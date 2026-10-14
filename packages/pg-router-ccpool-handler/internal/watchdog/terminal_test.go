@@ -80,17 +80,16 @@ func TestTerminal_closesSession(t *testing.T) {
 	}
 }
 
-// TestTerminal_marksRowIncompleteBeforeClose: a budget hard stop leaves its bead
-// open, so the row it closes must be marked incomplete FIRST -- a same-event
-// same-head re-request must not re-absorb it and hard-stop instantly from its
-// original launch time, forever (pg2-tc9c3; ccpool.MetaKeyIncomplete).
-func TestTerminal_marksRowIncompleteBeforeClose(t *testing.T) {
+// TestTerminal_closesWithoutAnOutcomeMark: the hard stop's only session write is
+// the close. A settled row is never absorbed by a later dispatch (INV-CCH-30,
+// ADR 0094), so the incomplete mark the hard stop used to stamp first (bead
+// pg2-tc9c3) is gone (bead pg2-qaeb8).
+func TestTerminal_closesWithoutAnOutcomeMark(t *testing.T) {
 	cc := &fakeCC{}
 	wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, cc, &recBD{}, tokBudget(1000))
 	wd.terminal(context.Background(), "s", "zr-1", &BudgetError{})
-	want := []string{"meta:" + ccpool.MetaKeyIncomplete, "close"}
-	if !slices.Equal(cc.ops, want) {
-		t.Errorf("hard stop must mark the row incomplete, then close it; ops=%v want %v", cc.ops, want)
+	if want := []string{"close"}; !slices.Equal(cc.ops, want) {
+		t.Errorf("hard stop must close the row and write nothing else to it; ops=%v want %v", cc.ops, want)
 	}
 }
 

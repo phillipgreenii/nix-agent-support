@@ -474,6 +474,13 @@ groups:
       # They are re-offered until the event expires, so a sustained nonzero rate is
       # expected and healthy; their per-reason counts stay visible on
       # pg_router_failures_total{class="declined"} for dashboards.
+      #
+      # reason=session-in-flight is EXCLUDED too (pg2-qaeb8, pg-router-ccpool-
+      # handler INV-CCH-30, ADR 0094): the handler declines a dispatch while an
+      # earlier attempt of the same bead and role is in flight (or its pool's
+      # sessions cannot be read) instead of launching a second session beside
+      # it. Like a full pool it is routine backpressure the core re-offers; its
+      # per-reason count stays visible on the declined counter.
       - uid: pg-router-failure-rate
         title: pg-router failure rate is non-zero (by class)
         condition: C
@@ -484,7 +491,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router failure rate for class {{ $labels.class }} role {{ $labels.role }} has been non-zero"
-          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|skipped-.+"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is set for every class as of pg2-nimab, DEC-OBS-5) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the five causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops), reason=origin-unavailable (its own rule, pg-router-origin-unavailable), reason=triager-failure (escalation-triage roles, bulkheaded by pg2-u2yub so they cannot fire this alert; their own rule, pg-router-triager-failures) and reason=upstream-killed (a gh call killed by the pg-connector 30s scriptout timeout, transient GitHub slowness healed by the 30-minute pr-sweep; pages only on a sustained burst via pg-router-upstream-killed, pg2-fy2pm). See pg2-97539 for the failure-class catalog''s provenance.'
+          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|session-in-flight|skipped-.+"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is set for every class as of pg2-nimab, DEC-OBS-5) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the five causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops), reason=origin-unavailable (its own rule, pg-router-origin-unavailable), reason=triager-failure (escalation-triage roles, bulkheaded by pg2-u2yub so they cannot fire this alert; their own rule, pg-router-triager-failures) and reason=upstream-killed (a gh call killed by the pg-connector 30s scriptout timeout, transient GitHub slowness healed by the 30-minute pr-sweep; pages only on a sustained burst via pg-router-upstream-killed, pg2-fy2pm). Routine backpressure declines are excluded as well: reason=session-in-flight (pg-router-ccpool-handler declining while an earlier attempt of the same bead and role is in flight, pg2-qaeb8) and the review precheck''s skipped-* reasons. See pg2-97539 for the failure-class catalog''s provenance.'
         data:
           - refId: A
             relativeTimeRange:
@@ -495,7 +502,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|skipped-.+"}[10m]))
+              expr: sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|session-in-flight|skipped-.+"}[10m]))
           - refId: B
             datasourceUid: __expr__
             model:

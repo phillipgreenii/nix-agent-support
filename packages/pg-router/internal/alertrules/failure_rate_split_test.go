@@ -13,7 +13,7 @@ import (
 // matched by the first two.
 const (
 	wantBudgetExpr   = `sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[1h])) >= 2`
-	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|skipped-.+"}[10m]))`
+	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|session-in-flight|skipped-.+"}[10m]))`
 	wantTriagerExpr  = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="triager-failure"}[10m]))`
 )
 
@@ -95,9 +95,11 @@ func TestResidualFailureRateRule(t *testing.T) {
 	// worker/review failure-rate alert), upstream-killed (a gh call killed by the
 	// 30s scriptout timeout; its own sustained-only rule, pg2-fy2pm). And the
 	// handler's review-precheck
-	// declines (skipped-*, pg2-5x29j), which are healthy and moot by construction. Nothing else.
-	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|skipped-.+"`) {
-		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure, upstream-killed and skipped-*: %q", got)
+	// declines (skipped-*, pg2-5x29j), which are healthy and moot by construction, and
+	// the handler's session-in-flight decline (pg2-qaeb8, INV-CCH-30), routine
+	// backpressure like at-capacity. Nothing else.
+	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|session-in-flight|skipped-.+"`) {
+		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure, upstream-killed, session-in-flight and skipped-*: %q", got)
 	}
 	for _, need := range []string{"for: 10m", "noDataState: OK", "execErrState: Error", "{{ $labels.role }}", "{{ $labels.class }}"} {
 		if !strings.Contains(r, need) {
@@ -137,6 +139,9 @@ func TestResidualExcludesUpstreamKilledOnly(t *testing.T) {
 		"origin-unavailable": true,
 		"at-capacity":        true,
 		"skipped-pr-merged":  true,
+		"session-in-flight":  true, // pg2-qaeb8: routine backpressure (INV-CCH-30)
+		"low-disk":           false,
+		"command-busy":       false,
 		"":                   false, // plain handler-error, dispatch-failure: keep paging
 		"capacity-unknown":   false,
 		"upstream-killed2":   false,

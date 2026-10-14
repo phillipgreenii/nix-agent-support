@@ -102,6 +102,16 @@ var ErrPoolCapacityUnknown = errors.New("ccpool: pool capacity unknown")
 // their own import of internal/worktree just to check it.
 var ErrLowDisk = worktree.ErrLowDisk
 
+// ErrSessionInFlight: an earlier attempt of the same bead and role is in flight
+// (its turn is in progress, or a handler still holds its supervision lease) and
+// this dispatch may not absorb it, or the pool's sessions cannot be read
+// (INV-CCH-30, ADR 0094's Decision item 4). Nothing was mutated: no bead, no
+// session, no worktree. The cmd layer maps it to the transport's pre-accept busy
+// decline with reason session-in-flight, so the core re-offers the event later;
+// like a full pool it is routine backpressure, and the failure-rate alert
+// excludes that reason.
+var ErrSessionInFlight = errors.New("ccpool: an earlier attempt of this bead and role is in flight")
+
 // run is the ccpool dispatch: Ensure a fresh per-attempt session, Send the
 // rendered nudge (async), then wait for completion — racing the budget watchdog when
 // the role carries a finite budget. The session is addressed by ExternalID; the
@@ -110,28 +120,47 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	cc := d.Role.CCPool
 	display := d.Role.DisplayName(r.deps.Cfg.SessionPrefix, d.Item.ID)
 
-	// This realizes INV-CCH-2's own duplicate-tolerance obligation (docs/
-	// behavior/invariants.md — a handler session MUST tolerate a duplicate
-	// event, matching INTF-HANDLER's obligations on every implementer).
-	// INV-EVT-2: a crash-window redelivery of the same dispatched item mints a
-	// FRESH per-attempt ExternalID (Role.ExternalID's own stamp), so ExternalID
-	// cannot be the correlation key that catches the duplicate — but the ccpool
-	// --name label (display, above) is stable per bead across attempts. Before
-	// launching a fresh session, check whether one already exists under that
-	// stable name; if so this dispatch is an already-in-flight duplicate, and
-	// absorbing it (rather than starting a second session for the same bead)
-	// closes register row INV-EVT-2 for real (ADR 0065's "Register" section).
-	if existing, ok := r.findSessionByName(ctx, display, d.EventID, dispatchHeadSHA(d.Item)); ok {
+	// Fresh session by default (INV-CCH-30, ADR 0094): look at every session the
+	// pool already holds for this bead and role (the ccpool --name label is
+	// stable per bead and role across attempts, unlike the per-attempt
+	// ExternalID), BEFORE the admission gate, and decide whether this dispatch
+	// absorbs the same event's turn in progress (the one exception, which keeps
+	// INV-CCH-2's and INV-EVT-2's duplicate tolerance), declines because another
+	// attempt is in flight, or launches its own session after closing any
+	// leftover nobody supervises.
+	plan := r.planPriorSessions(ctx, d, display)
+	switch plan.verdict {
+	case verdictDecline:
+		if plan.session == "" {
+			// An unreadable pool declines the same way (it counts as one in flight),
+			// but unlike routine backpressure it is worth an operator's look, and the
+			// failure-rate alert does not count it: say so at WARN.
+			slog.Warn("dispatch declined: the pool's sessions cannot be read; treating it as an attempt in flight",
+				"role", d.Role.Name, "bead", d.Item.ID, "event", d.EventID, "why", plan.why)
+		} else {
+			slog.Info("dispatch declined: an earlier attempt of this bead and role is in flight",
+				"role", d.Role.Name, "bead", d.Item.ID, "event", d.EventID, "session", plan.session, "why", plan.why)
+		}
+		return report.Result{}, fmt.Errorf("%w: %s", ErrSessionInFlight, plan.describe())
+	case verdictAbsorb:
 		// Take the per-session lock and refresh the supervision lease BEFORE
 		// waiting, so a concurrent orphan reconcile either already finished (the
-		// row is then closed and not absorbable: fall through to a fresh launch)
-		// or sees the fresh lease and stands down (INV-CCH-18).
-		existing, ok, err := r.takeOverForAbsorb(ctx, existing, d.EventID, dispatchHeadSHA(d.Item))
+		// row is then closed and no longer absorbable: decline, and let the next
+		// offer decide afresh) or sees the fresh lease and stands down (INV-CCH-18).
+		existing, ok, err := r.takeOverForAbsorb(ctx, plan.absorb, d.EventID)
 		if err != nil {
 			return report.Result{}, fmt.Errorf("absorb %s: %w", display, err)
 		}
-		if ok {
-			return r.absorbDuplicate(ctx, d, existing)
+		if !ok {
+			slog.Info("dispatch declined: the turn to absorb changed while taking it over",
+				"role", d.Role.Name, "bead", d.Item.ID, "session", plan.absorb.ExternalID)
+			return report.Result{}, fmt.Errorf("%w: session %s changed while being taken over", ErrSessionInFlight, plan.absorb.ExternalID)
+		}
+		return r.absorbDuplicate(ctx, d, existing)
+	}
+	for _, s := range plan.leftovers {
+		if err := r.closeLeftover(ctx, d, s); err != nil {
+			return report.Result{}, err
 		}
 	}
 
@@ -498,8 +527,7 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 	if errors.Is(werr, ErrPeerHeld) {
 		// Another actor holds the bead (close-or-release, INV-CCH-28): the dispatch
 		// wrote nothing to it and clears nothing on it, and it is not a failure of
-		// this session, so it reports success with no verb. The settled-session
-		// close above still saw the real werr, so the row is marked incomplete.
+		// this session, so it reports success with no verb.
 		return r.waitFailureResult(cc, d.Item.ID, werr), nil
 	}
 	if werr == nil {
@@ -683,11 +711,9 @@ func (r *ccpoolRun) closeSettledSession(ctx context.Context, cc *roles.CCPoolCon
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), closeSettledSessionTimeout)
 	defer cancel()
-	// Mark BEFORE closing (like the orphan reclaim) so no re-request ever sees an
-	// unmarked handler-closed row of an attempt that left its bead open.
-	if r.leftBeadOpen(cctx, cc, beadID, werr) {
-		r.markIncomplete(cctx, name, beadID)
-	}
+	// No outcome mark is written first: a settled row is never absorbed, whatever
+	// its outcome (INV-CCH-17, INV-CCH-30), so the incomplete mark of bead
+	// pg2-tc9c3 is no longer needed (ADR 0094's Decision item 6).
 	if err := r.deps.CC.Close(cctx, name, false); err != nil {
 		slog.Warn("settled-session close failed (left to idle_ttl)", "session", name, "bead", beadID, "err", err)
 		return
@@ -717,36 +743,6 @@ func (r *ccpoolRun) logUsageLimitOnDeath(ctx context.Context, name, beadID strin
 	}
 	slog.Info("session died; usage-limit reading", "session", name, "bead", beadID, "usage_limit_present", true,
 		"window", ul.Window, "used_pct", ul.UsedPct, "resets_at", ul.ResetsAt)
-}
-
-// markIncomplete stamps ccpool.MetaKeyIncomplete on the session's row (see its
-// doc comment), best effort: a failure is logged at ERROR, naming the session,
-// because the row then stays absorbable by a same-event same-head re-request
-// (the poison loop of bead pg2-tc9c3) until the watchdog stamps it at its next
-// hard stop or idle_ttl closes it.
-func (r *ccpoolRun) markIncomplete(ctx context.Context, name, beadID string) {
-	if err := r.deps.CC.SetMeta(ctx, name, ccpool.MetaKeyIncomplete, ccpool.FormatMetaTime(r.deps.clock())); err != nil {
-		slog.Error("incomplete mark failed; the row stays absorbable by a same-head re-request",
-			"session", name, "bead", beadID, "err", err)
-	}
-}
-
-// leftBeadOpen reports whether a dispatch that ended with werr left its bead
-// still to be done, so its settled row must not be absorbed by a same-event
-// same-head re-request (bead pg2-tc9c3): any failure, or a "success" of a
-// close-or-handback or close-or-release role whose bead is not closed -- the
-// hand-back (the session unclaimed the bead and went idle). A role whose success does not close its bead
-// (the triage modes) and an unreadable bead both report false: the row stays
-// absorbable, today's behavior.
-func (r *ccpoolRun) leftBeadOpen(ctx context.Context, cc *roles.CCPoolConfig, beadID string, werr error) bool {
-	if werr != nil {
-		return true
-	}
-	if cc.Completion != roles.CloseOrHandback && cc.Completion != roles.CloseOrRelease {
-		return false
-	}
-	iss, err := beads.ShowObj(ctx, r.deps.BD, beadID)
-	return err == nil && iss.Status != "closed"
 }
 
 // settledOutcome labels a dispatch's terminal outcome for closeSettledSession's
@@ -874,217 +870,300 @@ func usesWorktreeIsolation(cfg roles.IsolationConfig) bool {
 	return cfg.Type == "" || cfg.Type == "worktree"
 }
 
-// findSessionByName looks up a ccpool session by its --name display label
-// (Session.Name) — the stable per-bead identity (Role.DisplayName) INV-EVT-2's
-// duplicate-absorption check correlates a redelivered dispatch against,
-// unlike the per-attempt ExternalID (ADR 0065's "Register" section's
-// INV-EVT-2 note). A list error is treated as "no match" (can't tell ⇒ fall
-// through to launching normally), the same can't-tell posture active() and
-// sessionState() already take elsewhere in this file.
+// --- Prior sessions of the bead and role (INV-CCH-30, ADR 0094) ---
 //
-// A NAME MATCH ALONE IS NOT ENOUGH (pg2-04bf7): a name match on a row that is
-// crashOrphaned (below) must be treated as ABSENT here, or a crashed prior
-// attempt's stale row collides with every subsequent dispatch for the same
-// (bead, role) forever (the observed zombie-session incident) — letting the
-// fresh per-attempt ExternalID flow through to Ensure/ccpool new normally.
-// This is deliberately a NARROWER exclusion than active()'s own live/dead
-// split just below: a row that is Live=false but reached a legitimate,
-// hook-driven terminal state (idle/errored) WITHOUT ever being explicitly
-// closed still correlates a genuine already-settled duplicate (INV-EVT-2's
-// own "absorb rather than start a second session" guarantee) — only a row
-// that either crashed mid-flight (Live=false, never reached idle/errored) or
-// has ALREADY been explicitly closed by someone other than this handler's own
-// settled-session close (CloseReason set otherwise — nothing left to absorb)
-// counts as dead here. A settled row this handler closed itself (CloseReason
-// "handler", idle/errored; INV-CCH-17) is still a duplicate to absorb.
+// Every dispatch runs in a fresh session it launches itself. Before launching,
+// it looks at every session the role's pool holds for the same bead and role
+// and decides, in this order:
 //
-// A handler-closed settled row is further bounded by the dispatching event
-// (pg2-uprw5, ADR 0082) AND the item's pinned head (pg2-afre3): it is a
-// duplicate only for a redelivery of the SAME event at the SAME head, never for
-// a later re-dispatch of the same bead and role (see staleSettledRow).
-func (r *ccpoolRun) findSessionByName(ctx context.Context, name, eventID, headSHA string) (ccpool.Session, bool) {
+//   - absorb: a session whose turn is in progress (live, working or
+//     needs_input), that records this dispatch's own event id, that nobody has
+//     closed or begun to tear down, and whose bead is not closed. This is the
+//     one exception (a redelivery of an event whose turn still runs: the
+//     re-offer after a daemon restart, a crash-window redelivery, a dead
+//     handler's session still at work). The head is deliberately not compared.
+//   - decline (ErrSessionInFlight): any other attempt in flight (a turn in
+//     progress it may not absorb, or a session a handler may still be
+//     supervising, whatever its state: it holds the lease, or the session has
+//     no lease yet and is still inside its launch window), an absorb candidate
+//     whose bead is closed or cannot be read, or a pool whose sessions cannot
+//     be read.
+//   - launch: nothing in flight. A leftover nobody supervises (live, still
+//     starting or ready, and no longer supervised) is closed first, under the
+//     per-session lock, and every settled session (turn ended, or no longer
+//     live) is left alone: it is never absorbed, whoever closed it.
+//
+// This replaces the earlier duplicate-absorption check (findSessionByName,
+// crashOrphaned, staleSettledRow) and the bounds added to it one by one: the
+// event id on settled rows (pg2-uprw5), the item's pinned head (pg2-afre3) and
+// the outcome mark (pg2-tc9c3). None of them is needed once a settled row is
+// never absorbed (bead pg2-qaeb8).
+
+type priorVerdict int
+
+const (
+	verdictLaunch  priorVerdict = iota // nothing in flight: launch a fresh session
+	verdictAbsorb                      // the same event's turn in progress: wait on it as this dispatch's own
+	verdictDecline                     // another attempt in flight: decline session-in-flight
+)
+
+// priorPlan is planPriorSessions' decision.
+type priorPlan struct {
+	verdict   priorVerdict
+	absorb    ccpool.Session   // verdictAbsorb: the session to absorb
+	leftovers []ccpool.Session // verdictLaunch: leftovers to close before launching
+	session   string           // verdictDecline: the session that is in flight ("" for an unreadable pool)
+	why       string           // verdictDecline: a short reason, for the log and the error
+}
+
+func (p priorPlan) describe() string {
+	if p.session == "" {
+		return p.why
+	}
+	return "session " + p.session + ": " + p.why
+}
+
+// sameBeadAndRole reports whether s is a session of this bead and role: it
+// carries the stable per-bead display name, or the dispatch tags of this bead
+// and role in this handler's pool.
+func sameBeadAndRole(s ccpool.Session, display, beadID, role string) bool {
+	if s.Name == display {
+		return true
+	}
+	return s.Meta[ccpool.MetaKeyPool] == ccpool.PoolName && s.Meta[ccpool.MetaKeyBead] == beadID && s.Meta[ccpool.MetaKeyRole] == role
+}
+
+// turnInProgress reports whether s is live and working or needs_input: a turn
+// under way, or one paused for a person.
+func turnInProgress(s ccpool.Session) bool {
+	return s.Live && (s.State == ccpool.StateWorking || s.State == ccpool.StateNeedsInput)
+}
+
+// priorClock is what the predicates below judge supervision against: the
+// dispatch's clock reading and its launch window (launchWindow).
+type priorClock struct {
+	now    time.Time
+	window time.Duration
+}
+
+// launchWindow is how long a live session still starting or ready that
+// carries NO lease may still be inside its own launch. ccpool applies a
+// dispatch's `ccpool new --meta` (the lease, the event id, the dispatch tags)
+// only once the session has reached ready, so a session whose launch is still
+// waiting carries none, and neither does what a launch that never got there
+// leaves behind (bead pg2-qaeb8, found by the real-ccpool test). The lease
+// such a launch would have been stamped with covers the launch wait plus one
+// TTL (ccpool.DispatchMeta), so that same window, measured from the row's
+// last activity, stands in for it.
+func (r *ccpoolRun) launchWindow() time.Duration { return ccpool.EnsureTimeout + r.deps.Cfg.LeaseTTL }
+
+// awaitingTurn reports whether s is live with no turn yet (still starting, or
+// ready), and not under two-phase teardown (that row is the purge_pending
+// retry's, INV-CCH-20).
+func awaitingTurn(s ccpool.Session) bool {
+	return s.Live && (s.State == ccpool.StateStarting || s.State == ccpool.StateReady) && !s.PurgePending()
+}
+
+// supervised reports whether a handler may still be supervising s: it holds
+// s's lease, or s carries no lease yet, still awaits its first turn and may
+// still be inside its launch (its last activity is within the launch window,
+// or unknown). Any other session with no lease has no lease to hold.
+func supervised(s ccpool.Session, c priorClock) bool {
+	if until, ok := s.LeaseUntil(); ok {
+		return c.now.Before(until)
+	}
+	if !awaitingTurn(s) {
+		return false
+	}
+	if s.LastActivityAt == 0 {
+		return true // age unknown: it may still be launching
+	}
+	return c.now.Sub(time.Unix(s.LastActivityAt, 0)) < c.window
+}
+
+// inFlight reports whether s is an attempt still in flight: its turn is in
+// progress, or a handler may still be supervising it (launching it, waiting on
+// it, settling it or handling its death), whatever its state and liveness.
+func inFlight(s ccpool.Session, c priorClock) bool {
+	return turnInProgress(s) || supervised(s, c)
+}
+
+// tornDown reports whether someone has closed s or begun to tear it down: a
+// close reason, the two-phase teardown marker (INV-CCH-20) or the orphan
+// reclaim mark (INV-CCH-18).
+func tornDown(s ccpool.Session) bool {
+	return s.CloseReason != "" || s.PurgePending() || s.Meta[ccpool.MetaKeyOrphanReclaimed] != ""
+}
+
+// absorbable reports whether s is the one session a dispatch of eventID may
+// absorb, bead aside: its turn is in progress, it records the same non-empty
+// event id, and nobody has closed it or begun to tear it down. The bead's
+// status is planPriorSessions' own read.
+func absorbable(s ccpool.Session, eventID string) bool {
+	return turnInProgress(s) && eventID != "" && s.Meta[ccpool.MetaKeyEventID] == eventID && !tornDown(s)
+}
+
+// leftover reports whether s is a session nobody supervises and no turn uses:
+// live, still starting or ready, and no longer supervised (its lease expired,
+// or, carrying none, it has outlived the launch window): a launch whose handler
+// gave up or died before its prompt was taken, a launch that reached ready only
+// after its `ccpool new` had failed, or a session a cancel left ready after its
+// handler had gone.
+func leftover(s ccpool.Session, c priorClock) bool {
+	return awaitingTurn(s) && !supervised(s, c)
+}
+
+// inFlightWhy names why s is in flight but not absorbable, for the decline.
+func inFlightWhy(s ccpool.Session, eventID string) string {
+	_, leased := s.LeaseUntil()
+	switch {
+	case !turnInProgress(s) && !leased:
+		return "it may still be inside its launch (state " + string(s.State) + ", no lease yet)"
+	case !turnInProgress(s):
+		return "its handler still holds the supervision lease (state " + string(s.State) + ")"
+	case tornDown(s):
+		return "it was closed or is being torn down while its turn runs"
+	case eventID == "" || s.Meta[ccpool.MetaKeyEventID] == "":
+		return "its turn is in progress for an event that cannot be compared"
+	default:
+		return "its turn is in progress for another event (" + s.Meta[ccpool.MetaKeyEventID] + ")"
+	}
+}
+
+// planPriorSessions reads the pool once and decides what this dispatch does
+// about the sessions it already holds for the bead and role (see the section
+// comment above). A list error is a pool that cannot be read, which counts as
+// one in flight: decline.
+func (r *ccpoolRun) planPriorSessions(ctx context.Context, d DispatchContext, display string) priorPlan {
 	sessions, err := r.deps.CC.List(ctx)
 	if err != nil {
-		return ccpool.Session{}, false
+		return priorPlan{verdict: verdictDecline, why: "the pool's sessions cannot be read: " + err.Error()}
 	}
+	clk := priorClock{now: r.deps.clock(), window: r.launchWindow()}
+	var candidates, busy, leftovers []ccpool.Session
 	for _, s := range sessions {
-		if s.Name == name && !crashOrphaned(s) && !staleSettledRow(s, eventID, headSHA) {
-			return s, true
+		if !sameBeadAndRole(s, display, d.Item.ID, d.Role.Name) {
+			continue
+		}
+		switch {
+		case absorbable(s, d.EventID):
+			candidates = append(candidates, s)
+		case inFlight(s, clk):
+			busy = append(busy, s)
+		case leftover(s, clk):
+			leftovers = append(leftovers, s)
 		}
 	}
-	return ccpool.Session{}, false
+	if len(candidates) > 0 {
+		s := candidates[0]
+		iss, err := beads.ShowObj(ctx, r.deps.BD, d.Item.ID)
+		switch {
+		case err != nil:
+			return priorPlan{verdict: verdictDecline, session: s.ExternalID, why: "its turn is in progress and the bead cannot be read: " + err.Error()}
+		case iss.Status == "closed":
+			return priorPlan{verdict: verdictDecline, session: s.ExternalID, why: "its turn is in progress and the bead is already closed"}
+		}
+		return priorPlan{verdict: verdictAbsorb, absorb: s}
+	}
+	if len(busy) > 0 {
+		return priorPlan{verdict: verdictDecline, session: busy[0].ExternalID, why: inFlightWhy(busy[0], d.EventID)}
+	}
+	return priorPlan{verdict: verdictLaunch, leftovers: leftovers}
 }
 
-// crashOrphaned reports whether session s is a dead row that findSessionByName
-// must treat as ABSENT rather than a genuine duplicate worth absorbing
-// (pg2-04bf7):
-//
-//   - Live sessions are never crash-orphaned -- still literally running,
-//     whatever their store State (active()'s own polling logic decides
-//     separately whether it's still worth WAITING on).
-//   - A settled row this handler itself closed (CloseReason == "handler" with
-//     State idle/errored) is NOT orphaned: closeSettledSession closes every
-//     session it settles (INV-CCH-17, ADR 0082), so a crash-window
-//     redelivery of that same dispatch finds exactly this row and must still
-//     absorb it (INV-EVT-2) rather than launch a second session for an
-//     already-settled bead.
-//   - ... unless that row is marked incomplete (ccpool.MetaKeyIncomplete): its
-//     dispatch ended with the bead still open (hand-back, budget hard stop,
-//     failure), so a same-event same-head re-request is a retry, not a duplicate,
-//     and the row is ABSENT (bead pg2-tc9c3). Only a row whose bead was closed by
-//     the settled session stays absorbable.
-//   - Any OTHER row ccpool has ALREADY explicitly closed (CloseReason != "" --
-//     idle_ttl/cap_eviction/operator, or a handler close of a non-terminal row
-//     such as waitDone's own dead-row cleanup) has nothing left to absorb:
-//     re-matching it would just re-run the SAME dead-row collision waitDone
-//     already resolved once.
-//   - Otherwise (never closed by anyone, not live): a row that reached a
-//     Claude-hook-driven terminal state (Idle: Stop hook, the turn legitimately
-//     ended; Errored: StopFailure hook, an API error legitimately ended the
-//     turn) is a genuinely-settled prior duplicate -- Live going false on its
-//     own here is NOT a crash signal. A row stuck in a NON-terminal state
-//     (starting/ready/working/needs_input) while not live never reached
-//     either hook: its tmux pane died mid-flight -- a genuine crash.
-func crashOrphaned(s ccpool.Session) bool {
-	// A row whose two-phase teardown is still pending (INV-CCH-20) is ABSENT
-	// whatever its liveness or close reason: the handler decided to discard it, and
-	// the purge_pending retry (not an absorbing dispatch) finishes the job.
-	if s.PurgePending() {
-		return true
+// closeLeftover closes, without purging, a leftover session nobody supervises
+// (INV-CCH-30's leftover case) so this dispatch can launch its own: the
+// leftover neither keeps the pool's slot nor hands the new attempt a budget
+// clock that started at an earlier launch. It takes the same per-session lock an
+// absorb and the orphan reconcile take (INV-CCH-18) and re-reads the row under
+// it: a row that is gone or no longer a leftover and not in flight needs
+// nothing; a row that is now in flight declines the dispatch. A failed lock or
+// close is an error of this dispatch, never a silent launch beside the leftover.
+func (r *ccpoolRun) closeLeftover(ctx context.Context, d DispatchContext, s ccpool.Session) error {
+	if r.deps.LockDir != "" {
+		lock, err := r.lockSession(ctx, s.ExternalID)
+		if err != nil {
+			return fmt.Errorf("close leftover %s: %w", s.ExternalID, err)
+		}
+		defer lock.Unlock()
+		sessions, err := r.deps.CC.List(ctx)
+		if err != nil {
+			return fmt.Errorf("%w: the pool's sessions cannot be read: %v", ErrSessionInFlight, err)
+		}
+		found := false
+		for _, cur := range sessions {
+			if cur.ExternalID != s.ExternalID {
+				continue
+			}
+			found, s = true, cur
+			break
+		}
+		clk := priorClock{now: r.deps.clock(), window: r.launchWindow()}
+		switch {
+		case !found:
+			return nil
+		case inFlight(s, clk):
+			return fmt.Errorf("%w: session %s: %s", ErrSessionInFlight, s.ExternalID, inFlightWhy(s, d.EventID))
+		case !leftover(s, clk):
+			return nil
+		}
 	}
-	if s.Live {
-		return false
+	if err := r.deps.CC.Close(ctx, s.ExternalID, false); err != nil {
+		return fmt.Errorf("close leftover %s: %w", s.ExternalID, err)
 	}
-	// A row the orphan reconcile closed (INV-CCH-18) was ABANDONED work, not a
-	// settled duplicate: a redelivered dispatch must launch afresh rather than
-	// absorb it and fail on its stale outcome.
-	if s.Meta[ccpool.MetaKeyOrphanReclaimed] != "" {
-		return true
+	lease := "none"
+	if until, ok := s.LeaseUntil(); ok {
+		lease = ccpool.FormatMetaTime(until)
 	}
-	// A row whose dispatch ended without completing its bead (hand-back, budget
-	// hard stop, failure) is a finished attempt, not a settled duplicate: the bead
-	// is open again, so a re-request with the SAME event id and head must launch
-	// afresh instead of re-absorbing the row and hard-stopping instantly on its
-	// original launch time (bead pg2-tc9c3, ADR 0082).
-	if s.Meta[ccpool.MetaKeyIncomplete] != "" {
-		return true
+	slog.Info("closed a leftover session nobody supervises; launching a fresh one",
+		"role", d.Role.Name, "bead", d.Item.ID, "session", s.ExternalID, "state", string(s.State),
+		"lease_until", lease)
+	if r.deps.Log != nil {
+		_ = r.deps.Log.Emit("info", "leftover_closed", "closed a leftover session nobody supervises",
+			map[string]any{
+				"role": d.Role.Name, "bead": d.Item.ID, "session": s.ExternalID, "state": string(s.State),
+				"lease_until": lease,
+			})
 	}
-	settled := s.State == ccpool.StateIdle || s.State == ccpool.StateErrored
-	if s.CloseReason != "" {
-		return !(s.CloseReason == "handler" && settled)
-	}
-	return !settled
-}
-
-// staleSettledRow reports whether s is a handler-closed settled row (the case
-// crashOrphaned deliberately keeps absorbable, ADR 0082) that belongs to an
-// EARLIER event than the one now being dispatched, so absorbing it would be
-// wrong (bead pg2-uprw5).
-//
-// A handler-closed idle/errored row is kept absorbable only so that a
-// crash-window redelivery of the SAME accepted event (INV-EVT-2) finds it and
-// does not launch a second session for already-settled work. A later,
-// legitimate re-dispatch for the same bead and role -- a review bead reopened
-// after a head advance -- is a NEW event, and absorbing it into the dead row
-// would report the old outcome and fail with "session exited before
-// completing". The two are told apart by the event id the launching dispatch
-// stamped on the row (ccpool.MetaKeyEventID):
-//
-//   - this dispatch carries no event id: no bound can be applied, so the row is
-//     not stale (the pre-pg2-uprw5 behavior);
-//   - the row carries no event id (launched by an older build, or by a dispatch
-//     with none): it cannot be proven a redelivery, so it IS stale;
-//   - otherwise it is stale exactly when the ids differ.
-//
-// The event id alone is NOT enough for an item-carrying event (bead pg2-afre3):
-// event.FingerprintID is deterministic per (event type, bead), so a review
-// re-dispatched after a head advance carries the SAME id as the review that
-// already settled, and the id check above never fires. The id comparison is
-// therefore refined by the item's pinned head (ccpool.MetaKeyHeadSHA), applied
-// only to a row whose event id matched:
-//
-//   - this dispatch carries no head_sha (a worker/feedback role, or a bead
-//     without one): no head bound applies;
-//   - the row carries no head (launched by an older build): it cannot be proven
-//     the same head, so it IS stale;
-//   - otherwise it is stale exactly when the heads differ.
-//
-// Absorbing such a row would adopt the OLD head's outcome and, worse, measure the
-// time budget from its original launch, tripping an instant false
-// "session budget exceeded" without any model work.
-//
-// Only a handler-closed settled row is ever stale here. Rows still open, or
-// closed by anyone else, are judged by crashOrphaned alone.
-func staleSettledRow(s ccpool.Session, eventID, headSHA string) bool {
-	if eventID == "" || s.CloseReason != "handler" {
-		return false
-	}
-	if s.State != ccpool.StateIdle && s.State != ccpool.StateErrored {
-		return false
-	}
-	if s.Meta[ccpool.MetaKeyEventID] != eventID {
-		return true
-	}
-	return headSHA != "" && s.Meta[ccpool.MetaKeyHeadSHA] != headSHA
+	return nil
 }
 
 // dispatchHeadSHA returns the pinned PR head of the dispatched item (its
 // head_sha metadata, refreshed from the bead at dispatch time), or "" when the
-// item carries none -- worker and feedback beads have no head, so no head bound
-// applies to them (bead pg2-afre3).
+// item carries none (worker and feedback beads have no head). It is stamped on
+// the launched session (ccpool.MetaKeyHeadSHA) as a record of what the session
+// was launched for; it is never compared (INV-CCH-30).
 func dispatchHeadSHA(it item.Item) string {
 	h, _ := it.Metadata["head_sha"].(string)
 	return h
 }
 
-// absorbDuplicate treats this dispatch as an already-in-flight duplicate of
-// existing's session: it never re-Ensures/Sends (that would launch a SECOND
-// ccpool session for the same bead — exactly what INV-EVT-2 forbids), it only
-// waits on the EXISTING session's own outcome, addressing it by its own
-// ExternalID and reusing its own worktree (existing.CWD) for the watchdog's
-// guarded reset. If that session has already settled (idle/errored), waitDone
-// returns on its very first poll with the existing outcome; if it is still
-// in-flight, this call blocks until it settles — the "deferred ack pointing
-// at the same in-flight work" this task's Contract calls for, held open the
-// same way a normal inline dispatch already holds the call open for a
-// long-running session (cmd/pg-router-ccpool-handler/dispatch.go's own
-// doc comment). Mirrors run()'s own tail (budget-gated watchdog race +
-// waitFailureResult) so the terminal verb reported here is identical to what
-// a first-time dispatch of the same work would have reported.
+// absorbDuplicate treats this dispatch as a redelivery of the event whose turn
+// existing's session is still running (INV-CCH-30's one exception): it never
+// re-Ensures/Sends (that would put a SECOND session on the same bead — exactly
+// what INV-EVT-2 forbids), it only waits on the EXISTING session's own outcome,
+// addressing it by its own ExternalID and reusing its own worktree
+// (existing.CWD) for the watchdog's guarded reset. It blocks until the turn
+// settles — the "deferred ack pointing at the same in-flight work", held open
+// the same way a normal inline dispatch already holds the call open for a
+// long-running session (cmd/pg-router-ccpool-handler/dispatch.go's own doc
+// comment). Mirrors run()'s own tail (budget-gated watchdog race +
+// waitFailureResult) so the terminal verb reported here is identical to what a
+// first-time dispatch of the same work would have reported.
 func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, existing ccpool.Session) (report.Result, error) {
 	r.noteSession(existing)
 	cc := d.Role.CCPool
 	// The lease covers this absorbed session for as long as this dispatch is alive
 	// (takeOverForAbsorb already wrote the first refresh under the session lock).
 	defer r.startLease(ctx, existing.ExternalID)()
-	// pg2-oq6cy: a live session still in `ready` never took a turn — no prompt
-	// was ever delivered (a healthy dispatched session moves ready->working
-	// within seconds of Send, and afterwards settles at idle, never back to
-	// ready). This is the leftover of a launch that timed out after ccpool
-	// reported failure but before the session became ready: absorbing it
-	// without Send would wait to the budget hard stop on every re-dispatch
-	// (28 review budget events for one bead, pg2-uwnjp). Deliver the prompt to
-	// it instead, into its own worktree. If that fails, purge-close it so the
-	// next dispatch relaunches fresh, and hand the bead back.
-	if existing.Live && existing.State == ccpool.StateReady {
-		nudge := r.renderNudge(cc, d, existing.CWD)
-		slog.Warn("absorbed duplicate is ready but never received its prompt; sending it",
-			"role", d.Role.Name, "bead", d.Item.ID, "session", existing.ExternalID)
-		if err := r.deps.CC.Send(ctx, existing.ExternalID, nudge, ccpool.ModeNoWait); err != nil {
-			_ = r.deps.CC.Close(ctx, existing.ExternalID, true)
-			_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
-			return failureAction(report.Unclaimed, d.Item.ID),
-				fmt.Errorf("send %s: stranded ready session: %w", existing.ExternalID, err)
-		}
-	}
 	var werr error
 	if budgetUnlimited(cc.Budget) {
 		werr = r.waitDone(ctx, nil, d, existing.ExternalID)
 	} else {
 		// An absorbed session keeps its original launch time as the budget's
-		// start, so absorbing an under-budget orphan does not grant it a fresh
-		// budget (INV-CCH-18; pg2-3j76b's case). Absent launched_at (an older
-		// build) falls back to now, as before.
+		// start: it is the same attempt still running, so absorbing it never
+		// grants a fresh budget (INV-CCH-18, INV-CCH-30; pg2-3j76b's case).
+		// Absent launched_at (an older build) falls back to now, as before.
 		start, _ := existing.LaunchedAt()
 		werr = r.workerWaitWithWatchdog(ctx, d, existing.ExternalID, existing.CWD, start)
 	}
@@ -1362,25 +1441,16 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 				}
 				// Unexplained death (not an external close): close the dead row
 				// now, mirroring run()'s own not-ingested cleanup (r.deps.CC.Close
-				// call above) — otherwise this exact row sits in ccpool's list
-				// forever and collides with every future dispatch attempt for
-				// this (bead, role) pair (pg2-04bf7's zombie-session root cause,
-				// part b — defense-in-depth alongside findSessionByName's own
-				// dead-row-is-absent fix). Best-effort: a failed Close here does
-				// not change the failure outcome already decided below.
+				// call above), so the row does not sit in ccpool's list as an open
+				// session forever (pg2-04bf7's zombie-session root cause, part b).
+				// A later dispatch never absorbs it either way: it is settled
+				// (INV-CCH-30). Best-effort: a failed Close here does not change the
+				// failure outcome already decided below.
 				//
-				// This is a failed dispatch whose bead stays open, and this Close makes
-				// the row handler-closed, which closeSettledSession's guard (row already
-				// closed) then skips: stamp it incomplete HERE, before the close, or the
-				// row stays absorbable by a same-event same-head re-request (the poison
-				// loop of bead pg2-tc9c3). Chosen over teaching closeSettledSession to
-				// mark rows that are already closed: it marks at the single place that
-				// closes the row, and leaves that guard (never touch a row someone else
-				// closed) intact.
-				r.markIncomplete(ctx, name, d.Item.ID)
-				// A row that already carries a close reason (the handler's own settled
-				// close, absorbed again) is not closed a second time: that re-stamps it
-				// and appends another close event per re-dispatch (bead pg2-92rfu).
+				// A row that already carries a close reason (another handler watching
+				// the same absorbed session closed it first) is not closed a second
+				// time: that re-stamps it and appends another close event (bead
+				// pg2-92rfu).
 				if reason == "" {
 					_ = r.deps.CC.Close(ctx, name, false)
 				}

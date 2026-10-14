@@ -3986,9 +3986,22 @@
                     "-coverprofile=cover.out"
                     "-covermode=atomic"
                   ];
-                  testDeps = [ pkgs.git ];
+                  # ccpool + tmux: internal/executor's hermetic real-ccpool test
+                  # of INV-CCH-30 (bead pg2-qaeb8, prior_sessions_realccpool_test.go)
+                  # drives the REAL ccpool binary in a sandboxed pool and tmux
+                  # socket. It skips when either is missing; the REQUIRE variable
+                  # below turns that skip into a failure here, so a green check
+                  # means it ran.
+                  testDeps = [
+                    pkgs.git
+                    pkgs.ccpool
+                    pkgs.tmux
+                  ];
                 }).overrideAttrs
                   (old: {
+                    PG_ROUTER_CCPOOL_HANDLER_REQUIRE_CCPOOL = "1";
+                    # tmux serves each sandboxed pool over a unix socket.
+                    __darwinAllowLocalNetworking = true;
                     postBuild = (old.postBuild or "") + ''
                       echo "=== pg-router-ccpool-handler per-package statement-coverage gate ==="
                       bash tests/coverage-gate.sh cover.out tests/coverage-thresholds.txt

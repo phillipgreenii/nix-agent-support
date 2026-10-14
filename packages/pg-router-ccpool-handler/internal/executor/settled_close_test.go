@@ -173,97 +173,39 @@ func TestSettledClose_successHandbackToOpen(t *testing.T) {
 	assertClosedOnceNonPurge(t, cc.FakeCC, "sess-1")
 }
 
-// incompleteOps is the SetMeta/Close order closeSettledSession must produce for a
-// dispatch that left its bead open: mark the row incomplete, THEN close it, so no
-// same-event same-head re-request ever finds an unmarked handler-closed row of that
-// attempt (pg2-tc9c3).
-var incompleteOps = []string{"meta:" + ccpool.MetaKeyIncomplete, "close"}
+// closeOnly is the SetMeta/Close sequence closeSettledSession produces for every
+// outcome now: the close, and nothing before it. A settled row is never absorbed
+// (INV-CCH-30, ADR 0094), so the incomplete mark the handler used to stamp on a
+// row whose dispatch left its bead open (bead pg2-tc9c3) is gone (bead
+// pg2-qaeb8).
+var closeOnly = []string{"close"}
 
-// A hand-back (the session unclaimed the bead and went idle) leaves the bead open:
-// the closed row is marked incomplete, and the marked row then reads as ABSENT to
-// a same-event same-head re-request (crashOrphaned).
-func TestSettledClose_handbackMarksRowIncomplete(t *testing.T) {
-	cfg := fastCfg()
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "open"}}}
-	cc := newSettleCC("sess-1", func() ccpool.SessionState {
-		if bd.Idx["zr-w"] >= 2 {
-			return ccpool.StateIdle
-		}
-		return ccpool.StateWorking
-	})
-	if _, err := dispatchWith(t, cc, bd, cfg, noBudget(workerRole(cfg)), "sess-1", &dtest.ManualClock{T: time.Unix(0, 0)}); err != nil {
-		t.Fatalf("handback is a success: %v", err)
-	}
-	if !slices.Equal(cc.closeOps(), incompleteOps) {
-		t.Fatalf("a hand-back must mark the row incomplete, then close it; ops=%v", cc.closeOps())
-	}
-	row := ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{}}
-	for _, m := range cc.SetMetaCalls() {
-		row.Meta[m.Key] = m.Value
-	}
-	if !crashOrphaned(row) {
-		t.Errorf("the handed-back row, as the handler wrote it, must be ABSENT to a re-request; meta=%v", row.Meta)
-	}
-}
-
-// A completed dispatch (bead closed) keeps its row absorbable: a crash-window
-// redelivery of finished work must still find it (INV-EVT-2, INV-CCH-17).
-func TestSettledClose_closedBeadLeavesRowAbsorbable(t *testing.T) {
-	cfg := fastCfg()
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
-	cc := newSettleCC("sess-1", func() ccpool.SessionState {
-		if bd.Idx["zr-w"] >= 2 {
-			return ccpool.StateIdle
-		}
-		return ccpool.StateWorking
-	})
-	if _, err := dispatchWith(t, cc, bd, cfg, noBudget(workerRole(cfg)), "sess-1", &dtest.ManualClock{T: time.Unix(0, 0)}); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(cc.closeOps(), []string{"close"}) {
-		t.Errorf("a completed dispatch must close the row without marking it; ops=%v", cc.closeOps())
-	}
-}
-
-// leftBeadOpen decides whether a settled row is marked incomplete.
-func TestLeftBeadOpen_cases(t *testing.T) {
-	cases := []struct {
-		name       string
-		werr       error
-		completion roles.Completion
-		status     string // "" = the bead cannot be read
-		want       bool
-	}{
-		{"failure", errors.New("not complete"), roles.CloseOnly, "closed", true},
-		{"budget stop", watchdog.ErrBudgetExceeded, roles.CloseOrHandback, "open", true},
-		{"hand-back: close-or-handback, bead open", nil, roles.CloseOrHandback, "open", true},
-		{"hand-back: close-or-handback, bead re-claimed", nil, roles.CloseOrHandback, "in_progress", true},
-		{"success: close-or-handback, bead closed", nil, roles.CloseOrHandback, "closed", false},
-		{"hand-back: close-or-release, bead open", nil, roles.CloseOrRelease, "open", true},
-		{"hand-back: close-or-release, bead deferred", nil, roles.CloseOrRelease, "deferred", true},
-		{"success: close-or-release, bead closed", nil, roles.CloseOrRelease, "closed", false},
-		{"success: close-only (bead is closed by definition)", nil, roles.CloseOnly, "", false},
-		{"success: triage leaves the bead open by design", nil, roles.CloseOrTriage, "open", false},
-		{"success: split-triage leaves the bead open by design", nil, roles.CloseOrSplitTriage, "open", false},
-		{"cannot read the bead: stays absorbable", nil, roles.CloseOrHandback, "", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			bd := &dtest.ScriptBD{}
-			if tc.status != "" {
-				bd.StatusSeq = map[string][]string{"zr-w": {tc.status}}
+// A hand-back (the session unclaimed the bead and went idle) and a completed
+// dispatch (bead closed) close the settled row the same way: no outcome mark.
+func TestSettledClose_closesWithoutAnOutcomeMark(t *testing.T) {
+	for _, final := range []string{"open", "closed"} {
+		t.Run("bead "+final, func(t *testing.T) {
+			cfg := fastCfg()
+			bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", final}}}
+			cc := newSettleCC("sess-1", func() ccpool.SessionState {
+				if bd.Idx["zr-w"] >= 2 {
+					return ccpool.StateIdle
+				}
+				return ccpool.StateWorking
+			})
+			if _, err := dispatchWith(t, cc, bd, cfg, noBudget(workerRole(cfg)), "sess-1", &dtest.ManualClock{T: time.Unix(0, 0)}); err != nil {
+				t.Fatalf("a hand-back and a completion are both successes: %v", err)
 			}
-			r := newExec(&dtest.FakeCC{}, bd, fastCfg())
-			if got := r.leftBeadOpen(context.Background(), &roles.CCPoolConfig{Completion: tc.completion}, "zr-w", tc.werr); got != tc.want {
-				t.Errorf("leftBeadOpen = %v, want %v", got, tc.want)
+			if !slices.Equal(cc.closeOps(), closeOnly) {
+				t.Errorf("the settled row must be closed and nothing else written to it; ops=%v", cc.closeOps())
 			}
 		})
 	}
 }
 
-// A failed dispatch (here the add-human on_failure after not completing) is marked
-// incomplete too, before its close.
-func TestSettledClose_failureMarksRowIncomplete(t *testing.T) {
+// A failed dispatch (here the add-human on_failure after not completing) closes
+// its settled row with no mark either.
+func TestSettledClose_failureClosesWithoutAnOutcomeMark(t *testing.T) {
 	cfg := fastCfg()
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
 	cc := newSettleCC("sess-1", func() ccpool.SessionState {
@@ -275,26 +217,27 @@ func TestSettledClose_failureMarksRowIncomplete(t *testing.T) {
 	if _, err := dispatchWith(t, cc, bd, cfg, noBudget(workerRole(cfg)), "sess-1", &dtest.ManualClock{T: time.Unix(0, 0)}); err == nil {
 		t.Fatal("expected a not-complete failure")
 	}
-	if !slices.Equal(cc.closeOps(), incompleteOps) {
-		t.Errorf("a failed dispatch must mark the row incomplete, then close it; ops=%v", cc.closeOps())
+	if !slices.Equal(cc.closeOps(), closeOnly) {
+		t.Errorf("a failed dispatch must close its row and write nothing else to it; ops=%v", cc.closeOps())
 	}
 }
 
 // The unexplained-death branch of waitDone (the session went idle while a
-// close-only bead is still open) closes the row ITSELF, so closeSettledSession
-// later finds it already closed and skips it. That Close must therefore stamp
-// the row incomplete, or a same-event same-head redelivery re-absorbs it and
-// hard-stops instantly on its original launch time (pg2-tc9c3). End to end: the
-// first dispatch dies, then the SAME event at the SAME head arrives an hour
-// after the budget ran out of the old launch time and must launch afresh.
-func TestSettledClose_unexplainedDeathMarksRowIncomplete_redeliveryLaunchesFresh(t *testing.T) {
+// close-only bead is still open) closes the row ITSELF, with no mark. End to
+// end: the first dispatch dies, then the SAME event at the SAME head arrives
+// five hours after the launch, under a one-hour budget, and must launch afresh:
+// the dead row is settled and its lease long expired, so it is neither absorbed
+// (which would hard-stop at once on the old launch time) nor in flight
+// (INV-CCH-30).
+func TestSettledClose_unexplainedDeathClosesRow_redeliveryLaunchesFresh(t *testing.T) {
 	cfg := fastCfg()
 	cfg.BudgetTime = time.Hour
+	cfg.LeaseTTL = 2 * time.Minute
 	role := feedbackRole(cfg) // close-only, on_failure=unclaim
 	display := role.DisplayName(cfg.SessionPrefix, "zr-w")
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
 	cc := newSettleCC("sess-1", fixedState(ccpool.StateIdle)) // idle, bead still open: waitDone sees an unexplained death
-	// Dispatch 1 must LAUNCH (not absorb a row by name), so the row only carries the
+	// Dispatch 1 must LAUNCH (not find a row by name), so the row only carries the
 	// stable display name once the redelivery arrives.
 	it := item.Item{ID: "zr-w", Metadata: map[string]any{"head_sha": "h1"}}
 	dispatch := func(role roles.Role, ext string, now time.Time) error {
@@ -314,12 +257,12 @@ func TestSettledClose_unexplainedDeathMarksRowIncomplete_redeliveryLaunchesFresh
 	if err := dispatch(first, "sess-1", time.Unix(0, 0)); err == nil {
 		t.Fatal("the first dispatch must fail: its session exited before completing")
 	}
-	if got := cc.closeOps(); !slices.Equal(got, incompleteOps) {
-		t.Fatalf("waitDone's own close of the dead row must mark it incomplete first; ops=%v", got)
+	if got := cc.closeOps(); !slices.Equal(got, closeOnly) {
+		t.Fatalf("waitDone's own close of the dead row must be its only write to it; ops=%v", got)
 	}
 
 	// The row as ccpool now reports it: handler-closed, idle, carrying the meta the
-	// launch stamped plus whatever the handler marked since.
+	// launch stamped plus every lease refresh since.
 	meta := map[string]string{}
 	for k, v := range cc.EnsuredMeta {
 		meta[k] = v
@@ -330,11 +273,12 @@ func TestSettledClose_unexplainedDeathMarksRowIncomplete_redeliveryLaunchesFresh
 	cc.rowMeta, cc.name = meta, display
 	cc.Ensured = nil
 
-	// Redelivery of the same event at the same head, five hours after the launch,
-	// under a one-hour budget: absorbing the row would hard-stop instantly.
 	err := dispatch(role, "sess-2", time.Unix(0, 0).Add(5*time.Hour))
 	if errors.Is(err, watchdog.ErrBudgetExceeded) {
 		t.Fatalf("a redelivery after an unexplained death must not hard-stop on the old row's launch time: %v", err)
+	}
+	if errors.Is(err, ErrSessionInFlight) {
+		t.Fatalf("a settled row whose lease expired is not in flight: %v", err)
 	}
 	if len(cc.Ensured) != 1 || cc.Ensured[0] != "sess-2" {
 		t.Errorf("a same-event same-head redelivery after an unexplained death must launch a fresh session; Ensured=%v", cc.Ensured)

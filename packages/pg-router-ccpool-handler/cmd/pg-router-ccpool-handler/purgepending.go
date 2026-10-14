@@ -30,8 +30,8 @@ import (
 // the default pool, the next shutdown sweep).
 //
 // A marked row is owned by this retry alone: reconcileClosedBeadSessions and the
-// orphan reconcile skip it, and crashOrphaned (internal/executor) treats it as
-// absent so a redelivered dispatch never absorbs it.
+// orphan reconcile skip it, and the executor never absorbs it (a row under
+// teardown is not absorbable, INV-CCH-30).
 
 // purgeMarkerValue is the value written under ccpool.MetaKeyPurgePending.
 const purgeMarkerValue = "1"

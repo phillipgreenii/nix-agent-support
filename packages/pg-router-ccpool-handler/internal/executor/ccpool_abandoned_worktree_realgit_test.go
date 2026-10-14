@@ -396,7 +396,10 @@ func TestRealGitReclaim_liveOwnSession_isKept(t *testing.T) {
 		{
 			name: "session list unreadable",
 			script: func(_ *realGitHarness, cc launchHookCC) {
+				// The dispatch's first read (prior sessions, INV-CCH-30) succeeds and
+				// finds nothing in flight; the reclaim's read then fails.
 				cc.ListErr = errors.New("ccpool list: transient")
+				cc.ListErrFrom = 1
 			},
 			logged: "abandoned worktree left for next sweep -- session list failed",
 		},

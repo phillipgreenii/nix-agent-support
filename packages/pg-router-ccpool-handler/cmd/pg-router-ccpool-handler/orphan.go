@@ -133,7 +133,7 @@ func isOrphanOf(s ccpool.Session, role roles.Role, prefix string, now time.Time)
 	// owned by the purge_pending retry (reconcile.go), never by this pass. Handling
 	// it here too would double-handle one row in a single pass, and the orphan
 	// reclaim's own SetMeta/Close(false) would race the retry's. Keep this check
-	// first; crashOrphaned (internal/executor) treats the same rows as absent.
+	// first; the executor never absorbs such a row either (INV-CCH-30).
 	if s.PurgePending() {
 		return false
 	}
@@ -250,8 +250,8 @@ func reclaimIdleOrphan(ctx context.Context, role roles.Role, deps executor.Deps,
 		}
 	}
 
-	// Mark BEFORE closing so a redelivered dispatch never mistakes the abandoned
-	// row for a settled duplicate to absorb (executor.crashOrphaned). Best effort.
+	// Mark BEFORE closing: the mark starts the reclaim's teardown, so no dispatch
+	// absorbs the row even before the close lands (INV-CCH-30). Best effort.
 	if err := deps.CC.SetMeta(ctx, s.ExternalID, ccpool.MetaKeyOrphanReclaimed, ccpool.FormatMetaTime(orphanNow(deps))); err != nil {
 		slog.Warn("orphan reconcile: could not mark the row reclaimed", "session", s.ExternalID, "err", err)
 	}

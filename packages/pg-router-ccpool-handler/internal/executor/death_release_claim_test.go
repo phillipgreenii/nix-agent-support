@@ -56,7 +56,11 @@ func TestDispatch_deathReleasesClaim(t *testing.T) {
 			}
 			// The bead stays claimed by the dead session until the handler acts.
 			bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"bead-1": {"in_progress"}}}
-			fake := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{dead}}}
+			// The dispatch absorbs the same event's turn in progress (INV-CCH-30),
+			// which then dies under it.
+			turn := dead
+			turn.Live, turn.State, turn.CloseReason = true, ccpool.StateWorking, ""
+			fake := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{turn}, {dead}}}
 			d := DispatchContext{
 				Role: role, EventID: "review.ready:bead-1",
 				Item: item.Item{ID: "bead-1", Metadata: map[string]any{"repo": "example/repo", "pr_number": "7", "head_sha": "h1"}},

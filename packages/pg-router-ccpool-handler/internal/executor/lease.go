@@ -116,11 +116,12 @@ func (r *ccpoolRun) startLease(ctx context.Context, name string) (stop func()) {
 // row, and refreshes the lease while holding it, so a reconcile that observed
 // an expired lease either finishes first (and the row is then closed, so the
 // session is not absorbable) or sees the fresh lease and aborts. ok is false
-// when the row can no longer be absorbed (gone, closed, or reclaimed as an
-// orphan): the caller then launches a fresh session. Without a configured lock
-// dir (unit tests; production always sets one) there is nothing to exclude, and
+// when the row can no longer be absorbed (gone, closed, reclaimed as an
+// orphan, or its turn has ended: INV-CCH-30's absorbable): the caller then
+// declines, and the next offer decides afresh. Without a configured lock dir
+// (unit tests; production always sets one) there is nothing to exclude, and
 // the lease is simply refreshed.
-func (r *ccpoolRun) takeOverForAbsorb(ctx context.Context, existing ccpool.Session, eventID, headSHA string) (ccpool.Session, bool, error) {
+func (r *ccpoolRun) takeOverForAbsorb(ctx context.Context, existing ccpool.Session, eventID string) (ccpool.Session, bool, error) {
 	if r.deps.LockDir == "" {
 		r.refreshLeaseOnce(ctx, existing.ExternalID)
 		return existing, true, nil
@@ -132,7 +133,7 @@ func (r *ccpoolRun) takeOverForAbsorb(ctx context.Context, existing ccpool.Sessi
 	defer lock.Unlock()
 	sessions, err := r.deps.CC.List(ctx)
 	if err != nil {
-		// Can't tell. Keep the original absorb decision: findSessionByName already
+		// Can't tell. Keep the original absorb decision: planPriorSessions already
 		// chose this row, and an unreadable list is also what active() treats as
 		// "keep waiting".
 		r.refreshLeaseOnce(ctx, existing.ExternalID)
@@ -142,9 +143,9 @@ func (r *ccpoolRun) takeOverForAbsorb(ctx context.Context, existing ccpool.Sessi
 		if s.ExternalID != existing.ExternalID {
 			continue
 		}
-		if crashOrphaned(s) || staleSettledRow(s, eventID, headSHA) {
-			slog.Info("absorb: session was closed or reclaimed while taking over; launching afresh",
-				"session", s.ExternalID, "close_reason", s.CloseReason)
+		if !absorbable(s, eventID) {
+			slog.Info("absorb: session was closed, reclaimed or settled while taking over; declining",
+				"session", s.ExternalID, "close_reason", s.CloseReason, "state", string(s.State), "live", s.Live)
 			return ccpool.Session{}, false, nil
 		}
 		r.refreshLeaseOnce(ctx, s.ExternalID)

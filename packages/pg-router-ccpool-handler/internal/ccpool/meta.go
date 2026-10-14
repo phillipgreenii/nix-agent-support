@@ -27,35 +27,24 @@ const (
 	// budget from the real launch rather than from "now". Never a --label.
 	MetaKeyLaunchedAt = "pgrouter.launched_at"
 	// MetaKeyOrphanReclaimed marks a session the orphan reconcile closed
-	// (RFC3339 UTC of the reclaim). A reclaimed row is NOT a duplicate worth
-	// absorbing: its work was abandoned, so a redelivered dispatch must launch
-	// afresh. Never a --label.
+	// (RFC3339 UTC of the reclaim). The mark is the start of the reclaim's
+	// teardown, so a reclaimed row is never absorbed, even in the moment before
+	// its close lands (INV-CCH-30). Never a --label.
 	MetaKeyOrphanReclaimed = "pgrouter.orphan_reclaimed"
-	// MetaKeyIncomplete marks a session whose dispatch ended WITHOUT completing its
-	// bead (RFC3339 UTC of the marking): a hand-back (the bead returned to open), a
-	// budget hard stop, or a failed dispatch. Such a row is a finished attempt, not a
-	// settled duplicate: the bead is still open, so a later dispatch carrying the
-	// SAME event id and head (review-source re-emits review.ready:<bead> at an
-	// unchanged head after a hand-back) is a re-request that needs a fresh session.
-	// Absorbing the row would measure the time budget from its original launch and
-	// hard-stop instantly, forever (bead pg2-tc9c3). Never a --label.
-	MetaKeyIncomplete = "pgrouter.incomplete"
 	// MetaKeyEventID is the id of the pg-router event whose dispatch launched
 	// the session (bead pg2-uprw5, ADR 0082). A redelivery of the SAME accepted
-	// event carries the same id; a later, legitimate re-dispatch for the same
-	// bead and role (a reopened review) is a NEW event with a different id. It is
-	// what lets a dispatch tell a crash-window redelivery from a re-dispatch when
-	// deciding whether to absorb a handler-closed settled row. Absent when the
-	// dispatch carried no event id. Never a --label.
+	// event carries the same id. It is compared for one decision only: a
+	// dispatch absorbs an earlier session whose turn is still in progress only
+	// when the session records this dispatch's own event id (INV-CCH-30, ADR
+	// 0094); a settled session is never absorbed whatever its event id. Absent
+	// when the dispatch carried no event id (such a session is never absorbed).
+	// Never a --label.
 	MetaKeyEventID = "pgrouter.event_id"
 	// MetaKeyHeadSHA is the pinned PR head (the dispatched item's head_sha
-	// metadata) the session was launched to review (bead pg2-afre3). The event id
-	// alone cannot tell a redelivery from a re-dispatch for an item-carrying event,
-	// because it is deterministic per (event type, bead) -- review.ready:<bead> --
-	// and so is identical across every re-review of the same bead. The head is what
-	// changes: a review re-dispatched after a head advance is NOT a redelivery of
-	// the earlier head's settled session. Absent when the dispatch carried no
-	// head_sha. Never a --label.
+	// metadata) the session was launched for (bead pg2-afre3). It is a record of
+	// what the session reviews, read by people and verification; no decision
+	// compares it any more (INV-CCH-30 deliberately does not compare heads).
+	// Absent when the dispatch carried no head_sha. Never a --label.
 	MetaKeyHeadSHA = "pgrouter.head_sha"
 	// MetaKeyPurgePending marks a session whose teardown is two-phase and not yet
 	// finished (bead pg2-kqegi, INV-CCH-20): the handler has closed the row

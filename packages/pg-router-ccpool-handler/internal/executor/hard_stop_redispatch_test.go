@@ -25,7 +25,8 @@ import (
 // re-attaches to the stopped row (absorbDuplicate): that row's budget runs from
 // its original launch time, so the watchdog hard-stops it at once, over and over
 // (the 272-hit loop recorded on pg2-aezsm; fixed by pg2-vwb4c, pg2-afre3,
-// pg2-tc9c3 and pg2-92rfu).
+// pg2-tc9c3 and pg2-92rfu, and closed for good by INV-CCH-30's fresh-session
+// default, bead pg2-qaeb8: a settled row is never absorbed).
 //
 // The two halves were only ever tested apart: the stop by one Dispatch
 // (TestDispatch_watchdogHardStop_*, TestTerminal_*), the redispatch against a
@@ -160,8 +161,8 @@ func (c *storeCC) opsOn(id string) []string {
 // hard stop left it: not re-attached (no lease refresh, no wait on it), not sent
 // input, not closed again. The second dispatch starts five hours after the first
 // launch, under a 25-minute time budget, so re-attaching would hard-stop it
-// instantly from the old row's launch time. Removing the incomplete marker the
-// hard stop stamps (watchdog.terminal) makes this fail.
+// instantly from the old row's launch time. Making a settled row absorbable
+// again (planPriorSessions) makes this fail.
 func TestDispatch_budgetHardStop_thenRedispatchLaunchesFreshSession(t *testing.T) {
 	cfg := fastCfg()
 	cfg.BudgetTokens = 1000 // finite cap so the usage ramp trips it; the 25m time budget stays on
@@ -215,9 +216,6 @@ func TestDispatch_budgetHardStop_thenRedispatchLaunchesFreshSession(t *testing.T
 	}
 	if got := stopped.Meta[ccpool.MetaKeyLaunchedAt]; got != ccpool.FormatMetaTime(launched1) {
 		t.Fatalf("precondition: the stopped row must carry its original launch time %s, got %q", ccpool.FormatMetaTime(launched1), got)
-	}
-	if stopped.Meta[ccpool.MetaKeyIncomplete] == "" {
-		t.Errorf("the hard stop must stamp the row incomplete (its bead is open again); meta=%v", stopped.Meta)
 	}
 	if len(cc.Closed) != 1 || cc.Closed[0] != "sess-1" || cc.ClosedPurge[0] {
 		t.Errorf("the hard stop must close its session exactly once, non-purge; Closed=%v ClosedPurge=%v", cc.Closed, cc.ClosedPurge)

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/prompt"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/sessionlock"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/usage"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/watchdog"
 	"github.com/phillipgreenii/x/gitclient"
@@ -702,215 +704,388 @@ func TestWaitDone_externalCloseDoesNotDoubleClose(t *testing.T) {
 	}
 }
 
-// TestCrashOrphaned_cases pins down the exact predicate findSessionByName
-// relies on (pg2-04bf7): dead ONLY for a row that is not live AND (already
-// explicitly closed by someone other than this handler's own settled-session
-// close, OR never reached a hook-driven terminal state) — never for a
-// still-live row, never for a not-live row that legitimately settled
-// (idle/errored) without ever being explicitly closed, and never for a
-// settled (idle/errored) row this handler closed itself (INV-CCH-17):
-// INV-EVT-2's own "absorb, don't re-launch" guarantee for those cases.
-func TestCrashOrphaned_cases(t *testing.T) {
+// --- prior sessions of the bead and role (INV-CCH-30, ADR 0094) ---
+//
+// These fake-ccpool tests pin the decision table fast. The same rules are
+// proven against the REAL ccpool binary in prior_sessions_realccpool_test.go
+// (global rule V-3).
+
+var planNow = time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+
+// planClock is planNow with fastCfg's launch window (ccpool.EnsureTimeout plus
+// the default two-minute lease TTL).
+var planClock = priorClock{now: planNow, window: ccpool.EnsureTimeout + 2*time.Minute}
+
+// planMeta builds a row's dispatch meta: its event id ("" omits it) and a lease
+// that ends at planNow+leaseIn (a zero leaseIn omits the lease entirely).
+func planMeta(eventID string, leaseIn time.Duration) map[string]string {
+	m := map[string]string{}
+	if eventID != "" {
+		m[ccpool.MetaKeyEventID] = eventID
+	}
+	if leaseIn != 0 {
+		m[ccpool.MetaKeyLeaseUntil] = ccpool.FormatMetaTime(planNow.Add(leaseIn))
+	}
+	return m
+}
+
+func TestPriorSessionPredicates(t *testing.T) {
+	held, expired := planMeta("evt-1", time.Minute), planMeta("evt-1", -time.Minute)
 	cases := []struct {
-		name string
-		sess ccpool.Session
-		want bool
+		name                                    string
+		s                                       ccpool.Session
+		inProgress, inFlight, leftover, absorbs bool
 	}{
-		{"crash mid-work, never closed", ccpool.Session{Live: false, State: ccpool.StateWorking}, true},
-		{"crash while needs_input, never closed", ccpool.Session{Live: false, State: ccpool.StateNeedsInput}, true},
-		{"crash while starting, never closed", ccpool.Session{Live: false, State: ccpool.StateStarting}, true},
-		{"settled idle, never explicitly closed", ccpool.Session{Live: false, State: ccpool.StateIdle}, false},
-		{"settled errored, never explicitly closed", ccpool.Session{Live: false, State: ccpool.StateErrored}, false},
-		{"handler-closed settled idle row is a duplicate to absorb (INV-CCH-17)", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler"}, false},
-		{"handler-closed settled errored row is a duplicate to absorb (INV-CCH-17)", ccpool.Session{Live: false, State: ccpool.StateErrored, CloseReason: "handler"}, false},
-		{"handler-closed non-terminal dead row stays absent", ccpool.Session{Live: false, State: ccpool.StateWorking, CloseReason: "handler"}, true},
-		{"handler-closed starting dead row stays absent", ccpool.Session{Live: false, State: ccpool.StateStarting, CloseReason: "handler"}, true},
-		{"idle_ttl-closed despite idle state", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "idle_ttl"}, true},
-		{"cap_eviction-closed despite idle state", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "cap_eviction"}, true},
-		{"operator-closed despite idle state", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "operator"}, true},
-		{"already closed by ccpool despite errored state", ccpool.Session{Live: false, State: ccpool.StateErrored, CloseReason: "idle_ttl"}, true},
-		{"already closed but somehow still live (defensive)", ccpool.Session{Live: true, State: ccpool.StateErrored, CloseReason: "operator"}, false},
-		{"live and working", ccpool.Session{Live: true, State: ccpool.StateWorking}, false},
-		{"live and idle", ccpool.Session{Live: true, State: ccpool.StateIdle}, false},
-		{"orphan-reclaimed idle row is abandoned work, not a duplicate (INV-CCH-18)", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyOrphanReclaimed: "2026-10-06T12:00:00Z"}}, true},
-		{"orphan-reclaimed marker on a still-live row is ignored", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyOrphanReclaimed: "2026-10-06T12:00:00Z"}}, false},
-		{"handler-closed idle row of an attempt that left its bead open is absent (pg2-tc9c3)", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyIncomplete: "2026-10-08T07:54:03Z"}}, true},
-		{"handler-closed errored row of an attempt that left its bead open is absent (pg2-tc9c3)", ccpool.Session{Live: false, State: ccpool.StateErrored, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyIncomplete: "2026-10-08T07:54:03Z"}}, true},
-		{"incomplete marker on a still-live row is ignored", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyIncomplete: "2026-10-08T07:54:03Z"}}, false},
-		{"purge_pending handler-closed settled idle row is never absorbed (INV-CCH-20)", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyPurgePending: "1"}}, true},
-		{"purge_pending still-live row is absent too (its non-purge close failed)", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyPurgePending: "1"}}, true},
+		{"live working, same event, lease held", ccpool.Session{Live: true, State: ccpool.StateWorking, Meta: held}, true, true, false, true},
+		{"live needs_input, same event, lease expired (a dead handler's turn)", ccpool.Session{Live: true, State: ccpool.StateNeedsInput, Meta: expired}, true, true, false, true},
+		{"live working, no lease at all", ccpool.Session{Live: true, State: ccpool.StateWorking, Meta: planMeta("evt-1", 0)}, true, true, false, true},
+		{"dead working row (crashed), lease expired", ccpool.Session{State: ccpool.StateWorking, Meta: expired}, false, false, false, false},
+		{"dead working row, lease still held (handler handling its death)", ccpool.Session{State: ccpool.StateWorking, Meta: held}, false, true, false, false},
+		{"live idle, lease held (handler settling it)", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: held}, false, true, false, false},
+		{"live idle, lease expired (settled, nobody closed it)", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: expired}, false, false, false, false},
+		{"handler-closed idle row, lease expired (the settled success row)", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: expired}, false, false, false, false},
+		{"handler-closed errored row, lease held", ccpool.Session{State: ccpool.StateErrored, CloseReason: "handler", Meta: held}, false, true, false, false},
+		{"live ready, lease held (being launched)", ccpool.Session{Live: true, State: ccpool.StateReady, Meta: held}, false, true, false, false},
+		{"live starting, lease held (being launched)", ccpool.Session{Live: true, State: ccpool.StateStarting, Meta: held}, false, true, false, false},
+		{"live ready, lease expired: a leftover", ccpool.Session{Live: true, State: ccpool.StateReady, Meta: expired}, false, false, true, false},
+		{"live starting, lease expired: a leftover", ccpool.Session{Live: true, State: ccpool.StateStarting, Meta: expired}, false, false, true, false},
+		{"live ready, no lease, age unknown: may still be launching", ccpool.Session{Live: true, State: ccpool.StateReady}, false, true, false, false},
+		{"live starting, no lease yet, last activity a minute ago: still launching (ccpool stamps meta only at ready)", ccpool.Session{Live: true, State: ccpool.StateStarting, LastActivityAt: planNow.Add(-time.Minute).Unix()}, false, true, false, false},
+		{"live starting, no lease, outlived the launch window: a leftover", ccpool.Session{Live: true, State: ccpool.StateStarting, LastActivityAt: planNow.Add(-time.Hour).Unix()}, false, false, true, false},
+		{"live ready, no lease, ready an hour ago (late ready after a failed launch): a leftover", ccpool.Session{Live: true, State: ccpool.StateReady, LastActivityAt: planNow.Add(-time.Hour).Unix()}, false, false, true, false},
+		{"live idle, no lease: settled, nobody's lease to hold", ccpool.Session{Live: true, State: ccpool.StateIdle, LastActivityAt: planNow.Unix()}, false, false, false, false},
+		{"dead ready row, lease expired: not live, not a leftover", ccpool.Session{State: ccpool.StateReady, Meta: expired}, false, false, false, false},
+		{"live ready under two-phase teardown: the purge retry's", ccpool.Session{Live: true, State: ccpool.StateReady, Meta: map[string]string{ccpool.MetaKeyPurgePending: "1", ccpool.MetaKeyLeaseUntil: expired[ccpool.MetaKeyLeaseUntil]}}, false, false, false, false},
+		{"live working, closed while it runs", ccpool.Session{Live: true, State: ccpool.StateWorking, CloseReason: "operator", Meta: held}, true, true, false, false},
+		{"live working under two-phase teardown", ccpool.Session{Live: true, State: ccpool.StateWorking, Meta: map[string]string{ccpool.MetaKeyEventID: "evt-1", ccpool.MetaKeyPurgePending: "1"}}, true, true, false, false},
+		{"live working, orphan reclaim begun", ccpool.Session{Live: true, State: ccpool.StateWorking, Meta: map[string]string{ccpool.MetaKeyEventID: "evt-1", ccpool.MetaKeyOrphanReclaimed: "2026-10-13T11:00:00Z"}}, true, true, false, false},
+		{"live working, another event", ccpool.Session{Live: true, State: ccpool.StateWorking, Meta: planMeta("evt-0", time.Minute)}, true, true, false, false},
+		{"live working, no event id recorded", ccpool.Session{Live: true, State: ccpool.StateWorking, Meta: planMeta("", time.Minute)}, true, true, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := crashOrphaned(tc.sess); got != tc.want {
-				t.Errorf("crashOrphaned(%+v) = %v, want %v", tc.sess, got, tc.want)
+			if got := turnInProgress(tc.s); got != tc.inProgress {
+				t.Errorf("turnInProgress = %v, want %v", got, tc.inProgress)
+			}
+			if got := inFlight(tc.s, planClock); got != tc.inFlight {
+				t.Errorf("inFlight = %v, want %v", got, tc.inFlight)
+			}
+			if got := leftover(tc.s, planClock); got != tc.leftover {
+				t.Errorf("leftover = %v, want %v", got, tc.leftover)
+			}
+			if got := absorbable(tc.s, "evt-1"); got != tc.absorbs {
+				t.Errorf("absorbable(evt-1) = %v, want %v", got, tc.absorbs)
 			}
 		})
 	}
+	if absorbable(ccpool.Session{Live: true, State: ccpool.StateWorking, Meta: planMeta("", time.Minute)}, "") {
+		t.Error("a dispatch with no event id can compare nothing, so it absorbs nothing")
+	}
 }
 
-// TestFindSessionByName_deadRowTreatedAsAbsent proves fix (a) end-to-end
-// through findSessionByName: a --name match on a genuinely crash-orphaned row
-// — crashed mid-work with no explicit close, OR already explicitly closed by
-// ccpool regardless of its last recorded state (the fix (b) follow-up case) —
-// must be reported as NOT FOUND, so the caller falls through to Ensure/ccpool
-// new with the fresh per-attempt ExternalID instead of routing into
-// absorbDuplicate against a session that will never make progress again.
-func TestFindSessionByName_deadRowTreatedAsAbsent(t *testing.T) {
+// TestPlanPriorSessions is the decision table of INV-CCH-30 over a whole pool
+// listing: absorb only the same event's turn in progress on an open bead,
+// decline while any other attempt is in flight, close and replace leftovers,
+// and launch fresh otherwise.
+func TestPlanPriorSessions(t *testing.T) {
+	const name = "pg-router-review-zr-c"
+	row := func(id string, live bool, st ccpool.SessionState, meta map[string]string) ccpool.Session {
+		return ccpool.Session{ExternalID: id, Name: name, Live: live, State: st, Meta: meta}
+	}
+	settledSuccess := row("old", false, ccpool.StateIdle, map[string]string{
+		ccpool.MetaKeyEventID: "evt-1", ccpool.MetaKeyHeadSHA: "h1",
+		ccpool.MetaKeyLeaseUntil: ccpool.FormatMetaTime(planNow.Add(-time.Hour)),
+	})
+	settledSuccess.CloseReason = "handler"
 	cases := []struct {
-		name string
-		sess ccpool.Session
+		name       string
+		sessions   []ccpool.Session
+		listErr    error
+		eventID    string
+		bead       string // "" = unreadable
+		want       priorVerdict
+		wantID     string // absorb target, or the in-flight session of a decline
+		wantLefts  []string
+		wantBDRead bool
 	}{
-		{"crash-orphaned, never closed (Live=false)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateWorking}},
-		{"crash-orphaned while needs_input", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateNeedsInput}},
-		{"closed by waitDone's death-branch Close of a non-terminal row", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateWorking, CloseReason: "handler"}},
-		{"already closed by ccpool (idle_ttl, idle state)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle, CloseReason: "idle_ttl"}},
-		{"already closed by ccpool (errored state)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateErrored, CloseReason: "cap_eviction"}},
-		{"purge_pending handler-closed settled row (INV-CCH-20): the redelivered event must launch afresh", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyPurgePending: "1", ccpool.MetaKeyEventID: "evt-1"}}},
+		{name: "empty pool: launch", want: verdictLaunch},
+		{name: "settled success row, same event and head (the rejected candidate): launch", sessions: []ccpool.Session{settledSuccess}, eventID: "evt-1", bead: "open", want: verdictLaunch},
+		{name: "settled row closed by idle_ttl: launch", sessions: []ccpool.Session{{ExternalID: "old", Name: name, State: ccpool.StateIdle, CloseReason: "idle_ttl"}}, eventID: "evt-1", want: verdictLaunch},
+		{name: "crashed row, lease expired: launch", sessions: []ccpool.Session{row("old", false, ccpool.StateWorking, planMeta("evt-1", -time.Minute))}, eventID: "evt-1", want: verdictLaunch},
+		{name: "live idle nobody closed, lease expired: launch, never absorbed", sessions: []ccpool.Session{row("old", true, ccpool.StateIdle, planMeta("evt-1", -time.Minute))}, eventID: "evt-1", want: verdictLaunch},
+		{name: "live idle, handler still settling it: decline", sessions: []ccpool.Session{row("old", true, ccpool.StateIdle, planMeta("evt-1", time.Minute))}, eventID: "evt-1", want: verdictDecline, wantID: "old"},
+		{name: "same event's turn in progress, bead open: absorb", sessions: []ccpool.Session{row("cur", true, ccpool.StateWorking, planMeta("evt-1", time.Minute))}, eventID: "evt-1", bead: "in_progress", want: verdictAbsorb, wantID: "cur", wantBDRead: true},
+		{name: "same event's turn paused for a person: absorb", sessions: []ccpool.Session{row("cur", true, ccpool.StateNeedsInput, planMeta("evt-1", -time.Minute))}, eventID: "evt-1", bead: "in_progress", want: verdictAbsorb, wantID: "cur", wantBDRead: true},
+		{name: "same event's turn, bead already closed: decline", sessions: []ccpool.Session{row("cur", true, ccpool.StateWorking, planMeta("evt-1", time.Minute))}, eventID: "evt-1", bead: "closed", want: verdictDecline, wantID: "cur", wantBDRead: true},
+		{name: "same event's turn, bead unreadable: decline", sessions: []ccpool.Session{row("cur", true, ccpool.StateWorking, planMeta("evt-1", time.Minute))}, eventID: "evt-1", want: verdictDecline, wantID: "cur", wantBDRead: true},
+		{name: "another event's turn in progress: decline", sessions: []ccpool.Session{row("cur", true, ccpool.StateWorking, planMeta("evt-0", time.Minute))}, eventID: "evt-1", want: verdictDecline, wantID: "cur"},
+		{name: "another event's turn paused for a person: decline", sessions: []ccpool.Session{row("cur", true, ccpool.StateNeedsInput, planMeta("evt-0", -time.Minute))}, eventID: "evt-1", want: verdictDecline, wantID: "cur"},
+		{name: "a turn that records no event id: decline", sessions: []ccpool.Session{row("cur", true, ccpool.StateWorking, planMeta("", time.Minute))}, eventID: "evt-1", want: verdictDecline, wantID: "cur"},
+		{name: "a dispatch with no event id: decline", sessions: []ccpool.Session{row("cur", true, ccpool.StateWorking, planMeta("evt-1", time.Minute))}, want: verdictDecline, wantID: "cur"},
+		{name: "session being launched (ready, lease held): decline", sessions: []ccpool.Session{row("cur", true, ccpool.StateReady, planMeta("evt-1", time.Minute))}, eventID: "evt-1", want: verdictDecline, wantID: "cur"},
+		{name: "a launch still in progress (starting, no metadata yet): decline", sessions: []ccpool.Session{{ExternalID: "cur", Name: name, Live: true, State: ccpool.StateStarting, LastActivityAt: planNow.Add(-30 * time.Second).Unix()}}, eventID: "evt-1", want: verdictDecline, wantID: "cur"},
+		{name: "a late-ready leftover with no metadata: launch after closing it", sessions: []ccpool.Session{{ExternalID: "late", Name: name, Live: true, State: ccpool.StateReady, LastActivityAt: planNow.Add(-time.Hour).Unix()}}, eventID: "evt-1", want: verdictLaunch, wantLefts: []string{"late"}},
+		{name: "leftover ready and starting: launch after closing both", sessions: []ccpool.Session{row("l1", true, ccpool.StateReady, planMeta("evt-0", -time.Minute)), row("l2", true, ccpool.StateStarting, planMeta("evt-1", -time.Minute))}, eventID: "evt-1", want: verdictLaunch, wantLefts: []string{"l1", "l2"}},
+		{name: "a leftover beside an attempt in flight: decline, the leftover untouched", sessions: []ccpool.Session{row("l1", true, ccpool.StateReady, planMeta("evt-0", -time.Minute)), row("cur", true, ccpool.StateWorking, planMeta("evt-0", time.Minute))}, eventID: "evt-1", want: verdictDecline, wantID: "cur"},
+		{name: "every session counts, not only the first: decline", sessions: []ccpool.Session{settledSuccess, row("cur", true, ccpool.StateWorking, planMeta("evt-0", time.Minute))}, eventID: "evt-1", want: verdictDecline, wantID: "cur"},
+		{name: "the same event's turn is preferred over another attempt in flight", sessions: []ccpool.Session{row("other", true, ccpool.StateIdle, planMeta("evt-0", time.Minute)), row("cur", true, ccpool.StateWorking, planMeta("evt-1", time.Minute))}, eventID: "evt-1", bead: "in_progress", want: verdictAbsorb, wantID: "cur", wantBDRead: true},
+		{name: "another bead's session is not this bead's: launch", sessions: []ccpool.Session{{ExternalID: "x", Name: "pg-router-review-zr-d", Live: true, State: ccpool.StateWorking, Meta: planMeta("evt-9", time.Minute)}}, eventID: "evt-1", want: verdictLaunch},
+		{name: "a session found by its dispatch tags, not its name: decline", sessions: []ccpool.Session{{ExternalID: "tagged", Live: true, State: ccpool.StateWorking, Meta: map[string]string{
+			ccpool.MetaKeyPool: ccpool.PoolName, ccpool.MetaKeyBead: "zr-c", ccpool.MetaKeyRole: "review", ccpool.MetaKeyEventID: "evt-0",
+		}}}, eventID: "evt-1", want: verdictDecline, wantID: "tagged"},
+		{name: "the pool cannot be read: decline", listErr: errors.New("ccpool list: boom"), eventID: "evt-1", want: verdictDecline},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{tc.sess}}}
-			e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
-			if _, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c", "", ""); ok {
-				t.Errorf("dead row must be treated as absent, not a real duplicate")
+			sbd := &dtest.ScriptBD{}
+			if tc.bead != "" {
+				sbd.StatusSeq = map[string][]string{"zr-c": {tc.bead}}
+			}
+			bd := &showCountBD{ScriptBD: sbd}
+			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{tc.sessions}, ListErr: tc.listErr}
+			e := newExec(cc, sbd, fastCfg())
+			e.deps.BD = bd
+			e.deps.Now = func() time.Time { return planNow }
+			d := DispatchContext{Role: reviewRole(fastCfg()), Item: item.Item{ID: "zr-c"}, EventID: tc.eventID}
+			got := e.planPriorSessions(context.Background(), d, name)
+			if got.verdict != tc.want {
+				t.Fatalf("verdict = %v, want %v (plan %+v)", got.verdict, tc.want, got)
+			}
+			switch tc.want {
+			case verdictAbsorb:
+				if got.absorb.ExternalID != tc.wantID {
+					t.Errorf("absorbs %q, want %q", got.absorb.ExternalID, tc.wantID)
+				}
+			case verdictDecline:
+				if got.session != tc.wantID {
+					t.Errorf("declines over session %q, want %q (why %q)", got.session, tc.wantID, got.why)
+				}
+				if got.why == "" {
+					t.Error("a decline must say why")
+				}
+			}
+			var lefts []string
+			for _, s := range got.leftovers {
+				lefts = append(lefts, s.ExternalID)
+			}
+			if !slices.Equal(lefts, tc.wantLefts) {
+				t.Errorf("leftovers = %v, want %v", lefts, tc.wantLefts)
+			}
+			if read := bd.shows > 0; read != tc.wantBDRead {
+				t.Errorf("bead read = %v, want %v (the bead is read only for an absorb candidate)", read, tc.wantBDRead)
 			}
 		})
 	}
 }
 
-// TestFindSessionByName_liveMatchFound is the regression lock alongside the
-// above: a genuinely in-flight session under the same name must still be
-// found and absorbed, across every store state including the terminal ones
-// (Live=true is never crash-orphaned, regardless of state).
-func TestFindSessionByName_liveMatchFound(t *testing.T) {
-	cases := []ccpool.SessionState{
-		ccpool.StateStarting, ccpool.StateReady, ccpool.StateWorking, ccpool.StateNeedsInput,
-		ccpool.StateIdle, ccpool.StateErrored,
+// TestDispatch_sessionInFlight_declinesWithoutMutation: a dispatch that finds
+// another event's turn in progress declines with ErrSessionInFlight and touches
+// nothing: no launch, no send, no close, no session metadata, no bead write.
+func TestDispatch_sessionInFlight_declinesWithoutMutation(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := reviewRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+	other := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking,
+		Meta: map[string]string{ccpool.MetaKeyEventID: "review.ready:zr-c-earlier"},
 	}
-	for _, state := range cases {
-		t.Run(string(state), func(t *testing.T) {
-			sess := ccpool.Session{ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: true, State: state}
-			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{sess}}}
-			e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
-			got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c", "", "")
-			if !ok || got.ExternalID != "att-1" {
-				t.Errorf("live in-flight session (state=%s) must be found as the duplicate; got=%v ok=%v", state, got, ok)
-			}
-		})
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{other}}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "att-2"
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}, EventID: "review.ready:zr-c"}
+	res, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps)
+	if !errors.Is(err, ErrSessionInFlight) {
+		t.Fatalf("err = %v, want ErrSessionInFlight", err)
 	}
-}
-
-// TestFindSessionByName_settledWithoutExplicitClose_stillMatched is the
-// direct regression lock for TestDispatch_crashWindowRedelivery_
-// absorbsIntoExistingSession's own premise: a row that legitimately finished
-// (Idle: Claude's Stop hook fired) and has since gone Live=false on its own,
-// but was NEVER explicitly closed by ccpool (CloseReason=="") must still be
-// matched. (Since INV-CCH-17 / ADR 0082 the handler normally closes a settled
-// session itself; this covers a row nobody closed, e.g. a failed or deferred
-// close, and the sibling test below covers the handler-closed row.) This is
-// NOT the zombie case: the row settled naturally rather than crashing
-// mid-flight, so INV-EVT-2 still requires absorbing it rather than launching
-// a redundant second session for an already-completed bead.
-func TestFindSessionByName_settledWithoutExplicitClose_stillMatched(t *testing.T) {
-	sess := ccpool.Session{ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{sess}}}
-	e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
-	got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c", "", "")
-	if !ok || got.ExternalID != "att-1" {
-		t.Errorf("a naturally-settled (never explicitly closed) row must still be matched; got=%v ok=%v", got, ok)
+	if errors.Is(err, ErrPoolAtCapacity) || errors.Is(err, ErrPoolCapacityUnknown) {
+		t.Fatalf("a session-in-flight decline must not also read as a capacity decline: %v", err)
+	}
+	if v := verbOf(res); v != "" {
+		t.Errorf("a decline applies no verb, got %q", v)
+	}
+	if len(cc.Ensured)+len(cc.Sent)+len(cc.Closed)+len(cc.SetMetaCalls()) != 0 {
+		t.Errorf("a decline mutates no session; Ensured=%v Sent=%v Closed=%v SetMeta=%v", cc.Ensured, cc.Sent, cc.Closed, cc.SetMetaCalls())
+	}
+	if len(bd.Updates)+len(bd.Comments) != 0 {
+		t.Errorf("a decline writes nothing to the bead; updates=%v comments=%v", bd.Updates, bd.Comments)
 	}
 }
 
-// TestFindSessionByName_handlerClosedSettledRow_stillMatched: a settled
-// (idle/errored) row the handler closed itself (CloseReason "handler",
-// INV-CCH-17) is still the duplicate a crash-window redelivery must absorb.
-func TestFindSessionByName_handlerClosedSettledRow_stillMatched(t *testing.T) {
-	for _, state := range []ccpool.SessionState{ccpool.StateIdle, ccpool.StateErrored} {
-		t.Run(string(state), func(t *testing.T) {
-			sess := ccpool.Session{
-				ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: false, State: state, CloseReason: "handler",
-				Meta: map[string]string{ccpool.MetaKeyEventID: "evt-1"},
-			}
-			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{sess}}}
-			e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
-			got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c", "evt-1", "")
-			if !ok || got.ExternalID != "att-1" {
-				t.Errorf("a handler-closed settled row of the SAME event must still be matched; got=%v ok=%v", got, ok)
-			}
-		})
+// TestDispatch_leftover_closedThenReplaced: a live ready session whose lease has
+// expired (a launch whose handler died before its prompt was taken) is closed,
+// without purging and under the per-session lock, and the dispatch then launches
+// and prompts its OWN session. The leftover is never handed the prompt (the
+// pg2-oq6cy behavior this replaces).
+func TestDispatch_leftover_closedThenReplaced(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := feedbackRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+	stuck := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateReady, CWD: t.TempDir(),
+		Meta: map[string]string{ccpool.MetaKeyLeaseUntil: "1969-12-31T23:00:00Z"}, // long expired
 	}
+	lockDir := t.TempDir()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{stuck}, // planPriorSessions
+		{stuck}, // closeLeftover's re-read under the lock
+		{{ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateWorking}},
+	}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "att-2"
+	deps.LockDir = lockDir
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}, EventID: "evt-1"}
+	if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err != nil {
+		t.Fatalf("dispatch should succeed (bead closes), got %v", err)
+	}
+	if len(cc.Closed) == 0 || cc.Closed[0] != "att-1" || cc.ClosedPurge[0] {
+		t.Errorf("the leftover must be closed first, non-purge; Closed=%v purge=%v", cc.Closed, cc.ClosedPurge)
+	}
+	if got := cc.Ensured; len(got) != 1 || got[0] != "att-2" {
+		t.Errorf("the dispatch must launch its own session; Ensured=%v", got)
+	}
+	if got := cc.Sent; len(got) != 1 || got[0] != "att-2" {
+		t.Errorf("only the fresh session is prompted, never the leftover; Sent=%v", got)
+	}
+	l, err := sessionlock.TryLock(lockDir, "att-1")
+	if err != nil {
+		t.Fatalf("the leftover's lock must be released once it is closed: %v", err)
+	}
+	l.Unlock()
 }
 
-// TestStaleSettledRow_cases pins the bound on absorbing a handler-closed
-// settled row (bead pg2-uprw5, ADR 0082): it is a duplicate only for a
-// redelivery of the SAME event. A dispatch with no event id applies no bound;
-// a row with no recorded event id cannot be proven a redelivery.
-func TestStaleSettledRow_cases(t *testing.T) {
-	withEvt := func(id string) map[string]string { return map[string]string{ccpool.MetaKeyEventID: id} }
-	withEvtHead := func(id, head string) map[string]string {
-		return map[string]string{ccpool.MetaKeyEventID: id, ccpool.MetaKeyHeadSHA: head}
+// TestDispatch_leftover_reReadUnderLock: under the lock the row is read again.
+// One that a handler has since taken up (lease refreshed) is in flight, so the
+// dispatch declines without closing it; one that is gone needs nothing and the
+// dispatch launches.
+func TestDispatch_leftover_reReadUnderLock(t *testing.T) {
+	cfg := fastCfg()
+	role := feedbackRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+	stuck := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateReady,
+		Meta: map[string]string{ccpool.MetaKeyLeaseUntil: "1969-12-31T23:00:00Z"},
 	}
-	cases := []struct {
-		name    string
-		sess    ccpool.Session
-		eventID string
-		headSHA string
-		want    bool
+	retaken := stuck
+	retaken.Meta = map[string]string{ccpool.MetaKeyLeaseUntil: "1970-01-01T01:00:00Z"} // the manual clock starts at the epoch
+	for _, tc := range []struct {
+		name       string
+		reRead     []ccpool.Session
+		wantErr    error
+		wantLaunch bool
 	}{
-		// pg2-afre3: the event id is deterministic per (type, bead), so it is
-		// identical across re-reviews; the pinned head is what tells them apart.
-		{"same event, same head: a crash-window redelivery", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: withEvtHead("evt-1", "h1")}, "evt-1", "h1", false},
-		{"same event, head advanced: a re-review, not a redelivery", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: withEvtHead("evt-1", "h1")}, "evt-1", "h2", true},
-		{"same event, head advanced, errored row", ccpool.Session{State: ccpool.StateErrored, CloseReason: "handler", Meta: withEvtHead("evt-1", "h1")}, "evt-1", "h2", true},
-		{"same event, row has no head (older build): not provably the same head", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: withEvt("evt-1")}, "evt-1", "h2", true},
-		{"same event, this dispatch has no head: no head bound applies", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: withEvtHead("evt-1", "h1")}, "evt-1", "", false},
-		{"head advanced but open (not handler-closed) row is crashOrphaned's concern", ccpool.Session{State: ccpool.StateIdle, Meta: withEvtHead("evt-1", "h1")}, "evt-1", "h2", false},
-		{"head advanced but live row is never stale", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: withEvtHead("evt-1", "h1")}, "evt-1", "h2", false},
-		{"head advanced but no event id on this dispatch: no bound applies", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: withEvtHead("evt-1", "h1")}, "", "h2", false},
-		{"same event: a crash-window redelivery", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: withEvt("evt-1")}, "evt-1", "", false},
-		{"same event, errored row", ccpool.Session{State: ccpool.StateErrored, CloseReason: "handler", Meta: withEvt("evt-1")}, "evt-1", "", false},
-		{"different event: a legitimate re-dispatch", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: withEvt("evt-1")}, "evt-2", "", true},
-		{"different event, errored row", ccpool.Session{State: ccpool.StateErrored, CloseReason: "handler", Meta: withEvt("evt-1")}, "evt-2", "", true},
-		{"row has no event id (older build): not provably a redelivery", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler"}, "evt-2", "", true},
-		{"this dispatch has no event id: no bound applies", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: withEvt("evt-1")}, "", "", false},
-		{"no event id on either side: no bound applies", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler"}, "", "", false},
-		{"open settled row is judged by crashOrphaned alone", ccpool.Session{State: ccpool.StateIdle, Meta: withEvt("evt-1")}, "evt-2", "", false},
-		{"live row is never stale", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: withEvt("evt-1")}, "evt-2", "", false},
-		{"row closed by someone else is crashOrphaned's concern", ccpool.Session{State: ccpool.StateIdle, CloseReason: "idle_ttl", Meta: withEvt("evt-1")}, "evt-2", "", false},
-		{"handler-closed non-terminal row is crashOrphaned's concern", ccpool.Session{State: ccpool.StateWorking, CloseReason: "handler", Meta: withEvt("evt-1")}, "evt-2", "", false},
-	}
-	for _, tc := range cases {
+		{"now in flight: decline, nothing closed", []ccpool.Session{retaken}, ErrSessionInFlight, false},
+		{"gone: nothing to close, launch", []ccpool.Session{}, nil, true},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := staleSettledRow(tc.sess, tc.eventID, tc.headSHA); got != tc.want {
-				t.Errorf("staleSettledRow(%+v, %q, %q) = %v, want %v", tc.sess, tc.eventID, tc.headSHA, got, tc.want)
+			cfg := cfg
+			cfg.WorktreeDir = t.TempDir()
+			bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
+			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{stuck}, tc.reRead, {{ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateWorking}}}}
+			deps := newExec(cc, bd, cfg).deps
+			deps.ExternalID = "att-2"
+			deps.LockDir = t.TempDir()
+			deps.Git = &dtest.NoopGit{}
+			deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+			d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}, EventID: "evt-1"}
+			_, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps)
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr == nil && err != nil {
+				t.Fatalf("err = %v, want success", err)
+			}
+			if slices.Contains(cc.Closed, "att-1") {
+				t.Errorf("the re-read row must not be closed; Closed=%v", cc.Closed)
+			}
+			if launched := len(cc.Ensured) == 1; launched != tc.wantLaunch {
+				t.Errorf("launched = %v, want %v; Ensured=%v", launched, tc.wantLaunch, cc.Ensured)
 			}
 		})
 	}
 }
 
-// TestFindSessionByName_handlerClosedRow_ofEarlierEventIsAbsent: a handler-
-// closed settled row stamped with a DIFFERENT event's id must be reported as
-// absent, so a legitimate re-dispatch (a reopened review) launches afresh
-// instead of being absorbed into the dead row (bead pg2-uprw5).
-func TestFindSessionByName_handlerClosedRow_ofEarlierEventIsAbsent(t *testing.T) {
-	sess := ccpool.Session{
-		ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle, CloseReason: "handler",
+// TestDispatch_leftover_closeFails_launchesNothing: a leftover that cannot be
+// closed is an error of this dispatch, never a launch beside it.
+func TestDispatch_leftover_closeFails_launchesNothing(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := feedbackRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+	stuck := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateStarting,
+		Meta: map[string]string{ccpool.MetaKeyLeaseUntil: "1969-12-31T23:00:00Z"},
+	}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{stuck}}, CloseErr: errors.New("ccpool close: boom")}
+	deps := newExec(cc, &dtest.ScriptBD{}, cfg).deps
+	deps.ExternalID = "att-2"
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	_, err := (ccpoolExecutor{}).Dispatch(context.Background(), DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}}, deps)
+	if err == nil || errors.Is(err, ErrSessionInFlight) || !strings.Contains(err.Error(), "close leftover att-1") {
+		t.Fatalf("a failed leftover close must surface as an error naming it, got %v", err)
+	}
+	if len(cc.Ensured) != 0 {
+		t.Errorf("nothing may launch beside an unclosed leftover; Ensured=%v", cc.Ensured)
+	}
+}
+
+// TestDispatch_absorb_turnEndedWhileTakingOver_declines: the row chosen for
+// absorbing is read again under the lock; if its turn ended meanwhile it is no
+// longer absorbable, and the dispatch declines rather than adopting a settled
+// session or launching beside a handler that may still be settling it.
+func TestDispatch_absorb_turnEndedWhileTakingOver_declines(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := feedbackRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+	turn := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking,
 		Meta: map[string]string{ccpool.MetaKeyEventID: "evt-1"},
 	}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{sess}}}
-	e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
-	if got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c", "evt-2", ""); ok {
-		t.Errorf("a handler-closed row of an earlier event must not be absorbed; got=%v", got)
+	ended := turn
+	ended.State = ccpool.StateIdle
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{turn}, {ended}}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "att-2"
+	deps.LockDir = t.TempDir()
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	_, err := (ccpoolExecutor{}).Dispatch(context.Background(), DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}, EventID: "evt-1"}, deps)
+	if !errors.Is(err, ErrSessionInFlight) {
+		t.Fatalf("err = %v, want ErrSessionInFlight", err)
+	}
+	if len(cc.Ensured)+len(cc.Sent)+len(cc.Closed)+len(cc.SetMetaCalls()) != 0 {
+		t.Errorf("nothing may be written; Ensured=%v Sent=%v Closed=%v SetMeta=%v", cc.Ensured, cc.Sent, cc.Closed, cc.SetMetaCalls())
 	}
 }
 
-// TestDispatch_reDispatchAfterHandlerClose_launchesFreshSession is the
-// dispatch-level form of the above (bead pg2-uprw5): the handler-closed
-// settled row of event evt-1 still exists when event evt-2 (a reopened review
-// for the same bead and role) dispatches. It must Ensure a fresh session,
-// stamped with evt-2, rather than absorb the dead row and fail with "session
-// exited before completing".
+// showCountBD counts the bead reads ("show") a dispatch makes.
+type showCountBD struct {
+	*dtest.ScriptBD
+	shows int
+}
+
+func (b *showCountBD) Run(ctx context.Context, args ...string) (string, error) {
+	if len(args) > 0 && args[0] == "show" {
+		b.shows++
+	}
+	return b.ScriptBD.Run(ctx, args...)
+}
+
+// TestDispatch_reDispatchAfterHandlerClose_launchesFreshSession (bead pg2-uprw5,
+// INV-CCH-30): the handler-closed settled row of event evt-1 still exists when
+// event evt-2 (a reopened review for the same bead and role) dispatches. It must
+// Ensure a fresh session, stamped with evt-2, rather than absorb the dead row and
+// fail with "session exited before completing".
 func TestDispatch_reDispatchAfterHandlerClose_launchesFreshSession(t *testing.T) {
 	cfg := fastCfg()
 	cfg.WorktreeDir = t.TempDir()
@@ -923,7 +1098,7 @@ func TestDispatch_reDispatchAfterHandlerClose_launchesFreshSession(t *testing.T)
 
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
-		{old}, // findSessionByName: only the earlier event's handler-closed row exists
+		{old}, // planPriorSessions: only the earlier event's settled row exists
 		{old, {ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateWorking}},
 	}}
 	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}, EventID: "evt-2"}
@@ -950,8 +1125,10 @@ func TestDispatch_reDispatchAfterHandlerClose_launchesFreshSession(t *testing.T)
 // be absorbed by the new dispatch (head h2): absorbing it measured the time
 // budget from the ORIGINAL launch (an instant false "session budget exceeded")
 // and reported the old outcome. A fresh session must launch, stamped with the new
-// head. The event-bound absorption pg2-uprw5/pg2-4k66c verify is unchanged: same
-// event AND same head still absorbs (TestDispatch_sameEventSameHead_...).
+// head. Under INV-CCH-30 a settled row is never absorbed at all, so the same
+// event at the same head launches fresh too
+// (TestDispatch_sameEventSameHead_settledRow_launchesFreshSession); this test
+// keeps the head-advance case that bead pg2-pq2ej verifies.
 func TestDispatch_reDispatchSameEventAfterHeadAdvance_launchesFreshSession(t *testing.T) {
 	cfg := fastCfg()
 	cfg.WorktreeDir = t.TempDir()
@@ -965,7 +1142,7 @@ func TestDispatch_reDispatchSameEventAfterHeadAdvance_launchesFreshSession(t *te
 
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
-		{old}, // findSessionByName: only the earlier head's handler-closed row exists
+		{old}, // planPriorSessions: only the earlier head's settled row exists
 		{old, {ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateWorking}},
 	}}
 	d := DispatchContext{
@@ -987,11 +1164,12 @@ func TestDispatch_reDispatchSameEventAfterHeadAdvance_launchesFreshSession(t *te
 	}
 }
 
-// TestDispatch_sameEventSameHead_absorbsSettledRow is the guard that the
-// pg2-afre3 head bound does not weaken pg2-uprw5's event bound: a crash-window
-// redelivery (same event id, same head) still absorbs the handler-closed settled
-// row instead of launching a second session (INV-EVT-2).
-func TestDispatch_sameEventSameHead_absorbsSettledRow(t *testing.T) {
+// TestDispatch_sameEventSameHead_settledRow_launchesFreshSession: the candidate
+// ADR 0094 considered and rejected. A settled row of the SAME event at the SAME
+// head, whose dispatch completed the bead (handler-closed, idle), is still never
+// absorbed: once its handler's lease has expired the dispatch runs in a fresh
+// session of its own (INV-CCH-17, INV-CCH-30).
+func TestDispatch_sameEventSameHead_settledRow_launchesFreshSession(t *testing.T) {
 	cfg := fastCfg()
 	cfg.WorktreeDir = t.TempDir()
 	role := reviewRole(cfg)
@@ -1001,8 +1179,11 @@ func TestDispatch_sameEventSameHead_absorbsSettledRow(t *testing.T) {
 		ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler",
 		Meta: map[string]string{ccpool.MetaKeyEventID: "review.ready:zr-c", ccpool.MetaKeyHeadSHA: "h1"},
 	}
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"closed"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{old}}}
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{old},
+		{old, {ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateWorking}},
+	}}
 	d := DispatchContext{
 		Role: role, EventID: "review.ready:zr-c",
 		Item: item.Item{ID: "zr-c", Metadata: map[string]any{"repo": "o/r", "pr_number": "7", "head_sha": "h1"}},
@@ -1011,9 +1192,11 @@ func TestDispatch_sameEventSameHead_absorbsSettledRow(t *testing.T) {
 	deps.ExternalID = "att-2"
 	deps.Git = &dtest.NoopGit{}
 	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
-	_, _ = (ccpoolExecutor{}).Dispatch(context.Background(), d, deps)
-	if len(cc.Ensured) != 0 {
-		t.Errorf("a same-event same-head redelivery must absorb, not launch; Ensured=%v", cc.Ensured)
+	if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err != nil {
+		t.Fatalf("the fresh session should run to completion (bead closed), got %v", err)
+	}
+	if got := cc.Ensured; len(got) != 1 || got[0] != "att-2" {
+		t.Errorf("a settled row is never absorbed, even for the same event and head; Ensured=%v", got)
 	}
 }
 
@@ -1021,10 +1204,11 @@ func TestDispatch_sameEventSameHead_absorbsSettledRow(t *testing.T) {
 // pg2-tc9c3 regression (the same-head variant of pg2-afre3). After a hand-back
 // the review bead is open again at the SAME head, so review-source re-emits the
 // SAME event (review.ready:<bead>) at the SAME head_sha. The handler-closed row of
-// the handed-back attempt is marked incomplete and must NOT be re-absorbed:
-// absorbing it measured the budget from its original launch (five hours ago here)
-// and hard-stopped instantly, forever. A fresh session must launch, inside a fresh
-// budget, with no "session budget exceeded".
+// the handed-back attempt is settled and must NOT be re-absorbed (INV-CCH-30; it
+// carries no outcome mark any more): absorbing it measured the budget from its
+// original launch (five hours ago here) and hard-stopped instantly, forever. A
+// fresh session must launch, inside a fresh budget, with no "session budget
+// exceeded".
 func TestDispatch_sameEventSameHead_afterHandback_launchesFreshSession(t *testing.T) {
 	cfg := fastCfg()
 	cfg.WorktreeDir = t.TempDir()
@@ -1037,12 +1221,11 @@ func TestDispatch_sameEventSameHead_afterHandback_launchesFreshSession(t *testin
 		Meta: map[string]string{
 			ccpool.MetaKeyEventID: "review.ready:zr-c", ccpool.MetaKeyHeadSHA: "h1",
 			ccpool.MetaKeyLaunchedAt: ccpool.FormatMetaTime(launched),
-			ccpool.MetaKeyIncomplete: ccpool.FormatMetaTime(launched.Add(30 * time.Minute)),
 		},
 	}
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
-		{old}, // findSessionByName: only the handed-back attempt's row exists
+		{old}, // planPriorSessions: only the handed-back attempt's settled row exists
 		{old, {ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateIdle}},
 	}}
 	d := DispatchContext{
@@ -1062,63 +1245,6 @@ func TestDispatch_sameEventSameHead_afterHandback_launchesFreshSession(t *testin
 	}
 }
 
-// TestDispatch_legacyHandlerClosedRow_absorbOnceThenStamped pins the migration
-// claim of ADR 0082 item 4 (pg2-tc9c3): a handler-closed row the deployed handler
-// wrote carries no incomplete marker, so one same-event same-head request still
-// absorbs it, but that absorb ends in a failed dispatch (the watchdog hard stop
-// under a finite budget, the wait's unexplained-death branch otherwise), and BOTH
-// stamp the row, so the next dispatch launches afresh instead of looping.
-func TestDispatch_legacyHandlerClosedRow_absorbOnceThenStamped(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		budget budget.Budget
-	}{
-		{"finite budget", budget.Budget{Time: time.Hour, Thresholds: budget.Thresholds{Reminder: 70, Cancel: 90, Hard: 100}}},
-		{"unlimited budget", budget.Budget{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := fastCfg()
-			cfg.WorktreeDir = t.TempDir()
-			role := reviewRole(cfg)
-			role.CCPool.Budget = tc.budget
-			display := role.DisplayName(cfg.SessionPrefix, "zr-c")
-			legacy := ccpool.Session{
-				ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler",
-				Meta: map[string]string{
-					ccpool.MetaKeyEventID: "review.ready:zr-c", ccpool.MetaKeyHeadSHA: "h1",
-					ccpool.MetaKeyLaunchedAt: ccpool.FormatMetaTime(time.Unix(0, 0).Add(-5 * time.Hour)),
-				},
-			}
-			if crashOrphaned(legacy) {
-				t.Fatal("precondition: an unmarked handler-closed row is absorbable")
-			}
-			bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
-			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{legacy}}}
-			d := DispatchContext{
-				Role: role, EventID: "review.ready:zr-c",
-				Item: item.Item{ID: "zr-c", Metadata: map[string]any{"repo": "o/r", "pr_number": "7", "head_sha": "h1"}},
-			}
-			deps := newExec(cc, bd, cfg).deps
-			deps.ExternalID = "att-2"
-			deps.Git = &dtest.NoopGit{}
-			deps.GitOpener = (&dtest.NoopGitOpener{}).Open
-			if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err == nil {
-				t.Fatal("absorbing the legacy row of an open bead must end in a failed dispatch")
-			}
-			if len(cc.Ensured) != 0 {
-				t.Errorf("the first same-head request still absorbs the legacy row; Ensured=%v", cc.Ensured)
-			}
-			stamped := false
-			for _, m := range cc.SetMetaCalls() {
-				stamped = stamped || (m.ExternalID == "att-1" && m.Key == ccpool.MetaKeyIncomplete)
-			}
-			if !stamped {
-				t.Errorf("the failed absorb must stamp the legacy row so the next dispatch launches afresh; SetMeta=%v", cc.SetMetaCalls())
-			}
-		})
-	}
-}
-
 // TestDispatch_deadNameMatch_createsFreshSession is the dispatch-level,
 // end-to-end version of fix (a): a dispatch whose stable display name
 // matches only a DEAD prior row must Ensure a brand-new session under its own
@@ -1134,7 +1260,7 @@ func TestDispatch_deadNameMatch_createsFreshSession(t *testing.T) {
 
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
-		// findSessionByName's own List call: only a dead row under the same
+		// planPriorSessions' own List call: only a dead row under the same
 		// stable display name exists (the crash-orphaned zombie).
 		{{ExternalID: "dead-1", Name: display, Live: false, State: ccpool.StateWorking}},
 		// Every subsequent List call (sessionState/active) sees the fresh
@@ -1961,23 +2087,72 @@ func TestDispatch_waitFailWorkerTimeout_escalated(t *testing.T) {
 	}
 }
 
-// TestDispatch_crashWindowRedelivery_absorbsIntoExistingSession is Task 5.9's
-// INV-EVT-2 test: the SAME event dispatched TWICE — as a crash-window
-// redelivery would, each attempt minting its OWN fresh per-attempt
-// ExternalID (Role.ExternalID's own stamp) — must launch exactly ONE ccpool
-// session for the pair, correlated on the stable per-bead DisplayName
-// (Role.DisplayName), not the per-attempt id (ADR 0065's "Register" section's
-// INV-EVT-2 note). The second (redelivered) dispatch must be absorbed into
-// the first session's own outcome rather than starting a second session.
-func TestDispatch_crashWindowRedelivery_absorbsIntoExistingSession(t *testing.T) {
+// TestDispatch_redeliveryDuringTurn_absorbsIntoExistingSession is INV-EVT-2's
+// duplicate tolerance as INV-CCH-30 keeps it: the SAME event redelivered (a
+// crash window, or the re-offer after a daemon restart) while the first
+// attempt's turn is still in progress must be absorbed into that session, not
+// get a second one. The redelivery mints its OWN fresh per-attempt ExternalID,
+// so the correlation is the stable per-bead DisplayName plus the event id the
+// first launch stamped. The absorbing dispatch sends nothing and reports the
+// session's own outcome.
+func TestDispatch_redeliveryDuringTurn_absorbsIntoExistingSession(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := feedbackRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+	running := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking,
+		Meta: map[string]string{ccpool.MetaKeyEventID: "evt-1"},
+	}
+	// The absorb decision reads the bead (open work), then the wait sees it close.
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{running}}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "att-2"
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	res, err := ccpoolExecutor{}.Dispatch(context.Background(), DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}, EventID: "evt-1"}, deps)
+	if err != nil {
+		t.Fatalf("the redelivery must be absorbed and report the session's success, got %v", err)
+	}
+	if v := verbOf(res); v != "" {
+		t.Errorf("an absorbed success reports no verb, got %q", v)
+	}
+	if len(cc.Ensured)+len(cc.Sent) != 0 {
+		t.Errorf("absorbing launches and sends nothing; Ensured=%v Sent=%v", cc.Ensured, cc.Sent)
+	}
+	refreshed := false
+	for _, m := range cc.SetMetaCalls() {
+		if m.Key == ccpool.MetaKeyLeaseUntil {
+			if m.ExternalID != "att-1" {
+				t.Errorf("only the absorbed session's lease is refreshed, got a write to %q", m.ExternalID)
+			}
+			refreshed = true
+		}
+	}
+	if !refreshed {
+		t.Error("the absorbing dispatch must take over the absorbed session's lease")
+	}
+}
+
+// TestDispatch_redeliveryAfterSettle_launchesFreshSession is the consequence ADR
+// 0094 accepts against ADR 0065's INV-EVT-2 closure: once the first attempt has
+// settled (and its handler's lease is gone), a redelivery of the SAME event is a
+// dispatch like any other and runs in a fresh session; the handler-closed settled
+// row is never adopted.
+func TestDispatch_redeliveryAfterSettle_launchesFreshSession(t *testing.T) {
 	cfg := fastCfg()
 	cfg.WorktreeDir = t.TempDir()
 	role := feedbackRole(cfg)
 	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
 
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
+	settled := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler",
+		Meta: map[string]string{ccpool.MetaKeyEventID: "evt-1"},
+	}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
-		{}, // no session yet — the FIRST dispatch's own duplicate-absorption check
+		{}, // the FIRST dispatch's prior-session check: nothing yet
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
@@ -1988,18 +2163,12 @@ func TestDispatch_crashWindowRedelivery_absorbsIntoExistingSession(t *testing.T)
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateIdle}},
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateIdle}},
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateIdle}},
-		// By the time the redelivery lands the handler's own close has stamped the
-		// row (dtest.FakeCC.Close does not mutate it, so it is scripted here). The
-		// settled handler-closed row must still be absorbed (INV-EVT-2).
-		{{
-			ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler",
-			Meta: map[string]string{ccpool.MetaKeyEventID: "evt-1"},
-		}},
+		// By the time the redelivery lands the handler's close has stamped the row
+		// (dtest.FakeCC.Close does not mutate it, so it is scripted here).
+		{settled},
+		{settled, {ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateWorking}},
 	}}
-	// The redelivery is the SAME event (same id), which is what bounds the
-	// absorption of a handler-closed row (pg2-uprw5).
 	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}, EventID: "evt-1"}
-
 	dispatch := func(externalID string) (report.Result, error) {
 		deps := newExec(cc, bd, cfg).deps
 		deps.ExternalID = externalID
@@ -2007,35 +2176,17 @@ func TestDispatch_crashWindowRedelivery_absorbsIntoExistingSession(t *testing.T)
 		deps.GitOpener = (&dtest.NoopGitOpener{}).Open
 		return ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 	}
-
-	// First delivery: att-1's own session is created and runs to a normal close.
-	res1, err1 := dispatch("att-1")
-	if err1 != nil {
-		t.Fatalf("first dispatch should succeed, got %v", err1)
+	if _, err := dispatch("att-1"); err != nil {
+		t.Fatalf("first dispatch should succeed, got %v", err)
 	}
-	if v := verbOf(res1); v != "" {
-		t.Errorf("first dispatch success must report no verb, got %q", v)
+	if _, err := dispatch("att-2"); err != nil {
+		t.Fatalf("the redelivery must run its own session to completion, got %v", err)
 	}
-
-	// Redelivery: a fresh per-attempt ExternalID ("att-2"), same event/item/
-	// role — so the same DisplayName. Must be absorbed, not re-dispatched.
-	res2, err2 := dispatch("att-2")
-	if err2 != nil {
-		t.Fatalf("redelivery must be absorbed as success (existing outcome), got %v", err2)
+	if want := []string{"att-1", "att-2"}; !slices.Equal(cc.Ensured, want) {
+		t.Errorf("a redelivery after the attempt settled launches a fresh session; Ensured=%v want %v", cc.Ensured, want)
 	}
-	if v := verbOf(res2); v != "" {
-		t.Errorf("absorbed redelivery of an already-settled success must report no verb, got %q", v)
-	}
-	if got := cc.Ensured; len(got) != 1 || got[0] != "att-1" {
-		t.Errorf("exactly one ccpool session must ever be created for the pair; Ensured=%v", got)
-	}
-	if got := cc.Sent; len(got) != 1 || got[0] != "att-1" {
-		t.Errorf("exactly one Send (the first attempt's own nudge) may ever happen; Sent=%v", got)
-	}
-	// The first dispatch closed its settled session once, non-purge; the absorbed
-	// redelivery saw the handler-stamped row and closed nothing further.
-	if len(cc.Closed) != 1 || cc.Closed[0] != "att-1" || len(cc.ClosedPurge) != 1 || cc.ClosedPurge[0] {
-		t.Errorf("exactly one non-purge close of att-1 expected; Closed=%v ClosedPurge=%v", cc.Closed, cc.ClosedPurge)
+	if want := []string{"att-1", "att-2"}; !slices.Equal(cc.Sent, want) {
+		t.Errorf("each session gets its own nudge and the settled one nothing; Sent=%v want %v", cc.Sent, want)
 	}
 }
 
@@ -2297,68 +2448,6 @@ func TestBeadsDirFor(t *testing.T) {
 	}
 	if got := beadsDirFor("/zr", &roles.CCPoolConfig{}); got != "/zr" {
 		t.Errorf("got %q", got)
-	}
-}
-
-// TestDispatch_absorbDuplicate_readyNoPrompt_sendsPrompt is the pg2-oq6cy
-// regression: a launch timeout left a session that later reached ready but
-// never received its prompt. Every re-dispatch found it by stable name and
-// absorbed it WITHOUT ever sending, so each waited to the budget hard stop. A
-// live session still in `ready` (no working transition, i.e. no prompt ever
-// delivered) must get the nudge Sent to it (on its own ExternalID) instead.
-func TestDispatch_absorbDuplicate_readyNoPrompt_sendsPrompt(t *testing.T) {
-	cfg := fastCfg()
-	cfg.WorktreeDir = t.TempDir()
-	role := feedbackRole(cfg)
-	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
-
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
-	stuck := ccpool.Session{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateReady, CWD: t.TempDir()}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{stuck}}}
-	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}}
-	deps := newExec(cc, bd, cfg).deps
-	deps.ExternalID = "att-2"
-	deps.Git = &dtest.NoopGit{}
-	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
-
-	if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err != nil {
-		t.Fatalf("dispatch should succeed once the prompt is sent (bead closes), got %v", err)
-	}
-	if got := cc.Sent; len(got) != 1 || got[0] != "att-1" {
-		t.Errorf("an idle-ready never-prompted duplicate must be Sent the prompt on its own id; Sent=%v", got)
-	}
-	if got := cc.Ensured; len(got) != 0 {
-		t.Errorf("must not launch a second session; Ensured=%v", got)
-	}
-}
-
-// TestDispatch_absorbDuplicate_readyNoPrompt_sendFails_closesAndUnclaims: if
-// the prompt cannot be delivered to the stranded ready session, purge-close it
-// (so the next dispatch relaunches fresh) and hand the bead back.
-func TestDispatch_absorbDuplicate_readyNoPrompt_sendFails_closesAndUnclaims(t *testing.T) {
-	cfg := fastCfg()
-	cfg.WorktreeDir = t.TempDir()
-	role := feedbackRole(cfg)
-	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
-
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
-	stuck := ccpool.Session{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateReady, CWD: t.TempDir()}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{stuck}}, SendErr: ccpool.ErrPromptNotIngested}
-	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}}
-	deps := newExec(cc, bd, cfg).deps
-	deps.ExternalID = "att-2"
-	deps.Git = &dtest.NoopGit{}
-	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
-
-	res, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps)
-	if err == nil {
-		t.Fatalf("a failed send to the stranded session must surface an error")
-	}
-	if v := verbOf(res); v != report.Unclaimed {
-		t.Errorf("bead must be handed back unclaimed, got %q", v)
-	}
-	if len(cc.Closed) != 1 || cc.Closed[0] != "att-1" || !cc.ClosedPurge[0] {
-		t.Errorf("stranded session must be purge-closed; Closed=%v purge=%v", cc.Closed, cc.ClosedPurge)
 	}
 }
 

@@ -18,38 +18,33 @@ import (
 	"github.com/phillipgreenii/x/gitclient"
 )
 
-// TestDispatch_absorbedClosedLegacyRow_budgetStop_closesOnceAndReportsGoneWorktreeOnce
-// is the pg2-92rfu regression. A settled row the handler already closed, unmarked
-// (written by a build older than the incomplete marker) and launched long ago, is
-// absorbed by a same-event same-head re-request: the budget runs from the original
-// launch time and hard-stops at once. That absorb is the one allowed spurious
-// attempt on such a row; it MUST
-//
-//   - stamp the row incomplete (so the next dispatch launches fresh instead of
-//     hot-looping on the same session),
-//   - NOT close the row again: it is closed and its tmux session gone, and a second
-//     ccpool close re-stamps it and appends another close event (268 for one session
-//     in the field), and
-//   - report the worktree an earlier dispatch already removed as "already removed"
-//     at INFO, not as a failed open "left for next sweep" per re-dispatch.
-func TestDispatch_absorbedClosedLegacyRow_budgetStop_closesOnceAndReportsGoneWorktreeOnce(t *testing.T) {
-	logs := captureLog(t)
+// TestDispatch_closedLegacyRow_launchesFresh is the pg2-92rfu scenario under
+// INV-CCH-30. A settled row the handler already closed, unmarked (written by a
+// build older than the outcome mark) and launched five hours ago, used to be
+// absorbed by a same-event same-head re-request, whose budget then ran from the
+// original launch and hard-stopped at once, closing the row again on every
+// re-dispatch (268 close events for one session in the field). Now the row is
+// settled and never absorbed: the dispatch launches its own session, never
+// touches the old row and never budget-stops.
+func TestDispatch_closedLegacyRow_launchesFresh(t *testing.T) {
 	cfg := fastCfg()
 	cfg.WorktreeDir = t.TempDir()
-	cfg.BudgetTime = time.Hour // the row launched five hours ago is over budget
+	cfg.BudgetTime = time.Hour // the old row launched five hours ago is over budget
 	role := reviewRole(cfg)
 	display := role.DisplayName(cfg.SessionPrefix, "bead-1")
 	launched := time.Unix(0, 0).Add(-5 * time.Hour)
-	gone := filepath.Join(cfg.WorktreeDir, "bead-1") // never created: an earlier dispatch removed it
 	legacy := ccpool.Session{
-		ExternalID: "att-1", Name: display, CWD: gone, Live: false, State: ccpool.StateIdle, CloseReason: "handler",
+		ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler",
 		Meta: map[string]string{
 			ccpool.MetaKeyEventID: "review.ready:bead-1", ccpool.MetaKeyHeadSHA: "h1",
 			ccpool.MetaKeyLaunchedAt: ccpool.FormatMetaTime(launched),
 		},
 	}
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"bead-1": {"open"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{legacy}}}
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"bead-1": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{legacy},
+		{legacy, {ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateWorking}},
+	}}
 	d := DispatchContext{
 		Role: role, EventID: "review.ready:bead-1",
 		Item: item.Item{ID: "bead-1", Metadata: map[string]any{"repo": "example/repo", "pr_number": "7", "head_sha": "h1"}},
@@ -57,28 +52,40 @@ func TestDispatch_absorbedClosedLegacyRow_budgetStop_closesOnceAndReportsGoneWor
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = "att-2"
 	deps.Git = &dtest.NoopGit{}
-	deps.GitOpener = func(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
-		return nil, fmt.Errorf("gitclient: %s: %w", dir, &fs.PathError{Op: "lstat", Path: dir, Err: fs.ErrNotExist})
-	}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
 	_, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps)
-	if !errors.Is(err, watchdog.ErrBudgetExceeded) {
-		t.Fatalf("absorbing the over-budget legacy row must budget-stop; err=%v", err)
+	if errors.Is(err, watchdog.ErrBudgetExceeded) {
+		t.Fatalf("the dispatch must not budget-stop on the old row's launch time: %v", err)
 	}
-	if len(cc.Ensured) != 0 {
-		t.Fatalf("a same-event same-head re-request absorbs the row, it does not launch; Ensured=%v", cc.Ensured)
+	if err != nil {
+		t.Fatalf("the fresh session should run to completion (bead closed), got %v", err)
 	}
-	if len(cc.Closed) != 0 {
-		t.Errorf("a row that is already closed and gone must not be closed again; Closed=%v", cc.Closed)
+	if got := cc.Ensured; len(got) != 1 || got[0] != "att-2" {
+		t.Errorf("a closed settled row is never absorbed; a fresh session must launch; Ensured=%v", got)
 	}
-	stamped := false
-	for _, m := range cc.SetMetaCalls() {
-		if m.ExternalID == "att-1" && m.Key == ccpool.MetaKeyIncomplete {
-			stamped = true
+	for _, id := range cc.Closed {
+		if id == "att-1" {
+			t.Errorf("the old row is closed and gone and must not be closed again; Closed=%v", cc.Closed)
 		}
 	}
-	if !stamped {
-		t.Errorf("the failed absorb must stamp the row incomplete so the next dispatch launches fresh; sets=%v", cc.SetMetaCalls())
+	for _, m := range cc.SetMetaCalls() {
+		if m.ExternalID == "att-1" {
+			t.Errorf("nothing may be written to the old row; SetMeta=%v", cc.SetMetaCalls())
+		}
 	}
+}
+
+// A worktree an earlier dispatch already removed is reported once, at INFO, as
+// already removed, never as a failed open "left for next sweep" (pg2-92rfu).
+func TestCleanupWorktree_alreadyRemoved_reportedOnce(t *testing.T) {
+	logs := captureLog(t)
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{}}}
+	e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
+	gone := filepath.Join(t.TempDir(), "bead-1") // never created
+	e.deps.GitOpener = func(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
+		return nil, fmt.Errorf("gitclient: %s: %w", dir, &fs.PathError{Op: "lstat", Path: dir, Err: fs.ErrNotExist})
+	}
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "bead-1", gone)
 	out := logs.String()
 	if strings.Contains(out, "open failed") {
 		t.Errorf("an already-removed worktree is not a failed open; logs:\n%s", out)
@@ -103,20 +110,23 @@ func TestCleanupWorktree_openFailureOtherThanGone_stillWarns(t *testing.T) {
 	}
 }
 
-// The unlimited-budget variant: no watchdog, so waitDone's unexplained-death
-// branch is what fails the absorb. It stamps the row incomplete and, like the
-// budget stop, must not close the already-closed row again (pg2-92rfu).
-func TestDispatch_absorbedClosedLegacyRow_deathBranch_closesOnce(t *testing.T) {
+// An absorbed turn whose own (still running) handler closes it while this
+// dispatch waits too: the wait's death branch finds the row already closed and
+// must not close it a second time, which would re-stamp it and append another
+// close event (pg2-92rfu).
+func TestDispatch_absorbedTurnClosedByItsHandler_deathBranch_closesOnce(t *testing.T) {
 	cfg := fastCfg()
 	cfg.WorktreeDir = t.TempDir()
 	role := noBudget(reviewRole(cfg))
 	display := role.DisplayName(cfg.SessionPrefix, "bead-1")
-	legacy := ccpool.Session{
-		ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler",
+	turn := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking,
 		Meta: map[string]string{ccpool.MetaKeyEventID: "review.ready:bead-1", ccpool.MetaKeyHeadSHA: "h1"},
 	}
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"bead-1": {"open"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{legacy}}}
+	closed := turn
+	closed.Live, closed.State, closed.CloseReason = false, ccpool.StateIdle, "handler"
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"bead-1": {"in_progress"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{turn}, {closed}}}
 	d := DispatchContext{
 		Role: role, EventID: "review.ready:bead-1",
 		Item: item.Item{ID: "bead-1", Metadata: map[string]any{"repo": "example/repo", "pr_number": "7", "head_sha": "h1"}},
@@ -126,7 +136,10 @@ func TestDispatch_absorbedClosedLegacyRow_deathBranch_closesOnce(t *testing.T) {
 	deps.Git = &dtest.NoopGit{}
 	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
 	if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err == nil {
-		t.Fatal("absorbing a closed row whose bead is still open must fail")
+		t.Fatal("a turn that ended with its bead still open must fail the absorbing dispatch")
+	}
+	if len(cc.Ensured) != 0 {
+		t.Errorf("the same event's turn in progress is absorbed, not launched beside; Ensured=%v", cc.Ensured)
 	}
 	if len(cc.Closed) != 0 {
 		t.Errorf("a row that is already closed must not be closed again; Closed=%v", cc.Closed)

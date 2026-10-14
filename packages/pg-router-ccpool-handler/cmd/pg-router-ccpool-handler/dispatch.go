@@ -474,13 +474,21 @@ const (
 	// command that stays busy MUST remain visible, not hide inside that
 	// exclusion.
 	busyReasonCommandBusy = "command-busy"
+	// busyReasonSessionInFlight (bead pg2-qaeb8, INV-CCH-30, ADR 0094): an
+	// earlier attempt of the same bead and role is in flight and this dispatch
+	// may not absorb it, or the pool's sessions cannot be read
+	// (executor.ErrSessionInFlight). Routine backpressure like a full pool: the
+	// Grafana failure-rate rule excludes this reason, and the decline stays
+	// visible per reason on the declined counter.
+	busyReasonSessionInFlight = "session-in-flight"
 )
 
 // busyDeclineReason maps err to the wire's busy-decline reason tag when err
-// is one of executor's four "decline and retry later" sentinels (bead
-// pg2-j4uwg's capacity pair, widened by pg2-8vn8t's low-disk sentinel and
-// pg2-358u3's command-busy sentinel): ok is false for any other err
-// (including nil), matching none of them. All four still map to the SAME wire-level conformance.ExitBusy — the core's
+// is one of executor's five "decline and retry later" sentinels (bead
+// pg2-j4uwg's capacity pair, widened by pg2-8vn8t's low-disk sentinel,
+// pg2-358u3's command-busy sentinel and pg2-qaeb8's session-in-flight
+// sentinel): ok is false for any other err
+// (including nil), matching none of them. All five still map to the SAME wire-level conformance.ExitBusy — the core's
 // retry/backoff cadence never depends on which reason applied (INV-FAIL-1)
 // — reason exists purely so pg-router core's declined metric/status
 // breakdown can tell them apart (see this file's runDispatch call site and
@@ -496,6 +504,8 @@ func busyDeclineReason(err error) (reason string, ok bool) {
 		return busyReasonLowDisk, true
 	case errors.Is(err, executor.ErrBusy):
 		return busyReasonCommandBusy, true
+	case errors.Is(err, executor.ErrSessionInFlight):
+		return busyReasonSessionInFlight, true
 	default:
 		return "", false
 	}

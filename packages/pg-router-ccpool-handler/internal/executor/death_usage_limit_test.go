@@ -23,9 +23,9 @@ func (s slowCapacityCC) Capacity(ctx context.Context) (ccpool.Capacity, error) {
 
 // TestDispatch_unexplainedDeath_logsUsageLimitReading (INV-CCH-26): the
 // unexplained-death branch of waitDone records the ccpool usage-limit state as
-// evidence, and nothing else about the death changes: the failure text and the
-// incomplete marker are the same whatever the reading returns, and a failing or
-// hanging reading never holds up the failure.
+// evidence, and nothing else about the death changes: the failure text is the
+// same whatever the reading returns, and a failing or hanging reading never
+// holds up the failure.
 func TestDispatch_unexplainedDeath_logsUsageLimitReading(t *testing.T) {
 	resets := time.Date(2026, 10, 8, 18, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
@@ -72,7 +72,11 @@ func TestDispatch_unexplainedDeath_logsUsageLimitReading(t *testing.T) {
 				Meta: map[string]string{ccpool.MetaKeyEventID: "review.ready:bead-1", ccpool.MetaKeyHeadSHA: "h1"},
 			}
 			bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"bead-1": {"open"}}}
-			fake := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{dead}}, Cap: tc.cap, CapErr: tc.capErr}
+			// The dispatch absorbs the same event's turn in progress (INV-CCH-30;
+			// the absorb path never consults capacity), which then dies under it.
+			turn := dead
+			turn.Live, turn.State, turn.CloseReason = true, ccpool.StateWorking, ""
+			fake := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{turn}, {dead}}, Cap: tc.cap, CapErr: tc.capErr}
 			var cc ccpool.Runner = fake
 			if tc.slow {
 				cc = slowCapacityCC{fake}
@@ -96,13 +100,6 @@ func TestDispatch_unexplainedDeath_logsUsageLimitReading(t *testing.T) {
 			}
 			if elapsed > deathUsageLimitTimeout+3*time.Second {
 				t.Errorf("the reading must not hold up the failure; took %s", elapsed)
-			}
-			stamped := false
-			for _, m := range fake.SetMetaCalls() {
-				stamped = stamped || (m.ExternalID == "att-1" && m.Key == ccpool.MetaKeyIncomplete)
-			}
-			if !stamped {
-				t.Errorf("the row must still be stamped incomplete; sets=%v", fake.SetMetaCalls())
 			}
 			out := logs.String()
 			for _, w := range tc.wantLog {

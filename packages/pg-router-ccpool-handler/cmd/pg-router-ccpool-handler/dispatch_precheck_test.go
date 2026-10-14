@@ -12,9 +12,10 @@ import (
 
 // precheckEnv builds a hermetic environment for the review precheck through the
 // REAL runDispatch wiring: PATH holds only fake `bd` and `pg-connector` scripts
-// (no `ccpool`, so a dispatch that gets past the precheck dies at the admission
-// gate with reason capacity-unknown, which is how these tests tell "launch path
-// reached" from "skipped"). It returns the role-config path and the log of
+// (no `ccpool`, so a dispatch that gets past the precheck stops at its first
+// ccpool call, the prior-session read of INV-CCH-30, and declines with reason
+// session-in-flight: an unreadable pool counts as one in flight. That is how
+// these tests tell "launch path reached" from "skipped"). It returns the role-config path and the log of
 // every pg-connector call, so a test can prove the checks were read-only.
 func precheckEnv(t *testing.T, beadStatus, prJSON, pendingJSON string) (rolePath, connLog string) {
 	t.Helper()
@@ -87,8 +88,8 @@ func TestRunDispatch_reviewPrecheck(t *testing.T) {
 		{"bead closed", "closed", prOpen, noPending, "skipped-bead-closed", 0},
 		{"PR merged", "open", prMerged, noPending, "skipped-pr-merged", 1},
 		{"pending review covers the head", "open", prOpen, freshReview, "skipped-pending-review", 2},
-		{"launch path: nothing to skip", "open", prOpen, noPending, busyReasonCapacityUnknown, 2},
-		{"launch path: stale pending review", "open", prOpen, staleReview, busyReasonCapacityUnknown, 2},
+		{"launch path: nothing to skip", "open", prOpen, noPending, busyReasonSessionInFlight, 2},
+		{"launch path: stale pending review", "open", prOpen, staleReview, busyReasonSessionInFlight, 2},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,16 +120,16 @@ func TestRunDispatch_reviewPrecheckFailsOpenWithoutConnector(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, reason := runPrecheckDispatch(t, rolePath)
-	if code != conformance.ExitBusy || reason != busyReasonCapacityUnknown {
-		t.Fatalf("got exit %d reason %q, want the unchanged launch path (capacity-unknown)", code, reason)
+	if code != conformance.ExitBusy || reason != busyReasonSessionInFlight {
+		t.Fatalf("got exit %d reason %q, want the unchanged launch path (session-in-flight: no ccpool on PATH)", code, reason)
 	}
 }
 
 // readyPrecheckEnv is precheckEnv for a `ready` role (bead pg2-nk6th.3): PATH
 // holds only a fake `bd` answering `bd show` with beadJSON (a bd-show-shaped
 // single issue), and the role opts in with precheck = "ready" under actor
-// "test-actor". A dispatch that gets past the precheck dies at the admission
-// gate (no ccpool on PATH) with reason capacity-unknown.
+// "test-actor". A dispatch that gets past the precheck stops at the
+// prior-session read (no ccpool on PATH) with reason session-in-flight.
 func readyPrecheckEnv(t *testing.T, beadJSON string) (rolePath string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -175,7 +176,7 @@ func TestRunDispatch_readyPrecheck(t *testing.T) {
 		bead       string
 		wantReason string
 	}{
-		{"groomed open bead launches", `{"id":"zr-d","status":"open",` + groomed + `}`, busyReasonCapacityUnknown},
+		{"groomed open bead launches", `{"id":"zr-d","status":"open",` + groomed + `}`, busyReasonSessionInFlight},
 		{"closed", `{"id":"zr-d","status":"closed",` + groomed + `}`, "skipped-bead-not-open"},
 		{"claimed by a peer", `{"id":"zr-d","status":"in_progress","assignee":"someone-else",` + groomed + `}`, "skipped-bead-not-open"},
 		{"human", `{"id":"zr-d","status":"open","labels":["has-acceptance-criteria","human"]}`, "skipped-bead-human"},
@@ -183,7 +184,7 @@ func TestRunDispatch_readyPrecheck(t *testing.T) {
 		{"deferred status", `{"id":"zr-d","status":"deferred",` + groomed + `}`, "skipped-bead-deferred"},
 		{"future defer_until", `{"id":"zr-d","status":"open","defer_until":"2999-01-01T00:00:00Z",` + groomed + `}`, "skipped-bead-deferred"},
 		{"open blocker, bd show dependency shape", `{"id":"zr-d","status":"open",` + groomed + `,"dependencies":[{"id":"zr-b","status":"open","issue_type":"task","dependency_type":"blocks"}]}`, "skipped-bead-blocked"},
-		{"own-actor in_progress is absorbed, not declined", `{"id":"zr-d","status":"in_progress","assignee":"test-actor","labels":["human"]}`, busyReasonCapacityUnknown},
+		{"own-actor in_progress is absorbed, not declined", `{"id":"zr-d","status":"in_progress","assignee":"test-actor","labels":["human"]}`, busyReasonSessionInFlight},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

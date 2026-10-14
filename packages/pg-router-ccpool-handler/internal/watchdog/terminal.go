@@ -77,18 +77,12 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 		}
 	}
 
-	// Mark the row incomplete BEFORE closing it: a budget hard stop leaves the bead
-	// open, so a same-event same-head re-request must launch a fresh session rather
-	// than re-absorb this row and hard-stop instantly from its original launch time,
-	// forever (bead pg2-tc9c3). Best effort.
-	if err := w.CC.SetMeta(ctx, sessionName, ccpool.MetaKeyIncomplete, ccpool.FormatMetaTime(w.now())); err != nil {
-		w.emit("error", "incomplete_mark_failed", "incomplete mark failed; the row stays absorbable by a same-head re-request", map[string]any{
-			"session": sessionName, "bead": beadID, "err": err.Error(),
-		})
-	}
-	// An absorbed row the handler already closed is not closed again: a second
-	// non-purge close re-stamps it and appends another close event, once per
-	// re-dispatch (bead pg2-92rfu).
+	// No outcome mark precedes the close: the stopped row is settled, and a
+	// settled row is never absorbed (INV-CCH-30), so the next dispatch runs in a
+	// fresh session without one (the incomplete mark of bead pg2-tc9c3 is gone,
+	// ADR 0094's Decision item 6). A row someone already closed is not closed
+	// again: a second non-purge close re-stamps it and appends another close
+	// event (bead pg2-92rfu).
 	_, _ = ccpool.CloseIfOpen(ctx, w.CC, sessionName, false)
 
 	_ = beads.Comment(ctx, w.BD, beadID, "interrupted — budget")

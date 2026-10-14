@@ -27,18 +27,20 @@ import (
 //
 // runDispatch has no seam to inject a fake executor (it builds Deps itself
 // from loadRole/loadConfig/buildDeps), so this goes through the REAL
-// buildDeps wiring — a real ccpool.CLIRunner shelling out to the `ccpool`
-// binary. PATH is overridden to a directory that cannot contain that binary
-// (mirroring internal/beads/runner_test.go's own `t.Setenv("PATH",
-// "/usr/bin")` isolation trick), so every `ccpool` subcommand this process
-// would invoke — starting with `ccpool capacity --json`, the very first one
-// run() calls after the (list-based) duplicate-absorb check — fails with
-// "executable file not found in $PATH". That is exactly an unreadable pool:
-// the admission gate's fail-closed branch, reached deterministically and
-// without ever touching the real ccpool pool/tmux server/store.db (this
-// module's own unit-test isolation invariant).
+// buildDeps wiring — a real ccpool.CLIRunner shelling out to a `ccpool`
+// binary. PATH holds only a stub `ccpool` (plus /usr/bin and /bin for its
+// shell) that lists an empty pool and fails every other subcommand, so the
+// prior-session read (INV-CCH-30) finds nothing in flight and the very next
+// call, `ccpool capacity --json`, fails: the admission gate's fail-closed
+// branch, reached deterministically and without ever touching the real ccpool
+// pool/tmux server/store.db (this module's own unit-test isolation invariant).
 func TestRunDispatch_poolCapacityUnknownExitsBusyWithReason(t *testing.T) {
-	t.Setenv("PATH", "/usr/bin")
+	bin := t.TempDir()
+	stub := "#!/bin/sh\nif [ \"$1\" = list ]; then echo '[]'; exit 0; fi\necho \"stub ccpool: $1 unavailable\" >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "ccpool"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
 
 	dir := t.TempDir()
 	rolePath := filepath.Join(dir, "role.json")
@@ -66,6 +68,40 @@ func TestRunDispatch_poolCapacityUnknownExitsBusyWithReason(t *testing.T) {
 	}
 	if reply.Reason != busyReasonCapacityUnknown {
 		t.Fatalf("reason = %q, want %q", reply.Reason, busyReasonCapacityUnknown)
+	}
+}
+
+// TestRunDispatch_unreadablePoolExitsBusySessionInFlight: with no `ccpool` on
+// PATH at all, the prior-session read itself fails. A pool whose sessions
+// cannot be read counts as holding an attempt in flight (INV-CCH-30), so the
+// dispatch declines busy with reason session-in-flight before the admission
+// gate, launching nothing.
+func TestRunDispatch_unreadablePoolExitsBusySessionInFlight(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin")
+
+	dir := t.TempDir()
+	rolePath := filepath.Join(dir, "role.json")
+	roleJSON := `{"name":"worker","type":"ccpool","ccpool":{"actor":"test-actor","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"hello"}}`
+	if err := os.WriteFile(rolePath, []byte(roleJSON), 0o644); err != nil {
+		t.Fatalf("write role config: %v", err)
+	}
+	restoreIn := redirectStdin(t, `{"schemaVersion":"1","id":"d-1","event":{"id":"e-1","type":"dispatch","payload":{"id":"zr-w"}}}`)
+	defer restoreIn()
+	var code int
+	got := captureStdout(t, func() {
+		code = runDispatch([]string{"--role-config", rolePath})
+	})
+	if code != conformance.ExitBusy {
+		t.Fatalf("exit = %d, want ExitBusy (%d); stdout=%q", code, conformance.ExitBusy, got)
+	}
+	var reply struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(got), &reply); err != nil {
+		t.Fatalf("stdout = %q, not valid JSON: %v", got, err)
+	}
+	if reply.Reason != busyReasonSessionInFlight {
+		t.Fatalf("reason = %q, want %q", reply.Reason, busyReasonSessionInFlight)
 	}
 }
 
@@ -124,6 +160,27 @@ func TestRunDispatch_busyDeclineReasonCommandBusy(t *testing.T) {
 	}
 	if reason != busyReasonCommandBusy {
 		t.Fatalf("reason = %q, want %q", reason, busyReasonCommandBusy)
+	}
+}
+
+// TestRunDispatch_busyDeclineReasonSessionInFlight: the executor's
+// session-in-flight sentinel (bead pg2-qaeb8, INV-CCH-30), wrapped as the
+// executor wraps it, maps to its own reason tag, distinct from every other
+// busy reason (the failure-rate alert excludes exactly this tag).
+func TestRunDispatch_busyDeclineReasonSessionInFlight(t *testing.T) {
+	wrapped := fmt.Errorf("%w: session s-1: its turn is in progress for another event (e-0)", executor.ErrSessionInFlight)
+	reason, busy := busyDeclineReason(wrapped)
+	if !busy {
+		t.Fatalf("a wrapped executor.ErrSessionInFlight must be recognized as a busy decline")
+	}
+	// The literal is pinned too: the failure-rate alert's exclusion matches it.
+	if reason != "session-in-flight" || busyReasonSessionInFlight != "session-in-flight" {
+		t.Fatalf("reason = %q (constant %q), want %q", reason, busyReasonSessionInFlight, "session-in-flight")
+	}
+	for _, other := range []string{busyReasonAtCapacity, busyReasonCapacityUnknown, busyReasonLowDisk, busyReasonCommandBusy} {
+		if other == reason {
+			t.Fatalf("session-in-flight must carry its own tag, not %q", other)
+		}
 	}
 }
 

@@ -57,16 +57,23 @@ func (c *phaseCC) Close(ctx context.Context, id string, purge bool) error {
 	return c.settleCC.Close(ctx, id, purge)
 }
 
-// phaseBD hooks the first bead read (the start of waitDone).
+// phaseBD hooks one bead read: the first by default (the start of waitDone for
+// a launching dispatch), or the at-th one (an absorbing dispatch reads the bead
+// once to decide before its wait starts).
 type phaseBD struct {
 	*dtest.ScriptBD
 	once    sync.Once
 	onFirst func()
+	at      int
+	shows   int
 }
 
 func (b *phaseBD) Run(ctx context.Context, args ...string) (string, error) {
 	if args[0] == "show" && b.onFirst != nil {
-		b.once.Do(b.onFirst)
+		b.shows++
+		if b.shows >= max(b.at, 1) {
+			b.once.Do(b.onFirst)
+		}
 	}
 	return b.ScriptBD.Run(ctx, args...)
 }
@@ -233,12 +240,21 @@ func TestLease_disabledWhenTTLZero(t *testing.T) {
 
 // --- absorb ---
 
-// absorbRow is a live, working duplicate of a worker dispatch for zr-w, as an
-// earlier (now dead) handler left it.
+// absorbEvent is the event id of the worker dispatch the absorb tests redeliver.
+const absorbEvent = "worker.ready:zr-w"
+
+// absorbRow is a live, working session of a worker dispatch for zr-w whose turn
+// is still in progress, launched for absorbEvent, as an earlier handler (now
+// dead, or still running across a daemon restart) left it: the one session a
+// redelivery of absorbEvent absorbs (INV-CCH-30).
 func absorbRow(meta map[string]string) ccpool.Session {
+	m := map[string]string{ccpool.MetaKeyEventID: absorbEvent}
+	for k, v := range meta {
+		m[k] = v
+	}
 	return ccpool.Session{
 		ExternalID: "att-old", Name: "pg-router-worker-zr-w", Live: true, State: ccpool.StateWorking,
-		CWD: "/wt/zr-w", Meta: meta,
+		CWD: "/wt/zr-w", Meta: m,
 	}
 }
 
@@ -310,39 +326,41 @@ func timeBudgetDispatch(cfg config.Config) DispatchContext {
 		Time:       25 * time.Minute,
 		Thresholds: budget.Thresholds{Reminder: 0.725, Cancel: 0.90, Hard: 1.00},
 	}
-	return DispatchContext{Role: role, Item: item.Item{ID: "zr-w"}}
+	return DispatchContext{Role: role, Item: item.Item{ID: "zr-w"}, EventID: absorbEvent}
 }
 
-// absorbSettled runs a dispatch that absorbs a settled (idle) duplicate, with a
-// LockDir so the lease handshake takes the real flock.
-func absorbSettled(t *testing.T, lockDir string, cc *dtest.FakeCC, beforeWait func()) (report.Result, error) {
+// absorbTurn runs a dispatch that absorbs the same event's turn in progress,
+// with a LockDir so the lease handshake takes the real flock. beforeWait runs at
+// the wait's first bead read: the SECOND read, since the absorb decision reads
+// the bead first.
+func absorbTurn(t *testing.T, lockDir string, cc *dtest.FakeCC, beforeWait func()) (report.Result, error) {
 	t.Helper()
 	cfg := leaseCfg()
 	clk := &dtest.ManualClock{T: time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)}
-	sbd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"closed"}}}
-	bd := &phaseBD{ScriptBD: sbd, onFirst: beforeWait}
+	sbd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
+	bd := &phaseBD{ScriptBD: sbd, onFirst: beforeWait, at: 2}
 	deps := leaseDeps(t, cc, bd, cfg, clk)
 	deps.ExternalID = "att-new"
 	deps.LockDir = lockDir
-	d := DispatchContext{Role: noBudget(workerRole(cfg)), Item: item.Item{ID: "zr-w"}}
+	d := DispatchContext{Role: noBudget(workerRole(cfg)), Item: item.Item{ID: "zr-w"}, EventID: absorbEvent}
 	return (ccpoolExecutor{}).Dispatch(context.Background(), d, deps)
 }
 
-func settledRow() ccpool.Session {
-	r := absorbRow(map[string]string{ccpool.MetaKeyLeaseUntil: "2026-10-06T11:00:00Z"}) // long expired
-	r.State = ccpool.StateIdle
-	return r
+// turnRow is a session whose handler died while its turn was in progress: the
+// lease long expired, so only the turn keeps it in flight (and absorbable).
+func turnRow() ccpool.Session {
+	return absorbRow(map[string]string{ccpool.MetaKeyLeaseUntil: "2026-10-06T11:00:00Z"}) // long expired
 }
 
 // absorbDuplicate takes the per-session lock and refreshes the lease BEFORE it
 // starts waiting on the session.
 func TestAbsorb_refreshesLeaseUnderLockBeforeWaiting(t *testing.T) {
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{settledRow()}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{turnRow()}}}
 	lockDir := t.TempDir()
 	var writesBeforeWait int
-	_, err := absorbSettled(t, lockDir, cc, func() { writesBeforeWait = len(cc.SetMetaCalls()) })
+	_, err := absorbTurn(t, lockDir, cc, func() { writesBeforeWait = len(cc.SetMetaCalls()) })
 	if err != nil {
-		t.Fatalf("absorbing a settled duplicate whose bead is closed must succeed: %v", err)
+		t.Fatalf("absorbing the same event's turn, which then closes its bead, must succeed: %v", err)
 	}
 	if writesBeforeWait < 1 {
 		t.Fatalf("the lease must be refreshed before the wait starts; writes before first bead read = %d", writesBeforeWait)
@@ -365,7 +383,7 @@ func TestAbsorb_refreshesLeaseUnderLockBeforeWaiting(t *testing.T) {
 // While an orphan reconcile holds the session lock the absorbing dispatch waits
 // (it neither refreshes nor waits blind), and proceeds once the lock is free.
 func TestAbsorb_waitsForHeldLockThenProceeds(t *testing.T) {
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{settledRow()}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{turnRow()}}}
 	lockDir := t.TempDir()
 	held, err := sessionlock.TryLock(lockDir, "att-old")
 	if err != nil {
@@ -373,7 +391,7 @@ func TestAbsorb_waitsForHeldLockThenProceeds(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := absorbSettled(t, lockDir, cc, nil)
+		_, err := absorbTurn(t, lockDir, cc, nil)
 		done <- err
 	}()
 	select {
@@ -398,22 +416,40 @@ func TestAbsorb_waitsForHeldLockThenProceeds(t *testing.T) {
 	}
 }
 
-// If the orphan reconcile won the race (the row is now closed and marked
-// reclaimed), the absorb handshake reports the row as not absorbable so the
-// caller launches a fresh session instead.
+// If the orphan reconcile won the race (the row is now marked reclaimed, and
+// closed or about to be), the absorb handshake reports the row as not
+// absorbable and the caller declines: nobody may have begun to tear down a
+// session a dispatch absorbs (INV-CCH-30).
 func TestTakeOverForAbsorb_reclaimedRowIsNotAbsorbable(t *testing.T) {
-	reclaimed := settledRow()
-	reclaimed.Live, reclaimed.CloseReason = false, "handler"
-	reclaimed.Meta = map[string]string{ccpool.MetaKeyOrphanReclaimed: "2026-10-06T12:00:00Z"}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{reclaimed}}}
+	for _, closed := range []bool{true, false} {
+		reclaimed := turnRow()
+		reclaimed.Meta[ccpool.MetaKeyOrphanReclaimed] = "2026-10-06T12:00:00Z"
+		if closed {
+			reclaimed.Live, reclaimed.CloseReason = false, "handler"
+		}
+		cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{reclaimed}}}
+		e := newExec(cc, &dtest.ScriptBD{}, leaseCfg())
+		e.deps.LockDir = t.TempDir()
+		_, ok, err := e.takeOverForAbsorb(context.Background(), turnRow(), absorbEvent)
+		if err != nil || ok {
+			t.Fatalf("closed=%v: a reclaimed row must not be absorbable: ok=%v err=%v", closed, ok, err)
+		}
+		if n := len(cc.SetMetaCalls()); n != 0 {
+			t.Errorf("closed=%v: must not refresh the lease of a reclaimed row; got %d writes", closed, n)
+		}
+	}
+}
+
+// A row whose turn ended while the absorbing dispatch waited for its lock is
+// settled now, and a settled row is never absorbed (INV-CCH-30).
+func TestTakeOverForAbsorb_turnEndedIsNotAbsorbable(t *testing.T) {
+	ended := turnRow()
+	ended.State = ccpool.StateIdle
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{ended}}}
 	e := newExec(cc, &dtest.ScriptBD{}, leaseCfg())
 	e.deps.LockDir = t.TempDir()
-	_, ok, err := e.takeOverForAbsorb(context.Background(), settledRow(), "", "")
-	if err != nil || ok {
-		t.Fatalf("a reclaimed row must not be absorbable: ok=%v err=%v", ok, err)
-	}
-	if n := len(cc.SetMetaCalls()); n != 0 {
-		t.Errorf("must not refresh the lease of a reclaimed row; got %d writes", n)
+	if _, ok, err := e.takeOverForAbsorb(context.Background(), turnRow(), absorbEvent); err != nil || ok {
+		t.Fatalf("a row whose turn ended must not be absorbable: ok=%v err=%v", ok, err)
 	}
 }
 
@@ -422,7 +458,7 @@ func TestTakeOverForAbsorb_goneRowIsNotAbsorbable(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{}}}
 	e := newExec(cc, &dtest.ScriptBD{}, leaseCfg())
 	e.deps.LockDir = t.TempDir()
-	if _, ok, err := e.takeOverForAbsorb(context.Background(), settledRow(), "", ""); err != nil || ok {
+	if _, ok, err := e.takeOverForAbsorb(context.Background(), turnRow(), absorbEvent); err != nil || ok {
 		t.Fatalf("a vanished row must not be absorbable: ok=%v err=%v", ok, err)
 	}
 }

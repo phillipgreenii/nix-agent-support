@@ -77,6 +77,11 @@ type FakeCC struct {
 	ListSeq     [][]ccpool.Session // one entry consumed per List call (last repeats)
 	ListIdx     int
 	ListErr     error // when set, every List call returns (nil, ListErr) instead of consuming ListSeq
+	// ListErrFrom delays ListErr: the first ListErrFrom List calls still consume
+	// ListSeq, and only later ones fail (0, the default, fails every call). It
+	// lets a test read the pool once at the start of a dispatch and then fail.
+	ListErrFrom int
+	listCalls   int
 	// Cap/CapErr script Capacity(). Leaving BOTH unset (the zero Capacity{}
 	// and a nil CapErr) defaults to MaxSessions:1, Free:1 — "unset means
 	// free" — so the many pre-existing tests that never set Cap still
@@ -153,7 +158,8 @@ func (f *FakeCC) Capacity(_ context.Context) (ccpool.Capacity, error) {
 func (f *FakeCC) List(_ context.Context) ([]ccpool.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.ListErr != nil {
+	f.listCalls++
+	if f.ListErr != nil && f.listCalls > f.ListErrFrom {
 		return nil, f.ListErr
 	}
 	if len(f.ListSeq) == 0 {
