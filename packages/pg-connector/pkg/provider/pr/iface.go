@@ -262,6 +262,14 @@ type PendingReviewResult struct {
 	HeadSHA string         `json:"head_sha"`
 	AsOf    string         `json:"as_of"`
 	Review  *PendingReview `json:"review,omitempty"`
+
+	// The read-answer annotations (schema.PRSchemaVersion's 10 -> 11 bump, bead
+	// pg2-z5fax.3.12); see schema.PR.ServedFrom. Optional: the old backends
+	// never set them.
+	ServedFrom string             `json:"served_from,omitempty"`
+	Stale      *bool              `json:"stale,omitempty"`
+	AgeSeconds *int64             `json:"age_seconds,omitempty"`
+	Groups     []schema.GroupInfo `json:"groups,omitempty"`
 }
 
 // PendingReviewReader is an OPTIONAL capability of a pr backend: it resolves

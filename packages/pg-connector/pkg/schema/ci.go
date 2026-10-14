@@ -44,7 +44,14 @@ package schema
 // omitempty; existing run-level fields are untouched). Note CIRun is no
 // longer comparable with == (it now holds a slice); compare with
 // reflect.DeepEqual.
-const CISchemaVersion = 5
+//
+// Bumped 5 -> 6 by bead pg2-z5fax.3.12 (pg-connector-github daemon, "Entity
+// read"), which added CIRun's read-answer annotations ServedFrom, AgeSeconds
+// and Groups below (GroupInfo is defined in pr.go). Additive and omitted when
+// unset, so every version-5 consumer keeps decoding unchanged and the old
+// backends, which never set them, emit byte-identical runs; the bump follows
+// PRSchemaVersion's rule that ANY field-shape change bumps the version.
+const CISchemaVersion = 6
 
 // CIRun is the ci capability's shared JSON wire shape, returned by the ci
 // capability's "list_runs" op and carried by
@@ -143,6 +150,15 @@ type CIRun struct {
 	// time on the runs it returns — D3 stands (no backend gained a store;
 	// only the umbrella did).
 	Stale bool `json:"stale"`
+
+	// ServedFrom, AgeSeconds and Groups are the daemon's read-answer
+	// annotations (CISchemaVersion's 5 -> 6 bump, bead pg2-z5fax.3.12); see
+	// PR.ServedFrom for their meaning. list_runs keeps its array shape, so the
+	// annotation is carried on every element. Optional: the old backends never
+	// set them.
+	ServedFrom string      `json:"served_from,omitempty"`
+	AgeSeconds *int64      `json:"age_seconds,omitempty"`
+	Groups     []GroupInfo `json:"groups,omitempty"`
 }
 
 // CIJob is one job of a CIRun, carried by CIRun.Jobs. A job belongs to

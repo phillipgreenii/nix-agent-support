@@ -122,8 +122,8 @@ func TestCIRun_AttemptOmittedWhenZero(t *testing.T) {
 // TestCISchemaVersion_IsCurrent pins CISchemaVersion at its current value
 // so a bump is a deliberate, reviewed change.
 func TestCISchemaVersion_IsCurrent(t *testing.T) {
-	if CISchemaVersion != 5 {
-		t.Fatalf("CISchemaVersion = %d, want 5", CISchemaVersion)
+	if CISchemaVersion != 6 {
+		t.Fatalf("CISchemaVersion = %d, want 6", CISchemaVersion)
 	}
 }
 

@@ -94,7 +94,17 @@ import "encoding/json"
 // rule). Additive and omitempty, so every version-9 consumer keeps decoding
 // unchanged; the bump follows this const's own rule that ANY field-shape
 // change bumps the version, additive or not.
-const PRSchemaVersion = 10
+//
+// Bumped 10 -> 11 by bead pg2-z5fax.3.12 (pg-connector-github daemon, "Entity
+// read"), which added the read-answer annotations: the optional served_from,
+// age_seconds (a pointer, so a zero age is still emitted) and groups[] (see
+// GroupInfo) on PR, PRFilesResult and PRCommitsResult, plus an optional stale
+// pointer on the latter two (PR already carries stale). Additive and omitted
+// when unset, so every version-10 consumer keeps decoding unchanged and the
+// old backends, which never set them, emit byte-identical answers; the bump
+// follows this const's own rule that ANY field-shape change bumps the
+// version, additive or not.
+const PRSchemaVersion = 11
 
 // PRListFields is the authoritative set of schema.PR JSON field names the
 // cheap `list` populates (bead pg2-x3h8c.2). The list's batched search
@@ -170,6 +180,16 @@ type PR struct {
 	// cache for any of them should adopt this same AsOf/Stale pair rather
 	// than inventing a parallel convention.
 	Stale bool `json:"stale"`
+
+	// ServedFrom, AgeSeconds and Groups are the daemon's read-answer
+	// annotations (PRSchemaVersion's 10 -> 11 bump, bead pg2-z5fax.3.12):
+	// "origin" when the answer's own call fetched at least one group from
+	// origin and "cache" otherwise, the age in whole seconds of the OLDEST
+	// fetched_at among the groups served, and one GroupInfo per group served.
+	// Optional: the old backends never set them, so their output is unchanged.
+	ServedFrom string      `json:"served_from,omitempty"`
+	AgeSeconds *int64      `json:"age_seconds,omitempty"`
+	Groups     []GroupInfo `json:"groups,omitempty"`
 
 	// Comments are the PR's own top-level (non-review-thread) comments.
 	Comments []PRComment `json:"comments,omitempty"`
@@ -407,6 +427,12 @@ type PRFile struct {
 type PRFilesResult struct {
 	ID    string   `json:"id"`
 	Files []PRFile `json:"files"`
+
+	// The read-answer annotations (PRSchemaVersion 10 -> 11); see PR.ServedFrom.
+	ServedFrom string      `json:"served_from,omitempty"`
+	Stale      *bool       `json:"stale,omitempty"`
+	AgeSeconds *int64      `json:"age_seconds,omitempty"`
+	Groups     []GroupInfo `json:"groups,omitempty"`
 }
 
 // PRCommit is one commit on a PR's branch, an element of the "commits" op's
@@ -427,4 +453,23 @@ type PRCommit struct {
 type PRCommitsResult struct {
 	ID      string     `json:"id"`
 	Commits []PRCommit `json:"commits"`
+
+	// The read-answer annotations (PRSchemaVersion 10 -> 11); see PR.ServedFrom.
+	ServedFrom string      `json:"served_from,omitempty"`
+	Stale      *bool       `json:"stale,omitempty"`
+	AgeSeconds *int64      `json:"age_seconds,omitempty"`
+	Groups     []GroupInfo `json:"groups,omitempty"`
+}
+
+// GroupInfo is one entry of a read answer's optional groups[] (the spec's
+// "Entity read", INV-GH-FRESH-8): the freshness bookkeeping of one entity group
+// the answer was built from. Times are RFC 3339 in UTC. MaxAgeAt is omitted
+// when the group has no maximum age and LastError when the last fetch of the
+// group did not fail. Added with PRSchemaVersion 11 and CISchemaVersion 6.
+type GroupInfo struct {
+	Group      string `json:"group"`
+	FetchedAt  string `json:"fetched_at"`
+	FreshUntil string `json:"fresh_until"`
+	MaxAgeAt   string `json:"max_age_at,omitempty"`
+	LastError  string `json:"last_error,omitempty"`
 }

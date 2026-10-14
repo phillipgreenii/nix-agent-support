@@ -136,3 +136,17 @@ func TestReviewPending_LastAppendOmittedWhenNever(t *testing.T) {
 		t.Errorf("last_append present with no append: %s", raw)
 	}
 }
+
+// TestReviewPending_AnnotationsUnsetKeepShapeByteIdentical pins that the
+// read-answer annotations (served_from, stale, age_seconds, groups), when
+// unset, leave the result's marshaled shape exactly as it was before they
+// existed.
+func TestReviewPending_AnnotationsUnsetKeepShapeByteIdentical(t *testing.T) {
+	raw, err := json.Marshal(PendingReviewResult{HeadSHA: "h", AsOf: "2026-10-12T00:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"pending":false,"head_sha":"h","as_of":"2026-10-12T00:00:00Z"}`; string(raw) != want {
+		t.Fatalf("got %s, want %s", raw, want)
+	}
+}

@@ -90,13 +90,13 @@ func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 }
 
 // TestPRSchemaVersion_IsCurrent pins PRSchemaVersion at its current value
-// (PRReview.SubmittedAt bumped 8 -> 9, PRReview.CommitOID bumped 9 -> 10) so
+// (PRReview.SubmittedAt bumped 8 -> 9, PRReview.CommitOID bumped 9 -> 10, read-answer annotations bumped 10 -> 11) so
 // an accidental future edit that
 // forgets to bump it alongside a new field-shape change is caught here
 // first.
 func TestPRSchemaVersion_IsCurrent(t *testing.T) {
-	if PRSchemaVersion != 10 {
-		t.Fatalf("PRSchemaVersion = %d, want 10", PRSchemaVersion)
+	if PRSchemaVersion != 11 {
+		t.Fatalf("PRSchemaVersion = %d, want 11", PRSchemaVersion)
 	}
 }
 
