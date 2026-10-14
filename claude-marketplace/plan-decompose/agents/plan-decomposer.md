@@ -37,5 +37,5 @@ templates are in the skill ("Helper scripts", "Sub-dispatch templates").
 
 Packet index (id, title, planned edges); per-packet fixed-read estimate and cold-read
 dispatch count; sizing deviations; pre-check/pre-filter/cold-read/post-check outcomes per
-round; each semantic post-check round's dispatch prompt byte-length; hoisting flags
+round; each semantic post-check round's input bytes (prompt + referenced files); hoisting flags
 (advisory); not-decomposed records; the assertion "no uncited content".

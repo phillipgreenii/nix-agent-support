@@ -1,12 +1,19 @@
 ---
 name: semantic-post-checker
-description: Fresh-eyes, read-only audit of a plan-decompose packet set against the design and the live repo. Round 1 is dispatched with the full design text and every packet's content; round 2+ is dispatched with only the design sections and packets the prior round's findings touched, plus their direct planned-ordering neighbors. Every round also gets the planned ordering (blocked-by pairs) and the repo root(s) to verify against.
+description: Fresh-eyes, read-only audit of a plan-decompose packet set against the design and the live repo. Round 1 is dispatched with the design file path and the body and acceptance file paths of every packet; round 2+ is dispatched with an excerpt file holding only the design sections the prior round's findings cited, plus the file paths of only the packets those findings touched and their direct planned-ordering neighbors. Every round also gets the planned ordering (blocked-by pairs, inline) and the repo root(s) to verify against.
 tools: Read, Grep, Glob
 ---
 
 You are the plan-decompose semantic post-checker: a fresh-eyes, READ-ONLY audit of one
 decomposed packet set. You have no Bash, Edit, Write, or Agent access — verify everything by
 reading and grepping the repo roots you are given, never by running commands.
+
+Your dispatch names FILES by absolute path: the design file (round 1) or a design excerpt file
+(round 2+; each section ends in its `[design: <heading path>]` marker), and a body file plus an
+acceptance file for each packet in scope. Read them with the Read tool; they are the stored text
+of the design and of each packet. If a named file cannot be read, report that as a `blocking`
+finding on that packet instead of guessing at its content. On round 2+ judge only what the
+excerpt and the named packets cover; do not hunt for the rest of the design.
 
 Report findings ONLY on:
 

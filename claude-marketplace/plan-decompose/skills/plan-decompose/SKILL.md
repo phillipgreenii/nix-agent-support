@@ -265,6 +265,15 @@ deduplication.
    own mechanical pre-filter checks. A fix-loop revision is stored with `scripts/update-packet.sh`
    (below), never a raw `bd update`.
 
+   **Scratch layout** (one per run; all paths absolute, under one scratch directory that also
+   holds the design file): `drafts/<key>.draft.md` (may hold `@@` directives) is assembled into
+   `packets/<key>.body.md`, and the packet's acceptance criteria are written straight to
+   `packets/<key>.acceptance.md` (they never carry directives). `packets/` never holds drafts. Run
+   `assemble-packet.sh` for ALL packets in ONE Bash loop over `drafts/*.draft.md`, not one call per
+   packet. Those same two packet files feed `create-packet.sh` / `update-packet.sh` (`--body-file`,
+   `--acceptance-file`), the cold-reader and the semantic post-checker, so every reader sees
+   exactly the stored text.
+
    **Design file (one per run)**: materialize the design to ONE file per run and pass it as
    `--design` everywhere. A design stored in the medium (a bead) is written out ONCE via
    `read-docket-design`, following the chunk index; every later step, packet, and fix round
@@ -285,9 +294,10 @@ deduplication.
    (ambiguous heading): rewrite the path as one of the `Parent > Child` forms the message lists.
    Exit 3 (not found): correct the path; if the design has no such text, state the gap. Exit 3
    on `@@file` can also mean the path is outside the repo toplevel; never work around that.
-   The ASSEMBLED body, never the draft, is the packet's text: step 4 sizes it, step 5 pre-filters
-   it, `create-packet` receives it as `--body-file`, and step 6 gives it to the cold-reader.
-   Fix-loop edits go to the DRAFT; re-run `assemble-packet.sh` after each one.
+   The ASSEMBLED body (`packets/<key>.body.md`), never the draft, is the packet's text: step 4
+   sizes it, step 5 pre-filters it, `create-packet` receives it as `--body-file`, and steps 6 and 7
+   hand its path to the cold-reader and the post-checker. Fix-loop edits go to the DRAFT (and to
+   `packets/<key>.acceptance.md` for criteria); re-run `assemble-packet.sh` after each one.
 
    **RESUME dedup** (`pg2-b439c`; widened `tc-96czz` — a check performed once at step-3 ENTRY
    cannot catch a concurrent PEER that finishes decomposing the same docket between that entry
@@ -321,7 +331,7 @@ deduplication.
    once, not re-read per packet); the stamp rule is "Curation stamp" under Metadata keys. A
    RE-ENTRY into this step from step 5's, step 6's, or step 7's loop-back revises an
    ALREADY-CREATED packet's CONTENT only, written with `scripts/update-packet.sh` (`--id
-<packet> --body-file <assembled body> [--acceptance-file <file>]`; never a raw `bd update`,
+<packet> --body-file packets/<key>.body.md [--acceptance-file packets/<key>.acceptance.md]`; never a raw `bd update`,
    never `create-packet.sh` again; the binding's "Revising an already-created packet's
    content"). Record the PLANNED ORDERING (blocked-by pairs implied by Consumes/Produces) in the
    decomposition-report draft as you go — the draft is your working state (in-context or a
@@ -388,12 +398,13 @@ deduplication.
    everything else — a clarity gap, a redundant or currently-vacuous check, or a citation
    that's off-target but doesn't change the clause's correctness.
 
-   Dispatch per "Sub-dispatch templates" (Semantic post-checker). Round 1 reads the full design
-   and the full packet set; each fix-loop re-check after round 1 SCOPES to the packets the prior
-   round's findings touched plus their direct planned-ordering neighbors — mirroring reconcile
-   step 4 (`references/reconcile.md`) — never the full design and full packet set again. State
-   the round's total prompt byte-length in the decomposition report (step 10) so a non-scoped
-   round is visible immediately. Findings loop to step 3 (content-only; see "Curation stamp" —
+   Dispatch per "Sub-dispatch templates" (Semantic post-checker), by FILE PATH. Round 1 reads the
+   full design file and the full packet set; each fix-loop re-check after round 1 SCOPES to the
+   packets the prior round's findings touched plus their direct planned-ordering neighbors, and to
+   an excerpt file of only the design sections those findings cited — mirroring reconcile step 4
+   (`references/reconcile.md`) — never the full design and full packet set again. State the
+   round's input bytes (the prompt's bytes plus the bytes of every file it names, summed with
+   `wc -c`) in the decomposition report (step 10) so a non-scoped round is visible immediately. Findings loop to step 3 (content-only; see "Curation stamp" —
    no re-stamp per round). All findings get fixed regardless of severity; whether a further
    round is dispatched, and what happens at the cap, is governed by step 8's rule.
 
@@ -424,7 +435,7 @@ deduplication.
     if the not-decomposed list is empty at this moment, else `released:partial`) and
     `write-report` the decomposition report: packet index, per-packet fixed-read estimates
     and QA dispatch counts (cold-reads per packet, post-check rounds), each semantic
-    post-check round's prompt byte-length, sizing deviations, check outcomes, hoisting flags,
+    post-check round's input bytes (prompt + referenced files), sizing deviations, check outcomes, hoisting flags,
     not-decomposed records, and an explicit "no uncited content" assertion. Get the
     not-decomposed list right here — it is both what step 1's routing rule reports back to a
     later `find-docket` caller and what decides which of the two `pd_phase` literals gets
@@ -510,17 +521,28 @@ its last cold-read.
 
 **Semantic post-checker** (mode `decompose` step 7; one Agent call per fix round; `subagent_type:
 "plan-decompose:semantic-post-checker"`, `model: sonnet` — that agent is read-only by tool
-grant, not just by instruction). Two dispatch variants — NEVER re-send the full design or full
-packet set on round 2+:
+grant, not just by instruction). The prompt names FILES by absolute path; it never carries design
+or packet text, and never bead ids (the agent has Read/Grep/Glob only, no `bd`, so an id is
+unreadable to it). Two dispatch variants — NEVER re-send the full design or full packet set on
+round 2+:
 
-> Round 1: `[full design] [all packets] [planned ordering] [repo roots]`.
+> Round 1: `[design file path] [path pairs: packets/<key>.body.md + packets/<key>.acceptance.md,
+for every packet] [planned ordering, inline, as blocked-by pairs of packet keys] [repo roots]`.
 >
-> Round 2+: `[only the design sections the prior round's findings cited] [only the packets
-those findings touched, plus their direct planned-ordering neighbors] [planned ordering]
-[repo roots]`.
+> Round 2+: `[excerpt file path: only the design sections the prior round's findings cited]
+[path pairs for only the packets those findings touched, plus their direct planned-ordering
+neighbors] [planned ordering, inline] [repo roots]`.
+
+The round 2+ excerpt file is built, not typed: write `excerpts/round-<n>.draft.md` holding one
+`@@design-section <heading path>` line per cited section (add a line for each subsection a
+finding cites; a parent heading yields only its lead text), then run `assemble-packet.sh --design
+<design file> --in excerpts/round-<n>.draft.md --out excerpts/round-<n>.design.md` and pass the
+`.design.md` path. Each section arrives ending in its `[design: <heading path>]` marker. The
+design file is the one from step 3 ("Design file"), never re-read from the medium. Name each
+packet by its `<key>` in the planned ordering so findings map to the paths given.
 
 (the semantic-post-checker agent's own prompt already states its task and output format; your
-dispatch supplies only these four inputs.)
+dispatch supplies only these four inputs plus the read-only constraint stated above.)
 
 ## Other modes
 

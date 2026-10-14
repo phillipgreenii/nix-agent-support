@@ -97,8 +97,11 @@ ambiguous "same source, different intended round" case.
    approving another.
 
 6. **Adversarial review**: dispatch `phase-split-reviewer` (subagent_type
-   `plan-decompose:phase-split-reviewer`; a depth-2 leaf — see the invariant above) with the
-   full design, the existing phase inventory, and the proposed new phase(s). It checks: every
+   `plan-decompose:phase-split-reviewer`; a depth-2 leaf — see the invariant above) with three
+   absolute FILE PATHS, never their text: the full design (written to one scratch file per run),
+   the existing phase inventory (step 4's result, written to a file), and the proposed new
+   phase(s) (step 5's sketch, written to a file and rewritten when a finding revises it). It
+   checks: every
    design element lands in exactly one phase (existing + new) or is recorded as deliberately
    deferred; no new phase's Consumes cites a Produces shape only a LATER phase would create;
    each boundary is independently reject/approve-able. Findings loop back to step 5, capped at

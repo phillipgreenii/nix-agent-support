@@ -73,8 +73,9 @@ constraint in the prompt itself, since a fresh agent has no other way to know it
 call site, matching the existing precedent in `plan-decompose:plan-decompose`'s "Sub-dispatch
 templates" (its semantic-post-checker dispatch)):
 
-> The full design text, the existing phase inventory (step 4's `bd list` result), and the
-> proposed new phase(s) (step 5's sketch). Check: (a) coverage — every design element lands in
+> Three files, by absolute path (read them with Read; the text is not in this prompt): the full
+> design file, the existing phase inventory file (step 4's `bd list` result), and the proposed
+> new phase(s) file (step 5's sketch). Check: (a) coverage — every design element lands in
 > exactly one phase (existing + new) or is recorded as deliberately deferred; (b) forward-only
 > seams — no new phase's Consumes cites a Produces shape only a LATER phase would create; (c)
 > boundary independence — each proposed boundary is independently reject/approve-able. Report
@@ -82,7 +83,9 @@ templates" (its semantic-post-checker dispatch)):
 proposed-fix`. You dispatch nothing further and have no Agent/Skill tool grant to do so —
 > report fully in this one turn.
 
-Dispatch one round at a time (a round's findings must be resolved, per SKILL.md step 5-6,
+The three files are scratch files you write once per run (the design once; the inventory after
+step 4; the sketch after step 5, rewritten in place when a finding revises it); never paste
+their text into the prompt. Dispatch one round at a time (a round's findings must be resolved, per SKILL.md step 5-6,
 before the next round is dispatched — never dispatch round 2 speculatively alongside round 1).
 Findings loop back to SKILL.md step 5; the review is capped at 2 rounds total (step 6).
 
