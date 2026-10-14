@@ -27,8 +27,8 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-11`, `INV-CCH-12`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`.
-_Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind; `USECASE-CCH-RELEASE-END` for a role whose completion is `close-or-release`.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-8`, `INV-CCH-11`, `INV-CCH-12`, `INV-CCH-13`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-16`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`.
+_Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind; `USECASE-CCH-RELEASE-END` for a role whose completion is `close-or-release`; `USECASE-CCH-SPLIT-TRIAGE` for a role whose completion is `close-or-split-triage`.
 
 1. The core dispatches one event under one tracking id to a bound role.
 2. This module starts a fresh handler session of its own (`INV-CCH-30`; extension 2k is the one
@@ -36,6 +36,14 @@ _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backin
    command-backed role execs its configured argv.
    2d. A ccpool-backed role starts with the handler-wide tool grants plus its own extra grants, if
    it sets any, and no other role gets them (`INV-CCH-25`).
+   2l. A ccpool-backed session that runs under `permissionMode=dontAsk` is sent a code-owned notice
+   ahead of the role's own task text: writes to the agent runtime's protected paths (the `.claude/`
+   directory, except `.claude/worktrees`) are denied automatically in that mode and no allow-list
+   entry can grant them. If the task needs such a write, the session does not attempt or retry it,
+   stops at once, and hands the task back through the role's normal hand-back path, stating why and
+   carrying the exact intended change (a unified diff, or the full content of a new file). No
+   role's prompt template can edit the notice, and it is not sent under any other permission mode
+   (`INV-CCH-16`); choosing the mode is a deployment decision.
    2c. While the session runs, this module keeps a supervision lease on it fresh (`INV-CCH-18`),
    so a later dispatch can tell it from an orphan.
 3. This module replies inline with a completion outcome, or defers with an ack and finishes the
@@ -64,6 +72,12 @@ Extensions:
   role's own actor already holds `in_progress` is never declined here, because it is the live
   session of an earlier dispatch, which 2k absorbs while its turn is in progress. It reads only, and
   any failure to read launches as normal.
+- 2m. Preparing the per-bead isolation fails because the filesystem has run out of room
+  (`INV-CCH-8`): the ccpool-backed handler executor does not count this as a launch failure of
+  this bead, because a full disk is a transient, system-wide condition that would hit whichever
+  bead dispatched next. This module declines `busy` with reason `low-disk` before any session is
+  launched and writes nothing to any bead (no launch-failure stamp, no `human`); the core
+  re-offers the event later with backoff, as for 2a.
 - 2i. A session dies unexplained before its bead completes (`INV-CCH-7`): this module also logs
   the pool's usage-limit reading once (`INV-CCH-26`), as evidence only; the failure is unchanged.
 - 2j. A drain session (completion `close-or-release`) raises a permission dialog nobody can answer
@@ -129,6 +143,9 @@ Extensions:
 - 3d. The role's completion is `close-or-release` and its session has ended (`INV-CCH-28`): this
   module settles it as described in `USECASE-CCH-RELEASE-END`, which includes the case of a
   session that ended without ever claiming its bead.
+- 3e. The role's completion is `close-or-split-triage` (`INV-CCH-13`): its session works a bead
+  parked for split review, and this module settles the dispatch as described in
+  `USECASE-CCH-SPLIT-TRIAGE`.
 - 3a. The session hits a post-accept failure (`retryable`, `resource-limit`, `critical`): this
   module surfaces it on its own logs/metrics or as a new event, never as anything but the opaque
   completion outcome the core already stores (`INV-CCH-3`).
@@ -175,6 +192,45 @@ Extensions:
 - 4e. The handler restarts while the session runs: the latch is lost with it. A bead that the
   worker parked, deferred or converted still reads as handed back (step 4); one it handed back
   inside a single poll interval, with none of those marks, reads as 4b and earns a strike.
+
+### `USECASE-CCH-SPLIT-TRIAGE` — settle a bead parked for split review, for the split-triage role <!-- uuid: e0b4ef0a-189d-4297-b11e-e6454c930cbc -->
+
+**Primary actor:** `ACTOR-CCH-CORE`.
+**Level:** subfunction (the work and settle steps of `USECASE-CCH-DISPATCH`, for a role whose completion is `close-or-split-triage`).
+**Preconditions:** a dispatch has started a session of the split-triage role for a bead labelled `needs-split-review`, the label a bead gets when its budget stops reach the escalation threshold and it is eligible for a split (`INV-CCH-12`). The deployment wires the role, its discovery query and its tool grant for the `split` subcommand; this module's own beads-backed source never discovers a bead that carries the label (`INV-CCH-12`).
+_Requires:_ `INV-CCH-13`, `INV-CCH-11`, `INV-CCH-12`.
+_Includes:_ `INTF-CCH-CCPOOL`, `INTF-CCH-BEADS`.
+
+1. The session reads the bead and its stop history (the stopped sessions recorded on it,
+   `INV-CCH-11`) and decides whether it can be split.
+2. The session records exactly one outcome through this module's own `split` subcommand, as its
+   role's prompt template directs, never by hand-built `bd` calls. All bead text reaches `bd` as
+   discrete arguments taken from the session's input, never through a shell (`INV-CCH-13`).
+3. Splittable (`split apply`): the session supplies a plan of at least two children, each with a
+   title, a description and acceptance criteria. This module creates each child with the parent's
+   labels, except its `budget-stop:*` records, `needs-split-review`, `was-split`, `human`,
+   `escalated` and any `split-from:*`, plus a `split-from:` label naming the parent, so no child
+   inherits a stop count. It then makes the parent blocked by each child and checks that those
+   edges exist, marks the parent `was-split`, comments the decomposition, releases a claim the
+   parent still holds (open and unassigned, in one update), and removes `needs-split-review` last.
+4. Not splittable (`split unsplittable`): the session supplies the reason. This module adds
+   `human`, comments the reason together with the stop history, releases a claim the bead still
+   holds, and removes `needs-split-review` last.
+5. The dispatch is done when the bead is closed or `needs-split-review` is gone. The label's
+   removal is the completion signal, so both outcomes write it last.
+
+Extensions:
+
+- 3a. The parent is closed, already `was-split`, or itself a split child (it carries a
+  `split-from:` label): `split apply` refuses and writes nothing, so a bead is split at most once
+  and a child never starts a second round.
+- 3b. A split fails after its children exist: the parent fails safe to `human` (`needs-split-review`
+  removed, any held claim released, a comment naming the children created) and is not retried.
+- 5a. The session hands the bead back or only comments: neither is an outcome, so the dispatch is
+  not done; only a close or the removal of `needs-split-review` completes it.
+- 5b. The split-triage session itself hits its budget: the bead is routed to `human` by the budget
+  stop's escalation (`INV-CCH-12`) and also has `needs-split-review` removed, and the role never
+  re-enters the split path. No part of this role changes a budget.
 
 ### `USECASE-CCH-QUERY` — answer a source query from beads <!-- uuid: c73f0cd4-5c9b-4862-84da-1b80716ad937 -->
 
