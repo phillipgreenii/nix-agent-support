@@ -796,6 +796,13 @@ func (rc *runContext) ensureReviewRequest(ctx context.Context) error {
 			ClearAssignee: true,
 			ClearDefer:    true,
 			Metadata:      metadata,
+			// A review session that died without releasing its claim leaves
+			// the bead in_progress under a lease that has expired; bd refuses
+			// to reassign it, and without this the reopen failed on every
+			// retry until a person released the claim (pg2-9rq3r). A live
+			// holder is never taken: the refusal comes back and Classify
+			// makes it non-transient.
+			ReleaseExpiredClaim: true,
 		}); err != nil {
 			return fmt.Errorf("sync: reopen review request %s: %w", rc.reviewID, err)
 		}

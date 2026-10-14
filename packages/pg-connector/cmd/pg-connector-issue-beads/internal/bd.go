@@ -59,25 +59,28 @@ import (
 // when unset and closed_at is null or absent when not closed; both decode
 // to the empty string.
 type bdIssue struct {
-	ID           string                     `json:"id"`
-	Title        string                     `json:"title"`
-	Description  string                     `json:"description,omitempty"`
-	Status       string                     `json:"status"`
-	Priority     int                        `json:"priority"`
-	IssueType    string                     `json:"issue_type"`
-	Labels       []string                   `json:"labels,omitempty"`
-	Assignee     string                     `json:"assignee,omitempty"`
-	Owner        string                     `json:"owner,omitempty"`
-	Parent       string                     `json:"parent,omitempty"`
-	Dependencies []bdDependency             `json:"dependencies,omitempty"`
-	UpdatedAt    string                     `json:"updated_at,omitempty"`
-	CreatedAt    string                     `json:"created_at,omitempty"`
-	StartedAt    string                     `json:"started_at,omitempty"`
-	ClosedAt     string                     `json:"closed_at,omitempty"`
-	CreatedBy    string                     `json:"created_by,omitempty"`
-	DueAt        string                     `json:"due_at,omitempty"`
-	ExternalRef  string                     `json:"external_ref,omitempty"`
-	Metadata     map[string]json.RawMessage `json:"metadata,omitempty"`
+	ID           string         `json:"id"`
+	Title        string         `json:"title"`
+	Description  string         `json:"description,omitempty"`
+	Status       string         `json:"status"`
+	Priority     int            `json:"priority"`
+	IssueType    string         `json:"issue_type"`
+	Labels       []string       `json:"labels,omitempty"`
+	Assignee     string         `json:"assignee,omitempty"`
+	Owner        string         `json:"owner,omitempty"`
+	Parent       string         `json:"parent,omitempty"`
+	Dependencies []bdDependency `json:"dependencies,omitempty"`
+	UpdatedAt    string         `json:"updated_at,omitempty"`
+	CreatedAt    string         `json:"created_at,omitempty"`
+	StartedAt    string         `json:"started_at,omitempty"`
+	ClosedAt     string         `json:"closed_at,omitempty"`
+	// LeaseExpiresAt is when the holder's claim lease runs out (bd 1.3.1
+	// `lease_expires_at`, RFC3339, present only on an in_progress bead).
+	LeaseExpiresAt string                     `json:"lease_expires_at,omitempty"`
+	CreatedBy      string                     `json:"created_by,omitempty"`
+	DueAt          string                     `json:"due_at,omitempty"`
+	ExternalRef    string                     `json:"external_ref,omitempty"`
+	Metadata       map[string]json.RawMessage `json:"metadata,omitempty"`
 }
 
 // bdDepRecord is one record of `bd dep list <id> --direction=down --json`'s

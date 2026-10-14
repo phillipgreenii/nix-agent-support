@@ -72,6 +72,19 @@ type IssueUpdateFields struct {
 	// at once MUST set it: a plain status change keeps the old deferral, so
 	// the reopened issue stays out of every ready query until it expires.
 	ClearDefer bool `json:"clear_defer,omitempty"`
+	// ReleaseExpiredClaim, when true together with ClearAssignee, lets the
+	// call take the issue back from a DEAD claimant (pg2-9rq3r). A beads
+	// backend refuses to change the assignee of an in_progress issue held by
+	// another actor even after the holder's lease has expired, so a reopen
+	// that clears the assignee fails forever when the holder (a crashed
+	// review session) never released. With this set the backend reads the
+	// issue first; only when it is in_progress under a holder whose lease has
+	// EXPIRED does it add a compare-and-swap guard on that holder and status
+	// (so a holder that heartbeats or changes in between still wins), and the
+	// write goes through. A live (or unreadable) lease is NEVER taken: the
+	// write is attempted unguarded and the tracker's own refusal comes back
+	// as the error. Ignored by a backend with no lease notion.
+	ReleaseExpiredClaim bool `json:"release_expired_claim,omitempty"`
 }
 
 // Provider is the issue capability's provider interface. A concrete

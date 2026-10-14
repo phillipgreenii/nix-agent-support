@@ -399,6 +399,16 @@ func TestNewDispatchTable_Update(t *testing.T) {
 	if !gotFields.ClearDefer {
 		t.Fatalf("fields = %#v, want ClearDefer=true", gotFields)
 	}
+	// pg2-9rq3r: release_expired_claim rides the same update op.
+	if gotFields.ReleaseExpiredClaim {
+		t.Fatalf("release_expired_claim must default to unset, got %#v", gotFields)
+	}
+	if _, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"issue-1","fields":{"status":"open","clear_assignee":true,"release_expired_claim":true}}`)); err != nil {
+		t.Fatalf("Handle reopen+release_expired_claim: %v", err)
+	}
+	if !gotFields.ReleaseExpiredClaim {
+		t.Fatalf("fields = %#v, want ReleaseExpiredClaim=true", gotFields)
+	}
 	got, ok := result.(*schema.Issue)
 	if !ok || got.ID != "issue-1" {
 		t.Fatalf("result = %#v", result)

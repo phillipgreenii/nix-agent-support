@@ -68,9 +68,24 @@ func isOpenChildRefusal(detail string) bool {
 	return strings.Contains(detail, "cannot close") && strings.Contains(detail, "open child issue")
 }
 
+// isClaimHeldRefusal reports whether detail is bd >= 1.3.1's refusal to change
+// the assignee of an in_progress bead another actor holds ("cannot reassign
+// <id>: held by "<actor>" (in_progress); coordinate with the holder ..."). It
+// is what the review-request reopen meets when the holder's lease is still
+// LIVE (the connector already takes an expired one), carried as wire code
+// "unavailable" like the open-child refusal. Retrying cannot clear it: the
+// holder is working, and only it finishing, its lease lapsing or a person
+// acts. Both fragments are required so an unrelated failure that merely says
+// "held by" stays transient (bead pg2-9rq3r: the refusal burned the whole
+// 10-retry backoff budget and paged critical).
+func isClaimHeldRefusal(detail string) bool {
+	return strings.Contains(detail, "cannot reassign") && strings.Contains(detail, "held by")
+}
+
 // Classify returns ClassNonTransient when err's chain carries a
 // *ConnectorError whose wire code is in nonTransientCodes or whose detail is
-// bd's open-child close refusal (isOpenChildRefusal), or is Sync's own
+// bd's open-child close refusal (isOpenChildRefusal) or its held-claim
+// reassign refusal (isClaimHeldRefusal), or is Sync's own
 // unknown-sync.mode config error, and ClassTransient for everything else.
 //
 // Transient therefore covers pg-connector's "unavailable" code (its code for
@@ -88,7 +103,7 @@ func Classify(err error) ErrorClass {
 		return ClassNonTransient
 	}
 	var ce *ConnectorError
-	if errors.As(err, &ce) && (nonTransientCodes[ce.Code] || isOpenChildRefusal(ce.Detail)) {
+	if errors.As(err, &ce) && (nonTransientCodes[ce.Code] || isOpenChildRefusal(ce.Detail) || isClaimHeldRefusal(ce.Detail)) {
 		return ClassNonTransient
 	}
 	return ClassTransient

@@ -461,7 +461,9 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 // Metadata uses bd's own `--set-metadata` (repeatable key=value, a per-key
 // MERGE into existing metadata) rather than Create's `--metadata` (a
 // full-blob REPLACE) — IssueUpdateFields' own doc comment names this
-// choice explicitly. id is placed after a literal "--" terminator, ahead
+// choice explicitly. fields.ReleaseExpiredClaim (with ClearAssignee) lets the
+// write take the issue back from a holder whose lease has expired, under a
+// bd compare-and-swap guard (expiredClaimGuard, pg2-9rq3r). id is placed after a literal "--" terminator, ahead
 // of every flag [bead: pg2-usu5b; review finding A-8], mirroring
 // Show/Comment/Transition's identical defense-in-depth.
 func (b *Backend) Update(ctx context.Context, id string, fields issue.IssueUpdateFields) (*schema.Issue, error) {
@@ -499,6 +501,16 @@ func (b *Backend) Update(ctx context.Context, id string, fields issue.IssueUpdat
 		// the issue stays out of `bd ready` (pg2-vhs3e, verified on bd 1.2.2).
 		args = append(args, "--defer=")
 	}
+	if fields.ReleaseExpiredClaim {
+		if !fields.ClearAssignee {
+			return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: release_expired_claim requires clear_assignee")
+		}
+		guard, gerr := b.expiredClaimGuard(ctx, id, time.Now().UTC())
+		if gerr != nil {
+			return nil, gerr
+		}
+		args = append(args, guard...)
+	}
 	args = append(args, "--json", "--", id)
 	data, err := b.run(ctx, args...)
 	if err != nil {
@@ -509,6 +521,36 @@ func (b *Backend) Update(ctx context.Context, id string, fields issue.IssueUpdat
 		return nil, err
 	}
 	return toSchemaIssue(iss, b.tracker(), time.Now().UTC()), nil
+}
+
+// expiredClaimGuard reads id and, ONLY when it is in_progress under a holder
+// whose claim lease expired before now, returns the bd compare-and-swap flags
+// `--if-assignee <holder> --if-status in_progress` that make a clearing
+// update of that dead claim go through (pg2-9rq3r). bd 1.3.1 refuses to
+// change the assignee of an in_progress bead held by another actor even after
+// the lease expires, but a guarded write naming the observed holder passes,
+// and a holder that heartbeated, changed or released since the read makes bd
+// write nothing and exit 13 instead of being overwritten. Any other state (a
+// live lease, no lease, an unparseable lease, not in_progress, no assignee)
+// returns no flags: the update is then attempted as-is, so a live holder is
+// never stolen and bd's own refusal is the caller's error.
+func (b *Backend) expiredClaimGuard(ctx context.Context, id string, now time.Time) ([]string, error) {
+	data, err := b.run(ctx, "show", "--readonly", "--json", "--", id)
+	if err != nil {
+		return nil, err
+	}
+	iss, err := bdIssueFromArray(data)
+	if err != nil {
+		return nil, err
+	}
+	if iss.Status != "in_progress" || iss.Assignee == "" {
+		return nil, nil
+	}
+	expires, perr := time.Parse(time.RFC3339, iss.LeaseExpiresAt)
+	if perr != nil || !expires.Before(now) {
+		return nil, nil
+	}
+	return []string{"--if-assignee", iss.Assignee, "--if-status", "in_progress"}, nil
 }
 
 // Close implements issue.Provider.Close via `bd close <id> --reason

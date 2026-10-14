@@ -201,7 +201,7 @@ func newIssueTransitionCmd() *cobra.Command {
 // newIssueCreateCmd's own args map already sets for IssueInput.
 func newIssueUpdateCmd() *cobra.Command {
 	var priority, title, description, status string
-	var clearAssignee, clearDefer bool
+	var clearAssignee, clearDefer, releaseExpiredClaim bool
 	var addLabels, removeLabels []string
 	var metadata map[string]string
 	cmd := &cobra.Command{
@@ -227,6 +227,8 @@ func newIssueUpdateCmd() *cobra.Command {
 				"status":         status,
 				"clear_assignee": clearAssignee,
 				"clear_defer":    clearDefer,
+
+				"release_expired_claim": releaseExpiredClaim,
 			},
 		}, *backendFlag)
 		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueUpdate)
@@ -240,6 +242,7 @@ func newIssueUpdateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&status, "status", "", "move the issue to this backend-native state in the same call (e.g. open, to reopen)")
 	cmd.Flags().BoolVar(&clearAssignee, "clear-assignee", false, "clear the issue's assignee in the same call (use with --status open when reopening)")
 	cmd.Flags().BoolVar(&clearDefer, "clear-defer", false, "clear the issue's deferral in the same call (use with --status open when reopening, or the reopened issue stays hidden until the old deferral expires)")
+	cmd.Flags().BoolVar(&releaseExpiredClaim, "release-expired-claim", false, "with --clear-assignee: also take the issue from a holder whose claim lease has EXPIRED (a live lease is never taken; the tracker's own refusal is the error)")
 	return cmd
 }
 

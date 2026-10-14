@@ -1041,6 +1041,78 @@ func TestBackend_Update_ClearDeferInSameCall(t *testing.T) {
 	}
 }
 
+// releaseClaimRunner answers `show` with an in_progress bead held by "dead"
+// whose lease expires at leaseExpires, and records every `update` argv.
+func releaseClaimRunner(leaseExpires string, updates *[][]string) *fakeRunner {
+	return &fakeRunner{handle: func(args []string) (string, error) {
+		if len(args) > 0 && args[0] == "show" {
+			return `{"data":[{"id":"tp-1","title":"t","status":"in_progress","assignee":"dead","lease_expires_at":"` + leaseExpires + `","priority":2}],"schema_version":1}`, nil
+		}
+		*updates = append(*updates, args)
+		return `{"data":[{"id":"tp-1","title":"t","status":"open","priority":2}],"schema_version":1}`, nil
+	}}
+}
+
+// TestBackend_Update_ReleaseExpiredClaim_GuardsExpiredHolder pins pg2-9rq3r:
+// with ReleaseExpiredClaim, an in_progress bead whose holder's lease expired
+// is released with bd's compare-and-swap guard on that exact holder and
+// status, in the same update as the reopen.
+func TestBackend_Update_ReleaseExpiredClaim_GuardsExpiredHolder(t *testing.T) {
+	var updates [][]string
+	b := New(releaseClaimRunner("2020-01-01T00:00:00Z", &updates))
+	if _, err := b.Update(context.Background(), "tp-1", issue.IssueUpdateFields{
+		Status: "open", ClearAssignee: true, ReleaseExpiredClaim: true,
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("update calls = %v, want exactly one", updates)
+	}
+	joined := strings.Join(updates[0], " ")
+	for _, want := range []string{"--if-assignee dead", "--if-status in_progress", "--assignee=", "--status open"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("update args = %q, missing %q", joined, want)
+		}
+	}
+}
+
+// TestBackend_Update_ReleaseExpiredClaim_NeverGuardsLiveLease: a live lease is
+// not stolen. The update carries no guard flags, so bd's own refusal is the
+// outcome.
+func TestBackend_Update_ReleaseExpiredClaim_NeverGuardsLiveLease(t *testing.T) {
+	for name, lease := range map[string]string{
+		"live":        time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		"missing":     "",
+		"unparseable": "soon",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var updates [][]string
+			b := New(releaseClaimRunner(lease, &updates))
+			if _, err := b.Update(context.Background(), "tp-1", issue.IssueUpdateFields{
+				Status: "open", ClearAssignee: true, ReleaseExpiredClaim: true,
+			}); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			if len(updates) != 1 || containsArg(updates[0], "--if-assignee") || containsArg(updates[0], "--if-status") {
+				t.Fatalf("updates = %v, want one unguarded update", updates)
+			}
+		})
+	}
+}
+
+// TestBackend_Update_ReleaseExpiredClaim_RequiresClearAssignee: the flag is
+// meaningless without ClearAssignee and is refused before any bd call.
+func TestBackend_Update_ReleaseExpiredClaim_RequiresClearAssignee(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		t.Fatalf("bd must not run, got %v", args)
+		return "", nil
+	}}
+	_, err := New(fr).Update(context.Background(), "tp-1", issue.IssueUpdateFields{Status: "open", ReleaseExpiredClaim: true})
+	if err == nil {
+		t.Fatal("Update succeeded, want invalid_argument")
+	}
+}
+
 func TestBackend_Update_OmitsUnsetFields(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
 		for _, flag := range []string{"--set-metadata", "--add-label", "--remove-label", "--priority", "--title", "--description", "--status", "--assignee=", "--defer="} {

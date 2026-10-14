@@ -964,10 +964,17 @@
         # about a minute and a half), paid only on diffs touching these paths.
         # A missing `bd` or `go` is a LOUD failure, never a skip: an
         # absence-keyed skip would let a PATH breakage no-op the only gate.
+        #
+        # pg2-9rq3r: the same hook also runs `TestReviewReopen_RealBD_*`, the
+        # review-request reopen against a claim held by a dead review session
+        # (one more `bd init` per test). Those tests expire a lease by editing
+        # the embedded store's `leases` table with the `dolt` CLI (bd offers
+        # no TTL knob and no `bd sql` on an embedded store), so `dolt` is a
+        # required tool here too and its absence is equally loud.
         pg-desk-closure-contract-test = {
           enable = true;
           name = "pg-desk-closure-contract-test";
-          description = "pg-desk closure: run the contract-tagged real-bd depth-first closure tests (pg2-o0z8u)";
+          description = "pg-desk closure and review reopen: run the contract-tagged real-bd depth-first closure and expired-claim reopen tests (pg2-o0z8u, pg2-9rq3r)";
           entry = "${
             pkgs.writeShellApplication {
               name = "pg-desk-closure-contract-test-hook";
@@ -980,7 +987,7 @@
                   exit 0
                 fi
 
-                for tool in go bd; do
+                for tool in go bd dolt; do
                   if ! command -v "$tool" >/dev/null 2>&1; then
                     echo "pg-desk-closure-contract-test: $tool not found on PATH -- enter the devShell or install it before committing. Do NOT bypass with --no-verify." >&2
                     exit 1
@@ -989,7 +996,7 @@
 
                 top="$(git rev-parse --show-toplevel)"
                 cd "$top/packages/pg-desk"
-                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^TestClosure_RealBD_' ./internal/sync/
+                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Closure|ReviewReopen)_RealBD_' ./internal/sync/
               '';
             }
           }/bin/pg-desk-closure-contract-test-hook";

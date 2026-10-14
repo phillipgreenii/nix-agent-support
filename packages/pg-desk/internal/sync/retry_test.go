@@ -59,6 +59,16 @@ func TestClassify(t *testing.T) {
 		// alone: an unrelated unavailable close failure still retries.
 		{"unavailable close failure that is not the refusal", &ConnectorError{ExitCode: 1, Code: "unavailable", Detail: "unavailable: cannot close zr-7c0en: database is locked"}, ClassTransient},
 		{"open-child words outside a close refusal", &ConnectorError{ExitCode: 1, Code: "unavailable", Detail: "unavailable: listing open child issue(s) failed: chdir /x: no such file or directory"}, ClassTransient},
+		// bd >= 1.3.1's refusal to reassign a bead another actor holds
+		// in_progress (bead pg2-9rq3r) is carried as "unavailable" too: while
+		// the holder's lease is live, retrying cannot clear it.
+		{"bd held-claim reassign refusal", &ConnectorError{
+			Args: []string{"issue", "update", "zr-7zgma.2", "--status", "open", "--clear-assignee"}, ExitCode: 1, Code: "unavailable",
+			Detail: `unavailable: cannot reassign zr-7zgma.2: held by "577fc8f3-review" (in_progress); coordinate with the holder (bd mail 577fc8f3-review) - pass --force only if their claim is abandoned`,
+		}, ClassNonTransient},
+		{"wrapped bd held-claim refusal", fmt.Errorf("pipeline: sync pr 7: %w", fmt.Errorf("sync: reopen review request zr-7zgma.2: %w",
+			&ConnectorError{ExitCode: 1, Code: "unavailable", Detail: `cannot reassign zr-7zgma.2: held by "x" (in_progress)`})), ClassNonTransient},
+		{"unavailable failure that is not the held-claim refusal", &ConnectorError{ExitCode: 1, Code: "unavailable", Detail: "unavailable: lock held by another process: database is locked"}, ClassTransient},
 		// Classification sees through the wrapping every sync and pipeline
 		// layer adds.
 		{"wrapped non-transient", fmt.Errorf("pipeline: sync pr 7: %w", fmt.Errorf("sync: create anchor: %w", connErr("unauthenticated"))), ClassNonTransient},

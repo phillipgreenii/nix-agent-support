@@ -119,6 +119,16 @@ prompts that read these shapes, in the same change:
 update <id> --status open --clear-assignee ...` call (the previous reviewer's claim MUST NOT
   survive the reopen, or no worker can claim the re-review; `pg2-1pt7r`; the same call also clears
   the bead's deferral, below). No gate.
+  - A review session that died without releasing its claim leaves the bead `in_progress` under a
+    lease that has expired, and the tracker refuses to change the assignee of an `in_progress`
+    bead another actor holds even then (`cannot reassign <id>: held by <actor> (in_progress)`).
+    The reopen therefore asks the connector to release an EXPIRED claim in the same update
+    (`--release-expired-claim`; `pg2-9rq3r`): the connector reads the bead and, only when the
+    holder's lease has expired, writes under a compare-and-swap guard naming that holder and
+    status (a holder that heartbeats or changes meanwhile wins and nothing is written), so the
+    reopen succeeds in one run. A claim whose lease is still LIVE (or unreadable) MUST NOT be
+    taken: the reopen fails with the tracker's refusal, which is non-transient (below), and the
+    holder is left untouched.
 - **Review settle window** (`pg2-a9yhn`) — a head that differs from the last-requested one MUST NOT
   be acted on at once. A review is expensive (the router health review of 2026-10 measured one at
   about 16 minutes and $2.88) and a review whose head moved before it submitted is refused at
@@ -232,7 +242,12 @@ be retried automatically when the failure needs a person (operator ruling, 2026-
   (`invalid_argument`), and config or version problems (`unknown_op`, `query_not_recognized`,
   `version_mismatch`, an unknown `sync.mode`), and `bd`'s refusal to close a parent that still has
   open children (`cannot close <id>: N open child issue(s)`; carried as `unavailable`, recognized
-  by its message, `pg2-ubvmh`): a child the closure did not close stays open until a person acts.
+  by its message, `pg2-ubvmh`): a child the closure did not close stays open until a person acts,
+  and `bd`'s refusal to reassign a bead another actor still holds `in_progress` (`cannot reassign
+<id>: held by <actor> (in_progress)`; carried as `unavailable`, recognized by its message,
+  `pg2-9rq3r`): the review-request reopen meets it only for a LIVE claim (an expired one is
+  released, above), so the holder is working and only its finishing, its lease lapsing, or a
+  person ends it.
 
 Every failed run of a PR that has a recorded `sync_error` counts one attempt, whichever stage
 failed, and the latest failure decides the class. A transient row is retried with exponential

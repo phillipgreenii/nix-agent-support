@@ -1114,6 +1114,8 @@ func TestSync_ReviewRequest_ReopensOnHeadAdvance(t *testing.T) {
 			strings.Contains(joined, "--status open") &&
 			strings.Contains(joined, "--clear-assignee") &&
 			strings.Contains(joined, "--clear-defer") &&
+			// pg2-9rq3r: a dead reviewer's expired claim must not block the reopen.
+			strings.Contains(joined, "--release-expired-claim") &&
 			strings.Contains(joined, "head_sha=new-sha") {
 			reopenedAndRefreshed = true
 		}

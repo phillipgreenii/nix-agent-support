@@ -116,6 +116,16 @@ type updateInput struct {
 	// a reopen that keeps the old defer_until hides the NEW head from every
 	// ready query until that deferral expires (pg2-vhs3e).
 	ClearDefer bool
+	// ReleaseExpiredClaim asks the backend to take the issue back from a DEAD
+	// claimant in the same call (pg2-9rq3r). bd 1.3.1 refuses to change the
+	// assignee of an in_progress issue held by another actor even after its
+	// lease expired, so a reopen of a review request whose review session
+	// died without releasing failed on every retry. The backend reads the
+	// lease: an expired one is released under a compare-and-swap guard on the
+	// observed holder; a live one is never taken and bd's refusal comes back
+	// as the error, which Classify treats as non-transient. Only meaningful
+	// with ClearAssignee.
+	ReleaseExpiredClaim bool
 }
 
 // Update execs `pg-connector issue update <id> ...`.
@@ -139,6 +149,9 @@ func (c *issueClient) Update(ctx context.Context, id string, in updateInput) err
 	}
 	if in.ClearDefer {
 		args = append(args, "--clear-defer")
+	}
+	if in.ReleaseExpiredClaim {
+		args = append(args, "--release-expired-claim")
 	}
 	args = append(args, c.backendFlag()...)
 
