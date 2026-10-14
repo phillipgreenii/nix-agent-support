@@ -1,0 +1,8 @@
+flowchart LR
+    n0["command: landing=$(pnwf frobnicate)<br/>- env:set landing<br/>mark=permitted"]
+    n1{{"env: landing"}}
+    subgraph sg_s0["$(pnwf frobnicate)"]
+        n2["command: pnwf frobnicate<br/>mark=insufficient: unmodeled subcommand frobnicate"]
+    end
+    n2 -->|"substitution: $(pnwf frobnicate)"| n0
+    n0 -->|"assign: landing=$(pnwf frobnicate)"| n1

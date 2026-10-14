@@ -1,0 +1,9 @@
+flowchart LR
+    n0["command: landing=$(pnwf land-plan #quot;$BRANCH#quot;)<br/>- env:set landing<br/>mark=permitted"]
+    n1{{"env: landing"}}
+    subgraph sg_s0["$(pnwf land-plan #quot;$BRANCH#quot;)"]
+        n2["command: pnwf land-plan #quot;$BRANCH#quot;<br/>- stdio:stdout content<br/>mark=insufficient: arg 0 is a runtime expansion in a positional slot and could expand to an option (option injection); abstaining"]
+    end
+    n2 -->|"substitution: $(pnwf land-plan #quot;$BRANCH#quot;)"| n0
+    n0 -->|"assign: landing=$(pnwf land-plan #quot;$BRANCH#quot;)"| n1
+    n2 -->|"flow: stdout-#gt;argv"| n0

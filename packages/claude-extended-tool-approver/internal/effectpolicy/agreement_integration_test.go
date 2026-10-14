@@ -486,6 +486,36 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"(assign_cmdsubst_rm_abstains). Production-side fix, if wanted: give engine.go's " +
 			"assignment-only leaf an approving rule.",
 	},
+	"assign_cmdsubst_pnwf_land_plan_approves": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as assign_cmdsubst_approves (pg2-dbrsg), now for the plugin-instructed " +
+			"`landing=$(pnwf land-plan feature-x)` (pg2-aj84b; operator ruling pg2-cjfpy, Phillip, " +
+			"2026-10-04: \"any command which is supposed to work as part of a skill should be " +
+			"autoapproved\"): production has no rule that approves an assignment-only leaf, so the " +
+			"expression is NoOpinion and defers to claude-code, while the spike grades the " +
+			"substitution (pnwf land-plan is a schema-modeled, effect-free verb) and approves " +
+			"exactly because every command inside approves. The P15 report for this change is " +
+			"testdata/p15/assign-substitution.md; an inner command that abstains still abstains " +
+			"(assign_cmdsubst_unmodeled_verb_abstains, assign_cmdsubst_live_positional_abstains).",
+	},
+	"assign_cmdsubst_pnwf_resolve_jq_approves": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as assign_cmdsubst_pnwf_land_plan_approves, with a pipeline inside the " +
+			"substitution (`pnwf resolve | jq -r ...`): the spike approves iff every pipeline stage " +
+			"approves (assign_cmdsubst_pipe_unmodeled_stage_abstains pins the abstaining stage).",
+	},
+	"assign_cmdsubst_env_u_pn_info_jq_approves": {
+		Class: "looser-than-reject",
+		Cause: "pg2-aj84b: production's env-vars rule REJECTS a persistent assignment whose value is a " +
+			"command substitution it cannot verify (\"value is unverifiable and stays so however " +
+			"rephrased or run. Use a literal\"), and it has no schema for `pn workspace info`; the " +
+			"spike grades the substitution instead (`env -u NAME` is a modeled env-unset wrapper and " +
+			"`pn workspace info --json` a schema-modeled effect-free verb) and approves because every " +
+			"command inside approves, as the pg2-cjfpy ruling directs for skill-instructed forms. " +
+			"Not a new class of effect: the same command typed on its own already abstains in " +
+			"production rather than rejecting, and a destructive inner command still abstains " +
+			"(assign_cmdsubst_env_u_rm_abstains).",
+	},
 	"case_assign_arm": {
 		Class: "looser-than-abstain",
 		Cause: "same root cause as assign_cmdsubst_approves (pg2-dbrsg, commit 4fa66d12): the spike " +

@@ -1,0 +1,11 @@
+flowchart LR
+    n0["command: canonical_root=$(pnwf resolve | frobnicate)"]
+    n1{{"env: canonical_root"}}
+    subgraph sg_s0["$(pnwf resolve | frobnicate)"]
+        n2["command: pnwf resolve"]
+        n3["command: frobnicate"]
+    end
+    n2 -->|"pipe"| n3
+    n2 -->|"substitution: $(pnwf resolve | frobnicate)"| n0
+    n3 -->|"substitution: $(pnwf resolve | frobnicate)"| n0
+    n0 -->|"assign: canonical_root=$(pnwf resolve | frobnicate)"| n1

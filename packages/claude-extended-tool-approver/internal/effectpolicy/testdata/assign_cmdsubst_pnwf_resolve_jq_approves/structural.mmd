@@ -1,0 +1,11 @@
+flowchart LR
+    n0["command: canonical_root=$(pnwf resolve | jq -r '.canonical_root')"]
+    n1{{"env: canonical_root"}}
+    subgraph sg_s0["$(pnwf resolve | jq -r '.canonical_root')"]
+        n2["command: pnwf resolve"]
+        n3["command: jq -r '.canonical_root'"]
+    end
+    n2 -->|"pipe"| n3
+    n2 -->|"substitution: $(pnwf resolve | jq -r '.canonical_root')"| n0
+    n3 -->|"substitution: $(pnwf resolve | jq -r '.canonical_root')"| n0
+    n0 -->|"assign: canonical_root=$(pnwf resolve | jq -r '.canonical_root')"| n1

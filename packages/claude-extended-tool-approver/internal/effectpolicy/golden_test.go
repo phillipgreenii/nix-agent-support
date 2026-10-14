@@ -864,6 +864,17 @@ var goldenCases = []goldenCase{
 	{"assign_cmdsubst_rm_abstains", `X=$(rm -rf foo)`, evalcontract.Abstain, nil},
 	{"prefix_assign_cmdsubst_rm_abstains", `X=$(rm -rf foo) echo hi`, evalcontract.Abstain, nil},
 	{"assign_arithmetic_abstains", `X=$((1+2))`, evalcontract.Abstain, nil},
+	// pg2-aj84b: the plugin-instructed assignment forms (pnwf / pn workspace
+	// info substitutions). An assignment approves exactly when every command
+	// in its substitution approves; a substitution whose inner command (or any
+	// pipeline stage of it) abstains keeps the whole assignment abstaining.
+	{"assign_cmdsubst_pnwf_land_plan_approves", `landing=$(pnwf land-plan feature-x)`, evalcontract.Approve, nil},
+	{"assign_cmdsubst_pnwf_resolve_jq_approves", `canonical_root=$(pnwf resolve | jq -r '.canonical_root')`, evalcontract.Approve, nil},
+	{"assign_cmdsubst_env_u_pn_info_jq_approves", `set_count=$(env -u PN_WORKSPACE_ROOT pn workspace info --json | jq '.sets | length')`, evalcontract.Approve, nil},
+	{"assign_cmdsubst_live_positional_abstains", `landing=$(pnwf land-plan "$BRANCH")`, evalcontract.Abstain, nil},
+	{"assign_cmdsubst_unmodeled_verb_abstains", `landing=$(pnwf frobnicate)`, evalcontract.Abstain, nil},
+	{"assign_cmdsubst_pipe_unmodeled_stage_abstains", `canonical_root=$(pnwf resolve | frobnicate)`, evalcontract.Abstain, nil},
+	{"assign_cmdsubst_env_u_rm_abstains", `x=$(env -u FOO rm -rf foo)`, evalcontract.Abstain, nil},
 	{"assign_persistent_ifs_abstains", `IFS=/; echo hi`, evalcontract.Abstain, nil},
 	{"assign_persistent_git_dir_rejects", `GIT_DIR=/tmp/x; git status`, evalcontract.Reject, nil},
 	{"for_loop_cmdsubst_list", `for f in $(ls); do echo "$f"; done`, evalcontract.Approve, nil},

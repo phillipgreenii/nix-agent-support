@@ -1,0 +1,13 @@
+flowchart LR
+    n0["command: set_count=$(env -u PN_WORKSPACE_ROOT pn workspace info --json | jq '.sets | length')<br/>- env:set set_count<br/>mark=permitted"]
+    n1{{"env: set_count"}}
+    subgraph sg_s0["$(env -u PN_WORKSPACE_ROOT pn workspace info --json | jq '.sets | length')"]
+        n2["command: env -u PN_WORKSPACE_ROOT pn workspace info --json<br/>- stdio:stdout metadata<br/>mark=permitted"]
+        n3["command: jq '.sets | length'<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=permitted"]
+    end
+    n2 -->|"pipe"| n3
+    n2 -->|"substitution: $(env -u PN_WORKSPACE_ROOT pn workspace info --json | jq '.sets | length')"| n0
+    n3 -->|"substitution: $(env -u PN_WORKSPACE_ROOT pn workspace info --json | jq '.sets | length')"| n0
+    n0 -->|"assign: set_count=$(env -u PN_WORKSPACE_ROOT pn workspace info --json | jq '.sets | length')"| n1
+    n0 -->|"flow: captured content-#gt;later commands"| n2
+    n3 -->|"flow: stdout-#gt;argv"| n0

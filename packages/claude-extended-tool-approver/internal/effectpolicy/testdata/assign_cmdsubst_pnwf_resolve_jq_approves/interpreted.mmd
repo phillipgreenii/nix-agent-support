@@ -1,0 +1,14 @@
+flowchart LR
+    n0["command: canonical_root=$(pnwf resolve | jq -r '.canonical_root')<br/>- env:set canonical_root<br/>mark=permitted"]
+    n1{{"env: canonical_root"}}
+    subgraph sg_s0["$(pnwf resolve | jq -r '.canonical_root')"]
+        n2["command: pnwf resolve<br/>- stdio:stdout content<br/>mark=permitted"]
+        n3["command: jq -r '.canonical_root'<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=permitted"]
+    end
+    n2 -->|"pipe"| n3
+    n2 -->|"substitution: $(pnwf resolve | jq -r '.canonical_root')"| n0
+    n3 -->|"substitution: $(pnwf resolve | jq -r '.canonical_root')"| n0
+    n0 -->|"assign: canonical_root=$(pnwf resolve | jq -r '.canonical_root')"| n1
+    n2 -->|"flow: stdout-#gt;argv"| n0
+    n2 -->|"flow: stdout-#gt;stdin"| n3
+    n3 -->|"flow: stdout-#gt;argv"| n0

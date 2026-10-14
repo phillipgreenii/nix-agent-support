@@ -1,0 +1,13 @@
+flowchart LR
+    n0["command: canonical_root=$(pnwf resolve | frobnicate)<br/>- env:set canonical_root<br/>mark=permitted"]
+    n1{{"env: canonical_root"}}
+    subgraph sg_s0["$(pnwf resolve | frobnicate)"]
+        n2["command: pnwf resolve<br/>- stdio:stdout content<br/>mark=permitted"]
+        n3["command: frobnicate<br/>- opaque (no schema for frobnicate)<br/>mark=insufficient: no schema for frobnicate"]
+    end
+    n2 -->|"pipe"| n3
+    n2 -->|"substitution: $(pnwf resolve | frobnicate)"| n0
+    n3 -->|"substitution: $(pnwf resolve | frobnicate)"| n0
+    n0 -->|"assign: canonical_root=$(pnwf resolve | frobnicate)"| n1
+    n0 -->|"flow: captured content-#gt;later commands"| n3
+    n2 -->|"flow: stdout-#gt;argv"| n0

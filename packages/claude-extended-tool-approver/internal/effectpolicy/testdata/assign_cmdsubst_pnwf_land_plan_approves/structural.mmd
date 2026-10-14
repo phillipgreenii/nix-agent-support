@@ -1,0 +1,8 @@
+flowchart LR
+    n0["command: landing=$(pnwf land-plan feature-x)"]
+    n1{{"env: landing"}}
+    subgraph sg_s0["$(pnwf land-plan feature-x)"]
+        n2["command: pnwf land-plan feature-x"]
+    end
+    n2 -->|"substitution: $(pnwf land-plan feature-x)"| n0
+    n0 -->|"assign: landing=$(pnwf land-plan feature-x)"| n1

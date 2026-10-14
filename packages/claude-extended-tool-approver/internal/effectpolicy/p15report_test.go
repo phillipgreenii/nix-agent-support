@@ -84,3 +84,45 @@ func TestP15ReportHeldForms(t *testing.T) {
 	}
 	compareGolden(t, filepath.Join("testdata", "p15", "pb-held-forms.md"), md)
 }
+
+// TestP15ReportAssignSubst pins the committed P15 approve-reachability report
+// for pg2-aj84b: a bare assignment with a command substitution approves
+// exactly when every command inside the substitution approves, and ONLY then.
+func TestP15ReportAssignSubst(t *testing.T) {
+	root, _ := fixture(t)
+	rep, err := GenerateAssignSubstP15(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	permitted := map[string]bool{}
+	for _, e := range rep.PermittedEntries() {
+		permitted[e.Probe] = true
+	}
+	for _, want := range []string{
+		"landing=$(pnwf land-plan feature-x)",
+		"canonical_root=$(pnwf resolve | jq -r '.canonical_root')",
+		"set_count=$(env -u PN_WORKSPACE_ROOT pn workspace info --json | jq '.sets | length')",
+	} {
+		if !permitted[want] {
+			t.Errorf("P15 report does not list %q as feeding a Permitted path", want)
+		}
+	}
+	for _, mustNot := range []string{
+		"landing=$(pnwf frobnicate)", "X=$(frobnicate)", "X=$(frobnicate | jq .)",
+		"canonical_root=$(pnwf resolve | frobnicate)", "X=$(pnwf resolve; frobnicate)",
+		`landing=$(pnwf land-plan "$BRANCH")`, "X=$(rm -rf foo)", "X=$(env -u FOO rm -rf foo)",
+		"X=`frobnicate`", "X=$(echo $(frobnicate))", "X=$(pnwf resolve > /nix/store/x)",
+		"X=$(cat ~/.ssh/id_rsa)", "X=$((1+2))", "X=$(frobnicate) echo hi",
+		"IFS=$(pnwf resolve)", "PATH=$(pnwf resolve)", "GIT_DIR=$(pnwf resolve); git status",
+		"X=$(pnwf resolve) && frobnicate", "a[0]=$(pnwf resolve)",
+	} {
+		if permitted[mustNot] {
+			t.Errorf("P15 report lists %q as Permitted; it must not approve", mustNot)
+		}
+	}
+	md := rep.Markdown()
+	if strings.Contains(md, root) {
+		t.Error("report leaks the fixture root")
+	}
+	compareGolden(t, filepath.Join("testdata", "p15", "assign-substitution.md"), md)
+}

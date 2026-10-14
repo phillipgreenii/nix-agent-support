@@ -162,6 +162,61 @@ func GenerateHeldFormsP15(root string) (*P15Report, error) {
 	return rep, nil
 }
 
+// GenerateAssignSubstP15 builds the P15 report for pg2-aj84b: a bare
+// assignment whose value holds a command substitution (`X=$(cmd ...)`) is
+// graded by recursing into the substitution, so it approves exactly when every
+// command inside approves. The "spec fact" this approve path hangs on is the
+// SHAPE of the assignment and of its inner command, so each row probes one
+// shape: the plugin-instructed forms the bead names, the quoting spellings,
+// and the negative shapes that must keep abstaining or rejecting (an inner
+// command that abstains, a pipeline stage that abstains, a live positional,
+// arithmetic, backticks around an abstaining command, a persistent
+// shell-behaviour or git-redirecting variable, a nested substitution, and a
+// prefix assignment). Verdicts come from Evaluate, never from reading a spec
+// value (P14). root is a project root the probes run in.
+func GenerateAssignSubstP15(root string) (*P15Report, error) {
+	reg := cmddesc.DefaultRegistry()
+	if _, ok := reg.Lookup("pnwf"); !ok {
+		return nil, fmt.Errorf("p15: no pnwf schema registered")
+	}
+	rep := &P15Report{root: root, Subject: "assignment with command substitution (X=$(cmd))", Generator: "GenerateAssignSubstP15", Test: "TestP15ReportAssignSubst"}
+	for _, p := range []struct{ fact, probe string }{
+		{"(inner) approving pnwf verb", "landing=$(pnwf land-plan feature-x)"},
+		{"(inner) approving pnwf verb, quoted substitution", `landing="$(pnwf land-plan feature-x)"`},
+		{"(inner) approving pnwf verb piped to jq", "canonical_root=$(pnwf resolve | jq -r '.canonical_root')"},
+		{"(inner) env -u wrapping pn workspace info piped to jq", "set_count=$(env -u PN_WORKSPACE_ROOT pn workspace info --json | jq '.sets | length')"},
+		{"(inner) approving read of the repository", "X=$(git rev-parse --show-toplevel)"},
+		{"(inner) approving command, backtick spelling", "X=`git rev-parse --show-toplevel`"},
+		{"(inner) approving command with stderr discarded", "X=$(git rev-parse --show-toplevel 2>/dev/null)"},
+		{"(inner) bare mktemp -d idiom", "X=$(mktemp -d)"},
+		{"(inner) abstaining pnwf verb (not in the schema)", "landing=$(pnwf frobnicate)"},
+		{"(inner) abstaining command with no schema", "X=$(frobnicate)"},
+		{"(inner) abstaining first pipeline stage", "X=$(frobnicate | jq .)"},
+		{"(inner) abstaining last pipeline stage", "canonical_root=$(pnwf resolve | frobnicate)"},
+		{"(inner) abstaining second command of a list", "X=$(pnwf resolve; frobnicate)"},
+		{"(inner) approving command, live positional", `landing=$(pnwf land-plan "$BRANCH")`},
+		{"(inner) delete of a writable path", "X=$(rm -rf foo)"},
+		{"(inner) delete wrapped by env -u", "X=$(env -u FOO rm -rf foo)"},
+		{"(inner) abstaining command, backtick spelling", "X=`frobnicate`"},
+		{"(inner) nested substitution holding an abstaining command", "X=$(echo $(frobnicate))"},
+		{"(inner) nested substitution holding an approving command", "X=$(echo $(pnwf resolve))"},
+		{"(inner) redirect of the substitution into a forbidden path", "X=$(pnwf resolve > /nix/store/x)"},
+		{"(inner) substitution reading a secret", "X=$(cat ~/.ssh/id_rsa)"},
+		{"(shape) arithmetic expansion", "X=$((1+2))"},
+		{"(shape) prefix assignment on an approving command", "X=$(pnwf resolve) echo hi"},
+		{"(shape) prefix assignment holding an abstaining substitution", "X=$(frobnicate) echo hi"},
+		{"(shape) persistent IFS assignment from an approving substitution", "IFS=$(pnwf resolve)"},
+		{"(shape) persistent PATH assignment from an approving substitution", "PATH=$(pnwf resolve)"},
+		{"(shape) persistent GIT_DIR assignment from an approving substitution", "GIT_DIR=$(pnwf resolve); git status"},
+		{"(shape) export of an approving substitution", "export X=$(pnwf resolve)"},
+		{"(shape) assignment chained to an abstaining command", "X=$(pnwf resolve) && frobnicate"},
+		{"(shape) array-element assignment", "a[0]=$(pnwf resolve)"},
+	} {
+		rep.probe(root, reg, p.fact, p.probe)
+	}
+	return rep, nil
+}
+
 // GenerateGitPushP15 builds the P15 report for `git push` (the first
 // instance: R6 makes push Permitted). root is a project root the probes run
 // in (the verdicts do not depend on it; Evaluate needs one).

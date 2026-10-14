@@ -406,6 +406,16 @@ var pluginForms = []pluginForm{
 	{"integrate-branch", `REPO=$(pg-connector scm branch detect | jq -r '.result.repo')`, evalcontract.Abstain, "pg-connector scm is an unmodeled subcommand (ZR plugin schema, separate bead)"},
 	{"integrate-branch", `CC="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"`, evalcontract.Abstain, "cd to a runtime path: the directory is not statically known"},
 	{"integrate-branch", `N=$((1+2))`, evalcontract.Abstain, "arithmetic expansion evaluates variable text, which can run a command substitution"},
+	// pg2-aj84b: pn-workspace-rules assignment forms (validate-workforest
+	// classifier, pnwf-runner stage chains). An assignment approves exactly when
+	// its substitution does; the inner command is graded like a top-level one.
+	{"pn-workspace-rules", `landing=$(pnwf land-plan feature-x)`, evalcontract.Approve, ""},
+	{"pn-workspace-rules", `landing="$(pnwf land-plan feature-x)"`, evalcontract.Approve, ""},
+	{"pn-workspace-rules", `landing=$(pnwf land-plan "$BRANCH")`, evalcontract.Abstain, "pg2-5ctay: a quoted variable as a positional is a runtime value that may start with `-`; type the literal branch name"},
+	{"pn-workspace-rules", `canonical_root=$(pnwf resolve | jq -r '.canonical_root')`, evalcontract.Approve, ""},
+	{"pn-workspace-rules", `set_count=$(env -u PN_WORKSPACE_ROOT pn workspace info --json | jq '.sets | length')`, evalcontract.Approve, ""},
+	{"pn-workspace-rules", `landing=$(pnwf frobnicate)`, evalcontract.Abstain, "an unmodeled pnwf verb abstains, and the assignment never launders it"},
+	{"pn-workspace-rules", `canonical_root=$(pnwf resolve | frobnicate)`, evalcontract.Abstain, "one abstaining pipeline stage inside the substitution keeps the whole assignment abstaining"},
 
 	// `[ ]` / test operators.
 	{"integrate-branch", `[ -z "$REMOTE" ]`, evalcontract.Approve, ""},
