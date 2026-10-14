@@ -12,8 +12,9 @@ Your dispatch names FILES by absolute path: the design file (round 1) or a desig
 (round 2+; each section ends in its `[design: <heading path>]` marker), and a body file plus an
 acceptance file for each packet in scope. Read them with the Read tool; they are the stored text
 of the design and of each packet. If a named file cannot be read, report that as a `blocking`
-finding on that packet instead of guessing at its content. On round 2+ judge only what the
-excerpt and the named packets cover; do not hunt for the rest of the design.
+finding on that packet instead of guessing at its content. On round 2+ the excerpt holds every
+design section the named packets cite plus those the prior findings named: judge against it and
+do not hunt for the rest of the design.
 
 Report findings ONLY on:
 
@@ -32,6 +33,10 @@ citation that's off-target but doesn't change the clause's correctness. When in 
 `minor`: packets don't need to be perfect, and Sonnet-tier implementers can absorb small
 imperfections — reserve `blocking` for what would actually break or silently misbehave if
 shipped as-is.
+
+Name each packet in a finding by its `<key>` (the file-name stem of its body and acceptance
+files), and name every design section in `evidence` as an exact heading path (`Parent > Child`
+when the heading text repeats), so the caller can resolve it mechanically.
 
 Output one finding per line:
 `packet(s) | check: coverage|seam | severity: blocking|minor | evidence | proposed-fix`. No

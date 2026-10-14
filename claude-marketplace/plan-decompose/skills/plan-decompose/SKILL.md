@@ -265,14 +265,15 @@ deduplication.
    own mechanical pre-filter checks. A fix-loop revision is stored with `scripts/update-packet.sh`
    (below), never a raw `bd update`.
 
-   **Scratch layout** (one per run; all paths absolute, under one scratch directory that also
-   holds the design file): `drafts/<key>.draft.md` (may hold `@@` directives) is assembled into
+   **Scratch layout** (one per run; all paths absolute, under one scratch directory `<scratch>` that
+   also holds the design file; `mkdir -p <scratch>/drafts <scratch>/packets <scratch>/excerpts`
+   first): `drafts/<key>.draft.md` (may hold `@@` directives) is assembled into
    `packets/<key>.body.md`, and the packet's acceptance criteria are written straight to
    `packets/<key>.acceptance.md` (they never carry directives). `packets/` never holds drafts. Run
    `assemble-packet.sh` for ALL packets in ONE Bash loop over `drafts/*.draft.md`, not one call per
    packet. Those same two packet files feed `create-packet.sh` / `update-packet.sh` (`--body-file`,
    `--acceptance-file`), the cold-reader and the semantic post-checker, so every reader sees
-   exactly the stored text.
+   exactly the stored text. `excerpts/` holds the post-checker's round 2+ design excerpts (step 7).
 
    **Design file (one per run)**: materialize the design to ONE file per run and pass it as
    `--design` everywhere. A design stored in the medium (a bead) is written out ONCE via
@@ -473,8 +474,9 @@ it by searching disk is both slower and redundant.
   `[design: <heading path>]`. `@@file` resolves against the working directory and is refused
   (exit 3) outside the git toplevel. Exit 3 not found, 4 ambiguous heading (the message lists
   the `Parent > Child` paths that disambiguate), 2 usage, 1 generic; `--out` is written only on
-  success. Step 3 ("Exact excerpts") says when a directive is mandatory; run it once per packet
-  draft, and again after every draft edit.
+  success. Step 3 ("Exact excerpts") says when a directive is mandatory; run it for all
+  drafts in one Bash loop (step 3, "Scratch layout"), and again only for the drafts edited after a
+  fix-loop edit. It also builds the round 2+ post-checker design excerpt ("Sub-dispatch templates").
 - `scripts/create-packet.sh` — this IS the `create-packet` operation for the `beads` binding
   (see `plan-decompose-beads/SKILL.md`'s `create-packet` section): never hand-type a
   `bd create`/`bd defer` pair for a packet yourself. It bakes `--no-inherit-labels` in as the
@@ -526,20 +528,29 @@ or packet text, and never bead ids (the agent has Read/Grep/Glob only, no `bd`, 
 unreadable to it). Two dispatch variants — NEVER re-send the full design or full packet set on
 round 2+:
 
-> Round 1: `[design file path] [path pairs: packets/<key>.body.md + packets/<key>.acceptance.md,
-for every packet] [planned ordering, inline, as blocked-by pairs of packet keys] [repo roots]`.
+> Round 1: `[design file path] [path pairs: <scratch>/packets/<key>.body.md +
+<scratch>/packets/<key>.acceptance.md, for every packet] [planned ordering, inline, as blocked-by
+pairs of packet keys] [repo roots]`.
 >
-> Round 2+: `[excerpt file path: only the design sections the prior round's findings cited]
-[path pairs for only the packets those findings touched, plus their direct planned-ordering
-neighbors] [planned ordering, inline] [repo roots]`.
+> Round 2+: `[excerpt file path: <scratch>/excerpts/round-<n>.design.md] [path pairs for only the
+packets the prior round's findings touched, plus their direct planned-ordering neighbors] [planned
+ordering, inline] [repo roots]`.
 
-The round 2+ excerpt file is built, not typed: write `excerpts/round-<n>.draft.md` holding one
-`@@design-section <heading path>` line per cited section (add a line for each subsection a
-finding cites; a parent heading yields only its lead text), then run `assemble-packet.sh --design
-<design file> --in excerpts/round-<n>.draft.md --out excerpts/round-<n>.design.md` and pass the
+The round 2+ excerpt file is built, not typed. Collect the design sections to include as the union
+of (i) the sections the prior round's findings name and (ii) every `[design: <heading path>]`
+marker in the in-scope packets' bodies (`grep -o` over `<scratch>/packets/<key>.body.md`), so the
+checker can verify every citation of every packet it is given. Write
+`<scratch>/excerpts/round-<n>.draft.md` with one `@@design-section <heading path>` line per section
+(a parent heading yields only its lead text, so add a line for each subsection a finding or
+citation names), then run `assemble-packet.sh --design <design file> --in
+<scratch>/excerpts/round-<n>.draft.md --out <scratch>/excerpts/round-<n>.design.md` and pass the
 `.design.md` path. Each section arrives ending in its `[design: <heading path>]` marker. The
 design file is the one from step 3 ("Design file"), never re-read from the medium. Name each
-packet by its `<key>` in the planned ordering so findings map to the paths given.
+packet by its `<key>` in the planned ordering so findings map to the paths given. The script
+writes nothing if any one directive fails: on exit 3 drop that section from the draft and record
+it (a citation to a nonexistent section is itself a pre-filter failure to fix); on exit 4 use the
+`Parent > Child` form it lists; if a path still cannot be resolved, give that round the full
+design file instead and say so in its input-bytes line.
 
 (the semantic-post-checker agent's own prompt already states its task and output format; your
 dispatch supplies only these four inputs plus the read-only constraint stated above.)

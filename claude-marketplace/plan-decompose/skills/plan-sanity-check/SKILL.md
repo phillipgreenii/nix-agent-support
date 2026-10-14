@@ -62,8 +62,8 @@ gets no `Agent`/`Skill` tool grant, so it cannot recurse or invoke this skill ag
      instructed to.
    - The dispatch is read-only and MUST report fully in one turn (no waiting, no Monitor, no
      further sub-dispatches) — state that constraint in the prompt itself, since a fresh agent
-     has no other way to know it. Give it the plan text's absolute FILE PATH, never the text (a plan held only in a bead
-     or inline is written to a scratch file first), the level being judged (informational only —
+     has no other way to know it. Give it the plan text's absolute FILE PATH, never the text (reuse the plan's existing file when
+     there is one; a plan held only in a bead or inline is written to a scratch file first), the level being judged (informational only —
      do not ask it to branch judgment per level), and step 1's inconclusive findings; ask it to
      read that file and return `good_enough: yes|no` plus `reasons: [...]`. Its Read access is
      the only tool it needs.

@@ -66,8 +66,11 @@ load-bearing:
    there).
 
 4. Re-run the pre-filter + cold-read on re-curated packets and a semantic pass SCOPED to the
-   amended sections, the re-curated packets, and their direct planned-ordering neighbors —
-   plus, when a revision in range ADDED a section, a coverage check of each added section
+   amended sections, the re-curated packets, and their direct planned-ordering neighbors
+   (dispatched by FILE PATH like `decompose` step 7, SKILL.md "Sub-dispatch templates": first write
+   the amended design to the design file and each in-scope packet's stored body and acceptance, via
+   the binding's `read-packet`, to `packets/<key>.body.md` / `.acceptance.md`, since the checker has
+   no `bd`) — plus, when a revision in range ADDED a section, a coverage check of each added section
    against every not-closed packet's Objective and Contract (confirming step 3's placement).
    The full-set semantic check is for initial release and deliberate audits only. A packet
    step 3 classified unaffected that a finding here forces into a content fix is
