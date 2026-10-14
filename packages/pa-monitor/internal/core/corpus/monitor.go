@@ -27,6 +27,7 @@ type Monitor struct {
 	tt     *transcriptTail
 	st     *subagentTail
 	stat   *statusTail
+	walker *corpusWalker
 
 	observers  []Observer
 	sessionObs *SessionSnapshotObserver
@@ -62,6 +63,7 @@ func New(claudeHome string, disc *session.Discoverer) *Monitor {
 		tt:         newTranscriptTail(),
 		st:         newSubagentTail(),
 		stat:       newStatusTail(),
+		walker:     newCorpusWalker(),
 		topo:       map[string]sessionTopology{},
 	}
 }
@@ -174,7 +176,7 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 	// superset) + status siblings (limits), each read at most once. Skipped
 	// entirely when neither observer is registered (phase-1a Monitors).
 	if m.pricingObs != nil || m.limitsObs != nil {
-		files, werr := walkCorpus(m.claudeHome, pricingWindow(now), now)
+		files, werr := m.walker.walk(m.claudeHome, pricingWindow(now), now)
 		if werr != nil && m.pricingObs != nil {
 			m.pricingObs.noteScanErr(werr)
 		}
