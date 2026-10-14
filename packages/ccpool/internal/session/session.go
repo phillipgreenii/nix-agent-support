@@ -287,8 +287,11 @@ type EnsureOpts struct {
 	// workers; unset for attended sessions (which keep pg2-7a5b detection).
 	Autonomous bool
 
-	// Meta is caller-supplied session metadata upserted atomically as part of this
-	// dispatch (e.g. pg-router's pgrouter.bead/role/pool). Addressed by external_id and
+	// Meta is caller-supplied session metadata upserted as part of this dispatch
+	// (e.g. pg-router's pgrouter.bead/role/pool and its supervision lease), written
+	// as soon as the row is in its launching state and BEFORE the launch wait, so a
+	// session still starting (or one whose launch fails or times out) already
+	// carries it (pg2-7139f). Addressed by external_id and
 	// tied to the Claude session lifecycle: preserved across reuse-live/resume,
 	// cleared when a phantom row is pruned (reuse => new). Empty/nil is a no-op.
 	Meta map[string]string
@@ -324,16 +327,7 @@ func (s *Service) Ensure(ctx context.Context, externalID, cwd, model string, opt
 	err := s.withLock(externalID, func() error {
 		var e error
 		h, e = s.ensureLocked(ctx, externalID, cwd, model, opts)
-		if e != nil {
-			return e
-		}
-		// Upsert dispatch metadata atomically within the per-external_id lock, AFTER
-		// ensureLocked has launched/resumed/reused the session. Running here (not inside
-		// ensureLocked) means it lands AFTER the path-4 phantom-row prune, whose
-		// store.Delete cascade already cleared any prior session's metadata — so a fresh
-		// Claude session under a reused external_id keeps only this dispatch's metadata
-		// (reuse => new), while reuse-live/resume preserve prior keys and upsert on top.
-		return s.applyMeta(ctx, externalID, opts.Meta)
+		return e
 	})
 	return h, err
 }
@@ -341,6 +335,16 @@ func (s *Service) Ensure(ctx context.Context, externalID, cwd, model string, opt
 // applyMeta upserts each (key,value) of meta onto externalID. Empty meta is a no-op.
 // A write error is returned: the dispatch metadata is part of the creation contract,
 // and SetMeta is a single autocommit UPSERT on the DB the row was just written to.
+//
+// ensureLocked calls it as soon as the row is in its launching state and BEFORE
+// the launch wait (launchAndWait), not after the session reaches ready: a caller
+// that stamps a supervision lease through --meta (pg-router-ccpool-handler,
+// INV-CCH-18) needs a session that is still starting, or whose launch fails or
+// times out, to carry that lease and its dispatch tags (bead pg2-7139f). It runs
+// AFTER the path-4 phantom-row prune, whose store.Delete cascade already cleared
+// any prior session's metadata, so a fresh Claude session under a reused
+// external_id keeps only this dispatch's metadata (reuse => new), while
+// reuse-live/resume preserve prior keys and upsert on top.
 func (s *Service) applyMeta(ctx context.Context, externalID string, meta map[string]string) error {
 	for k, v := range meta {
 		if err := s.d.Store.SetMeta(ctx, externalID, k, v); err != nil {
@@ -369,6 +373,9 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 	// branch only ever returns a nil error) is recorded HERE, at its own
 	// immediate return (design D6 round-1 semantic post-check finding).
 	if s.d.Tmux.HasSession(tmuxName) {
+		if err := s.applyMeta(ctx, externalID, opts.Meta); err != nil {
+			return Handle{}, err
+		}
 		s.recordLaunchOutcome(externalID, "reuse_live", "success")
 		return Handle{
 			ExternalID: externalID, ClaudeSessionID: row.ClaudeSessionID, Name: row.Name,
@@ -421,6 +428,9 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 			if _, err := s.d.Store.Transition(ctx, externalID, store.Starting, "", ""); err != nil {
 				return Handle{}, fmt.Errorf("mark resuming: %w", err)
 			}
+			if err := s.applyMeta(ctx, externalID, opts.Meta); err != nil {
+				return Handle{}, err
+			}
 			since, err := s.currentGeneration(ctx, externalID)
 			if err != nil {
 				return Handle{}, err
@@ -451,6 +461,9 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 		if _, err := s.d.Store.Transition(ctx, externalID, store.Starting, "", ""); err != nil {
 			return Handle{}, fmt.Errorf("mark resuming: %w", err)
 		}
+		if err := s.applyMeta(ctx, externalID, opts.Meta); err != nil {
+			return Handle{}, err
+		}
 		since, err := s.currentGeneration(ctx, externalID)
 		if err != nil {
 			return Handle{}, err
@@ -470,6 +483,9 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 		TmuxSession: tmuxName, Model: model,
 	}); err != nil {
 		return Handle{}, fmt.Errorf("insert row: %w", err)
+	}
+	if err := s.applyMeta(ctx, externalID, opts.Meta); err != nil {
+		return Handle{}, err
 	}
 	if err := s.startRun(ctx, store.Session{ExternalID: externalID}); err != nil {
 		return Handle{}, err

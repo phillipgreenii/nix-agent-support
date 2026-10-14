@@ -19,7 +19,8 @@ const (
 	// supervising the session. The dispatching handler stamps it at launch
 	// (covering the launch wait plus one TTL) and refreshes it every poll; a
 	// lease in the past means nobody is supervising the session any more. A
-	// session with NO lease (launched by an older build) is never an orphan.
+	// session with NO lease (launched by an older build, or by a ccpool that
+	// applied --meta only at ready) is never an orphan.
 	// NEVER passed as a ccpool --label: a per-poll value would churn telemetry.
 	MetaKeyLeaseUntil = "pgrouter.lease_until"
 	// MetaKeyLaunchedAt is the RFC3339 UTC instant the dispatch launched the
@@ -66,8 +67,10 @@ const PoolName = "pg-router"
 //
 // now is the dispatch's clock reading and leaseTTL the supervision-lease TTL
 // (config.Config.LeaseTTL). The initial lease covers the whole `ccpool new`
-// wait (EnsureTimeout) plus one TTL, so a session still launching is never
-// mistaken for an orphan; the handler shortens it to now+TTL on its first
+// wait (EnsureTimeout) plus one TTL, and ccpool writes it when it inserts the
+// session's row, before that wait (bead pg2-7139f), so a session still
+// launching, or left behind by a failed launch, is never mistaken for an
+// orphan; the handler shortens it to now+TTL on its first
 // refresh once Ensure succeeds. A zero now or a non-positive leaseTTL omits the
 // lease keys (the session is then never treated as an orphan). A non-empty
 // eventID is stamped as MetaKeyEventID, and a non-empty headSHA as

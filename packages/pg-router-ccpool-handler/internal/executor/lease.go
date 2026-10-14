@@ -19,8 +19,12 @@ import (
 // the handler stamps pgrouter.lease_until = now + LeaseTTL on the session's
 // metadata every PollInterval for as long as the dispatch is alive; an expired
 // lease means nobody is supervising the session. The initial value is written
-// atomically by `ccpool new --meta` (ccpool.DispatchMeta) and covers the whole
-// launch wait, so a session still inside Ensure is never an orphan.
+// atomically by `ccpool new --meta` (ccpool.DispatchMeta). ccpool applies it
+// when it inserts the session's row, before the launch wait (bead pg2-7139f), so
+// it covers the whole launch wait and a session still inside Ensure, or what a
+// failed launch leaves behind, is never an orphan. (A ccpool older than that
+// fix applied --meta only once the session was ready; launchWindow, in
+// ccpool.go, is the fallback for a row with no lease.)
 
 const (
 	// leaseWriteTimeout bounds one lease refresh, so a wedged `ccpool meta set`

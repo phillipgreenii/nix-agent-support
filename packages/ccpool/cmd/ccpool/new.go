@@ -26,7 +26,7 @@ func runNew(args []string) int {
 	env := envFlag{}
 	fs.Var(env, "env", "extra env KEY=VAL injected into the session (repeatable)")
 	meta := metaFlag{}
-	fs.Var(meta, "meta", "session metadata KEY=VAL upserted at dispatch (repeatable)")
+	fs.Var(meta, "meta", "session metadata KEY=VAL upserted at dispatch, before the launch wait (repeatable)")
 	label := labelFlag{}
 	fs.Var(label, "label", "flag a metadata key (set via --meta in this same call, or previously) as label-eligible (repeatable)")
 	permMode := fs.String("permission-mode", "", "claude --permission-mode value: default|acceptEdits|plan|auto|dontAsk|bypassPermissions (workers need bypassPermissions)")
@@ -95,7 +95,7 @@ func runNew(args []string) int {
 		return 1
 	}
 	// --label marks each named key as label-eligible in this SAME invocation,
-	// after the metadata itself (--meta, applied inside Ensure) has committed
+	// after the metadata itself (--meta, applied inside Ensure before the launch wait) has committed
 	// (pg2-24f89/pg2-qye99 D8.1).
 	if err := applyLabels(st, externalID, label); err != nil {
 		slog.Error("new: label failed", "err", err)

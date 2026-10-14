@@ -707,6 +707,105 @@ func TestEnsure_freshLaunchUnderReusedExternalIDClearsPriorMetadata(t *testing.T
 	}
 }
 
+// TestEnsure_dispatchMetadataLandsBeforeLaunchWait: --meta must be on the row
+// while the session is still starting, not only once it reaches ready. A caller
+// that stamps its supervision lease through --meta (pg-router-ccpool-handler,
+// INV-CCH-18) otherwise has a launching session with no lease (bead pg2-7139f).
+// Each launching route is driven against the real sqlite store, and the
+// metadata is read from inside the launch wait.
+func TestEnsure_dispatchMetadataLandsBeforeLaunchWait(t *testing.T) {
+	meta := map[string]string{"pgrouter.bead": "zr-1", "pgrouter.lease_until": "2026-10-14T12:00:00Z"}
+	cases := []struct {
+		name  string
+		seed  *store.Session
+		exist bool
+	}{
+		{name: "brand_new"},
+		{name: "resume", seed: &store.Session{ExternalID: "ext-w", ClaudeSessionID: "csid-w", TranscriptPath: "/p/w.jsonl", State: store.Idle, TmuxSession: "cc-ext-w"}, exist: true},
+		{name: "resume_fresh_starting", seed: &store.Session{ExternalID: "ext-w", ClaudeSessionID: "csid-w", State: store.Starting, TmuxSession: "cc-ext-w"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := newMemStore(t)
+			if tc.seed != nil {
+				if err := st.Insert(ctx, *tc.seed); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var during map[string]string
+			var duringState store.State
+			waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+				during, _ = st.Meta(ctx, externalID)
+				row, _, _ := st.GetByExternalID(ctx, externalID)
+				duringState = row.State
+				_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/w.jsonl")
+				return wait.Outcome{State: store.Ready}, nil
+			})
+			s := New(Deps{
+				Tmux: &fakeTmux{live: map[string]bool{}}, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+				Exister: fakeExister{ok: tc.exist},
+				Socket:  "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
+				NewUUID: func() string { return "csid-new" },
+				Now:     func() time.Time { return time.Unix(100, 0) },
+			})
+			if _, err := s.Ensure(ctx, "ext-w", "/tmp/proj", "", EnsureOpts{Meta: meta}); err != nil {
+				t.Fatalf("Ensure: %v", err)
+			}
+			if duringState != store.Starting {
+				t.Fatalf("row state during the launch wait = %q, want starting", duringState)
+			}
+			if !reflect.DeepEqual(during, meta) {
+				t.Errorf("Meta during the launch wait = %v, want %v (a launching session must already carry it)", during, meta)
+			}
+		})
+	}
+}
+
+// TestEnsure_dispatchMetadataSurvivesFailedLaunch: a launch whose wait fails (or
+// whose tmux session cannot be created) still leaves its row carrying the
+// dispatch metadata, so what a failed launch leaves behind is attributable and
+// leased rather than an anonymous row (bead pg2-7139f).
+func TestEnsure_dispatchMetadataSurvivesFailedLaunch(t *testing.T) {
+	meta := map[string]string{"pgrouter.bead": "zr-1", "pgrouter.lease_until": "2026-10-14T12:00:00Z"}
+	cases := map[string]struct {
+		tmuxErr error
+		waitErr error
+	}{
+		"wait_error":   {waitErr: errors.New("boom")},
+		"tmux_error":   {tmuxErr: errors.New("no tmux")},
+		"wait_timeout": {},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			st := newMemStore(t)
+			waiter := waitFunc(func(context.Context, string, int64) (wait.Outcome, error) {
+				if tc.waitErr != nil {
+					return wait.Outcome{}, tc.waitErr
+				}
+				return wait.Outcome{State: store.Starting, TimedOut: true}, nil
+			})
+			s := New(Deps{
+				Tmux: &fakeTmux{live: map[string]bool{}, newErr: tc.tmuxErr}, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+				Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
+				NewUUID: func() string { return "csid-new" },
+				Now:     func() time.Time { return time.Unix(100, 0) },
+			})
+			if _, err := s.Ensure(ctx, "ext-f", "/tmp/proj", "", EnsureOpts{Meta: meta}); err == nil {
+				t.Fatal("Ensure: want a launch error")
+			}
+			got, err := st.Meta(ctx, "ext-f")
+			if err != nil {
+				t.Fatalf("Meta: %v", err)
+			}
+			if !reflect.DeepEqual(got, meta) {
+				t.Errorf("Meta after a failed launch = %v, want %v", got, meta)
+			}
+		})
+	}
+}
+
 // --- ccpool_launch_outcome_total call-site behavior (design D6/D11,
 // pg2-qye99.6). recordLaunchOutcomeFn is spied via the package-level
 // indirection var (declared in session.go) so these tests observe exactly

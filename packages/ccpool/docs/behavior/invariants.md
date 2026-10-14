@@ -92,6 +92,9 @@ obligations, and ownership of a session's working directory.
 - **`INV-SESS-4`** <!-- uuid: 7994abf0-a943-479a-856b-99526f13a5f2 --> — Session metadata is an
   **opaque, caller-owned** key/value set. ccpool MUST NOT interpret a key's meaning; it MUST only
   store what a caller sets, return it uninterpreted, and let a caller filter sessions by it.
+  Metadata a caller supplies at dispatch MUST be stored when the session's row is created, before
+  ccpool waits for the session to become ready, so a session still launching, or one whose launch
+  fails or times out, already carries it.
 
 ### Working directory (`INV-CCPOOL-CWD-*`)
 

@@ -210,7 +210,10 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   running (a dispatch of a ccpool-backed role outlives a daemon restart, see below), so closing the
   session would pull it out from under that handler; a session with no lease, an expired lease, or
   a close reason set is not spared by this rule, and a spared session's worktree is kept like any
-  other spared session's. The shutdown sweep lists only the daemon's default
+  other spared session's. A session mid-launch is spared by its state, not by a lease: it is
+  `starting` from the moment its row is created (and a resumed one is flipped to `starting` before
+  it launches), `ready` once launched, and both are spared whether or not it carries a lease, so
+  the sweep cannot purge a launch in progress (bead `pg2-7139f`). The shutdown sweep lists only the daemon's default
   `ccpool` pool: a session in a role's own dedicated pool is outside it, neither purged nor spared
   by shutdown, and is bounded only by the mechanisms below. Operator ruling (Phillip, 2026-09-30,
   bead `pg2-hwt7v`), superseding the earlier behavior of closing working sessions and
@@ -286,15 +289,20 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   not as a failed cleanup left for the sweep.
 - **`INV-CCH-18`** — a session the handler launched MUST NOT stay unsupervised once its handler is
   gone. While a handler is alive it MUST keep a supervision lease on its session: the lease is
-  stamped when the session is launched (covering the whole launch wait, so a session still
-  starting is never mistaken for an orphan), refreshed on every poll for as long as the dispatch
+  stamped when the session's row is created, before the launch wait (`ccpool new --meta` writes the
+  dispatch's metadata at row insert, not once the session is ready; the initial lease covers the
+  whole launch wait plus one TTL, so a session still starting, or what a failed launch leaves
+  behind, is never mistaken for an orphan and carries its dispatch tags), refreshed on every poll for as long as the dispatch
   runs, and covers the wait, the budget watchdog, the worktree cleanup and the close of the settled
   session. A failure to refresh the lease MUST NOT fail the dispatch; it is logged, and repeated
   consecutive failures are logged at error level so a live handler whose lease is lapsing is
   visible. The lease TTL is configurable and MUST be at least ten poll intervals. A session of a
   role's own pool that carries that role's tags and an expired lease is an **orphan**; a session
-  with no lease at all (launched before leases existed) is never an orphan, and neither is a
-  closed one. Before checking capacity, a dispatch MUST handle every orphan of its own role, one
+  with no lease at all (launched before leases existed or before `ccpool` applied `--meta` at row
+  insert, or by a handler whose lease TTL is not positive) is never an orphan, and neither is a
+  closed one. Such a live `starting` or `ready` session may still be inside its launch, so a
+  dispatch treats it as in flight for one launch window (the launch wait plus one lease TTL) from
+  its last activity and, after that, as a leftover (`INV-CCH-30`). Before checking capacity, a dispatch MUST handle every orphan of its own role, one
   at a time, while holding an exclusive per-session lock (an orphan whose lock is held is skipped)
   and only after re-reading the session to confirm the lease is still expired:
   - **`idle` or `errored`, and quiet** (neither it nor its subagents wrote within the quiet

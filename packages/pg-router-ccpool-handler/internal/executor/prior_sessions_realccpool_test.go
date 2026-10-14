@@ -609,12 +609,60 @@ func TestPriorSessions_realCCPool(t *testing.T) {
 		p.wantReplaced("old", "new")
 	})
 
-	// What real ccpool leaves when a launch fails: `ccpool new` applies a
-	// dispatch's metadata (lease included) only once the session is ready, so a
-	// launch that never got there, or got there only after `ccpool new` had given
-	// up, is a live starting or ready row with NO metadata at all. Inside the
-	// launch window it may still be a launch in progress, so a dispatch declines;
-	// past the window it is a leftover, closed and replaced.
+	// A launch that fails still carries its dispatch metadata, the supervision
+	// lease included: `ccpool new --meta` is applied when the row is inserted,
+	// before the launch wait (bead pg2-7139f; INV-CCH-18), not once the session is
+	// ready. So a session still starting, and what a launch that never got ready
+	// (or got ready only after `ccpool new` gave up) leaves behind, is held by
+	// its lease: a dispatch declines while it lasts, and once it has expired the
+	// row is a leftover, closed and replaced.
+	for _, tc := range []struct {
+		name  string
+		env   map[string]string
+		state ccpool.SessionState
+	}{
+		{"a launch that never reached ready (starting)", map[string]string{"FAKE_CLAUDE_NO_START": "1"}, ccpool.StateStarting},
+		{"a launch that reached ready after it was given up (ready)", map[string]string{"FAKE_CLAUDE_START_DELAY": lateStart}, ccpool.StateReady},
+	} {
+		run("leased failed launch, "+tc.name+": declined while the lease holds, then replaced", func(t *testing.T, p *realPool) {
+			role := realRole("worker")
+			meta := ccpool.DispatchMeta(bead, "worker", time.Now(), p.cfg.LeaseTTL, "evt-earlier", "")
+			if err := p.launch("old", role.DisplayName(p.cfg.SessionPrefix, bead), meta, tc.env); err == nil {
+				t.Fatal("precondition: a launch that does not reach ready in time must fail")
+			}
+			p.wantState("old", tc.state, true)
+			before := p.mustRow("old")
+			if len(before.Meta) == 0 && os.Getenv(requireRealCCPoolEnv) == "" {
+				// The ccpool on PATH predates bead pg2-7139f (--meta applied only at
+				// ready). The nix check builds ccpool from this repo and sets the REQUIRE
+				// variable, so there it is a failure, not a skip.
+				t.Skip("the ccpool on PATH applies --meta only once the session is ready (it predates pg2-7139f)")
+			}
+			if _, ok := before.LeaseUntil(); !ok || before.Meta[ccpool.MetaKeyBead] != bead {
+				t.Fatalf("a failed launch must still carry the dispatch metadata ccpool new was given (lease included); got %v", before.Meta)
+			}
+			if _, err := p.dispatch(role, bead, "evt-1", "", "early", "in_progress"); !errors.Is(err, ErrSessionInFlight) {
+				t.Fatalf("while the launch's lease holds the row is supervised: err = %v, want ErrSessionInFlight", err)
+			}
+			if _, launched := p.row("early"); launched {
+				t.Errorf("a decline launches nothing; pool holds %v", p.ids())
+			}
+			p.wantUnchanged(before)
+			pastLease := ccpool.EnsureTimeout + p.cfg.LeaseTTL + time.Minute
+			if _, err := p.dispatchAt(pastLease, p.cc, role, bead, "evt-1", "", "new", "in_progress", "closed"); err != nil {
+				t.Fatalf("once the lease has expired the leftover is replaced: got %v", err)
+			}
+			p.wantReplaced("old", "new")
+		})
+	}
+
+	// A row with NO lease: one launched before ccpool applied --meta at insert
+	// (a ccpool older than bead pg2-7139f), or by a handler whose LeaseTTL is not
+	// positive, which omits the lease keys. It launches with no metadata at all
+	// here. Such a live starting or ready row may still be inside its launch, so
+	// inside the launch window a dispatch declines; past it, it is a leftover,
+	// closed and replaced. This is the executor's one-launch-window fallback
+	// (launchWindow), kept for those rows.
 	for _, tc := range []struct {
 		name  string
 		env   map[string]string
@@ -625,13 +673,13 @@ func TestPriorSessions_realCCPool(t *testing.T) {
 	} {
 		run("unleased leftover, "+tc.name+": declined inside the launch window, then replaced", func(t *testing.T, p *realPool) {
 			role := realRole("worker")
-			if err := p.launch("old", role.DisplayName(p.cfg.SessionPrefix, bead), p.meta(bead, "worker", "evt-earlier", "", now, future), tc.env); err == nil {
+			if err := p.launch("old", role.DisplayName(p.cfg.SessionPrefix, bead), nil, tc.env); err == nil {
 				t.Fatal("precondition: a launch that does not reach ready in time must fail")
 			}
 			p.wantState("old", tc.state, true)
 			before := p.mustRow("old")
 			if len(before.Meta) != 0 {
-				t.Fatalf("precondition: ccpool applies --meta only at ready, so the failed launch carries none; got %v", before.Meta)
+				t.Fatalf("precondition: a launch given no metadata carries none; got %v", before.Meta)
 			}
 			if _, err := p.dispatch(role, bead, "evt-1", "", "early", "in_progress"); !errors.Is(err, ErrSessionInFlight) {
 				t.Fatalf("inside the launch window the row may still be launching: err = %v, want ErrSessionInFlight", err)

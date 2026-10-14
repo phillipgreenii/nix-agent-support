@@ -947,14 +947,17 @@ type priorClock struct {
 }
 
 // launchWindow is how long a live session still starting or ready that
-// carries NO lease may still be inside its own launch. ccpool applies a
+// carries NO lease may still be inside its own launch. ccpool now applies a
 // dispatch's `ccpool new --meta` (the lease, the event id, the dispatch tags)
-// only once the session has reached ready, so a session whose launch is still
-// waiting carries none, and neither does what a launch that never got there
-// leaves behind (bead pg2-qaeb8, found by the real-ccpool test). The lease
-// such a launch would have been stamped with covers the launch wait plus one
-// TTL (ccpool.DispatchMeta), so that same window, measured from the row's
-// last activity, stands in for it.
+// when it inserts the row, before the launch wait (bead pg2-7139f), so a
+// session launched by this handler normally carries its lease from the start.
+// Before that fix ccpool applied it only once the session was ready, so a
+// launching session, and what a failed launch left behind, carried none (bead
+// pg2-qaeb8, found by the real-ccpool test); a row from such a ccpool, or from
+// a handler whose LeaseTTL is not positive, still carries none. The lease such
+// a launch would have been stamped with covers the launch wait plus one TTL
+// (ccpool.DispatchMeta), so that same window, measured from the row's last
+// activity, stands in for it.
 func (r *ccpoolRun) launchWindow() time.Duration { return ccpool.EnsureTimeout + r.deps.Cfg.LeaseTTL }
 
 // awaitingTurn reports whether s is live with no turn yet (still starting, or
