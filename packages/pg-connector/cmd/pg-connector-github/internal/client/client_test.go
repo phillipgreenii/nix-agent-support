@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/logs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/passthrough"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/proc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/socket"
@@ -111,6 +112,53 @@ func TestCapabilitiesAnsweredStaticallyWithNoDaemon(t *testing.T) {
 	}
 	if !slices.Contains(PR().OpNames(), "list") || slices.Contains(CI().OpNames(), "list") {
 		t.Errorf("pr lists list, ci does not: %v / %v", PR().OpNames(), CI().OpNames())
+	}
+}
+
+// The Phase 3a op tables and what capabilities declares: every op the daemon
+// registers for the instance, the old binary's schema versions and its
+// activity_kinds vocabulary (kept next to cache_opt_out and owns_changes).
+func TestPhase3aOpTablesAndTheCapabilitiesDeclaration(t *testing.T) {
+	wantPR := []string{
+		"auth_status", "capabilities", "commits", "explain", "files", "list", "list_activity", "refresh",
+		"review_pending", "review_submit", "search", "show", "status",
+	}
+	wantCI := []string{"auth_status", "capabilities", "explain", "get_logs", "list_runs", "refresh", "rerun_failed", "status"}
+	if got := PR().OpNames(); !slices.Equal(got, wantPR) {
+		t.Errorf("pr ops = %v, want %v", got, wantPR)
+	}
+	if got := CI().OpNames(); !slices.Equal(got, wantCI) {
+		t.Errorf("ci ops = %v, want %v", got, wantCI)
+	}
+
+	caps := PR().Capabilities("v")
+	for name, want := range map[string]int{"pr": schema.PRSchemaVersion, "search": schema.SearchSchemaVersion, "activity": schema.ActivitySchemaVersion} {
+		if got := caps.SchemaVersions[name]; got != want {
+			t.Errorf("pr capabilities schema version %s = %d, want %d", name, got, want)
+		}
+	}
+	if len(caps.SchemaVersions) != 3 {
+		t.Errorf("pr capabilities declare %v, want exactly pr, search and activity", caps.SchemaVersions)
+	}
+	kinds, ok := caps.Vocabulary[VocabActivityKinds].([]string)
+	if !ok || !slices.Equal(kinds, passthrough.ActivityKinds) || len(kinds) == 0 {
+		t.Errorf("activity_kinds = %v (%T), want the old binary's %v", caps.Vocabulary[VocabActivityKinds], caps.Vocabulary[VocabActivityKinds], passthrough.ActivityKinds)
+	}
+	if caps.Vocabulary[VocabCacheOptOut] != true || caps.Vocabulary[VocabOwnsChanges] != true {
+		t.Errorf("pr vocabulary %v must keep cache_opt_out and owns_changes", caps.Vocabulary)
+	}
+	ci := CI().Capabilities("v")
+	if _, has := ci.Vocabulary[VocabActivityKinds]; has {
+		t.Errorf("ci vocabulary %v must not declare activity_kinds", ci.Vocabulary)
+	}
+	if ci.SchemaVersions["ci"] != schema.CISchemaVersion || len(ci.SchemaVersions) != 1 {
+		t.Errorf("ci capabilities schema versions = %v", ci.SchemaVersions)
+	}
+	// The vocabulary map of one call is its own: editing the answer leaves the
+	// table's declaration alone.
+	caps.Vocabulary["other"] = true
+	if _, leaked := PR().Capabilities("v").Vocabulary["other"]; leaked {
+		t.Error("a capabilities answer shares its vocabulary map with the table")
 	}
 }
 

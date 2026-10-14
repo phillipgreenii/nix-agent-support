@@ -69,23 +69,21 @@ func TestRestartServesEveryFreshReadWithZeroOriginCalls(t *testing.T) {
 }
 
 func TestRestartAfterALongDowntimeStaysInsideTheBudget(t *testing.T) {
-	// One summary per call (batch_size 1) so the demand is many small calls, and
-	// a generous cap for the fill.
+	// One summary and one detail per call (batch_size 1) so the demand is many
+	// small calls, and a generous cap for the fill.
 	d := servetest.NewDaemon(t, servetest.Options{
-		Before: seed,
+		Before: seed3a,
 		Config: map[string]any{"batch_size": 1, "rate_reserve_points": 0},
 	})
 	d.Start(t)
-	for _, q := range []string{servetest.QueryMine, servetest.QueryTeam} {
-		mustList(t, d, q, nil)
-	}
-	filled := d.Shim.WaitQuiet(t, 500*time.Millisecond, 30*time.Second)
+	filled := settle(t, d)
 	if code := servetest.StopDaemon(t, d); code != 0 {
 		t.Fatalf("exit = %d; output: %s", code, d.Stderr())
 	}
 
 	// A long downtime: every stored due time is in the past, so the queue
-	// rebuilt at start holds every query and every summary as overdue.
+	// rebuilt at start holds every query, every summary and every background
+	// group as overdue.
 	past := time.Now().Add(-48 * time.Hour).UnixMilli()
 	db := d.WritableStore(t)
 	for _, stmt := range []string{`UPDATE entity_group SET fresh_until = ?`, `UPDATE query SET fresh_until = ?`} {
@@ -95,31 +93,64 @@ func TestRestartAfterALongDowntimeStaysInsideTheBudget(t *testing.T) {
 	}
 	_ = db.Close()
 
-	const cap = 10
+	// GraphQL calls cost one point each; the runs and jobs requests are REST.
+	graphqlCalls := func(calls []servetest.Call) int {
+		n := 0
+		for _, c := range calls {
+			switch c.Kind() {
+			case "runs", "jobs", "rerun", "create_review":
+			default:
+				n++
+			}
+		}
+		return n
+	}
+	filledGraphQL := graphqlCalls(d.Shim.OriginCalls())
 	spentBefore := graphqlSpent(t, d)
-	if spentBefore != int64(filled) {
-		t.Fatalf("fixture: the budget table holds %d points, the shim saw %d calls (1 point each)", spentBefore, filled)
+	if spentBefore != int64(filledGraphQL) {
+		t.Fatalf("fixture: the budget table holds %d points, the shim saw %d GraphQL calls (1 point each)", spentBefore, filledGraphQL)
 	}
-	if spentBefore >= cap {
-		t.Fatalf("fixture: the fill spent %d points, which leaves nothing under the cap %d", spentBefore, cap)
+	jobRowsBefore := countRows(t, d, "job")
+	if jobRowsBefore == 0 {
+		t.Fatal("fixture: the failed run's jobs were not stored")
 	}
-	demand := 2 + 3 // the two queries and three summaries, one call each
+	// The demand of the catch-up: the two queries, three summaries, three details
+	// and three conversation reads of three pages each, one point per call.
+	const demand = 2 + 3 + 3 + 3*3
+	const headroom = 6
+	cap := int(spentBefore) + headroom
 
-	// Restart under a small cap. The hour's spend is replayed from the budget
-	// table, so the catch-up can use only what is left.
+	// Restart under a cap that leaves only a little headroom. The hour's spend is
+	// replayed from the budget table, so the catch-up can use only what is left.
 	d.Rewrite(map[string]any{"batch_size": 1, "rate_reserve_points": 0, "graphql_points_per_hour": cap})
 	d.Start(t)
-	total := d.Shim.WaitQuiet(t, 1500*time.Millisecond, 30*time.Second)
+	d.Shim.WaitQuiet(t, 1500*time.Millisecond, 30*time.Second, workKinds...)
+	total := len(d.Shim.OriginCalls())
 
-	newCalls := total - filled
-	t.Logf("catch-up: %d calls in the fill, %d new calls (demand %d plus the viewer lookup), cap %d", filled, newCalls, demand, cap)
-	if newCalls >= demand+1 { // +1 for the viewer lookup
-		t.Errorf("the catch-up made %d calls for a demand of %d: the cap did not limit it", newCalls, demand+1)
+	newGraphQL := graphqlCalls(d.Shim.OriginCalls()[filled:])
+	t.Logf("catch-up: %d calls in the fill, %d new GraphQL calls (demand %d plus the viewer lookup), cap %d", filled, newGraphQL, demand, cap)
+	if newGraphQL >= demand+1 { // +1 for the viewer lookup
+		t.Errorf("the catch-up made %d GraphQL calls for a demand of %d: the cap did not limit it", newGraphQL, demand+1)
 	}
-	if spent := graphqlSpent(t, d); spent > cap {
+	if spent := graphqlSpent(t, d); spent > int64(cap) {
 		t.Errorf("the hour's spend is %d points, over the cap %d", spent, cap)
-	} else if spent != int64(total) {
-		t.Errorf("budget table says %d points, the shim saw %d calls", spent, total)
+	} else if want := int64(filledGraphQL + newGraphQL); spent != want {
+		t.Errorf("budget table says %d points, the shim saw %d GraphQL calls (after the fill: %v)", spent, want, kinds(d.Shim.OriginCalls()[filled:]))
+		rows, _ := d.OpenStore(t).Query(`SELECT seq, bucket, spent, purpose, remaining FROM budget ORDER BY seq`)
+		for rows.Next() {
+			var seq, spent, rem int64
+			var bucket, purpose string
+			_ = rows.Scan(&seq, &bucket, &spent, &purpose, &rem)
+			t.Logf("budget row %d %s spent=%d purpose=%q remaining=%d", seq, bucket, spent, purpose, rem)
+		}
+	}
+	// The job table survived the restart, and a failed run's jobs are not fetched
+	// again: the runs requests of the catch-up reuse the cached rows.
+	if got := countRows(t, d, "job"); got != jobRowsBefore {
+		t.Errorf("job rows = %d after the restart, want the %d from before", got, jobRowsBefore)
+	}
+	if got := d.Shim.CountKind("jobs"); got != 1 {
+		t.Errorf("jobs were fetched %d times in all, want once", got)
 	}
 	// The cap held: the catch-up stopped on its own and nothing more comes.
 	time.Sleep(2500 * time.Millisecond)
@@ -130,6 +161,17 @@ func TestRestartAfterALongDowntimeStaysInsideTheBudget(t *testing.T) {
 	if resp, _ := list(t, d, servetest.QueryMine, 20*time.Second, nil); resp.Error != nil {
 		t.Errorf("a read after the catch-up: %+v", resp.Error)
 	}
+	callOK(t, d, "pr", "show", map[string]any{"id": prA.Ref()})
+}
+
+// countRows is the number of rows of a store table.
+func countRows(t *testing.T, d *servetest.Daemon, table string) int {
+	t.Helper()
+	var n int
+	if err := d.OpenStore(t).QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 // graphqlSpent is the sum of the GraphQL points in the budget table over the

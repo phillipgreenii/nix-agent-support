@@ -343,6 +343,25 @@ func StopDaemon(t *testing.T, d *Daemon) int {
 	return d.Wait(t, 30*time.Second)
 }
 
+// Term sends SIGTERM and returns at once; Wait collects the exit code. A test
+// uses it to stop the daemon while a request is still in flight.
+func (d *Daemon) Term(t *testing.T) {
+	t.Helper()
+	d.mu.Lock()
+	cmd, done := d.cmd, d.done
+	d.mu.Unlock()
+	if cmd == nil {
+		t.Fatal("servetest: the daemon was never started")
+	}
+	select {
+	case <-done:
+	default:
+		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			t.Fatalf("servetest: SIGTERM: %v", err)
+		}
+	}
+}
+
 // Kill ends the daemon with SIGKILL (a crash) and returns once it is gone.
 func (d *Daemon) Kill(t *testing.T) {
 	t.Helper()

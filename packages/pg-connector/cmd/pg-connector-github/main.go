@@ -14,7 +14,7 @@
 // Every mode loads and validates the config first. serve runs the daemon
 // (internal/serve): the process shell (state directory, lock, socket, drain on
 // SIGTERM; see pkg/connectord/proc), the store, the governor, the scheduler, the
-// request router and the Phase 2 ops. pr and ci are the client modes
+// request router, the group refresh engine and the Phase 2 and Phase 3a ops. pr and ci are the client modes
 // (internal/client): one scriptout request on stdin, one response on stdout,
 // forwarded to the daemon over its socket (pkg/connectord/socket).
 package main

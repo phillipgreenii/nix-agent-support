@@ -34,6 +34,16 @@ type origin struct {
 	clock governor.Clock
 }
 
+// newOriginOnly returns the origin over gh WITHOUT the retrying runner, for a
+// fetcher that retries and falls back by itself (the detail group's): the
+// runner would retry a batch 502 first and the per-PR retries would multiply.
+func newOriginOnly(gh github.RunFunc, gov *governor.Governor, clock governor.Clock) *origin {
+	if clock == nil {
+		clock = governor.SystemClock{}
+	}
+	return &origin{run: gh, gov: gov, clock: clock}
+}
+
 // newOrigin returns the origin over gh (the token-protected github.CLI, or a
 // stand-in in a test).
 func newOrigin(gh github.RunFunc, gov *governor.Governor, clock governor.Clock, policy github.RetryPolicy) *github.RetryRunner {

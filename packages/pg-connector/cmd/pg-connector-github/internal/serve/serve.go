@@ -1,8 +1,9 @@
 // Package serve assembles the pg-connector-github daemon from the parts the
 // sibling packages built: the process shell (state directory, lock, socket,
 // drain), the request router and its gate, the store, the budget governor, the
-// scheduler, the summary group and the query runner, the viewer identity, the
-// logs and the telemetry, and the Phase 2 ops.
+// scheduler, the summary group and the query runner, the group refresh engine
+// with its six group fetchers, the viewer identity, the posted-review sidecar,
+// the logs and the telemetry, and the Phase 2 and Phase 3a ops.
 //
 // # Startup order
 //
@@ -22,24 +23,36 @@
 //     the telemetry.
 //  6. The viewer is resolved (a failure is not fatal: the daemon is then
 //     unauthenticated or retrying, and says so in auth_status).
-//  7. The Phase 2 ops are registered: pr list, auth_status, status, explain and
-//     ci auth_status, status, explain. Every other op stays unknown_op.
-//  8. The scheduler's queue is rebuilt from the stored due times (nothing is
-//     fetched by the rebuild itself: the governor admits every spend, so a
-//     start after a long outage catches up at the governor's rate) and the
-//     scheduler starts.
-//  9. The gate opens.
+//  7. The posted-review sidecar is opened from the daemon's own environment
+//     (a failure is logged and the write path answers unavailable; startup
+//     goes on), the metered gh runner and Provider are built, the group
+//     engine is built and the six group fetchers (detail, conversation, files,
+//     commits, pending, runs) are registered with it, the revalidation handler
+//     is installed on the summary service's OnSummaryRefreshed hook, the
+//     telemetry observer is installed, and the three identity flushes are
+//     registered (the @me query flush, the pending-group flush and the
+//     sidecar-view flush).
+//  8. The ops are registered: pr list, auth_status, status, show, files,
+//     commits, review_pending, review_submit, search, list_activity, refresh and
+//     explain; ci auth_status, status, list_runs, get_logs, rerun_failed,
+//     refresh and explain. Every other op stays unknown_op.
+//  9. The scheduler's queue is rebuilt from the stored due times, the summary
+//     service's first and the group engine's after it (nothing is fetched by
+//     the rebuild itself: the governor admits every spend, so a start after a
+//     long outage catches up at the governor's rate), and the scheduler starts.
+//  10. The gate opens.
 //
 // A SIGTERM (ctx ending) drains: the listener closes, in-flight requests finish,
-// then the registered hooks run in order (the scheduler and the background
-// loops stop, the telemetry flushes, and the store's WAL checkpoint and close
-// come last) and the lock is released.
+// then the registered hooks run in order (the engine's in-flight writes finish,
+// the scheduler and the background loops stop, the telemetry flushes, and the
+// store's WAL checkpoint and close come last) and the lock is released.
 //
 // # What is not here
 //
-// The change engine, the write path, the pass-through ops and every group but
-// summary belong to later phases; their ops are not registered, so the router
-// answers unknown_op for them.
+// The change engine (classifier, settle barrier, changes and changes_ack, the
+// per-group baselines) belongs to a later phase; its ops are not registered, so
+// the router answers unknown_op for them. The revalidation hook is composed
+// with chain so that phase can add its own handler after the revalidation one.
 package serve
 
 import (
@@ -49,23 +62,42 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ciprovider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/conversation"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/detail"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/entity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/github"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groups"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groupsvc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/identity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/logs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/metered"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/auth"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/explain"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/ciops"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/diag"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/list"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/passthrough"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/prread"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/review"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/status"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/pending"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/posted"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/prfacts"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ratefeed"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/revalidate"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/runs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/sidecar"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
@@ -74,6 +106,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/scheduler"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/socket"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // Exit codes of Run. 1 stays reserved for unexpected errors and 2 for usage.
@@ -109,6 +142,12 @@ type Options struct {
 	PeerUID func(net.Conn) (uint32, error)
 	OwnUID  func() uint32
 	OnReady func(rt *router.Router)
+
+	// MeterProvider is where the daemon's instruments go; nil means the global
+	// provider telemetry.Setup installed. It is a seam for an in-process test
+	// that reads the metrics (the revalidation counter) from a manual reader; the
+	// binary leaves it nil.
+	MeterProvider metric.MeterProvider
 }
 
 // Run runs the daemon until ctx ends and returns the process exit code.
@@ -146,6 +185,7 @@ func Run(ctx context.Context, o Options) int {
 	// The hooks are registered now, in the order they must run, and act on
 	// whatever startup got to.
 	drain := &proc.Hooks{}
+	drain.Register("writes", d.drainWrites)
 	drain.Register("background", d.stopBackground)
 	drain.Register("telemetry", d.stopTelemetry)
 	drain.Register("store", d.closeStore)
@@ -197,11 +237,12 @@ type daemon struct {
 	draining    bool
 	bg          sync.WaitGroup
 
-	gov   atomic.Pointer[governor.Governor]
-	sched atomic.Pointer[scheduler.Scheduler]
+	gov    atomic.Pointer[governor.Governor]
+	sched  atomic.Pointer[scheduler.Scheduler]
+	engine atomic.Pointer[groupsvc.Service]
 }
 
-// start runs startup steps 4 to 9 (see the package comment).
+// start runs startup steps 4 to 10 (see the package comment).
 func (d *daemon) start(ctx context.Context) error {
 	cfg := d.cfg
 	hooks := d.o.Hooks
@@ -229,6 +270,8 @@ func (d *daemon) start(ctx context.Context) error {
 	d.telShutdown = shutdown
 	d.mu.Unlock()
 	tel, err := telemetry.New(telemetry.Options{
+		MeterProvider: d.o.MeterProvider,
+		StorePath:     filepath.Join(cfg.StateDir, config.StoreFileName),
 		Governor: func() governor.State {
 			if g := d.gov.Load(); g != nil {
 				return g.State()
@@ -308,6 +351,11 @@ func (d *daemon) start(ctx context.Context) error {
 		Interval: hooks.ViewerInterval, RetryInterval: hooks.ViewerInterval,
 	})
 
+	// The summary service is built before the group engine (the engine needs
+	// it), and its OnSummaryRefreshed hook is fixed at construction, so the hook
+	// is a late-bound closure: the handler is installed below, once the engine
+	// and the revalidation handler exist.
+	var onRefreshed atomic.Pointer[func(*summary.Summary, summary.Stored)]
 	svc, err := summary.NewService(summary.ServiceConfig{
 		Store: st,
 		Persister: &summary.Persister{
@@ -320,6 +368,11 @@ func (d *daemon) start(ctx context.Context) error {
 		Expiry:          cfg.Expiry.Std(),
 		BatchSize:       cfg.BatchSize,
 		OnBatchSent:     onBatch,
+		OnSummaryRefreshed: func(prev *summary.Summary, next summary.Stored) {
+			if h := onRefreshed.Load(); h != nil {
+				(*h)(prev, next)
+			}
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("summary service: %w", err)
@@ -332,8 +385,66 @@ func (d *daemon) start(ctx context.Context) error {
 		return fmt.Errorf("query runner: %w", err)
 	}
 
+	// The posted-review sidecar, from the daemon's own environment. Without a
+	// state home the daemon runs on: review_submit answers unavailable and
+	// review_pending reports no last_append (both structs' zero values mean
+	// unconfigured).
+	pstore, plocker, serr := sidecar.Open(cfg, os.Getenv)
+	if serr != nil {
+		d.log.Log("sidecar_unavailable", "error", serr.Error())
+		pstore, plocker = posted.Store{}, posted.Locker{}
+	}
+	view := &pending.SidecarView{Store: pstore}
+
+	// The metered runner and the Provider over it: every origin call of the
+	// groups and of the pass-through and write ops is admitted, limited and
+	// booked by the governor. The runner's Feed runs over the RAW gh gateway,
+	// never over the runner itself (and never over the origin, whose --include
+	// handling the Feed does on its own).
+	meteredFeed := ratefeed.New(gov, cli, nil)
+	mr := &metered.Runner{Inner: cli, Governor: gov, Feed: meteredFeed}
+	prov := metered.NewProvider(mr)
+
+	// The group engine and the six fetchers.
+	rules := groups.NewRules(cfg.Settings)
+	engine, err := groupsvc.New(groupsvc.Config{
+		Store: st, Scheduler: sched, Summary: svc, Rules: rules, Aliases: ent,
+		Resolver: &entity.Resolver{Identity: ent, GH: gh, Governor: gov, Feed: feed, BatchSize: cfg.BatchSize},
+		Identity: tracker, Governor: gov, Expiry: cfg.Expiry.Std(),
+	})
+	if err != nil {
+		return fmt.Errorf("group engine: %w", err)
+	}
+	d.engine.Store(engine)
+	// The detail fetcher retries and falls back per PR by itself, so its gh is
+	// the origin WITHOUT the retrying runner: a batch 502 would otherwise be
+	// retried first and the per-PR retries would multiply.
+	runsFetcher := &runs.Fetcher{Feed: meteredFeed, Store: st, Rules: *rules, Settings: cfg.Settings}
+	engine.Register(&detail.Fetcher{GH: newOriginOnly(cli, gov, nil), Governor: gov, Feed: feed, BatchSize: cfg.BatchSize})
+	engine.Register(&conversation.Fetcher{Reader: prov})
+	engine.Register(&prfacts.FilesFetcher{Provider: prov})
+	engine.Register(&prfacts.CommitsFetcher{Provider: prov})
+	engine.Register(&pending.Fetcher{Reader: prov})
+	engine.Register(runsFetcher)
+
+	// Revalidation and the telemetry observer (the same observer value serves
+	// the engine's staleness events and the handler's revalidation counter).
+	var observer revalidate.Observer
+	if tel != nil {
+		o := telemetry.NewGroupObserver(tel)
+		engine.SetObserver(o)
+		observer = o
+	}
+	reval := revalidate.New(revalidate.Config{
+		Store: st, Engine: engine, KeepAlive: svc.InKeepAlive, Rules: rules, Observer: observer,
+		OnError: func(err error) { d.log.Log("revalidation_failed", "error", err.Error()) },
+	})
+	hook := chain(reval.OnSummaryRefreshed)
+	onRefreshed.Store(&hook)
+
 	// A viewer switch flushes every stored result that depends on the viewer
-	// and re-queues the configured queries at once.
+	// and re-queues the configured queries at once; the pending groups and the
+	// sidecar view are identity-scoped too.
 	flushMe := identity.FlushMeQueries(st, func(key string) []string {
 		name, _, _ := cutQueryKey(key)
 		expr, _ := runner.Expr(name)
@@ -345,6 +456,7 @@ func (d *daemon) start(ctx context.Context) error {
 		}
 		return runner.Schedule(ctx)
 	})
+	pending.RegisterFlushes(tracker, st, view, nil)
 
 	// The viewer. A failure is not fatal: the tracker keeps the error, marks an
 	// authentication failure, and the loop below retries.
@@ -367,24 +479,51 @@ func (d *daemon) start(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	if err := explain.Register(d.rt, explain.Config{Store: st, Queue: sched}); err != nil {
-		return err
-	}
 	if err := list.Register(d.rt, list.Config{
 		Queries: runner, Summaries: svc, Store: st, Identity: ent, Auth: tracker, Expiry: cfg.Expiry.Std(),
 	}); err != nil {
 		return err
+	}
+	for op, h := range prread.Handlers(prread.Deps{Engine: engine, Sidecar: view}) {
+		d.rt.Register("pr", op, h)
+	}
+	d.rt.Register("pr", review.OpName, review.Handler(review.Deps{
+		Engine: engine, Provider: prov, Store: pstore, Locker: plocker,
+	}))
+	for op, h := range passthrough.Handlers(passthrough.Deps{GH: prov}) {
+		d.rt.Register("pr", op, h)
+	}
+	for op, h := range ciops.Handlers(ciops.Deps{
+		Engine: engine, Feed: meteredFeed, Logs: ciprovider.NewWithDeps(mr, nil), Runs: runsFetcher,
+	}) {
+		d.rt.Register("ci", op, h)
+	}
+	// refresh and the extended explain (which replaces the Phase 2 explain
+	// registration: the router refuses a duplicate).
+	dd := diag.Deps{
+		Engine: engine, Summaries: svc, Queries: runner, Config: cfg, Store: st, Aliases: ent,
+		Queue: sched, Rules: rules, Jobs: st,
+	}
+	for _, handlers := range []map[string]map[string]scriptout.OpHandler{diag.RefreshHandlers(dd), diag.ExplainHandlers(dd)} {
+		for instance, ops := range handlers {
+			for op, h := range ops {
+				d.rt.Register(instance, op, h)
+			}
+		}
 	}
 
 	// The scheduler's queue, from the stored due times.
 	if _, err := svc.Rebuild(ctx); err != nil {
 		return fmt.Errorf("rebuild the scheduler queue: %w", err)
 	}
+	if _, err := engine.Rebuild(ctx); err != nil {
+		return fmt.Errorf("rebuild the group tasks: %w", err)
+	}
 	if err := runner.Schedule(ctx); err != nil {
 		return fmt.Errorf("schedule the configured queries: %w", err)
 	}
 	d.background(bgCtx, "scheduler", func(ctx context.Context) { sched.Run(ctx) })
-	d.background(bgCtx, "sweep", func(ctx context.Context) { d.sweepLoop(ctx, svc, runner) })
+	d.background(bgCtx, "sweep", func(ctx context.Context) { d.sweepLoop(ctx, svc, runner, st, tel) })
 
 	if ctx.Err() != nil {
 		return errCancelled
@@ -514,8 +653,10 @@ func (d *daemon) viewerLoop(ctx context.Context, t *identity.Tracker) {
 	}
 }
 
-// sweepLoop applies expiry on a timer.
-func (d *daemon) sweepLoop(ctx context.Context, svc *summary.Service, runner *query.Runner) {
+// sweepLoop applies expiry on a timer: the summary service's sweep, the job
+// table's horizon prune and the configured queries' expiry, and reports what the
+// first two evicted to the store.evictions metric (tel may be nil).
+func (d *daemon) sweepLoop(ctx context.Context, svc *summary.Service, runner *query.Runner, st *store.Store, tel *telemetry.Telemetry) {
 	interval := d.o.Hooks.SweepInterval
 	if interval <= 0 {
 		interval = defaultSweepInterval
@@ -526,13 +667,45 @@ func (d *daemon) sweepLoop(ctx context.Context, svc *summary.Service, runner *qu
 			return
 		case <-time.After(interval):
 		}
-		if _, err := svc.Sweep(ctx); err != nil {
+		evicted := 0
+		if n, err := svc.Sweep(ctx); err != nil {
 			d.log.Log("expiry_sweep_failed", "error", err.Error())
+		} else {
+			evicted += n
+		}
+		if n, err := runs.PruneJobs(ctx, st, time.Now(), d.cfg.Expiry.Std()); err != nil {
+			d.log.Log("job_prune_failed", "error", err.Error())
+		} else {
+			evicted += int(n)
+		}
+		if tel != nil {
+			tel.RecordEvictions(evicted)
 		}
 		if _, err := runner.Expire(ctx, d.cfg.Expiry.Std()); err != nil {
 			d.log.Log("query_expiry_failed", "error", err.Error())
 		}
 	}
+}
+
+// chain returns the function that calls each given summary hook in order. It
+// mutates nothing and holds no state; the change engine's handler is chained
+// after the revalidation one.
+func chain(fns ...func(*summary.Summary, summary.Stored)) func(*summary.Summary, summary.Stored) {
+	return func(prev *summary.Summary, next summary.Stored) {
+		for _, fn := range fns {
+			fn(prev, next)
+		}
+	}
+}
+
+// drainWrites waits for the in-flight writes of the group engine to finish
+// (within the drain deadline), before the background stops and before the WAL
+// checkpoint and the lock release.
+func (d *daemon) drainWrites(ctx context.Context) error {
+	if e := d.engine.Load(); e != nil {
+		return e.DrainWrites(ctx)
+	}
+	return nil
 }
 
 // stopBackground ends the scheduler and the loops, after the in-flight requests

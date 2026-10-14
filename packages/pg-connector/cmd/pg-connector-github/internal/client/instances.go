@@ -5,6 +5,7 @@ import (
 	"maps"
 	"sort"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/passthrough"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -33,6 +34,9 @@ type Instance struct {
 	Name           string
 	Ops            map[string]Op
 	SchemaVersions map[string]int
+	// Vocabulary is the instance's extra vocabulary keys (activity_kinds for
+	// pr), reported next to the two flags every instance declares.
+	Vocabulary map[string]any
 }
 
 // WithFallback returns a copy of i whose op has fb as its local fallback (the
@@ -78,20 +82,26 @@ const (
 func (i Instance) Capabilities(version string) scriptout.CapabilitiesResponse {
 	sv := make(map[string]int, len(i.SchemaVersions))
 	maps.Copy(sv, i.SchemaVersions)
+	vocab := map[string]any{}
+	maps.Copy(vocab, i.Vocabulary)
+	vocab[VocabCacheOptOut] = true
+	vocab[VocabOwnsChanges] = true
 	return scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions:  sv,
 		Ops:             i.OpNames(),
-		Vocabulary: map[string]any{
-			VocabCacheOptOut: true,
-			VocabOwnsChanges: true,
-		},
-		Version: version,
+		Vocabulary:      vocab,
+		Version:         version,
 	}
 }
 
-// PR is the pr instance's client table for this phase: the ops the daemon's
-// handlers register so far. Later phases add the rest.
+// VocabActivityKinds is the vocabulary key listing the activity kinds the pr
+// instance emits (the old binary's declaration).
+const VocabActivityKinds = "activity_kinds"
+
+// PR is the pr instance's client table: every op the daemon registers for pr
+// (the drift guard in internal/serve holds the two lists equal), the schema
+// versions pr, search and activity, and the activity_kinds vocabulary.
 func PR() Instance {
 	v := schema.PRSchemaVersion
 	return Instance{
@@ -102,12 +112,25 @@ func PR() Instance {
 			scriptout.OpList:         {SchemaVersion: v},
 			"status":                 {SchemaVersion: v},
 			"explain":                {SchemaVersion: v},
+			"show":                   {SchemaVersion: v},
+			"files":                  {SchemaVersion: v},
+			"commits":                {SchemaVersion: v},
+			"review_pending":         {SchemaVersion: v},
+			"review_submit":          {SchemaVersion: v},
+			"refresh":                {SchemaVersion: v},
+			"search":                 {SchemaVersion: schema.SearchSchemaVersion},
+			scriptout.OpListActivity: {SchemaVersion: schema.ActivitySchemaVersion},
 		},
-		SchemaVersions: map[string]int{"pr": schema.PRSchemaVersion},
+		SchemaVersions: map[string]int{
+			"pr":       schema.PRSchemaVersion,
+			"search":   schema.SearchSchemaVersion,
+			"activity": schema.ActivitySchemaVersion,
+		},
+		Vocabulary: map[string]any{VocabActivityKinds: passthrough.ActivityKinds},
 	}
 }
 
-// CI is the ci instance's client table for this phase.
+// CI is the ci instance's client table: every op the daemon registers for ci.
 func CI() Instance {
 	v := schema.CISchemaVersion
 	return Instance{
@@ -117,6 +140,10 @@ func CI() Instance {
 			scriptout.OpAuthStatus:   {SchemaVersion: v},
 			"status":                 {SchemaVersion: v},
 			"explain":                {SchemaVersion: v},
+			"list_runs":              {SchemaVersion: v},
+			"get_logs":               {SchemaVersion: v},
+			"rerun_failed":           {SchemaVersion: v},
+			"refresh":                {SchemaVersion: v},
 		},
 		SchemaVersions: map[string]int{"ci": schema.CISchemaVersion},
 	}

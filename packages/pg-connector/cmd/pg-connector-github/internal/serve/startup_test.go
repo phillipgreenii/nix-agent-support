@@ -11,8 +11,8 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
-// The startup order and the op table: the daemon is up, the ops of Phase 2 answer
-// and every other op is unknown_op.
+// The startup order and the op table: the daemon is up, the ops of Phases 2 and
+// 3a answer and every other op is unknown_op.
 
 func TestServeStartsAndAnswersTheListOpFromTheOrigin(t *testing.T) {
 	d := servetest.NewDaemon(t, servetest.Options{Before: seed})
@@ -53,12 +53,15 @@ func TestServeStartsAndAnswersTheListOpFromTheOrigin(t *testing.T) {
 	}
 }
 
-func TestServeRegistersOnlyThePhase2Ops(t *testing.T) {
+func TestServeRegistersExactlyThePhase3aOps(t *testing.T) {
 	d := servetest.StartDaemon(t, servetest.Options{})
 
 	registered := map[string][]string{
-		"pr": {scriptout.OpAuthStatus, "explain", scriptout.OpList, "status"},
-		"ci": {scriptout.OpAuthStatus, "explain", "status"},
+		"pr": {
+			scriptout.OpAuthStatus, "explain", scriptout.OpList, "status",
+			"show", "files", "commits", "review_pending", "review_submit", "search", scriptout.OpListActivity, "refresh",
+		},
+		"ci": {scriptout.OpAuthStatus, "explain", "status", "list_runs", "get_logs", "rerun_failed", "refresh"},
 	}
 	for inst, ops := range registered {
 		for _, op := range ops {
@@ -68,17 +71,15 @@ func TestServeRegistersOnlyThePhase2Ops(t *testing.T) {
 			}
 		}
 	}
-	// ci has no list op, and no instance has a later-phase op.
+	// ci has no list op, and the change feed (Phase 3b) is not here yet.
 	for _, c := range []struct{ inst, op string }{
 		{"ci", scriptout.OpList},
-		{"pr", "show"},
-		{"pr", "files"},
-		{"pr", "commits"},
 		{"pr", "changes"},
 		{"pr", "changes_ack"},
-		{"pr", "review_submit"},
-		{"ci", "rerun_failed"},
-		{"ci", "list_runs"},
+		{"ci", "changes"},
+		{"ci", "changes_ack"},
+		{"pr", "list_runs"},
+		{"ci", "show"},
 	} {
 		resp := d.MustCall(t, c.inst, scriptout.Request{Op: c.op, Args: json.RawMessage(`{}`)}, 10*time.Second)
 		if resp.Error == nil || resp.Error.Code != "unknown_op" {

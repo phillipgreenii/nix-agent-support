@@ -186,10 +186,15 @@ func TestConformancePhase2OpsAnswerResponseEnvelopes(t *testing.T) {
 		invoke(t, b, `{"op":"explain","args":{"id":"example-org/widget#9999"}}`).wantError(t, inst.name+" explain unseen", "not_found")
 		invoke(t, b, `{"op":"explain","args":{}}`).wantError(t, inst.name+" explain without id", "invalid_argument")
 
-		// An op no phase delivered yet is unknown_op, from the daemon, for every
-		// op the later phases add.
-		for _, op := range []string{"show", "files", "commits", "changes", "changes_ack", "refresh", "review_pending", "list_runs"} {
+		// An op no phase delivered yet is unknown_op, from the daemon: the
+		// change feed belongs to a later phase.
+		for _, op := range []string{"changes", "changes_ack"} {
 			invoke(t, b, `{"op":"`+op+`","args":{}}`).wantError(t, inst.name+" "+op, "unknown_op")
+		}
+		// An op a phase delivered is registered: with no arguments it is the
+		// handler's invalid_argument, never unknown_op.
+		for _, op := range delivered3aOps(inst.name) {
+			invoke(t, b, `{"op":"`+op+`","args":{}}`).wantError(t, inst.name+" "+op+" with no arguments", "invalid_argument")
 		}
 	}
 
@@ -223,7 +228,21 @@ func phase2Ops(instance string) []string {
 	if instance == "pr" {
 		ops = append(ops, scriptout.OpList)
 	}
-	return ops
+	ops = append(ops, delivered3aOps(instance)...)
+	if instance == "pr" {
+		return append(ops, "review_submit", "search", "list_activity")
+	}
+	return append(ops, "get_logs", "rerun_failed")
+}
+
+// delivered3aOps are the ops Phase 3a added whose empty-argument answer is
+// invalid_argument (review_submit, search and list_activity validate their own
+// arguments later and are covered by the daemon's own tests).
+func delivered3aOps(instance string) []string {
+	if instance == "pr" {
+		return []string{"show", "files", "commits", "review_pending", "refresh"}
+	}
+	return []string{"list_runs", "refresh"}
 }
 
 func TestConformanceFailureCodesFollowTheClosedTaxonomy(t *testing.T) {

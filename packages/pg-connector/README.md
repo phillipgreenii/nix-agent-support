@@ -208,8 +208,10 @@ packages/pg-connector/
                                          error mapping onto the wire taxonomy (rate limits are never auth failures);
                                          internal/ops/passthrough serves the metered pass-through ops search and
                                          list_activity (class 1, purpose passthrough, nothing stored);
-                                         internal/serve assembles the daemon (startup order, ops table, origin gateway)
+                                         internal/serve assembles the daemon (startup order, ops table, origin gateway,
+                                         the group engine and its six fetchers, revalidation, the write path's sidecar and drain)
                                          and internal/servetest runs the real binary against a counting fake gh in tests
+                                         (its fixtures cover every group, the review writes and the rerun)
     pg-connector-pr-github/internal/     backend-private
     pg-connector-issue-beads/internal/
     pg-connector-ci-github-actions/internal/
