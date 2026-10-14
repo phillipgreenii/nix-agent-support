@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,7 +57,20 @@ type writeCall struct {
 // fakeHost is a stateful simulation of one PR's reviews on the host. It backs
 // the lookup and the three write primitives of fakeGH, so a test drives whole
 // create-or-append runs and the re-read sees what the writes did.
+//
+// A fakeHost is safe for concurrent use by the fake host calls (the fakeGH
+// methods, snapshot, addPending, addSubmitted, pendingByNode): mu guards every
+// mutable field they touch. routedGH asks every PR's host who owns a review id
+// (pendingByNode) while another PR's write is mutating its own host, so the
+// hosts of different PRs are reached from several goroutines at once. The test
+// knobs (readErr .. onCompare) are plain fields a test sets before it starts
+// goroutines. The callbacks afterRead, afterCreate and onCompare run with mu
+// RELEASED so a callback may call back into the host (addPending) or block
+// (onCompare); readErr and failItem are pure and run under mu. A test reads the
+// records directly only after the goroutines that wrote them have finished.
 type fakeHost struct {
+	mu sync.Mutex
+
 	head      string
 	pending   []*hostReview
 	submitted []*hostReview
@@ -115,6 +129,12 @@ func newFakeHost(head string) *fakeHost {
 
 // addPending adds a pending review (a hand-started one, say).
 func (h *fakeHost) addPending(commit, body string) *hostReview {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.addPendingLocked(commit, body)
+}
+
+func (h *fakeHost) addPendingLocked(commit, body string) *hostReview {
 	h.nextID++
 	r := &hostReview{dbID: h.nextID, commit: commit, body: body}
 	h.pending = append(h.pending, r)
@@ -123,6 +143,8 @@ func (h *fakeHost) addPending(commit, body string) *hostReview {
 
 // addSubmitted adds a submitted review of the viewer holding comments.
 func (h *fakeHost) addSubmitted(commit string, cs ...hostComment) *hostReview {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.nextID++
 	r := &hostReview{dbID: h.nextID, commit: commit, comments: cs}
 	for _, c := range cs {
@@ -148,10 +170,12 @@ func (h *fakeHost) toNode(r *hostReview) github.PendingReviewNode {
 // snapshot is the lookup: the head, every pending review (lowest id first) and
 // the viewer's submitted reviews.
 func (h *fakeHost) snapshot() (*github.PendingReviewData, error) {
+	h.mu.Lock()
 	h.reads++
 	call := h.reads
 	if h.readErr != nil {
 		if err := h.readErr(call); err != nil {
+			h.mu.Unlock()
 			return nil, err
 		}
 	}
@@ -163,13 +187,21 @@ func (h *fakeHost) snapshot() (*github.PendingReviewData, error) {
 		n := h.toNode(r)
 		data.Submitted = append(data.Submitted, github.SubmittedReviewNode{ID: n.ID, DatabaseID: n.DatabaseID, CommitOID: n.CommitOID, Comments: n.Comments})
 	}
-	if h.afterRead != nil {
-		h.afterRead(call, h)
+	afterRead := h.afterRead
+	h.mu.Unlock()
+	if afterRead != nil {
+		afterRead(call, h)
 	}
 	return data, nil
 }
 
 func (h *fakeHost) pendingByNode(id string) *hostReview {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.pendingByNodeLocked(id)
+}
+
+func (h *fakeHost) pendingByNodeLocked(id string) *hostReview {
 	for _, r := range h.pending {
 		if r.nodeID() == id {
 			return r
@@ -181,30 +213,39 @@ func (h *fakeHost) pendingByNode(id string) *hostReview {
 func (f *fakeGH) CreateBodyOnlyPendingReview(ctx context.Context, repo string, number int, commitID, body string) (*github.CreatedReview, error) {
 	f.note(ctx, "create")
 	h := f.host
+	h.mu.Lock()
 	if h.createErr != nil {
+		h.mu.Unlock()
 		return nil, h.createErr
 	}
 	if h.create422 > 0 {
 		h.create422--
-		h.addPending(h.head, "typed by the operator")
+		h.addPendingLocked(h.head, "typed by the operator")
+		h.mu.Unlock()
 		return nil, fmt.Errorf("github: create pending review: %w: %w", github.ErrPendingReviewExists, errors.New("HTTP 422"))
 	}
 	if len(h.pending) > 0 {
+		h.mu.Unlock()
 		return nil, fmt.Errorf("github: create pending review: %w: %w", github.ErrPendingReviewExists, errors.New("HTTP 422"))
 	}
 	h.creates = append(h.creates, body)
-	r := h.addPending(commitID, body)
-	if h.afterCreate != nil {
-		h.afterCreate(h)
+	r := h.addPendingLocked(commitID, body)
+	created := &github.CreatedReview{NodeID: r.nodeID(), ID: r.dbID, State: "pending"}
+	afterCreate := h.afterCreate
+	h.mu.Unlock()
+	if afterCreate != nil {
+		afterCreate(h)
 	}
-	return &github.CreatedReview{NodeID: r.nodeID(), ID: r.dbID, State: "pending"}, nil
+	return created, nil
 }
 
 func (f *fakeGH) WriteReviewItems(ctx context.Context, reviewID string, items []github.ReviewWriteItem) ([]github.ReviewWriteResult, error) {
 	f.note(ctx, "write")
 	h := f.host
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.writes = append(h.writes, writeCall{reviewID: reviewID, items: items})
-	rev := h.pendingByNode(reviewID)
+	rev := h.pendingByNodeLocked(reviewID)
 	out := make([]github.ReviewWriteResult, len(items))
 	for i, it := range items {
 		reason := github.WriteFailReason("")
@@ -247,6 +288,8 @@ func (f *fakeGH) WriteReviewItems(ctx context.Context, reviewID string, items []
 func (f *fakeGH) GetPRHistory(ctx context.Context, repo string, number int) (*github.PRHistory, error) {
 	f.note(ctx, "history")
 	h := f.host
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.historyReads++
 	if h.historyErr != nil {
 		return nil, h.historyErr
@@ -257,11 +300,16 @@ func (f *fakeGH) GetPRHistory(ctx context.Context, repo string, number int) (*gi
 func (f *fakeGH) GetComparedFiles(ctx context.Context, repo, base, head string, wanted []string) ([]github.ComparedFile, error) {
 	f.note(ctx, "compare")
 	h := f.host
+	h.mu.Lock()
 	h.compareReads++
 	h.compareCalls = append(h.compareCalls, compareCall{base: base, head: head, wanted: slices.Clone(wanted)})
-	if h.onCompare != nil {
-		h.onCompare(h)
+	onCompare := h.onCompare
+	h.mu.Unlock()
+	if onCompare != nil {
+		onCompare(h) // unlocked: it may block or change the host
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if h.compareErr != nil {
 		return nil, h.compareErr
 	}
@@ -271,10 +319,12 @@ func (f *fakeGH) GetComparedFiles(ctx context.Context, repo, base, head string, 
 func (f *fakeGH) UpdateReviewBody(ctx context.Context, reviewID, body string) error {
 	f.note(ctx, "update")
 	h := f.host
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if h.updateTwoPending {
 		return fmt.Errorf("github: update review body: %w: %w", github.ErrTwoPendingReviews, errors.New("only have one pending review"))
 	}
-	rev := h.pendingByNode(reviewID)
+	rev := h.pendingByNodeLocked(reviewID)
 	if rev == nil {
 		return errors.New("no such review")
 	}
