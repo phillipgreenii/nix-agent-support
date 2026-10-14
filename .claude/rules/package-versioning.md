@@ -33,6 +33,18 @@ resolved natively — use the rooted-fileset + `modRoot` form (Pattern B). Autho
 A/B pattern: `phillipg-nix-repo-base` ADR 0008 and its `CLAUDE.md` "Go packages" section. Do not
 reintroduce `vendorHash`/`buildGoModule`/`localReplaceModules` for these packages.
 
+**Cross-module consistency of local replaces** (bead `pg2-cahkj`): `go-deps-wired` checks wiring,
+not that sibling modules still build against each other. A dependency bump synced into one module
+(e.g. `pg-connector`) leaves every module that consumes it through `replace => ../<module>`
+(`pg-desk`, `work-report`, ...) unbuildable, and a hook that only sees the changed module's diff
+misses it. The `go-local-replace-build` hook (commit time and `pg-hooks run pre-land`) therefore
+runs `go build ./...` in every `packages/*` module with a `=> ../<changed>` replace, but only when a
+`packages/<module>/go.mod` or `go.sum` is in the diff. It is a path-scoped hook rather than a nix
+check because a nix check is not a land-time gate in this repo; the logic is
+`scripts/check-go-local-replace-build.sh`, guarded by `tests/go-local-replace-build.bats` (real
+`go`, hermetic fixture). Adding a new local replace needs no wiring: dependents are discovered from
+the `go.mod` files.
+
 **Go test gate**: package builds no longer run tests at all — `mkGoApp`/`mkGoBinary` default
 `doCheck = false` (operator ruling 2026-10-01, bead `pg2-pla9d.2`), so a green `nix build .#<pkg>`
 proves only that the binary compiles, never that any test passes. (Even before that, a package

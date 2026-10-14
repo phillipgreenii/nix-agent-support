@@ -1115,6 +1115,57 @@
           require_serial = true;
         };
 
+        # pg2-cahkj: a dependency bump synced into ONE Go module breaks every
+        # module that consumes it through a local `replace => ../<module>`
+        # (pg2-z5fax.2.3's pg-connector sqlite bump broke `go build ./...` in
+        # pg-desk and work-report; found only when the next pg-desk branch hit
+        # FF-1b, fixed by pg2-wyttf). The existing `go-deps-wired` check proves
+        # wiring, not cross-module consistency, and the other hooks only see the
+        # module that changed. DECISION: a path-scoped hook, not a nix check,
+        # following the precedent of `ceta-agreement-test` and the `*-contract-test`
+        # hooks above. A nix check would not run at land (operator ruling
+        # 2026-10-01: no full flake check at land), while this runs at commit
+        # and under `pg-hooks run pre-land` over the branch diff, the only
+        # automatic gates in this CI-less repo. It needs no nix build: it only
+        # runs `go build ./...` (about 50 s for all seven dependents of
+        # pg-connector/claude-transcript, from a warm cache) and only when a
+        # module's go.mod or go.sum is in the diff (`pass_filenames` hands the
+        # script the changed paths; any other diff starts no go process).
+        # The logic lives in scripts/check-go-local-replace-build.sh and its
+        # regression guard is tests/go-local-replace-build.bats (real go, hermetic
+        # fixture, global rule V-3), which `run-unit-tests` runs on a diff that
+        # touches either. A missing `go` is a LOUD failure, never a skip.
+        go-local-replace-build = {
+          enable = true;
+          name = "go-local-replace-build";
+          description = "go.mod/go.sum changed: go build ./... every module joined to it by a local replace => ../<module> (pg2-cahkj)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "go-local-replace-build-hook";
+              runtimeInputs = [
+                pkgs.git
+                pkgs.coreutils
+                pkgs.gnugrep
+                pkgs.gnused
+              ];
+              text = ''
+                # No network/module cache in the nix build sandbox; the hermetic
+                # checks.*-go-tests tier builds each module there.
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "go-local-replace-build: inside the nix build sandbox; skipping (checks.*-go-tests covers this)" >&2
+                  exit 0
+                fi
+
+                exec bash ${./scripts/check-go-local-replace-build.sh} "$@"
+              '';
+            }
+          }/bin/go-local-replace-build-hook";
+          language = "system";
+          files = "^packages/[^/]+/go\\.(mod|sum)$";
+          pass_filenames = true;
+          require_serial = true;
+        };
+
         # pg2-m146l: prevent main's own history from being rewritten via a
         # direct `git rebase` again. Operator decision 2026-09-07 (bead
         # pg2-m146l comments): main's local reflog showed
