@@ -284,18 +284,40 @@ func fromAlert(v view.CycleView) AlertSettings {
 // and no EventIDs. Replayed is set when the answer is the one an earlier
 // request with the same id and content received.
 type Result struct {
-	Changed  bool     `json:"changed"`
-	Note     string   `json:"note,omitempty"`
-	EventIDs []string `json:"event_ids"`
-	BatchID  string   `json:"batch_id,omitempty"`
-	Replayed bool     `json:"replayed,omitempty"`
-	Version  Version  `json:"version"`
+	Changed bool   `json:"changed"`
+	Note    string `json:"note,omitempty"`
+	// NoteParts is Note as text and instants, present when Note names an
+	// instant, so a client can show the instant in its own zone and clock.
+	NoteParts []NotePart `json:"note_parts,omitempty"`
+	EventIDs  []string   `json:"event_ids"`
+	BatchID   string     `json:"batch_id,omitempty"`
+	Replayed  bool       `json:"replayed,omitempty"`
+	Version   Version    `json:"version"`
+}
+
+// NotePart is one piece of a note: a piece of text, or an instant.
+type NotePart struct {
+	Text string   `json:"text,omitempty"`
+	At   *Instant `json:"at,omitempty"`
+}
+
+func noteParts(parts []command.NotePart) []NotePart {
+	var out []NotePart
+	for _, p := range parts {
+		if p.At.IsZero() {
+			out = append(out, NotePart{Text: p.Text})
+			continue
+		}
+		i := at(p.At)
+		out = append(out, NotePart{At: &i})
+	}
+	return out
 }
 
 // FromResult converts the engine's result.
 func FromResult(r engine.Result) Result {
 	out := Result{
-		Changed: r.Changed, Note: r.Note, EventIDs: []string{}, BatchID: string(r.BatchID),
+		Changed: r.Changed, Note: r.Note, NoteParts: noteParts(r.NoteParts), EventIDs: []string{}, BatchID: string(r.BatchID),
 		Replayed: r.Replayed, Version: FromVersion(r.Version),
 	}
 	for _, id := range r.EventIDs {

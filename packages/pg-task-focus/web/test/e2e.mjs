@@ -278,6 +278,7 @@ test("a cycle starts from the form, runs, pauses, and a repeated pause is a quie
   await settle();
   assert.equal(model.error, null, "no error for a pause of a paused cycle");
   assert.match(model.notice.text, /has been paused since/);
+  assert.doesNotMatch(model.notice.text, /America|Z\b|\b(1[3-9]|2[0-3]):\d\d/, "the notice has no zone name and no 24-hour clock");
   assert.deepEqual(model.state.version, before, "and nothing changed");
 
   await setClock("2026-10-07T13:20:00.000Z");

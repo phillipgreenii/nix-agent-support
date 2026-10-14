@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/command"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/engine"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/wire"
@@ -94,6 +95,33 @@ func TestBuildCalendarClipsAndOrdersSegments(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestResultNotePartsCarryTheInstantAsRFC3339(t *testing.T) {
+	when := time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		parts []command.NotePart
+		want  string
+	}{
+		{"none", nil, `{"changed":false,"note":"n","event_ids":[],"version":{"log_lines":0,"config_generation":0}}`},
+		{
+			"text around an instant",
+			[]command.NotePart{{Text: "since "}, {At: when}, {Text: "."}},
+			`{"changed":false,"note":"n","note_parts":[{"text":"since "},{"at":"2026-10-07T14:00:00.000Z"},{"text":"."}],"event_ids":[],"version":{"log_lines":0,"config_generation":0}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := json.Marshal(wire.FromResult(engine.Result{Note: "n", NoteParts: tc.parts}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("Result = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestProblemOfCarriesTheStructuredDetails(t *testing.T) {
 	r := &command.Rejection{

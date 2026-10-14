@@ -29,8 +29,9 @@ export function networkError() {
  * @param {object} [o.state] the first state
  * @param {(path: string, body: object, calls: object[]) => object | Promise<object>} [o.post] answers a POST; throw an ApiError to fail
  * @param {(q: object) => object} [o.events] answers GET /events
+ * @param {string} [o.browserZone] the zone the browser reports
  */
-export function harness({ state = stateFixture(), post, events, hash = "" } = {}) {
+export function harness({ state = stateFixture(), post, events, hash = "", browserZone = "America/New_York" } = {}) {
   const calls = [];
   let current = state;
   let nowMs = T0;
@@ -59,7 +60,7 @@ export function harness({ state = stateFixture(), post, events, hash = "" } = {}
     api,
     now: () => nowMs,
     newId: () => `01JID${String(++n).padStart(21, "0")}`.slice(0, 26),
-    browserZone: "America/New_York",
+    browserZone,
     hash,
   });
   const controller = createController(store);

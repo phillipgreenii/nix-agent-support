@@ -42,8 +42,20 @@ type Plan struct {
 	BatchID   event.ID
 	NoOp      bool
 	Note      string
+	NoteParts []NotePart
 	Preview   *Preview
 	Candidate *projection.Model
+}
+
+// NotePart is one piece of a note that carries an instant: either Text, or At,
+// the instant the note names. Note always has the instant written out (in UTC
+// and the day period's zone, for the command line); NoteParts lets a client
+// that shows instants its own way, as the web client does in the browser's
+// zone, rebuild the sentence with At shown its way. A part with a zero At is
+// text.
+type NotePart struct {
+	Text string
+	At   time.Time
 }
 
 // Version is the state version: the number of lines in the log and the

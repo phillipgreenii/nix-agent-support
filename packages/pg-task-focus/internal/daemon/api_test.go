@@ -66,6 +66,11 @@ func TestScriptedDay(t *testing.T) {
 	if noop["changed"] != false || noop["note"] == nil || len(noop["event_ids"].([]any)) != 0 {
 		t.Fatalf("a repeated pause is a no-op with a note: %v", noop)
 	}
+	// The note also comes as text and instant parts, so a client can show the instant in its own zone.
+	parts, _ := noop["note_parts"].([]any)
+	if len(parts) != 3 || parts[1].(map[string]any)["at"] == nil || parts[0].(map[string]any)["at"] != nil {
+		t.Fatalf("a no-op note comes as text, an instant and text: %v", noop["note_parts"])
+	}
 	e.clock.Set(local(9, 20))
 	e.ok("/api/v1/cycles/resume", map[string]any{})
 	e.ok("/api/v1/cycles/boost", map[string]any{"minutes": 10})

@@ -7,7 +7,8 @@
 // and the id generator are injected, so every rule here runs under node.
 
 import { ApiError } from "./api.mjs";
-import { overtimeNow, parseRoute } from "./select.mjs";
+import { noteText } from "./present.mjs";
+import { overtimeNow, parseRoute, shownZone } from "./select.mjs";
 
 /** How long an Undo stays, in milliseconds. */
 export const UNDO_MS = 10000;
@@ -201,7 +202,7 @@ export function createStore({ api, now, newId, browserZone = "", hash = "" }) {
       model.busy--;
       if (result.changed === false) {
         // A request for a state that already holds is a success, not an error.
-        model.notice = { seq: ++seq, text: result.note ?? "Nothing changed." };
+        model.notice = { seq: ++seq, text: noteText(result, now(), shownZone(model)) ?? "Nothing changed." };
       } else {
         model.notice = null;
         if (action.undo) setUndo(action.undo.label, result);

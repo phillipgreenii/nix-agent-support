@@ -53,13 +53,39 @@ test("every mutation carries an idempotency id of the daemon's shape", async () 
 });
 
 test("a no-op is a quiet notice and never an error or an Undo", async () => {
-  const h = harness({ post: () => ({ changed: false, note: "Review cycle has been paused since 13:00:00Z (09:00 America/New_York)", event_ids: [], version: { log_lines: 40, config_generation: 1 } }) });
+  const h = harness({ post: () => ({ changed: false, note: "Review cycle has been paused since 2026-10-07T13:00:00.000Z (09:00 America/New_York).", note_parts: [{ text: "Review cycle has been paused since " }, { at: "2026-10-07T13:00:00.000Z" }, { text: "." }], event_ids: [], version: { log_lines: 40, config_generation: 1 } }) });
   await h.start();
   const r = await h.dispatch("cycle.pause", dimmed());
   assert.equal(r.ok, true);
   assert.equal(h.model.error, null);
   assert.equal(h.model.undo, null);
   assert.match(h.model.notice.text, /has been paused since/);
+});
+
+test("a no-op notice shows its instant in the browser's zone, on a 12-hour clock, with no zone name", async () => {
+  // The service writes the note for the command line (UTC and the rule zone, 24-hour) and sends the same sentence as parts.
+  const note = "Review cycle has been paused since 2026-10-07T13:00:00.000Z (09:00 America/New_York).";
+  const note_parts = [{ text: "Review cycle has been paused since " }, { at: "2026-10-07T13:00:00.000Z" }, { text: "." }];
+  const post = () => ({ changed: false, note, note_parts, event_ids: [], version: { log_lines: 40, config_generation: 1 } });
+  // The harness clock is 2026-10-07T13:00Z, so the pause instant is today in each zone.
+  for (const [browserZone, text] of [
+    ["America/New_York", "Review cycle has been paused since 9:00 AM."],
+    ["America/Los_Angeles", "Review cycle has been paused since 6:00 AM."],
+    ["Asia/Tokyo", "Review cycle has been paused since 10:00 PM."],
+  ]) {
+    const h = harness({ post, browserZone });
+    await h.start();
+    await h.dispatch("cycle.pause", dimmed());
+    assert.equal(h.model.notice.text, text, browserZone);
+    assert.doesNotMatch(h.model.notice.text, /America|Asia|Z\b|\b(1[3-9]|2[0-3]):\d\d/, "no zone name and no 24-hour clock");
+  }
+});
+
+test("a no-op notice without parts is shown as the service sent it", async () => {
+  const h = harness({ post: () => ({ changed: false, note: "Nothing to retract.", event_ids: [], version: {} }) });
+  await h.start();
+  await h.dispatch("cycle.pause", dimmed());
+  assert.equal(h.model.notice.text, "Nothing to retract.");
 });
 
 test("a success with an Undo keeps the event just appended, and a batch is undone as a batch", async () => {

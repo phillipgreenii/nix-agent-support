@@ -360,7 +360,7 @@ test("an ambiguous cycle verb is shown as a choice, never decided by the page", 
 });
 
 test("a no-op is a quiet notice, not an error", () => {
-  const m = model({ notice: { seq: 1, text: "Review cycle has been paused since 13:00:00Z (09:00 America/New_York)" } });
+  const m = model({ notice: { seq: 1, text: "Review cycle has been paused since 9:00 AM." } });
   const { p } = draw(m);
   const n = p.byAttr("role", "status").find((x) => page(x).has("has been paused since"));
   assert.ok(n);

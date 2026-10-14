@@ -804,10 +804,25 @@ components:
       properties:
         changed: { type: boolean }
         note: { type: string }
+        note_parts:
+          {
+            type: array,
+            description: The `note` as pieces of text and instants,
+            present when the note names an instant,
+            so a client can show the instant in its own zone and clock. Joining the pieces with each instant written out gives the note.,
+            items: { $ref: "#/components/schemas/NotePart" },
+          }
         event_ids: { type: array, items: { type: string } }
         batch_id: { type: string }
         replayed: { type: boolean }
         version: { $ref: "#/components/schemas/Version" }
+    NotePart:
+      type: object
+      description: One piece of a note, either `text` or `at`, never both.
+      additionalProperties: false
+      properties:
+        text: { type: string }
+        at: { $ref: "#/components/schemas/Instant" }
     TaskRef:
       type: object
       required: [id, title, overdue]

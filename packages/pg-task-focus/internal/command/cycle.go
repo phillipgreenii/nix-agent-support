@@ -509,7 +509,16 @@ func (b *builder) noOp(c projection.Cycle, eff time.Time, state projection.Cycle
 	if title == "" {
 		title = "Cycle " + string(c.ID)
 	}
-	return Plan{NoOp: true, Note: fmt.Sprintf("%s has been %s since %s%s.", title, state, b.instant(since(c, eff, state)), tail)}, nil
+	sinceAt := since(c, eff, state)
+	return Plan{
+		NoOp: true,
+		Note: fmt.Sprintf("%s has been %s since %s%s.", title, state, b.instant(sinceAt), tail),
+		NoteParts: []NotePart{
+			{Text: fmt.Sprintf("%s has been %s since ", title, state)},
+			{At: sinceAt},
+			{Text: tail + "."},
+		},
+	}, nil
 }
 
 // since is the instant cycle c entered state, the state it is in at eff: the

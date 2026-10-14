@@ -266,8 +266,10 @@ Extensions:
   them. _(Operator ruling, 2026-10-08, decision log row 43.)_
 - **`INV-WEB-5`** <!-- uuid: 0c901789-b50a-4185-b43c-2624dae0f9b4 --> — A pause, resume, stop or switch that finds its cycle already in that state is a
   success with `changed: false`; the page MUST NOT show it as an error and MUST NOT change its display,
-  and MAY say the service's one-sentence note, quietly. _(Operator ruling, 2026-10-08, decision log row
-  36.)_
+  and MAY say the service's one-sentence note, quietly. When the note names an instant, the page MUST
+  rebuild the sentence from the note's parts and show that instant as `INV-WEB-23` requires, never the
+  service's own text with the instant written out in UTC and the rule zone. _(Operator ruling,
+  2026-10-08, decision log row 36; instant form: operator ruling, 2026-10-13, bead `pg2-pjb41`.)_
 
 ### Read-only mode
 
@@ -374,13 +376,15 @@ Extensions:
   not exist resolves to the first valid instant after the gap, a time that occurs twice to its earlier
   occurrence); every time the page shows follows `INV-WEB-23`.
 - **`INV-WEB-23`** <!-- uuid: a6d7d849-bcb0-4071-8003-462d4fdc21ca --> — Every instant the page SHOWS (a due time, a completion time, an event's time, a cycle's
-  stop time, a timeline segment, the time of the last state when the connection is lost) MUST be shown in
+  stop time, a timeline segment, the time of the last state when the connection is lost, an instant in
+  the quiet notice of a no-op) MUST be shown in
   the browser's zone, on a 12-hour clock with `AM` or `PM`, and MUST NOT carry a zone name or a 24-hour clock.
   The form is one compact form everywhere: the time alone (`9:00 AM`) on today's date, the weekday and time
   (`Mon 9:00 AM`) within six days either side of today, and otherwise the month, day and time
   (`Oct 12, 9:00 AM`, with the year when it is not the current one). Not shown this way, because they are
   zone-explicit by design: the value of a time the operator types (24-hour, read in the zone named beside
-  the input, `INV-WEB-21`), the zone field of the period modal, and the rule text of a period or a day.
+  the input, `INV-WEB-21`), the zone field of the period modal, the rule text of a period or a day, and
+  the service's own sentence of a refusal (`INV-WEB-4`), which is shown unchanged.
   _(Operator ruling, Phillip, 2026-10-13, bead `pg2-r5xy1`: "the date and times should be using the current
   timezone of the browser. it should also be using am/pm, not 24 hour." Supersedes the web client's part of
   `INV-TIME-8`.)_

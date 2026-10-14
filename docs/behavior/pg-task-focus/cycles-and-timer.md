@@ -42,7 +42,10 @@ A **no-op** is a success, not an error: pausing a paused cycle, resuming a runni
 stopped one, or switching to the cycle that is already the focus, each at the request's effective
 instant, appends no event and changes no version. The success says `changed: false`, returns no event
 ids, and carries a `note`, one plain sentence saying why nothing changed (for example "Deep work
-cycle has been paused since 14:00:00Z (10:00 America/New_York)").
+cycle has been paused since 2026-10-07T14:00:00.000Z (10:00 America/New_York)."). When the note names
+an instant it also carries `note_parts`, the same sentence as pieces of text and instants, so a client
+that shows instants its own way (the web client, in the browser's zone, `INV-WEB-23`) can rebuild the
+sentence without parsing the note.
 
 ## Stories
 

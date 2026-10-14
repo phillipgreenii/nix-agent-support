@@ -74,7 +74,7 @@ const cliOnly = `{
 
 // The outputs that come from the API, by the name of their OpenAPI schema.
 var fromAPI = []string{
-	"State", "Result", "DryRunResult", "Events", "Problem", "Version", "Store", "Period", "Task", "KV", "AlertSettings",
+	"State", "Result", "NotePart", "DryRunResult", "Events", "Problem", "Version", "Store", "Period", "Task", "KV", "AlertSettings",
 	"CycleBase", "Cycle", "DimmedCycle", "ResumeOffer", "TaskRef", "NotMaterialized", "CycleRef", "Preview", "EventView",
 	"ProblemDetails", "Reason", "Instant", "Date", "ULID", "Health",
 }
@@ -119,7 +119,7 @@ func derive(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	var anyOf []any
-	for _, n := range []string{"State", "Result", "DryRunResult", "Events", "Problem", "CheckOutput", "ConfigCheckOutput"} {
+	for _, n := range []string{"State", "Result", "NotePart", "DryRunResult", "Events", "Problem", "CheckOutput", "ConfigCheckOutput"} {
 		anyOf = append(anyOf, map[string]any{"$ref": "#/$defs/" + n})
 	}
 	out := map[string]any{

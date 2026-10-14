@@ -3,6 +3,7 @@ import { test } from "node:test";
 import * as actions from "../assets/actions.mjs";
 import { batchOf, editableFields, effectiveMs, isCorrectable, isRetractable, lookupOf, sentence } from "../assets/events.mjs";
 import { durationWords, isBlank, plural, relativeDue, safeHref, shortTitle, timerText } from "../assets/format.mjs";
+import { noteText } from "../assets/present.mjs";
 import { cycleTypes, overtimeNow, parseRoute, remainingNow, routeHash, tabTitle } from "../assets/select.mjs";
 import { cycleSegments, previewChange, runningMs, withBreak, withEndAt } from "../assets/timeline.mjs";
 import { ULID_PATTERN, ulid } from "../assets/ulid.mjs";
@@ -123,6 +124,21 @@ test("the compact stamp: today, within the week, otherwise the date", () => {
   for (const iso of ["2026-10-07T13:30:00Z", "2026-10-06T13:40:00Z", "2026-11-20T13:00:00Z"]) {
     assert.doesNotMatch(stamp(iso), /America|Z$|\b1[3-9]:|\b2[0-3]:/, "no zone name and no 24-hour clock");
   }
+});
+
+test("a notice's instant is shown in the zone given, not the rule zone the service named", () => {
+  const now = Date.parse("2026-10-07T13:00:00Z");
+  const result = {
+    note: "Deep work cycle has been paused since 2026-10-07T14:00:00.000Z (10:00 America/New_York).",
+    note_parts: [{ text: "Deep work cycle has been paused since " }, { at: "2026-10-07T14:00:00.000Z" }, { text: "." }],
+  };
+  assert.equal(noteText(result, now, NY), "Deep work cycle has been paused since 10:00 AM.");
+  assert.equal(noteText(result, now, "America/Los_Angeles"), "Deep work cycle has been paused since 7:00 AM.");
+  assert.equal(noteText(result, now, "Asia/Kolkata"), "Deep work cycle has been paused since 7:30 PM.");
+  assert.equal(noteText(result, now, "Asia/Tokyo"), "Deep work cycle has been paused since 11:00 PM.");
+  assert.equal(noteText(result, Date.parse("2026-10-09T13:00:00Z"), "Asia/Tokyo"), "Deep work cycle has been paused since Wed 11:00 PM.", "the date follows the zone and the clock");
+  assert.equal(noteText({ note: "Nothing to retract." }, now, NY), "Nothing to retract.", "a note without parts is as sent");
+  assert.equal(noteText({ note: "n", note_parts: [{ text: "since " }, { at: "garbage" }] }, now, NY), "since garbage", "an unreadable instant is shown as sent");
 });
 
 test("the compact stamp reads the instant in the zone given, not the rule's zone", () => {

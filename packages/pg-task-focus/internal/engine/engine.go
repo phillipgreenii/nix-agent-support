@@ -70,13 +70,15 @@ type Options struct {
 // once the request was handled (for a replayed answer, the present one).
 // Preview is the dry run's preview.
 type Result struct {
-	Changed  bool
-	Note     string
-	EventIDs []event.ID
-	BatchID  event.ID
-	Replayed bool
-	Version  Version
-	Preview  *command.Preview
+	Changed bool
+	Note    string
+	// NoteParts is Note as text and instants, when Note names an instant.
+	NoteParts []command.NotePart
+	EventIDs  []event.ID
+	BatchID   event.ID
+	Replayed  bool
+	Version   Version
+	Preview   *command.Preview
 	// Stages are the stages a handled request went through, with the
 	// instants each took, for a trace: "validate" (the plan and the candidate
 	// replay), and for a request that appended, "append", "fsync" (inside
@@ -268,7 +270,7 @@ func (e *Engine) Do(ctx context.Context, c command.Command) (Result, error) {
 		return Result{}, e.reportBuildErr(err)
 	}
 	if plan.NoOp {
-		r := Result{Note: plan.Note, Version: e.version}
+		r := Result{Note: plan.Note, NoteParts: plan.NoteParts, Version: e.version}
 		if hash != "" {
 			e.noOps.put(&noOp{id: id, hash: hash, result: r})
 		}

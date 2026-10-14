@@ -320,6 +320,54 @@ func TestNoOpNoteNamesTheCycleAndSince(t *testing.T) {
 	}
 }
 
+// A no-op note also comes as parts, so a client can show the instant in its
+// own zone: the text around the instant and the instant itself, which are the
+// note once the instant is written out.
+func TestNoOpNoteComesAsTextAndInstantParts(t *testing.T) {
+	b := bootstrapped(t)
+	b.add(0, startOf(cycleA, deepWork))
+	b.add(120, pauseOf(cycleA))
+	b.add(130, startOf(cycleB, review))
+	b.add(140, pauseOf(cycleB))
+	b.add(150, resumeOf(cycleB))
+
+	tests := []struct {
+		name string
+		cmd  command.Command
+		want []command.NotePart
+	}{
+		{"paused", command.PauseCycle{CycleID: cycleA}, []command.NotePart{
+			{Text: "Deep work cycle has been paused since "}, {At: at(120)}, {Text: "."},
+		}},
+		{"the focus", command.SwitchCycle{To: cycleB}, []command.NotePart{
+			{Text: "Review cycle has been running since "}, {At: at(150)}, {Text: ", so it is already the focus."},
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env := envOf(t, b, at(200))
+			p := mustPlan(t, env, tc.cmd)
+			if !slices.EqualFunc(p.NoteParts, tc.want, func(a, w command.NotePart) bool {
+				return a.Text == w.Text && a.At.Equal(w.At)
+			}) {
+				t.Fatalf("NoteParts = %+v, want %+v", p.NoteParts, tc.want)
+			}
+			// The parts are the note: the instant is written the way Note writes it.
+			var joined strings.Builder
+			for _, part := range p.NoteParts {
+				if part.At.IsZero() {
+					joined.WriteString(part.Text)
+				} else {
+					joined.WriteString(env.Model.FormatInstant(part.At))
+				}
+			}
+			if joined.String() != p.Note {
+				t.Errorf("parts joined = %q, want the note %q", joined.String(), p.Note)
+			}
+		})
+	}
+}
+
 // targetOf is the cycle the one event of a plan is about.
 func targetOf(t *testing.T, p command.Plan) event.CycleID {
 	t.Helper()

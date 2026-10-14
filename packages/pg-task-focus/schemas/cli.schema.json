@@ -497,6 +497,19 @@
       "required": ["definition", "reason"],
       "type": "object"
     },
+    "NotePart": {
+      "additionalProperties": false,
+      "description": "One piece of a note, either `text` or `at`, never both.",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Instant"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Period": {
       "additionalProperties": false,
       "properties": {
@@ -723,6 +736,15 @@
         },
         "note": {
           "type": "string"
+        },
+        "note_parts": {
+          "description": "The `note` as pieces of text and instants",
+          "items": {
+            "$ref": "#/$defs/NotePart"
+          },
+          "present when the note names an instant": null,
+          "so a client can show the instant in its own zone and clock. Joining the pieces with each instant written out gives the note.": null,
+          "type": "array"
         },
         "replayed": {
           "type": "boolean"
@@ -960,6 +982,9 @@
     },
     {
       "$ref": "#/$defs/Result"
+    },
+    {
+      "$ref": "#/$defs/NotePart"
     },
     {
       "$ref": "#/$defs/DryRunResult"

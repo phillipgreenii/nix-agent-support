@@ -166,7 +166,8 @@ log). **What crosses in:** a command (complete or skip a task, change periods or
 pause, resume, boost, stop, switch or annotate a cycle, back-fill a break, correct, retract), with
 an optional request `id`, an optional `effective_at`, and for a preview a dry-run flag and an
 expected version. **What crosses out:** on success, whether anything changed, the ids of the events
-appended, the batch id, a one-sentence note when nothing changed, and whether this is a replay of
+appended, the batch id, a one-sentence note when nothing changed (with its parts as text and instants
+when it names an instant), and whether this is a replay of
 an earlier answer; on refusal, one code from the closed catalog below with a message and
 structured details (`INV-LOG-13`, `INV-LOG-14`). **What must hold:** `INV-LOG-12` to `INV-LOG-19`,
 `INV-LOG-24`, `INV-LOG-25`, `INV-LOG-26`, `INV-LOG-27`, `INV-LOG-28`, `INV-LOG-29`.
