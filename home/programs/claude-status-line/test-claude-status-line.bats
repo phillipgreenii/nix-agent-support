@@ -36,6 +36,8 @@ GLYPH_BRANCH=$(_glyph 0xF062C)
 GLYPH_THINKING=$(_glyph 0xF0493)
 GLYPH_CTX=$(_glyph 0xF035B)
 GLYPH_ALERT=$(_glyph 0xF0028)
+# MDI "history" U+F02DA (983770 decimal in scripts.nix glyphCompact): the compaction note.
+GLYPH_COMPACT=$(_glyph 0xF02DA)
 GLYPH_5H=$(_glyph 0xF0150)
 GLYPH_7D=$(_glyph 0xF0679)
 # circle-slice fill U+F0A9E .. U+F0AA5 (8 levels)
@@ -1295,4 +1297,267 @@ _session_mode_json() {
   stripped=$(strip_ansi "$output")
   [[ "$stripped" != *"RUNNING"* ]]
   [[ "$stripped" != *"WRAP"* ]]
+}
+
+# =====================================================================================
+# Compaction note (bead pg2-thkh0.4): folded into the context part while a fresh
+# <session_id>.compaction.json marker (written by `session-mode hook post-compact`) sits
+# next to the transcript and its age is below the window. There is no mockable clock, so
+# ts is computed from `date +%s` and assertions avoid exact boundaries; the window is
+# shrunk through the CLAUDE_SL_COMPACT_WINDOW seam where a small window is needed.
+# =====================================================================================
+
+# Build a status-line JSON with a context_window and a transcript in $TEST_DIR.
+# Args: $1 session_id  $2 transcript_path  $3 context_window JSON object
+#       $4 (optional) extra top-level fields, e.g. '"exceeds_200k_tokens":true,'
+_compaction_json() {
+  printf '{"session_id":"%s","version":"1.0.0",%s"workspace":{"current_dir":"/tmp/potato"},"transcript_path":"%s","model":{"display_name":"Opus"},"context_window":%s}' \
+    "$1" "${4:-}" "$2" "$3"
+}
+
+# Write a marker whose ts is AGE seconds in the past. Args: $1 session_id  $2 age_s
+_write_compaction_marker() {
+  printf '{"ts":%d,"trigger":"auto"}\n' "$(($(date +%s) - $2))" >"$TEST_DIR/$1.compaction.json"
+}
+
+_CTX_25='{"used_percentage":25}'
+_CTX_ZERO='{"used_percentage":0,"current_usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}'
+
+@test "compaction note shows after the percentage while the marker is fresh" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  _write_compaction_marker sess-1 150
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then
+    [[ "$stripped" == *"$GLYPH_CTX 25% $GLYPH_COMPACT 2m"* ]]
+  else
+    [[ "$stripped" == *"ctx:25% ↻2m"* ]]
+  fi
+}
+
+@test "compaction note is dim and sits inside the context segment (no extra separator)" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  _write_compaction_marker sess-1 150
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  # dim escape directly before the compaction glyph
+  if nerd_on; then
+    [[ "$output" == *$'\033[2m'"$GLYPH_COMPACT 2m"* ]]
+  else
+    [[ "$output" == *$'\033[2m'"↻2m"* ]]
+  fi
+  stripped=$(strip_ansi "$output")
+  # the note is not its own " | " segment
+  [[ "$stripped" != *"| ↻"* ]]
+  [[ "$stripped" != *"| $GLYPH_COMPACT"* ]]
+}
+
+@test "compaction note shows seconds-old compactions as <1m" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  _write_compaction_marker sess-1 0
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then
+    [[ "$stripped" == *"$GLYPH_COMPACT <1m"* ]]
+  else
+    [[ "$stripped" == *"ctx:25% ↻<1m"* ]]
+  fi
+}
+
+@test "compaction note renders hours when the window is large and the compaction is old" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  _write_compaction_marker sess-1 7300
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  run bash -c "printf '%s' '$J' | CLAUDE_SL_COMPACT_WINDOW=100000 claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then
+    [[ "$stripped" == *"$GLYPH_COMPACT 2h"* ]]
+  else
+    [[ "$stripped" == *"ctx:25% ↻2h"* ]]
+  fi
+}
+
+@test "compaction note accompanies the settling placeholder, still with no alert" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  _write_compaction_marker sess-1 0
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_ZERO" '"exceeds_200k_tokens":true,')
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then
+    [[ "$stripped" == *"$GLYPH_CTX ... $GLYPH_COMPACT <1m"* ]]
+    [[ "$stripped" != *"$GLYPH_ALERT"* ]]
+  else
+    [[ "$stripped" == *"ctx:... ↻<1m"* ]]
+  fi
+  [[ "$stripped" != *"0%"* ]]
+  [[ "$stripped" != *"(!)"* ]]
+}
+
+@test "compaction note follows the 200k alert when both apply" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  _write_compaction_marker sess-1 150
+  local ctx='{"used_percentage":12,"current_usage":{"input_tokens":1200,"output_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}'
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$ctx" '"exceeds_200k_tokens":true,')
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then
+    [[ "$stripped" == *"12% $GLYPH_ALERT $GLYPH_COMPACT 2m"* ]]
+  else
+    [[ "$stripped" == *"ctx:12%(!) ↻2m"* ]]
+  fi
+}
+
+@test "no marker leaves the output byte-identical to a marker hidden by window 0" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  local J without with_off
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  without=$(bash -c "printf '%s' '$J' | claude-status-line")
+  _write_compaction_marker sess-1 0
+  with_off=$(bash -c "printf '%s' '$J' | CLAUDE_SL_COMPACT_WINDOW=0 claude-status-line")
+  [ "$without" = "$with_off" ]
+  [[ "$without" != *"↻"* ]]
+  nerd_off || [[ "$without" != *"$GLYPH_COMPACT"* ]]
+}
+
+@test "window 0 hides the note even for a brand-new marker" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  _write_compaction_marker sess-1 0
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  run bash -c "printf '%s' '$J' | CLAUDE_SL_COMPACT_WINDOW=0 claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"25%"* ]]
+  [[ "$stripped" != *"↻"* ]]
+  nerd_off || [[ "$stripped" != *"$GLYPH_COMPACT"* ]]
+}
+
+@test "compaction note disappears once the marker is older than the window" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  _write_compaction_marker sess-1 400
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  # same marker: shown under a 1000s window, hidden under a 100s window
+  run bash -c "printf '%s' '$J' | CLAUDE_SL_COMPACT_WINDOW=1000 claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then [[ "$stripped" == *"$GLYPH_COMPACT 6m"* ]]; else [[ "$stripped" == *"↻6m"* ]]; fi
+  run bash -c "printf '%s' '$J' | CLAUDE_SL_COMPACT_WINDOW=100 claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"25%"* ]]
+  [[ "$stripped" != *"↻"* ]]
+  nerd_off || [[ "$stripped" != *"$GLYPH_COMPACT"* ]]
+}
+
+@test "the default window (1800s) hides a marker an hour old and shows one ten minutes old" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  _write_compaction_marker sess-1 3600
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"↻"* ]]
+  nerd_off || [[ "$output" != *"$GLYPH_COMPACT"* ]]
+  _write_compaction_marker sess-1 600
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then [[ "$stripped" == *"$GLYPH_COMPACT 10m"* ]]; else [[ "$stripped" == *"↻10m"* ]]; fi
+}
+
+@test "a malformed, zero-byte or bad-ts marker shows no note and does not crash" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  local content
+  for content in 'not-json{{{' '' '{"ts":"soon","trigger":"auto"}' '{"ts":0,"trigger":"auto"}' '{"ts":-3}'; do
+    printf '%s' "$content" >"$TEST_DIR/sess-1.compaction.json"
+    run bash -c "printf '%s' '$J' | claude-status-line"
+    [ "$status" -eq 0 ]
+    stripped=$(strip_ansi "$output")
+    [[ "$stripped" == *"25%"* ]]
+    [[ "$stripped" != *"↻"* ]]
+    nerd_off || [[ "$stripped" != *"$GLYPH_COMPACT"* ]]
+  done
+}
+
+@test "a future ts (clock skew) is clamped and shows <1m" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  printf '{"ts":%d,"trigger":"auto"}\n' "$(($(date +%s) + 5000))" >"$TEST_DIR/sess-1.compaction.json"
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then [[ "$stripped" == *"$GLYPH_COMPACT <1m"* ]]; else [[ "$stripped" == *"↻<1m"* ]]; fi
+}
+
+@test "another session's marker does not show a note" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  _write_compaction_marker sess-2 0
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"↻"* ]]
+  nerd_off || [[ "$output" != *"$GLYPH_COMPACT"* ]]
+}
+
+@test "no transcript_path means no marker lookup and no note" {
+  _write_compaction_marker sess-1 0
+  run bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"↻"* ]]
+  nerd_off || [[ "$output" != *"$GLYPH_COMPACT"* ]]
+}
+
+@test "a non-numeric CLAUDE_SL_COMPACT_WINDOW falls back to the default window" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  _write_compaction_marker sess-1 150
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  run bash -c "printf '%s' '$J' | CLAUDE_SL_COMPACT_WINDOW=abc claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then [[ "$stripped" == *"$GLYPH_COMPACT 2m"* ]]; else [[ "$stripped" == *"↻2m"* ]]; fi
+}
+
+@test "a CLAUDE_SL_COMPACT_AGE inherited from the environment cannot forge a note" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  local J
+  J=$(_compaction_json sess-1 "$tx" "$_CTX_25")
+  run bash -c "printf '%s' '$J' | CLAUDE_SL_COMPACT_AGE=42 claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"↻"* ]]
+  nerd_off || [[ "$output" != *"$GLYPH_COMPACT"* ]]
 }

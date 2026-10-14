@@ -9,6 +9,7 @@ let
   cfgColors = config.phillipgreenii.programs.claude-code.status-line-colors;
   cfgReserve = config.phillipgreenii.programs.claude-code.status-line-notification-reserve;
   cfgNerdFont = config.phillipgreenii.programs.claude-code.status-line-nerd-font;
+  cfgCompactWindow = config.phillipgreenii.programs.claude-code.status-line-compaction-window-s;
   scripts = import ./scripts.nix {
     inherit pkgs lib;
     colors = cfgColors;
@@ -17,6 +18,7 @@ let
   wrapperScript = scripts.mkWrapperScript {
     parts = cfg;
     reserve = cfgReserve;
+    compactWindow = cfgCompactWindow;
   };
 in
 {
@@ -29,7 +31,7 @@ in
           - receives Claude context via exported env vars (CLAUDE_SL_SESSION_NAME,
             CLAUDE_SL_SESSION_ID, CLAUDE_SL_WORKTREE, CLAUDE_SL_BRANCH,
             CLAUDE_SL_VERSION, CLAUDE_SL_MODEL, CLAUDE_SL_CONTEXT_USED_PCT,
-            CLAUDE_SL_CONTEXT_SETTLING, CLAUDE_SL_EXCEEDS_200K, CLAUDE_SL_REPO_OWNER, CLAUDE_SL_REPO_NAME,
+            CLAUDE_SL_CONTEXT_SETTLING, CLAUDE_SL_COMPACT_AGE, CLAUDE_SL_EXCEEDS_200K, CLAUDE_SL_REPO_OWNER, CLAUDE_SL_REPO_NAME,
             CLAUDE_SL_PR_NUMBER, CLAUDE_SL_PR_URL, CLAUDE_SL_PR_REVIEW_STATE,
             CLAUDE_SL_EFFORT, CLAUDE_SL_THINKING, CLAUDE_SL_VIM_MODE, CLAUDE_SL_AGENT,
             CLAUDE_SL_5H_PCT, CLAUDE_SL_5H_RESET, CLAUDE_SL_7D_PCT, CLAUDE_SL_7D_RESET,
@@ -78,6 +80,20 @@ in
         carries the notification is undocumented. Set to 0 to wrap only at the true COLUMNS
         edge. Wrapping is skipped entirely (single line, legacy behavior) when COLUMNS is
         unset, 0, or non-numeric.
+      '';
+    };
+
+    status-line-compaction-window-s = lib.mkOption {
+      type = lib.types.int;
+      default = 1800;
+      description = ''
+        Seconds the compaction note (`<glyph>14m`, folded into the context segment) stays
+        visible after a compaction. The `session-mode hook post-compact` PostCompact hook writes
+        a `<session_id>.compaction.json` marker next to the transcript; the wrapper reads it
+        (pure bash, no second jq call) and exports CLAUDE_SL_COMPACT_AGE (whole seconds since
+        the compaction) only while the marker's age is below this window. Set to 0 to disable
+        the note (the hook still writes the marker; only the display is disabled). Overridable
+        at runtime via the CLAUDE_SL_COMPACT_WINDOW environment variable (test/power-use seam).
       '';
     };
   };

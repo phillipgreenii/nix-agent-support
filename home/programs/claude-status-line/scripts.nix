@@ -76,6 +76,13 @@ let
   # space so it reads `... 42% <alert>`. Nerd-off `(!)` stays tight (text unaffected).
   glyphAlert = if nerdFont then " " + glyph 983080 else "(!)"; # U+F0028
 
+  # Compaction note (bead pg2-thkh0.4): a SUFFIX marker folded into the context part right after
+  # the percentage (or the settling placeholder), followed by the age (`<glyph>14m`). The part
+  # adds the single separating space itself. Nerd-on is MDI "history" (plane 15, written in
+  # decimal like glyphCtx; utf8Bytes is only correct for plane 15) with a trailing space so it sits
+  # one space from the age; nerd-off is the BMP literal U+21BB, tight against the age.
+  glyphCompact = if nerdFont then glyph 983770 + " " else "↻"; # U+F02DA
+
   # The session NAME is its own segment (bold). Shown only when session_name present.
   sessionNamePart = pkgs.writeShellScript "claude-sl-session-name" ''
     ${ansiColors}
@@ -166,15 +173,32 @@ let
   # CONTEXT: simple colored percentage (number always shown) + 200k alert glyph.
   #   green (<60) / yellow (60-74) / red (>=75) by used_percentage. Hidden when absent.
   #   Appends a RED alert marker when exceeds_200k_tokens == true.
+  #   Appends a DIM compaction note (`<glyph>14m`) while CLAUDE_SL_COMPACT_AGE is set: the wrapper
+  #   sets it only when a fresh `<session_id>.compaction.json` marker exists and its age is below
+  #   the display window (status-line-compaction-window-s), so this part only formats it.
   contextPart = pkgs.writeShellScript "claude-sl-context" ''
     ${ansiColors}
     [ -n "$CLAUDE_SL_CONTEXT_USED_PCT" ] || exit 1
+    note=""
+    case "$CLAUDE_SL_COMPACT_AGE" in
+      "" | *[!0-9]*) ;;
+      *)
+        if [ "$CLAUDE_SL_COMPACT_AGE" -lt 60 ]; then
+          note_age="<1m"
+        elif [ "$CLAUDE_SL_COMPACT_AGE" -lt 3600 ]; then
+          note_age="$((CLAUDE_SL_COMPACT_AGE / 60))m"
+        else
+          note_age="$((CLAUDE_SL_COMPACT_AGE / 3600))h"
+        fi
+        note=" $(printf "''${DIM}${glyphCompact}%s''${RESET}" "$note_age")"
+        ;;
+    esac
     # Right after a compaction Claude reports a literal 0% (not null) with no input tokens yet,
     # while exceeds_200k_tokens is still the stale cached true. Show a dim placeholder and NO
     # alert until the next API response repopulates the numbers. The check lives here because
     # the empty-string guard above does not catch the non-empty string "0".
     if [ "$CLAUDE_SL_CONTEXT_SETTLING" = "true" ]; then
-      printf "''${DIM}${glyphCtx}...''${RESET}"
+      printf "''${DIM}${glyphCtx}...''${RESET}%s" "$note"
       exit 0
     fi
     used_int=''${CLAUDE_SL_CONTEXT_USED_PCT%.*}
@@ -189,7 +213,7 @@ let
     if [ "$CLAUDE_SL_EXCEEDS_200K" = "true" ]; then
       out="$out$(printf "''${RED}${glyphAlert}''${RESET}")"
     fi
-    printf '%s' "$out"
+    printf '%s' "$out$note"
   '';
 
   versionPart = pkgs.writeShellScript "claude-sl-version" ''
@@ -366,6 +390,9 @@ let
     {
       parts,
       reserve ? 20,
+      # Seconds the compaction note stays visible after a compaction; 0 disables the note.
+      # Overridable at runtime via CLAUDE_SL_COMPACT_WINDOW (test/power-use seam).
+      compactWindow ? 1800,
     }:
     pkgs.writeShellScript "claude-status-line-wrapper" ''
       input=$(cat)
@@ -395,6 +422,7 @@ let
       export CLAUDE_SL_SESSION_MODE_KIND
       export CLAUDE_SL_SESSION_MODE_STATE
       export CLAUDE_SL_SESSION_MODE_DETAIL
+      export CLAUDE_SL_COMPACT_AGE
       # Single jq invocation extracts every field at once (one process per render, not one
       # per field). jq emits shell-quoted `VAR=value` assignments via @sh; eval applies them.
       # @sh guarantees each value is safely quoted, so spaces / quotes / $() / backticks in
@@ -444,6 +472,24 @@ let
       ${builtins.readFile ./session-mode-status.bash}
       if [ -n "$_sl_txdir" ] && [ -n "$CLAUDE_SL_SESSION_ID" ]; then
         read_session_mode "$_sl_txdir/$CLAUDE_SL_SESSION_ID.session-mode.json"
+      fi
+
+      # Compaction note (bead pg2-thkh0.4). Reads the sibling <session_id>.compaction.json
+      # marker written by `session-mode hook post-compact`, jq-free like the session-mode read
+      # (functions injected verbatim from compaction-status.bash; the CALL is guarded the same
+      # way). CLAUDE_SL_COMPACT_AGE ends up non-empty (whole seconds since the compaction) ONLY
+      # when a valid marker exists AND its age is below the display window; contextPart then
+      # shows the note. Window: nix-baked default, overridable via CLAUDE_SL_COMPACT_WINDOW
+      # (exactly like CLAUDE_SL_RESERVE); a non-numeric value falls back to the default, 0 disables.
+      ${builtins.readFile ./compaction-status.bash}
+      CLAUDE_SL_COMPACT_AGE=""
+      _sl_compact_window=''${CLAUDE_SL_COMPACT_WINDOW:-${toString compactWindow}}
+      case "$_sl_compact_window" in (*[!0-9]*|"") _sl_compact_window=${toString compactWindow} ;; esac
+      if [ "$_sl_compact_window" -gt 0 ] && [ -n "$_sl_txdir" ] && [ -n "$CLAUDE_SL_SESSION_ID" ]; then
+        read_compaction_marker "$_sl_txdir/$CLAUDE_SL_SESSION_ID.compaction.json" "$EPOCHSECONDS"
+        if [ -n "$CLAUDE_SL_COMPACT_AGE" ] && [ "$CLAUDE_SL_COMPACT_AGE" -ge "$_sl_compact_window" ]; then
+          CLAUDE_SL_COMPACT_AGE=""
+        fi
       fi
 
       # Branch fallback: Claude only populates worktree.branch inside a worktree session,
