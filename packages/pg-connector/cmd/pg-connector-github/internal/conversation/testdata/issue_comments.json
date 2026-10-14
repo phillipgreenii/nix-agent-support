@@ -1,0 +1,35 @@
+{
+  "data": {
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4899,
+      "resetAt": "2026-10-12T10:00:00Z"
+    },
+    "repository": {
+      "pullRequest": {
+        "comments": {
+          "totalCount": 2,
+          "pageInfo": { "hasNextPage": false, "endCursor": "" },
+          "nodes": [
+            {
+              "id": "IC_1",
+              "author": { "login": "teammate" },
+              "authorAssociation": "OWNER",
+              "body": "first",
+              "createdAt": "2026-10-12T09:00:00Z",
+              "updatedAt": "2026-10-12T09:00:00Z"
+            },
+            {
+              "id": "IC_2",
+              "author": { "login": "teammate" },
+              "authorAssociation": "OWNER",
+              "body": "second",
+              "createdAt": "2026-10-12T11:00:00Z",
+              "updatedAt": "2026-10-12T11:00:00Z"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

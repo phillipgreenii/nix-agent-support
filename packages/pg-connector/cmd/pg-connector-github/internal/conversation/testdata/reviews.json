@@ -1,0 +1,37 @@
+{
+  "data": {
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4898,
+      "resetAt": "2026-10-12T10:00:00Z"
+    },
+    "repository": {
+      "pullRequest": {
+        "reviews": {
+          "totalCount": 2,
+          "pageInfo": { "hasNextPage": false, "endCursor": "" },
+          "nodes": [
+            {
+              "id": "PRR_2",
+              "state": "COMMENTED",
+              "body": "",
+              "createdAt": "2026-10-12T08:00:00Z",
+              "submittedAt": "2026-10-12T08:00:00Z",
+              "author": { "login": "teammate" },
+              "commit": null
+            },
+            {
+              "id": "PRR_1",
+              "state": "CHANGES_REQUESTED",
+              "body": "please fix",
+              "createdAt": "2026-10-12T10:30:00Z",
+              "submittedAt": "2026-10-12T10:30:00Z",
+              "author": { "login": "review-bot" },
+              "commit": { "oid": "abc123" }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "data": {
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4900,
+      "resetAt": "2026-10-12T10:00:00Z"
+    },
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 1,
+          "pageInfo": { "hasNextPage": false, "endCursor": "" },
+          "nodes": [
+            {
+              "id": "PRRT_1",
+              "isResolved": true,
+              "isOutdated": true,
+              "comments": {
+                "totalCount": 1,
+                "pageInfo": { "hasNextPage": false, "endCursor": "" },
+                "nodes": [
+                  {
+                    "id": "PRRC_1",
+                    "author": { "login": "review-bot" },
+                    "authorAssociation": "MEMBER",
+                    "body": "nit",
+                    "path": "a.go",
+                    "line": 3,
+                    "originalLine": 3,
+                    "createdAt": "2026-10-12T10:00:00Z",
+                    "updatedAt": "2026-10-12T10:00:00Z",
+                    "isMinimized": false,
+                    "minimizedReason": "",
+                    "originalCommit": { "oid": "abc123" },
+                    "pullRequestReview": { "id": "PRR_1" }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
