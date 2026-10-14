@@ -145,19 +145,25 @@ closeout): `pd_metrics outcome=<done|blocked|released> escalation-reads=<n> vali
 ## Work-packet content anatomy
 
 Nine parts, in this order. EVERY substantive clause in parts 2, 3, 5, and 7 MUST end with the
-citation marker `[design: <section number or heading>]` — content with no citable design
-source is invention and MUST NOT be written (state the gap instead). Verbatim-copied blocks
-cite their source section once for the block.
+citation marker `[design: <section number or heading>]` — the heading form MAY be a
+`Parent > Child` path when the heading text repeats, resolved exactly as `assemble-packet.sh`
+resolves it ("Helper scripts"). Content with no citable design source is invention and MUST NOT
+be written (state the gap instead). Verbatim-copied blocks cite their source section once for
+the block.
 
 1. **Shared preamble** — global constraints / docket-wide normative text binding this packet,
-   VERBATIM, byte-identical and identically ordered across the siblings that share it.
+   VERBATIM, byte-identical and identically ordered across the siblings that share it. A
+   verbatim WHOLE design section or table row MUST come from an `assemble-packet.sh` directive
+   (step 3, "Exact excerpts"), never retyped.
 2. **Objective** — the end-to-end deliverable, one paragraph, rewritten curation.
 3. **Contract** — _Consumes:_ exact signatures/interfaces used (from predecessor packets or
    existing code). _Produces:_ names, types, behaviors later packets rely on. Neighbors
    communicate ONLY through contracts; sibling packet text is never authority.
 4. **Files** — create/modify/test paths; repo root stated once.
 5. **Binding decisions** — decided-hows from the design (mandated algorithms, idioms, error
-   shapes, libraries), VERBATIM. Decision-encoding snippets (schema, state machine) allowed;
+   shapes, libraries), VERBATIM — a verbatim WHOLE section or table row MUST come from an
+   `assemble-packet.sh` directive (step 3, "Exact excerpts"); verbatim sentences inside curated
+   prose stay hand-written. Decision-encoding snippets (schema, state machine) allowed;
    implementation code is not. State the freedom boundary explicitly: anything the design did
    not decide is the implementer's choice.
 6. **Validation (change-scoped)** — exact commands, timeouts, expected results for THIS
@@ -252,6 +258,25 @@ deduplication.
    of the whole packet. Bash stays for this plugin's helper scripts ("Helper scripts") and your
    own mechanical pre-filter checks.
 
+   **Design file (one per run)**: materialize the design to ONE file per run and pass it as
+   `--design` everywhere. A design stored in the medium (a bead) is written out ONCE via
+   `read-docket-design`, following the chunk index; every later step, packet, and fix round
+   reuses that file — never re-read the design from the medium per packet.
+
+   **Exact excerpts**: a verbatim WHOLE design section or table row in a packet MUST come from a
+   directive line in the draft, never retyped — `@@design-section [--quote] <heading path>`,
+   `@@design-table-row <heading path> | <first-cell text>`, or `@@file <path>`. The draft is
+   expanded by `scripts/assemble-packet.sh --design <design file> --in <draft> --out <body>`
+   ("Helper scripts"); every other draft line passes through byte-for-byte. Verbatim sentences
+   inside curated prose stay hand-written. A `@@design-section` / `@@design-table-row` block
+   already ends with its `[design: <heading path>]` marker, so write none for it. Exit 4
+   (ambiguous heading): rewrite the path as one of the `Parent > Child` forms the message lists.
+   Exit 3 (not found): correct the path; if the design has no such text, state the gap. Exit 3
+   on `@@file` can also mean the path is outside the repo toplevel; never work around that.
+   The ASSEMBLED body, never the draft, is the packet's text: step 4 sizes it, step 5 pre-filters
+   it, `create-packet` receives it as `--body-file`, and step 6 gives it to the cold-reader.
+   Fix-loop edits go to the DRAFT; re-run `assemble-packet.sh` after each one.
+
    **RESUME dedup** (`pg2-b439c`; widened `tc-96czz` — a check performed once at step-3 ENTRY
    cannot catch a concurrent PEER that finishes decomposing the same docket between that entry
    and a LATER `create-packet` call in the same pass; that gap let two concurrent
@@ -292,19 +317,21 @@ deduplication.
    packets — delete restated consumer discipline; keep docket-specific normative text as the
    shared preamble.
 
-4. **Size** each packet: fixed inputs (packet text + expected read-set, bytes ÷ 4) MUST be
+4. **Size** each packet: fixed inputs (the ASSEMBLED body's text + expected read-set, bytes ÷ 4) MUST be
    ≤ `pd_read_target`% of budget. Over ⇒ split. Unsplittable (no boundary passes the
    reviewer-reject test) ⇒ write a packet-metadata deviation and PROCEED — sizing never
    halts. Estimates go in the report, not packet content.
 5. **Mechanical pre-filter** — checks YOU run yourself with shell tools over the drafted
-   packet texts (no agent dispatch, no shipped script; near-zero cost; gates the agent
-   dispatches): uncited clauses (grep for the `[design:` marker per substantive clause);
+   packets' ASSEMBLED bodies, never the drafts (no agent dispatch, no shipped script; near-zero
+   cost; gates the agent dispatches): uncited clauses (grep for the `[design:` marker per substantive clause);
    file-overlap collisions (extract each packet's Files paths, intersect, require a planned
    edge between any two packets sharing a path); out-of-scope pointer validity (each "that is
    packet X" claim checked against X's Objective); shared-preamble byte-identity (diff the
    part-1 blocks); metadata completeness (stamps, policy, `pd_rev`); citation-target
    existence (every `[design: <section>]` marker's target actually exists in the design
-   text — this catches a citation to a NONEXISTENT section, never a citation to a real
+   text — a `Parent > Child` path counts as existing when `assemble-packet.sh` would resolve
+   it to exactly one heading: the last element is the heading text, the earlier elements are
+   its ancestors in order; this catches a citation to a NONEXISTENT section, never a citation to a real
    section that doesn't support the clause, which stays the semantic post-check's call);
    whole-set coverage scan, ADVISORY ONLY (every design section/heading is named by at least
    one citation somewhere across the full packet set; a section cited by zero packets is
@@ -324,7 +351,7 @@ deduplication.
    packets that step 3 did not fold raises a hoisting flag (advisory, reported, never
    blocking). Failures loop to step 3 (content-only; see "Curation stamp").
 6. **Cold-read check** (one cheap-model agent per packet, read-only): input is the packet's
-   stored text only, delivered by file path; output `executable: yes|no` + `missing:` list,
+   stored text only (the ASSEMBLED body, never the draft), delivered by file path; output `executable: yes|no` + `missing:` list,
    plus any assumption the reader had to make about a sibling packet's Consumes/Produces shape
    that is not pinned by the design or a predecessor's Produces. Dispatch per "Sub-dispatch
    templates" (Cold-read). Any packet EDITED after its cold-read MUST be cold-read again AND
@@ -409,6 +436,17 @@ it by searching disk is both slower and redundant.
   packet body, a report) instead of computing byte lengths and slicing text yourself by hand —
   every chunking step in this skill and its bindings means "run this script," not ad hoc
   `wc -c`/`sed`.
+- `scripts/assemble-packet.sh --design <design.md> --in <draft.md> --out <body.md>` — expands
+  the three exact-excerpt directives in a packet draft into the assembled body:
+  `@@file <path>`, `@@design-section [--quote] <heading path>`, and
+  `@@design-table-row <heading path> | <first-cell text>`. Every other line, diff hunks
+  included, passes through byte-for-byte, and expanded text is never re-scanned. A section is
+  the text up to the next heading of ANY level, without the heading line, ending in
+  `[design: <heading path>]`. `@@file` resolves against the working directory and is refused
+  (exit 3) outside the git toplevel. Exit 3 not found, 4 ambiguous heading (the message lists
+  the `Parent > Child` paths that disambiguate), 2 usage, 1 generic; `--out` is written only on
+  success. Step 3 ("Exact excerpts") says when a directive is mandatory; run it once per packet
+  draft, and again after every draft edit.
 - `scripts/create-packet.sh` — this IS the `create-packet` operation for the `beads` binding
   (see `plan-decompose-beads/SKILL.md`'s `create-packet` section): never hand-type a
   `bd create`/`bd defer` pair for a packet yourself. It bakes `--no-inherit-labels` in as the
@@ -435,7 +473,7 @@ state the constraint in the prompt itself, since a fresh sub-agent has no other 
 
 **Cold-read** (mode `decompose` step 6; one Agent call per packet): `subagent_type:
 "plan-decompose:cold-reader"` (`model` only when the brief overrides the haiku tier); the prompt
-is ONLY two paths — the packet's body file and acceptance file, the same files passed to
+is ONLY two paths — the packet's ASSEMBLED body file and acceptance file, the same files passed to
 `create-packet.sh` (`--body-file`, `--acceptance-file`) or to the fix-loop `bd update` (criteria
 passed inline are first written to an acceptance file), so the reader judges the stored text.
 Never paste packet text into the prompt; the reader's own agent file (`agents/cold-reader.md`)
