@@ -473,12 +473,16 @@ func inRange(updatedAt string, r scriptout.TimeRange) (keep, imprecise bool) {
 // backend's list answered: state in lower case, no branch, base or merged flag,
 // checks_rollup folded to success, failure, pending or none. as_of is when the
 // summary was fetched and stale says it was served past its freshness.
-func toPR(l loaded) schema.PR {
-	s := l.sum
+func toPR(l loaded) schema.PR { return SummaryEntity(l.sum, l.fetchedAt, l.stale) }
+
+// SummaryEntity is toPR for a stored summary read outside this package (the
+// change feed builds the entity of a change row from it): the same mapping,
+// given the summary, when it was fetched and whether it is served stale.
+func SummaryEntity(s summary.Summary, fetchedAt time.Time, stale bool) schema.PR {
 	pr := schema.PR{
 		ID: s.Ref(), Repo: s.Repo, Number: s.Number, Title: s.Title,
 		State: strings.ToLower(s.State), Author: s.Author, URL: s.URL, Draft: s.IsDraft,
-		Body: s.Body, AsOf: l.fetchedAt.UTC().Format(time.RFC3339), Stale: l.stale,
+		Body: s.Body, AsOf: fetchedAt.UTC().Format(time.RFC3339), Stale: stale,
 		HeadSHA: s.HeadRefOid, Mergeable: s.Mergeable, ChecksRollup: github.ChecksRollupFor(s.ChecksState),
 		NodeID: s.NodeID, UpdatedAt: s.UpdatedAt, ReviewDecision: s.ReviewDecision,
 		CommentCount: s.CommentCount, ReviewCount: s.ReviewCount,

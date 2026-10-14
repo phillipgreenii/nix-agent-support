@@ -104,7 +104,16 @@ import "encoding/json"
 // old backends, which never set them, emit byte-identical answers; the bump
 // follows this const's own rule that ANY field-shape change bumps the
 // version, additive or not.
-const PRSchemaVersion = 11
+//
+// Bumped 11 -> 12 by bead pg2-z5fax.4.8 (pg-connector-github daemon, "pr
+// changes and changes_ack ops"), which added PR.Version (the per-entity
+// version of a change row's entity) and the changes and changes_ack result
+// shapes in changes.go (PRChangesResult, ChangesAckResult). Additive and
+// omitted when unset, so every version-11 consumer keeps decoding unchanged and
+// the old backends, which never set Version, emit byte-identical entities; the
+// bump follows this const's own rule that ANY field-shape change bumps the
+// version, additive or not.
+const PRSchemaVersion = 12
 
 // PRListFields is the authoritative set of schema.PR JSON field names the
 // cheap `list` populates (bead pg2-x3h8c.2). The list's batched search
@@ -213,6 +222,11 @@ type PR struct {
 
 	// HeadSHA is the OID of the PR's current head commit.
 	HeadSHA string `json:"head_sha,omitempty"`
+	// Version is the per-entity version the daemon counts for this PR (added
+	// with PRSchemaVersion 12). On a change answer it is the version recorded
+	// with the change row, not the entity's current one. Omitted when zero, so
+	// the old backends, which never set it, emit unchanged entities.
+	Version int64 `json:"version,omitempty"`
 	// Additions/Deletions/ChangedFiles are the PR's diff-size facts, as
 	// GitHub reports them on the PR itself (not summed here from Files,
 	// which a caller fetches separately via the "files" op).
