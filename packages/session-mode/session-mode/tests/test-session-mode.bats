@@ -370,6 +370,232 @@ _hook_payload() {
 }
 
 # =====================================================================================
+# hook post-compact
+# =====================================================================================
+#
+# The hook writes <transcript_dir>/<session_id>.compaction.json beside the
+# transcript. It derives the directory from transcript_path itself, ignores
+# SESSION_MODE_STATE_DIR, NEVER creates the directory, prints nothing and
+# always exits 0.
+
+# compaction_file [DIR] — the marker path for this session (default: the
+# test's SESSION_MODE_STATE_DIR, used as the transcript directory).
+compaction_file() { echo "${1:-$SESSION_MODE_STATE_DIR}/$CLAUDE_SESSION_ID.compaction.json"; }
+
+# _compact_payload SID TRANSCRIPT TRIGGER_JSON_FRAGMENT — emits session_id,
+# transcript_path and, when the 3rd arg is non-empty, that raw fragment
+# (e.g. '"trigger":"auto"') as an extra field.
+_compact_payload() {
+  if [[ -n ${3:-} ]]; then
+    printf '{"session_id":"%s","transcript_path":"%s",%s}' "$1" "$2" "$3"
+  else
+    _hook_payload "$1" "$2"
+  fi
+}
+
+_run_post_compact() {
+  # $1 = payload; extra env prefix words via $2.. (e.g. env -u X)
+  local payload="$1"
+  shift
+  run "$@" bash -c "printf '%s' '$payload' | '$TEST_DIR/run_session-mode' hook post-compact"
+}
+
+@test "hook post-compact: trigger manual writes a marker beside the transcript" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  local before after f payload
+  f="$(compaction_file)"
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl" '"trigger":"manual"')"
+  before="$(date +%s)"
+  _run_post_compact "$payload" env
+  after="$(date +%s)"
+  [ "$status" -eq 0 ]
+  [ -f "$f" ]
+  [ "$(wc -l <"$f" | tr -d ' ')" = "1" ]
+  [ "$(jq -r '.trigger' "$f")" = "manual" ]
+  [ "$(jq -r '.ts | type' "$f")" = "number" ]
+  [ "$(jq -r '.ts' "$f")" -ge "$before" ]
+  [ "$(jq -r '.ts' "$f")" -le "$after" ]
+  # exactly the two contract fields, no count and no summary
+  [ "$(jq -c 'keys' "$f")" = '["trigger","ts"]' ]
+}
+
+@test "hook post-compact: trigger auto writes a marker" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  local payload
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl" '"trigger":"auto"')"
+  _run_post_compact "$payload" env
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.trigger' "$(compaction_file)")" = "auto" ]
+}
+
+@test "hook post-compact: a second call overwrites the marker" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  local f payload
+  f="$(compaction_file)"
+  printf '{"ts":1,"trigger":"manual"}\n' >"$f"
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl" '"trigger":"auto"')"
+  _run_post_compact "$payload" env
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.trigger' "$f")" = "auto" ]
+  [ "$(jq -r '.ts' "$f")" -gt 1 ]
+  [ "$(wc -l <"$f" | tr -d ' ')" = "1" ]
+}
+
+@test "hook post-compact: absent trigger writes unknown" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  local payload
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl")"
+  _run_post_compact "$payload" env
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.trigger' "$(compaction_file)")" = "unknown" ]
+}
+
+@test "hook post-compact: numeric trigger writes unknown" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  local payload
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl" '"trigger":7')"
+  _run_post_compact "$payload" env
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.trigger' "$(compaction_file)")" = "unknown" ]
+}
+
+@test "hook post-compact: empty-string trigger writes unknown" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  local payload
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl" '"trigger":""')"
+  _run_post_compact "$payload" env
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.trigger' "$(compaction_file)")" = "unknown" ]
+}
+
+@test "hook post-compact: an unrecognized trigger string writes unknown" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  local payload
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl" '"trigger":"bogus"')"
+  _run_post_compact "$payload" env
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.trigger' "$(compaction_file)")" = "unknown" ]
+}
+
+@test "hook post-compact: compact_summary is not stored" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  local payload
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl" '"trigger":"auto","compact_summary":"secret summary"')"
+  _run_post_compact "$payload" env
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$(compaction_file)")" != *"secret summary"* ]]
+}
+
+@test "hook post-compact: payload {} (no session_id) writes nothing, exit 0" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  _run_post_compact '{}' env
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$(ls -A "$SESSION_MODE_STATE_DIR")" ]
+}
+
+@test "hook post-compact: non-JSON input writes nothing, exit 0" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  _run_post_compact 'this is not json' env
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$(ls -A "$SESSION_MODE_STATE_DIR")" ]
+}
+
+@test "hook post-compact: missing transcript_path writes nothing, exit 0" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  _run_post_compact "{\"session_id\":\"$CLAUDE_SESSION_ID\",\"trigger\":\"auto\"}" env
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$(ls -A "$SESSION_MODE_STATE_DIR")" ]
+}
+
+@test "hook post-compact: a nonexistent transcript dir writes nothing and creates NO directory" {
+  create_cmd_wrapper session-mode
+  local missing="$TEST_DIR/no-such-dir/deeper" payload
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$missing/$CLAUDE_SESSION_ID.jsonl" '"trigger":"auto"')"
+  # SESSION_MODE_STATE_DIR unset, as in production: the PWD-derived fallback
+  # under $HOME/.claude/projects must NOT be materialized.
+  _run_post_compact "$payload" env -u SESSION_MODE_STATE_DIR
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e "$TEST_DIR/no-such-dir" ]
+  [ ! -e "$HOME/.claude/projects" ]
+  [ ! -e "$HOME/.claude" ]
+  # and nothing under the (isolated) HOME at all
+  [ -z "$(ls -A "$HOME")" ]
+}
+
+@test "hook post-compact: prints nothing to stdout or stderr on success" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  local payload out
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl" '"trigger":"auto"')"
+  out="$(printf '%s' "$payload" | "$TEST_DIR/run_session-mode" hook post-compact 2>&1)"
+  [ -z "$out" ]
+  [ -f "$(compaction_file)" ]
+}
+
+@test "hook post-compact: marker file mode is 0600" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  local payload mode
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl" '"trigger":"auto"')"
+  _run_post_compact "$payload" env
+  [ "$status" -eq 0 ]
+  mode="$(stat -c '%a' "$(compaction_file)" 2>/dev/null || stat -f '%Lp' "$(compaction_file)")"
+  [ "$mode" = "600" ]
+}
+
+@test "hook post-compact: SESSION_MODE_STATE_DIR set elsewhere does NOT redirect the write" {
+  create_cmd_wrapper session-mode
+  local tdir="$TEST_DIR/transcripts" payload
+  mkdir -p "$tdir"
+  # SESSION_MODE_STATE_DIR (from setup) points at a different, even
+  # nonexistent, directory: the marker must land beside the transcript.
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$tdir/$CLAUDE_SESSION_ID.jsonl" '"trigger":"auto"')"
+  _run_post_compact "$payload" env
+  [ "$status" -eq 0 ]
+  [ -f "$(compaction_file "$tdir")" ]
+  [ ! -e "$SESSION_MODE_STATE_DIR" ]
+}
+
+@test "hook post-compact: leaves no temp dotfile behind" {
+  create_cmd_wrapper session-mode
+  mkdir -p "$SESSION_MODE_STATE_DIR"
+  local payload
+  payload="$(_compact_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl" '"trigger":"auto"')"
+  _run_post_compact "$payload" env
+  [ "$status" -eq 0 ]
+  [ "$(ls -A "$SESSION_MODE_STATE_DIR")" = "$CLAUDE_SESSION_ID.compaction.json" ]
+}
+
+@test "hook: unknown event usage mentions post-compact" {
+  create_cmd_wrapper session-mode
+  run "$TEST_DIR/run_session-mode" hook bogus
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"post-compact"* ]]
+}
+
+@test "help documents hook post-compact" {
+  create_cmd_wrapper session-mode
+  run "$TEST_DIR/run_session-mode" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hook post-compact"* ]]
+}
+
+# =====================================================================================
 # CLI record-directory resolution without $SESSION_MODE_STATE_DIR (pg2-3pg4v)
 # =====================================================================================
 #

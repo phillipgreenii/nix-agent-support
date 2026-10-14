@@ -33,7 +33,7 @@ _session_mode() {
         '1:state:(running stopping finished)'
       ;;
     hook)
-      _values 'hook event' session-end
+      _values 'hook event' session-end post-compact
       ;;
     esac
     ;;

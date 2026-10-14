@@ -26,7 +26,7 @@ _session_mode() {
     ;;
   hook)
     if [[ $COMP_CWORD -eq 2 ]]; then
-      mapfile -t COMPREPLY < <(compgen -W "session-end" -- "$cur")
+      mapfile -t COMPREPLY < <(compgen -W "session-end post-compact" -- "$cur")
     fi
     ;;
   esac

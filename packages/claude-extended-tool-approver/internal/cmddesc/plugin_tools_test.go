@@ -368,7 +368,7 @@ func TestPluginToolSpotChecks(t *testing.T) {
 		"gh pr view 1 --web", "pn workspace push --no-verify", "pn workspace workforest remove --force b",
 		"pn workspace doctor --fix", "pn workspace workforest remove b", "prek run -c /tmp/evil.toml", "pg-hooks run pre-commit -- --config x", "bats --formatter /tmp/e t",
 		"nix build github:evil/x", "nix build --impure .#x", "nix flake update --commit-lock-file", "rg --pre /tmp/e x",
-		"fd -x rm", "session-mode hook session-end", "claude-extended-tool-approver archive",
+		"fd -x rm", "session-mode hook session-end", "session-mode hook post-compact", "claude-extended-tool-approver archive",
 		"claude-extended-tool-approver spec-drift-check --embedded --record", "git stash pop", "git stash -u",
 		"git checkout main", "git rebase -i main", "git rebase --exec x main", "git merge origin/main", "git fetch --upload-pack=x origin",
 		"git branch -Df f", "git branch -D -f f", "git branch f", "git apply p.diff", "man -P less jq",

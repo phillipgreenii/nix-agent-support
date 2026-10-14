@@ -125,6 +125,47 @@ load_lib() {
   [ "$output" = "/some/dir/sess-1.session-mode.json" ]
 }
 
+# --- session_mode_compaction_file_path ---
+
+@test "session_mode_compaction_file_path composes DIR/SESSION_ID.compaction.json" {
+  load_lib
+  run session_mode_compaction_file_path "/some/dir" "sess-1"
+  [ "$status" -eq 0 ]
+  [ "$output" = "/some/dir/sess-1.compaction.json" ]
+}
+
+@test "session_mode_compaction_file_path is not a .jsonl transcript name" {
+  load_lib
+  run session_mode_compaction_file_path "/d" "s"
+  [[ "$output" != *.jsonl ]]
+}
+
+# --- session_mode_build_compaction_record ---
+
+@test "session_mode_build_compaction_record emits compact single-line JSON with ts and trigger" {
+  load_lib
+  run session_mode_build_compaction_record "auto" 1760000000
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"ts":1760000000,"trigger":"auto"}' ]
+}
+
+@test "session_mode_build_compaction_record emits ts as a JSON number and has exactly two fields" {
+  load_lib
+  run session_mode_build_compaction_record "manual" 42
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.ts | type')" = "number" ]
+  [ "$(printf '%s' "$output" | jq -r '.trigger')" = "manual" ]
+  [ "$(printf '%s' "$output" | jq -c 'keys')" = '["trigger","ts"]' ]
+  [[ "$output" != *$'\n'* ]]
+}
+
+@test "session_mode_build_compaction_record writes the trigger verbatim (unknown included)" {
+  load_lib
+  run session_mode_build_compaction_record "unknown" 1
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.trigger')" = "unknown" ]
+}
+
 # --- session_mode_validate_kind ---
 
 @test "session_mode_validate_kind accepts a novel slug (proves extensibility)" {

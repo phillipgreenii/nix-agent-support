@@ -94,6 +94,23 @@ session_mode_file_path() {
   printf '%s/%s.session-mode.json' "$1" "$2"
 }
 
+# session_mode_compaction_file_path DIR SESSION_ID — the compaction marker path
+# for SESSION_ID. Extension is .json (NOT .jsonl): the marker is a rewritten
+# record, not an append-only log, and .jsonl is what pa-monitor treats as a
+# transcript.
+session_mode_compaction_file_path() {
+  printf '%s/%s.compaction.json' "$1" "$2"
+}
+
+# session_mode_build_compaction_record TRIGGER EPOCH — emit the compaction
+# marker as a single-line JSON object: {"ts": <epoch seconds>, "trigger":
+# "<manual|auto|unknown>"}. -c keeps it on one line (the status-line reader is
+# jq-free and line-based). TRIGGER is written verbatim (the caller normalizes
+# it); EPOCH is emitted as a JSON number.
+session_mode_build_compaction_record() {
+  jq -nc --arg trigger "$1" --argjson ts "$2" '{ts: $ts, trigger: $trigger}'
+}
+
 # session_mode_now_iso — the current UTC time, ISO-8601.
 session_mode_now_iso() {
   date -u +%Y-%m-%dT%H:%M:%SZ

@@ -31,6 +31,12 @@ Subcommands:
       session_id/transcript_path from stdin JSON; when a record exists in
       state running or stopping, marks it finished. Always exits 0 — a hook
       must never disrupt session teardown.
+  hook post-compact
+      Internal: invoked by Claude Code's PostCompact hook. Reads
+      session_id/transcript_path/trigger from stdin JSON and writes a
+      compaction marker (<session_id>.compaction.json: ts, trigger) beside
+      the transcript; never creates the directory. Prints nothing and always
+      exits 0.
 
 The session is identified by $CLAUDE_SESSION_ID, falling back to
 $CLAUDE_CODE_SESSION_ID (start/set-status/show); the record directory is
@@ -55,6 +61,7 @@ Examples:
   session-mode set-status finished --handoff-bead tc-m08w3
   session-mode show
   echo '{"session_id":"abc","transcript_path":"/x/abc.jsonl"}' | session-mode hook session-end
+  echo '{"session_id":"abc","transcript_path":"/x/abc.jsonl","trigger":"auto"}' | session-mode hook post-compact
 
 Report bugs to: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support/issues>
 HELP
@@ -252,6 +259,37 @@ cmd_hook_session_end() {
   exit 0
 }
 
+# cmd_hook_post_compact — ALWAYS exits 0 and prints NOTHING to stdout
+# (PostCompact stdout is echoed into the user-visible compaction message).
+# Writes <transcript_dir>/<session_id>.compaction.json. Unlike the other
+# hooks it does NOT use session_mode_state_dir: it ignores
+# $SESSION_MODE_STATE_DIR and never creates the directory (the $PWD fallback
+# plus mkdir -p would invent phantom project dirs under ~/.claude/projects).
+# Every command is guarded so the exit status never depends on `set -e`.
+cmd_hook_post_compact() {
+  local payload sid transcript trig dir file
+  payload="$(cat || true)"
+  sid="$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null || true)"
+  [[ -n $sid ]] || exit 0
+  transcript="$(printf '%s' "$payload" | jq -r '.transcript_path // empty' 2>/dev/null || true)"
+  [[ -n $transcript ]] || exit 0
+  dir="${transcript%/*}"
+  [[ -d $dir ]] || exit 0
+
+  trig="$(printf '%s' "$payload" | jq -r '.trigger // empty' 2>/dev/null || true)"
+  case "$trig" in
+  manual | auto) ;;
+  *) trig=unknown ;;
+  esac
+
+  local record
+  record="$(session_mode_build_compaction_record "$trig" "$(date +%s)" 2>/dev/null || true)"
+  [[ -n $record ]] || exit 0
+  file="$(session_mode_compaction_file_path "$dir" "$sid")"
+  session_mode_write_atomic "$file" "$record" >/dev/null 2>&1 || true
+  exit 0
+}
+
 main() {
   local subcommand="${1:-}"
   if [[ $# -gt 0 ]]; then
@@ -277,8 +315,11 @@ main() {
     session-end)
       cmd_hook_session_end
       ;;
+    post-compact)
+      cmd_hook_post_compact
+      ;;
     *)
-      die "unknown hook event: ${hook_event:-<missing>} (usage: session-mode hook session-end)"
+      die "unknown hook event: ${hook_event:-<missing>} (usage: session-mode hook session-end|post-compact)"
       ;;
     esac
     ;;
