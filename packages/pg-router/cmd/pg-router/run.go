@@ -1676,6 +1676,20 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 		}
 	}()
 
+	// The first dispatch pass of this process runs BEFORE its first producer tick
+	// (DEC-EVENT-5, bead pg2-x3zkb). A fresh process has no last-fire time for any
+	// source, so its first tick polls every one of them, one after another, and
+	// runOneTick dispatches only after the whole producer pass; on 2026-10-12 the
+	// daemon that restarted over a surviving ccpool dispatch (ADR 0085) held no offer
+	// for it for 4 min 28.6 s, and pg_router_listener_in_flight read 0 for its role
+	// the whole time. What the durable queue restored is already queued, so nothing
+	// needs producing before it is re-offered. Still after postStartupAll, so a
+	// handler's boot hook has returned before its first dispatch, and still silent
+	// once shutdown was requested (the same rule as runOneTick's own pass).
+	if ctx.Err() == nil {
+		slog.Info("run: startup dispatch pass, before the first producer tick", "offersLaunched", q.Kick())
+	}
+
 	tick := pr.cfg.PollInterval
 	if tick <= 0 {
 		tick = 10 * time.Second

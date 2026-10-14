@@ -172,3 +172,157 @@ the TUI and that there be a way to trigger a compaction and a dry-run compaction
 
 The behavior-doc side is `INV-EVT-1`'s "one sanctioned refusal at ingest" paragraph and the
 `ingest-event` / inspection sections of the interfaces doc.
+
+### `DEC-EVENT-5` — a restart over a dispatch left running: the first dispatch pass comes before the first producer tick, and the adopting handler, not the queue, carries the dispatch's original start <!-- uuid: 7c3e9a14-5d82-4b6f-9e07-d1a8f4c26b35 -->
+
+**Decided** (bead `pg2-x3zkb`, 2026-10-14, by the implementing agent on the evidence of `pg2-b1srv`;
+the operator MAY overrule any point). The bead asks two things about a daemon restart that leaves a
+ccpool-backed dispatch running (this repo's ADR 0085: "the next daemon re-offers their events and
+adopts the sessions"): **(a)** who carries the dispatch's original start into the accept record and
+the metrics, and **(b)** whether the new daemon re-offers before its first producer tick, or at least
+reports in-flight truthfully from its first scrape. **(b) is decided and built in this change; (a) is
+decided and left as implementation slices**, because it crosses the wire contract, the core and the
+ccpool handler. Neither changes what `listener_in_flight`, `queue_wait` or `run` measure
+(`DEC-OBS-9`): (b) leaves the gauge an outstanding offer, and (a) makes an adopted dispatch measure the
+wait and run they already name.
+
+**What a restart does, from source.**
+
+- The new process replays the queue log. The surviving dispatch's event has no accept record, because
+  an accept is written only when its offer settles, so it replays un-accepted (ADR 0085's evidence,
+  question 1).
+- The daemon boots the core, sends each enabled role `postStartup`, then loops. Each iteration runs the
+  producer tick and only then the dispatch pass. A fresh process has no last-fire time for any source,
+  so every period source is due and the first producer tick polls all of them, one after another,
+  each with its own retry and backoff. It is the one tick on which every period source is due, and it
+  stood in front of the re-offer.
+- An offer's start is the instant its pass takes the listener's slot. The accept record, the
+  queue-wait and run histograms and the event log row all read it, so a re-offered dispatch is timed
+  from the re-offer.
+
+**Evidence** (`pg2-b1srv`: raw Prometheus samples and the daemon log, as that bead's 2026-10-14
+comment corrected them; items marked "not re-checked" are that investigation's own).
+
+- The 2026-10-12 restart: the new process was serving metrics at 23:28:38Z, its startup compaction
+  ended at 23:28:44.25Z and its first dispatch pass re-offered the event at 23:33:06.6Z. Process start
+  to re-offer is 23:33:06.6 - 23:28:38 = 268.6 s (4 min 28.6 s). Boot, to the end of the compaction,
+  is 23:28:44.25 - 23:28:38 = 6.25 s. The remaining 268.6 - 6.25 = 262.35 s is the `postStartup`
+  hooks plus the first producer tick; **the evidence does not separate the two**. The role's gauge
+  read 1 at 23:27:44Z on the old process, 0 on 8 scrapes from 23:28:53Z to 23:32:57Z and 1 again at
+  23:33:25Z.
+- That dispatch's accept record says it ran 2,696,857 ms, 2,696,857 / 60,000 = 44.95 min, against a
+  real 4,459.52 s, 4,459.52 / 60 = 74.3 min: 74.3 - 44.95 = 29.4 min of run time recorded as queue
+  wait.
+- Five restarts in three days re-timed a drain-pg2 start, by 29.4, 19.8, 61.9, 3.2 and 12.5 minutes
+  (the last four not re-checked): 29.4 + 19.8 + 61.9 + 3.2 + 12.5 = 126.8 minutes of run time read as
+  queue wait.
+- The restart holes seen, process start to re-offer (not re-checked): 4:28, 3:52, 2:17, 2:23 and 1:58,
+  that is 268, 232, 137, 143 and 118 s.
+- `pg-router-queue-stalled` needs a hole of about 12 minutes to page: the condition holds from 10
+  minutes after the last in-flight scrape until a run of 6 scrapes completes 3 minutes after the
+  re-offer, and `for` is 5, so (H + 3) - 10 >= 5 gives H >= 12 minutes (`DEC-OBS-10`). The longest
+  hole seen, 268 / 60 = 4.47 min, is 12 - 4.47 = 7.5 min short of it.
+
+```mermaid
+flowchart LR
+    boot["boot: replay the queue log, startup compaction"] --> hooks["postStartup hooks"]
+    hooks --> pass["first dispatch pass: re-offer what was restored"]
+    pass --> tick["first producer tick: poll every source"]
+    tick --> loop["each later tick: producer tick, then dispatch pass"]
+```
+
+**(b) Decided and built: offer before producing, at startup only.**
+
+- The daemon **MUST** run one dispatch pass after its `postStartup` hooks have returned and before its
+  first producer tick, and **MUST NOT** run it once shutdown has been requested (the rule every
+  later pass already follows). It **SHOULD** log the pass with the number of offers it launched.
+  Every later iteration is unchanged.
+- `listener_in_flight` **MUST** keep its meaning, an offer outstanding (`DEC-OBS-9`), and **MUST NOT**
+  be pre-set from restored queue state. After this change it reads 1 from the first pass, not from the
+  end of the first producer tick; it reads 0 only for the boot and the hooks.
+- **Residual.** The hole is now the boot plus the `postStartup` hooks. Boot was measured at 6.25 s; the
+  hooks are not measured (the ccpool handler's own `postStartup` does no work beyond starting its
+  process, but a process start under a host load average of 195 is not free).
+- **Test.** `TestRunLongRunning_restartReoffersTheSurvivingDispatchBeforeTheFirstProducerTick` restarts
+  a daemon over a surviving dispatch with a first producer tick that never ends and asserts the
+  re-offer and the gauge; `TestRunLongRunning_noStartupDispatchPassOnceShutdownWasRequested` pins the
+  shutdown rule.
+
+**(a) Decided, not built: the adopting handler reports the original start.**
+
+- A handler that adopts a session left running by an earlier daemon **MUST** be able to report the
+  dispatch's original start in an **optional** `startedAt` field (RFC 3339, UTC) of its dispatch
+  reply, and the ccpool handler **SHOULD**: it already takes the session's recorded launch time
+  (`pgrouter.launched_at`) as the start of an adopted session's budget, so the same value is the start
+  of the dispatch.
+- The core **MUST** use a reported start as the dispatch's start in the accept record's `startedAt`,
+  in `DispatchTiming` (queue wait = reported start - enqueue instant, run = settle - reported start)
+  and in the event log row (`started_at`, and `duration_ms` as settle - reported start). It **MUST**
+  ignore, and log, a reported start earlier than the event's enqueue instant or later than the offer's
+  own start. A reply without the field **MUST** behave exactly as today, so a fresh session, an older
+  handler and every other handler are unchanged.
+- The core **MUST NOT** derive the start itself and **MUST NOT** persist per-attempt state for it
+  (`DEC-EVENT-1`).
+- The reported instant is wall-clock with second precision. The launch time is later than the offer
+  that caused it by about 2.5 s on 2026-10-12 (the session was created at 23:03:46.48Z for an offer at
+  about 23:03:43.98Z, 23:03:46.48 - 23:03:43.98 = 2.50 s), against the 29.4 min it corrects.
+- Metric names, labels and buckets do not change; only the start the existing members measure from.
+- **Consistency with `pg2-9uvm5`** (open, human-labelled, not resolved here). Nothing here adds a
+  clock, renames a series or answers whether a host-awake signal is needed. The corrected start is a
+  wall-clock instant, the basis that bead's draft design already gives a restored event's wait, so the
+  two agree. One interaction to carry into it: an awake-adjusted queue wait computed when the offer is
+  created would end at the re-offer, whereas the wait of an adopted dispatch ends at the reported
+  start, which the core learns only when the reply arrives.
+
+**Alternatives rejected.**
+
+- **Memento in the durable log** (the core persists each offer's start, or an "in flight" marker at
+  shutdown, and the next process restores it) for (a). Rejected on three counts. A record per offer
+  adds one fsynced write per attempt, declines included: the 2026-10-13 decline storm had 302 in
+  65.55 min (20:54:26Z to 21:59:59Z, 3,933 s, one per 3,933 / 302 = 13.0 s on one lane), and
+  `DEC-EVENT-1` keeps no attempt history for exactly this reason. A marker written only at shutdown
+  misses a SIGKILL, an out-of-memory kill and a panic, which ADR 0085 says leave the same state. And
+  neither can tell an adopted session from a fresh one launched after the old session settled (ADR
+  0094), so it would carry a start into a dispatch that did not begin then. The handler holds the
+  fact (it is the Information Expert) and the core only needs it relayed.
+- **Derive the start in the core** from the session name or a queue-side stamp. Rejected: the core
+  knows no handler's naming (`GOAL-MIN-1`).
+- **Flag and exclude** (mark a re-timed record and let consumers skip it) as the end state for (a).
+  Rejected: the measurement stays lost. It is what the lane fixtures do for the recorded days.
+- **Leave it** for (a). Rejected: 126.8 minutes of run time read as queue wait in three days, on the
+  histograms the saturation reading uses (`pg2-9uvm5`).
+- **Dispatch before every producer tick** (reorder the loop body) for (b). Rejected: every event the
+  tick produces would wait one more poll interval (10 s when none is configured) to be offered, for a
+  benefit that exists only at process start.
+- **Decouple production and dispatch** into two loops (Producer-Consumer) for (b). The right shape if
+  a producer tick other than a process's first is found to hold up dispatch; rejected for now because
+  it changes `INV-LIFE-2` and `INV-LIFE-3`'s single loop, the limit controller's place before
+  producing, and tick publishing, which is not a small change for a delay seen only at start. Only a
+  process's first tick finds every period source due: later ticks poll the sources whose period
+  elapsed.
+- **Presume the head in flight** (set the gauge from a restored, un-accepted head of a surviving role)
+  for (b). Rejected: a restored head may be merely queued, and presuming it running hides exactly the
+  idle-with-backlog that `pg-router-queue-stalled` exists to catch for as long as the first pass is
+  delayed. The gauge is defined as an outstanding offer.
+- **Withhold the series until the first pass** for (b). Rejected: `listener_in_flight` is present, 0 or
+  1, on every scrape, which the rule's tests and its `max_over_time` window rely on, and it leaves the
+  answer unknown for as long as the first pass is delayed.
+- **A restart grace in the alert** for (b). Rejected: the longest hole seen is 7.5 min short of
+  paging, and a grace would also hide a real stall that follows a restart.
+- **The pass before `postStartup`** for (b). Rejected: a participant's boot-time setup (starting a
+  daemon, warming a cache, `DEC-WIRE-3`) is only worth a hook if it is done before that participant's
+  first dispatch, and the saving here is only the hooks' time. See the trigger below.
+
+**Revisit when** (the implementer of either trigger **SHOULD** reopen this entry rather than patch
+around it): on a build with this change, a restart over a surviving session still leaves
+`listener_in_flight` at 0 for more than 4 scrape intervals, 4 x 30 s = 120 s, after the process
+started, which makes the `postStartup` hooks the cause (the pass **SHOULD** then move ahead of them or
+run beside them); or a producer tick other than a process's first is observed delaying a dispatch pass
+by more than 1 minute (decouple the two stages).
+
+**Not decided here.** The reply field's schema text, the clamping details and the handler's mapping
+from a session's launch time to the reply are the implementation slices' own. How `pg2-9uvm5` reads
+queue wait is that bead's. The behavior-doc side of (b) is `INV-LIFE-3`'s restart paragraph and the
+stopping-state and `listener_in_flight` text of the interfaces doc. (a)'s intent is stated in the
+interfaces doc's `queue_wait` text and registered as a gap against `INTF-MON` in the behavior set's
+"Realization gaps"; each slice **MUST** update that row as it lands, and the last one removes it.

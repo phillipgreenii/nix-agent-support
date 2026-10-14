@@ -465,6 +465,19 @@ sequenceDiagram
   loop has since moved on to. What changes is only the loop's own posture toward a pass it has
   already launched, never the per-handler ceiling itself.
 
+  **A restarted core offers before it queries.** A core that starts over a queue holding events an
+  earlier core left owed — above all a dispatch that **survives the core's shutdown** (`INV-LIFE-1`,
+  `INTF-HANDLER`'s `stopping` state) — **MUST** make its first offer pass over what the queue
+  restored **before** its first pull-source query, once its participants' `postStartup` hooks have
+  returned, and **MUST NOT** make it once shutdown has been requested. A fresh core has no last query
+  time for any source, so its first source pass queries all of them one after another; without this
+  rule a handler still working on the surviving dispatch is re-offered its event (and absorbs it,
+  `INV-EVT-2`) only after the slowest of them, and the handler's in-flight status reads idle for
+  that long although it never stopped. This orders one pass at start and nothing after it: every
+  later pass is unchanged, and no in-flight status is set from restored events — a restored event
+  may be merely queued, and the status stays what it is, an outstanding offer (`INV-OBS-2`).
+  _(Realization: `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-EVENT-5`.)_
+
   **A one-off, driven-to-completion pass remains a legitimate shape.** Nothing here forbids a caller
   that DOES want to wait for a pass's every offer to settle before proceeding (e.g. a smoke test of
   one handler against one event, or an internal pass with no live caller of its own) — `INV-LIFE-3`

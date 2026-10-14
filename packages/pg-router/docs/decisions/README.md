@@ -60,6 +60,9 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   `log_full` / `log_unwritable` reason.
 - [`DEC-EVENT-4`](event.md) — the queue log has one owner at a time (an exclusive lock, second opener
   refused), and `log compact [--dry-run]` is the operator's way to reclaim dead history.
+- [`DEC-EVENT-5`](event.md) — a restart over a dispatch left running: the first dispatch pass comes
+  before the first producer tick (built), and the adopting handler, not the queue, carries the
+  dispatch's original start (decided, not yet built).
 - [`DEC-OBS-1`](observability.md) — OTel is the default emission transport for metrics only, and
   logs stay JSONL.
 - [`DEC-OBS-2`](observability.md) — per-participant history widens the existing activity ring; the

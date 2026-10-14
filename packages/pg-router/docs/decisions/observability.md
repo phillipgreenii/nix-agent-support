@@ -59,6 +59,14 @@ anything before or after it ran), so that side **does** add a small new observer
 the same way `discover.SourceFailureObserver` already brackets a failed attempt — the smallest
 addition that makes the already-happening event visible, not a parallel tracking mechanism.
 
+**Across a restart (amended 2026-10-14, bead `pg2-x3zkb`).** Reading the offer window means a daemon
+that has just started reads 0 until it has made an offer, even for a role whose session an earlier
+daemon left running (ADR 0085). The signal is **not** pre-set from restored queue state: a restored head
+may be merely queued, and the gauge would then hide an idle role. The daemon instead makes its first
+dispatch pass before its first producer tick (`DEC-EVENT-5`), so a surviving role reads 1 from that
+pass and 0 only for the boot and the `postStartup` hooks; before it, the first producer tick, which
+polls every source, stood in front of the re-offer (268.6 s on 2026-10-12, of which boot was 6.25 s).
+
 **Not decided here.** The exact history-window size (how many entries a drill-down shows) and the
 exact new `Entry.Outcome` vocabulary a source-side pass may report (`"produced"`, `"source_failed"`)
 are implementation detail with no behavioral consequence — substituting either preserves everything
@@ -413,6 +421,16 @@ event. Four changes make the split computable from live data:
   its limits. A replay ignores `archive` records, so queue state and delivery are unchanged, and a
   binary that predates them ignores the unknown kind.
 
+**An adopted dispatch (decided 2026-10-14, bead `pg2-x3zkb`, `DEC-EVENT-5`; not yet built).** The start
+instant above is the instant the offer became in-flight, which for a dispatch a restart re-offered is the
+re-offer, not the dispatch's own start: on 2026-10-12 the accept record said 2,696,857 ms, 44.95 min,
+for a dispatch that ran 4,459.52 s, 74.3 min, so 29.4 min of run time was recorded as queue wait. The
+handler that adopts a session an earlier daemon left running is to report the dispatch's original start
+in an optional reply field, and the core is then to use it as the start in the accept record's
+`startedAt`, in the queue-wait and run histograms and in the `events.jsonl` row (`started_at`,
+`duration_ms`). Until that is built an adopted dispatch is still timed from the re-offer; the lane
+fixtures of 2026-10-12 and 2026-10-13 list the starts it moved. No metric changes name, labels or buckets.
+
 **Bounds.** `role` is config-bounded (`DEC-OBS-5`); `type` is bounded as above; neither adds an event
 id, bead or session as a label. The oldest-age gauge is a scan of the retained events at scrape time.
 
@@ -532,8 +550,12 @@ expression in a `promtool` case, and the replay holds at every scrape phase. Aft
 the 10 minute in-flight window protects the rule: the `up` and depth series stayed continuous (one 68 second
 gap), so the presence guard does not wait for fresh scrapes the way it does after a sleep. A hole would need to
 run about 12 minutes to page (the condition holds from 10 minutes after the last in-flight scrape until a run
-of 6 scrapes completes 3 minutes after the re-offer, and `for` is 5); whether the router should keep the
-original start across a restart, or hold the gauge until it re-offers, is `pg2-x3zkb`'s question. The recorded
+of 6 scrapes completes 3 minutes after the re-offer, and `for` is 5). `pg2-x3zkb` answered the two questions
+this left (`DEC-EVENT-5`, 2026-10-14): the daemon now makes its first dispatch pass before its first producer
+tick, which on 2026-10-12 had stood in front of the re-offer, so a hole shrinks to the boot and the
+`postStartup` hooks (the 268.6 s of that restart held 6.25 s of boot); and the handler that adopts a surviving
+session is to report the dispatch's original start (decided, not yet built). The rule's expression needs no
+change for either. The recorded
 `pr.changed` buildup of 2026-09-30 pages as two idle-with-backlog stretches the old rule could not see, and
 the absorbed `issue.changed` surge of 2026-10-01 pages nothing. The usage-limit decline storm of 2026-10-13
 (`testdata/drain_pg2_2026-10-13.txt`: the queue log and the daemon log, 302 recorded declines) holds the

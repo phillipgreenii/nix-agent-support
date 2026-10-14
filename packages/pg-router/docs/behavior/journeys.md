@@ -251,7 +251,9 @@ registered participants (`INV-LIFE-1`). That signal stays best-effort and MAY be
 an accepted-and-persisted event **survives the
 restart** and is redelivered at-least-once, and only the **narrow crash window** (accepted but not
 yet persisted) MAY redeliver, absorbed by idempotent handlers (`INV-EVT-2`). After restart the core
-resumes offering from the durable queue; pull sources also re-derive current truth on their next
+resumes offering from the durable queue — its first offer pass runs **before** it queries any pull
+source, so a dispatch an earlier core left running is re-offered, and absorbed, without waiting for
+the slowest source (`INV-LIFE-3`) — and pull sources also re-derive current truth on their next
 trigger. The core carries **no branch or deadletter path** of its own: **delivery is pg-router's
 contract and everything past delivery is the handler's**, so a handler's failure branches surface on
 the handler's own surface or become **new events** that re-enter through a source
@@ -265,7 +267,7 @@ sequenceDiagram
     CORE-->>M: best-effort crashing signal (INV-LIFE-1) — MAY be lost
     Note over CORE: accepted events are durable (INV-EVT-1); only the narrow crash window may redeliver
     CORE->>CORE: restart
-    Note over CORE,M: core resumes offering from the durable queue; idempotent handlers absorb any redelivery (INV-EVT-2)
+    Note over CORE,M: core resumes offering from the durable queue, before its first source query (INV-LIFE-3), and idempotent handlers absorb any redelivery (INV-EVT-2)
 ```
 
 ## Use cases

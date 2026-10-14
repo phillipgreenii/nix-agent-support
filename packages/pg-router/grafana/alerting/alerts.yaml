@@ -311,9 +311,12 @@ groups:
       # scrapes completes 3 minutes after the re-offer, and `for` is 5).
       # Replay: internal/alertrules/queue_stalled_test.go
       # (TestStalledRecordedDay, TestStalledRestartHoleThatIsLongEnoughPages) and the real
-      # series in rule-tests/pg-router-queue-stalled.test.yaml. Whether the router should
-      # keep the original start across a restart or hold the gauge until it re-offers is
-      # pg2-x3zkb's question, not this rule's. The dedicated host-awake signal belongs to
+      # series in rule-tests/pg-router-queue-stalled.test.yaml. The router now makes its
+      # first dispatch pass before its first producer tick (DEC-EVENT-5, pg2-x3zkb), so a
+      # restart's hole is the boot plus the postStartup hooks instead of the first producer
+      # tick that stood in front of the re-offer, and the handler that adopts a surviving
+      # session is to report the dispatch's original start (decided, not yet built);
+      # neither changes this rule. The dedicated host-awake signal belongs to
       # pg2-9uvm5; when it lands this rule needs one more `unless` clause on that signal
       # and nothing else changes.
       #

@@ -173,7 +173,8 @@ stateDiagram-v2
   session that lasts far longer than any shutdown budget) MAY declare, in its role's configuration,
   that its dispatch **survives the core's shutdown**. For such a role the core **MUST NOT** cancel
   an in-flight dispatch when it stops and **MUST NOT** wait for it to finish; the offer is left
-  un-accepted, so the next core re-offers the event (`INV-EVT-1`) and the handler absorbs the
+  un-accepted, so the next core re-offers the event (`INV-EVT-1`) in its first offer pass, before
+  its first source query (`INV-LIFE-3`), and the handler absorbs the
   duplicate onto the work already running (`INV-EVT-2`). A role that makes no such declaration
   keeps the default: in-flight dispatches get a bounded drain, then are cancelled.
 - **`stopped`** — the participant has drained and deregistered; no messages cross.
@@ -568,7 +569,12 @@ sequenceDiagram
     `type` (`pr.changed` and `pr.reconcile` are separate series), one sample per accepted dispatch.
     **queue_wait** is the time from the event's enqueue to the instant the accepting handler's offer
     became in-flight; **run** is that offer's own synchronous run. A run that ended in a handler error is
-    still a sample (the core counts it as accepted, `INV-FAIL-1`). Both use the bucket boundaries 0.1,
+    still a sample (the core counts it as accepted, `INV-FAIL-1`). For a dispatch a handler **adopted**
+    — work an earlier core's offer started and left running (`INTF-HANDLER`'s `stopping` state) — the
+    wait **MUST** end, and the run **MUST** begin, at the dispatch's own start as the adopting handler
+    reports it in its reply, not at the later re-offer, so a restart neither lengthens the wait nor
+    shortens the run; a reply that reports no start leaves the offer's own instant (`DEC-EVENT-5`;
+    see "Realization gaps"). Both use the bucket boundaries 0.1,
     0.5, 1, 2.5, 5, 10, 20, 30, 45, 60, 120, 300, 600, 1200, 1800, 3600 and 7200 seconds;
   - **queue_oldest_age** — gauge, per event `type`, in seconds: the age of the oldest retained event
     of that type that a bound handler has not yet settled, `0` when nothing of that type is owed. A
@@ -577,7 +583,11 @@ sequenceDiagram
     `0`, for **every** registered handler. `INV-CONC-1` caps it at one, so its time-average is the
     handler's utilisation. An offer is outstanding until it settles, whatever its outcome, so a
     **declined** offer counts for the second or two the decline takes to decide: a reader tells a
-    running dispatch from declines by how many consecutive scrapes read `1` (`DEC-OBS-10`).
+    running dispatch from declines by how many consecutive scrapes read `1` (`DEC-OBS-10`). A core
+    that has just started holds no offer until its first offer pass, so it reads `0` for every role,
+    including one whose session an earlier core left running, until that pass; the pass runs before
+    the first source query (`INV-LIFE-3`), so the reading is `0` for the start-up only, and it is
+    never pre-set from restored events (`DEC-OBS-2`).
 
   `role` is config-bounded on all four (`DEC-OBS-5`). On the two histograms `type` is the **full**
   event type, bounded by configuration the way `DEC-OBS-6` bounds the entity type: a lowercase

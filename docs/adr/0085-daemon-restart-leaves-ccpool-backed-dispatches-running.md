@@ -11,6 +11,13 @@
 > re-offered, and once the session has settled it runs in a fresh session like any other dispatch
 > (`INV-CCH-30`).
 
+> **Later note (2026-10-14, bead `pg2-x3zkb`, `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-EVENT-5`):**
+> the next daemon's re-offer now comes in its first dispatch pass, which runs after its
+> `postStartup` hooks and before its first producer tick. A fresh process polls every source on
+> that tick, and on 2026-10-12 it stood in front of the re-offer (268.6 s from process start). The
+> re-offered dispatch is still timed from the re-offer: the decision is that the adopting handler
+> reports the dispatch's original start, and it is not built yet.
+
 ## Context
 
 Operator requirement (Phillip, 2026-10-07, verbatim): "we need to ensure that restarts don't kill
