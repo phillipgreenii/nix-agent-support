@@ -217,6 +217,105 @@ tests:
         alertname: pg-router-queue-stalled
         exp_alerts: []
 
+  # The daemon restart of 2026-10-12 (pg2-g8gnv, found by pg2-b1srv): the drain.pg2 dispatch that went in
+  # flight at 23:03:43Z ran 74 minutes, through a restart at 23:28:05Z that left its session working (ADR 0085 of
+  # this repo). The new process holds no offer until its first dispatch pass re-offers the event (23:33:06Z), so
+  # the in-flight gauge read 0 for four and a half minutes while the lane worked, and the accept record of the
+  # dispatch, which carries the re-offer's start, made a lane rebuilt from accept records look idle for 30
+  # minutes (internal/alertrules/testdata/drain_pg2_2026-10-12.txt). The rule needs the role quiet for the 10
+  # minute window and then 5 more, so it stays silent.
+  #
+  # The REAL series of the lane for 22:50:14Z to 00:19:53Z, the raw samples read back with a [100m] range
+  # selector at 00:20:00Z (a stepped range query reads each step off the last sample within five minutes and
+  # moves the edges). Sample 0 is 22:50:14Z and every sample sits at its real second, so the spacing is the
+  # recorded one: mostly 30 seconds, 6 to 88 once the host load average passed 100 and Prometheus scraped late
+  # (the hand-off of 23:03:14Z read 0; no sample from 23:27:44Z to 23:28:53Z; 0 on the 8 scrapes of 23:28:53Z to
+  # 23:32:57Z; 1 again at 23:33:25Z), hence `interval: 1s`. The depth (17 to 28 events) and the gauge are sampled
+  # on the same scrapes, so the presence guard sees the recorded holes too. The throughput counter is left
+  # out on purpose: its last step is 23:03:14Z, 25
+  # minutes before the restart, and the new process's series starts only at 00:18:23Z, so nothing in it
+  # protects the rule during the hole and the case holds on the in-flight window alone. No gate series
+  # existed in the window. The hole is deepest at 23:33Z (the window then still holds the old process's
+  # last run of in-flight scrapes, 23:27:44Z); the new process's run of 6 completes by 23:36Z, before that run
+  # leaves the window at 23:38:30Z.
+  - name: the real daemon restart of 2026-10-12 reads 0 in flight for 4.5 minutes while the session works, and nothing pages (recorded Prometheus series)
+    interval: 1s
+    input_series:
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "17 _x29 17 _x29 17 _x29 17 _x29 17 _x29 17 _x29 17 _x29 19 _x29 19 _x29 19 _x29 19 _x30 19 _x28 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 20 _x29 20 _x29 21 _x29 21 _x29 21 _x29 21 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x31 19 _x87 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x61 19 _x27 19 _x29 19 _x29 19 _x29 19 _x31 19 _x27 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x68 19 _x29 19 _x29 19 _x29 19 _x37 19 _x75 19 _x5 19 _x33 19 _x27 19 _x27 19 _x29 19 _x29 19 _x29 19 _x29 20 _x29 20 _x38 20 _x21 20 _x28 20 _x29 20 _x29 20 _x29 20 _x29 20 _x29 20 _x40 20 _x18 20 _x29 20 _x29 20 _x29 20 _x29 20 _x30 20 _x28 20 _x29 20 _x29 20 _x59 20 _x29 20 _x30 20 _x29 20 _x28 20 _x30 20 _x46 20 _x12 20 _x28 20 _x30 20 _x28 20 _x29 20 _x29 20 _x32 21 _x26 21 _x59 21 _x37 21 _x45 21 _x7 21 _x28 21 _x28 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x30 21 _x29 21 _x28 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x31 21 _x27 21 _x29 21 _x29 21 _x30 21 _x28 21 _x29 25 _x29 25 _x29 25 _x29 27 _x29 27 _x29 27 _x29 28 _x29 28 _x30 28 _x36 28 _x28 28 _x22 28 _x29 28 _x29 28 _x29 28 _x29 28 _x29 28 _x29 26 _x29 24 _x29 21 _x29 19"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x30 1 _x28 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 0 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x31 1 _x87 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x61 1 _x27 1 _x29 1 _x29 1 _x29 1 _x31 1 _x27 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x68 0 _x29 0 _x29 0 _x29 0 _x37 0 _x75 0 _x5 0 _x33 0 _x27 1 _x27 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x38 1 _x21 1 _x28 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x40 1 _x18 1 _x29 1 _x29 1 _x29 1 _x29 1 _x30 1 _x28 1 _x29 1 _x29 1 _x59 1 _x29 1 _x30 1 _x29 1 _x28 1 _x30 1 _x46 1 _x12 1 _x28 1 _x30 1 _x28 1 _x29 1 _x29 1 _x32 1 _x26 1 _x59 1 _x37 1 _x45 1 _x7 1 _x28 1 _x28 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x30 1 _x29 1 _x28 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x31 1 _x27 1 _x29 1 _x29 1 _x30 1 _x28 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x30 1 _x36 1 _x28 1 _x22 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 1 _x29 0 _x29 0 _x29 1 _x29 0"
+    promql_expr_test:
+      # Non-vacuity: the hole is in the series. The last scrape before it read 1 (23:27:44Z, 37m30s), the
+      # scrapes of the restart read 0 (the one at 23:31:01Z, 40m47s, is the latest at 41m), and the dispatch
+      # reads 1 again from 23:33:25Z (the latest sample at 44m, 23:34:14Z, is the 23:33:53Z one).
+      - expr: pg_router_listener_in_flight{role="drain-pg2"}
+        eval_time: 38m
+        exp_samples:
+          - labels: 'pg_router_listener_in_flight{job="pg-router", role="drain-pg2"}'
+            value: 1
+      - expr: pg_router_listener_in_flight{role="drain-pg2"}
+        eval_time: 41m
+        exp_samples:
+          - labels: 'pg_router_listener_in_flight{job="pg-router", role="drain-pg2"}'
+            value: 0
+      - expr: pg_router_listener_in_flight{role="drain-pg2"}
+        eval_time: 44m
+        exp_samples:
+          - labels: 'pg_router_listener_in_flight{job="pg-router", role="drain-pg2"}'
+            value: 1
+      # The condition never holds: before the restart, in the hole, at its end and through the 10 minutes
+      # after it (the window is the only thing between this lane and a page), then to the end of the recording.
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 30m
+        exp_samples: []
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 38m
+        exp_samples: []
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 41m
+        exp_samples: []
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 43m
+        exp_samples: []
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 45m
+        exp_samples: []
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 48m
+        exp_samples: []
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 51m
+        exp_samples: []
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 60m
+        exp_samples: []
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 80m
+        exp_samples: []
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 89m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 38m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 41m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 43m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 48m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 55m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 89m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+
   - name: a pace-limited fast role that is never caught in flight is not idle while its dispatches keep settling
     interval: 30s
     input_series:

@@ -2,11 +2,13 @@
 # pg-router-queue-stalled and pg-router-queue-slow-growth replays (see ../queue_stalled_test.go and
 # ../queue_slow_growth_test.go).
 #
-# REAL RECORDING, reconstructed from the pg-router durable queue log (~/.local/state/pg-router/queue.jsonl); no
-# synthesis. The series Prometheus held for this lane are all functions of these records: pg_router_queue_depth{type}
-# is the count of retained events, pg_router_listener_in_flight{role} is 1 while an offer is outstanding, and
-# pg_router_throughput_total{type} advances once per accepted dispatch. Only timestamps are kept (UTC, to the second):
-# event ids, bead titles and payloads are dropped, and no event is identified.
+# REAL RECORDING, reconstructed from the pg-router durable queue log (~/.local/state/pg-router/queue.jsonl) and, for the one
+# record the log misleads on, corrected from the daemon log, the ccpool pool events and Prometheus (see "Correction of
+# 2026-10-14" below); no synthesis. The series Prometheus held for this lane are all functions of these records:
+# pg_router_queue_depth{type} is the count of retained events, pg_router_listener_in_flight{role} is 1 while an offer is
+# outstanding (and not in a restart hole, H), and pg_router_throughput_total{type} advances once per accepted dispatch. Only
+# timestamps are kept (UTC, to the second, truncated): event ids, bead titles and payloads are dropped, and no event is
+# identified.
 #
 # Record kinds, one per line (the S records first, then every other record in time order):
 #   E <t>          an event was admitted (enqueue record; for a compacted event, the archive record's enqueue
@@ -14,18 +16,55 @@
 #                  counter existed is exactly these records).
 #   X <t>          an event left the queue (evict record, or the archive record's evictedAt): retired after being
 #                  accepted, or retired unaccepted by the queue's own sweep (reason "retired"). Depth falls by one.
-#   D <start> <t>  one dispatch: the offer went in flight at <start> (accept record startedAt) and settled at <t>
-#                  (accept record at), which is also when pg_router_throughput_total advanced. The router holds one
-#                  offer per role (INV-CONC-1), so these never overlap. A handler error still settles as an accept.
+#   D <start> <t>  one dispatch: the offer went in flight at <start> and settled at <t> (accept record at), which is also
+#                  when pg_router_throughput_total advanced. The router holds one offer per role (INV-CONC-1), so these
+#                  never overlap. A handler error still settles as an accept. <start> is the accept record's startedAt,
+#                  and a daemon restart RE-TIMES it: a restart leaves a ccpool-backed session running (ADR 0085 of this
+#                  repo), the new daemon re-offers the event, and the accept written when the session settles carries the
+#                  re-offer's start, not the original offer's. A D whose start was read from an accept record alone can
+#                  therefore lie about when the dispatch began. The daemon log shows one restart of this day with a
+#                  drain-pg2 dispatch running (23:28:05Z), and the record it re-timed is corrected below.
 #   S <from> <to>  the host was asleep: no router activity and therefore no Prometheus scrape in [from, to). These
 #                  are the three >= 100 minute gaps in the router event log (~/.local/state/pg-router/events.jsonl)
 #                  of that day, the same ones the sleep-aware metrics bead records (03:30Z-07:21Z, 08:28Z-12:20Z,
 #                  13:36Z-16:30Z; the first is before this file's first record, so only the other two appear).
 #                  Short dark wakes inside a sleep are not modelled (fewer samples, never more).
+#   H <from> <to>  a restart hole: a daemon restart left the dispatch running (ADR 0085 of this repo) but the new process
+#                  holds no offer until its first dispatch pass re-offers the event, so pg_router_listener_in_flight read 0
+#                  on every scrape in [from, to) although the session never stopped. <from> is when the new process began
+#                  serving metrics, <to> the re-offer. The D that spans a hole is ONE dispatch: nothing is accepted at the
+#                  restart, so the throughput counter advances once, when the session settles.
 #   U <t>          an event was retired WITHOUT an accept: what pg_router_unconsumed_expired_total counts (a retirement
 #                  followed by the source's re-emission is a U and an E that add up to no new work). Only the churn burst
 #                  of 00:18Z-00:24Z on 10-13 is recorded as U (every X of it from 00:18:31Z, 30 in all): the queue log no
 #                  longer says which earlier X were unaccepted, and every X before it follows an accept. U records come last.
+#
+# Correction of 2026-10-14 (bead pg2-g8gnv; found by pg2-b1srv). This file first held `D 2026-10-12T23:33:06Z
+# 2026-10-13T00:18:03Z` for the last dispatch of the day, which left the lane idle from the previous settle (23:03:11Z) to
+# 23:33:06Z: 30 minutes with about 20 events queued, the one real stretch the old replay paged for. The lane was not idle.
+# The dispatch went in flight at 23:03:43Z and ran 74 minutes; the daemon restarted at 23:28:05Z and left its session
+# working (ADR 0085), and the new daemon re-offered the event at 23:33:06Z. The accept record written at 00:18:03Z carries
+# that re-offer as its startedAt (44.9 minutes; the router event log, ~/.local/state/pg-router/events.jsonl, has
+# started_at 23:33:06.63Z and time 00:18:03.50Z), so a lane rebuilt from accept records shows a hole that never existed.
+# The file now holds `D 23:03:43Z 00:18:03Z` and the restart as `H 23:28:38Z 23:33:06Z`. Derived from, re-read on 2026-10-14:
+#   * Prometheus pg_router_listener_in_flight{role="drain-pg2"}, the RAW samples (a stepped range query reads each step off
+#     the last sample within five minutes and moves the edges by up to a minute): 1 at 23:02:44Z, 0 at 23:03:14Z (the
+#     hand-off), 1 from 23:03:44Z to 23:27:44Z, the old process's last scrape; no sample from 23:27:44Z to 23:28:53Z (the
+#     host load average was above 100 and scrapes ran late); 0 on the 8 scrapes of 23:28:53Z to 23:32:57Z; 1 again at
+#     23:33:25Z. up and pg_router_queue_depth were read on every one of those scrapes (depth 19), so a restart this short
+#     leaves neither series with a hole the rule's 18-of-20 guard would notice.
+#   * the daemon log (~/.local/state/pg-router/launchd-stderr.log, local time UTC-4): shutdown requested 23:28:05Z and
+#     "leaving dispatch(es) running" for the roles drain-pg2 and review; the new process serving metrics at 23:28:38Z; the
+#     previous dispatch's result at 23:03:11Z and a decline for another event at 23:03:33Z, after which this offer went in
+#     flight (INV-CONC-1: one offer per role). The first dispatch pass followed the new process's first producer tick, which
+#     ended at 23:33:06Z after a source timed out under a load average near 150.
+#   * the ccpool pool events (~/.local/state/pg-router-ccpool-drain-pg2/events.jsonl): the session was created at
+#     23:03:46Z (it is named for that instant), reached working at 23:04:18Z and changed state again only at 00:13:17Z.
+#   * this file: the X at 23:03:43Z is the evict of the offer's own dispatch pass (every D here starts in the second of the X
+#     before it), so the start is 23:03:43Z, between the 23:03:33Z decline and the 23:03:44Z scrape that read 1.
+# Hand-offs: the 12 dispatches of the day are separated by 0 to 150 seconds (the 11 gaps, largest 21:50:56Z to 21:53:26Z;
+# the last, 23:03:11Z to 23:03:43Z, took 32 seconds): the largest is a quarter of the 10 minute window of
+# pg-router-queue-stalled.
 #
 # Facts a replay can be checked against (all read from the same records):
 #   * the 63.7 minute healthy dispatch is D 17:47:55 18:53:11 (router duration 63.7 min), with depth >= 10 throughout;
@@ -93,7 +132,8 @@ E 2026-10-12T23:00:31Z
 E 2026-10-12T23:01:35Z
 X 2026-10-12T23:03:27Z
 X 2026-10-12T23:03:43Z
-D 2026-10-12T23:33:06Z 2026-10-13T00:18:03Z
+D 2026-10-12T23:03:43Z 2026-10-13T00:18:03Z
+H 2026-10-12T23:28:38Z 2026-10-12T23:33:06Z
 E 2026-10-12T23:35:33Z
 E 2026-10-12T23:52:38Z
 E 2026-10-13T00:09:41Z

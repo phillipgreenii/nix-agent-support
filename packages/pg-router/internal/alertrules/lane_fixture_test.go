@@ -35,6 +35,7 @@ type lane struct {
 	declines []time.Time // offers the handler declined, as logged: in flight around the instant, never accepted (R)
 	retired  []time.Time // events retired without an accept: what pg_router_unconsumed_expired_total counts (U)
 	asleep   []span      // the host was asleep: no scrape in [from, to) (S)
+	holes    []span      // restart holes: a dispatch was running but the gauge read 0 in [from, to) (H)
 }
 
 func parseUTC(s string) time.Time {
@@ -66,6 +67,8 @@ func loadLane(t *testing.T, path string) lane {
 			l.disp = append(l.disp, span{parseUTC(f[1]), parseUTC(f[2])})
 		case len(f) == 3 && f[0] == "S":
 			l.asleep = append(l.asleep, span{parseUTC(f[1]), parseUTC(f[2])})
+		case len(f) == 3 && f[0] == "H":
+			l.holes = append(l.holes, span{parseUTC(f[1]), parseUTC(f[2])})
 		case len(f) == 3 && f[0] == "B":
 			n, err := strconv.Atoi(f[2])
 			if err != nil || n < 0 {
@@ -104,6 +107,14 @@ func (l lane) depthAt(t time.Time) int {
 }
 
 func (l lane) inFlightAt(t time.Time) bool {
+	// A restarted daemon holds no outstanding offer until its first dispatch pass
+	// re-offers the surviving session's event, so the gauge reads 0 in a restart hole
+	// whatever the session is doing (the D record that spans it is one dispatch).
+	for _, h := range l.holes {
+		if !t.Before(h.from) && t.Before(h.to) {
+			return false
+		}
+	}
 	for _, d := range l.disp {
 		if !t.Before(d.from) && t.Before(d.to) {
 			return true

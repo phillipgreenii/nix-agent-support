@@ -14,7 +14,9 @@
 #                  born-expired drain event and the source re-emits it on its next tick: the re-emission is an E again.
 #   X <t>          an event left the queue (archive evictedAt or evict record): depth falls by one.
 #   D <start> <t>  one ACCEPTED dispatch: the offer went in flight at <start> and settled at <t>, which is when
-#                  pg_router_throughput_total advanced. The D records start 6 hours before <B>, so a 6 hour completions
+#                  pg_router_throughput_total advanced. <start> is the accept record's startedAt, which a daemon restart
+#                  that leaves the session running re-times to the re-offer (see "Re-timed starts" below). The D records
+#                  start 6 hours before <B>, so a 6 hour completions
 #                  window is complete from the first evaluation (only the archived events of the queue log survive, which
 #                  can omit an older dispatch). A dispatch that settles after 23:28Z is not a record.
 #   R <t>          one DECLINED offer: the daemon logged `dispatch declined: ... role=drain-pg2` at <t> (the second the line
@@ -29,6 +31,28 @@
 #   S <from> <to>  the host was asleep: no router activity and no Prometheus scrape in [from, to) (gaps of 10 minutes or
 #                  more in the router event log, ~/.local/state/pg-router/events.jsonl; the dark wakes inside them are not
 #                  modelled). The recording stops at 23:28Z, before the first of the next evening's gaps.
+#
+# Re-timed starts (pg2-g8gnv, 2026-10-14; the same effect drain_pg2_2026-10-12.txt corrects under "Correction of
+# 2026-10-14", where the derivation and the H record that models it are). A restart leaves a ccpool-backed session running
+# (ADR 0085 of this repo), the new daemon re-offers its event, and the accept record carries the re-offer as its start. Four
+# drain-pg2 dispatches of 2026-10-13 and 14 are re-timed this way. Read from the router event log
+# (~/.local/state/pg-router/events.jsonl, started_at and time), the ccpool pool events (a session name carries its
+# creation instant) and the daemon log (UTC; each new process's "starting" line):
+#   * session created 14:33:58.6Z, recorded start 14:53:48.7Z (19.8 minutes late), settled 15:16:30.49Z; the new process
+#     started at 14:49:56.6Z. This file holds no D for it (its first D starts at 17:35:58Z).
+#   * session created 16:34:06.5Z, recorded start 17:35:58.5Z (61.9 minutes late), settled 18:09:44.96Z; two restarts in
+#     between, the new processes starting at 16:42:15.5Z (after 7 minutes down) and 17:33:41.6Z. The line
+#     `D 17:35:58Z 18:09:44Z` is this dispatch, with the re-offer as its start.
+#   * session created 19:45:36.7Z, recorded start 19:48:46.8Z (3.2 minutes late), settled 20:10:08.76Z; the new process
+#     started at 19:46:23.6Z. The line `D 19:48:46Z 20:10:08Z` is this dispatch, with the re-offer as its start.
+#   * session created 2026-10-14 00:14:18.2Z, recorded start 00:26:48.0Z (12.5 minutes late); the new process started at
+#     00:24:49.8Z. After the end of this file.
+# Not re-timed, as a control: the dispatch of D 20:10:15Z 20:53:50Z (started_at 20:10:15.1Z, its session created at
+# 20:10:15.3Z). The two D records above are kept as recorded, with their re-offer starts, and not corrected to their true
+# starts (and an H record for each restart): no replay reads them. The storm replays scrape from 20:30Z and judge windows
+# from 20:35Z, after both settled (18:09:44Z, 20:10:08Z), and the slow-growth replays read the queue records and the
+# settle instants, never a start; queue_stalled_test.go pins it (TestStormReplayDoesNotReadTheRetimedStarts: the scrapes
+# from 20:30Z are identical with both starts moved to the creation instants above).
 #
 # Facts a replay can be checked against (all read from the same records):
 #   * 20:53:50Z is the last accept before the storm and 22:02:39Z the first after it; the dispatch that ended there went in

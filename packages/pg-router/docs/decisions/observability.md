@@ -516,9 +516,24 @@ or when consumption stays far below generation.
 **Evidence.** The recorded `drain.pg2` lane of 2026-10-12, reconstructed from the queue log
 (`internal/alertrules/testdata/drain_pg2_2026-10-12.txt`), replays through both rules in
 `queue_stalled_test.go` and `queue_slow_growth_test.go`: the old expression pages at 18:48Z, as the alert
-record says, and the new one never evaluates true during the dispatch; it pages once for a real stretch of
-30 minutes (23:03:11Z to 23:33:06Z) in which the lane sat idle with about 20 events queued and the host
-awake; the slow-growth rule pages for the 12:00Z to 19:40Z case (11 arrivals, 5 completions). The recorded
+record says, and the new one never evaluates true during the dispatch, nor anywhere else on the recorded
+day; the slow-growth rule pages for the 12:00Z to 19:40Z case (11 arrivals, 5 completions). All eleven
+hand-offs of that day took 0 to 150 seconds (the last, 23:03:11Z to 23:03:43Z, 32), so the 10 minute window is
+four times the worst of them. No stretch of the day is idle. A lane rebuilt from accept records alone shows 30
+idle minutes with about 20 events queued (23:03:11Z to 23:33:06Z) that this rule would page, but they never
+happened: an accept record carries the start of the offer it settles, and a daemon restart re-times it. The
+dispatch went in flight at 23:03:43Z and ran 74 minutes; the daemon restarted at 23:28:05Z and left its session
+working (ADR 0085), the new daemon re-offered the event at 23:33:06Z, and the accept written at 00:18:03Z says
+the dispatch began then (corrected 2026-10-14, bead `pg2-g8gnv`, found by `pg2-b1srv`). The gauge Prometheus
+recorded reads 1 until the restart, 0 on the 8 scrapes of 23:28:53Z to 23:32:57Z (the new process holds no offer
+until its first dispatch pass; the host load average was above 100) and 1 again from 23:33:25Z, so the rule,
+which needs the role quiet for 10 minutes and then 5 more, stays silent: the real series runs through the real
+expression in a `promtool` case, and the replay holds at every scrape phase. After a restart this short only
+the 10 minute in-flight window protects the rule: the `up` and depth series stayed continuous (one 68 second
+gap), so the presence guard does not wait for fresh scrapes the way it does after a sleep. A hole would need to
+run about 12 minutes to page (the condition holds from 10 minutes after the last in-flight scrape until a run
+of 6 scrapes completes 3 minutes after the re-offer, and `for` is 5); whether the router should keep the
+original start across a restart, or hold the gauge until it re-offers, is `pg2-x3zkb`'s question. The recorded
 `pr.changed` buildup of 2026-09-30 pages as two idle-with-backlog stretches the old rule could not see, and
 the absorbed `issue.changed` surge of 2026-10-01 pages nothing. The usage-limit decline storm of 2026-10-13
 (`testdata/drain_pg2_2026-10-13.txt`: the queue log and the daemon log, 302 recorded declines) holds the

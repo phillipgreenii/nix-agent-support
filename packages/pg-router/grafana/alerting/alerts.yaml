@@ -283,18 +283,39 @@ groups:
       # Window and hold. 10m window with at least 18 of its 20 scrapes (30s scrape
       # interval, the 10% slack of the other rules), `for: 5m`: a lane pages after
       # about 15 minutes idle. A healthy lane starts its next dispatch 0 to 150
-      # seconds after one settles (ten of the eleven hand-offs of 2026-10-12), so 10m
-      # is four times the worst of those; the eleventh, 23:03:11Z to 23:33:06Z, was 30
-      # minutes with about 20 events queued and the host awake, which is exactly what
-      # this rule pages. keepFiringFor 10m holds the alert across a lane that restarts
-      # briefly and stalls again.
+      # seconds after one settles (all eleven hand-offs of 2026-10-12, the last, 23:03:11Z
+      # to 23:03:43Z, took 32), so 10m is four times the worst of those. The recorded
+      # day never evaluates true (internal/alertrules/testdata/drain_pg2_2026-10-12.txt).
+      # A lane rebuilt from accept records alone shows 30 idle minutes with about 20
+      # events queued, 23:03:11Z to 23:33:06Z, and this rule would page for them, but
+      # they never happened: a dispatch that began at 23:03:43Z ran through a daemon
+      # restart, and its accept record carries the start of the RE-offer (23:33:06Z). The
+      # real gauge read 0 for 4.5 minutes of it (see "Sleep and restart").
+      # keepFiringFor 10m holds the alert across a lane that restarts briefly and stalls
+      # again.
       #
       # Sleep and restart (pg2-9uvm5). The presence guard is the wake grace: a laptop
       # sleep leaves no samples, so after a wake the guard is false until 18 fresh
       # scrapes exist and `for` has to be earned again, instead of a Pending state from
-      # before the sleep carrying across the gap. A daemon restart does the same. The
-      # dedicated host-awake signal belongs to pg2-9uvm5; when it lands this rule needs
-      # one more `unless` clause on that signal and nothing else changes.
+      # before the sleep carrying across the gap. A daemon restart does NOT do the same
+      # when it is short: the up and depth series stayed continuous across the restart of
+      # 2026-10-12 23:28Z (the old process's last scrape was 23:27:44Z and the new one's
+      # first 23:28:53Z, one 68 second gap on a loaded host; depth 19 on every scrape on
+      # both sides), so the guard did not wait for fresh scrapes.
+      # After a short restart the only protection is the 10 minute in-flight window. A
+      # restart leaves a ccpool-backed session running (ADR 0085 of this repo) and the new
+      # process holds no offer until its first dispatch pass re-offers the event, so
+      # in-flight reads 0 for that long: about 4.5 minutes on 2026-10-12 (23:28:38Z to
+      # 23:33:06Z, on a loaded host). A hole has to run roughly 12 minutes to page (the
+      # condition holds from 10 minutes after the last in-flight scrape until a run of 6
+      # scrapes completes 3 minutes after the re-offer, and `for` is 5).
+      # Replay: internal/alertrules/queue_stalled_test.go
+      # (TestStalledRecordedDay, TestStalledRestartHoleThatIsLongEnoughPages) and the real
+      # series in rule-tests/pg-router-queue-stalled.test.yaml. Whether the router should
+      # keep the original start across a restart or hold the gauge until it re-offers is
+      # pg2-x3zkb's question, not this rule's. The dedicated host-awake signal belongs to
+      # pg2-9uvm5; when it lands this rule needs one more `unless` clause on that signal
+      # and nothing else changes.
       #
       # Gates. A gate (any TYPE, SYSTEM_PAUSE included) halts every listener except its
       # owner, so an idle lane with a backlog is expected while one is in force:
@@ -339,7 +360,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router queue for type {{ $labels.type }} has a backlog but nothing is processing it"
-          description: "pg_router_queue_depth for type {{ $labels.type }} stayed above 0 on every scrape of a 10 minute window while the role bound to that type had no dispatch running in it (pg_router_listener_in_flight on 6 consecutive scrapes; a declined attempt is in flight for a second or two and does not count) and completed none, and that held for another 5 minutes -- events are waiting and the consumer is idle. Check `pg-router status` for the role that binds this type: a decline backoff (a ccpool pool at capacity or at its usage limit, an unavailable handler), a handler that fails at launch, or a role that is disabled or excluded. A dispatch that is running, however long, is not stalled and does not fire this. A pg-router pause or any other gate suppresses it (pg-router-gate-held covers a long hold), and so does a laptop sleep or a daemon restart, which need 10 minutes of fresh scrapes before the condition can hold."
+          description: "pg_router_queue_depth for type {{ $labels.type }} stayed above 0 on every scrape of a 10 minute window while the role bound to that type had no dispatch running in it (pg_router_listener_in_flight on 6 consecutive scrapes; a declined attempt is in flight for a second or two and does not count) and completed none, and that held for another 5 minutes -- events are waiting and the consumer is idle. Check `pg-router status` for the role that binds this type: a decline backoff (a ccpool pool at capacity or at its usage limit, an unavailable handler), a handler that fails at launch, or a role that is disabled or excluded. A dispatch that is running, however long, is not stalled and does not fire this. A pg-router pause or any other gate suppresses it (pg-router-gate-held covers a long hold), and so does a laptop sleep, which needs 10 minutes of fresh scrapes before the condition can hold. A daemon restart is covered only by the 10 minute window: the new daemon holds no offer until its first dispatch pass re-offers a session the restart left running, so check whether the daemon restarted shortly before this fired."
         data:
           - refId: A
             relativeTimeRange:

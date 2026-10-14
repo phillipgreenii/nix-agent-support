@@ -341,42 +341,161 @@ func TestStalledHealthyLongDispatchDoesNotPage(t *testing.T) {
 }
 
 // Replay of the whole recorded day. Every long dispatch (4h50m across a sleep, 63.7,
-// 69.7 and 44.9 minutes) is quiet. The one stretch where the lane really sat idle
-// with a backlog while the host was awake and other roles were dispatching,
-// 23:03:11Z to 23:33:06Z (about 20 events queued), pages once, 15 to 20 minutes in.
+// 69.7 and 74 minutes) and every hand-off between them (0 to 150 seconds, at most a
+// quarter of the 10 minute window) is quiet: the condition is never true and nothing
+// pages. A lane rebuilt from accept records alone shows one stretch of 30 idle
+// minutes with about 20 events queued, 23:03:11Z to 23:33:06Z, which the rule would
+// have paged; it never existed. The dispatch that began at 23:03:43Z ran through a
+// daemon restart (the accept record carries the re-offer's start, 23:33:06Z), and the
+// gauge read 0 only from 23:28:38Z to 23:33:06Z, 4.5 minutes of the 12 or so a hole
+// needs to page (TestStalledRestartHoleThatIsLongEnoughPages;
+// testdata/drain_pg2_2026-10-12.txt, "Correction of 2026-10-14"). The restart window is
+// replayed at every scrape phase, because which scrapes the hole catches depends on
+// where the scrape grid falls and the real one is only one of 30.
 func TestStalledRecordedDay(t *testing.T) {
 	l := loadLane(t, laneFixture)
 	from := parseUTC("2026-10-12T08:32:00Z")
 	series := l.scrapes(from, laneEnd)
 	m := replayStalled(series, awakeIn(l), from, laneEnd)
+	if tm, bad := firstWhere(m, from, laneEnd, condTrue); bad {
+		t.Errorf("the recorded day evaluated true at %s", tm.Format("15:04:05"))
+	}
+	if tm, bad := firstWhere(m, from, laneEnd, isFiring); bad {
+		t.Errorf("the recorded day paged at %s", tm.Format("15:04:05"))
+	}
 
-	idleFrom, idleTo := parseUTC("2026-10-12T23:03:11Z"), parseUTC("2026-10-12T23:33:06Z")
-	if tm, bad := firstWhere(m, from, idleFrom.Add(9*time.Minute), condTrue); bad {
-		t.Errorf("condition true at %s, before the idle stretch had lasted a window", tm.Format("15:04:05"))
+	// 23:03Z to 00:20Z: never true, never firing, at any scrape phase.
+	if len(l.holes) != 1 {
+		t.Fatalf("%d restart holes recorded, want the one of 23:28:38Z to 23:33:06Z", len(l.holes))
 	}
-	firstCond, ok := firstWhere(m, from, laneEnd, condTrue)
-	if !ok || firstCond.Before(idleFrom.Add(9*time.Minute)) || firstCond.After(idleFrom.Add(12*time.Minute)) {
-		t.Fatalf("first true condition at %v (found=%v), want 9-12 minutes into the idle stretch", firstCond, ok)
+	hole := l.holes[0]
+	winFrom, winTo := parseUTC("2026-10-12T23:03:00Z"), parseUTC("2026-10-13T00:20:00Z")
+	evalFrom := parseUTC("2026-10-12T22:30:00Z")
+	for phase := time.Duration(0); phase < scrape; phase += time.Second {
+		s := l.scrapes(evalFrom.Add(-time.Hour).Add(phase), laneEnd)
+		pm := replayStalled(s, awakeIn(l), evalFrom, laneEnd)
+		if tm, bad := firstWhere(pm, winFrom, winTo, condTrue); bad {
+			t.Fatalf("phase %s: condition true at %s, inside the dispatch that ran through the restart", phase, tm.Format("15:04:05"))
+		}
+		if tm, bad := firstWhere(pm, winFrom, winTo, isFiring); bad {
+			t.Fatalf("phase %s: paged at %s, inside the dispatch that ran through the restart", phase, tm.Format("15:04:05"))
+		}
+		// Non-vacuity: the restart hole is in the replayed series, 8 or 9 scrapes at
+		// any phase (Prometheus recorded 8; the host load delayed its scrapes).
+		zeros := 0
+		for _, o := range obsIn(s, hole.from.Add(-time.Second), hole.to.Add(-time.Second)) {
+			if o.inFlight == 0 {
+				zeros++
+			}
+		}
+		if zeros < 8 || zeros > 9 {
+			t.Fatalf("phase %s: the restart hole reads 0 on %d scrapes, want 8 or 9", phase, zeros)
+		}
 	}
-	firstFire, ok := firstWhere(m, from, laneEnd, isFiring)
-	if !ok || firstFire.Before(idleFrom.Add(14*time.Minute)) || firstFire.After(idleFrom.Add(20*time.Minute)) {
-		t.Fatalf("first page at %v (found=%v), want 14-20 minutes into the idle stretch", firstFire, ok)
+}
+
+// The correction of 2026-10-14 pinned (pg2-g8gnv), so a fixture rebuilt from accept
+// records alone cannot bring the false stretch back: the last dispatch of the day is
+// ONE dispatch that began at 23:03:43Z (not the re-offer at 23:33:06Z), the restart
+// accepts nothing, the gauge reads 0 only in the restart hole, and all eleven
+// hand-offs of the day took 0 to 150 seconds.
+func TestStalledRecordedDayRestartIsOneDispatchAndOneHole(t *testing.T) {
+	l := loadLane(t, laneFixture)
+	began, settled := parseUTC("2026-10-12T23:03:43Z"), parseUTC("2026-10-13T00:18:03Z")
+	restart, reoffer := parseUTC("2026-10-12T23:28:05Z"), parseUTC("2026-10-12T23:33:06Z")
+
+	// One dispatch spans the restart, and began before it.
+	n := 0
+	for _, d := range l.disp {
+		if d.from.Before(restart) && d.to.After(reoffer) {
+			n++
+			if d.from.Before(began.Add(-2*time.Second)) || d.from.After(began.Add(2*time.Second)) || !d.to.Equal(settled) {
+				t.Errorf("the dispatch across the restart is %s to %s, want %s to %s", d.from.Format("15:04:05"), d.to.Format("15:04:05"), began.Format("15:04:05"), settled.Format("15:04:05"))
+			}
+		}
+		if d.from.Equal(reoffer) {
+			t.Errorf("a dispatch starts at the re-offer %s: an accept record's start is re-timed by the restart, the offer began at %s", reoffer.Format("15:04:05"), began.Format("15:04:05"))
+		}
 	}
-	// The condition stops with the idle stretch: the next dispatch is in flight from
-	// 23:33:06Z and counts as running once it has been in flight on stalledBusyRun
-	// scrapes, two minutes on. The alert resolves keepFiringFor later; it never fires
-	// again.
-	runs := time.Duration(stalledBusyRun) * scrape
-	lastCond, _ := lastWhere(m, from, laneEnd, condTrue)
-	if lastCond.After(idleTo.Add(runs + evalEvery)) {
-		t.Errorf("condition still true at %s, after the lane resumed at %s", lastCond.Format("15:04:05"), idleTo.Format("15:04:05"))
+	if n != 1 {
+		t.Fatalf("%d dispatches span the restart, want 1", n)
 	}
-	lastFire, _ := lastWhere(m, from, laneEnd, isFiring)
-	if lastFire.Before(idleTo) || lastFire.After(idleTo.Add(runs+stalledKeep+2*time.Minute)) {
-		t.Errorf("last firing evaluation at %s, want within keepFiringFor of the resume at %s", lastFire.Format("15:04:05"), idleTo.Format("15:04:05"))
+	// No phantom accept at the restart: the throughput counter advances once per
+	// settled dispatch, so nothing settles between the start and the end.
+	for _, a := range acceptTimes(l) {
+		if a.After(began) && a.Before(settled) {
+			t.Errorf("accept at %s inside the dispatch that ran %s to %s", a.Format("15:04:05"), began.Format("15:04:05"), settled.Format("15:04:05"))
+		}
 	}
-	if tm, bad := firstWhere(m, idleTo.Add(runs+stalledKeep+3*time.Minute), laneEnd, isFiring); bad {
-		t.Errorf("fired again at %s", tm.Format("15:04:05"))
+	// The gauge: in flight from the offer to the old process's end, 0 in the hole (the
+	// new process, until its first dispatch pass), in flight again from the re-offer.
+	if len(l.holes) != 1 || !l.holes[0].from.After(restart) || l.holes[0].to.After(reoffer) {
+		t.Fatalf("restart holes %v, want one from the new process (after the shutdown request at %s) to the re-offer %s", l.holes, restart.Format("15:04:05"), reoffer.Format("15:04:05"))
+	}
+	for hms, want := range map[string]bool{
+		"23:03:30": false, // the hand-off: the previous dispatch settled at 23:03:11
+		"23:04:00": true, "23:10:00": true, "23:20:00": true, "23:28:30": true,
+		"23:29:00": false, "23:31:00": false, "23:33:00": false, // the hole
+		"23:33:30": true, "23:50:00": true, "00:10:00": true,
+		"00:18:30": false, // settled at 00:18:03
+	} {
+		day := "2026-10-12"
+		if hms < "12:00:00" {
+			day = "2026-10-13"
+		}
+		if got := l.inFlightAt(atDay(day, hms)); got != want {
+			t.Errorf("in flight at %s is %v, want %v", hms, got, want)
+		}
+	}
+	// All eleven hand-offs of the day: 0 to 150 seconds, the largest 21:50:56Z to
+	// 21:53:26Z and the last, 23:03:11Z to 23:03:43Z, 32 seconds.
+	if len(l.disp) != 12 {
+		t.Fatalf("%d dispatches recorded, want 12", len(l.disp))
+	}
+	var longest time.Duration
+	for i := 1; i < len(l.disp); i++ {
+		gap := l.disp[i].from.Sub(l.disp[i-1].to)
+		if gap < 0 || gap > 150*time.Second {
+			t.Errorf("hand-off %d (%s to %s) took %s, want 0 to 150s", i, l.disp[i-1].to.Format("15:04:05"), l.disp[i].from.Format("15:04:05"), gap)
+		}
+		if gap > longest {
+			longest = gap
+		}
+	}
+	if longest != 150*time.Second {
+		t.Errorf("the longest hand-off is %s, want 150s", longest)
+	}
+	if gap := l.disp[11].from.Sub(l.disp[10].to); gap != 32*time.Second {
+		t.Errorf("the last hand-off took %s, want 32s", gap)
+	}
+}
+
+// Teeth for the replay above: it is silent because the real hole is short, not
+// because the model cannot see one. The same recorded day with the restart hole
+// stretched (a first dispatch pass that took that long) pages once the hole has run
+// about 12 minutes: the condition needs the role quiet for the 10 minute window
+// after its last in-flight scrape and holds until a run of 6 scrapes completes 3
+// minutes after the re-offer, and `for` is 5 minutes. The real hole is 4.5 minutes.
+func TestStalledRestartHoleThatIsLongEnoughPages(t *testing.T) {
+	base := loadLane(t, laneFixture)
+	evalFrom := parseUTC("2026-10-12T22:30:00Z")
+	replay := func(hole time.Duration) map[time.Time]alertState {
+		l := base
+		l.holes = []span{{base.holes[0].from, base.holes[0].from.Add(hole)}}
+		return replayStalled(l.scrapes(evalFrom.Add(-time.Hour), laneEnd), awakeIn(l), evalFrom, laneEnd)
+	}
+	for _, hole := range []time.Duration{base.holes[0].to.Sub(base.holes[0].from), 10 * time.Minute} {
+		if tm, bad := firstWhere(replay(hole), evalFrom, laneEnd, isFiring); bad {
+			t.Errorf("a restart hole of %s paged at %s, want silence", hole, tm.Format("15:04:05"))
+		}
+	}
+	for _, hole := range []time.Duration{15 * time.Minute, 20 * time.Minute} {
+		m := replay(hole)
+		first, ok := firstWhere(m, evalFrom, laneEnd, isFiring)
+		from := base.holes[0].from
+		if !ok || first.Before(from.Add(14*time.Minute)) || first.After(from.Add(18*time.Minute)) {
+			t.Errorf("a restart hole of %s first paged at %v (found=%v), want 14-18 minutes into the hole", hole, first, ok)
+		}
 	}
 }
 
@@ -508,6 +627,50 @@ func TestStalledDeclineStormHeldTheOldConditionForAFewMinutesOnly(t *testing.T) 
 		if !stalledCondRun(series, e, stalledBusyRun) {
 			t.Fatalf("the sustained in-flight test is false at %s, inside the same stretch", e.Format("15:04:05"))
 		}
+	}
+}
+
+// Two D records of the storm fixture carry a daemon restart's re-offer as their
+// start, not the offer: 17:35:58Z (the session was created at 16:34:06Z) and
+// 19:48:46Z (created at 19:45:36Z); testdata/drain_pg2_2026-10-13.txt, "Re-timed
+// starts" (pg2-g8gnv). The fixture keeps them as recorded because no replay reads
+// them: both dispatches settled before the first scrape the storm replays take
+// (20:30Z), so every scrape from there is the same with the true starts.
+func TestStormReplayDoesNotReadTheRetimedStarts(t *testing.T) {
+	l := loadLane(t, stormFixture)
+	truth := l
+	truth.disp = append([]span(nil), l.disp...)
+	moved := 0
+	for i, d := range truth.disp {
+		switch {
+		case d.from.Equal(parseUTC("2026-10-13T17:35:58Z")):
+			truth.disp[i].from = parseUTC("2026-10-13T16:34:06Z")
+			moved++
+		case d.from.Equal(parseUTC("2026-10-13T19:48:46Z")):
+			truth.disp[i].from = parseUTC("2026-10-13T19:45:36Z")
+			moved++
+		}
+	}
+	if moved != 2 {
+		t.Fatalf("%d re-timed starts found in the fixture, want 2", moved)
+	}
+	for phase := time.Duration(0); phase < scrape; phase += time.Second {
+		a := l.scrapes(stormScrapeStart.Add(phase), stormEnd)
+		b := truth.scrapes(stormScrapeStart.Add(phase), stormEnd)
+		if len(a) != len(b) {
+			t.Fatalf("phase %s: %d scrapes with the recorded starts, %d with the true ones", phase, len(a), len(b))
+		}
+		for i := range a {
+			if !a[i].at.Equal(b[i].at) || a[i].depth != b[i].depth || a[i].inFlight != b[i].inFlight || a[i].gate != b[i].gate || a[i].settled != b[i].settled {
+				t.Fatalf("phase %s: the scrape at %s reads %+v with the recorded starts and %+v with the true ones", phase, a[i].at.Format("15:04:05"), a[i], b[i])
+			}
+		}
+	}
+	// Non-vacuity: a scrape inside the true stretch of the first re-timed dispatch
+	// does read differently (the replay model sees the true start).
+	at := parseUTC("2026-10-13T17:00:00Z")
+	if l.inFlightAt(at) == truth.inFlightAt(at) {
+		t.Errorf("the lanes read the same at %s, the true start should be in flight", at.Format("15:04:05"))
 	}
 }
 
