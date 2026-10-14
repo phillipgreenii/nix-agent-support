@@ -576,6 +576,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				// re-read user toggle from shared state in case Caffeinate RPC changed it
 				opts.Caffeinate.SetToggle(state.isCaffeinateOn())
 				opts.Caffeinate.Tick(false)
+				recordCaffeinateBattery(&opts, state)
 			}
 			return
 		}
@@ -683,6 +684,8 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			prevState := opts.Caffeinate.State()
 			opts.Caffeinate.Tick(keepAwake)
 			newState := opts.Caffeinate.State()
+			recordCaffeinateBattery(&opts, state)
+			batteryGate := opts.Caffeinate.BatteryStatus().Gate
 			// active is true when the subprocess is running OR when the
 			// user toggle is on but the manager is waiting for agents to
 			// start before spawning (StateOff + toggle=true). Without the
@@ -705,7 +708,12 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			// manager's real state here revives the long-dead grace display.
 			graceRemaining := opts.Caffeinate.GraceRemaining()
 			state.setCaffeinateState(active, cause, newState, graceRemaining)
-			opts.Emitter.RecordCaffeinateActive(active, caffeinateProcessLabel(newState), int(graceRemaining.Seconds()), map[string]string{"plan_tier": opts.PlanTier})
+			// The gauge reports whether the Mac is being held awake (or armed to
+			// be), so a low battery that withholds the assertion reads 0 even
+			// with the toggle on (pg2-s86z9). The legacy `active` flag above
+			// stays the toggle-driven intent for the TUI.
+			gaugeActive := active && !(batteryGate.Restricts() && newState == caffeinate.StateOff)
+			opts.Emitter.RecordCaffeinateActive(gaugeActive, caffeinateProcessLabel(newState), int(graceRemaining.Seconds()), map[string]string{"plan_tier": opts.PlanTier})
 			if prevState == caffeinate.StateOff && newState != caffeinate.StateOff {
 				opts.Emitter.RecordCaffeinateRound(map[string]string{"cause": cause})
 			}
@@ -917,6 +925,21 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		case <-t.C:
 			runTick()
 		}
+	}
+}
+
+// recordCaffeinateBattery publishes the low-battery rule's verdict from the
+// Caffeinate.Tick that just ran (for `status`) and turns each release the tick
+// recorded into a counter increment and a log event. Called from both tick
+// paths so a release is counted whether or not a poller is wired.
+func recordCaffeinateBattery(opts *RunOptions, state *sharedState) {
+	b := opts.Caffeinate.BatteryStatus()
+	state.setCaffeinateBattery(b)
+	for _, reason := range opts.Caffeinate.TakeBatteryReleases() {
+		opts.Emitter.RecordCaffeinateBatteryRelease(reason, map[string]string{
+			"plan_tier": opts.PlanTier,
+			"gate":      b.Gate.String(),
+		})
 	}
 }
 

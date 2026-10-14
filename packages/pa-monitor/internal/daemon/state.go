@@ -53,6 +53,13 @@ type sharedState struct {
 	watermarks               *WatermarkStore
 	autoResumeDelay          time.Duration // static config: how long to wait before auto-nudging
 
+	// caffeinateBattery is the low-battery rule's verdict from the latest
+	// Caffeinate.Tick (bead pg2-s86z9); caffeinateBatteryKnown is false until
+	// the first tick, so the status reports "not yet known" rather than a
+	// fabricated "disabled".
+	caffeinateBattery      caffeinate.BatteryStatus
+	caffeinateBatteryKnown bool
+
 	// cachedSnapshotTree is the most recent snapshot() result, refreshed by the
 	// daemon's tick loop (refreshSnapshot) on the TICK goroutine. gRPC handlers
 	// (buildState) serve this cached copy instead of doing a synchronous SQLite
@@ -198,6 +205,22 @@ func (s *sharedState) setCaffeinateState(active bool, cause string, process caff
 	s.caffeinateProcess = process
 	s.caffeinateGraceRemaining = graceRemaining
 	s.mu.Unlock()
+}
+
+// setCaffeinateBattery records the low-battery rule's verdict for surfacing.
+func (s *sharedState) setCaffeinateBattery(b caffeinate.BatteryStatus) {
+	s.mu.Lock()
+	s.caffeinateBattery = b
+	s.caffeinateBatteryKnown = true
+	s.mu.Unlock()
+}
+
+// caffeinateBatteryStatus returns the last recorded verdict and whether one
+// has been recorded yet.
+func (s *sharedState) caffeinateBatteryStatus() (caffeinate.BatteryStatus, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.caffeinateBattery, s.caffeinateBatteryKnown
 }
 
 // caffeinateIndicators returns the full two-indicator view for surfacing:

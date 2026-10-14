@@ -19,6 +19,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/power"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
@@ -459,6 +460,14 @@ func (s *server) buildState() *pb.DaemonState {
 	state.CaffeinateProcess = caffeinateProcessToProto(process)
 	state.CaffeinateGraceRemainingS = uint32(graceRemaining.Seconds())
 	state.CaffeinateCause = cause
+	if b, ok := s.state.caffeinateBatteryStatus(); ok {
+		state.CaffeinateBatteryGate = b.Gate.String()
+		state.CaffeinateOnBattery = b.OnBattery
+		if b.Percent != power.NoPercent {
+			pct := uint32(b.Percent)
+			state.CaffeinateBatteryPercent = &pct
+		}
+	}
 	s.state.mu.RLock()
 	delay := s.state.autoResumeDelay
 	wm := s.state.watermarks

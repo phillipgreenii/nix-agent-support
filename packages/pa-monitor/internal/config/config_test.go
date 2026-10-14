@@ -580,3 +580,75 @@ func TestDefaultPricingIncludesFiveFiveModels(t *testing.T) {
 		t.Errorf("default fallback = %+v, want %+v", cfg.Pricing.Default, wantDefault)
 	}
 }
+
+func loadTOML(t *testing.T, content string) Config {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// TestCaffeinateBatteryDefaults pins the initial HOLD/RELEASE thresholds of the
+// low-battery keep-awake rule (bead pg2-s86z9): 30 and 20, 5 points hysteresis.
+func TestCaffeinateBatteryDefaults(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "nonexistent.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CaffeinateBatteryHoldPct != 30 || cfg.CaffeinateBatteryReleasePct != 20 || cfg.CaffeinateBatteryHysteresisPct != 5 {
+		t.Errorf("battery defaults = hold %d release %d hysteresis %d, want 30/20/5",
+			cfg.CaffeinateBatteryHoldPct, cfg.CaffeinateBatteryReleasePct, cfg.CaffeinateBatteryHysteresisPct)
+	}
+}
+
+func TestCaffeinateBatteryOverrides(t *testing.T) {
+	cfg := loadTOML(t, `
+caffeinate_battery_hold_pct = 40
+caffeinate_battery_release_pct = 25
+caffeinate_battery_hysteresis_pct = 8
+`)
+	if cfg.CaffeinateBatteryHoldPct != 40 || cfg.CaffeinateBatteryReleasePct != 25 || cfg.CaffeinateBatteryHysteresisPct != 8 {
+		t.Errorf("got hold %d release %d hysteresis %d, want 40/25/8",
+			cfg.CaffeinateBatteryHoldPct, cfg.CaffeinateBatteryReleasePct, cfg.CaffeinateBatteryHysteresisPct)
+	}
+}
+
+func TestCaffeinateBatteryPartialOverrideKeepsOtherDefaults(t *testing.T) {
+	cfg := loadTOML(t, "caffeinate_battery_hold_pct = 50\n")
+	if cfg.CaffeinateBatteryHoldPct != 50 || cfg.CaffeinateBatteryReleasePct != 20 {
+		t.Errorf("got hold %d release %d, want 50/20", cfg.CaffeinateBatteryHoldPct, cfg.CaffeinateBatteryReleasePct)
+	}
+}
+
+// TestCaffeinateBatterySanitized: out-of-range values are clamped to [0,100]
+// and a release threshold above the hold threshold is capped at it, so a typo
+// can neither crash the daemon nor invert the rule.
+func TestCaffeinateBatterySanitized(t *testing.T) {
+	cases := []struct {
+		name                string
+		toml                string
+		hold, release, hyst int
+	}{
+		{"negative clamps to zero", "caffeinate_battery_hold_pct = -5\ncaffeinate_battery_release_pct = -1\n", 0, 0, 5},
+		{"over 100 clamps", "caffeinate_battery_hold_pct = 250\ncaffeinate_battery_hysteresis_pct = 999\n", 100, 20, 100},
+		{"release above hold is capped", "caffeinate_battery_hold_pct = 30\ncaffeinate_battery_release_pct = 60\n", 30, 30, 5},
+		{"lowering hold drags the default release down", "caffeinate_battery_hold_pct = 10\n", 10, 10, 5},
+		{"hold 0 disables the rule", "caffeinate_battery_hold_pct = 0\n", 0, 0, 5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := loadTOML(t, tc.toml)
+			if cfg.CaffeinateBatteryHoldPct != tc.hold || cfg.CaffeinateBatteryReleasePct != tc.release || cfg.CaffeinateBatteryHysteresisPct != tc.hyst {
+				t.Errorf("got hold %d release %d hysteresis %d, want %d/%d/%d",
+					cfg.CaffeinateBatteryHoldPct, cfg.CaffeinateBatteryReleasePct, cfg.CaffeinateBatteryHysteresisPct,
+					tc.hold, tc.release, tc.hyst)
+			}
+		})
+	}
+}

@@ -1,6 +1,10 @@
 package caffeinate
 
-import "time"
+import (
+	"time"
+
+	"github.com/phillipgreenii/pa-monitor/internal/core/power"
+)
 
 type State int
 
@@ -23,10 +27,26 @@ type Manager struct {
 	Now     func() time.Time
 	PID     int
 
+	// Battery, when non-nil, is consulted every Tick to apply BatteryPolicy
+	// (bead pg2-s86z9): a low battery stops the Mac being held awake. A nil
+	// Battery, or a zero BatteryPolicy.HoldPct, leaves the manager's behavior
+	// exactly as it was before the rule existed.
+	Battery       power.Reader
+	BatteryPolicy BatteryPolicy
+
 	state        State
 	toggle       bool
 	countdownEnd time.Time
 	spawnErr     error
+
+	// Battery-rule state; see battery.go.
+	gate        BatteryGate
+	lastReading power.Reading
+	latched     bool
+	// spawnBlockedNoted is true once the current withheld-spawn episode has
+	// been counted, so the counter ticks once per episode, not once per Tick.
+	spawnBlockedNoted bool
+	releases          []string
 }
 
 func (m *Manager) State() State { return m.state }
@@ -65,7 +85,12 @@ func (m *Manager) GraceRemaining() time.Duration {
 // unattempted nudgeable disrupt (D5). The caller computes the disjunction
 // inline from the tree + watermark store (NOT the nudger's pending-store,
 // which reconciles later in the same tick).
+//
+// A low battery (see BatteryPolicy) overrides keepAwake for spawning: the
+// subprocess is withheld at or below the hold threshold and stopped at or
+// below the release threshold, whatever keepAwake says.
 func (m *Manager) Tick(keepAwake bool) {
+	gate := m.evalBattery()
 	if !m.toggle {
 		return
 	}
@@ -76,6 +101,20 @@ func (m *Manager) Tick(keepAwake bool) {
 		m.state = StateOff
 	}
 	now := m.Now()
+	if gate == GateReleased && m.state != StateOff {
+		// Stop holding the Mac awake so it can idle-sleep with its state
+		// intact instead of draining to 1%. A StateError manager holds no
+		// process, so it only drops to Off; no release is recorded for it.
+		if m.state != StateError {
+			_ = m.Kill()
+			m.releases = append(m.releases, ReasonReleaseThreshold)
+		}
+		m.state = StateOff
+		m.spawnErr = nil
+	}
+	if !gate.Restricts() || !keepAwake {
+		m.spawnBlockedNoted = false
+	}
 	switch m.state {
 	case StateOff:
 		// Only spawn when something needs the Mac awake; if toggle was just
@@ -83,6 +122,10 @@ func (m *Manager) Tick(keepAwake bool) {
 		// still idle, stay off until work resumes — avoids perpetual
 		// kill/respawn cycle.
 		if !keepAwake {
+			return
+		}
+		if gate.Restricts() {
+			m.noteSpawnBlocked()
 			return
 		}
 		m.trySpawn()
@@ -103,13 +146,26 @@ func (m *Manager) Tick(keepAwake bool) {
 	case StateError:
 		// A prior Spawn failed. Retry while the Mac still needs to be awake;
 		// otherwise release the error and fall back to Off (nothing to hold).
-		if !keepAwake {
+		if !keepAwake || gate.Restricts() {
+			if keepAwake {
+				m.noteSpawnBlocked()
+			}
 			m.spawnErr = nil
 			m.state = StateOff
 			return
 		}
 		m.trySpawn()
 	}
+}
+
+// noteSpawnBlocked records, once per episode, that the low battery withheld a
+// subprocess the Mac was otherwise due to be held awake with.
+func (m *Manager) noteSpawnBlocked() {
+	if m.spawnBlockedNoted {
+		return
+	}
+	m.spawnBlockedNoted = true
+	m.releases = append(m.releases, ReasonSpawnBlocked)
 }
 
 // trySpawn attempts to start the caffeinate subprocess, recording the outcome

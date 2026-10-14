@@ -10575,11 +10575,44 @@
                       settings = endpoint;
                     };
                   };
+                  # pg2-s86z9: the low-battery keep-awake thresholds. Defaults 30/20 render
+                  # with daemon.enable; an operator override reaches the TOML settings; a
+                  # release above the hold is an assertion failure.
+                  settingsOf = c: c.phillipgreenii.programs.pa-monitor.settings;
+                  assertionsPass = c: builtins.all (a: a.assertion) c.assertions;
+                  tunedBattery = evalCfg {
+                    phillipgreenii.programs.pa-monitor = {
+                      daemon.enable = true;
+                      caffeinate = {
+                        batteryHoldPercent = 40;
+                        batteryReleasePercent = 25;
+                      };
+                    };
+                  };
+                  invertedBattery = evalCfg {
+                    phillipgreenii.programs.pa-monitor = {
+                      daemon.enable = true;
+                      caffeinate = {
+                        batteryHoldPercent = 20;
+                        batteryReleasePercent = 30;
+                      };
+                    };
+                  };
                 in
                 assert hasConfig daemonOnly; # the fix: daemon.enable alone ⇒ config rendered
                 assert hasConfig tuiOnly; # TUI path unchanged ⇒ still rendered
                 assert !(hasConfig neither); # nothing enabled ⇒ no file
                 assert hasConfig bothEnabled; # both gates ⇒ still rendered
+                assert (settingsOf daemonOnly).caffeinate_battery_hold_pct == 30; # default HOLD
+                assert (settingsOf daemonOnly).caffeinate_battery_release_pct == 20; # default RELEASE
+                assert (settingsOf daemonOnly).otel.endpoint == endpoint.otel.endpoint; # merged, not replaced
+                assert !((settingsOf neither) ? caffeinate_battery_hold_pct); # daemon off ⇒ not rendered
+                assert !((settingsOf tuiOnly) ? caffeinate_battery_hold_pct); # the TUI never reads them
+                assert (settingsOf tunedBattery).caffeinate_battery_hold_pct == 40; # override reaches the TOML
+                assert (settingsOf tunedBattery).caffeinate_battery_release_pct == 25;
+                assert hasConfig tunedBattery; # a thresholds-only daemon still gets its config.toml
+                assert assertionsPass tunedBattery;
+                assert !(assertionsPass invertedBattery); # release above hold is refused
                 pkgs.runCommand "pa-monitor-config-gating-ok" { } "touch $out";
 
               # pg2-sgs4y (V3 of the HM launchdServices work; personal ADR 0055): the
@@ -10730,6 +10763,12 @@
                   };
                   e = (entries enabled).pa-monitor-daemon;
                   settingsOf = c: c.phillipgreenii.programs.pa-monitor.settings;
+                  # pg2-s86z9: daemon.enable ALWAYS renders the low-battery keep-awake
+                  # thresholds (module defaults 30/20) into settings, OTel or not.
+                  batteryDefaults = {
+                    caffeinate_battery_hold_pct = 30;
+                    caffeinate_battery_release_pct = 20;
+                  };
 
                   # OTel endpoint lands in settings iff daemon.enable AND the stack is on.
                   obsOn = evalWith {
@@ -10807,14 +10846,14 @@
                   e.serviceConfig.StandardErrorPath == "/Users/tester/.local/state/pa-monitor/launchd-stderr.log";
                 # OTel now lands in settings from osConfig (replacing home-manager.sharedModules)
                 assert (settingsOf obsOn).otel.endpoint == "http://127.0.0.1:4317";
-                assert (settingsOf obsOn) == { otel.endpoint = "http://127.0.0.1:4317"; };
-                assert (settingsOf obsOff) == { };
+                assert (settingsOf obsOn) == batteryDefaults // { otel.endpoint = "http://127.0.0.1:4317"; };
+                assert (settingsOf obsOff) == batteryDefaults;
                 assert (settingsOf daemonOffObsOn) == { };
                 assert obsOn.xdg.configFile ? "pa-monitor/config.toml";
                 # null-safe fallbacks: standalone HM, no observability, no mkEmitterEnv
-                assert (settingsOf noOsConfig) == { };
-                assert (settingsOf osConfigNoObs) == { };
-                assert (settingsOf obsNoEmitter) == { };
+                assert (settingsOf noOsConfig) == batteryDefaults;
+                assert (settingsOf osConfigNoObs) == batteryDefaults;
+                assert (settingsOf obsNoEmitter) == batteryDefaults;
                 assert (entries noOsConfig) ? pa-monitor-daemon;
                 # linux: no registry entry, no declaration needed
                 assert !(linux ? phillipgreenii.programs.launchdServices);
@@ -10822,7 +10861,7 @@
                 assert failedAssertions enabled == [ ];
                 assert failedAssertions disabled == [ ];
                 assert builtins.length (failedAssertions darwinNoRegistry) == 1;
-                assert (settingsOf linux) == { };
+                assert (settingsOf linux) == batteryDefaults;
                 pkgs.runCommand "pa-monitor-hm-launchd-ok" { } "touch $out";
 
               # pg-connector-github's supervisor entry (docket pg2-z5fax, Phase 2): the

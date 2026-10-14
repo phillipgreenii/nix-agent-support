@@ -74,6 +74,37 @@ in
       reads this flag across `config.home-manager.users.<u>`.
     '';
 
+    caffeinate = {
+      batteryHoldPercent = lib.mkOption {
+        type = lib.types.ints.between 0 100;
+        default = 30;
+        description = ''
+          Low-battery HOLD threshold for the keep-awake assertion (pa-monitor
+          `caffeinate_battery_hold_pct`). While the Mac is on battery power at or
+          below this charge, the daemon does NOT start a caffeinate subprocess,
+          whatever the caffeinate toggle says, so the Mac can idle-sleep with its
+          state intact instead of running the battery down to 1% under agent load
+          (the 2026-10-09 and 2026-10-10 host stalls). The normal rule resumes as
+          soon as AC returns, or the charge is above this value plus the daemon's
+          5-point hysteresis. Set to 0 to disable the rule. Only rendered when
+          `daemon.enable` is set; a change takes effect when the daemon restarts.
+        '';
+      };
+
+      batteryReleasePercent = lib.mkOption {
+        type = lib.types.ints.between 0 100;
+        default = 20;
+        description = ''
+          Low-battery RELEASE threshold (pa-monitor
+          `caffeinate_battery_release_pct`). While on battery at or below this
+          charge, a RUNNING caffeinate subprocess is stopped at the next tick.
+          Between this value and `batteryHoldPercent` a running subprocess is
+          kept but no new one starts. MUST NOT exceed `batteryHoldPercent`
+          (asserted). Set to 0 to never stop a running subprocess.
+        '';
+      };
+    };
+
     pprof.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -174,6 +205,24 @@ in
     (lib.mkIf (cfg.daemon.enable && otelSettings != { }) {
       phillipgreenii.programs.pa-monitor.settings = otelSettings;
     })
+    # Low-battery keep-awake thresholds (bead pg2-s86z9). The daemon is the only
+    # reader, so they render with daemon.enable, into the same config.toml as the
+    # OTel endpoint; the Go-side defaults are the same 30/20, so this adds the
+    # operator's declared values rather than the only copy.
+    (lib.mkIf cfg.daemon.enable {
+      phillipgreenii.programs.pa-monitor.settings = {
+        caffeinate_battery_hold_pct = cfg.caffeinate.batteryHoldPercent;
+        caffeinate_battery_release_pct = cfg.caffeinate.batteryReleasePercent;
+      };
+    })
+    {
+      assertions = [
+        {
+          assertion = cfg.caffeinate.batteryReleasePercent <= cfg.caffeinate.batteryHoldPercent;
+          message = "phillipgreenii.programs.pa-monitor.caffeinate.batteryReleasePercent (${toString cfg.caffeinate.batteryReleasePercent}) must not exceed batteryHoldPercent (${toString cfg.caffeinate.batteryHoldPercent}): the release threshold would stop a hold the hold threshold never restricted.";
+        }
+      ];
+    }
     # SwiftBar menu bar plugin. The ENTRY is darwin-only (mkIf: home.file is a
     # real HM option on every platform, unlike the launchd registry below); the
     # assertion requires `enable` because the wrapper bakes in

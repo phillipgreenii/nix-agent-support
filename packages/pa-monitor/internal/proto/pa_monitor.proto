@@ -140,6 +140,15 @@ message DaemonState {
   google.protobuf.Timestamp seven_day_resets_at = 22;    // 7d window reset; unset = unknown (never 1970)
   google.protobuf.Timestamp limits_captured_at = 23;     // capture ts of the limits reading; unset = unknown
   google.protobuf.Timestamp five_hour_resets_at = 24;    // 5h window reset; unset = unknown (never 1970)
+
+  // Low-battery rule for the keep-awake assertion (bead pg2-s86z9). The gate is
+  // one of "disabled" | "ok" | "no_spawn" | "released" | "unknown"; an EMPTY
+  // string means an older daemon that does not report it. A client MUST treat a
+  // value it does not recognise as "unknown". on_battery and battery_percent
+  // are the last reading; battery_percent is unset when there is no reading.
+  string caffeinate_battery_gate = 25;
+  bool caffeinate_on_battery = 26;
+  optional uint32 caffeinate_battery_percent = 27;
 }
 
 message Directory {

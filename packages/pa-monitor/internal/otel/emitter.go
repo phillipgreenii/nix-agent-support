@@ -85,6 +85,7 @@ type Emitter struct {
 	weekLimitHits        metric.Int64Counter
 	caffeinateRounds     metric.Int64Counter
 	caffeinateGrace      metric.Int64Counter
+	caffeinateBatteryRel metric.Int64Counter
 	contextLimitHits     metric.Int64Counter
 	nudgesSent           metric.Int64Counter
 	nudgeSendFailures    metric.Int64Counter
@@ -366,6 +367,14 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	}
 	if e.caffeinateGrace, err = meter.Int64Counter("pa_monitor.caffeinate.grace_expirations_total"); err != nil {
 		return err
+	}
+	// Birth each reason's zero series so increase() over a range that includes
+	// emitter creation captures the first release (R7, same as limit_hits above).
+	if e.caffeinateBatteryRel, err = meter.Int64Counter("pa_monitor.caffeinate.battery_releases_total"); err != nil {
+		return err
+	}
+	for _, reason := range CaffeinateBatteryReleaseReasons {
+		e.caffeinateBatteryRel.Add(context.Background(), 0, metric.WithAttributes(attribute.String("reason", reason)))
 	}
 	if e.contextLimitHits, err = meter.Int64Counter("pa_monitor.session.context.limit_hits_total"); err != nil {
 		return err
@@ -773,6 +782,32 @@ func (e *Emitter) RecordCaffeinateGraceExpired(attrs map[string]string) {
 		e.caffeinateGrace.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
 	e.LogEvent("caffeinate.grace_expired", attrs)
+}
+
+// CaffeinateBatteryReleaseReasons are the `reason` label values of
+// pa_monitor.caffeinate.battery_releases_total. They mirror the reasons in
+// internal/core/caffeinate (ReasonReleaseThreshold, ReasonSpawnBlocked); the
+// otel package does not import the state machine, so a test pins the match.
+var CaffeinateBatteryReleaseReasons = []string{"release_threshold", "spawn_blocked"}
+
+// RecordCaffeinateBatteryRelease increments
+// pa_monitor.caffeinate.battery_releases_total for one low-battery release of
+// the keep-awake assertion and emits the matching caffeinate.battery_release
+// log event. reason is added to attrs as the `reason` label. nil-safe.
+func (e *Emitter) RecordCaffeinateBatteryRelease(reason string, attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	merged := map[string]string{"reason": reason}
+	for k, v := range attrs {
+		if k != "reason" {
+			merged[k] = v
+		}
+	}
+	if e.caffeinateBatteryRel != nil {
+		e.caffeinateBatteryRel.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(merged)...))
+	}
+	e.LogEvent("caffeinate.battery_release", merged)
 }
 
 // RecordContextLimitHit increments pa_monitor.session.context.limit_hits_total

@@ -19,6 +19,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
+	"github.com/phillipgreenii/pa-monitor/internal/core/power"
 	"github.com/phillipgreenii/pa-monitor/internal/core/provider"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
@@ -177,6 +178,14 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		IsAlive: caffProc.IsAlive,
 		Now:     time.Now,
 		PID:     os.Getpid(),
+		// Low-battery rule (pg2-s86z9): stop holding the Mac awake on a low
+		// battery. NewReader is pmset on darwin and a no-op elsewhere.
+		Battery: power.NewReader(),
+		BatteryPolicy: caffeinate.BatteryPolicy{
+			HoldPct:       cfg.CaffeinateBatteryHoldPct,
+			ReleasePct:    cfg.CaffeinateBatteryReleasePct,
+			HysteresisPct: cfg.CaffeinateBatteryHysteresisPct,
+		},
 	}
 	// Ensure caffeinate is killed even if Run returns abnormally.
 	cleanups = append(cleanups, func() { _ = caffProc.Kill() })

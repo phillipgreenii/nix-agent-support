@@ -92,3 +92,47 @@ func TestCaffeinateResponseRoundTrip(t *testing.T) {
 		t.Errorf("until = %v, want %v", out.GetUntil().AsTime(), until.AsTime())
 	}
 }
+
+// TestDaemonStateCaffeinateBatteryRoundTrip confirms the low-battery rule's
+// report (bead pg2-s86z9) survives a marshal/unmarshal, and that a 0% reading
+// stays distinguishable from "no reading" (proto3 optional presence).
+func TestDaemonStateCaffeinateBatteryRoundTrip(t *testing.T) {
+	zero, fifteen := uint32(0), uint32(15)
+	cases := []struct {
+		name      string
+		gate      string
+		onBattery bool
+		percent   *uint32
+	}{
+		{"released_at_15", "released", true, &fifteen},
+		{"ok_on_ac_unknown_charge", "ok", false, nil},
+		{"zero_percent_is_not_unset", "released", true, &zero},
+		{"older_daemon", "", false, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := proto.Marshal(&DaemonState{
+				CaffeinateBatteryGate:    tc.gate,
+				CaffeinateOnBattery:      tc.onBattery,
+				CaffeinateBatteryPercent: tc.percent,
+			})
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			var out DaemonState
+			if err := proto.Unmarshal(b, &out); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if out.GetCaffeinateBatteryGate() != tc.gate || out.GetCaffeinateOnBattery() != tc.onBattery {
+				t.Errorf("gate/on_battery = %q/%v, want %q/%v",
+					out.GetCaffeinateBatteryGate(), out.GetCaffeinateOnBattery(), tc.gate, tc.onBattery)
+			}
+			if (out.CaffeinateBatteryPercent != nil) != (tc.percent != nil) {
+				t.Fatalf("percent presence = %v, want %v", out.CaffeinateBatteryPercent != nil, tc.percent != nil)
+			}
+			if tc.percent != nil && out.GetCaffeinateBatteryPercent() != *tc.percent {
+				t.Errorf("percent = %d, want %d", out.GetCaffeinateBatteryPercent(), *tc.percent)
+			}
+		})
+	}
+}

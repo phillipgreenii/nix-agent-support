@@ -102,10 +102,64 @@ changed):
   holding" case.
 - `caffeinate.grace_remaining_s` is emitted only while `process` is `grace` and is omitted when 0, so
   a consumer MUST read a missing value during `grace` as 0.
+- `caffeinate.battery` reports the [low-battery rule](#low-battery-keep-awake-rule): `gate` is one of
+  `disabled`, `ok`, `no_spawn`, `released`, or `unknown`; `on_battery` is the last power-source
+  reading; `percent` is the last charge and is omitted when none was read (a real `0` is emitted).
+  The key is omitted when the daemon does not report it (an older daemon, or before its first
+  tick), so a consumer MUST read a missing key as "unknown", never as `ok`:
+
+  ```json
+  {
+    "caffeinate": {
+      "mode": true,
+      "process": "off",
+      "battery": { "gate": "released", "on_battery": true, "percent": 15 }
+    }
+  }
+  ```
+
 - `auto_resume` is always present; `false` is a meaningful value, not "unknown".
 - A pa-monitor client with this change ALWAYS emits both keys, so key **absence** means "an older
   pa-monitor client" and a consumer SHOULD hide the toggles. A new client talking to an OLD daemon
   cannot tell unknown from off (proto3 zero values) and will report both as off; this is accepted.
+
+### Low-battery keep-awake rule
+
+While any session is working (or a nudgeable error has had no attempt yet) the daemon holds the Mac
+awake with a `caffeinate` subprocess. On 2026-10-09 and 2026-10-10 the Mac lost AC power, kept that
+assertion under agent load, and ran its battery down to 1% to 3%, which stalled the host for about
+45 minutes each time (bead `pg2-bqcqi`). The daemon therefore reads the power source and the charge
+(`pmset -g batt`, read-only) every tick and applies this rule, in addition to the normal one
+(ADR 0095):
+
+| Condition                                        | Effect                                                                              |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| On battery, charge at or below the HOLD value    | No new `caffeinate` subprocess is started, whatever the toggle says.                |
+| On battery, charge at or below the RELEASE value | A running `caffeinate` subprocess is stopped at the next tick.                      |
+| On AC, or charge above HOLD plus hysteresis      | The normal rule resumes at the next tick.                                           |
+| The battery cannot be read                       | The normal rule applies (fail open): an unreadable battery never releases the hold. |
+| Not macOS, or a Mac with no battery              | The rule is off (a no-op reader reports AC).                                        |
+
+The defaults are HOLD 30%, RELEASE 20% and 5 points of hysteresis, so a charge hovering at 30% does
+not flap the assertion. Between RELEASE and HOLD a running subprocess is kept but a new one is not
+started. No session is killed or nudged: sessions simply stop being protected from idle sleep, so
+the Mac can sleep with its state intact. The rule does not force the Mac to sleep, and other
+processes' assertions (audio output, a browser playing sound, another `caffeinate`) still keep it
+awake.
+
+Observability: `pa_monitor.caffeinate.battery_releases_total{reason}` counts each release
+(`release_threshold`: a running subprocess was stopped; `spawn_blocked`: a subprocess the Mac was due
+to hold was withheld, counted once per episode, not once per tick), with a matching
+`caffeinate.battery_release` log event; the `pa_monitor.caffeinate.active` gauge reads 0 while the
+rule is withholding the assertion even though the toggle is on (the toggle itself is still reported
+as `caffeinate.mode`); and `status --json` carries `caffeinate.battery`
+([above](#status---json-the-rate_limits-caffeinate-and-auto_resume-keys)).
+
+Configure it with the Home-Manager options `phillipgreenii.programs.pa-monitor.caffeinate.batteryHoldPercent`
+(default 30) and `batteryReleasePercent` (default 20; asserted not to exceed the hold value), or with
+the `caffeinate_battery_*_pct` keys under [Other keys](#other-keys). A value of 0 for the hold
+threshold disables the rule. Config is read at daemon start (ADR 0028), so a change applies when the
+daemon restarts.
 
 ### Busy/idle gates: a blocked session counts as idle
 
@@ -222,8 +276,8 @@ The daemon emits:
 
 - **Metrics**
   - Observable gauges: `pa_monitor.sessions.count` (by `state` + workspace/agent/model labels), `pa_monitor.sessions.errored` (by `kind`), `pa_monitor.caffeinate.active`, `pa_monitor.auto_resume.enabled`, `pa_monitor.block.cost.usd`, `pa_monitor.week.cost.usd`, and per-active-session `pa_monitor.session.info` / `pa_monitor.session.tokens` / `pa_monitor.session.cost.usd` (keyed by `session_id`, one row per non-Dormant session).
-  - Counters: `pa_monitor.block.usage.limit_hits_total`, `pa_monitor.week.usage.limit_hits_total`, `pa_monitor.caffeinate.rounds_total`, `pa_monitor.caffeinate.grace_expirations_total`, `pa_monitor.signal.sends_total`, `pa_monitor.nudge.queued_total`, `pa_monitor.nudge.suppressed_total`, `pa_monitor.session.api_error.observed_total`, `pa_monitor.session.context.limit_hits_total` (context-window-exceeded / "prompt is too long" hits, by `model`), `pa_monitor.signaler.binary_missing_total` (fired once per required signaler binary — `tmux`/`cmux` — not found on the daemon's PATH at startup, by `signaler` + `binary`).
-- **Logs** — structured event records: `block.usage.limit_hit`, `week.usage.limit_hit`, `caffeinate.start`, `caffeinate.grace_expired`, `nudge.queued`, `nudge.sent`, `nudge.suppressed`, `session.api_error.observed`, `session.context.limit_hit`, `signaler.binary_missing`.
+  - Counters: `pa_monitor.block.usage.limit_hits_total`, `pa_monitor.week.usage.limit_hits_total`, `pa_monitor.caffeinate.rounds_total`, `pa_monitor.caffeinate.grace_expirations_total`, `pa_monitor.caffeinate.battery_releases_total` (by `reason`), `pa_monitor.signal.sends_total`, `pa_monitor.nudge.queued_total`, `pa_monitor.nudge.suppressed_total`, `pa_monitor.session.api_error.observed_total`, `pa_monitor.session.context.limit_hits_total` (context-window-exceeded / "prompt is too long" hits, by `model`), `pa_monitor.signaler.binary_missing_total` (fired once per required signaler binary — `tmux`/`cmux` — not found on the daemon's PATH at startup, by `signaler` + `binary`).
+- **Logs** — structured event records: `block.usage.limit_hit`, `week.usage.limit_hit`, `caffeinate.start`, `caffeinate.grace_expired`, `caffeinate.battery_release`, `nudge.queued`, `nudge.sent`, `nudge.suppressed`, `session.api_error.observed`, `session.context.limit_hit`, `signaler.binary_missing`.
 
 The cmux-bridge and TUI additionally emit:
 
@@ -426,6 +480,9 @@ endpoint = "http://127.0.0.1:4317"
 | `auto_restart_on_version_mismatch`            | bool | `false` | Opt the `cmux-bridge` and `tui` into re-executing themselves on a daemon-version upgrade — see [Client self-restart](#client-self-restart-on-version-mismatch). |
 | `auto_session_wrap_up.enable`                 | bool | `false` | Opt in to the AutoSessionWrapUp nudge — see [AutoSessionWrapUp](#autosessionwrapup-nudging-idle-but-live-sessions-before-the-cache-expires).                    |
 | `auto_session_wrap_up.idle_threshold_minutes` | int  | `45`    | Minutes a session must be Idle before the nudge fires.                                                                                                          |
+| `caffeinate_battery_hold_pct`                 | int  | `30`    | On battery at or below this charge, start no new `caffeinate` — see [Low-battery rule](#low-battery-keep-awake-rule). `0` disables the rule.                    |
+| `caffeinate_battery_release_pct`              | int  | `20`    | On battery at or below this charge, stop a running `caffeinate`. Capped at the hold value.                                                                      |
+| `caffeinate_battery_hysteresis_pct`           | int  | `5`     | Charge must exceed hold plus this before the normal rule resumes on battery.                                                                                    |
 
 ## TUI symbols
 

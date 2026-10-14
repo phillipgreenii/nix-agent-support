@@ -290,8 +290,16 @@ type DaemonState struct {
 	SevenDayResetsAt *timestamppb.Timestamp `protobuf:"bytes,22,opt,name=seven_day_resets_at,json=sevenDayResetsAt,proto3" json:"seven_day_resets_at,omitempty"` // 7d window reset; unset = unknown (never 1970)
 	LimitsCapturedAt *timestamppb.Timestamp `protobuf:"bytes,23,opt,name=limits_captured_at,json=limitsCapturedAt,proto3" json:"limits_captured_at,omitempty"`   // capture ts of the limits reading; unset = unknown
 	FiveHourResetsAt *timestamppb.Timestamp `protobuf:"bytes,24,opt,name=five_hour_resets_at,json=fiveHourResetsAt,proto3" json:"five_hour_resets_at,omitempty"` // 5h window reset; unset = unknown (never 1970)
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Low-battery rule for the keep-awake assertion (bead pg2-s86z9). The gate is
+	// one of "disabled" | "ok" | "no_spawn" | "released" | "unknown"; an EMPTY
+	// string means an older daemon that does not report it. A client MUST treat a
+	// value it does not recognise as "unknown". on_battery and battery_percent
+	// are the last reading; battery_percent is unset when there is no reading.
+	CaffeinateBatteryGate    string  `protobuf:"bytes,25,opt,name=caffeinate_battery_gate,json=caffeinateBatteryGate,proto3" json:"caffeinate_battery_gate,omitempty"`
+	CaffeinateOnBattery      bool    `protobuf:"varint,26,opt,name=caffeinate_on_battery,json=caffeinateOnBattery,proto3" json:"caffeinate_on_battery,omitempty"`
+	CaffeinateBatteryPercent *uint32 `protobuf:"varint,27,opt,name=caffeinate_battery_percent,json=caffeinateBatteryPercent,proto3,oneof" json:"caffeinate_battery_percent,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *DaemonState) Reset() {
@@ -490,6 +498,27 @@ func (x *DaemonState) GetFiveHourResetsAt() *timestamppb.Timestamp {
 		return x.FiveHourResetsAt
 	}
 	return nil
+}
+
+func (x *DaemonState) GetCaffeinateBatteryGate() string {
+	if x != nil {
+		return x.CaffeinateBatteryGate
+	}
+	return ""
+}
+
+func (x *DaemonState) GetCaffeinateOnBattery() bool {
+	if x != nil {
+		return x.CaffeinateOnBattery
+	}
+	return false
+}
+
+func (x *DaemonState) GetCaffeinateBatteryPercent() uint32 {
+	if x != nil && x.CaffeinateBatteryPercent != nil {
+		return *x.CaffeinateBatteryPercent
+	}
+	return 0
 }
 
 type Directory struct {
@@ -2635,7 +2664,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x10push_interval_ms\x18\x01 \x01(\rR\x0epushIntervalMs\"\r\n" +
 	"\vPingRequest\":\n" +
 	"\fPingResponse\x12*\n" +
-	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xed\t\n" +
+	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xbb\v\n" +
 	"\vDaemonState\x12,\n" +
 	"\x03now\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x03now\x122\n" +
 	"\x15daemon_uptime_seconds\x18\x02 \x01(\x04R\x13daemonUptimeSeconds\x12%\n" +
@@ -2665,9 +2694,13 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\rseven_day_pct\x18\x15 \x01(\x01H\x01R\vsevenDayPct\x88\x01\x01\x12I\n" +
 	"\x13seven_day_resets_at\x18\x16 \x01(\v2\x1a.google.protobuf.TimestampR\x10sevenDayResetsAt\x12H\n" +
 	"\x12limits_captured_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x10limitsCapturedAt\x12I\n" +
-	"\x13five_hour_resets_at\x18\x18 \x01(\v2\x1a.google.protobuf.TimestampR\x10fiveHourResetsAtB\x10\n" +
+	"\x13five_hour_resets_at\x18\x18 \x01(\v2\x1a.google.protobuf.TimestampR\x10fiveHourResetsAt\x126\n" +
+	"\x17caffeinate_battery_gate\x18\x19 \x01(\tR\x15caffeinateBatteryGate\x122\n" +
+	"\x15caffeinate_on_battery\x18\x1a \x01(\bR\x13caffeinateOnBattery\x12A\n" +
+	"\x1acaffeinate_battery_percent\x18\x1b \x01(\rH\x02R\x18caffeinateBatteryPercent\x88\x01\x01B\x10\n" +
 	"\x0e_five_hour_pctB\x10\n" +
-	"\x0e_seven_day_pct\"\xfa\x02\n" +
+	"\x0e_seven_day_pctB\x1d\n" +
+	"\x1b_caffeinate_battery_percent\"\xfa\x02\n" +
 	"\tDirectory\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x16\n" +
 	"\x06branch\x18\x02 \x01(\tR\x06branch\x12.\n" +

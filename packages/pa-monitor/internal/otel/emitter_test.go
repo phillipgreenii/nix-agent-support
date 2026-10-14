@@ -451,3 +451,52 @@ func TestRecordScan_CacheHitSkipsWorkloadCounters(t *testing.T) {
 		t.Errorf("bytes_total = %d, want 100 (bytes from the incremental scan only)", bs.DataPoints[0].Value)
 	}
 }
+
+// TestEmitter_RecordCaffeinateBatteryRelease_Counter asserts the low-battery
+// release counter by value (bead pg2-s86z9): each release increments the series
+// for its `reason`, the reasons are born at 0 at startup, and the caller's other
+// attributes ride along without being able to overwrite `reason`.
+func TestEmitter_RecordCaffeinateBatteryRelease_Counter(t *testing.T) {
+	e, reader := newTestEmitter(t)
+
+	// Born at zero before any release, one series per reason.
+	m, ok := collectMetric(t, reader, "pa_monitor.caffeinate.battery_releases_total")
+	if !ok {
+		t.Fatal("pa_monitor.caffeinate.battery_releases_total not emitted at startup")
+	}
+	sum, ok := m.Data.(metricdata.Sum[int64])
+	if !ok {
+		t.Fatalf("battery_releases_total is %T, want metricdata.Sum[int64]", m.Data)
+	}
+	if len(sum.DataPoints) != len(CaffeinateBatteryReleaseReasons) {
+		t.Fatalf("startup series = %d, want %d (one per reason)", len(sum.DataPoints), len(CaffeinateBatteryReleaseReasons))
+	}
+	for _, dp := range sum.DataPoints {
+		if dp.Value != 0 {
+			t.Errorf("startup value = %d, want 0", dp.Value)
+		}
+	}
+
+	e.RecordCaffeinateBatteryRelease("release_threshold", map[string]string{"plan_tier": "max_5x", "reason": "spoofed"})
+	e.RecordCaffeinateBatteryRelease("release_threshold", map[string]string{"plan_tier": "max_5x"})
+	e.RecordCaffeinateBatteryRelease("spawn_blocked", nil)
+
+	m, _ = collectMetric(t, reader, "pa_monitor.caffeinate.battery_releases_total")
+	sum = m.Data.(metricdata.Sum[int64])
+	got := map[string]int64{}
+	for _, dp := range sum.DataPoints {
+		reason, present := dp.Attributes.Value("reason")
+		if !present {
+			t.Fatalf("data point without a reason label: %+v", dp)
+		}
+		got[reason.AsString()] += dp.Value
+		if reason.AsString() == "release_threshold" && dp.Value > 0 {
+			if tier, _ := dp.Attributes.Value("plan_tier"); tier.AsString() != "max_5x" {
+				t.Errorf("plan_tier = %q, want max_5x", tier.AsString())
+			}
+		}
+	}
+	if got["release_threshold"] != 2 || got["spawn_blocked"] != 1 || got["spoofed"] != 0 {
+		t.Errorf("counts = %v, want release_threshold=2 spawn_blocked=1 and no spoofed series", got)
+	}
+}

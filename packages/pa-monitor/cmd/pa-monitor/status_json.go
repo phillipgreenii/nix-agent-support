@@ -124,10 +124,32 @@ type rateLimitsJSON struct {
 // (see caffeinateProcessToken). GraceRemainingS is emitted only while the
 // process is in grace and is omitempty, so a consumer MUST read a missing value
 // during process "grace" as 0.
+//
+// Battery is the low-battery rule for the keep-awake assertion (bead
+// pg2-s86z9). It is omitted when the daemon does not report it (an older
+// daemon, or before its first tick), so a consumer MUST treat a missing key as
+// "unknown", never as "ok".
 type caffeinateJSON struct {
-	Mode            bool   `json:"mode"`
-	Process         string `json:"process"`
-	GraceRemainingS uint32 `json:"grace_remaining_s,omitempty"`
+	Mode            bool                   `json:"mode"`
+	Process         string                 `json:"process"`
+	GraceRemainingS uint32                 `json:"grace_remaining_s,omitempty"`
+	Battery         *caffeinateBatteryJSON `json:"battery,omitempty"`
+}
+
+// caffeinateBatteryJSON is the wire shape of the "battery" key under
+// "caffeinate". Gate is one of disabled|ok|no_spawn|released|unknown (any value
+// this client does not recognise is passed through as "unknown"). OnBattery is
+// the last power-source reading and Percent the last charge, omitted when no
+// charge was read.
+type caffeinateBatteryJSON struct {
+	Gate      string  `json:"gate"`
+	OnBattery bool    `json:"on_battery"`
+	Percent   *uint32 `json:"percent,omitempty"`
+}
+
+// caffeinateBatteryGateTokens are the gate values this client knows.
+var caffeinateBatteryGateTokens = map[string]bool{
+	"disabled": true, "ok": true, "no_spawn": true, "released": true, "unknown": true,
 }
 
 // statusJSONDoc is the `status --json` document. Caffeinate and AutoResume are
@@ -172,6 +194,17 @@ func toCaffeinateJSON(state *pb.DaemonState) *caffeinateJSON {
 	}
 	if state.GetCaffeinateProcess() == pb.CaffeinateProcess_CAFFEINATE_PROCESS_GRACE {
 		c.GraceRemainingS = state.GetCaffeinateGraceRemainingS()
+	}
+	if gate := state.GetCaffeinateBatteryGate(); gate != "" {
+		if !caffeinateBatteryGateTokens[gate] {
+			gate = "unknown"
+		}
+		b := &caffeinateBatteryJSON{Gate: gate, OnBattery: state.GetCaffeinateOnBattery()}
+		if state.CaffeinateBatteryPercent != nil {
+			pct := state.GetCaffeinateBatteryPercent()
+			b.Percent = &pct
+		}
+		c.Battery = b
 	}
 	return c
 }

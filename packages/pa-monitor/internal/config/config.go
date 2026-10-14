@@ -75,6 +75,15 @@ type Config struct {
 	// each session's first_prompt to. Sourced from the top-level
 	// first_prompt_max_chars key; a non-positive value falls back to the default.
 	FirstPromptMaxChars int
+	// CaffeinateBatteryHoldPct / ReleasePct / HysteresisPct are the low-battery
+	// rule for the keep-awake assertion (bead pg2-s86z9; see
+	// caffeinate.BatteryPolicy): on battery at or below HoldPct no caffeinate is
+	// started, at or below ReleasePct a running one is stopped, and the normal
+	// rule resumes on AC or above HoldPct+HysteresisPct. HoldPct 0 disables the
+	// rule. apply() keeps every value in [0,100] and ReleasePct <= HoldPct.
+	CaffeinateBatteryHoldPct       int
+	CaffeinateBatteryReleasePct    int
+	CaffeinateBatteryHysteresisPct int
 }
 
 // AutoSessionWrapUpConfig is the [auto_session_wrap_up] block.
@@ -166,6 +175,10 @@ type tomlConfig struct {
 	Account                      *tomlAccount           `toml:"account"`
 	BeadsWatch                   *tomlBeadsWatch        `toml:"beads_watch"`
 	AutoSessionWrapUp            *tomlAutoSessionWrapUp `toml:"auto_session_wrap_up"`
+
+	CaffeinateBatteryHoldPct       *int `toml:"caffeinate_battery_hold_pct"`
+	CaffeinateBatteryReleasePct    *int `toml:"caffeinate_battery_release_pct"`
+	CaffeinateBatteryHysteresisPct *int `toml:"caffeinate_battery_hysteresis_pct"`
 }
 
 // tomlAutoSessionWrapUp is the [auto_session_wrap_up] block (bead tc-m08w3).
@@ -242,6 +255,12 @@ func defaults() Config {
 		AutoSessionWrapUp: AutoSessionWrapUpConfig{Enable: false, IdleThresholdMinutes: 45},
 		// Keeps a `sessions` first_prompt to a single readable line.
 		FirstPromptMaxChars: DefaultFirstPromptMaxChars,
+		// 30/20 from the 2026-10-09/10 stalls (pg2-bqcqi): the charge fell from
+		// 30% to the 3% low-battery warning in about 27 to 34 minutes. 5 points
+		// of hysteresis stops a charge hovering at 30% flapping the assertion.
+		CaffeinateBatteryHoldPct:       30,
+		CaffeinateBatteryReleasePct:    20,
+		CaffeinateBatteryHysteresisPct: 5,
 	}
 }
 
@@ -309,6 +328,18 @@ func apply(cfg *Config, raw tomlConfig) {
 	if raw.CaffeinateGraceS != nil {
 		cfg.CaffeinateGrace = time.Duration(*raw.CaffeinateGraceS) * time.Second
 	}
+	if raw.CaffeinateBatteryHoldPct != nil {
+		cfg.CaffeinateBatteryHoldPct = clampPct(*raw.CaffeinateBatteryHoldPct)
+	}
+	if raw.CaffeinateBatteryReleasePct != nil {
+		cfg.CaffeinateBatteryReleasePct = clampPct(*raw.CaffeinateBatteryReleasePct)
+	}
+	if raw.CaffeinateBatteryHysteresisPct != nil {
+		cfg.CaffeinateBatteryHysteresisPct = clampPct(*raw.CaffeinateBatteryHysteresisPct)
+	}
+	// A release threshold above the hold threshold would stop a running hold
+	// the rule never meant to restrict; cap it at the hold threshold.
+	cfg.CaffeinateBatteryReleasePct = min(cfg.CaffeinateBatteryReleasePct, cfg.CaffeinateBatteryHoldPct)
 	if raw.WorkingThresholdS != nil {
 		cfg.WorkingThreshold = time.Duration(*raw.WorkingThresholdS) * time.Second
 	}
@@ -386,6 +417,9 @@ func apply(cfg *Config, raw tomlConfig) {
 		}
 	}
 }
+
+// clampPct keeps a percentage in [0,100].
+func clampPct(v int) int { return max(0, min(100, v)) }
 
 // applyPricing merges a parsed [account.pricing] block over the built-in
 // defaults: any per-field override replaces that field; a configured model adds

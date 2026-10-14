@@ -297,3 +297,81 @@ func TestStripJSONFlag(t *testing.T) {
 		t.Errorf("no flag present: got rest=%v jsonMode=%v", rest, jsonMode)
 	}
 }
+
+// TestStatusJSON_CaffeinateBattery covers the low-battery rule's report under
+// the caffeinate key (bead pg2-s86z9): present with the gate, the power-source
+// flag and the charge when the daemon reports it; absent for an older daemon;
+// percent omitted when no charge was read; an unrecognised gate passes through
+// as "unknown".
+func TestStatusJSON_CaffeinateBattery(t *testing.T) {
+	pct := func(v uint32) *uint32 { return &v }
+	cases := []struct {
+		name        string
+		state       *pb.DaemonState
+		wantPresent bool
+		wantGate    string
+		wantOnBatt  bool
+		wantPct     *float64
+	}{
+		{
+			name: "released at 15 percent on battery",
+			state: &pb.DaemonState{
+				CaffeinateMode: true, CaffeinateBatteryGate: "released",
+				CaffeinateOnBattery: true, CaffeinateBatteryPercent: pct(15),
+			},
+			wantPresent: true, wantGate: "released", wantOnBatt: true, wantPct: new(float64(15)),
+		},
+		{
+			name: "no_spawn keeps the charge",
+			state: &pb.DaemonState{
+				CaffeinateBatteryGate: "no_spawn", CaffeinateOnBattery: true, CaffeinateBatteryPercent: pct(27),
+			},
+			wantPresent: true, wantGate: "no_spawn", wantOnBatt: true, wantPct: new(float64(27)),
+		},
+		{
+			name:        "ok on AC at 0 percent still reports the charge",
+			state:       &pb.DaemonState{CaffeinateBatteryGate: "ok", CaffeinateBatteryPercent: pct(0)},
+			wantPresent: true, wantGate: "ok", wantPct: new(float64(0)),
+		},
+		{
+			name:        "no charge read omits percent",
+			state:       &pb.DaemonState{CaffeinateBatteryGate: "unknown"},
+			wantPresent: true, wantGate: "unknown",
+		},
+		{
+			name:        "unrecognised gate becomes unknown",
+			state:       &pb.DaemonState{CaffeinateBatteryGate: "from_the_future"},
+			wantPresent: true, wantGate: "unknown",
+		},
+		{
+			name:        "older daemon reports nothing",
+			state:       &pb.DaemonState{CaffeinateMode: true},
+			wantPresent: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			caf := statusJSONMap(t, c.state)["caffeinate"].(map[string]any)
+			b, present := caf["battery"].(map[string]any)
+			if present != c.wantPresent {
+				t.Fatalf("battery present = %v, want %v (%v)", present, c.wantPresent, caf)
+			}
+			if !c.wantPresent {
+				return
+			}
+			if b["gate"] != c.wantGate {
+				t.Errorf("gate = %v, want %q", b["gate"], c.wantGate)
+			}
+			if b["on_battery"] != c.wantOnBatt {
+				t.Errorf("on_battery = %v, want %v", b["on_battery"], c.wantOnBatt)
+			}
+			got, hasPct := b["percent"]
+			if hasPct != (c.wantPct != nil) {
+				t.Fatalf("percent present = %v, want %v (%v)", hasPct, c.wantPct != nil, b)
+			}
+			if c.wantPct != nil && got != *c.wantPct {
+				t.Errorf("percent = %v, want %v", got, *c.wantPct)
+			}
+		})
+	}
+}
