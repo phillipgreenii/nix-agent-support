@@ -91,7 +91,22 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 	if counted {
 		outcome, closed = w.escalate(ctx, sessionName, beadID, be, iss, stops)
 	}
-	if !closed { // never unclaim (= reopen) a bead closed mid-flight
+	// Never unclaim (= reopen) a bead that is already closed (bead pg2-sx246).
+	// escalate only learns that on the AT-threshold path; below the threshold
+	// (or with counting disabled / the record failed) it reports closed=false, so
+	// the status is read fresh here, right before the release. A failed read
+	// falls back to the plain unclaim (the pre-existing safe direction).
+	if !closed {
+		if st, err := beads.Status(ctx, w.BD, beadID); err == nil && st == "closed" {
+			closed = true
+		}
+	}
+	unclaimSkipped := closed
+	if unclaimSkipped {
+		w.emit("info", "budget_unclaim_skipped", "bead already closed; release skipped (no reopen)", map[string]any{
+			"session": sessionName, "bead": beadID, "role": be.Role,
+		})
+	} else {
 		_ = beads.Unclaim(ctx, w.BD, beadID)
 	}
 	fields := map[string]any{
@@ -99,6 +114,9 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 		"role": be.Role, "pool": be.Pool, "limit": string(be.Limit),
 		"failure_signature": "budget",
 		"used":              be.Used, "cap": be.Cap, "elapsed": be.Elapsed.Seconds(),
+	}
+	if unclaimSkipped {
+		fields["unclaim_skipped"] = true
 	}
 	if counted {
 		fields["budget_stops"] = stops

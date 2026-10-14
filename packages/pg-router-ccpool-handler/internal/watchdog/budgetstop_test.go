@@ -118,12 +118,66 @@ func TestTerminal_budgetStop_disabledRecordsNothing(t *testing.T) {
 	bd := &stopBD{}
 	newStopWD(bd, 0).terminal(context.Background(), "s", "zr-1", &BudgetError{})
 	for _, c := range bd.calls {
-		if strings.Contains(c, "budget-stop") || strings.HasPrefix(c, "show") || strings.HasPrefix(c, "comment zr-1 budget stop") {
+		// The one read allowed with counting off is the pre-release status
+		// check (bead pg2-sx246): it must not be mistaken for a count read.
+		if strings.Contains(c, "budget-stop") || strings.HasPrefix(c, "comment zr-1 budget stop") {
 			t.Errorf("threshold 0 must do nothing extra, saw %q", c)
 		}
 	}
 	if bd.idx(unclaim) < 0 {
 		t.Errorf("must still unclaim; calls=%v", bd.calls)
+	}
+}
+
+// Bead pg2-sx246: a bead closed before the hard stop is handled stays closed
+// on every path -- below the threshold, counting disabled, and at the
+// threshold -- so the release (which would reopen it) is skipped and logged.
+func TestTerminal_closedBeadIsNeverUnclaimed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		threshold int
+		labels    []string
+	}{
+		{"below threshold", 3, nil},
+		{"counting disabled", 0, nil},
+		{"at threshold", 2, []string{"budget-stop:s0"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bd := seeded(tc.labels...)
+			bd.status = "closed"
+			logPath := t.TempDir() + "/events.jsonl"
+			lw, err := eventlog.New(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wd := newEscWD(bd, "worker", tc.threshold)
+			wd.Log = lw
+			wd.terminal(context.Background(), "s", "zr-1", stopBE("worker"))
+			_ = lw.Close()
+			if bd.idx(unclaim) >= 0 || bd.has("update zr-1 --status=open") {
+				t.Errorf("closed bead must not be released/reopened; calls=%v", bd.calls)
+			}
+			if bd.has("update zr-1 --add-label needs-split-review") || bd.has("update zr-1 --add-label human") {
+				t.Errorf("closed bead must not be relabeled for escalation; calls=%v", bd.calls)
+			}
+			raw, _ := os.ReadFile(logPath)
+			if !strings.Contains(string(raw), "budget_unclaim_skipped") {
+				t.Errorf("skipped release must be logged; log=%s", raw)
+			}
+			if !strings.Contains(string(raw), "unclaim_skipped") {
+				t.Errorf("hard_stop must report unclaim_skipped; log=%s", raw)
+			}
+		})
+	}
+}
+
+// A failed status read falls back to the plain unclaim (the pre-existing
+// safe direction): the release is not silently dropped.
+func TestTerminal_statusReadFailureStillUnclaims(t *testing.T) {
+	bd := &stopBD{failOn: "show"}
+	newStopWD(bd, 0).terminal(context.Background(), "s", "zr-1", &BudgetError{})
+	if bd.idx(unclaim) < 0 {
+		t.Errorf("must still unclaim when the status read fails; calls=%v", bd.calls)
 	}
 }
 

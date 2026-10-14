@@ -999,6 +999,55 @@
           require_serial = true;
         };
 
+        # pg2-sx246: the pg-router-ccpool-handler budget hard stop MUST NOT
+        # reopen a bead that is already closed. Whether the release
+        # (`bd update --status=open --assignee=`) reopens a closed bead is a
+        # property of a REAL tool, so the regression guard runs against a real
+        # bd in a throwaway embedded store (global rule V-3): the
+        # `contract`-tagged `TestTerminal_RealBD_*` tests in
+        # packages/pg-router-ccpool-handler/internal/watchdog. Like
+        # `pg-desk-closure-contract-test` above: no default check runs the
+        # `contract` tag and the nix sandbox has no bd, so this path-scoped
+        # hook is what puts the suite under the commit-time and
+        # `pg-hooks run pre-land` runs. Cost is two `bd init`s' worth of tests
+        # (about half a minute), paid only on diffs touching the watchdog or
+        # the beads client it drives. A missing `bd` or `go` is a LOUD
+        # failure, never a skip.
+        pg-router-ccpool-handler-bd-contract-test = {
+          enable = true;
+          name = "pg-router-ccpool-handler-bd-contract-test";
+          description = "pg-router-ccpool-handler watchdog: run the contract-tagged real-bd hard-stop tests (pg2-sx246)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "pg-router-ccpool-handler-bd-contract-test-hook";
+              runtimeInputs = [ pkgs.git ];
+              text = ''
+                # No bd in the nix build sandbox (and no network/module cache):
+                # this runs on the operator's machine via pg-hooks only.
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "pg-router-ccpool-handler-bd-contract-test: inside the nix build sandbox; skipping (needs a real bd)" >&2
+                  exit 0
+                fi
+
+                for tool in go bd; do
+                  if ! command -v "$tool" >/dev/null 2>&1; then
+                    echo "pg-router-ccpool-handler-bd-contract-test: $tool not found on PATH -- enter the devShell or install it before committing. Do NOT bypass with --no-verify." >&2
+                    exit 1
+                  fi
+                done
+
+                top="$(git rev-parse --show-toplevel)"
+                cd "$top/packages/pg-router-ccpool-handler"
+                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^TestTerminal_RealBD_' ./internal/watchdog/
+              '';
+            }
+          }/bin/pg-router-ccpool-handler-bd-contract-test-hook";
+          language = "system";
+          files = "^packages/pg-router-ccpool-handler/(internal/(watchdog|beads)/|go\\.(mod|sum)$)";
+          pass_filenames = false;
+          require_serial = true;
+        };
+
         # pg2-m146l: prevent main's own history from being rewritten via a
         # direct `git rebase` again. Operator decision 2026-09-07 (bead
         # pg2-m146l comments): main's local reflog showed
