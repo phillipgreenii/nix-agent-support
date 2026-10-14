@@ -1787,7 +1787,28 @@ func workforestSetRemovalFinding(abs string) (Finding, bool) {
 // evalcontract.VerbClassInstallableReference, for `nix run`'s installable
 // child — see that constant's own doc comment (evalcontract/contract.go)
 // and judgeBuildToolVerb's own doc comment below for the full contract.
+//
+// # The pn-workspace.toml marker (bead pg2-qy5u8)
+//
+// A directory at or under a pn-workspace.toml is ALSO a trusted exec
+// location (the "pn" Kind's marker, trustedExecMarkerKinds below). Operator
+// ruling (Phillip, 2026-10-12, verbatim choice: "pn-workspace.toml marker
+// (Recommended)", over a pn/pnwf-only per-tool route and over keeping the
+// inert-literal modelling): the repo-base skills run `pn`/`pnwf` from a
+// workforest set directory (`cd <SETDIR> && pn workspace build`) or the
+// non-git workspace root, neither of which carries a git/go marker, so
+// without the marker every real invocation of a pn/pnwf Exec fact would
+// abstain. The widening is by DIRECTORY, not by tool: every producer of an
+// EffectExec (go, nix, pg-hooks, ... as well as pn/pnwf) is now Permitted
+// from such a directory, exactly the class go test already gets inside a
+// git/go checkout. Its reachability review is the P15 report
+// testdata/p15/pn-workspace-marker.md (GeneratePnWorkspaceMarkerP15).
 type TrustedCheckoutExec struct{}
+
+// trustedExecMarkerKinds names the pathspec Kinds whose Markers make a
+// directory (and everything under it) a trusted exec location for
+// TrustedCheckoutExec: a git checkout, a go module, or a pn workspace.
+var trustedExecMarkerKinds = []string{"git", "go", "pn"}
 
 // Name implements Policy.
 func (TrustedCheckoutExec) Name() string { return "trusted-checkout-exec" }
@@ -1807,10 +1828,10 @@ func (TrustedCheckoutExec) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, 
 	if e.Family != "" {
 		return judgeBuildToolVerb(e, abs, ctx)
 	}
-	if pathspec.InsideMarkerWorkspace(pathspec.DefaultKinds(), []string{"git", "go"}, abs) {
-		return Finding{Verdict: Permitted, Reason: "CWD is inside a recognised git/go workspace (ADR 0053's \"executing trusted checkout code\")"}, true
+	if pathspec.InsideMarkerWorkspace(pathspec.DefaultKinds(), trustedExecMarkerKinds, abs) {
+		return Finding{Verdict: Permitted, Reason: "CWD is inside a recognised git/go/pn workspace (ADR 0053's \"executing trusted checkout code\")"}, true
 	}
-	return Finding{Verdict: Unknown, Reason: "CWD is not inside any recognised git/go workspace"}, true
+	return Finding{Verdict: Unknown, Reason: "CWD is not inside any recognised git/go/pn workspace"}, true
 }
 
 // judgeBuildToolVerb judges a build-tool-family EffectExec — see

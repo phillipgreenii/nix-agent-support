@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
@@ -526,6 +527,43 @@ func loadCorpusRows(paths []string) ([]goldencorpus.Row, error) {
 	return rows, nil
 }
 
+// corpusRowCWD returns the working directory and project root a corpus row is
+// evaluated in. A row with no WorkspaceMarkers keeps its synthetic fixture
+// paths. A row naming markers gets a real throwaway directory instead: the
+// marker files are written (empty) in its root and the cwd is a workforest-set
+// shaped directory two levels below, so the verdict depends on the marker
+// being found ABOVE the cwd, exactly like a real pn workforest set. The
+// directory is created under literal /tmp (not $TMPDIR) so it lands outside
+// every zone the path classifier recognises, like the effectpolicy golden
+// fixtures. cleanup removes it and is always safe to call.
+func corpusRowCWD(fx goldencorpus.PathStateFixture) (cwd, projectRoot string, cleanup func(), err error) {
+	if len(fx.WorkspaceMarkers) == 0 {
+		return fx.CWD, fx.ProjectRoot, func() {}, nil
+	}
+	for _, m := range fx.WorkspaceMarkers {
+		if m == "" || m != filepath.Base(m) || m == "." || m == ".." {
+			return "", "", func() {}, fmt.Errorf("workspace marker %q must be a bare file name", m)
+		}
+	}
+	root, err := os.MkdirTemp("/tmp", "ceta-corpus-ws-")
+	if err != nil {
+		return "", "", func() {}, fmt.Errorf("creating the marker workspace: %w", err)
+	}
+	cleanup = func() { _ = os.RemoveAll(root) }
+	cwd = filepath.Join(root, ".workforests", "set")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		cleanup()
+		return "", "", func() {}, fmt.Errorf("creating the marker workspace: %w", err)
+	}
+	for _, m := range fx.WorkspaceMarkers {
+		if err := os.WriteFile(filepath.Join(root, m), nil, 0o644); err != nil {
+			cleanup()
+			return "", "", func() {}, fmt.Errorf("writing marker %q: %w", m, err)
+		}
+	}
+	return cwd, cwd, cleanup, nil
+}
+
 // runEvaluateCorpus is --corpus's own entry point: load every named corpus
 // file, replay each row's tool_input through the new effect engine, and
 // grade it against the row's own expected_verdict (gradeCorpusRow). A row
@@ -567,13 +605,18 @@ func runEvaluateCorpus(corpusPaths []string, format string) {
 			fmt.Fprintf(os.Stderr, "error: marshalling tool_input for case %s: %v\n", row.Case, err)
 			os.Exit(1)
 		}
+		rowCWD, rowRoot, cleanupCWD, err := corpusRowCWD(row.CWDPathState)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: case %s: %v\n", row.Case, err)
+			os.Exit(1)
+		}
 		input := &hookio.HookInput{
 			ToolName:  row.ToolInput.ToolName,
 			ToolInput: raw,
-			CWD:       row.CWDPathState.CWD,
+			CWD:       rowCWD,
 		}
 		cfg := claudecodeadapter.RequestConfig{
-			ProjectRoot:     row.CWDPathState.ProjectRoot,
+			ProjectRoot:     rowRoot,
 			VettedHosts:     row.RulesConfig.VettedHosts,
 			RemoteLifecycle: row.RulesConfig.RemoteLifecycle,
 			KubeContexts:    convertKubeContexts(row.RulesConfig.KubeContexts),
@@ -582,6 +625,7 @@ func runEvaluateCorpus(corpusPaths []string, format string) {
 		}
 
 		resp, evalErr := claudecodeadapter.Evaluate(input, cfg, reg, policies, graphPolicies)
+		cleanupCWD()
 		if evalErr != nil {
 			r.Category = "not-comparable"
 			r.ReplayReason = evalErr.Error()

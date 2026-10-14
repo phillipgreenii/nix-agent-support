@@ -4,6 +4,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
 )
 
 // TestP15ReportGitPush pins the committed P15 approve-reachability report for
@@ -231,4 +234,99 @@ func TestP15ReportAssignSubst(t *testing.T) {
 		t.Error("report leaks the fixture root")
 	}
 	compareGolden(t, filepath.Join("testdata", "p15", "assign-substitution.md"), md)
+}
+
+// TestP15ReportPnWorkspaceMarker pins the committed P15 approve-reachability
+// report for pg2-qy5u8 (gate 5 of the operator's marker ruling, Phillip,
+// 2026-10-12) and enforces its stop condition: the facts the pn-workspace.toml
+// marker newly approves MUST be only Exec producers (the class `go test`
+// already gets inside a git/go checkout), every Exec producer in the registry
+// MUST be represented in the report, and every other fact MUST keep the same
+// verdict inside and outside the marker. A change that breaks any of these
+// widened beyond what the operator expected and needs a human, not a golden
+// refresh.
+func TestP15ReportPnWorkspaceMarker(t *testing.T) {
+	rep, err := GeneratePnWorkspaceMarkerP15(tempDirUnderRealTmp(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := cmddesc.DefaultRegistry()
+	producers := ExecProducerPaths(reg)
+
+	isProducerProbe := func(probe string) bool {
+		for _, p := range producers {
+			if probe == p || strings.HasPrefix(probe, p+" ") {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Every registered Exec producer has a representative probe, every
+	// representative probe names a registered producer, and each one
+	// approves inside the marker (the probe is a valid form, so the report
+	// really shows the widening rather than a vacuous abstain).
+	probed := map[string]bool{}
+	for _, p := range markerExecProbes {
+		probed[p.path] = true
+	}
+	for _, p := range producers {
+		if !probed[p] {
+			t.Errorf("Exec producer %q has no markerExecProbes entry: add one so the P15 report covers it", p)
+		}
+	}
+	registered := map[string]bool{}
+	for _, p := range producers {
+		registered[p] = true
+	}
+	for _, p := range markerExecProbes {
+		if !registered[p.path] {
+			t.Errorf("markerExecProbes names %q, which declares no Exec fact in the registry", p.path)
+		}
+	}
+	insideApproves := map[string]bool{}
+	for _, e := range rep.Entries {
+		if strings.HasPrefix(e.Fact, "exec producer ") {
+			insideApproves[e.Probe] = e.Decision == evalcontract.Approve
+			if e.Baseline == evalcontract.Approve {
+				t.Errorf("%q approves OUTSIDE a marker; an Exec producer must abstain there", e.Probe)
+			}
+		}
+	}
+	for _, p := range markerExecProbes {
+		if !insideApproves[p.probe] {
+			t.Errorf("representative probe %q does not approve inside the marker", p.probe)
+		}
+	}
+
+	// Stop condition: nothing but Exec producers is newly approved, and no
+	// control fact moves.
+	for _, e := range rep.WidenedEntries() {
+		if !isProducerProbe(e.Probe) {
+			t.Errorf("marker newly approves %q, which is not an Exec producer: beyond the ruling's scope", e.Probe)
+		}
+	}
+	for _, e := range rep.Entries {
+		if strings.HasPrefix(e.Fact, "(control)") && e.Decision != e.Baseline {
+			t.Errorf("control %q changed verdict with the marker: inside %s, outside %s", e.Probe, e.Decision, e.Baseline)
+		}
+	}
+	// The unmodeled pn/pnwf forms stay non-approving inside the marker.
+	for _, e := range rep.Entries {
+		switch e.Probe {
+		case "pn workspace init", "pn workspace upgrade", "pn workspace allow", "pn workspace doctor --fix",
+			"pn workspace workforest remove feat", "pn workspace push --no-verify",
+			"pnwf cleanup my-branch --force-dirty-worktree-removal", "pnwf cleanup my-branch --force-unlanded-branch-removal",
+			"go run ./cmd/tool":
+			if e.Decision == evalcontract.Approve {
+				t.Errorf("%q approves inside the marker; it must stay non-approving", e.Probe)
+			}
+		}
+	}
+
+	md := rep.Markdown()
+	if strings.Contains(md, "/tmp/") {
+		t.Error("report leaks a fixture path")
+	}
+	compareGolden(t, filepath.Join("testdata", "p15", "pn-workspace-marker.md"), md)
 }

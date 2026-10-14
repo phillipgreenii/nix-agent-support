@@ -10,22 +10,30 @@ package cmddesc
 // ... pn workspace is approved, that is correct." ADR 0075 R6: "`pn workspace
 // push|update` approvable."
 //
-// # Effect model (facts only; no new policy)
+// # Effect model
 //
-// Every verb below declares NO effect at all: a `pn`/`pnwf` invocation is
-// modeled as a command whose flags and positionals are inert literals (a
-// branch name, a repo key, a ref). That is deliberate, and it reproduces what
-// the frozen old engine did for these tools (internal/rules/pnworkspace and
-// internal/rules/pnwf approved them by basename + subcommand from any CWD).
+// The verbs that run the workspace's own code (flake builds, hooks, scripts,
+// git operations in the member repos) declare ONE real fact: KindExec, judged
+// by effectpolicy.TrustedCheckoutExec, exactly like `go test`. That policy is
+// Permitted when CWD is inside a git/go checkout OR at/under a
+// pn-workspace.toml (operator ruling, Phillip, 2026-10-12, bead pg2-qy5u8: the
+// marker route), which is what makes the skills' real invocation shapes
+// approvable: `cd <SETDIR> && pn workspace build` from a workforest set
+// directory, and the non-git workspace root. Anywhere without such a marker
+// the Exec fact abstains. The read-only introspection verbs (`pn workspace
+// status|tree|discover|info`, `workforest list`, and pnwf's read-only probes)
+// declare NO effect: they run no checkout code, so they stay approvable from
+// any CWD exactly as the frozen old engine allowed
+// (internal/rules/pnworkspace and internal/rules/pnwf approved them by
+// basename + subcommand).
 //
-// The alternative -- the KindExec fact goTestSchema declares, judged by
-// TrustedCheckoutExec -- was tried and rejected: that policy is Permitted only
-// when CWD is inside a git/go checkout, but the skills run these tools from a
-// workforest set directory (`cd <SETDIR> && pn workspace build`) or the
-// non-git pn workspace root, neither of which carries a git/go marker, so
-// every real invocation would abstain. Teaching TrustedCheckoutExec the
-// `pn-workspace.toml` marker is a policy change, filed as a follow-up
-// (see the pg2-cjfpy.3 close report), not done here.
+// History: pg2-cjfpy.3 first modeled every verb as an inert literal command
+// because TrustedCheckoutExec did not yet know the pn-workspace.toml marker
+// (every real invocation would have abstained). pg2-qy5u8 taught it the
+// marker and replaced the inert modeling with the Exec fact above for the
+// verbs that run workspace code. The widening is by directory, so it applies
+// to every Exec-fact tool, not only pn/pnwf; its P15 reachability report is
+// internal/effectpolicy/testdata/p15/pn-workspace-marker.md.
 //
 // Effects the tools perform that this model cannot see are STATED here, not
 // hidden:
@@ -77,6 +85,12 @@ func pnWorkspaceGlobalFlags() map[string]FlagSpec {
 	}
 }
 
+// pnWorkspaceExec is the Exec fact of a pn verb that runs the workspace's own
+// code (see the file comment's "Effect model").
+func pnWorkspaceExec(verb string) ImplicitEffect {
+	return ImplicitEffect{Role: Exec, Target: "pn workspace " + verb}
+}
+
 // pnWorkspaceVerbSchema builds one verb. extra flags are merged over the global ones.
 func pnWorkspaceVerbSchema(name string, extra map[string]FlagSpec, implicit ...ImplicitEffect) CommandSchema {
 	return CommandSchema{
@@ -96,6 +110,7 @@ var pnWorkspacePush = pnWorkspaceVerbSchema(
 	"push", map[string]FlagSpec{
 		"--no-siblings": inert, "-u": inert, "--set-upstream": inert, "--remote": literal1,
 	},
+	pnWorkspaceExec("push"),
 )
 
 var pnWorkspaceWorkforest = CommandSchema{
@@ -132,20 +147,20 @@ var repoBasePnSchema = CommandSchema{
 				"discover": pnWorkspaceVerbSchema("discover", nil),
 				"info":     pnWorkspaceVerbSchema("info", map[string]FlagSpec{"--json": inert}),
 				// Runs workspace flake/hook/script code.
-				"build":            pnWorkspaceVerbSchema("build", nil),
-				"flake-check":      pnWorkspaceVerbSchema("flake-check", nil),
-				"format":           pnWorkspaceVerbSchema("format", nil),
-				"pre-commit-check": pnWorkspaceVerbSchema("pre-commit-check", nil),
+				"build":            pnWorkspaceVerbSchema("build", nil, pnWorkspaceExec("build")),
+				"flake-check":      pnWorkspaceVerbSchema("flake-check", nil, pnWorkspaceExec("flake-check")),
+				"format":           pnWorkspaceVerbSchema("format", nil, pnWorkspaceExec("format")),
+				"pre-commit-check": pnWorkspaceVerbSchema("pre-commit-check", nil, pnWorkspaceExec("pre-commit-check")),
 				"doctor": pnWorkspaceVerbSchema("doctor", map[string]FlagSpec{
 					"--json": inert, "--offline": inert, "--strict": inert,
-				}),
-				"lock":  pnWorkspaceVerbSchema("lock", map[string]FlagSpec{"--allow-missing-edges": inert}),
-				"clone": pnWorkspaceVerbSchema("clone", nil),
+				}, pnWorkspaceExec("doctor")),
+				"lock":  pnWorkspaceVerbSchema("lock", map[string]FlagSpec{"--allow-missing-edges": inert}, pnWorkspaceExec("lock")),
+				"clone": pnWorkspaceVerbSchema("clone", nil, pnWorkspaceExec("clone")),
 				"update": pnWorkspaceVerbSchema("update", map[string]FlagSpec{
 					"--in-place": inert, "--siblings-only": inert,
-				}),
-				"rebase":     pnWorkspaceVerbSchema("rebase", nil),
-				"apply":      pnWorkspaceVerbSchema("apply", map[string]FlagSpec{"--force": inert}),
+				}, pnWorkspaceExec("update")),
+				"rebase":     pnWorkspaceVerbSchema("rebase", nil, pnWorkspaceExec("rebase")),
+				"apply":      pnWorkspaceVerbSchema("apply", map[string]FlagSpec{"--force": inert}, pnWorkspaceExec("apply")),
 				"push":       pnWorkspacePush,
 				"workforest": pnWorkspaceWorkforest,
 			},
@@ -167,6 +182,12 @@ func pnwfVerb(name string, extra map[string]FlagSpec, pos PositionalSpec, implic
 		UnknownFlag:     UnknownFlagInsufficient,
 		EndOfOptions:    true,
 	}
+}
+
+// pnwfExec is the Exec fact of a pnwf verb that runs the workspace's own code
+// (see the file comment's "Effect model").
+func pnwfExec(verb string) ImplicitEffect {
+	return ImplicitEffect{Role: Exec, Target: "pnwf " + verb}
 }
 
 var (
@@ -193,12 +214,12 @@ var repoBasePnwfSchema = CommandSchema{
 		// Mutating WORK-recipe helpers. sync-fetch also publishes a member's
 		// canonical primary to origin when it is ahead (never --force); see the
 		// file comment for why that push is not a declared effect.
-		"sync-fetch":    pnwfVerb("sync-fetch", pnwfSetFlag, pnwfNoPos),
-		"update-relock": pnwfVerb("update-relock", pnwfSetFlag, pnwfNoPos),
+		"sync-fetch":    pnwfVerb("sync-fetch", pnwfSetFlag, pnwfNoPos, pnwfExec("sync-fetch")),
+		"update-relock": pnwfVerb("update-relock", pnwfSetFlag, pnwfNoPos, pnwfExec("update-relock")),
 		// cleanup WITHOUT the two --force-* flags only removes members already
 		// confirmed as ancestors of their primary (via wtdone). The force flags
 		// are absent from Flags, so their presence is insufficient.
-		"cleanup": pnwfVerb("cleanup", nil, pnwfBranchPos),
+		"cleanup": pnwfVerb("cleanup", nil, pnwfBranchPos, pnwfExec("cleanup")),
 	},
 }
 

@@ -336,6 +336,17 @@
                 "source": "pn workspace apply --help: usage \"pn workspace apply [flags]\""
               }
             },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "pn workspace apply",
+                "citation": {
+                  "source": "pn workspace apply --help: \"Apply nix configurations across workspace repos\" -- builds and activates the workspace repos' own nix configurations (operator ruling 2026-10-04 approves it); the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+                }
+              }
+            ],
             "stdin": "never",
             "stdout": "metadata",
             "unknownFlag": "insufficient",
@@ -445,6 +456,17 @@
                 "source": "pn workspace build --help: usage \"pn workspace build [flags]\""
               }
             },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "pn workspace build",
+                "citation": {
+                  "source": "pn workspace build --help: \"Build all workspace repos\" -- builds every workspace repo's own flake; the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+                }
+              }
+            ],
             "stdin": "never",
             "stdout": "metadata",
             "unknownFlag": "insufficient",
@@ -554,6 +576,17 @@
                 "source": "pn workspace clone --help: usage \"pn workspace clone [flags]\""
               }
             },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "pn workspace clone",
+                "citation": {
+                  "source": "pn workspace clone --help: \"Clone repos listed in pn-workspace.toml that are missing on disk\" -- clones the workspace's declared repos; the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+                }
+              }
+            ],
             "stdin": "never",
             "stdout": "metadata",
             "unknownFlag": "insufficient",
@@ -808,6 +841,17 @@
                 "source": "pn workspace doctor --help: usage \"pn workspace doctor [flags]\""
               }
             },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "pn workspace doctor",
+                "citation": {
+                  "source": "pn workspace doctor --help: \"Audit (and optionally repair) workspace drift\" -- audits the workspace repos; only the read-only audit form is modeled (--fix is absent); the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+                }
+              }
+            ],
             "stdin": "never",
             "stdout": "metadata",
             "unknownFlag": "insufficient",
@@ -917,6 +961,17 @@
                 "source": "pn workspace flake-check --help: usage \"pn workspace flake-check [flags]\""
               }
             },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "pn workspace flake-check",
+                "citation": {
+                  "source": "pn workspace flake-check --help: \"Run nix flake check on each workspace repo\" -- evaluates and builds every workspace repo's own flake checks; the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+                }
+              }
+            ],
             "stdin": "never",
             "stdout": "metadata",
             "unknownFlag": "insufficient",
@@ -1026,6 +1081,17 @@
                 "source": "pn workspace format --help: usage \"pn workspace format [flags]\""
               }
             },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "pn workspace format",
+                "citation": {
+                  "source": "pn workspace format --help: \"Run `nix fmt` in each workspace repo\" -- runs each workspace repo's own formatter; the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+                }
+              }
+            ],
             "stdin": "never",
             "stdout": "metadata",
             "unknownFlag": "insufficient",
@@ -1268,6 +1334,17 @@
                 "source": "pn workspace lock --help: usage \"pn workspace lock [flags]\""
               }
             },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "pn workspace lock",
+                "citation": {
+                  "source": "pn workspace lock --help: \"Evaluate flake inputs, build edges, resolve terminal, and write pn-workspace.lock.json atomically.\" -- evaluates each workspace repo's own flake inputs; the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+                }
+              }
+            ],
             "stdin": "never",
             "stdout": "metadata",
             "unknownFlag": "insufficient",
@@ -1377,6 +1454,17 @@
                 "source": "pn workspace pre-commit-check --help: usage \"pn workspace pre-commit-check [flags]\""
               }
             },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "pn workspace pre-commit-check",
+                "citation": {
+                  "source": "pn workspace pre-commit-check --help: \"Run pre-commit checks on each workspace repo\" -- runs each workspace repo's own hooks; the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+                }
+              }
+            ],
             "stdin": "never",
             "stdout": "metadata",
             "unknownFlag": "insufficient",
@@ -1534,6 +1622,17 @@
                 "source": "pn workspace push --help: usage \"pn workspace push [flags]\""
               }
             },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "pn workspace push",
+                "citation": {
+                  "source": "pn workspace push --help: \"Publish each workspace repo.\" -- relocks and pushes each workspace repo (ADR 0075 R6 approves push); the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+                }
+              }
+            ],
             "stdin": "never",
             "stdout": "metadata",
             "unknownFlag": "insufficient",
@@ -1643,6 +1742,17 @@
                 "source": "pn workspace rebase --help: usage \"pn workspace rebase [branch] [flags]\""
               }
             },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "pn workspace rebase",
+                "citation": {
+                  "source": "pn workspace rebase --help: \"Git rebase each workspace repo.\" -- runs git rebase in each workspace repo; the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+                }
+              }
+            ],
             "stdin": "never",
             "stdout": "metadata",
             "unknownFlag": "insufficient",
@@ -1994,6 +2104,17 @@
                 "source": "pn workspace update --help: usage \"pn workspace update [flags]\""
               }
             },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "pn workspace update",
+                "citation": {
+                  "source": "pn workspace update --help: \"Relock each workspace repo, local-only\" -- relocks each workspace repo's flake inputs without publishing; the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+                }
+              }
+            ],
             "stdin": "never",
             "stdout": "metadata",
             "unknownFlag": "insufficient",

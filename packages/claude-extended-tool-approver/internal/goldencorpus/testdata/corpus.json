@@ -295,7 +295,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace push" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -309,7 +313,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace update" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1111,7 +1119,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace apply" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1125,7 +1137,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace push --no-siblings" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1139,7 +1155,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace push --set-upstream" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1153,7 +1173,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace push -u" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1167,7 +1191,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace push -u --remote origin" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1181,7 +1209,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace update --in-place" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1195,7 +1227,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace update --siblings-only" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1209,7 +1245,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace build" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1223,7 +1263,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace flake-check" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1237,7 +1281,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace format" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1251,7 +1299,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace pre-commit-check" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1265,7 +1317,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace doctor" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1279,7 +1335,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace doctor --json" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1349,7 +1409,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace rebase main" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1363,7 +1427,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace rebase" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1377,7 +1445,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace lock" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1405,7 +1477,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace clone" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1581,7 +1657,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace build --terminal repo-a" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1597,7 +1677,11 @@
         "command": "cd /tmp/set && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace build"
       }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1613,7 +1697,11 @@
         "command": "cd /tmp/set && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace doctor"
       }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1629,7 +1717,11 @@
         "command": "cd /tmp/set && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace rebase main"
       }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1645,7 +1737,11 @@
         "command": "cd /tmp/ws && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace doctor --json | jq -r '.findings[] | select(.check == \"branch-synced\") | \"\\(.repo)\\t\\(.message)\"'"
       }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1661,7 +1757,11 @@
         "command": "pn workspace doctor --json | jq -r --arg landing \"$landing\" '.findings[] | .repo'"
       }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1843,7 +1943,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pnwf sync-fetch --set" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1857,7 +1961,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pnwf sync-fetch --help" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1871,7 +1979,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pnwf update-relock --set" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -1885,7 +1997,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pnwf cleanup my-branch" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -7779,7 +7895,11 @@
       "tool_name": "Bash",
       "tool_input": { "command": "pn workspace build" }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -12122,5 +12242,241 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "pg2-xu7sz GUARDRAIL: --force forms stay on the clean-worktree state ladder (tc-vn5z); an undeterminable worktree abstains."
+  },
+  {
+    "case": "marker_exec_pn_workspace_build_under_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace build"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): a pn Exec verb approves from a workforest set directory at or under a pn-workspace.toml, with no git or go marker (the runner materializes the marker)."
+  },
+  {
+    "case": "marker_exec_pn_workspace_build_no_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace build"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): NEGATIVE: the same verb from a directory without the marker still abstains (the synthetic /repo cwd does not exist and carries no marker)."
+  },
+  {
+    "case": "marker_exec_pnwf_sync_fetch_under_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pnwf sync-fetch --set"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): a pnwf Exec verb approves from a marker directory."
+  },
+  {
+    "case": "marker_exec_pnwf_sync_fetch_no_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pnwf sync-fetch --set"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): NEGATIVE: pnwf sync-fetch from a directory without the marker abstains."
+  },
+  {
+    "case": "marker_exec_go_test_under_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "go test ./..."
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): the marker is a trusted exec location for every Exec producer, the class go test already gets inside a git/go checkout (see internal/effectpolicy/testdata/p15/pn-workspace-marker.md)."
+  },
+  {
+    "case": "marker_exec_go_test_no_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "go test ./..."
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): NEGATIVE: go test from a directory with neither a git/go checkout nor the marker abstains."
+  },
+  {
+    "case": "marker_exec_nix_flake_check_under_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "nix flake check"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): another Exec producer approves from a marker directory (reachability recorded in the P15 report)."
+  },
+  {
+    "case": "marker_exec_pn_workspace_status_no_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace status"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): read-only introspection declares no Exec fact, so it stays approvable from any directory."
+  },
+  {
+    "case": "marker_exec_pn_workspace_init_under_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace init"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): the marker never widens what the schema leaves unmodeled: init rewrites the user-only pn-workspace.toml."
+  },
+  {
+    "case": "marker_exec_pn_workspace_doctor_fix_under_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace doctor --fix"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): doctor --fix mutates the canonical clones and stays unmodeled even inside the marker."
+  },
+  {
+    "case": "marker_exec_pnwf_cleanup_force_under_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pnwf cleanup my-branch --force-dirty-worktree-removal"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): the operator-only cleanup force flags stay unmodeled inside the marker."
+  },
+  {
+    "case": "marker_exec_go_run_under_marker",
+    "tags": ["trusted-exec-marker", "pg2-qy5u8"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "go run ./cmd/tool"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): go run is deliberately never judged (ruling 2026-09-07), marker or not."
   }
 ]

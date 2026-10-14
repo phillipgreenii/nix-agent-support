@@ -145,6 +145,16 @@ type PathStateFixture struct {
 	GitTracked    []string `json:"git_tracked,omitempty"`
 	Gitignored    []string `json:"gitignored,omitempty"`
 	WorktreeState string   `json:"worktree_state,omitempty"`
+	// WorkspaceMarkers names marker files (a bare file name such as
+	// "pn-workspace.toml") that `evaluate --corpus` materializes, empty, in a
+	// throwaway directory above a workforest-set-shaped working directory, and
+	// substitutes for CWD/ProjectRoot. It is for a row whose verdict depends on
+	// the working directory being a trusted exec location
+	// (effectpolicy.TrustedCheckoutExec): a synthetic cwd such as "/repo" does
+	// not exist, so an Exec fact there can never approve. A row with no
+	// markers keeps its synthetic cwd untouched, which is also how a
+	// "directory without the marker still abstains" row is written.
+	WorkspaceMarkers []string `json:"workspace_markers,omitempty"`
 }
 
 // SettingsFixture is the "settings fixture" field: the operator's Claude

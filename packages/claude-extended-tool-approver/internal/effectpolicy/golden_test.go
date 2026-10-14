@@ -1839,6 +1839,19 @@ var goldenCases = []goldenCase{
 	{"nix_flake_update_named_inputs", "nix flake update nixpkgs home-manager", evalcontract.Approve, nil},
 	{"nix_flake_lock", "nix flake lock", evalcontract.Approve, nil},
 	{"nix_flake_update_commit_lock_file_abstains", "nix flake update --commit-lock-file", evalcontract.Abstain, nil},
+
+	// pn/pnwf Exec facts (bead pg2-qy5u8): the verbs that run workspace code
+	// declare a KindExec fact judged by TrustedCheckoutExec, like go test. The
+	// fixture root is both a git checkout and a pn workspace; the marker-only
+	// and no-marker directories are pinned in trusted_checkout_exec_marker_test.go
+	// and the P15 report, because a golden's CWD is always this fixture root.
+	{"pn_workspace_build_exec", "pn workspace build", evalcontract.Approve, nil},
+	{"pn_workspace_push_exec", "pn workspace push", evalcontract.Approve, nil},
+	{"pn_workspace_status_inert", "pn workspace status", evalcontract.Approve, nil},
+	{"pn_workspace_init_abstains", "pn workspace init", evalcontract.Abstain, nil},
+	{"pnwf_sync_fetch_exec", "pnwf sync-fetch --set", evalcontract.Approve, nil},
+	{"pnwf_resolve_inert", "pnwf resolve --set", evalcontract.Approve, nil},
+	{"pnwf_cleanup_force_abstains", "pnwf cleanup my-branch --force-dirty-worktree-removal", evalcontract.Abstain, nil},
 }
 
 func TestGolden(t *testing.T) {

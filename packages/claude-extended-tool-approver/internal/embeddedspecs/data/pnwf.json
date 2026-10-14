@@ -148,6 +148,17 @@
             "source": "pnwf cleanup --help: usage \"Usage: pnwf cleanup <branch> [--force-dirty-worktree-removal] [--force-unlanded-branch-removal]\""
           }
         },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "pnwf cleanup",
+            "citation": {
+              "source": "pnwf cleanup --help: \"Best-effort teardown of <branch>'s set, from the canonical clone on each member's primary branch.\" -- tears down a landed set via wtdone; the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+            }
+          }
+        ],
         "stdin": "never",
         "stdout": "content",
         "unknownFlag": "insufficient",
@@ -723,6 +734,17 @@
             "source": "pnwf sync-fetch --help: usage \"Usage: pnwf sync-fetch [--set]\""
           }
         },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "pnwf sync-fetch",
+            "citation": {
+              "source": "pnwf sync-fetch --help: \"else `git fetch origin`, then attempt to rebase the member's current branch onto the remote primary\" -- fetches, rebases and may publish each member's canonical primary; the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+            }
+          }
+        ],
         "stdin": "never",
         "stdout": "content",
         "unknownFlag": "insufficient",
@@ -796,6 +818,17 @@
             "source": "pnwf update-relock --help: usage \"Usage: pnwf update-relock [--set]\""
           }
         },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "pnwf update-relock",
+            "citation": {
+              "source": "pnwf update-relock --help: \"shelling `pn workspace update --in-place` once for the whole set\" -- relocks every member of the resolved workspace; the exec fact (role \"exec\") is judged by TrustedCheckoutExec, which trusts a git/go checkout or a directory at/under a pn-workspace.toml (operator ruling, 2026-10-12, bead pg2-qy5u8)"
+            }
+          }
+        ],
         "stdin": "never",
         "stdout": "content",
         "unknownFlag": "insufficient",
