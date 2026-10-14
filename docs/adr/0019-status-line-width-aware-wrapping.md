@@ -52,7 +52,9 @@ The wrapper wraps segments across multiple rows based on `COLUMNS`, in part orde
 
 `mkWrapperScript` now takes an attrset `{ parts, reserve ? 20 }` (was a bare `parts`
 positional). Both call sites — `default.nix` and the `flake.nix` `test-claude-status-line`
-check — pass the attrset form.
+check — pass the attrset form. (ADR 0096 later added a third argument, `compactWindow ? 1800`,
+the seconds the compaction note stays visible; it has a default, so the `flake.nix` test
+packages did not change.)
 
 ## Consequences
 

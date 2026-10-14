@@ -69,7 +69,7 @@ from memory or docs alone:
   not always "tool name"**: `PreToolUse`/`PostToolUse`/`PostToolUseFailure`/`PermissionRequest`/
   `PermissionDenied` match against the payload's `tool_name`; `SessionEnd` matches against
   `end_reason` (a session-end payload carries no `tool_name` at all); `SessionStart` matches
-  against `session_start_reason`. A real example on this machine confirms the non-tool case:
+  against `source`. A real example on this machine confirms the non-tool case:
   `superpowers`'s `hooks.json` has `"matcher": "startup|clear|compact"` on `SessionStart` — that's
   session modes, not tool names.
 - **Whether two DIFFERENTLY-matchered hooks on the SAME event, both satisfied by one call, run in
@@ -282,7 +282,7 @@ yes). Instead, filtering narrower than the registered matcher happens **inside t
 dispatch loop**, using each delegate's _original_ matcher (parsed at generation time straight out
 of that delegate's own `hooks.json`, §2.6) evaluated against the **event-appropriate payload
 field** — `tool_name` for `PreToolUse`/`PostToolUse`/`PostToolUseFailure`/`PermissionRequest`/
-`PermissionDenied`, `end_reason` for `SessionEnd`, `session_start_reason` for `SessionStart`
+`PermissionDenied`, `end_reason` for `SessionEnd`, `source` for `SessionStart`
 (§1.2). This filter step is event-aware by construction, not a hardcoded `tool_name` check, since
 the matcher-target field genuinely differs by event.
 

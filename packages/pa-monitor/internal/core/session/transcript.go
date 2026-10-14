@@ -20,10 +20,18 @@ import (
 // listSessionFiles would strip only the .json suffix and derive the phantom
 // session ID "<id>.session-mode" — the same bug class ADR 0021 §2 already fixed
 // for the two suffixes above.
+//
+// compactionSuffix (bead pg2-thkh0.5, ADR 0096) is a FOURTH sibling:
+// `session-mode hook post-compact` writes <id>.compaction.json (ts, trigger) next
+// to the same transcript. It is .json, not .jsonl, so no pa-monitor enumerator can
+// select it today; the exclusion is a defensive consistency guard mirroring
+// sessionModeSuffix, so a future scanner of the projects directory cannot derive
+// the phantom session ID "<id>.compaction".
 const (
 	statusRecordSuffix  = ".status.jsonl"
 	statusSidecarSuffix = ".status.last"
 	sessionModeSuffix   = ".session-mode.json"
+	compactionSuffix    = ".compaction.json"
 )
 
 // IsTranscriptFile reports whether name is a Claude Code transcript file, as
@@ -45,13 +53,15 @@ func IsTranscriptFile(name string) bool {
 // IsStatusSiblingFile reports whether name is a session-adjacent sibling file
 // that is NOT itself a transcript or a session record: the <id>.status.jsonl
 // rate_limits record, the <id>.status.last hash sidecar, or the
-// <id>.session-mode.json mode record (bead pg2-gzrn2). Used by
+// <id>.session-mode.json mode record (bead pg2-gzrn2), or the
+// <id>.compaction.json compaction marker (bead pg2-thkh0.5). Used by
 // gc.listSessionFiles to skip these so they never derive a phantom session ID
 // (ADR 0021 §2), while genuine <id>.json session records still pass.
 func IsStatusSiblingFile(name string) bool {
 	return strings.HasSuffix(name, statusRecordSuffix) ||
 		strings.HasSuffix(name, statusSidecarSuffix) ||
-		strings.HasSuffix(name, sessionModeSuffix)
+		strings.HasSuffix(name, sessionModeSuffix) ||
+		strings.HasSuffix(name, compactionSuffix)
 }
 
 // ResolveTranscript finds the most relevant transcript file for s under

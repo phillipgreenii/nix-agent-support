@@ -33,8 +33,9 @@ func TestIsTranscriptFile(t *testing.T) {
 }
 
 // TestIsStatusSiblingFile is the direct truth table for the predicate itself
-// (bead pg2-gzrn2 added the third case): a real session record ends in .json
-// or .jsonl but is NEITHER a rate_limits sibling NOR a session-mode sibling.
+// (bead pg2-gzrn2 added the third case, pg2-thkh0.5 the fourth): a real session
+// record ends in .json or .jsonl but is NEITHER a rate_limits sibling NOR a
+// session-mode sibling NOR a compaction marker.
 func TestIsStatusSiblingFile(t *testing.T) {
 	cases := []struct {
 		name string
@@ -43,8 +44,9 @@ func TestIsStatusSiblingFile(t *testing.T) {
 		{"abc-123.status.jsonl", true},
 		{"abc-123.status.last", true},
 		{"abc-123.session-mode.json", true},
-		{"abc-123.json", false},  // genuine session record
-		{"abc-123.jsonl", false}, // genuine transcript
+		{"abc-123.compaction.json", true}, // compaction marker (bead pg2-thkh0.5)
+		{"abc-123.json", false},           // genuine session record
+		{"abc-123.jsonl", false},          // genuine transcript
 		{"", false},
 	}
 	for _, c := range cases {

@@ -15,7 +15,7 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
 `docs/adr/0019-status-line-width-aware-wrapping.md`).
 
 - **Extension point**: append part-script store paths to
-  `phillipgreenii.programs.claude.status-line-parts` (a `listOf str` — any module MAY
+  `phillipgreenii.programs.claude-code.status-line-parts` (a `listOf str` — any module MAY
   contribute, including downstream flakes like `phillipg-nix-ziprecruiter`).
 - **Ordering convention** (see `docs/adr/0020-status-line-parts-ordering-convention.md`):
   the list is merged across modules by ascending priority band, so contributors MUST place
@@ -27,7 +27,7 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
   the list order.
 - **Part contract**: a part reads its data from the exported `CLAUDE_SL_*` env vars
   (`CLAUDE_SL_SESSION_NAME`, `_SESSION_ID`, `_WORKTREE`, `_BRANCH`, `_VERSION`, `_MODEL`,
-  `_CONTEXT_USED_PCT`, `_EXCEEDS_200K`, `_REPO_OWNER`, `_REPO_NAME`, `_PR_NUMBER`, `_PR_URL`,
+  `_CONTEXT_USED_PCT`, `_CONTEXT_SETTLING`, `_COMPACT_AGE`, `_EXCEEDS_200K`, `_REPO_OWNER`, `_REPO_NAME`, `_PR_NUMBER`, `_PR_URL`,
   `_PR_REVIEW_STATE`, `_EFFORT`, `_THINKING`, `_VIM_MODE`, `_AGENT`, `_5H_PCT`, `_5H_RESET`,
   `_7D_PCT`, `_7D_RESET`, `_SESSION_MODE_KIND`, `_SESSION_MODE_STATE`, `_SESSION_MODE_DETAIL`)
   or its own environment; prints **one** formatted segment to stdout
@@ -35,7 +35,8 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
   they share rows and the right edge is reserved for notifications.
 - **Default segment order** (base set, `home/programs/claude-status-line/scripts.nix`):
   vim, session name?, session id, location (repo + worktree + branch + `PR#<n>`), model
-  (+effort +thinking), agent, session mode, context (+200k alert), limits (5h + 7d), version.
+  (+effort +thinking), agent, session mode, context (+200k alert, +compaction note), limits
+  (5h + 7d), version.
   The PR sub-part is appended after branch inside the single location segment (colored by
   `pr.review_state`, no glyph prefix); the `CLAUDE_SL_PR_*` vars remain exported for custom parts.
 - **Session mode segment** (bead pg2-gzrn2): shows which named "mode" (drain-beads,
@@ -49,7 +50,29 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
   like `capture-status.bash`), reusing the wrapper's hoisted `_sl_txdir` — matching the
   one-jq-call-per-render discipline below. Hidden entirely when no record exists, the file is
   unreadable/empty, or it fails to parse.
-- **Nerd-font glyphs**: `phillipgreenii.programs.claude.status-line-nerd-font` (bool, default
+- **Context segment: settling placeholder and compaction note** (plan
+  `docs/superpowers/plans/2026-10-13-status-line-compaction-awareness.md`, ADR 0096):
+  - Right after a compaction Claude reports a literal `used_percentage` of `0` together with the
+    stale cached `exceeds_200k_tokens=true`. The wrapper's one `jq` call exports
+    `CLAUDE_SL_CONTEXT_SETTLING` (`true` ONLY when `used_percentage == 0` AND `current_usage` is
+    not an object or its input-side token sum is `0`; every other input is `false`). The context
+    part MUST check it itself (its empty-string guard does not catch the string `0`) and print a
+    dim `ctx:...` placeholder with NO alert glyph. The alert MUST NOT be suppressed by any
+    percentage-to-token inference (on a 1M window it can legitimately be true at 25%).
+  - The `session-mode hook post-compact` PostCompact hook (pb plugin `hooks.json`) writes
+    `<transcript_dir>/<session_id>.compaction.json` (`{"ts":<epoch s>,"trigger":"manual|auto|unknown"}`,
+    one line, mode 0600). The wrapper reads it jq-free via `compaction-status.bash`
+    (`read_compaction_marker PATH NOW`: `ts` MUST be a positive integer; a missing, zero-byte or
+    malformed file yields nothing; negative age is clamped to 0), reusing the hoisted `_sl_txdir`,
+    and exports `CLAUDE_SL_COMPACT_AGE` (whole seconds) ONLY while the age is below
+    `phillipgreenii.programs.claude-code.status-line-compaction-window-s` (int, default `1800`,
+    `0` disables the DISPLAY only; `CLAUDE_SL_COMPACT_WINDOW` is the runtime/test seam, like
+    `CLAUDE_SL_RESERVE`).
+  - The context part appends a dim `<glyphCompact><age>` note (`<1m`, `Nm`, `Nh`; text `↻`, nerd
+    plane-15 MDI glyph) folded into the SAME segment, never a separate one, and no running count.
+  - The status line MUST NOT read or parse the transcript per render; the marker is the only extra
+    per-render read. New helpers in the injected lib MUST be jq-free and use `local`.
+- **Nerd-font glyphs**: `phillipgreenii.programs.claude-code.status-line-nerd-font` (bool, default
   false) picks MDI glyphs vs text fallbacks. The choice is baked at Nix eval time (no runtime
   branch) via the `nerdFont` arg threaded into `scripts.nix`. In text (off) mode the location
   sub-parts carry `repo:` / `wt:` / `br:` labels (matching the `ctx:` / `5h:` / `7d:` idiom); in
@@ -69,12 +92,13 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
   (walking up from `workspace.current_dir`) using the `read` builtin — deliberately **no
   `git` subprocess**, to preserve the single-process-per-render goal. JSON `worktree.branch`
   always wins when present; a detached HEAD shows no branch.
-- **Colors**: override named ANSI codes via `phillipgreenii.programs.claude.status-line-colors`
+- **Colors**: override named ANSI codes via `phillipgreenii.programs.claude-code.status-line-colors`
   (the `claude-theme` module injects Stylix truecolor). Do not hardcode new colors in parts
   without a matching key.
 - **Width / wrapping contract**: the wrapper wraps at `COLUMNS - reserve`, where `reserve`
-  is `phillipgreenii.programs.claude.status-line-notification-reserve` (default 20),
-  applied uniformly to every row. Wrapping is disabled when `COLUMNS` is unset/0/non-numeric.
+  is `phillipgreenii.programs.claude-code.status-line-notification-reserve` (default 20),
+  applied uniformly to every row (`mkWrapperScript { parts, reserve ? 20, compactWindow ? 1800 }`;
+  see ADR 0019 and ADR 0096). Wrapping is disabled when `COLUMNS` is unset/0/non-numeric.
   A single segment wider than the budget is emitted whole on its own row (never split). When
   adding parts, prefer short labels so rows pack well on narrow terminals.
 - **Tests**: `test-claude-status-line.bats`. Width tests MUST pass `COLUMNS` /
