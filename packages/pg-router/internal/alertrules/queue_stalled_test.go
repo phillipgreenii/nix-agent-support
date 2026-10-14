@@ -12,18 +12,30 @@ import (
 // 2026-10-12: "fire if queue > 0 and nothing is being processed"). A type has a
 // backlog when pg_router_queue_depth held on every scrape of a 10m window; nothing
 // processes it when the role bound to the type had no dispatch in flight
-// (pg_router_listener_in_flight) on any scrape of that window. The expression is
+// (pg_router_listener_in_flight) for a sustained stretch of that window, and none
+// settled in it. A declined offer is in flight for the second or two the handler
+// takes to decline it, and a decline is not processing (pg2-9nfla), so a stretch
+// counts only when it spans stalledBusyRun consecutive scrapes. The expression is
 // modelled here (no PromQL engine is a dependency of this module; the real PromQL
 // is exercised by grafana/alerting/rule-tests/pg-router-queue-stalled.test.yaml) and
-// replayed over testdata/drain_pg2_2026-10-12.txt, a recording of the drain.pg2 lane.
+// replayed over testdata/drain_pg2_2026-10-12.txt, a recording of the drain.pg2 lane,
+// and testdata/drain_pg2_2026-10-13.txt, the same lane through a decline storm.
 
 const (
 	stalledWindow     = 10 * time.Minute
 	stalledMinSamples = 18 // 90% of the 20 samples a 30s scrape yields over 10m
 	stalledFor        = 5 * time.Minute
 	stalledKeep       = 10 * time.Minute
+	// stalledBusyRun is the in-flight stretch that counts as a dispatch running: the
+	// 3m lookback min_over_time(pg_router_listener_in_flight[3m]) is 1 only when the
+	// last 6 scrapes (30s apart) all read 1. A decline is decided in about 2s, so a
+	// storm of them (one every 13s) leaves a handful of consecutive scrapes in flight
+	// at worst (4 in the recording of 2026-10-13, at one scrape phase of 30, under a
+	// model that is wider than the scrapes that really read 1), never 6.
+	stalledBusyRun = 6
 
-	laneFixture = "testdata/drain_pg2_2026-10-12.txt"
+	laneFixture  = "testdata/drain_pg2_2026-10-12.txt"
+	stormFixture = "testdata/drain_pg2_2026-10-13.txt"
 )
 
 // laneEnd is the last instant of the recorded day at which the host is known to
@@ -87,7 +99,7 @@ func wantStalledExpr() string {
 	for _, r := range stalledRoles {
 		fmt.Fprintf(&b, `, "role", %q, "type", %q)`, r.role, r.typeRE)
 	}
-	b.WriteString(` and on(role) (max by (role) (max_over_time(pg_router_listener_in_flight[10m])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)`)
+	b.WriteString(` and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)`)
 	return b.String()
 }
 
@@ -100,20 +112,58 @@ func stalledCond(series []obs, t time.Time) bool {
 }
 
 // stalledCondMin is stalledCond with the presence guard's threshold as a parameter,
-// so a test can show what the guard buys by weakening it. A scrape's `settled` is
-// whether the throughput counter advanced since the previous scrape (a dispatch
-// settled in it); increase() over the window is above 0 when any scrape has it.
+// so a test can show what the guard buys by weakening it.
 func stalledCondMin(series []obs, t time.Time, minPresent int) bool {
-	present, busy, gated, completed := 0, false, false, false
+	return stalledCondWith(series, t, minPresent, stalledBusyRun)
+}
+
+// stalledCondRun is stalledCond with the in-flight stretch that counts as running as
+// a parameter. run 1 is the test the rule had before pg2-9nfla (the role was in
+// flight on ANY scrape of the window), which reads a declined offer as activity.
+func stalledCondRun(series []obs, t time.Time, run int) bool {
+	return stalledCondWith(series, t, stalledMinSamples, run)
+}
+
+// stalledCondWith evaluates the expression at t. A scrape's `settled` is whether the
+// throughput counter advanced since the previous scrape (a dispatch settled in it);
+// increase() over the window is above 0 when any scrape has it.
+func stalledCondWith(series []obs, t time.Time, minPresent, run int) bool {
+	present, gated, completed := 0, false, false
 	for _, o := range obsIn(series, t.Add(-stalledWindow), t) {
 		if o.depth > 0 {
 			present++
 		}
-		busy = busy || o.inFlight > 0
 		gated = gated || o.gate
 		completed = completed || o.settled
 	}
-	return present >= minPresent && !busy && !completed && !gated
+	return present >= minPresent && !inFlightRun(series, t, run) && !completed && !gated
+}
+
+// inFlightRun reports whether the role read in flight on run consecutive scrapes
+// that completed inside the window ending at t:
+// max_over_time(min_over_time(pg_router_listener_in_flight[2m])[10m:30s]) is above 0.
+// The subquery looks back from each of its steps, so a stretch that began before the
+// window still counts while its run completes inside it, and the role has to stay
+// quiet for the window after the stretch's LAST scrape, as before. Scrapes more than
+// a scrape interval apart (a sleep between them) are not consecutive.
+func inFlightRun(series []obs, t time.Time, run int) bool {
+	n := 0
+	var prev time.Time
+	for _, o := range obsIn(series, t.Add(-stalledWindow-time.Duration(run)*scrape), t) {
+		switch {
+		case o.inFlight == 0:
+			n = 0
+		case n > 0 && o.at.Sub(prev) <= scrape+time.Second:
+			n++
+		default:
+			n = 1
+		}
+		prev = o.at
+		if n >= run && o.at.After(t.Add(-stalledWindow)) {
+			return true
+		}
+	}
+	return false
 }
 
 func replayStalled(series []obs, awake func(time.Time) bool, from, to time.Time) map[time.Time]alertState {
@@ -181,6 +231,15 @@ func TestStalledRuleMatchesModel(t *testing.T) {
 	}
 	if !strings.Contains(expr, "unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)") {
 		t.Error("queue-stalled lost its short-dispatch guard (a dispatch that settled in the window is processing)")
+	}
+	// pg2-9nfla: a declined attempt is in flight for the second or two it takes to
+	// decline it, so ANY in-flight scrape of the window cannot count as activity; the
+	// role has to be in flight on consecutive scrapes (a 3m lookback) for that.
+	if strings.Contains(expr, "max_over_time(pg_router_listener_in_flight[10m])") {
+		t.Error("queue-stalled reads any in-flight scrape as activity, which a decline storm abuses (pg2-9nfla)")
+	}
+	if !strings.Contains(expr, "max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])") {
+		t.Error("queue-stalled lost its sustained in-flight test (a dispatch running, not a declined attempt)")
 	}
 	i, j := strings.Index(r, "annotations:"), strings.Index(r, "data:")
 	if i < 0 || j < i {
@@ -301,18 +360,217 @@ func TestStalledRecordedDay(t *testing.T) {
 	if !ok || firstFire.Before(idleFrom.Add(14*time.Minute)) || firstFire.After(idleFrom.Add(20*time.Minute)) {
 		t.Fatalf("first page at %v (found=%v), want 14-20 minutes into the idle stretch", firstFire, ok)
 	}
-	// The condition stops with the idle stretch (the next dispatch is in flight from
-	// 23:33:06Z) and the alert resolves keepFiringFor later; it never fires again.
+	// The condition stops with the idle stretch: the next dispatch is in flight from
+	// 23:33:06Z and counts as running once it has been in flight on stalledBusyRun
+	// scrapes, two minutes on. The alert resolves keepFiringFor later; it never fires
+	// again.
+	runs := time.Duration(stalledBusyRun) * scrape
 	lastCond, _ := lastWhere(m, from, laneEnd, condTrue)
-	if lastCond.After(idleTo) {
+	if lastCond.After(idleTo.Add(runs + evalEvery)) {
 		t.Errorf("condition still true at %s, after the lane resumed at %s", lastCond.Format("15:04:05"), idleTo.Format("15:04:05"))
 	}
 	lastFire, _ := lastWhere(m, from, laneEnd, isFiring)
-	if lastFire.Before(idleTo) || lastFire.After(idleTo.Add(stalledKeep+2*time.Minute)) {
+	if lastFire.Before(idleTo) || lastFire.After(idleTo.Add(runs+stalledKeep+2*time.Minute)) {
 		t.Errorf("last firing evaluation at %s, want within keepFiringFor of the resume at %s", lastFire.Format("15:04:05"), idleTo.Format("15:04:05"))
 	}
-	if tm, bad := firstWhere(m, idleTo.Add(stalledKeep+3*time.Minute), laneEnd, isFiring); bad {
+	if tm, bad := firstWhere(m, idleTo.Add(runs+stalledKeep+3*time.Minute), laneEnd, isFiring); bad {
 		t.Errorf("fired again at %s", tm.Format("15:04:05"))
+	}
+}
+
+// The decline storm of 2026-10-13 (pg2-9nfla; found by pg2-hyeno, the post-apply
+// verification of this rule): the account's five-hour usage limit made the handler
+// decline every drain-pg2 offer from 20:54:26Z to 21:59:59Z (one every 13 seconds,
+// each decided in about two), while 19 to 24 events waited and nothing was accepted
+// from 20:53:50Z until the dispatch that went in flight at 22:00:10Z settled at
+// 22:02:39Z. A declined attempt is not processing, but it is in flight, so a scrape
+// that landed inside one read the role as busy and restarted the 10 minute window: the
+// rule as shipped held its condition for about 7 of those 69 minutes.
+//
+// The recording has the declines (R) and the accepts (D); the in-flight series is
+// replayed at every scrape phase, because which scrapes a decline catches depends on
+// where the scrape grid falls and the real grid (:14 and :44) is only one of 30. Its
+// replays stop at 22:29:00Z: the dispatch in flight at the end of the recording has no
+// record.
+var (
+	stormScrapeStart = parseUTC("2026-10-13T20:30:00Z")
+	stormEnd         = parseUTC("2026-10-13T22:29:00Z")
+	stormResume      = parseUTC("2026-10-13T22:00:10Z") // the dispatch accepted at 22:02:39Z goes in flight
+)
+
+// The model has to catch the scrapes Prometheus caught, or the replay below proves
+// nothing about the storm: the five samples of pg_router_listener_in_flight{role="drain-pg2"}
+// that read 1 between 21:09Z and 21:34Z (the verification read them off the live
+// series), each 0 to 2 seconds before a logged decline.
+func TestStormModelCatchesTheScrapesPrometheusCaught(t *testing.T) {
+	l := loadLane(t, stormFixture)
+	for _, hms := range []string{"21:15:44", "21:16:14", "21:21:14", "21:29:14", "21:33:44"} {
+		if at := atDay("2026-10-13", hms); !l.inFlightAt(at) {
+			t.Errorf("the scrape at %s read in flight in Prometheus, the model has the role idle", at.Format("15:04:05"))
+		}
+	}
+	n := 0
+	for _, r := range l.declines {
+		if !r.Before(parseUTC("2026-10-13T20:54:26Z")) && !r.After(parseUTC("2026-10-13T21:59:59Z")) {
+			n++
+		}
+	}
+	if n < 293 {
+		t.Errorf("%d declines recorded in the storm, the verification counted 293 usage-limit declines", n)
+	}
+	// Non-vacuity of the lane itself: a backlog of 19 to 24 events throughout.
+	for at := parseUTC("2026-10-13T20:56:00Z"); at.Before(parseUTC("2026-10-13T22:00:00Z")); at = at.Add(time.Minute) {
+		if d := l.depthAt(at); d < 15 || d > 30 {
+			t.Fatalf("depth at %s is %d, want the recorded 19 to 24 (give or take the re-emits in flight)", at.Format("15:04:05"), d)
+		}
+	}
+}
+
+func TestStalledDeclineStormHoldsTheConditionUntilDispatchesResume(t *testing.T) {
+	l := loadLane(t, stormFixture)
+	// The throughput step of the 20:53:50Z accept is in the window until 21:04:20Z at
+	// the latest (the first scrape after it is at most 30s later); the next dispatch is
+	// in flight from 22:00:10Z and counts as running 90 to 120 seconds into it, so the
+	// condition holds on every evaluation from 21:05:00Z to 22:00:00Z.
+	holdFrom, holdTo := parseUTC("2026-10-13T21:05:00Z"), parseUTC("2026-10-13T22:00:00Z")
+	from := parseUTC("2026-10-13T20:45:00Z")
+
+	// The storm never reads as a running dispatch: a few consecutive scrapes at worst
+	// are in flight, never stalledBusyRun, whatever the scrape phase.
+	maxRun := 0
+	for phase := time.Duration(0); phase < scrape; phase += time.Second {
+		series := l.scrapes(stormScrapeStart.Add(phase), stormEnd)
+		if run := longestRun(series, parseUTC("2026-10-13T20:54:00Z"), parseUTC("2026-10-13T21:59:50Z")); run > maxRun {
+			maxRun = run
+		}
+	}
+	t.Logf("longest stretch of consecutive in-flight scrapes inside the storm, over all 30 scrape phases: %d (a running dispatch needs %d)", maxRun, stalledBusyRun)
+	if maxRun < 2 || maxRun >= stalledBusyRun {
+		t.Errorf("the storm reads in flight on up to %d consecutive scrapes, want 2 to %d (more than 1 or the model is too narrow to be a test; under %d or the rule reads the storm as a dispatch)", maxRun, stalledBusyRun-1, stalledBusyRun)
+	}
+
+	for phase := time.Duration(0); phase < scrape; phase += time.Second {
+		series := l.scrapes(stormScrapeStart.Add(phase), stormEnd)
+		m := replayStalled(series, awakeIn(l), from, stormEnd)
+
+		for e := holdFrom; !e.After(holdTo); e = e.Add(evalEvery) {
+			if !m[e].cond {
+				t.Fatalf("phase %s: condition false at %s, inside the idle stretch (last accept 20:53:50Z, next dispatch in flight from %s)",
+					phase, e.Format("15:04:05"), stormResume.Format("15:04:05"))
+			}
+		}
+		// It pages once `for` has elapsed on the first true evaluation (the window clears
+		// of the 20:53:50Z accept's throughput step 10 minutes after the first scrape that
+		// saw it, 21:04:00Z to 21:04:30Z) and keeps paging until the dispatch is running.
+		first, ok := firstWhere(m, from, stormEnd, isFiring)
+		if !ok || first.Before(parseUTC("2026-10-13T21:08:30Z")) || first.After(parseUTC("2026-10-13T21:10:30Z")) {
+			t.Fatalf("phase %s: first page at %v (found=%v), want about 21:09Z (the verification's estimate: 21:09Z to 22:10Z)", phase, first, ok)
+		}
+		for e := first; !e.After(holdTo); e = e.Add(evalEvery) {
+			if !m[e].firing {
+				t.Fatalf("phase %s: alert not firing at %s, it resolved inside the idle stretch", phase, e.Format("15:04:05"))
+			}
+		}
+		// Once the dispatch is running the condition ends and the alert resolves
+		// keepFiringFor later.
+		if tm, bad := firstWhere(m, stormResume.Add(3*time.Minute), stormEnd, condTrue); bad {
+			t.Fatalf("phase %s: condition true at %s, with a dispatch running since %s", phase, tm.Format("15:04:05"), stormResume.Format("15:04:05"))
+		}
+		if last, _ := lastWhere(m, from, stormEnd, isFiring); last.After(stormResume.Add(3*time.Minute + stalledKeep + evalEvery)) {
+			t.Fatalf("phase %s: still firing at %s", phase, last.Format("15:04:05"))
+		}
+	}
+}
+
+// What the rule did with the same recording before pg2-9nfla: a scrape in flight on
+// ANY scrape of the window (run 1) restarts it, so the lane read busy through almost
+// all of the idle stretch. The verification saw the condition hold from 21:44Z to
+// about 21:51Z (Pending 21:44, Alerting 21:49, Recovering 21:51); on the real scrape
+// grid (:14 and :44) the model reads the same few minutes, and the replay above fails
+// against this variant of the model.
+func TestStalledDeclineStormHeldTheOldConditionForAFewMinutesOnly(t *testing.T) {
+	l := loadLane(t, stormFixture)
+	series := l.scrapes(stormScrapeStart.Add(14*time.Second), stormEnd)
+	trueMinutes, total := 0, 0
+	for e := parseUTC("2026-10-13T21:05:00Z"); !e.After(parseUTC("2026-10-13T22:00:00Z")); e = e.Add(evalEvery) {
+		total++
+		if stalledCondRun(series, e, 1) {
+			trueMinutes++
+		}
+	}
+	t.Logf("the pre-pg2-9nfla condition held on %d of %d evaluations of the idle stretch", trueMinutes, total)
+	if trueMinutes < 3 || trueMinutes > 12 {
+		t.Errorf("the pre-pg2-9nfla condition held on %d of %d evaluations of the idle stretch, want a few (the verification saw about 7 of 69 minutes)", trueMinutes, total)
+	}
+	for e := parseUTC("2026-10-13T21:05:00Z"); !e.After(parseUTC("2026-10-13T22:00:00Z")); e = e.Add(evalEvery) {
+		if !stalledCondRun(series, e, stalledBusyRun) {
+			t.Fatalf("the sustained in-flight test is false at %s, inside the same stretch", e.Format("15:04:05"))
+		}
+	}
+}
+
+// longestRun is the longest stretch of consecutive scrapes in series[from..to] that
+// read in flight.
+func longestRun(series []obs, from, to time.Time) int {
+	best, n := 0, 0
+	for _, o := range obsIn(series, from, to) {
+		if o.inFlight > 0 {
+			n++
+		} else {
+			n = 0
+		}
+		if n > best {
+			best = n
+		}
+	}
+	return best
+}
+
+// A running dispatch is still processing, and a stretch that long is what the rule
+// reads: in flight on 4 consecutive scrapes (two minutes) anywhere in the window
+// keeps the condition false, 3 do not, and the rule goes back to the window of 10
+// minutes after the stretch's last scrape.
+func TestStalledSustainedInFlightStretchIsProcessing(t *testing.T) {
+	start := parseUTC("2026-10-13T10:00:00Z")
+	mk := func(stretch int) []obs {
+		var series []obs
+		for i := 0; i < 240; i++ { // 2h, backlog of 5, one stretch of `stretch` scrapes at 30 minutes
+			o := obs{at: start.Add(time.Duration(i) * scrape), depth: 5}
+			if i >= 60 && i < 60+stretch {
+				o.inFlight = 1
+			}
+			series = append(series, o)
+		}
+		return series
+	}
+	// A short stretch (a declined offer, caught on 1 to 3 scrapes) never makes the
+	// role look busy: with the backlog present since the start the condition is true
+	// on every evaluation once the window holds 18 scrapes.
+	for _, stretch := range []int{1, 2, stalledBusyRun - 1} {
+		series := mk(stretch)
+		for e := start.Add(10 * time.Minute); e.Before(start.Add(2 * time.Hour)); e = e.Add(evalEvery) {
+			if !stalledCond(series, e) {
+				t.Fatalf("a stretch of %d scrapes held the condition false at %s", stretch, e.Format("15:04:05"))
+			}
+		}
+	}
+	// A stretch of stalledBusyRun or more is a dispatch running: the condition is false
+	// from the scrape that completes the run until the window has passed the stretch's
+	// LAST scrape, and true again after it.
+	for _, stretch := range []int{stalledBusyRun, stalledBusyRun + 2, 40} {
+		series := mk(stretch)
+		first, last := start.Add(time.Duration(60+stalledBusyRun-1)*scrape), start.Add(time.Duration(60+stretch-1)*scrape)
+		if tm := first.Add(-2 * evalEvery); !stalledCond(series, tm) {
+			t.Errorf("a stretch of %d scrapes held the condition false at %s, before it completed a run", stretch, tm.Format("15:04:05"))
+		}
+		for _, tm := range []time.Time{first.Add(10 * time.Second), last.Add(time.Minute), last.Add(stalledWindow - evalEvery)} {
+			if stalledCond(series, tm) {
+				t.Errorf("a stretch of %d scrapes left the condition true at %s, inside the window after its run", stretch, tm.Format("15:04:05"))
+			}
+		}
+		if tm := last.Add(stalledWindow + evalEvery); !stalledCond(series, tm) {
+			t.Errorf("a stretch of %d scrapes still holds the condition false at %s, a window after its last scrape", stretch, tm.Format("15:04:05"))
+		}
 	}
 }
 

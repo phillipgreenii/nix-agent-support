@@ -236,15 +236,39 @@ groups:
       # is being processed". A type has a backlog when pg_router_queue_depth{type}
       # stayed above 0 on every scrape of a 10 minute window. Nothing is processing
       # it when pg_router_listener_in_flight{role} (1 while that role has a dispatch
-      # outstanding, never more than one per role, INV-CONC-1) read 0 on every scrape
-      # of the same window for the role bound to the type. Progress is read from the
-      # lane's own state, not from how rarely a dispatch completes: a dispatch is in
-      # flight for as long as it runs, so one dispatch of an hour or two (the drain
-      # lanes' budget allows 2h) never trips this rule, however few events it
-      # completes. The rule this replaced judged a lane only by completions and paged
-      # on any healthy dispatch of about an hour while depth was 10 or more (the
-      # drain.pg2 dispatch of 2026-10-12 17:47:55Z to 18:53:11Z, 63.7 minutes, paged at
-      # 18:48Z; 4 of the last 12 drain-pg2 dispatches ran that long).
+      # outstanding, never more than one per role, INV-CONC-1) did NOT read 1 on 6
+      # consecutive scrapes anywhere in the same window, for the role bound to the type
+      # (see "Declined attempts" below for why not on any scrape).
+      # Progress is read from the lane's own state, not from how rarely a dispatch
+      # completes: a dispatch is in flight for as long as it runs, so one dispatch of an
+      # hour or two (the drain lanes' budget allows 2h) never trips this rule, however
+      # few events it completes. The rule this replaced judged a lane only by
+      # completions and paged on any healthy dispatch of about an hour while depth was
+      # 10 or more (the drain.pg2 dispatch of 2026-10-12 17:47:55Z to 18:53:11Z, 63.7
+      # minutes, paged at 18:48Z; 4 of the last 12 drain-pg2 dispatches ran that long).
+      #
+      # Declined attempts (pg2-9nfla, DEC-OBS-10). A declined offer is IN FLIGHT too:
+      # the queue marks the role outstanding before the offer and clears it after it
+      # returns, whatever the outcome, and the decline is decided inside the offer (the
+      # handler's admission gate: pool sessions and capacity are read first), about two
+      # seconds. A decline is not processing, but a scrape that lands inside one reads 1.
+      # On 2026-10-13 the account's usage limit made every drain-pg2 offer decline from
+      # 20:54:26Z to 21:59:59Z, one every 13 seconds, so about 1 scrape in 8 landed in one
+      # and restarted the 10 minute window: nothing was accepted for 69 minutes (19 to
+      # 24 events waiting) and the condition held for 7 of them. A decline is seen on a
+      # few consecutive scrapes at worst, a running dispatch on every scrape until it
+      # ends, so the in-flight test is
+      #   max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s]) == 0:
+      # the 3 minute lookback reads 1 only when the last 6 scrapes (30s apart) all read
+      # 1, and the 10 minute subquery asks whether that ever happened in the window, so
+      # the role must still be quiet for a window after its LAST in-flight scrape, as
+      # before. A dispatch that settles in less than 3 minutes is covered by the
+      # throughput clause below. Replay of the recorded storm at every scrape phase:
+      # internal/alertrules/testdata/drain_pg2_2026-10-13.txt and queue_stalled_test.go.
+      # Consequence, by the ruling: a lane with a backlog now pages for about as long as
+      # a usage-limit or at-capacity window keeps declining its offers. If that is
+      # unwanted, the lever is to count at-capacity declines as activity, which needs a
+      # new operator ruling.
       #
       # Short dispatches. A role whose dispatches last a second or two (desk-issue
       # runs 0.4 to 7 s) is in flight on about 3% of 30s scrapes even while it drains
@@ -313,7 +337,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router queue for type {{ $labels.type }} has a backlog but nothing is processing it"
-          description: "pg_router_queue_depth for type {{ $labels.type }} stayed above 0 on every scrape of a 10 minute window while the role bound to that type had no dispatch in flight on any scrape of it (pg_router_listener_in_flight) and completed none, and that held for another 5 minutes -- events are waiting and the consumer is idle. Check `pg-router status` for the role that binds this type: a decline backoff (a ccpool pool at capacity or at its usage limit, an unavailable handler), a handler that fails at launch, or a role that is disabled or excluded. A dispatch that is running, however long, is not stalled and does not fire this. A pg-router pause or any other gate suppresses it (pg-router-gate-held covers a long hold), and so does a laptop sleep or a daemon restart, which need 10 minutes of fresh scrapes before the condition can hold."
+          description: "pg_router_queue_depth for type {{ $labels.type }} stayed above 0 on every scrape of a 10 minute window while the role bound to that type had no dispatch running in it (pg_router_listener_in_flight on 6 consecutive scrapes; a declined attempt is in flight for a second or two and does not count) and completed none, and that held for another 5 minutes -- events are waiting and the consumer is idle. Check `pg-router status` for the role that binds this type: a decline backoff (a ccpool pool at capacity or at its usage limit, an unavailable handler), a handler that fails at launch, or a role that is disabled or excluded. A dispatch that is running, however long, is not stalled and does not fire this. A pg-router pause or any other gate suppresses it (pg-router-gate-held covers a long hold), and so does a laptop sleep or a daemon restart, which need 10 minutes of fresh scrapes before the condition can hold."
         data:
           - refId: A
             relativeTimeRange:
@@ -324,7 +348,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "desk-pr", "type", "pr[.](changed|reconcile)"), "role", "desk-issue", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "desk-reconcile", "type", "desk[.]reconcile"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "disk-watchdog", "type", "disk[.]check"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2") and on(role) (max by (role) (max_over_time(pg_router_listener_in_flight[10m])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)
+              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "desk-pr", "type", "pr[.](changed|reconcile)"), "role", "desk-issue", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "desk-reconcile", "type", "desk[.]reconcile"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "disk-watchdog", "type", "disk[.]check"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2") and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)
           - refId: B
             datasourceUid: __expr__
             model:

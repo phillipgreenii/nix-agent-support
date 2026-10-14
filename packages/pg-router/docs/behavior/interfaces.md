@@ -568,7 +568,9 @@ sequenceDiagram
     histogram learns of a wait only when it ends; this shows a stuck head while it is still growing;
   - **listener_in_flight** — gauge, per `role`: `1` while that handler has an offer outstanding, else
     `0`, for **every** registered handler. `INV-CONC-1` caps it at one, so its time-average is the
-    handler's utilisation.
+    handler's utilisation. An offer is outstanding until it settles, whatever its outcome, so a
+    **declined** offer counts for the second or two the decline takes to decide: a reader tells a
+    running dispatch from declines by how many consecutive scrapes read `1` (`DEC-OBS-10`).
 
   `role` is config-bounded on all four (`DEC-OBS-5`). On the two histograms `type` is the **full**
   event type, bounded by configuration the way `DEC-OBS-6` bounds the entity type: a lowercase

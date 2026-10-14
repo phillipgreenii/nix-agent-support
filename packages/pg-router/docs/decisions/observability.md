@@ -421,11 +421,12 @@ long. The operator replaced the premise: alert when the queue is above 0 and not
 or when consumption stays far below generation.
 
 - **Idle with a backlog (`pg-router-queue-stalled`).** A type pages when its depth held above 0 on every
-  scrape of a 10 minute window, the role bound to it had no dispatch in flight on any scrape of the window
-  (`listener_in_flight`, `DEC-OBS-9`) **and** completed none (the throughput counter did not advance in
-  it), and that held for 5 minutes. The second clause exists because a role whose dispatches last seconds
-  is in flight on about 3 percent of 30 second scrapes even while it drains a backlog; a dispatch that
-  settled inside the window is processing. A dispatch that is running is processing however long it runs.
+  scrape of a 10 minute window, the role bound to it was not running a dispatch (it did not read in flight,
+  `listener_in_flight`, `DEC-OBS-9`, on 6 consecutive scrapes anywhere in the window: see "Declined
+  attempts" below) **and** completed none (the throughput counter did not advance in it), and that held
+  for 5 minutes. The second clause exists because a role whose dispatches last seconds is in flight on
+  about 3 percent of 30 second scrapes even while it drains a backlog; a dispatch that settled inside the
+  window is processing. A dispatch that is running is processing however long it runs.
   Any gate (`SYSTEM_PAUSE` included) holds every listener but its owner, so the rule is suppressed from the
   first scrape of a gate until 10 minutes after it ends; a long hold is `pg-router-gate-held`'s page. The
   depth gauge carries `type` and the in-flight gauge `role`, and the binding is configuration, so the join
@@ -434,6 +435,29 @@ or when consumption stays far below generation.
   again until 10 minutes after the wake (`pg2-9uvm5` owns the dedicated host-awake signal; it will add one
   `unless` clause and change nothing else). The helper `role` label is dropped, so the alert keeps its
   labels and an open bead for its fingerprint keeps matching.
+- **Declined attempts are not processing (amended 2026-10-14, bead `pg2-9nfla`).** A declined offer is in
+  flight too: the queue marks the role outstanding before the offer and clears it after the offer returns,
+  whatever the outcome, and a decline is decided inside the offer (the listener, then the handler's
+  admission gate, which reads the pool's sessions and capacity first), about two seconds. The gauge cannot
+  tell it from a running dispatch. On 2026-10-13 the account's five-hour usage limit made the handler
+  decline every `drain-pg2` offer from 20:54:26Z to 21:59:59Z, one every 13 seconds: nothing was accepted
+  from 20:53:50Z to 22:02:39Z, 19 to 24 events waited, and about one scrape in eight landed inside a
+  decline, so the 10 minute window restarted every few minutes and the condition held for about 7 of the
+  69 minutes (Pending 21:44Z, Alerting 21:49Z, Normal 22:01Z). The ruling ("queue > 0 and nothing is being
+  processed") makes a declined attempt idleness, so the rule asks for a dispatch that is RUNNING: the role
+  in flight on 6 consecutive scrapes (`min_over_time(listener_in_flight[3m])`) at some point of the window
+  (`max_over_time(...[10m:30s])`). A decline reads on a few consecutive scrapes at worst (4, at one scrape
+  phase of 30, in the recording of the storm, under a model wider than the scrapes that really read 1); a
+  running dispatch reads on every scrape until it ends, and the role must still be quiet for the window
+  after its last in-flight scrape, as before. A dispatch that settles inside 3 minutes is processing
+  through the throughput clause. **Chosen over** keeping a declined attempt out of the gauge in the daemon
+  (a new admission signal from the handler, or a second accepted-dispatch gauge: a change to the queue, the
+  wire protocol and the ccpool handler), because the rule-side test passes the replay of the recorded storm
+  at every scrape phase, needs no deployment of a new router, and keeps `listener_in_flight` meaning what
+  `DEC-OBS-9` says. **Consequence, by the ruling:** a lane with a backlog now pages for roughly the length of
+  each usage-limit or at-capacity window that declines its offers; the verification found the rule not
+  noisy (one Alerting episode, none for `escalated.pg2`). If that proves unwanted, the lever is to count
+  at-capacity declines as activity, which needs a new operator ruling.
 - **Slow growth (`pg-router-queue-slow-growth`).** A type pages when `increase(enqueued_total[6h])` is
   above 1.5 times `increase(throughput_total[6h])` (or there are arrivals and no completions series), at
   least 6 arrived, and a backlog of 5 or more did not drain once in the last hour (108 of the hour's 120
@@ -454,8 +478,12 @@ record says, and the new one never evaluates true during the dispatch; it pages 
 30 minutes (23:03:11Z to 23:33:06Z) in which the lane sat idle with about 20 events queued and the host
 awake; the slow-growth rule pages for the 12:00Z to 19:40Z case (11 arrivals, 5 completions). The recorded
 `pr.changed` buildup of 2026-09-30 pages as two idle-with-backlog stretches the old rule could not see, and
-the absorbed `issue.changed` surge of 2026-10-01 pages nothing. `grafana/alerting/rule-tests/` runs the same
-expressions under `promtool`.
+the absorbed `issue.changed` surge of 2026-10-01 pages nothing. The usage-limit decline storm of 2026-10-13
+(`testdata/drain_pg2_2026-10-13.txt`: the queue log and the daemon log, 302 recorded declines) holds the
+stalled condition on every evaluation from 21:05Z to 22:00Z at every one of the 30 scrape phases and pages from
+about 21:09Z until the dispatch that went in flight at 22:00:10Z is running, where the previous in-flight test
+held it for 5 of those 56 minutes in the replay (about 7 in Grafana). `grafana/alerting/rule-tests/` runs the
+same expressions under `promtool`.
 
 **Not covered, by the ruling.** A wedged session that still counts as in flight (the ccpool session rules,
 `pool-full-idle` and `needs_input`, own it); a type missing from the rule's role table.

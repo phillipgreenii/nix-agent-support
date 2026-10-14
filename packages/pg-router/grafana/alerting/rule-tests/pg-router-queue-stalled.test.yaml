@@ -88,6 +88,87 @@ tests:
         alertname: pg-router-queue-stalled
         exp_alerts: []
 
+  # pg2-9nfla: the usage-limit decline storm of 2026-10-13. Every drain-pg2 offer was declined, one
+  # every 13s, and an offer is in flight until it settles (about 2s for a decline), so about one
+  # scrape in eight read the role as in flight, now and then two in a row, though nothing was
+  # processed for over an hour. A declined attempt is not processing: the role counts as running
+  # only when it is in flight on 6 consecutive scrapes (a 3 minute lookback), and the idle test
+  # that read ANY in-flight scrape restarted its 10 minute window on every blip and paged for 7 of
+  # the 69 minutes. Each unit below is 40 scrapes (20 minutes); the longest quiet stretch is 5
+  # minutes, so the old test never reads the lane as idle.
+  - name: declined offers caught in flight on one or two scrapes are not activity, a decline storm pages
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "20x240"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "0x5 1 0x3 1 1 0x5 1 0x2 1 0x6 1 1 0x1 1 0x3 0x5 1 0x3 1 1 0x5 1 0x2 1 0x6 1 1 0x1 1 0x3 0x5 1 0x3 1 1 0x5 1 0x2 1 0x6 1 1 0x1 1 0x3 0x5 1 0x3 1 1 0x5 1 0x2 1 0x6 1 1 0x1 1 0x3 0x5 1 0x3 1 1 0x5 1 0x2 1 0x6 1 1 0x1 1 0x3 0x5 1 0x3 1 1 0x5 1 0x2 1 0x6 1 1 0x1 1 0x3"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 30m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      # The condition holds from 9m (18 scrapes) and pages after `for`, through every blip.
+      - eval_time: 12m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning
+      - eval_time: 100m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning
+
+  - name: a dispatch in flight for three minutes or more is processing, a stretch of a few scrapes is not
+    interval: 30s
+    input_series:
+      # drain.pg2: one dispatch in flight on 10 consecutive scrapes (5m to 9m30s), idle before and after.
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "3x240"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "0x9 1x9 0x220"
+      # drain.zr: declined offers caught on 5 consecutive scrapes (5m to 7m), one short of a run,
+      # idle otherwise. The recorded storm never reads more than 4 in a row (queue_stalled_test.go).
+      - series: pg_router_queue_depth{type="drain.zr",job="pg-router"}
+        values: "3x240"
+      - series: pg_router_listener_in_flight{role="drain-zr",job="pg-router"}
+        values: "0x9 1x4 0x226"
+    alert_rule_test:
+      # drain.zr is idle from 9m and pages at 14m whatever happened at 5m.
+      - eval_time: 12m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      # drain.pg2's dispatch ran until 9m30s, so its window is clear only from 19m30s and it pages
+      # after `for`: at 20m only drain.zr is firing, at 30m both are.
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.zr
+              job: pg-router
+              severity: warning
+      - eval_time: 30m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning
+          - exp_labels:
+              type: drain.zr
+              job: pg-router
+              severity: warning
+
   - name: a pace-limited fast role that is never caught in flight is not idle while its dispatches keep settling
     interval: 30s
     input_series:

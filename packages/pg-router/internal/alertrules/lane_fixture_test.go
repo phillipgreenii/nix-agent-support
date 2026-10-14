@@ -3,6 +3,7 @@ package alertrules
 import (
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,12 +16,24 @@ import (
 
 type span struct{ from, to time.Time }
 
+// A declined offer (R) is in flight from the moment it is made until the handler
+// has decided and the offer settles; the daemon logs the decision at the end of that
+// stretch. The model is [t-declineBefore, t+declineAfter) around the logged second,
+// the offsets that reproduce the five scrapes of the 2026-10-13 storm that read
+// pg_router_listener_in_flight == 1 (testdata/drain_pg2_2026-10-13.txt, header).
+const (
+	declineBefore = 2 * time.Second
+	declineAfter  = time.Second
+)
+
 // lane is the recorded history of one event type and the role that consumes it.
 type lane struct {
-	enq    []time.Time // events admitted (E)
-	evict  []time.Time // events that left the queue (X)
-	disp   []span      // dispatches: offer in flight from..to, settled (accepted) at `to` (D)
-	asleep []span      // the host was asleep: no scrape in [from, to) (S)
+	backlog  int         // events held when the recording starts, not arrivals (B)
+	enq      []time.Time // events admitted (E)
+	evict    []time.Time // events that left the queue (X)
+	disp     []span      // dispatches: offer in flight from..to, settled (accepted) at `to` (D)
+	declines []time.Time // offers the handler declined, as logged: in flight around the instant, never accepted (R)
+	asleep   []span      // the host was asleep: no scrape in [from, to) (S)
 }
 
 func parseUTC(s string) time.Time {
@@ -52,6 +65,14 @@ func loadLane(t *testing.T, path string) lane {
 			l.disp = append(l.disp, span{parseUTC(f[1]), parseUTC(f[2])})
 		case len(f) == 3 && f[0] == "S":
 			l.asleep = append(l.asleep, span{parseUTC(f[1]), parseUTC(f[2])})
+		case len(f) == 3 && f[0] == "B":
+			n, err := strconv.Atoi(f[2])
+			if err != nil || n < 0 {
+				t.Fatalf("%s: bad backlog in %q", path, line)
+			}
+			l.backlog = n
+		case len(f) == 2 && f[0] == "R":
+			l.declines = append(l.declines, parseUTC(f[1]))
 		default:
 			t.Fatalf("%s: bad record %q", path, line)
 		}
@@ -65,7 +86,7 @@ func loadLane(t *testing.T, path string) lane {
 }
 
 func (l lane) depthAt(t time.Time) int {
-	n := 0
+	n := l.backlog
 	for _, e := range l.enq {
 		if !e.After(t) {
 			n++
@@ -82,6 +103,13 @@ func (l lane) depthAt(t time.Time) int {
 func (l lane) inFlightAt(t time.Time) bool {
 	for _, d := range l.disp {
 		if !t.Before(d.from) && t.Before(d.to) {
+			return true
+		}
+	}
+	// A declined offer is in flight too, for as long as the decline takes to decide:
+	// the gauge cannot tell it from a dispatch (pg2-9nfla).
+	for _, r := range l.declines {
+		if !t.Before(r.Add(-declineBefore)) && t.Before(r.Add(declineAfter)) {
 			return true
 		}
 	}
