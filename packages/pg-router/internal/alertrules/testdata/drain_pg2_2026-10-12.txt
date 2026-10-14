@@ -22,6 +22,10 @@
 #                  of that day, the same ones the sleep-aware metrics bead records (03:30Z-07:21Z, 08:28Z-12:20Z,
 #                  13:36Z-16:30Z; the first is before this file's first record, so only the other two appear).
 #                  Short dark wakes inside a sleep are not modelled (fewer samples, never more).
+#   U <t>          an event was retired WITHOUT an accept: what pg_router_unconsumed_expired_total counts (a retirement
+#                  followed by the source's re-emission is a U and an E that add up to no new work). Only the churn burst
+#                  of 00:18Z-00:24Z on 10-13 is recorded as U (every X of it from 00:18:31Z, 30 in all): the queue log no
+#                  longer says which earlier X were unaccepted, and every X before it follows an accept. U records come last.
 #
 # Facts a replay can be checked against (all read from the same records):
 #   * the 63.7 minute healthy dispatch is D 17:47:55 18:53:11 (router duration 63.7 min), with depth >= 10 throughout;
@@ -161,3 +165,33 @@ X 2026-10-13T01:30:57Z
 E 2026-10-13T01:46:55Z
 E 2026-10-13T01:46:55Z
 E 2026-10-13T03:37:10Z
+U 2026-10-13T00:18:31Z
+U 2026-10-13T00:18:43Z
+U 2026-10-13T00:18:47Z
+U 2026-10-13T00:19:01Z
+U 2026-10-13T00:19:06Z
+U 2026-10-13T00:19:22Z
+U 2026-10-13T00:19:26Z
+U 2026-10-13T00:19:41Z
+U 2026-10-13T00:19:54Z
+U 2026-10-13T00:19:56Z
+U 2026-10-13T00:20:41Z
+U 2026-10-13T00:20:50Z
+U 2026-10-13T00:21:03Z
+U 2026-10-13T00:21:07Z
+U 2026-10-13T00:21:20Z
+U 2026-10-13T00:21:26Z
+U 2026-10-13T00:21:39Z
+U 2026-10-13T00:21:50Z
+U 2026-10-13T00:21:55Z
+U 2026-10-13T00:22:47Z
+U 2026-10-13T00:22:53Z
+U 2026-10-13T00:22:56Z
+U 2026-10-13T00:23:10Z
+U 2026-10-13T00:23:19Z
+U 2026-10-13T00:23:30Z
+U 2026-10-13T00:23:36Z
+U 2026-10-13T00:23:51Z
+U 2026-10-13T00:23:56Z
+U 2026-10-13T00:24:06Z
+U 2026-10-13T00:24:20Z

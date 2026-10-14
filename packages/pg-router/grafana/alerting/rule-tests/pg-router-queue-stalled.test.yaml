@@ -169,6 +169,54 @@ tests:
               job: pg-router
               severity: warning
 
+  # The same storm as the local Prometheus recorded it (pg2-9nfla): the REAL series of the drain.pg2
+  # lane for 2026-10-13 19:30:14Z to 22:29:44Z (sample 0 is 19:30:14Z, 30s apart, scrapes on :14
+  # and :44), read back with a [3h] range selector. In flight, the 87-scrape dispatch of 20:10:44Z
+  # to 20:53:44Z, then the usage-limit storm (20:54:26Z to 21:59:59Z): 17 runs of 1, none longer
+  # than 2 consecutive scrapes (only 21:15:44Z and 21:16:14Z), where the queue-stalled rule as
+  # shipped restarted its window on every one and held its condition from 21:44Z to about 21:51Z;
+  # then the dispatches that went in flight from 22:00:14Z (runs of 5, 10, 4, 5, 5 and 26 scrapes).
+  # The throughput counter steps at 20:54:14Z (the last accept) and at 22:02:44Z (the first after
+  # the storm). The lane held 18 to 35 events throughout. The condition is true from 21:05Z (the
+  # throughput step leaves the window at 21:04:14Z) and the alert fires after `for`, at 21:10Z.
+  - name: the real decline storm of 2026-10-13 pages through its blips and stops once the dispatches run (recorded Prometheus series)
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "32x22 33x7 32x6 33x42 32x7 35x79 32x1 29x1 32 28 25 27 26 23 21 25x1 24 21 24x2 21 18 24 23 22 19 24x1 25 23 20 25 22 25 22 21 24 21 25 24 21 23 19 25 22 25 23 20 25 24x1 21 20 24 21 25 24 25 21 19 23x1 24 21 25 24 22 24 21 25x1 22 20 25x1 22 23 20 25 23 24 22 25x1 23x1 20 25 22 24 22 20 24 21 25 23x1 22 19 24x1 25 22 19 25 22 24 21 25x1 22 24 21x1 22 20 25x2 22 19 24 23x1 20 25 23 25 22 19 25 23x1 20 25x4 24 25x3 24 25x4 24x1 25x2 24x1 25x9 24 25x3 24 25x3 24x1 25x2 24x1 25x2 24x1 25x2 24"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "1x25 0x4 1x1 0x4 1x41 0 1x86 0x2 1 0x5 1 0x4 1 0x4 1 0x3 1 0x2 1 0x8 1 0 1x1 0x2 1 0x4 1 0x1 1 0x11 1 0x7 1 0x32 1 0 1 0x4 1 0x2 1 0x5 1x4 0 1x9 0 1x3 0 1x4 0 1x4 0 1x25"
+      - series: pg_router_throughput_total{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "2x25 _x53 1x87 2x136 3x5 4x4 5x4 6x5 7x5 8x5 9x4 10x4 11x4 12x4 13"
+    alert_rule_test:
+      # 20:40:14Z: the 87-scrape dispatch is in flight.
+      - eval_time: 1h10m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      # 21:30:14Z and 21:55:14Z: the lane has been idle with a backlog since 20:54Z, through the
+      # blips of 21:29:14Z, 21:33:44Z and 21:50:44Z to 21:54:44Z.
+      - eval_time: 2h
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning
+      - eval_time: 2h25m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning
+      # 22:05:14Z and 22:20:14Z: the dispatches run and settle (promtool has no keepFiringFor).
+      - eval_time: 2h35m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 2h50m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+
   - name: a pace-limited fast role that is never caught in flight is not idle while its dispatches keep settling
     interval: 30s
     input_series:

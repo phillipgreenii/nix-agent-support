@@ -30,8 +30,10 @@ const (
 	// 3m lookback min_over_time(pg_router_listener_in_flight[3m]) is 1 only when the
 	// last 6 scrapes (30s apart) all read 1. A decline is decided in about 2s, so a
 	// storm of them (one every 13s) leaves a handful of consecutive scrapes in flight
-	// at worst (4 in the recording of 2026-10-13, at one scrape phase of 30, under a
-	// model that is wider than the scrapes that really read 1), never 6.
+	// at worst: 2 in Prometheus's own record of the 2026-10-13 storm (17 runs of 1, one
+	// of them a pair; the promtool case of that series is in rule-tests), and 4 at one
+	// scrape phase of 30 under the replay model, which is wider than the scrapes that
+	// really read 1. Never 6.
 	stalledBusyRun = 6
 
 	laneFixture  = "testdata/drain_pg2_2026-10-12.txt"

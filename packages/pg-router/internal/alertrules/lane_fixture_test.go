@@ -33,6 +33,7 @@ type lane struct {
 	evict    []time.Time // events that left the queue (X)
 	disp     []span      // dispatches: offer in flight from..to, settled (accepted) at `to` (D)
 	declines []time.Time // offers the handler declined, as logged: in flight around the instant, never accepted (R)
+	retired  []time.Time // events retired without an accept: what pg_router_unconsumed_expired_total counts (U)
 	asleep   []span      // the host was asleep: no scrape in [from, to) (S)
 }
 
@@ -73,6 +74,8 @@ func loadLane(t *testing.T, path string) lane {
 			l.backlog = n
 		case len(f) == 2 && f[0] == "R":
 			l.declines = append(l.declines, parseUTC(f[1]))
+		case len(f) == 2 && f[0] == "U":
+			l.retired = append(l.retired, parseUTC(f[1]))
 		default:
 			t.Fatalf("%s: bad record %q", path, line)
 		}

@@ -446,10 +446,12 @@ or when consumption stays far below generation.
   69 minutes (Pending 21:44Z, Alerting 21:49Z, Normal 22:01Z). The ruling ("queue > 0 and nothing is being
   processed") makes a declined attempt idleness, so the rule asks for a dispatch that is RUNNING: the role
   in flight on 6 consecutive scrapes (`min_over_time(listener_in_flight[3m])`) at some point of the window
-  (`max_over_time(...[10m:30s])`). A decline reads on a few consecutive scrapes at worst (4, at one scrape
-  phase of 30, in the recording of the storm, under a model wider than the scrapes that really read 1); a
-  running dispatch reads on every scrape until it ends, and the role must still be quiet for the window
-  after its last in-flight scrape, as before. A dispatch that settles inside 3 minutes is processing
+  (`max_over_time(...[10m:30s])`). A decline reads on a few consecutive scrapes at worst: Prometheus's own
+  record of the storm has 17 runs of `listener_in_flight == 1` inside it, none longer than 2 consecutive
+  scrapes (one pair), and the replay model, built from the declines in the daemon log and wider than the
+  scrapes that really read 1, reads at most 4 at any of the 30 scrape phases, so 6 leaves a margin of 4
+  against the record. A running dispatch reads on every scrape until it ends, and the role must still be
+  quiet for the window after its last in-flight scrape, as before. A dispatch that settles inside 3 minutes is processing
   through the throughput clause. **Chosen over** keeping a declined attempt out of the gauge in the daemon
   (a new admission signal from the handler, or a second accepted-dispatch gauge: a change to the queue, the
   wire protocol and the ccpool handler), because the rule-side test passes the replay of the recorded storm
@@ -458,8 +460,9 @@ or when consumption stays far below generation.
   each usage-limit or at-capacity window that declines its offers; the verification found the rule not
   noisy (one Alerting episode, none for `escalated.pg2`). If that proves unwanted, the lever is to count
   at-capacity declines as activity, which needs a new operator ruling.
-- **Slow growth (`pg-router-queue-slow-growth`).** A type pages when `increase(enqueued_total[6h])` is
-  above 1.5 times `increase(throughput_total[6h])` (or there are arrivals and no completions series), at
+- **Slow growth (`pg-router-queue-slow-growth`).** A type pages when its arrivals,
+  `increase(enqueued_total[6h]) - increase(unconsumed_expired_total[6h])` (see "Re-emitted events" below),
+  are above 1.5 times `increase(throughput_total[6h])` (or there are arrivals and no completions series), at
   least 6 arrived, and a backlog of 5 or more did not drain once in the last hour (108 of the hour's 120
   scrapes present, which is also its wake grace), held for 30 minutes. A counter pair was chosen over
   `predict_linear` on the depth gauge, which has no series while a type is drained and has multi-hour holes
@@ -468,8 +471,34 @@ or when consumption stays far below generation.
 - **`enqueued`** — a new counter per `type`: events admitted to the queue. A duplicate id, a restored
   event, a refused admission and the Gate Registry's own records are not arrivals; a fresh event that
   reuses a retired id is. The queue retires events unaccepted and the source re-emits them (2026-10-13
-  00:18Z to 00:24Z: about 17 such pairs), which this counts as arrivals; the depth floor keeps that churn
-  alone from paging a type that holds no backlog.
+  00:18Z to 00:24Z: about 17 such pairs), which this counts as arrivals; the slow-growth rule nets that
+  out (the next bullet).
+- **Re-emitted events are not arrivals (amended 2026-10-14, bead `pg2-9nfla`).** A drain event is born
+  expired, so a decline is its only attempt: the queue retires it unaccepted (`unconsumed_expired`) and the
+  source re-emits it on its next tick, which `enqueued` counts as one more arrival. During the decline storm
+  of 2026-10-13 (302 declines, 20:54:26Z to 21:59:59Z) the 6 hours to 22:42Z held 312 enqueues of 27
+  distinct beads, at most 8 of them new, against 13 completions, a ratio of 24; the alert, which had paged
+  correctly for the 14:52Z-20:52Z onset (22 distinct beads against about 6 completions, depth 22 to 35),
+  would have stayed Alerting until the burst left the window (about 04:00Z the next day, plus the hour of
+  `keepFiringFor`) on a lane whose distinct arrivals kept up. The depth floor does not help a lane that
+  holds a standing backlog. Arrivals are now the enqueues less the events retired unconsumed over the same
+  window, so a retire-and-re-emit pair nets to zero whichever path retired it (262 of the storm's 302
+  retirements were the sweep, 40 a re-emit over the stale entry, so a hook on the stale-retire path alone
+  would not have been enough). The counters carry no event id: a retirement that is not re-emitted nets to
+  zero as well, so enqueues less retirements is the change in the backlog plus the completions and the rule
+  reads "the backlog grew by more than half of what was completed", with the same ratio and floors as
+  before and no change to a lane that never retires anything unaccepted (an absent retirements series reads
+  as 0). On the recorded storm that ends the condition at about 21:10Z, when the retirements have caught up
+  with the re-emissions (the storm also retired and did not re-emit the stale part of the standing backlog,
+  depth 35 to 22), and the alert resolves an hour later; the verification's estimate, which counts each
+  distinct bead once, would hold the condition to about 23:22Z. Net arrivals in the 6 hours to 22:42Z read
+  7, where the verification counted at most 8 new beads. **Chosen over** a depth-trend guard (the same
+  quantity from the gauge, which has no series while a type is drained, holes across every sleep, and
+  noise of a few events either way) and over counting an event id once in the daemon, which is the exact
+  count but needs the queue to remember a retired id past its sweep (an id memory in `eventqueue`, a new
+  observer hook, a router deploy, and a different meaning of `enqueued` for its other readers). **Not
+  covered:** a lane that only loses events (every enqueue retired unconsumed) reads no growth here; its
+  `unconsumed_expired` counter and its depth are the alarm for that.
 
 **Evidence.** The recorded `drain.pg2` lane of 2026-10-12, reconstructed from the queue log
 (`internal/alertrules/testdata/drain_pg2_2026-10-12.txt`), replays through both rules in
@@ -482,8 +511,15 @@ the absorbed `issue.changed` surge of 2026-10-01 pages nothing. The usage-limit 
 (`testdata/drain_pg2_2026-10-13.txt`: the queue log and the daemon log, 302 recorded declines) holds the
 stalled condition on every evaluation from 21:05Z to 22:00Z at every one of the 30 scrape phases and pages from
 about 21:09Z until the dispatch that went in flight at 22:00:10Z is running, where the previous in-flight test
-held it for 5 of those 56 minutes in the replay (about 7 in Grafana). `grafana/alerting/rule-tests/` runs the
-same expressions under `promtool`.
+held it for 5 of those 56 minutes in the replay (about 7 in Grafana). The same storm as Prometheus recorded
+it (the real `in_flight`, `queue_depth` and `throughput_total` series, 19:30Z to 22:29Z) runs through the
+real expression in a `promtool` case: the alert fires at 21:30Z and 21:55Z and is quiet at 20:40Z (a
+dispatch running), 22:05Z and 22:20Z (the dispatches settling). The slow-growth rule reads 7 net arrivals
+in the 6 hours to 22:42Z (the verification: at most 8 new beads of the 27) and, replayed over the storm, holds
+its condition for the onset and ends it at about 21:10Z; the live counters read after the storm agree
+(enqueues less retirements over 6 hours 14 to 17 against 5 to 6 completions from 20:00Z to 20:45Z, 10 or
+fewer from 21:15Z, inside the counters' first 6 hours, so a cross-check and not a replay).
+`grafana/alerting/rule-tests/` runs the same expressions under `promtool`.
 
 **Not covered, by the ruling.** A wedged session that still counts as in flight (the ccpool session rules,
 `pool-full-idle` and `needs_input`, own it); a type missing from the rule's role table.

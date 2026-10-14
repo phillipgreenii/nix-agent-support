@@ -141,6 +141,64 @@ tests:
               type: drain.pg2
               severity: warning
 
+  # pg2-9nfla: the usage-limit decline storm of 2026-10-13. A drain event is born expired, so a
+  # decline is its only attempt: the queue retires it unconsumed (pg_router_unconsumed_expired_total)
+  # and the source re-emits it, which pg_router_enqueued_total counts as one more arrival. The
+  # arrivals of the rule are the enqueues less the retirements, so a retire-and-re-emit pair
+  # nets to zero and a work item counts once. A type whose retirements counter has no series
+  # (it is created on the first increment) reads its enqueues as before: every other case in
+  # this file has none.
+  - name: events the queue retired unconsumed and the source re-emitted count once, a lane whose distinct arrivals keep up never fires
+    interval: 30s
+    input_series:
+      # 1.5 distinct arrivals an hour (0.0125 per scrape) and as many completions, plus a
+      # retire-and-re-emit pair every 2.5 scrapes (0.2 per scrape, 24 an hour: a decline storm).
+      # In 6h the enqueues read 153 against 9 completions (17 times), the net arrivals 9.
+      - series: pg_router_enqueued_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.2125x1440"
+      - series: pg_router_unconsumed_expired_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.2x1440"
+      - series: pg_router_throughput_total{type="drain.pg2",role="drain-pg2",job="pg-router"}
+        values: "0+0.0125x1440"
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "20x1440"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_slow_growth)
+        eval_time: 8h
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+      - eval_time: 8h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+
+  - name: real growth still fires with the same churn on top of it
+    interval: 30s
+    input_series:
+      # 3 distinct arrivals an hour (0.025 per scrape) against 1.5 completions an hour (ratio 2),
+      # with the same 24 retire-and-re-emit pairs an hour on top.
+      - series: pg_router_enqueued_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.225x1440"
+      - series: pg_router_unconsumed_expired_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.2x1440"
+      - series: pg_router_throughput_total{type="drain.pg2",role="drain-pg2",job="pg-router"}
+        values: "0+0.0125x1440"
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "20x1440"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+      # Net arrivals reach the floor of 6 at 2h and `for` runs 30m after that.
+      - eval_time: 4h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              severity: warning
+
   - name: a laptop sleep needs an hour of fresh scrapes before the condition can hold again
     interval: 30s
     input_series:

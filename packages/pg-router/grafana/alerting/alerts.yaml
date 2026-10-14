@@ -264,7 +264,9 @@ groups:
       # the role must still be quiet for a window after its LAST in-flight scrape, as
       # before. A dispatch that settles in less than 3 minutes is covered by the
       # throughput clause below. Replay of the recorded storm at every scrape phase:
-      # internal/alertrules/testdata/drain_pg2_2026-10-13.txt and queue_stalled_test.go.
+      # internal/alertrules/testdata/drain_pg2_2026-10-13.txt and queue_stalled_test.go;
+      # Prometheus's own series of the storm (17 in-flight runs, none longer than 2
+      # scrapes) run through this expression in rule-tests/pg-router-queue-stalled.test.yaml.
       # Consequence, by the ruling: a lane with a backlog now pages for about as long as
       # a usage-limit or at-capacity window keeps declining its offers. If that is
       # unwanted, the lever is to count at-capacity declines as activity, which needs a
@@ -373,14 +375,58 @@ groups:
       # generation, that is a problem". pg-router-queue-stalled cannot see it (the
       # consumer is working) and pg-router-queue-depth-growing needs a rise of 25 in an
       # hour; this rule watches the RATE over a long window:
-      #   sum by (type) (increase(pg_router_enqueued_total[6h]))
+      #   (sum by (type) (increase(pg_router_enqueued_total[6h]))
+      #     - sum by (type) (increase(pg_router_unconsumed_expired_total[6h])))
       #     > 1.5 * sum by (type) (increase(pg_router_throughput_total[6h]))
       # pg_router_enqueued_total (internal/metrics, added with this rule) counts events
-      # admitted to the queue, per type; pg_router_throughput_total counts dispatches
-      # that settled, per type and role. A type with arrivals and no throughput series
-      # at all in the window counts as growing too (the `unless on(type)` branch): a
-      # consumer that never completes anything is the extreme of a slow one, and it
-      # also covers a lane wedged in flight, which the stalled rule accepts as a gap.
+      # admitted to the queue, per type; pg_router_unconsumed_expired_total counts events
+      # the queue retired without any handler accepting them (see "Re-emitted events"
+      # below); pg_router_throughput_total counts dispatches that settled, per type and
+      # role. A type with arrivals and no throughput series at all in the window counts
+      # as growing too (the `unless on(type)` branch): a consumer that never completes
+      # anything is the extreme of a slow one, and it also covers a lane wedged in
+      # flight, which the stalled rule accepts as a gap.
+      #
+      # Re-emitted events (pg2-9nfla, DEC-OBS-10). The queue counts a re-emission as a
+      # fresh arrival, and a born-expired event (every drain event) has one attempt, so a
+      # decline retires it unaccepted and the source re-emits it on its next tick: one
+      # work item, one more enqueue and one more unconsumed-expired per decline. During
+      # the usage-limit decline storm of 2026-10-13 (every drain-pg2 offer declined from
+      # 20:54:26Z to 21:59:59Z, 302 declines) the 6 hour window ending 22:42Z held 312
+      # enqueues of 27 distinct beads, at most 8 of them new, against 13 completions, so
+      # the ratio read about 24 and the alert, which had paged correctly for the
+      # 14:52Z-20:52Z onset (22 distinct beads against about 6 completions, depth 22 to
+      # 35), would have stayed Alerting until the burst left the window, at about 04:00Z
+      # the next day, plus the hour of keepFiringFor, on a lane whose distinct arrivals
+      # kept up. Arrivals are therefore the enqueues LESS the events retired unconsumed in
+      # the same window: a retirement followed by its re-emission nets to zero, so a work
+      # item counts once, whichever path retired it (the sweep, 262 of the storm's 302
+      # retirements, or a re-emit over the stale entry, 40). The `or on(type) (0 * ...)`
+      # supplies the 0 for a type whose retirements counter has no series yet (OTel
+      # counters are created on the first increment), so such a type reads its enqueues
+      # as before. Limits: the counters cannot tell a retirement that is re-emitted from
+      # one that is not, so a retirement with no re-emission also nets to zero (work that
+      # was dropped is no longer waiting, and a lane that only LOSES events is not slow
+      # growth: pg_router_unconsumed_expired_total and the depth gauge are the alarm for
+      # it); and a retirement lands in the window it happens in, while its re-emission
+      # lands a tick later, so a pair straddling the window edge reads +1 or -1 for one
+      # evaluation. Enqueues less retirements is the change in the backlog plus the
+      # completions (every event leaves by an accept or a retirement), so the rule now
+      # reads "the backlog grew by more than half of what the consumer completed in the
+      # window", from two exact counters rather than the depth gauge (absent while a
+      # type is drained, holes across every sleep). It therefore also reads the storm's
+      # sweep of the stale part of the standing backlog (depth 35 to 22, retired and not
+      # re-emitted) as a shrinking backlog: on the recorded storm the condition ends about
+      # 21:10Z, when the retirements have caught up with the re-emissions, and the alert
+      # resolves an hour later, where counting each distinct bead once (the verification's
+      # estimate) would hold the condition to about 23:22Z. That count needs an event id
+      # the counters do not carry. Replay of the recorded storm and of the 2026-10-12 slow
+      # growth: internal/alertrules/testdata/drain_pg2_2026-10-13.txt,
+      # drain_pg2_2026-10-12.txt and queue_slow_growth_test.go. Chosen over a daemon
+      # change that counts an event id once: the queue keeps no memory of a retired id
+      # past its sweep (87 percent of the storm's pairs went through the sweep), so it
+      # needs an id memory in eventqueue, a new observer hook and a router deploy, and
+      # it would also change what pg_router_enqueued_total means for its other readers.
       #
       # Constants (pinned and replayed in internal/alertrules/queue_slow_growth_test.go):
       #   - 6h window, ratio above 1.5: the reference case, 2026-10-12 12:00Z to 19:40Z,
@@ -413,11 +459,10 @@ groups:
       # first arrival of a type after a daemon restart is not counted (as in
       # pg-router-budget-stops; with the 6 arrivals floor it can only delay, never fake, a
       # page). The counter has no history: for 6 hours after it first ships the arrivals
-      # cover less than the window, which under-reads the ratio (quiet, never noisy). An
-      # event the queue retires unaccepted and the source then re-emits is a second
-      # arrival, as the queue counts it (2026-10-13 00:18Z to 00:24Z: ~17 such pairs); the
-      # depth floor keeps that churn alone from paging a type that is not holding a
-      # backlog. Static-safe annotations, like the other registered rules.
+      # cover less than the window, which under-reads the ratio (quiet, never noisy). The
+      # depth floor keeps a lane that holds no backlog from paging on churn at all (the
+      # re-emission discussion above covers the lane that does). Static-safe annotations,
+      # like the other registered rules.
       - uid: pg-router-queue-slow-growth
         title: pg-router queue is slowly growing (arrivals outpace completions, by type)
         condition: C
@@ -429,7 +474,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router type {{ $labels.type }} receives events faster than it completes them"
-          description: "Over the last 6 hours more than 1.5 times as many events of type {{ $labels.type }} were enqueued (increase of pg_router_enqueued_total) as were completed (increase of pg_router_throughput_total), at least 6 arrived, and a backlog of 5 or more has not drained once in the last hour -- the consumer is working but is not keeping up, so the queue keeps lengthening. This is the rate-based signal for a queue that is processing correctly yet falling behind (the lane's single consumer or its pool is too slow for the arrival rate); it is not an idle-consumer alert (that is pg-router-queue-stalled) and not a fast buildup (that is pg-router-queue-depth-growing). Check `pg-router status` for the role that binds this type, compare the arrival and completion rates on the pg-router dashboard, and decide whether the lane needs more capacity, fewer arrivals or a smaller backlog. A laptop sleep needs an hour of fresh scrapes before this can fire again."
+          description: "Over the last 6 hours more than 1.5 times as many events of type {{ $labels.type }} arrived (increase of pg_router_enqueued_total, less the events the queue retired unconsumed, increase of pg_router_unconsumed_expired_total, so an event the queue retired and its source re-emitted counts once) as were completed (increase of pg_router_throughput_total), at least 6 arrived, and a backlog of 5 or more has not drained once in the last hour -- the consumer is working but is not keeping up, so the queue keeps lengthening. This is the rate-based signal for a queue that is processing correctly yet falling behind (the lane's single consumer or its pool is too slow for the arrival rate); it is not an idle-consumer alert (that is pg-router-queue-stalled) and not a fast buildup (that is pg-router-queue-depth-growing). Check `pg-router status` for the role that binds this type, compare the arrival and completion rates on the pg-router dashboard, and decide whether the lane needs more capacity, fewer arrivals or a smaller backlog. A laptop sleep needs an hour of fresh scrapes before this can fire again."
         data:
           - refId: A
             relativeTimeRange:
@@ -440,7 +485,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: (sum by (type) (increase(pg_router_enqueued_total[6h])) > 1.5 * sum by (type) (increase(pg_router_throughput_total[6h])) or sum by (type) (increase(pg_router_enqueued_total[6h])) unless on(type) sum by (type) (increase(pg_router_throughput_total[6h]))) and on(type) sum by (type) (increase(pg_router_enqueued_total[6h])) >= 6 and on(type) min_over_time(pg_router_queue_depth[1h]) >= 5 and on(type) count_over_time(pg_router_queue_depth[1h]) >= 108
+              expr: ((sum by (type) (increase(pg_router_enqueued_total[6h])) - on(type) (sum by (type) (increase(pg_router_unconsumed_expired_total[6h])) or on(type) (0 * sum by (type) (increase(pg_router_enqueued_total[6h]))))) > 1.5 * sum by (type) (increase(pg_router_throughput_total[6h])) or (sum by (type) (increase(pg_router_enqueued_total[6h])) - on(type) (sum by (type) (increase(pg_router_unconsumed_expired_total[6h])) or on(type) (0 * sum by (type) (increase(pg_router_enqueued_total[6h]))))) unless on(type) sum by (type) (increase(pg_router_throughput_total[6h]))) and on(type) (sum by (type) (increase(pg_router_enqueued_total[6h])) - on(type) (sum by (type) (increase(pg_router_unconsumed_expired_total[6h])) or on(type) (0 * sum by (type) (increase(pg_router_enqueued_total[6h]))))) >= 6 and on(type) min_over_time(pg_router_queue_depth[1h]) >= 5 and on(type) count_over_time(pg_router_queue_depth[1h]) >= 108
           - refId: B
             datasourceUid: __expr__
             model:

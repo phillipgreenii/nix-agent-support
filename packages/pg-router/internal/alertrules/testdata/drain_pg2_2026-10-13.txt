@@ -1,13 +1,13 @@
-# Queue-lane history for the drain.pg2 type and its drain-pg2 role, 2026-10-13 14:50Z .. 23:00Z: the account usage limit
+# Queue-lane history for the drain.pg2 type and its drain-pg2 role, 2026-10-13 14:50Z .. 23:28Z: the account usage limit
 # declined every drain-pg2 dispatch from 20:54:26Z to 21:59:59Z (pg2-9nfla). Replayed by queue_stalled_test.go and
-# queue_slow_growth_test.go. Same record kinds as drain_pg2_2026-10-12.txt (E, X, D, S), plus B and R.
+# queue_slow_growth_test.go. Same record kinds as drain_pg2_2026-10-12.txt (E, X, D, S), plus B, R and U.
 #
-# REAL RECORDING, no synthesis. B, E, X and D are read from the pg-router durable queue log
+# REAL RECORDING, no synthesis. B, E, X, D and U are read from the pg-router durable queue log
 # (~/.local/state/pg-router/queue.jsonl: enqueue, evict and accept records, and the archive records a compaction folds a
 # departed event into); R is read from the daemon log (~/.local/state/pg-router/launchd-stderr.log, whose clock is local
 # time, UTC-4 that day). Only timestamps are kept (UTC, to the second): event ids, bead ids and payloads are dropped.
 #
-# Record kinds, one per line (B and S first, then E, X and D in time order, then every R):
+# Record kinds, one per line (B and S first, then E, X and D in time order, then every R, then every U):
 #   B <t> <n>      the lane held n events at <t>, the start of the recording. They are not arrivals: pg_router_enqueued_total
 #                  was born at the 14:52:09Z apply, so no E record precedes <t>.
 #   E <t>          an event was admitted (an arrival, as the new counter counts it). During the storm each decline retires a
@@ -16,23 +16,29 @@
 #   D <start> <t>  one ACCEPTED dispatch: the offer went in flight at <start> and settled at <t>, which is when
 #                  pg_router_throughput_total advanced. The D records start 6 hours before <B>, so a 6 hour completions
 #                  window is complete from the first evaluation (only the archived events of the queue log survive, which
-#                  can omit an older dispatch).
+#                  can omit an older dispatch). A dispatch that settles after 23:28Z is not a record.
 #   R <t>          one DECLINED offer: the daemon logged `dispatch declined: ... role=drain-pg2` at <t> (the second the line
 #                  carries). An offer is in flight from the moment it is made until it settles, and a decline is decided
 #                  inside the offer (the handler's admission gate), so the role counts as in flight for a couple of seconds
 #                  around <t> without anything being accepted. The offer is not accepted: no D record, no throughput.
-#                  A replay models the span as [t-2s, t+1s) (queue_stalled_test.go, declineBefore and declineAfter).
+#                  A replay models the span as [t-2s, t+1s) (lane_fixture_test.go, declineBefore and declineAfter).
+#   U <t>          an event was retired WITHOUT an accept (the sweep, or a re-emit over the stale entry): what
+#                  pg_router_unconsumed_expired_total counts, at the instant of the retirement. Every U instant is also an
+#                  X. The pg-router counts a retired event's re-emission as a new arrival (an E), so a retire and re-emit
+#                  pair is a U and an E that add up to no new work.
 #   S <from> <to>  the host was asleep: no router activity and no Prometheus scrape in [from, to) (gaps of 10 minutes or
 #                  more in the router event log, ~/.local/state/pg-router/events.jsonl; the dark wakes inside them are not
-#                  modelled).
+#                  modelled). The recording stops at 23:28Z, before the first of the next evening's gaps.
 #
 # Facts a replay can be checked against (all read from the same records):
 #   * 20:53:50Z is the last accept before the storm and 22:02:39Z the first after it; the dispatch that ended there went in
 #     flight at 22:00:10Z, 11 seconds after the last decline (21:59:59Z), so nothing was processed for 66 minutes and the
-#     lane held 19 to 24 events throughout. The dispatch in flight at 22:29:40Z (settled 23:17:41Z) has no D record: D
-#     records are the dispatches that settled by 23:00Z, so a replay of the stalled rule stops at 22:29:00Z.
-#   * 22 arrivals and 4 recorded accepts from 14:52Z to 20:52Z (depth 19 -> 35); from 20:54Z the storm adds one arrival
-#     per decline.
+#     lane held 19 to 24 events throughout.
+#   * 22 arrivals and 4 recorded accepts from 14:52Z to 20:52Z (depth 19 -> 35, 3 of the retirements in the whole window
+#     are before the storm); from 20:54Z every decline retires an event unaccepted (a U) and the source re-emits it (an E):
+#     302 declines, 302 U and about 300 E in the storm.
+#   * the 6 hours to 22:42Z hold 312 E and 305 U (the verification: 312 enqueues of 27 distinct beads, at most 8 of them
+#     new, against 13 completions): 7 net arrivals, below the 13 completions.
 #   * the Prometheus samples of pg_router_listener_in_flight{role="drain-pg2"} that read 1 inside the storm (the scrapes
 #     are on :14 and :44 of every minute) were 21:15:44Z, 21:16:14Z, 21:21:14Z, 21:29:14Z and 21:33:44Z. Each has an R
 #     record 0, 1 or 2 seconds after it, and the offsets of the model above reproduce all five.
@@ -703,6 +709,10 @@ X 2026-10-13T22:29:40Z
 E 2026-10-13T22:30:09Z
 E 2026-10-13T22:34:33Z
 E 2026-10-13T22:54:44Z
+E 2026-10-13T23:13:55Z
+D 2026-10-13T22:29:40Z 2026-10-13T23:17:41Z
+X 2026-10-13T23:17:50Z
+D 2026-10-13T23:17:50Z 2026-10-13T23:28:18Z
 R 2026-10-13T15:16:39Z
 R 2026-10-13T16:33:40Z
 R 2026-10-13T18:09:57Z
@@ -1010,3 +1020,308 @@ R 2026-10-13T21:59:26Z
 R 2026-10-13T21:59:40Z
 R 2026-10-13T21:59:52Z
 R 2026-10-13T21:59:59Z
+U 2026-10-13T18:10:08Z
+U 2026-10-13T19:00:57Z
+U 2026-10-13T19:45:36Z
+U 2026-10-13T20:54:29Z
+U 2026-10-13T20:54:39Z
+U 2026-10-13T20:54:49Z
+U 2026-10-13T20:54:55Z
+U 2026-10-13T20:55:04Z
+U 2026-10-13T20:55:18Z
+U 2026-10-13T20:55:28Z
+U 2026-10-13T20:55:44Z
+U 2026-10-13T20:56:37Z
+U 2026-10-13T20:56:45Z
+U 2026-10-13T20:56:49Z
+U 2026-10-13T20:56:57Z
+U 2026-10-13T20:57:04Z
+U 2026-10-13T20:57:18Z
+U 2026-10-13T20:57:24Z
+U 2026-10-13T20:57:38Z
+U 2026-10-13T20:57:45Z
+U 2026-10-13T20:58:04Z
+U 2026-10-13T20:58:41Z
+U 2026-10-13T20:58:46Z
+U 2026-10-13T20:58:58Z
+U 2026-10-13T20:59:12Z
+U 2026-10-13T20:59:14Z
+U 2026-10-13T20:59:29Z
+U 2026-10-13T20:59:33Z
+U 2026-10-13T20:59:48Z
+U 2026-10-13T20:59:55Z
+U 2026-10-13T21:00:08Z
+U 2026-10-13T21:00:55Z
+U 2026-10-13T21:01:02Z
+U 2026-10-13T21:01:18Z
+U 2026-10-13T21:01:32Z
+U 2026-10-13T21:01:34Z
+U 2026-10-13T21:01:48Z
+U 2026-10-13T21:01:55Z
+U 2026-10-13T21:02:05Z
+U 2026-10-13T21:02:14Z
+U 2026-10-13T21:03:01Z
+U 2026-10-13T21:03:10Z
+U 2026-10-13T21:03:12Z
+U 2026-10-13T21:03:18Z
+U 2026-10-13T21:03:28Z
+U 2026-10-13T21:03:34Z
+U 2026-10-13T21:03:48Z
+U 2026-10-13T21:03:53Z
+U 2026-10-13T21:04:08Z
+U 2026-10-13T21:04:15Z
+U 2026-10-13T21:04:29Z
+U 2026-10-13T21:05:12Z
+U 2026-10-13T21:05:18Z
+U 2026-10-13T21:05:23Z
+U 2026-10-13T21:05:28Z
+U 2026-10-13T21:05:34Z
+U 2026-10-13T21:05:47Z
+U 2026-10-13T21:05:59Z
+U 2026-10-13T21:06:08Z
+U 2026-10-13T21:06:18Z
+U 2026-10-13T21:06:25Z
+U 2026-10-13T21:06:38Z
+U 2026-10-13T21:07:15Z
+U 2026-10-13T21:07:21Z
+U 2026-10-13T21:07:24Z
+U 2026-10-13T21:07:35Z
+U 2026-10-13T21:07:59Z
+U 2026-10-13T21:08:04Z
+U 2026-10-13T21:08:18Z
+U 2026-10-13T21:08:24Z
+U 2026-10-13T21:08:39Z
+U 2026-10-13T21:08:44Z
+U 2026-10-13T21:09:22Z
+U 2026-10-13T21:09:39Z
+U 2026-10-13T21:09:43Z
+U 2026-10-13T21:09:54Z
+U 2026-10-13T21:10:18Z
+U 2026-10-13T21:10:27Z
+U 2026-10-13T21:10:35Z
+U 2026-10-13T21:10:48Z
+U 2026-10-13T21:11:25Z
+U 2026-10-13T21:11:33Z
+U 2026-10-13T21:11:48Z
+U 2026-10-13T21:11:54Z
+U 2026-10-13T21:12:09Z
+U 2026-10-13T21:12:17Z
+U 2026-10-13T21:12:25Z
+U 2026-10-13T21:12:35Z
+U 2026-10-13T21:12:50Z
+U 2026-10-13T21:13:17Z
+U 2026-10-13T21:13:23Z
+U 2026-10-13T21:13:39Z
+U 2026-10-13T21:13:44Z
+U 2026-10-13T21:13:55Z
+U 2026-10-13T21:14:09Z
+U 2026-10-13T21:14:14Z
+U 2026-10-13T21:14:27Z
+U 2026-10-13T21:14:39Z
+U 2026-10-13T21:14:43Z
+U 2026-10-13T21:14:55Z
+U 2026-10-13T21:15:34Z
+U 2026-10-13T21:15:39Z
+U 2026-10-13T21:15:43Z
+U 2026-10-13T21:15:58Z
+U 2026-10-13T21:16:05Z
+U 2026-10-13T21:16:28Z
+U 2026-10-13T21:16:35Z
+U 2026-10-13T21:16:47Z
+U 2026-10-13T21:16:54Z
+U 2026-10-13T21:17:08Z
+U 2026-10-13T21:17:15Z
+U 2026-10-13T21:18:14Z
+U 2026-10-13T21:18:19Z
+U 2026-10-13T21:18:24Z
+U 2026-10-13T21:18:39Z
+U 2026-10-13T21:18:47Z
+U 2026-10-13T21:19:00Z
+U 2026-10-13T21:19:03Z
+U 2026-10-13T21:19:19Z
+U 2026-10-13T21:19:55Z
+U 2026-10-13T21:20:06Z
+U 2026-10-13T21:20:17Z
+U 2026-10-13T21:20:25Z
+U 2026-10-13T21:20:37Z
+U 2026-10-13T21:20:48Z
+U 2026-10-13T21:20:53Z
+U 2026-10-13T21:21:05Z
+U 2026-10-13T21:21:29Z
+U 2026-10-13T21:22:03Z
+U 2026-10-13T21:22:08Z
+U 2026-10-13T21:22:20Z
+U 2026-10-13T21:22:24Z
+U 2026-10-13T21:22:38Z
+U 2026-10-13T21:22:44Z
+U 2026-10-13T21:22:58Z
+U 2026-10-13T21:23:04Z
+U 2026-10-13T21:23:15Z
+U 2026-10-13T21:23:28Z
+U 2026-10-13T21:23:39Z
+U 2026-10-13T21:24:28Z
+U 2026-10-13T21:24:37Z
+U 2026-10-13T21:24:48Z
+U 2026-10-13T21:24:54Z
+U 2026-10-13T21:25:08Z
+U 2026-10-13T21:25:18Z
+U 2026-10-13T21:25:27Z
+U 2026-10-13T21:25:35Z
+U 2026-10-13T21:25:47Z
+U 2026-10-13T21:26:28Z
+U 2026-10-13T21:26:33Z
+U 2026-10-13T21:26:45Z
+U 2026-10-13T21:27:08Z
+U 2026-10-13T21:27:18Z
+U 2026-10-13T21:27:28Z
+U 2026-10-13T21:27:33Z
+U 2026-10-13T21:27:49Z
+U 2026-10-13T21:27:55Z
+U 2026-10-13T21:28:50Z
+U 2026-10-13T21:28:56Z
+U 2026-10-13T21:29:00Z
+U 2026-10-13T21:29:08Z
+U 2026-10-13T21:29:13Z
+U 2026-10-13T21:29:28Z
+U 2026-10-13T21:29:33Z
+U 2026-10-13T21:29:49Z
+U 2026-10-13T21:29:58Z
+U 2026-10-13T21:30:04Z
+U 2026-10-13T21:30:52Z
+U 2026-10-13T21:30:57Z
+U 2026-10-13T21:31:07Z
+U 2026-10-13T21:31:15Z
+U 2026-10-13T21:31:27Z
+U 2026-10-13T21:31:34Z
+U 2026-10-13T21:31:48Z
+U 2026-10-13T21:31:58Z
+U 2026-10-13T21:32:04Z
+U 2026-10-13T21:32:20Z
+U 2026-10-13T21:32:24Z
+U 2026-10-13T21:33:00Z
+U 2026-10-13T21:33:04Z
+U 2026-10-13T21:33:19Z
+U 2026-10-13T21:33:25Z
+U 2026-10-13T21:33:43Z
+U 2026-10-13T21:34:00Z
+U 2026-10-13T21:34:04Z
+U 2026-10-13T21:34:20Z
+U 2026-10-13T21:34:23Z
+U 2026-10-13T21:34:34Z
+U 2026-10-13T21:35:19Z
+U 2026-10-13T21:35:28Z
+U 2026-10-13T21:35:38Z
+U 2026-10-13T21:35:44Z
+U 2026-10-13T21:36:00Z
+U 2026-10-13T21:36:04Z
+U 2026-10-13T21:36:20Z
+U 2026-10-13T21:36:28Z
+U 2026-10-13T21:36:38Z
+U 2026-10-13T21:36:45Z
+U 2026-10-13T21:37:24Z
+U 2026-10-13T21:37:28Z
+U 2026-10-13T21:37:37Z
+U 2026-10-13T21:37:48Z
+U 2026-10-13T21:37:54Z
+U 2026-10-13T21:38:08Z
+U 2026-10-13T21:38:17Z
+U 2026-10-13T21:38:24Z
+U 2026-10-13T21:38:45Z
+U 2026-10-13T21:38:49Z
+U 2026-10-13T21:39:30Z
+U 2026-10-13T21:39:38Z
+U 2026-10-13T21:39:50Z
+U 2026-10-13T21:39:55Z
+U 2026-10-13T21:40:09Z
+U 2026-10-13T21:40:18Z
+U 2026-10-13T21:40:27Z
+U 2026-10-13T21:40:34Z
+U 2026-10-13T21:40:48Z
+U 2026-10-13T21:40:59Z
+U 2026-10-13T21:41:48Z
+U 2026-10-13T21:41:54Z
+U 2026-10-13T21:41:59Z
+U 2026-10-13T21:42:08Z
+U 2026-10-13T21:42:18Z
+U 2026-10-13T21:42:28Z
+U 2026-10-13T21:42:34Z
+U 2026-10-13T21:42:48Z
+U 2026-10-13T21:42:56Z
+U 2026-10-13T21:43:09Z
+U 2026-10-13T21:43:46Z
+U 2026-10-13T21:43:50Z
+U 2026-10-13T21:43:53Z
+U 2026-10-13T21:44:05Z
+U 2026-10-13T21:44:17Z
+U 2026-10-13T21:44:29Z
+U 2026-10-13T21:44:33Z
+U 2026-10-13T21:44:50Z
+U 2026-10-13T21:44:53Z
+U 2026-10-13T21:45:10Z
+U 2026-10-13T21:45:15Z
+U 2026-10-13T21:45:49Z
+U 2026-10-13T21:45:53Z
+U 2026-10-13T21:46:08Z
+U 2026-10-13T21:46:17Z
+U 2026-10-13T21:46:25Z
+U 2026-10-13T21:46:37Z
+U 2026-10-13T21:46:48Z
+U 2026-10-13T21:46:53Z
+U 2026-10-13T21:47:08Z
+U 2026-10-13T21:47:17Z
+U 2026-10-13T21:47:24Z
+U 2026-10-13T21:47:35Z
+U 2026-10-13T21:48:27Z
+U 2026-10-13T21:48:33Z
+U 2026-10-13T21:48:37Z
+U 2026-10-13T21:48:44Z
+U 2026-10-13T21:49:08Z
+U 2026-10-13T21:49:14Z
+U 2026-10-13T21:49:30Z
+U 2026-10-13T21:49:41Z
+U 2026-10-13T21:50:24Z
+U 2026-10-13T21:50:36Z
+U 2026-10-13T21:50:42Z
+U 2026-10-13T21:50:44Z
+U 2026-10-13T21:50:59Z
+U 2026-10-13T21:51:08Z
+U 2026-10-13T21:51:18Z
+U 2026-10-13T21:51:23Z
+U 2026-10-13T21:51:35Z
+U 2026-10-13T21:52:39Z
+U 2026-10-13T21:52:47Z
+U 2026-10-13T21:52:58Z
+U 2026-10-13T21:53:04Z
+U 2026-10-13T21:53:18Z
+U 2026-10-13T21:53:27Z
+U 2026-10-13T21:53:38Z
+U 2026-10-13T21:53:45Z
+U 2026-10-13T21:54:03Z
+U 2026-10-13T21:54:42Z
+U 2026-10-13T21:54:47Z
+U 2026-10-13T21:54:57Z
+U 2026-10-13T21:55:08Z
+U 2026-10-13T21:55:18Z
+U 2026-10-13T21:55:24Z
+U 2026-10-13T21:55:39Z
+U 2026-10-13T21:55:45Z
+U 2026-10-13T21:55:54Z
+U 2026-10-13T21:56:34Z
+U 2026-10-13T21:56:43Z
+U 2026-10-13T21:56:58Z
+U 2026-10-13T21:57:05Z
+U 2026-10-13T21:57:18Z
+U 2026-10-13T21:57:24Z
+U 2026-10-13T21:57:39Z
+U 2026-10-13T21:57:46Z
+U 2026-10-13T21:57:59Z
+U 2026-10-13T21:58:05Z
+U 2026-10-13T21:58:14Z
+U 2026-10-13T21:58:54Z
+U 2026-10-13T21:59:09Z
+U 2026-10-13T21:59:14Z
+U 2026-10-13T21:59:24Z
+U 2026-10-13T21:59:38Z
+U 2026-10-13T21:59:50Z
+U 2026-10-13T21:59:57Z
+U 2026-10-13T22:00:10Z
