@@ -58,7 +58,13 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   has commits ahead of the primary branch (discovery is best effort and bounded; it MUST NOT block
   or fail the park), and a statement that no person-question was identified, so the bead is
   resume-or-land work and not a decision. A failed comment write MUST NOT stop the label-and-release
-  update. Bead `pg2-78mxs`.
+  update. Bead `pg2-78mxs`. The death release MUST be guarded by the claim it observed
+  (`--if-assignee <observed holder> --if-status in_progress`), because the dead session usually held
+  the claim under another actor and bd's claim guard refuses an unguarded cross-actor release; it
+  MUST NOT be a bare `bd reclaim` (a lapsed lease does not prove the session is gone). A release that
+  fails (including a guard that went stale because the claim changed hands) MUST NOT be discarded: it
+  MUST be logged, MUST be counted as one `death_release_failed` eventlog record, and the dispatch MUST
+  report no unclaim/escalation verb for it. Bead `pg2-qyc3h`.
 - **`INV-CCH-8`** — when preparing per-bead isolation (`git worktree add`) fails because the
   filesystem has run out of room, the handler MUST NOT treat it as a per-bead launch failure
   (no `pool-launch-fail`/`human` escalation) — a full disk is a transient, system-wide

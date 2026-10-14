@@ -478,8 +478,13 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 	}
 	if errors.Is(err, ErrSessionDied) {
 		// complete.OnDeath released the claim under either on_failure, so the
-		// unclaim verb is always reported; add-human adds its escalation too
-		// (pg2-0fsuu).
+		// unclaim verb is reported; add-human adds its escalation too
+		// (pg2-0fsuu). When the release itself failed, nothing was written
+		// (the label rides the same update), so no verb is claimed (pg2-qyc3h).
+		var sd *sessionDied
+		if errors.As(err, &sd) && sd.releaseErr != nil {
+			return report.Result{}
+		}
 		res := failureAction(report.Unclaimed, beadID)
 		if cc.OnFailure == roles.AddHuman {
 			res.Actions = append([]report.Action{{Verb: report.Escalated, Refs: res.Actions[0].Refs}}, res.Actions...)
@@ -1531,8 +1536,35 @@ func (r *ccpoolRun) failDead(ctx context.Context, d DispatchContext, name, reaso
 	if d.Role.CCPool.OnFailure == roles.AddHuman {
 		note = r.parkNote(ctx, d, name, "session died before completing ("+reason+")", r.deathDetail())
 	}
-	_ = complete.OnDeath(ctx, r.deps.BD, d.Role.CCPool.OnFailure, d.Item.ID, note)
-	return &sessionDied{beadID: d.Item.ID, reason: reason}
+	derr := complete.OnDeath(ctx, r.deps.BD, d.Role.CCPool.OnFailure, d.Item.ID, note)
+	if derr != nil {
+		r.deathReleaseFailed(d, name, derr)
+	}
+	return &sessionDied{beadID: d.Item.ID, reason: reason, releaseErr: derr}
+}
+
+// deathReleaseKind is the eventlog kind of a dead session's claim release that
+// bd refused or that otherwise failed (pg2-qyc3h): the bead is still
+// in_progress under the dead session, so this record is the countable signal
+// (one per failed release) that the death path did not hold, in place of the
+// silent discard that left zr-xvbqa.2 stranded for 23 h.
+const deathReleaseKind = "death_release_failed"
+
+// deathReleaseFailed surfaces a failed OnDeath: an error log line and one
+// deathReleaseKind eventlog record. guard_stale is true when bd refused only
+// because the claim changed hands since it was read (nothing was written, and
+// the bead is no longer the dead session's to release).
+func (r *ccpoolRun) deathReleaseFailed(d DispatchContext, name string, err error) {
+	stale := beads.IsGuardStale(err)
+	slog.Error("dead session's claim release failed; the bead keeps its claim",
+		"role", d.Role.Name, "bead", d.Item.ID, "session", name, "guard_stale", stale, "err", err)
+	if r.deps.Log != nil {
+		_ = r.deps.Log.Emit("error", deathReleaseKind, "dead session's claim release failed",
+			map[string]any{
+				"role": d.Role.Name, "bead": d.Item.ID, "session": name,
+				"on_failure": string(d.Role.CCPool.OnFailure), "guard_stale": stale, "error": err.Error(),
+			})
+	}
 }
 
 // ErrSessionDied wraps the unexplained death of a session (waitDone's death
@@ -1546,6 +1578,10 @@ var ErrSessionDied = errors.New("session exited before completing")
 type sessionDied struct {
 	beadID string
 	reason string
+	// releaseErr is the failure of complete.OnDeath, nil when the claim was
+	// released. waitFailureResult reports no verb for a release that did not
+	// land (pg2-qyc3h).
+	releaseErr error
 }
 
 func (e *sessionDied) Error() string { return fmt.Sprintf("%s: %s", e.beadID, e.reason) }

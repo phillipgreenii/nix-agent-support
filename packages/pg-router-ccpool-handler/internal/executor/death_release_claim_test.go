@@ -2,6 +2,10 @@ package executor
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
@@ -97,5 +101,74 @@ func TestDispatch_deathReleasesClaim(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// refuseUpdateBD wraps a ScriptBD and fails every `update`, as bd's claim guard
+// does for an unguarded cross-actor release.
+type refuseUpdateBD struct{ *dtest.ScriptBD }
+
+func (b refuseUpdateBD) Run(ctx context.Context, args ...string) (string, error) {
+	if args[0] == "update" {
+		_, _ = b.ScriptBD.Run(ctx, args...)
+		return "", errors.New("bd update: exit status 1: cannot reassign bead-1: held by dead-actor (in_progress)")
+	}
+	return b.ScriptBD.Run(ctx, args...)
+}
+
+// TestDispatch_deathReleaseFailureIsSurfaced (pg2-qyc3h): when bd refuses the
+// dead session's claim release the failure is not discarded. It is logged and
+// counted as one death_release_failed eventlog record, the bead is reported
+// with NO unclaimed/escalated verb (nothing was written), and the dispatch
+// still fails with the unchanged session-died text. The live miss: the
+// release was refused, ignored, and the dispatch result claimed nothing while
+// the bead sat in_progress under the dead session for 23 h.
+func TestDispatch_deathReleaseFailureIsSurfaced(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := noBudget(reviewRole(cfg))
+	display := role.DisplayName(cfg.SessionPrefix, "bead-1")
+	dead := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateErrored, CloseReason: "handler",
+		Meta: map[string]string{ccpool.MetaKeyEventID: "review.ready:bead-1", ccpool.MetaKeyHeadSHA: "h1"},
+	}
+	script := &dtest.ScriptBD{
+		StatusSeq:   map[string][]string{"bead-1": {"in_progress"}},
+		AssigneeSeq: map[string][]string{"bead-1": {"dead-actor"}},
+	}
+	turn := dead
+	turn.Live, turn.State, turn.CloseReason = true, ccpool.StateWorking, ""
+	fake := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{turn}, {dead}}}
+	logPath := filepath.Join(t.TempDir(), "events.jsonl")
+	run := newExecWithLog(fake, script, cfg, logPath)
+	run.deps.BD = refuseUpdateBD{script}
+	run.deps.ExternalID = "att-2"
+	run.deps.Git = &dtest.NoopGit{}
+	run.deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	d := DispatchContext{
+		Role: role, EventID: "review.ready:bead-1",
+		Item: item.Item{ID: "bead-1", Metadata: map[string]any{"repo": "example/repo", "pr_number": "7", "head_sha": "h1"}},
+	}
+
+	res, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, run.deps)
+	if err == nil || err.Error() != "bead-1: session exited before completing" {
+		t.Fatalf("the failure text must be unchanged; err=%v", err)
+	}
+	if len(res.Actions) != 0 {
+		t.Errorf("a release bd refused wrote nothing, so no verb may be reported; got %v", verbsOf(res))
+	}
+	if !dtest.HasUpdate(script, "update bead-1 --add-label human --status=open --assignee= --if-assignee dead-actor --if-status in_progress") {
+		t.Errorf("the release must be guarded by the observed holder; updates=%v", script.Updates)
+	}
+	raw, rerr := os.ReadFile(logPath)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	n := strings.Count(string(raw), `"kind":"`+deathReleaseKind+`"`)
+	if n != 1 {
+		t.Errorf("want exactly one %s record, got %d in:\n%s", deathReleaseKind, n, raw)
+	}
+	if !strings.Contains(string(raw), `"bead":"bead-1"`) || !strings.Contains(string(raw), "cannot reassign") {
+		t.Errorf("the record must name the bead and carry bd's refusal; log:\n%s", raw)
 	}
 }

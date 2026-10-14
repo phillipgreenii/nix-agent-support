@@ -3,8 +3,10 @@ package beads
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
@@ -152,6 +154,51 @@ func Unclaim(ctx context.Context, r Runner, id string) error {
 	return nil
 }
 
+// guardStaleExit is the exit code bd update returns when every failure was a
+// stale --if-assignee/--if-status guard: the precondition no longer held and
+// nothing was written (another actor won the race).
+const guardStaleExit = 13
+
+// IsGuardStale reports whether err is bd's "guard no longer held" refusal (exit
+// 13 from an update carrying --if-assignee/--if-status). It is NOT a failure of
+// bd itself: the claim changed hands between the read and the write, so a retry
+// of the same guard is pointless.
+func IsGuardStale(err error) bool {
+	var ee *exec.ExitError
+	return errors.As(err, &ee) && ee.ExitCode() == guardStaleExit
+}
+
+// heldGuard reads the bead and, when it is in_progress under a named assignee,
+// returns the bd update guard flags that make a release of that exact claim
+// pass bd's claim guard: bd 1.3.1 refuses an unguarded `--assignee=` overwrite
+// of another actor's in_progress claim ("cannot reassign ... held by ...";
+// pg2-qyc3h), and `bd reclaim` would also rob a live worker whose lease merely
+// lapsed (pg2-7gtae), so the release is conditioned on the claim still being
+// the observed one: `--if-assignee <holder> --if-status in_progress`. A bead
+// that is not in_progress under a named assignee, or that cannot be read, gets
+// no guard (the legacy unguarded update, which the claim guard does not refuse
+// for an unassigned bead).
+func heldGuard(ctx context.Context, r Runner, id string) []string {
+	iss, err := ShowObj(ctx, r, id)
+	if err != nil || iss.Status != "in_progress" || iss.Assignee == "" {
+		return nil
+	}
+	return []string{"--if-assignee", iss.Assignee, "--if-status", "in_progress"}
+}
+
+// UnclaimHeld is Unclaim for a bead whose holder may be another actor (the
+// session that held it is gone): `bd update <id> --status=open --assignee=`
+// plus the guard flags of heldGuard.
+func UnclaimHeld(ctx context.Context, r Runner, id string) error {
+	args := append([]string{"update", id, "--status=open", "--assignee="}, heldGuard(ctx, r, id)...)
+	if _, err := r.Run(ctx, args...); err != nil {
+		slog.Error("release of a dead session's claim failed; the bead keeps its claim",
+			"bead", id, "guard_stale", IsGuardStale(err), "err", err)
+		return fmt.Errorf("unclaim %s: %w", id, err)
+	}
+	return nil
+}
+
 // ReopenReview re-opens a closed review-pr bead and refreshes its review target:
 // `bd update <id> --status=open --set-metadata head_sha=<new> --set-metadata
 // branch=<new> --set-metadata ownership=<new> --assignee=`. Overwriting
@@ -207,15 +254,30 @@ const DefaultParkNote = "Handler park note: this bead was parked as human by the
 // label-and-release update, which is the pg2-0fsuu invariant; a failed update
 // is logged too and returned.
 func AddHumanAndUnclaim(ctx context.Context, r Runner, id, note string) error {
+	return addHumanAndUnclaim(ctx, r, id, note, nil)
+}
+
+// AddHumanAndUnclaimHeld is AddHumanAndUnclaim for a bead whose claim may be
+// held by ANOTHER actor (the session that held it is gone): the release is
+// guarded with `--if-assignee <holder> --if-status in_progress` (see
+// heldGuard) so bd's claim guard accepts it. A guard that has gone stale (the
+// claim changed hands since the read) writes nothing and is returned; see
+// IsGuardStale.
+func AddHumanAndUnclaimHeld(ctx context.Context, r Runner, id, note string) error {
+	return addHumanAndUnclaim(ctx, r, id, note, heldGuard(ctx, r, id))
+}
+
+func addHumanAndUnclaim(ctx context.Context, r Runner, id, note string, guard []string) error {
 	if strings.TrimSpace(note) == "" {
 		note = DefaultParkNote
 	}
 	if err := Comment(ctx, r, id, note); err != nil {
 		slog.Error("park note not written; parking the bead anyway", "bead", id, "err", err)
 	}
-	_, err := r.Run(ctx, "update", id, "--add-label", "human", "--status=open", "--assignee=")
-	if err != nil {
-		slog.Error("park: add human and release failed; the bead keeps its claim", "bead", id, "err", err)
+	args := append([]string{"update", id, "--add-label", "human", "--status=open", "--assignee="}, guard...)
+	if _, err := r.Run(ctx, args...); err != nil {
+		slog.Error("park: add human and release failed; the bead keeps its claim",
+			"bead", id, "guarded", len(guard) > 0, "guard_stale", IsGuardStale(err), "err", err)
 		return fmt.Errorf("add-human-and-unclaim %s: %w", id, err)
 	}
 	return nil

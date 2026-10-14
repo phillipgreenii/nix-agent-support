@@ -2,6 +2,7 @@ package complete
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
@@ -65,7 +66,10 @@ func TestOnDeath_addHumanReleasesClaimInOneUpdate(t *testing.T) {
 	if err := OnDeath(context.Background(), fr, roles.AddHuman, "zr-w1", "park note"); err != nil {
 		t.Fatal(err)
 	}
-	if len(fr.calls) != 2 || fr.calls[0] != "comment zr-w1 park note" || fr.calls[1] != "update zr-w1 --add-label human --status=open --assignee=" {
+	// recRunner's show is unreadable, so the release is unguarded (the guarded
+	// form is covered by TestOnDeath_guardsReleaseWithObservedHolder and the
+	// real-bd contract test).
+	if len(fr.calls) != 3 || fr.calls[0] != "show zr-w1 --json" || fr.calls[1] != "comment zr-w1 park note" || fr.calls[2] != "update zr-w1 --add-label human --status=open --assignee=" {
 		t.Errorf("add-human death must write the park note, then add human AND release the claim in one update; calls=%v", fr.calls)
 	}
 }
@@ -75,8 +79,60 @@ func TestOnDeath_unclaimNeverAddsHuman(t *testing.T) {
 	if err := OnDeath(context.Background(), fr, roles.Unclaim, "zr-c1", "park note"); err != nil {
 		t.Fatal(err)
 	}
-	if len(fr.calls) != 1 || fr.calls[0] != "update zr-c1 --status=open --assignee=" {
+	if len(fr.calls) != 2 || fr.calls[0] != "show zr-c1 --json" || fr.calls[1] != "update zr-c1 --status=open --assignee=" {
 		t.Errorf("unclaim death must only unclaim; calls=%v", fr.calls)
+	}
+}
+
+// heldRunner is a recRunner whose `bd show` reports the bead in_progress under
+// holder, and whose update fails with updateErr when set.
+type heldRunner struct {
+	recRunner
+	holder    string
+	updateErr error
+}
+
+func (h *heldRunner) Run(ctx context.Context, args ...string) (string, error) {
+	_, _ = h.recRunner.Run(ctx, args...)
+	switch args[0] {
+	case "show":
+		return `{"data":[{"id":"` + args[1] + `","status":"in_progress","assignee":"` + h.holder + `"}]}`, nil
+	case "update":
+		return "", h.updateErr
+	}
+	return "", nil
+}
+
+// pg2-qyc3h: bd 1.3.1's claim guard refuses an unguarded cross-actor
+// `--assignee=` overwrite of an in_progress claim, so a death release must name
+// the observed holder. (The real-bd proof is complete_realbd_contract_test.go.)
+func TestOnDeath_guardsReleaseWithObservedHolder(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		action roles.FailureAction
+		want   string
+	}{
+		{"add-human", roles.AddHuman, "update zr-w1 --add-label human --status=open --assignee= --if-assignee dead-actor --if-status in_progress"},
+		{"unclaim", roles.Unclaim, "update zr-w1 --status=open --assignee= --if-assignee dead-actor --if-status in_progress"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hr := &heldRunner{holder: "dead-actor"}
+			if err := OnDeath(context.Background(), hr, tc.action, "zr-w1", "note"); err != nil {
+				t.Fatal(err)
+			}
+			if !hr.has(tc.want) {
+				t.Errorf("want guarded update %q; calls=%v", tc.want, hr.calls)
+			}
+		})
+	}
+}
+
+func TestOnDeath_returnsTheUpdateError(t *testing.T) {
+	for _, action := range []roles.FailureAction{roles.AddHuman, roles.Unclaim} {
+		hr := &heldRunner{holder: "dead-actor", updateErr: errors.New("cannot reassign zr-w1: held by dead-actor")}
+		if err := OnDeath(context.Background(), hr, action, "zr-w1", "note"); err == nil {
+			t.Errorf("%s: a refused release must be returned, not swallowed", action)
+		}
 	}
 }
 

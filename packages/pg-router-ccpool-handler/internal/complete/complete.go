@@ -198,9 +198,17 @@ func OnFailure(ctx context.Context, br beads.Runner, action roles.FailureAction,
 //
 // The human label (not the claim) is what stops a blind retry of a bead whose
 // dead worker may have left a half-built worktree.
+//
+// The release is GUARDED (`--if-assignee <observed holder> --if-status
+// in_progress`): the dead session usually held the claim under a different
+// actor than this handler's, and bd 1.3.1's claim guard refuses an unguarded
+// cross-actor `--assignee=` overwrite, which left the bead in_progress under
+// the dead assignee (pg2-qyc3h; the 2026-10-12 zr-xvbqa.2 death). The guard is
+// not a bare `bd reclaim`: that would also rob a live worker whose lease merely
+// lapsed (pg2-7gtae). The caller MUST surface a returned error (failDead does).
 func OnDeath(ctx context.Context, br beads.Runner, action roles.FailureAction, beadID, parkNote string) error {
 	if action == roles.AddHuman {
-		return beads.AddHumanAndUnclaim(ctx, br, beadID, parkNote)
+		return beads.AddHumanAndUnclaimHeld(ctx, br, beadID, parkNote)
 	}
-	return beads.Unclaim(ctx, br, beadID)
+	return beads.UnclaimHeld(ctx, br, beadID)
 }

@@ -280,8 +280,9 @@ func TestWaitDoneRelease_diedHoldingClaimAppliesOnFailureAndClearsStrike(t *test
 	if err == nil || errors.Is(err, ErrPeerHeld) || errors.Is(err, ErrUnclaimedEnd) {
 		t.Fatalf("got %v, want a plain failure", err)
 	}
-	if !dtest.HasUpdate(bd, "update zr-d --add-label human --status=open --assignee=") {
-		t.Errorf("on_failure add-human must apply; updates=%v", bd.Updates)
+	// The release is guarded with the observed holder (pg2-qyc3h).
+	if !dtest.HasUpdate(bd, "update zr-d --add-label human --status=open --assignee= --if-assignee "+relActor+" --if-status in_progress") {
+		t.Errorf("on_failure add-human must apply, guarded by the observed holder; updates=%v", bd.Updates)
 	}
 	if !dtest.HasUpdate(bd, "update zr-d --remove-label drain-unclaimed-end") {
 		t.Errorf("a latched end clears the unclaimed-end strike; updates=%v", bd.Updates)
