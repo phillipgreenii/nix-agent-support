@@ -3573,6 +3573,116 @@
     "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
   },
   {
+    "case": "plugin_plan_decompose_assemble_packet_relative_approve",
+    "tags": ["plugin-instructed", "pg2-3gizb", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-marketplace/plan-decompose/scripts/assemble-packet.sh --design /tmp/design.md --in /tmp/draft.md --out /tmp/body.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-3gizb: a command form the plan-decompose plugin instructs an agent to run (repo-relative call, placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_update_packet_relative_approve",
+    "tags": ["plugin-instructed", "pg2-3gizb", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-marketplace/plan-decompose/scripts/update-packet.sh --id pg2-pk1 --body-file /tmp/body.md --acceptance-file /tmp/acc.md --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-3gizb: a command form the plan-decompose plugin instructs an agent to run (repo-relative call, placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_create_packet_absolute_not_approve",
+    "tags": [
+      "plugin-instructed",
+      "pg2-3gizb",
+      "plan-decompose",
+      "absolute-path"
+    ],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "/Users/phillipg/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/plan-decompose/scripts/create-packet.sh --parent pg2-epic1 --title \"title\" --body-file /tmp/body.md --acceptance \"criteria\" --metadata '{}' --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-3gizb (speedup P6): the ABSOLUTE-path form decomposers use (installed marketplace path). Measured 2026-10-14: the effect engine abstains ('untrusted executable identity', P4 identity check, by design) and the live rules chain abstains too (asks.db: every recorded absolute-path create-packet.sh invocation with real args was abstain; the allow rows were --help/sed reads only). not-approve pins today's verdict; flip to approve only together with a deliberate identity-check change. create-packet.sh, assemble-packet.sh and update-packet.sh MUST get the same verdict."
+  },
+  {
+    "case": "plugin_plan_decompose_assemble_packet_absolute_not_approve",
+    "tags": [
+      "plugin-instructed",
+      "pg2-3gizb",
+      "plan-decompose",
+      "absolute-path"
+    ],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "/Users/phillipg/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/plan-decompose/scripts/assemble-packet.sh --design /tmp/design.md --in /tmp/draft.md --out /tmp/body.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-3gizb (speedup P6): the ABSOLUTE-path form decomposers use (installed marketplace path). Measured 2026-10-14: the effect engine abstains ('untrusted executable identity', P4 identity check, by design) and the live rules chain abstains too (asks.db: every recorded absolute-path create-packet.sh invocation with real args was abstain; the allow rows were --help/sed reads only). not-approve pins today's verdict; flip to approve only together with a deliberate identity-check change. create-packet.sh, assemble-packet.sh and update-packet.sh MUST get the same verdict."
+  },
+  {
+    "case": "plugin_plan_decompose_update_packet_absolute_not_approve",
+    "tags": [
+      "plugin-instructed",
+      "pg2-3gizb",
+      "plan-decompose",
+      "absolute-path"
+    ],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "/Users/phillipg/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/plan-decompose/scripts/update-packet.sh --id pg2-pk1 --body-file /tmp/body.md --acceptance-file /tmp/acc.md --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-3gizb (speedup P6): the ABSOLUTE-path form decomposers use (installed marketplace path). Measured 2026-10-14: the effect engine abstains ('untrusted executable identity', P4 identity check, by design) and the live rules chain abstains too (asks.db: every recorded absolute-path create-packet.sh invocation with real args was abstain; the allow rows were --help/sed reads only). not-approve pins today's verdict; flip to approve only together with a deliberate identity-check change. create-packet.sh, assemble-packet.sh and update-packet.sh MUST get the same verdict."
+  },
+  {
     "case": "plugin_plan_decompose_claude_marketplace_plan_decompose_scripts_chunk_for_bd_f_approve",
     "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
     "tool_input": {

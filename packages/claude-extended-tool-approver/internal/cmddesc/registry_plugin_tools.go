@@ -720,10 +720,15 @@ var cetaSchema = CommandSchema{
 // engine looks such a command up by basename and does NOT apply the P4
 // absolute-path identity check to it (effectgraph/build.go) — so these
 // schemas are registry entries by script name. An ABSOLUTE path to the same
-// script fails the P4 identity check and abstains, by design.
+// script fails the P4 identity check and abstains, by design (measured
+// 2026-10-14, pg2-3gizb: an absolute-path create-packet.sh / assemble-packet.sh
+// / update-packet.sh INVOCATION abstains in both the live rules chain and
+// `evaluate --corpus` ("untrusted executable identity"); only the `--help`
+// form is approved, generically by safe-commands, for any script name).
 
 // scriptSchema builds one helper-script schema. hasHelp says whether the
-// script itself answers -h/--help (create-packet.sh, chunk-for-bd-field.sh,
+// script itself answers -h/--help (create-packet.sh, assemble-packet.sh,
+// update-packet.sh, chunk-for-bd-field.sh,
 // audit-docket-label-leak.sh, impl-traces.sh, name-collisions.sh,
 // trace-extract.sh do; self-checks.sh, relocation-check.sh, resolve-imports.sh
 // and capture-prefix-snapshots.sh take positionals only and treat `-h` as a bad
@@ -764,6 +769,27 @@ func pluginScriptSchemas() []CommandSchema {
 				"--body-file":       {Arity: ArityOne, Operand: PathRead},
 				"--acceptance-file": {Arity: ArityOne, Operand: PathRead},
 				"--metadata":        {Arity: ArityOne, Operand: DataOrAtFile},
+			}, PositionalSpec{Rest: Unmodeled}, []ImplicitEffect{writesBeads}, StdoutMetadata),
+		// assemble-packet.sh (P4): reads --design/--in, writes --out. Its
+		// `@@file <path>` directives read files named INSIDE the draft, which this
+		// schema cannot see; the script itself bounds them to the real path under
+		// the git toplevel of the working directory (symlinks resolved, never
+		// through a .git component, refused with exit 3 otherwise), so the
+		// directive reads are not an unbounded read channel.
+		scriptSchema("assemble-packet.sh", "expands exact-excerpt directives of a packet draft into a body file", true,
+			map[string]FlagSpec{
+				"--design": {Arity: ArityOne, Operand: PathRead},
+				"--in":     {Arity: ArityOne, Operand: PathRead},
+				"--out":    {Arity: ArityOne, Operand: PathCreate},
+			}, PositionalSpec{Rest: Unmodeled}, nil, StdoutMetadata),
+		// update-packet.sh (P5): rewrites an existing packet's content through
+		// bd update (writes beads; the stored-acceptance guard also reads them,
+		// which writesBeads subsumes). Never touches metadata/labels/status.
+		scriptSchema("update-packet.sh", "rewrites a work-packet bead's body/acceptance via the acceptance guard + bd update", true,
+			map[string]FlagSpec{
+				"--id": literal1, "--actor": literal1,
+				"--body-file":       {Arity: ArityOne, Operand: PathRead},
+				"--acceptance-file": {Arity: ArityOne, Operand: PathRead},
 			}, PositionalSpec{Rest: Unmodeled}, []ImplicitEffect{writesBeads}, StdoutMetadata),
 		scriptSchema("chunk-for-bd-field.sh", "splits a file into byte-capped chunks <output-prefix>.N", true,
 			map[string]FlagSpec{"-m": literal1, "--max-bytes": literal1},

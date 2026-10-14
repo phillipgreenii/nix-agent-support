@@ -306,6 +306,32 @@ func TestBdFileFlagsAreReadsPerVerb(t *testing.T) {
 	}
 }
 
+// TestPacketScriptFlagRoles: assemble-packet.sh reads --design/--in and creates
+// --out; update-packet.sh reads --body-file/--acceptance-file, treats --id and
+// --actor as literals (no path effect) and writes beads. The roles are what the
+// engine's path policies judge, so a wrong role would silently change a verdict.
+func TestPacketScriptFlagRoles(t *testing.T) {
+	asm := interpretDefault(t, "assemble-packet.sh --design d.md --in draft.md --out body.md")
+	if got := effectPaths(asm.Effects, AccessRead); !reflect.DeepEqual(got, []string{"d.md", "draft.md"}) {
+		t.Errorf("assemble-packet.sh reads = %v, want [d.md draft.md]", got)
+	}
+	if got := effectPaths(asm.Effects, AccessCreate); !reflect.DeepEqual(got, []string{"body.md"}) {
+		t.Errorf("assemble-packet.sh creates = %v, want [body.md]", got)
+	}
+	upd := interpretDefault(t, "update-packet.sh --id pg2-abc --actor sess-1 --body-file b.md --acceptance-file a.md")
+	if got := effectPaths(upd.Effects, AccessRead); !reflect.DeepEqual(got, []string{"b.md", "a.md"}) {
+		t.Errorf("update-packet.sh reads = %v, want [b.md a.md]", got)
+	}
+	for _, acc := range []PathAccess{AccessCreate, AccessTruncate} {
+		if got := effectPaths(upd.Effects, acc); len(got) != 0 {
+			t.Errorf("update-packet.sh must not write local paths, access %v = %v", acc, got)
+		}
+	}
+	if !hasRemoteOp(upd.Effects, "tracker-write") {
+		t.Errorf("update-packet.sh must declare the implicit beads tracker-write effect, effects = %v", upd.Effects)
+	}
+}
+
 // TestPluginToolSchemasFailClosed: every schema this slice added refuses an
 // unlisted flag (the ceta-spec-gen rule: skill-generated specs are never
 // UnknownFlagInert) and is registered under a unique name.
@@ -349,6 +375,9 @@ func TestPluginToolSpotChecks(t *testing.T) {
 		"rg -uu -in x -g '*y*' /repo", "fd -HI artifact", "du -sh dir", "lsof -nP -iTCP:25252", "launchctl list org.x", "man jq",
 		"nix build .#checks.aarch64-darwin.x", "nix flake check", "nix flake update nixpkgs", "nix flake lock",
 		"create-packet.sh --parent p --title t --body-file b --acceptance a", "chunk-for-bd-field.sh in out",
+		"assemble-packet.sh --design d.md --in draft.md --out body.md", "assemble-packet.sh --help",
+		"update-packet.sh --id pg2-abc --body-file b.md", "update-packet.sh --id pg2-abc --body-file b.md --acceptance-file a.md --actor sess-1-role",
+		"update-packet.sh --help",
 		"audit-docket-label-leak.sh --json", "impl-traces.sh --strict set impl", "resolve-imports.sh o i",
 		"name-collisions.sh a b c", "self-checks.sh d", "trace-extract.sh d", "relocation-check.sh d", "capture-prefix-snapshots.sh out",
 		"git merge-base --is-ancestor a b", "git cherry -v main f", "git ls-tree -r --name-only main -- p", "git ls-files d",
@@ -372,6 +401,8 @@ func TestPluginToolSpotChecks(t *testing.T) {
 		"claude-extended-tool-approver spec-drift-check --embedded --record", "git stash pop", "git stash -u",
 		"git checkout main", "git rebase -i main", "git rebase --exec x main", "git merge origin/main", "git fetch --upload-pack=x origin",
 		"git branch -Df f", "git branch -D -f f", "git branch f", "git apply p.diff", "man -P less jq",
+		"assemble-packet.sh --design d.md --in draft.md --out body.md --force",
+		"update-packet.sh --id pg2-abc --body-file b.md --metadata {}", "update-packet.sh --id pg2-abc --body-file b.md --label x",
 	}
 	for _, c := range insufficient {
 		if got := interpretDefault(t, c); got.Sufficient {

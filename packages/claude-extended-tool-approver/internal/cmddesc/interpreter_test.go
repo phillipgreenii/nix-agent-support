@@ -269,11 +269,11 @@ func TestRegistryNames(t *testing.T) {
 	}
 	want = append(
 		want,
-		"audit-docket-label-leak.sh", "bats", "bgcheck", "capture-prefix-snapshots.sh", "chunk-for-bd-field.sh",
+		"assemble-packet.sh", "audit-docket-label-leak.sh", "bats", "bgcheck", "capture-prefix-snapshots.sh", "chunk-for-bd-field.sh",
 		"claude-extended-tool-approver", "create-packet.sh", "du", "fd", "gh", "handoff-create", "impl-traces.sh",
 		"integrate-branch-support", "launchctl", "lsof", "man", "name-collisions.sh", "pg-ccaudit", "pg-go-mutate",
 		"pg-hooks", "pg-wi-flow", "prek", "relocation-check.sh", "resolve-imports.sh", "rg", "self-checks.sh",
-		"session-mode", "trace-extract.sh", "wtdone",
+		"session-mode", "trace-extract.sh", "update-packet.sh", "wtdone",
 	)
 	// pg2-cjfpy.4: the ZR plugin CLIs (registry_ziprecruiter.go). `gh` is NOT
 	// repeated here: it is one schema (registry_plugin_tools.go) that also
