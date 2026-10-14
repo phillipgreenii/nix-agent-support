@@ -4,7 +4,9 @@ package watchdog
 
 import (
 	"context"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
@@ -114,7 +116,7 @@ func TestTerminal_RealBD_ClosedBeadStaysClosed(t *testing.T) {
 			if iss.Status != "closed" {
 				t.Errorf("a budget hard stop reopened a closed bead: status=%q (want closed)", iss.Status)
 			}
-			if iss.HasLabel(LabelNeedsSplitReview) || iss.HasLabel(labelHuman) {
+			if iss.HasLabel(LabelNeedsSplitReview) || iss.HasLabel(labelHuman) || iss.HasLabel(LabelEscalated) {
 				t.Errorf("a closed bead must not be relabeled for escalation; labels=%v", iss.Labels)
 			}
 		})
@@ -135,5 +137,75 @@ func TestTerminal_RealBD_InProgressBeadIsReleased(t *testing.T) {
 	}
 	if iss.Status != "open" || iss.Assignee != "" {
 		t.Errorf("an in-progress bead must be released by the hard stop: status=%q assignee=%q", iss.Status, iss.Assignee)
+	}
+}
+
+// recordingRunner passes every call through to the real bd runner and records
+// the argv in order, so a test can assert on the ORDER of writes against the
+// real tool as well as on the resulting bead state.
+type recordingRunner struct {
+	inner beads.Runner
+	mu    sync.Mutex
+	calls []string
+}
+
+func (r *recordingRunner) Run(ctx context.Context, args ...string) (string, error) {
+	r.mu.Lock()
+	r.calls = append(r.calls, strings.Join(args, " "))
+	r.mu.Unlock()
+	return r.inner.Run(ctx, args...)
+}
+
+func (r *recordingRunner) index(prefix string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.IndexFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, prefix) })
+}
+
+// Bead pg2-cty80: a time-budget stop at threshold 1 (the drain roles' setting)
+// escalates against the REAL bd. The bead is labelled escalated (and NOT
+// needs-split-review or human), keeps its budget-stop record and the
+// explanatory comment, ends open and unassigned, and the escalated label was
+// written BEFORE the release. A triage role's own stop goes to human instead.
+func TestTerminal_RealBD_TimeBudgetStopAtThresholdOneEscalates(t *testing.T) {
+	for _, tc := range []struct {
+		role      string
+		wantLabel string
+		notLabels []string
+	}{
+		{"drain-pg2", LabelEscalated, []string{LabelNeedsSplitReview, labelHuman}},
+		{"review", LabelEscalated, []string{LabelNeedsSplitReview, labelHuman}},
+		{"pg2-escalation-triager", labelHuman, []string{LabelEscalated, LabelNeedsSplitReview}},
+	} {
+		t.Run(tc.role, func(t *testing.T) {
+			ctx, r := newRealBD(t)
+			id := claimedBead(ctx, t, r)
+			rec := &recordingRunner{inner: r}
+			wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, &fakeCC{list: []ccpool.Session{{ExternalID: "s", CWD: "/repo"}}}, &recBD{}, tokBudget(1000))
+			wd.BD = rec
+			wd.Role = tc.role
+			wd.BudgetStopEscalateAfter = 1
+			wd.terminal(ctx, "s", id, &BudgetError{Role: tc.role, Pool: "p", Limit: "time", Used: 7201, Cap: 7200})
+
+			iss, err := beads.ShowObj(ctx, r, id)
+			if err != nil {
+				t.Fatalf("ShowObj: %v", err)
+			}
+			if !iss.HasLabel(tc.wantLabel) || !iss.HasLabel("budget-stop:s") {
+				t.Errorf("want %q and budget-stop:s on the bead; labels=%v", tc.wantLabel, iss.Labels)
+			}
+			for _, l := range tc.notLabels {
+				if iss.HasLabel(l) {
+					t.Errorf("must not carry %q; labels=%v", l, iss.Labels)
+				}
+			}
+			if iss.Status != "open" || iss.Assignee != "" {
+				t.Errorf("the stopped bead must be released: status=%q assignee=%q", iss.Status, iss.Assignee)
+			}
+			lab, un := rec.index("update "+id+" --add-label "+tc.wantLabel), rec.index("update "+id+" --status=open")
+			if lab < 0 || un < 0 || lab > un {
+				t.Errorf("the %s label must be written BEFORE the release; label=%d unclaim=%d calls=%v", tc.wantLabel, lab, un, rec.calls)
+			}
+		})
 	}
 }

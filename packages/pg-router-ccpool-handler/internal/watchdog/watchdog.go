@@ -61,7 +61,9 @@ type Watchdog struct {
 	// (bead pg2-6akgz, part 1/3). > 0 makes every hard stop record a per-session
 	// budget-stop label on the bead (before the unclaim) and comment
 	// "budget stop <n> of <threshold> (session <id>)"; <= 0 (the zero value)
-	// records nothing. It never alters Budget: budgets stay fixed.
+	// records nothing. It never alters Budget: budgets stay fixed. When the count
+	// reaches the threshold escalate labels the bead escalated (a triage role's
+	// own stop goes to human instead), bead pg2-cty80.
 	BudgetStopEscalateAfter int
 	RepoRoot, WorktreeDir   string
 	ReminderMsg, WrapUpMsg  string

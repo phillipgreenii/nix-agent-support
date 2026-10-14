@@ -198,7 +198,7 @@ Extensions:
 
 **Primary actor:** `ACTOR-CCH-CORE`.
 **Level:** subfunction (the work and settle steps of `USECASE-CCH-DISPATCH`, for a role whose completion is `close-or-split-triage`).
-**Preconditions:** a dispatch has started a session of the split-triage role for a bead labelled `needs-split-review`, the label a bead gets when its budget stops reach the escalation threshold and it is eligible for a split (`INV-CCH-12`). The deployment wires the role, its discovery query and its tool grant for the `split` subcommand; this module's own beads-backed source never discovers a bead that carries the label (`INV-CCH-12`).
+**Preconditions:** a dispatch has started a session of the split-triage role for a bead labelled `needs-split-review`, the label the escalation triager gives a budget-stopped bead (labelled `escalated` by `INV-CCH-12`) that it judges splittable, or that an operator adds. The deployment wires the role, its discovery query and its tool grant for the `split` subcommand; this module's own beads-backed source never discovers a bead that carries the label (`INV-CCH-12`).
 _Requires:_ `INV-CCH-13`, `INV-CCH-11`, `INV-CCH-12`.
 _Includes:_ `INTF-CCH-CCPOOL`, `INTF-CCH-BEADS`.
 

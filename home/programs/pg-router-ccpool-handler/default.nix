@@ -782,8 +782,11 @@ let
                   TOML key `budget_stop_escalate_after`, bead pg2-6akgz): each watchdog
                   hard stop records a per-session `budget-stop:<session>` label on the
                   bead before unclaiming it, and comments `budget stop <n> of <threshold>
-                  (session <id>)`. Budgets are NEVER changed by it. `0` disables the
-                  record entirely (kill switch).
+                  (session <id>)`. When the count of distinct stop sessions reaches
+                  this threshold the handler labels the bead `escalated` (feeding the
+                  deployment's escalated-work triager; a triage role's own stop goes to
+                  `human` instead, bead pg2-cty80). Budgets are NEVER changed by it. `0`
+                  disables the record entirely (kill switch).
                 '';
               };
               worktreeQuietWindow = lib.mkOption {

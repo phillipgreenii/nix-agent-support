@@ -161,21 +161,30 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   its history. The threshold is the role setting `budget_stop_escalate_after` (default 3, `0`
   disables all of the above). This invariant only counts; acting on the count is `INV-CCH-12`.
   The handler has no metrics emitter, so it emits no metric for this.
-- **`INV-CCH-12`** — when a hard stop brings a bead's recorded stop count (`INV-CCH-11`) to the
-  threshold or above, the handler MUST, BEFORE the unclaim, escalate: (a) a bead dispatched to the
-  `review` role, to a triage role (role name containing `triage`), or already carrying `was-split`
-  or any `split-from:*` label MUST go straight to a human — add `human` and comment
-  `budget stops reached threshold <t>; escalated to human (<reason>; not split). stop sessions:
-<ids>. last stop: session=<id> limit=<kind> used=<n> cap=<n>` (no second split round, and the
-  triage role never re-enters the split path); (b) any other bead MUST get the label
-  `needs-split-review` and the comment `budget stops reached threshold <t>; queued for split
-review`. The claim is still released (status open, assignee cleared) — the label, not the claim,
-  keeps the bead out of the pool: every beads-ready discovery the handler runs MUST exclude
-  `needs-split-review` (it is added to the query's exclude labels and re-checked client-side,
-  whatever the query config says; the ZR discovery queries also name it). The hard-stop event-log
-  record gains `escalation=<split-review|human>` and a `budget_escalation` record carries role,
-  pool, outcome, reason, `budget_stops`, `threshold`. The count is never reset, so an operator
-  removing `human` or `needs-split-review` makes the NEXT stop re-evaluate and re-escalate; a
+- **`INV-CCH-12`** — when a hard stop (any budget limit: time, tokens or cost) brings a bead's
+  recorded stop count (`INV-CCH-11`) to the threshold or above, the handler MUST, BEFORE the
+  unclaim, put the bead on the escalated path (operator ruling, Phillip, 2026-10-14, bead
+  `pg2-cty80`: "a session which fails due to time should immediatly go to escalated", read as the
+  existing `*-escalated-work` path): (a) a bead dispatched to a triage role (role name containing
+  `triage`) is the one exception and MUST go to a human — add `human`, remove `needs-split-review`
+  (bead `pg2-47rsh`) and comment `budget stops reached threshold <t>; escalated to human (triage
+role; not escalated again). stop sessions: <ids>. last stop: session=<id> limit=<kind> used=<n>
+cap=<n>`, because a triager MUST NOT escalate its own bead back to itself; (b) every other bead,
+  whatever its role (implementation, `review`, already `was-split` or a `split-from:*` child),
+  MUST get the label `escalated` (the same constant the escalation triager's completion reads) and
+  the comment `budget stops reached threshold <t>; labelled escalated for the escalation triager
+[(<reason>; not eligible for split review)]. stop sessions: <ids>. last stop: session=<id>
+limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `review`, `was-split`
+  and `split-from:*` beads and tells the triager the bead MUST NOT be sent to split review. The
+  handler no longer writes `needs-split-review` itself: sending an escalated bead to split review is
+  the escalation triager's decision. The claim is still released (status open, assignee cleared) —
+  the label, not the claim, keeps the bead out of the pool, so the deployment's discovery queries
+  for roles that can hit a budget stop MUST exclude `escalated` as well as `human` (the drain, worker,
+  feedback and review queries do; the handler additionally force-excludes `needs-split-review` from
+  every beads-ready discovery it runs, whatever the query config says). The hard-stop event-log
+  record gains `escalation=<escalated|human>` and a `budget_escalation` record carries role, pool,
+  outcome, reason, `budget_stops`, `threshold`. The count is never reset, so an operator or the
+  triager removing `escalated` or `human` makes the NEXT stop re-evaluate and re-escalate; a
   reopened bead likewise keeps its history. A bead found closed at escalation time gets no
   escalation write and is NOT unclaimed (that would reopen it). A failed escalation write is
   logged and falls back to the plain unclaim. Threshold `0` disables escalation (and counting).
@@ -197,7 +206,7 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   nothing. (b) `split unsplittable <id>` (reason on stdin) adds `human`, comments the reason plus
   the stop history, releases a held claim, and removes `needs-split-review` last. If a split fails
   after children exist, the parent fails safe to `human` (label removed, claim released) rather than
-  being retried. A triage session that hits its own budget is routed to `human` by `INV-CCH-12`
+  being retried. A triage session that hits its own budget is the one stop routed to `human` by `INV-CCH-12`
   and, additionally, has `needs-split-review` removed; it never re-enters the split path. No part
   of this role changes any budget. All bead text reaches `bd` as discrete argv elements from stdin
   JSON, never via a shell. The reference prompt is `docs/roles/split-triager-prompt.txt`; the

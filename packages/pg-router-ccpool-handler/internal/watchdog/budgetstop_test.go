@@ -157,7 +157,7 @@ func TestTerminal_closedBeadIsNeverUnclaimed(t *testing.T) {
 			if bd.idx(unclaim) >= 0 || bd.has("update zr-1 --status=open") {
 				t.Errorf("closed bead must not be released/reopened; calls=%v", bd.calls)
 			}
-			if bd.has("update zr-1 --add-label needs-split-review") || bd.has("update zr-1 --add-label human") {
+			if bd.hasAnyEscalationLabel() {
 				t.Errorf("closed bead must not be relabeled for escalation; calls=%v", bd.calls)
 			}
 			raw, _ := os.ReadFile(logPath)
@@ -271,7 +271,14 @@ func (b *stopBD) has(prefix string) bool {
 	return false
 }
 
-const splitComment = "comment zr-1 budget stops reached threshold 2; queued for split review"
+// hasAnyEscalationLabel reports whether any escalation label (escalated,
+// human, needs-split-review) was added.
+func (b *stopBD) hasAnyEscalationLabel() bool {
+	return b.has("update zr-1 --add-label escalated") || b.has("update zr-1 --add-label human") ||
+		b.has("update zr-1 --add-label needs-split-review")
+}
+
+const escalatedComment = "comment zr-1 budget stops reached threshold"
 
 // escScenario is the stop history an escalation test starts from. The drain
 // roles run at threshold 1 (bead pg2-izvr8: a session that fails on time
@@ -281,7 +288,7 @@ type escScenario struct {
 	name      string
 	threshold int
 	prior     []string // budget-stop labels already on the bead
-	sessions  string   // expected "stop sessions:" list in the human comment
+	sessions  string   // expected "stop sessions:" list in the escalation comment
 }
 
 var escScenarios = []escScenario{
@@ -292,60 +299,95 @@ var escScenarios = []escScenario{
 func TestEscalate_belowThresholdDoesNothing(t *testing.T) {
 	bd := seeded()
 	newEscWD(bd, "worker", 3).terminal(context.Background(), "s", "zr-1", stopBE("worker"))
-	if bd.has("update zr-1 --add-label needs-split-review") || bd.has("update zr-1 --add-label human") {
+	if bd.hasAnyEscalationLabel() {
 		t.Errorf("below threshold must not escalate; calls=%v", bd.calls)
 	}
 }
 
-func TestEscalate_atThresholdQueuesSplitReviewBeforeUnclaim(t *testing.T) {
-	for _, sc := range escScenarios {
-		t.Run(sc.name, func(t *testing.T) {
-			bd := seeded(sc.prior...)
-			newEscWD(bd, "worker", sc.threshold).terminal(context.Background(), "s", "zr-1", stopBE("worker"))
-			lab := bd.idx("update zr-1 --add-label needs-split-review")
-			cm := bd.idx(fmt.Sprintf("comment zr-1 budget stops reached threshold %d; queued for split review", sc.threshold))
-			un := bd.idx(unclaim)
-			if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
-				t.Fatalf("want label+comment before unclaim; lab=%d cm=%d un=%d calls=%v", lab, cm, un, bd.calls)
-			}
-			if bd.has("update zr-1 --add-label human") {
-				t.Errorf("must not add human on the split path; calls=%v", bd.calls)
-			}
-		})
+// Bead pg2-cty80: a budget stop at the threshold puts the bead on the escalated
+// path (the label the *-escalated-work queries select), for an implementation
+// bead and for a review bead alike. It is neither queued for split review nor
+// parked for a human, the label and the comment precede the unclaim, and nothing
+// is removed from the bead.
+func TestEscalate_atThresholdLabelsEscalatedBeforeUnclaim(t *testing.T) {
+	for _, role := range []string{"worker", "drain-pg2", "drain-zr", "review"} {
+		for _, sc := range escScenarios {
+			t.Run(role+"/"+sc.name, func(t *testing.T) {
+				bd := seeded(sc.prior...)
+				newEscWD(bd, role, sc.threshold).terminal(context.Background(), "s", "zr-1", stopBE(role))
+				hint := ""
+				if role == "review" {
+					hint = " (review role; not eligible for split review)"
+				}
+				exact := fmt.Sprintf("comment zr-1 budget stops reached threshold %d; labelled escalated for the escalation triager%s"+
+					". stop sessions: %s. last stop: session=s limit=tokens used=1000 cap=1000", sc.threshold, hint, sc.sessions)
+				lab, cm, un := bd.idx("update zr-1 --add-label escalated"), bd.idx(exact), bd.idx(unclaim)
+				if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
+					t.Fatalf("want escalated label+comment before unclaim; lab=%d cm=%d un=%d calls=%v", lab, cm, un, bd.calls)
+				}
+				if bd.has("update zr-1 --add-label needs-split-review") || bd.has("update zr-1 --add-label human") {
+					t.Errorf("an at-threshold stop must be escalated, not split-review or human; calls=%v", bd.calls)
+				}
+				if bd.has("update zr-1 --remove-label") {
+					t.Errorf("the escalated path removes no label; calls=%v", bd.calls)
+				}
+			})
+		}
 	}
 }
 
-func TestEscalate_humanBranches(t *testing.T) {
+// A bead that must not go on to split review (was-split, a split child) is
+// still escalated; the comment tells the triager why it is not eligible.
+func TestEscalate_splitIneligibleBeadsAreEscalatedWithReason(t *testing.T) {
 	for _, tc := range []struct {
-		name, role string
-		labels     []string
-		reason     string
+		name   string
+		labels []string
+		reason string
 	}{
-		{"review role", "review", nil, "review role"},
-		{"triage role", "pg2-escalation-triager", nil, "triage role"},
-		{"split-triage role", "split-triage", nil, "triage role"},
-		{"was-split", "worker", []string{"was-split"}, "already split"},
-		{"split-from child", "worker", []string{"split-from:pg2-abc"}, "split child"},
+		{"was-split", []string{"was-split"}, "already split"},
+		{"split-from child", []string{"split-from:pg2-abc"}, "split child"},
 	} {
 		for _, sc := range escScenarios {
 			t.Run(tc.name+"/"+sc.name, func(t *testing.T) {
 				bd := seeded(append(append([]string{}, sc.prior...), tc.labels...)...)
-				newEscWD(bd, tc.role, sc.threshold).terminal(context.Background(), "s", "zr-1", stopBE(tc.role))
-				exact := fmt.Sprintf("comment zr-1 budget stops reached threshold %d; escalated to human (%s"+
-					"; not split). stop sessions: %s. last stop: session=s limit=tokens used=1000 cap=1000",
+				newEscWD(bd, "worker", sc.threshold).terminal(context.Background(), "s", "zr-1", stopBE("worker"))
+				exact := fmt.Sprintf("comment zr-1 budget stops reached threshold %d; labelled escalated for the escalation triager (%s"+
+					"; not eligible for split review). stop sessions: %s. last stop: session=s limit=tokens used=1000 cap=1000",
 					sc.threshold, tc.reason, sc.sessions)
+				lab, cm, un := bd.idx("update zr-1 --add-label escalated"), bd.idx(exact), bd.idx(unclaim)
+				if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
+					t.Fatalf("lab=%d cm=%d un=%d; calls=%v", lab, cm, un, bd.calls)
+				}
+				if bd.has("update zr-1 --add-label human") || bd.has("update zr-1 --add-label needs-split-review") {
+					t.Errorf("must be escalated only; calls=%v", bd.calls)
+				}
+			})
+		}
+	}
+}
+
+// The one exception (bead pg2-cty80): a triage role's own stop must not put the
+// bead back on the escalated path it works, so it goes to human and loses
+// needs-split-review (bead pg2-47rsh), before the unclaim.
+func TestEscalate_triageRoleStopGoesToHuman(t *testing.T) {
+	for _, role := range []string{"pg2-escalation-triager", "zr-escalation-triager", "pg2-split-triager", "split-triage"} {
+		for _, sc := range escScenarios {
+			t.Run(role+"/"+sc.name, func(t *testing.T) {
+				bd := seeded(append(append([]string{}, sc.prior...), "needs-split-review")...)
+				newEscWD(bd, role, sc.threshold).terminal(context.Background(), "s", "zr-1", stopBE(role))
+				exact := fmt.Sprintf("comment zr-1 budget stops reached threshold %d; escalated to human (triage role"+
+					"; not escalated again). stop sessions: %s. last stop: session=s limit=tokens used=1000 cap=1000",
+					sc.threshold, sc.sessions)
 				lab, cm, un := bd.idx("update zr-1 --add-label human"), bd.idx(exact), bd.idx(unclaim)
 				if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
 					t.Fatalf("lab=%d cm=%d un=%d; calls=%v", lab, cm, un, bd.calls)
 				}
-				if bd.has("update zr-1 --add-label needs-split-review") {
-					t.Errorf("human path must not queue split review; calls=%v", bd.calls)
+				if bd.has("update zr-1 --add-label escalated") || bd.has("update zr-1 --add-label needs-split-review") {
+					t.Errorf("a triage role must never put its own bead back on the escalated path; calls=%v", bd.calls)
 				}
-				// pg2-47rsh: a triage session that hit its own budget drops
-				// needs-split-review (human instead); other human routes leave it.
 				rm := bd.idx("update zr-1 --remove-label needs-split-review")
-				if (tc.reason == "triage role") != (rm >= 0) || (rm >= 0 && rm > un) {
-					t.Errorf("remove-label needs-split-review at %d (unclaim %d); calls=%v", rm, un, bd.calls)
+				if rm < 0 || rm > un {
+					t.Errorf("needs-split-review must be removed before the unclaim; rm=%d unclaim=%d calls=%v", rm, un, bd.calls)
 				}
 			})
 		}
@@ -355,21 +397,21 @@ func TestEscalate_humanBranches(t *testing.T) {
 func TestEscalate_killSwitchNeverEscalates(t *testing.T) {
 	bd := seeded("budget-stop:a", "budget-stop:b", "budget-stop:c")
 	newEscWD(bd, "worker", 0).terminal(context.Background(), "s", "zr-1", stopBE("worker"))
-	if bd.has("update zr-1 --add-label needs-split-review") || bd.has("update zr-1 --add-label human") {
+	if bd.hasAnyEscalationLabel() {
 		t.Errorf("threshold 0 must never escalate; calls=%v", bd.calls)
 	}
 }
 
-// Manual removal of human / needs-split-review keeps the stop history, so the
-// next stop re-evaluates and escalates again.
+// Manual removal of escalated keeps the stop history, so the next stop
+// re-evaluates and escalates again.
 func TestEscalate_manualLabelRemovalReEscalates(t *testing.T) {
 	bd := seeded("budget-stop:s0")
 	wd := newEscWD(bd, "worker", 2)
 	wd.terminal(context.Background(), "s", "zr-1", stopBE("worker"))
-	delete(bd.labels, "needs-split-review") // operator removes it
+	delete(bd.labels, "escalated") // operator or triager removes it
 	bd.calls = nil
 	wd.terminal(context.Background(), "s2", "zr-1", stopBE("worker"))
-	if !bd.has("update zr-1 --add-label needs-split-review") || bd.idx(unclaim) < 0 {
+	if !bd.has("update zr-1 --add-label escalated") || bd.idx(unclaim) < 0 {
 		t.Errorf("history preserved: next stop must re-escalate; calls=%v", bd.calls)
 	}
 }
@@ -378,7 +420,7 @@ func TestEscalate_manualLabelRemovalReEscalates(t *testing.T) {
 func TestEscalate_reopenedBeadKeepsHistory(t *testing.T) {
 	bd := seeded("budget-stop:a", "budget-stop:b")
 	newEscWD(bd, "worker", 3).terminal(context.Background(), "s", "zr-1", stopBE("worker"))
-	if bd.idx("comment zr-1 budget stops reached threshold 3; queued for split review") < 0 {
+	if !bd.has("update zr-1 --add-label escalated") || !bd.has("comment zr-1 budget stops reached threshold 3; labelled escalated") {
 		t.Errorf("calls=%v", bd.calls)
 	}
 }
@@ -389,7 +431,7 @@ func TestEscalate_closedMidFlightWritesNothing(t *testing.T) {
 	bd := seeded("budget-stop:s0")
 	bd.status = "closed"
 	newEscWD(bd, "worker", 2).terminal(context.Background(), "s", "zr-1", stopBE("worker"))
-	if bd.has("update zr-1 --add-label needs-split-review") || bd.has("update zr-1 --add-label human") || bd.has(splitComment[:len("comment zr-1 budget stops")]) {
+	if bd.hasAnyEscalationLabel() || bd.has(escalatedComment) {
 		t.Errorf("no escalation write on a closed bead; calls=%v", bd.calls)
 	}
 	if bd.idx(unclaim) >= 0 {
@@ -400,46 +442,50 @@ func TestEscalate_closedMidFlightWritesNothing(t *testing.T) {
 // A failed escalation label write falls back to the plain unclaim.
 func TestEscalate_labelWriteFailureFallsBackToUnclaim(t *testing.T) {
 	bd := seeded("budget-stop:s0")
-	bd.failOn = "needs-split-review"
+	bd.failOn = "--add-label escalated"
 	newEscWD(bd, "worker", 2).terminal(context.Background(), "s", "zr-1", stopBE("worker"))
-	if bd.idx(unclaim) < 0 || bd.idx(splitComment) >= 0 {
-		t.Errorf("want plain unclaim and no split comment; calls=%v", bd.calls)
+	if bd.idx(unclaim) < 0 || bd.has(escalatedComment) {
+		t.Errorf("want plain unclaim and no escalation comment; calls=%v", bd.calls)
 	}
 }
 
 func TestEscalate_eventlogExact(t *testing.T) {
-	logPath := t.TempDir() + "/events.jsonl"
-	lw, err := eventlog.New(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wd := newEscWD(seeded("budget-stop:s0"), "worker", 2)
-	wd.Log = lw
-	wd.terminal(context.Background(), "s", "zr-1", stopBE("worker"))
-	_ = lw.Close()
-	raw, _ := os.ReadFile(logPath)
-	var gotEsc, gotStop bool
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		var r map[string]any
-		if json.Unmarshal([]byte(line), &r) != nil {
-			continue
-		}
-		f, _ := r["fields"].(map[string]any)
-		if f == nil {
-			f = r
-		}
-		switch r["kind"] {
-		case "budget_escalation":
-			gotEsc = r["msg"] == "budget stops reached threshold; escalated to split-review" ||
-				r["message"] == "budget stops reached threshold; escalated to split-review"
-			if f["outcome"] != "split-review" || f["threshold"] != float64(2) || f["budget_stops"] != float64(2) {
-				t.Errorf("escalation fields: %v", f)
+	for _, tc := range []struct{ role, outcome string }{{"worker", "escalated"}, {"pg2-escalation-triager", "human"}} {
+		t.Run(tc.role, func(t *testing.T) {
+			logPath := t.TempDir() + "/events.jsonl"
+			lw, err := eventlog.New(logPath)
+			if err != nil {
+				t.Fatal(err)
 			}
-		case "hard_stop":
-			gotStop = f["escalation"] == "split-review"
-		}
-	}
-	if !gotEsc || !gotStop {
-		t.Errorf("want budget_escalation (msg exact) and hard_stop.escalation; esc=%v stop=%v\n%s", gotEsc, gotStop, raw)
+			wd := newEscWD(seeded("budget-stop:s0"), tc.role, 2)
+			wd.Log = lw
+			wd.terminal(context.Background(), "s", "zr-1", stopBE(tc.role))
+			_ = lw.Close()
+			raw, _ := os.ReadFile(logPath)
+			wantMsg := "budget stops reached threshold; escalated to " + tc.outcome
+			var gotEsc, gotStop bool
+			for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+				var r map[string]any
+				if json.Unmarshal([]byte(line), &r) != nil {
+					continue
+				}
+				f, _ := r["fields"].(map[string]any)
+				if f == nil {
+					f = r
+				}
+				switch r["kind"] {
+				case "budget_escalation":
+					gotEsc = r["msg"] == wantMsg || r["message"] == wantMsg
+					if f["outcome"] != tc.outcome || f["threshold"] != float64(2) || f["budget_stops"] != float64(2) {
+						t.Errorf("escalation fields: %v", f)
+					}
+				case "hard_stop":
+					gotStop = f["escalation"] == tc.outcome
+				}
+			}
+			if !gotEsc || !gotStop {
+				t.Errorf("want budget_escalation (msg exact) and hard_stop.escalation=%s; esc=%v stop=%v\n%s", tc.outcome, gotEsc, gotStop, raw)
+			}
+		})
 	}
 }

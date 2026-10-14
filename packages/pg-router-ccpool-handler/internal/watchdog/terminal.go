@@ -10,6 +10,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/complete"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/gitenv"
 	"github.com/phillipgreenii/x/gitclient"
 )
@@ -158,29 +159,43 @@ func (w *Watchdog) recordBudgetStop(ctx context.Context, sessionName, beadID str
 	return iss, n, true
 }
 
-// Escalation outcomes (bead pg2-mab1w) and the labels they act through.
+// Escalation outcomes (beads pg2-mab1w, pg2-cty80) and the labels they act through.
 const (
-	OutcomeSplitReview = "split-review"
-	OutcomeHuman       = "human"
+	// OutcomeEscalated is a bead put on the escalated path: it carries the
+	// escalated label the deployment's *-escalated-work query selects, so the
+	// escalation triager role decides what happens next (a split review, a
+	// human, or another disposition).
+	OutcomeEscalated = "escalated"
+	// OutcomeHuman is the triage-role exception: the triager must not escalate
+	// its own bead back to itself, so a triage session's stop parks the bead
+	// for a human.
+	OutcomeHuman = "human"
 
+	LabelEscalated        = complete.EscalatedLabel
 	LabelNeedsSplitReview = beads.LabelNeedsSplitReview
 	LabelWasSplit         = "was-split"
 	LabelSplitFromPrefix  = "split-from:"
 	labelHuman            = "human"
 )
 
-// humanOnlyReason reports why a bead at the escalation threshold skips the
-// split path and goes straight to a human ("" = splitting is allowed). Review
+// isTriageRole reports whether role is a triage role: its name contains
+// "triage" (covers pg2-/zr-escalation-triager and the split-triage role). A
+// triage role's own budget stop goes to a human, never back onto the escalated
+// path it works, so a bead cannot loop through the triager forever.
+func isTriageRole(role string) bool {
+	return strings.Contains(role, "triage")
+}
+
+// splitIneligibleReason reports why a bead at the escalation threshold MUST NOT
+// be sent on to split review by the triager ("" = splitting is allowed). Review
 // beads are PR reviews (splitting makes no sense); an already-split bead or a
-// split child gets no second round; the triage role itself must never re-enter
-// the split path. A role is "triage" when its name contains "triage" (covers
-// pg2-/zr-escalation-triager and the split-triage role).
-func humanOnlyReason(role string, iss beads.Issue) string {
+// split child gets no second round (the split subcommand refuses both). The
+// reason travels in the escalation comment so the triager need not rediscover
+// it. It does not change the outcome: every non-triage role goes to escalated.
+func splitIneligibleReason(role string, iss beads.Issue) string {
 	switch {
 	case role == "review":
 		return "review role"
-	case strings.Contains(role, "triage"):
-		return "triage role"
 	case iss.HasLabel(LabelWasSplit):
 		return "already split"
 	}
@@ -192,14 +207,16 @@ func humanOnlyReason(role string, iss beads.Issue) string {
 	return ""
 }
 
-// escalate acts on the stop count once it reaches the threshold (bead
-// pg2-mab1w): human (reviews, triage role, was-split/split-from:*) or
-// needs-split-review. It runs BEFORE the unclaim so the exclusion label is in
-// place when the bead returns to the pool. The count is never reset, so a
-// manually removed human/needs-split-review label re-escalates on the next stop.
-// closed=true means the bead was closed mid-flight: nothing is written (and the
-// caller must not unclaim, which would reopen it). On a bd write failure it
-// logs and returns outcome "" so the caller does today's plain unclaim.
+// escalate acts on the stop count once it reaches the threshold (beads
+// pg2-mab1w, pg2-cty80): the bead is labelled escalated and handed to the
+// escalation triager, except that a triage role's own stop goes to human. It
+// runs BEFORE the unclaim so the label is in place when the bead returns to the
+// pool (the deployment's discovery queries exclude escalated, so it does not
+// come back). The count is never reset, so a manually removed escalated/human
+// label re-escalates on the next stop. closed=true means the bead was closed
+// mid-flight: nothing is written (and the caller must not unclaim, which would
+// reopen it). On a bd write failure it logs and returns outcome "" so the
+// caller does today's plain unclaim.
 func (w *Watchdog) escalate(ctx context.Context, sessionName, beadID string, be *BudgetError, iss beads.Issue, stops int) (outcome string, closed bool) {
 	if stops < w.BudgetStopEscalateAfter {
 		return "", false
@@ -210,15 +227,18 @@ func (w *Watchdog) escalate(ctx context.Context, sessionName, beadID string, be 
 		})
 		return "", true
 	}
-	reason := humanOnlyReason(be.Role, iss)
-	label, comment := LabelNeedsSplitReview, fmt.Sprintf("budget stops reached threshold %d; queued for split review", w.BudgetStopEscalateAfter)
-	outcome = OutcomeSplitReview
-	if reason != "" {
-		label, outcome = labelHuman, OutcomeHuman
-		comment = fmt.Sprintf("budget stops reached threshold %d; escalated to human (%s; not split). stop sessions: %s. last stop: session=%s limit=%s used=%s cap=%s",
-			w.BudgetStopEscalateAfter, reason, strings.Join(beads.BudgetStopSessions(iss), ", "), sessionName, be.Limit,
-			strconv.FormatFloat(be.Used, 'f', -1, 64), strconv.FormatFloat(be.Cap, 'f', -1, 64))
+	triage := isTriageRole(be.Role)
+	reason := splitIneligibleReason(be.Role, iss)
+	label, outcome, how := LabelEscalated, OutcomeEscalated, "labelled escalated for the escalation triager"
+	if triage {
+		reason = "triage role"
+		label, outcome, how = labelHuman, OutcomeHuman, "escalated to human (triage role; not escalated again)"
+	} else if reason != "" {
+		how += " (" + reason + "; not eligible for split review)"
 	}
+	comment := fmt.Sprintf("budget stops reached threshold %d; %s. stop sessions: %s. last stop: session=%s limit=%s used=%s cap=%s",
+		w.BudgetStopEscalateAfter, how, strings.Join(beads.BudgetStopSessions(iss), ", "), sessionName, be.Limit,
+		strconv.FormatFloat(be.Used, 'f', -1, 64), strconv.FormatFloat(be.Cap, 'f', -1, 64))
 	fields := map[string]any{
 		"session": sessionName, "bead": beadID, "role": be.Role, "pool": be.Pool,
 		"outcome": outcome, "reason": reason, "budget_stops": stops, "threshold": w.BudgetStopEscalateAfter,
@@ -229,7 +249,7 @@ func (w *Watchdog) escalate(ctx context.Context, sessionName, beadID string, be 
 		return "", false
 	}
 	_ = beads.Comment(ctx, w.BD, beadID, comment)
-	if reason == "triage role" {
+	if triage {
 		// pg2-47rsh: the split-triage session hit its OWN budget. human is on;
 		// drop needs-split-review so the bead is not left half-parked and the
 		// split-triage completion sees a decided outcome. Never re-enters split.
