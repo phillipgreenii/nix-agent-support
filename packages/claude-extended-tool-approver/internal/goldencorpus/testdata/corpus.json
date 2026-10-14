@@ -3632,7 +3632,7 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-3gizb (speedup P6): the ABSOLUTE-path form decomposers use (installed marketplace path). Measured 2026-10-14: the effect engine abstains ('untrusted executable identity', P4 identity check, by design) and the live rules chain abstains too (asks.db: every recorded absolute-path create-packet.sh invocation with real args was abstain; the allow rows were --help/sed reads only). not-approve pins today's verdict; flip to approve only together with a deliberate identity-check change. create-packet.sh, assemble-packet.sh and update-packet.sh MUST get the same verdict."
+    "notes": "pg2-3gizb (speedup P6): the ABSOLUTE-path form decomposers use (installed marketplace path). Measured 2026-10-14: the effect engine abstains ('untrusted executable identity', P4 identity check, by design) and the live rules chain abstains too (asks.db: every recorded absolute-path create-packet.sh invocation with real args was abstain; the historical allow rows were sed/ls/cat reads of the script and bare --help calls; the --help allow is generic code, internal/rules/safecmds/safecmds.go isHelpRequest ~778, which approves exactly one argument --help but not -h, confirmed by a live hook probe). not-approve pins today's verdict; flip to approve only together with a deliberate identity-check change. create-packet.sh, assemble-packet.sh and update-packet.sh MUST get the same verdict."
   },
   {
     "case": "plugin_plan_decompose_assemble_packet_absolute_not_approve",
@@ -3656,7 +3656,7 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-3gizb (speedup P6): the ABSOLUTE-path form decomposers use (installed marketplace path). Measured 2026-10-14: the effect engine abstains ('untrusted executable identity', P4 identity check, by design) and the live rules chain abstains too (asks.db: every recorded absolute-path create-packet.sh invocation with real args was abstain; the allow rows were --help/sed reads only). not-approve pins today's verdict; flip to approve only together with a deliberate identity-check change. create-packet.sh, assemble-packet.sh and update-packet.sh MUST get the same verdict."
+    "notes": "pg2-3gizb (speedup P6): the ABSOLUTE-path form decomposers use (installed marketplace path). Measured 2026-10-14: the effect engine abstains ('untrusted executable identity', P4 identity check, by design) and the live rules chain abstains too (asks.db: every recorded absolute-path create-packet.sh invocation with real args was abstain; the historical allow rows were sed/ls/cat reads of the script and bare --help calls; the --help allow is generic code, internal/rules/safecmds/safecmds.go isHelpRequest ~778, which approves exactly one argument --help but not -h, confirmed by a live hook probe). not-approve pins today's verdict; flip to approve only together with a deliberate identity-check change. create-packet.sh, assemble-packet.sh and update-packet.sh MUST get the same verdict."
   },
   {
     "case": "plugin_plan_decompose_update_packet_absolute_not_approve",
@@ -3680,7 +3680,7 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-3gizb (speedup P6): the ABSOLUTE-path form decomposers use (installed marketplace path). Measured 2026-10-14: the effect engine abstains ('untrusted executable identity', P4 identity check, by design) and the live rules chain abstains too (asks.db: every recorded absolute-path create-packet.sh invocation with real args was abstain; the allow rows were --help/sed reads only). not-approve pins today's verdict; flip to approve only together with a deliberate identity-check change. create-packet.sh, assemble-packet.sh and update-packet.sh MUST get the same verdict."
+    "notes": "pg2-3gizb (speedup P6): the ABSOLUTE-path form decomposers use (installed marketplace path). Measured 2026-10-14: the effect engine abstains ('untrusted executable identity', P4 identity check, by design) and the live rules chain abstains too (asks.db: every recorded absolute-path create-packet.sh invocation with real args was abstain; the historical allow rows were sed/ls/cat reads of the script and bare --help calls; the --help allow is generic code, internal/rules/safecmds/safecmds.go isHelpRequest ~778, which approves exactly one argument --help but not -h, confirmed by a live hook probe). not-approve pins today's verdict; flip to approve only together with a deliberate identity-check change. create-packet.sh, assemble-packet.sh and update-packet.sh MUST get the same verdict."
   },
   {
     "case": "plugin_plan_decompose_claude_marketplace_plan_decompose_scripts_chunk_for_bd_f_approve",

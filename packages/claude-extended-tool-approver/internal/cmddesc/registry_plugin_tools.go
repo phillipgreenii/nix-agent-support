@@ -723,8 +723,12 @@ var cetaSchema = CommandSchema{
 // script fails the P4 identity check and abstains, by design (measured
 // 2026-10-14, pg2-3gizb: an absolute-path create-packet.sh / assemble-packet.sh
 // / update-packet.sh INVOCATION abstains in both the live rules chain and
-// `evaluate --corpus` ("untrusted executable identity"); only the `--help`
-// form is approved, generically by safe-commands, for any script name).
+// `evaluate --corpus` ("untrusted executable identity"). What IS allowed:
+// historically, sed/ls/cat READS of the script and bare `create-packet.sh
+// --help` calls (asks.db); the `--help` allow is generic code, not a script
+// schema: internal/rules/safecmds/safecmds.go isHelpRequest (~778) approves
+// exactly ONE argument `--help` (not `-h`) for any command name, confirmed by
+// a live hook probe on all three scripts, not inferred from history).
 
 // scriptSchema builds one helper-script schema. hasHelp says whether the
 // script itself answers -h/--help (create-packet.sh, assemble-packet.sh,
@@ -774,8 +778,11 @@ func pluginScriptSchemas() []CommandSchema {
 		// `@@file <path>` directives read files named INSIDE the draft, which this
 		// schema cannot see; the script itself bounds them to the real path under
 		// the git toplevel of the working directory (symlinks resolved, never
-		// through a .git component, refused with exit 3 otherwise), so the
-		// directive reads are not an unbounded read channel.
+		// through a .git component), so the directive reads are not an
+		// unbounded read channel. The bound is the toplevel MINUS .git only:
+		// an in-repo gitignored secret file (e.g. .env) IS readable by a
+		// directive and would be copied into --out. The script refuses an
+		// out-of-bounds path with exit 3 and an unreadable file with exit 1.
 		scriptSchema("assemble-packet.sh", "expands exact-excerpt directives of a packet draft into a body file", true,
 			map[string]FlagSpec{
 				"--design": {Arity: ArityOne, Operand: PathRead},
