@@ -523,6 +523,22 @@ type options struct {
 	awakeSince    func(time.Time) time.Duration
 	queueAges     func() map[string]time.Duration
 	listenerBusy  func() map[string]int
+	queueReady    func() bool
+}
+
+// WithQueueReady registers ready, the answer to "does the queue the gauges below read
+// exist yet?". While it returns false, every gauge that reads the queue — the per-type
+// depth and its sum (backlog), the oldest-owed age, the per-role in-flight gauge, the
+// event-log size and limit gauges and the active-gate gauge — observes nothing and calls
+// none of the functions that read the queue, so a collect that lands before the queue is
+// built reports no series for them: not a panic on a queue that is not there, and not a
+// zero, because there is no queue to read a zero from. The caller turns it true once, after
+// it has built the queue and wired its listeners, and never back (bead pg2-nzkjl:
+// cmd/pg-router's bootCore, whose /metrics endpoint is already serving while the queue's
+// startup compaction runs). Without the option the gauges always report, which is every
+// caller whose queue exists before it registers anything.
+func WithQueueReady(ready func() bool) Option {
+	return func(o *options) { o.queueReady = ready }
 }
 
 // WithClock injects a clock seam (default time.Now) for deterministic tests
@@ -616,12 +632,18 @@ func WithLiveness(isLive func() bool) Option {
 // New registers the instruments above on a meter from mp and returns an Emitter.
 // depthFn supplies the current per-type queue depth (typically queue.DepthByType)
 // — the observable gauge reads it on each collect, so the gauge tracks
-// enqueue/accept/expire without the queue pushing updates.
+// enqueue/accept/expire without the queue pushing updates. A caller whose queue does
+// not exist yet when it calls New (the queue takes the Emitter as its observer, so the
+// Emitter comes first) passes WithQueueReady, which keeps every gauge that reads the
+// queue silent until the queue is there.
 func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option) (*Emitter, error) {
 	cfg := options{now: time.Now}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	// ready gates every callback below that reads the queue (WithQueueReady): false only
+	// while the caller says the queue is not there yet, and always true without the option.
+	ready := func() bool { return cfg.queueReady == nil || cfg.queueReady() }
 	m := mp.Meter("github.com/phillipgreenii/pg-router")
 
 	failures, err := m.Int64Counter(
@@ -731,6 +753,9 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		metric.WithUnit("{event}"),
 		metric.WithDescription("retained non-expired events in the queue, per type (INV-OBS-1)"),
 		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			if !ready() {
+				return nil
+			}
 			for typ, depth := range depthFn() {
 				o.Observe(int64(depth), metric.WithAttributes(attribute.String("type", typ)))
 			}
@@ -744,6 +769,9 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		metric.WithUnit("{event}"),
 		metric.WithDescription("retained non-expired events across every type, a scalar distinct from the per-type MetricQueueDepth (STORY-OBS-1)"),
 		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			if !ready() {
+				return nil
+			}
 			total := 0
 			for _, depth := range depthFn() {
 				total += depth
@@ -760,6 +788,9 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 			metric.WithUnit("s"),
 			metric.WithDescription("age in seconds of the oldest retained event, per type, that a bound listener has not yet settled; 0 when nothing of that type is owed (pg2-n7da9)"),
 			metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+				if !ready() {
+					return nil
+				}
 				ages := cfg.queueAges()
 				seen := map[string]bool{}
 				for typ, age := range ages {
@@ -783,6 +814,9 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 			metric.WithUnit("{dispatch}"),
 			metric.WithDescription("1 while a role's listener has an offer outstanding, else 0, per role; INV-CONC-1 caps it at 1 (pg2-n7da9)"),
 			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+				if !ready() {
+					return nil
+				}
 				for role, n := range cfg.listenerBusy() {
 					o.Observe(int64(n), metric.WithAttributes(attribute.String("role", role)))
 				}
@@ -812,6 +846,9 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 			metric.WithUnit("By"),
 			metric.WithDescription("size of the durable event-queue write-ahead log (queue.jsonl); drops when the log is compacted"),
 			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+				if !ready() {
+					return nil
+				}
 				o.Observe(cfg.queueLogBytes())
 				return nil
 			}),
@@ -820,7 +857,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		}
 	}
 	if cfg.logLimits != nil {
-		if err := registerLogLimitGauges(m, cfg.logLimits); err != nil {
+		if err := registerLogLimitGauges(m, cfg.logLimits, ready); err != nil {
 			return nil, err
 		}
 	}
@@ -830,6 +867,9 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 			metric.WithUnit("{gate}"),
 			metric.WithDescription("1 per gate TYPE currently in force (Gate Registry); an empty series means nothing is gated"),
 			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+				if !ready() {
+					return nil
+				}
 				for _, g := range cfg.activeGates() {
 					o.Observe(1, metric.WithAttributes(attribute.String("type", e.gateLabel(g.Type))))
 				}
@@ -1749,13 +1789,17 @@ func Flush(ctx context.Context, mp metric.MeterProvider) error {
 }
 
 // registerLogLimitGauges registers the log-size limit's observable gauges over
-// fn (see WithLogLimitStatus).
-func registerLogLimitGauges(m metric.Meter, fn func() eventqueue.LimitStatus) error {
+// fn (see WithLogLimitStatus). Each observes nothing while ready (WithQueueReady)
+// says the queue fn reads is not there yet.
+func registerLogLimitGauges(m metric.Meter, fn func() eventqueue.LimitStatus, ready func() bool) error {
 	if _, err := m.Int64ObservableGauge(
 		MetricQueueLogLimitBytes,
 		metric.WithUnit("By"),
 		metric.WithDescription("the hard size limit of the event-queue write-ahead log (max_log_bytes); at or above it new events are rejected"),
 		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			if !ready() {
+				return nil
+			}
 			o.Observe(fn().HardBytes)
 			return nil
 		}),
@@ -1767,6 +1811,9 @@ func registerLogLimitGauges(m metric.Meter, fn func() eventqueue.LimitStatus) er
 		metric.WithUnit("%"),
 		metric.WithDescription("size of the event-queue write-ahead log as a percentage (0-100, may exceed 100) of its hard limit"),
 		metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+			if !ready() {
+				return nil
+			}
 			o.Observe(fn().Percent())
 			return nil
 		}),
@@ -1778,6 +1825,9 @@ func registerLogLimitGauges(m metric.Meter, fn func() eventqueue.LimitStatus) er
 		metric.WithUnit("{state}"),
 		metric.WithDescription("1 while polled command-source emitters are not being polled because the event log is past its soft size threshold or unwritable, else 0; not a gate (timers, listeners and pushed events keep running)"),
 		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			if !ready() {
+				return nil
+			}
 			v := int64(0)
 			if fn().EmittersHalted {
 				v = 1
@@ -1793,6 +1843,9 @@ func registerLogLimitGauges(m metric.Meter, fn func() eventqueue.LimitStatus) er
 		metric.WithUnit("{state}"),
 		metric.WithDescription("1 per reason (log_full, log_unwritable) while the event log is in that state and refusing new events, else 0"),
 		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			if !ready() {
+				return nil
+			}
 			st := fn().State
 			for _, reason := range []string{eventqueue.ReasonLogFull, eventqueue.ReasonLogUnwritable} {
 				v := int64(0)

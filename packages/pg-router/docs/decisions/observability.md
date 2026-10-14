@@ -64,7 +64,8 @@ that has just started reads 0 until it has made an offer, even for a role whose 
 daemon left running (ADR 0085). The signal is **not** pre-set from restored queue state: a restored head
 may be merely queued, and the gauge would then hide an idle role. The daemon instead makes its first
 dispatch pass before its first producer tick (`DEC-EVENT-5`), so a surviving role reads 1 from that
-pass and 0 only for the boot and the `postStartup` hooks; before it, the first producer tick, which
+pass and 0 only for the boot and the `postStartup` hooks (a scrape that lands before the daemon has
+built its queue reads no series at all, `DEC-EVENT-5`); before it, the first producer tick, which
 polls every source, stood in front of the re-offer (268.6 s on 2026-10-12, of which boot was 6.25 s).
 
 **Not decided here.** The exact history-window size (how many entries a drill-down shows) and the
@@ -450,6 +451,16 @@ instant and the offer's own start, as the start in the accept record's `startedA
 run histograms and in the `events.jsonl` row (`started_at`, `duration_ms`). Until the ccpool handler
 reports it an adopted ccpool dispatch is still timed from the re-offer; the lane fixtures of 2026-10-12
 and 2026-10-13 list the starts it moved. No metric changes name, labels or buckets.
+
+**Before the queue exists (decided 2026-10-14, bead `pg2-nzkjl`, `DEC-EVENT-5`).** Every gauge that
+reads the queue (the depth gauge and its backlog sum, `queue_oldest_age`, `listener_in_flight`, and the
+log-size, log-limit and active-gate gauges) reads it on each collect, and the daemon serves `/metrics`
+before it has built the queue (the startup compaction alone took 6.03 s on 2026-10-12). A scrape in that
+gap reads **no series** for them, not a zero: there is no queue to read a zero from, and a zero would say
+"nothing queued, no offer outstanding" of a daemon that has not replayed its log. From the first scrape
+that sees the built queue they are present as stated above, `listener_in_flight` being 0 or 1 for every
+registered role. A panic in a callback would have failed that scrape (HTTP 500) and nothing else, not
+crashed the daemon (`DEC-EVENT-5` has the evidence).
 
 **Bounds.** `role` is config-bounded (`DEC-OBS-5`); `type` is bounded as above; neither adds an event
 id, bead or session as a label. The oldest-age gauge is a scan of the retained events at scrape time.

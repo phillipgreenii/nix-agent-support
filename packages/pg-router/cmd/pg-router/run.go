@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -239,10 +240,13 @@ func warnHandlerCommandAmbiguity(cfg config.Config) {
 // logs only in the running binary — discover.WithSourceFailureObserver's seam
 // existed but no production call site ever passed it a live observer; bead
 // pg2-97539 closed the identical class of gap for handler-internal errors).
-// Matches internal/metrics/metrics_test.go's newHarness circular-construction
-// pattern: q is declared (as this function's named return) before New(mp,
-// depthFn) closes over it, then constructed for real with WithObserver(emitter).
-// mp is resolved by resolveMeterProvider, which defers to cfg.MeterProvider
+// The emitter is built BEFORE the queue (the queue takes it as its observer, so
+// it must exist first), yet the gauge callbacks metrics.New registers must read
+// the queue: they reach it through queueRef, which this function publishes once,
+// as its last step, and metrics.WithQueueReady keeps every one of them silent
+// until then (see queueRef; internal/metrics/metrics_test.go's newHarness, which
+// only ever collects after its queue exists, closes over a plain variable
+// instead). mp is resolved by resolveMeterProvider, which defers to cfg.MeterProvider
 // when the deployment has bound one (INV-OBS-1: core stays unaware of any
 // concrete monitoring backend; binding a real one is a deployment concern
 // this function does not take on — it is chosen by CONFIG, not hardcoded
@@ -310,25 +314,41 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 			metricsOpts = append(metricsOpts, metrics.WithWorktreePool(cfg.WorktreeDir, 0))
 		}
 	}
+	// queueRef is how the queue-bound gauges below reach the queue (bead pg2-nzkjl,
+	// DEC-EVENT-5's residual). The queue is built after the emitter, and a scrape
+	// can land in between: runRun starts the /metrics endpoint before it calls
+	// bootCore, and the queue's startup compaction alone held the gap open for
+	// 6.03 s on 2026-10-12. The callbacks used to close over this function's
+	// still-nil q there and dereference it; the exporter's collector recovers
+	// that panic into a failed scrape (HTTP 500), it does not crash the daemon.
+	// queueRef is stored once, as this function's last step before it returns, by
+	// which point the queue is built and every enabled role is registered, and it
+	// is never cleared. metrics.WithQueueReady keeps every gauge that reads the
+	// queue silent until then, so a collect before it reports no series for them
+	// (neither a panic nor a zero: there is no queue to read a zero from), and a
+	// collect after it never sees a half-wired queue. An atomic rather than the
+	// variable the closures used to capture, because the collecting goroutine is a
+	// scrape's, not this one.
+	var queueRef atomic.Pointer[eventqueue.Queue]
+	metricsOpts = append(metricsOpts, metrics.WithQueueReady(func() bool { return queueRef.Load() != nil }))
 	// Gate Registry gauge (bead pg2-h63eu): one series per gate TYPE in force,
-	// read live off the queue on each collect (q is assigned below, before the
-	// first collect can run).
-	metricsOpts = append(metricsOpts, metrics.WithActiveGates(func() []eventqueue.Gate { return q.ActiveGates() }))
+	// read live off the queue on each collect (once queueRef is set).
+	metricsOpts = append(metricsOpts, metrics.WithActiveGates(func() []eventqueue.Gate { return queueRef.Load().ActiveGates() }))
 	// Event-queue write-ahead-log size gauge (bead pg2-8e0m6), read live off the
 	// queue on each collect.
-	metricsOpts = append(metricsOpts, metrics.WithQueueLogSize(func() int64 { return q.LogSize() }))
+	metricsOpts = append(metricsOpts, metrics.WithQueueLogSize(func() int64 { return queueRef.Load().LogSize() }))
 	// Log-size limit gauges (bead pg2-5d3ui): limit, percent, emitters halted, and
 	// which reason (if any) the log is rejecting events for.
-	metricsOpts = append(metricsOpts, metrics.WithLogLimitStatus(func() eventqueue.LimitStatus { return q.LimitStatus() }))
+	metricsOpts = append(metricsOpts, metrics.WithLogLimitStatus(func() eventqueue.LimitStatus { return queueRef.Load().LimitStatus() }))
 	// Oldest-pending-age (per type) and per-listener in-flight gauges (bead
 	// pg2-n7da9), read live off the queue on each collect.
-	metricsOpts = append(metricsOpts, metrics.WithQueueAges(func() map[string]time.Duration { return q.OldestPendingAgeByType() }))
-	metricsOpts = append(metricsOpts, metrics.WithListenerInFlight(func() map[string]int { return q.InFlightByListener() }))
+	metricsOpts = append(metricsOpts, metrics.WithQueueAges(func() map[string]time.Duration { return queueRef.Load().OldestPendingAgeByType() }))
+	metricsOpts = append(metricsOpts, metrics.WithListenerInFlight(func() map[string]int { return queueRef.Load().InFlightByListener() }))
 	// Per-source last-success / expected-interval gauges (bead pg2-tv11a,
 	// DEC-OBS-4): one series per enabled, non-excluded PULL source with a
 	// period, last-success initialised to now (process start).
 	metricsOpts = append(metricsOpts, metrics.WithPullSources(pullSourceIntervals(cfg)))
-	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() }, metricsOpts...)
+	emitter, err := metrics.New(mp, func() map[string]int { return queueRef.Load().DepthByType() }, metricsOpts...)
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct metrics emitter: %w", err)
@@ -510,6 +530,9 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 			return nil, nil, nil, nil, fmt.Errorf("promote role %s to started: %w", r.Name, err)
 		}
 	}
+	// The queue is built and every enabled role is registered: from the next
+	// collect the queue-bound gauges report (see queueRef above).
+	queueRef.Store(q)
 	return svc, q, mp, store.Close, nil
 }
 

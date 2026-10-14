@@ -239,21 +239,58 @@ flowchart LR
   Every later iteration is unchanged.
 - `listener_in_flight` **MUST** keep its meaning, an offer outstanding (`DEC-OBS-9`), and **MUST NOT**
   be pre-set from restored queue state. After this change it reads 1 from the first pass, not from the
-  end of the first producer tick; it reads 0 only for the boot and the hooks.
+  end of the first producer tick; it reads 0 only for the boot and the hooks, and nothing at all for a
+  scrape that lands before the queue is built (the "scrape before the queue exists" bullet below).
 - **Residual.** The hole is now the boot plus the `postStartup` hooks. Boot was measured at 6.25 s; the
   hooks are not measured (the ccpool handler's own `postStartup` does no work beyond starting its
   process, but a process start under a host load average of 195 is not free).
-- **A scrape before the queue exists is not a reading at all.** `bootCore` registers the gauge
-  callbacks before it constructs the queue, so a collect in between calls them with a nil queue. A
-  probe on 2026-10-14 (a manual reader collecting in a loop while `bootCore` ran, 300 boots at most)
-  panicked in the depth callback (`DepthByType`); how the live exporter's collector goroutine treats
-  that panic is not verified. The window is the startup compaction (6.03 s on 2026-10-12). It is a
-  separate defect with its own fix, callbacks that tolerate a queue that does not exist yet, and not
-  part of this decision.
+- **A scrape before the queue exists is not a reading at all** (found while building (b), fixed by
+  bead `pg2-nzkjl`, 2026-10-14). The daemon starts serving `/metrics` before it boots the core, and
+  `bootCore` registers the gauge callbacks before it constructs the queue (the queue takes the metrics
+  emitter as its observer, so the emitter comes first), so a collect in between called them with a nil
+  queue and dereferenced it. The window is the queue's construction, above all its startup compaction
+  (6.03 s on 2026-10-12). A probe on 2026-10-14 (a manual reader collecting in a loop while `bootCore`
+  ran, 300 boots at most) panicked in the depth callback (`DepthByType`).
+  - **Decided.** Every gauge that reads the queue (queue depth and backlog, oldest-owed age,
+    `listener_in_flight`, the event-log size and limit gauges and the active-gate gauge) **MUST** observe
+    nothing until `bootCore` has built the queue and registered its listeners, and **MUST NOT** call a
+    function that reads the queue before then. A collect in the window therefore reads no series for
+    them: not a panic, and not a zero, because there is no queue to read a zero from, and a zero would
+    say "nothing queued, no offer outstanding" of a daemon that has not replayed its log. `bootCore`
+    publishes the queue once, as its last step, through an atomic pointer (the collecting goroutine is a
+    scrape's, not `bootCore`'s, so the plain variable the callbacks used to close over was also an
+    unsynchronized read), and `metrics.WithQueueReady` holds those gauges silent until then. Every other
+    instrument is unaffected.
+  - **What stays true.** From the first scrape that sees the built queue the series are present as
+    `DEC-OBS-9` and `DEC-OBS-10` state (`listener_in_flight` is 0 or 1 for every registered role). A
+    scrape in the window reads no series, like a scrape before the instruments exist, and
+    `pg-router-queue-stalled` is indifferent to it: its depth side needs 18 of 20 scrapes, so it
+    tolerates a missing one, and with no in-flight sample at all its `and on(role)` clause matches
+    nothing, so a missing series can only keep it quiet, never fire it.
+  - **Severity: a failed scrape, not a crash** (from source; pinned by
+    `TestStartMetricsServer_APanickingGaugeCallbackFailsOneScrapeNotTheProcess`). When `--metrics-addr`
+    (`PG_ROUTER_METRICS_ADDR`) is set, the daemon's reader is the OTel Prometheus exporter
+    (`exporters/prometheus` v0.56.0 over `sdk/metric` v1.46.0's manual reader), registered on its own
+    `prometheus.Registry` and served by `promhttp.HandlerFor` (`startMetricsServer`). A scrape runs the
+    callbacks on a collect-worker goroutine that `Registry.Gather` (`client_golang` v1.24.1,
+    `prometheus/registry.go`) starts, not on the HTTP handler's goroutine and not on `bootCore`'s.
+    Neither `pipeline.produce` (`sdk/metric`, whose deferred unlock still runs) nor the exporter's
+    `Collect` recovers a panic, but `Registry.Gather` runs every collector through `safeCollect`, which
+    turns a panic into an error, and `promhttp.HandlerFor` with its default `HandlerOpts`
+    (`HTTPErrorOnError`) answers an error with HTTP 500 and the error, stack included, as the body. One
+    scrape fails; the process, its listener and the SDK survive, and the next scrape reads normally.
+    `pg-router-liveness-down` waits `for: 5m`, so a lone failed scrape does not page. Without
+    `--metrics-addr` nothing collects before `bootCore` returns: the default manual reader is read only
+    by the core's `status` and `mon.read` verbs, which are served after it. The panic the 2026-10-14
+    probe saw ran on its own collecting goroutine with nothing to recover it, which is not this path.
 - **Test.** `TestRunLongRunning_restartReoffersTheSurvivingDispatchBeforeTheFirstProducerTick` restarts
   a daemon over a surviving dispatch with a first producer tick that never ends and asserts the
   re-offer and the gauge; `TestRunLongRunning_noStartupDispatchPassOnceShutdownWasRequested` pins the
-  shutdown rule.
+  shutdown rule. `TestBootCore_ACollectBeforeTheQueueExistsReadsNothing` runs a collect inside the
+  window deterministically (a `slog` handler runs it from the startup-compaction record, which
+  `eventqueue.New` emits from inside the window) and asserts no panic, no series for any queue-bound
+  gauge, and every series from the first collect after `bootCore` returns;
+  `TestQueueReadyGatesEveryQueueBoundGauge` pins the option in `internal/metrics`.
 
 **(a) Decided; the core side is built (bead `pg2-dm6de`), the handler side is not (bead `pg2-m2x35`): the
 adopting handler reports the original start.**
