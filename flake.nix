@@ -4299,6 +4299,7 @@
                       pkgs.yq-go # yq (mikefarah) -- see internal/embeddedspecs/data/yq.json's own provenance
                       pkgs.bash # bash, sh
                       pkgs.nix
+                      pkgs.sqlite # sqlite3 (data/sqlite3.json; pinned help fixture is nixpkgs sqlite)
                       # pg2-cjfpy.2: the plugin-instructed CLIs now embedded as built-in
                       # specs (cmddesc/registry_plugin_tools.go). Third-party:
                       pkgs.gh
