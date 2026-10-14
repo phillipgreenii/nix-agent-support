@@ -743,11 +743,17 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     absorb (one still being launched; one whose turn has ended, or whose session has died, while its
     handler still holds the lease; one for another event, or for an event it cannot compare because
     either side records no event id; one that someone has closed while it still runs; one whose
-    bead is already closed; a pool it cannot read) MUST NOT absorb it and MUST NOT launch a session
-    beside it. It declines with the pre-accept busy decline (`INV-CCH-6`), reason
-    `session-in-flight`, mutating nothing. Like a full pool, this decline is routine backpressure,
-    not a failure, so the failure-rate alert MUST NOT count it. The core re-offers the event later,
-    and the first dispatch that finds no attempt in flight launches a fresh session.
+    bead is already closed) MUST NOT absorb it and MUST NOT launch a session beside it. It declines
+    with the pre-accept busy decline (`INV-CCH-6`), reason `session-in-flight`, mutating nothing.
+    Like a full pool, this decline is routine backpressure, not a failure, so the failure-rate
+    alert MUST NOT count it. The core re-offers the event later, and the first dispatch that finds
+    no attempt in flight launches a fresh session.
+  - **A pool it cannot read: decline, loudly.** A pool whose sessions cannot be read is treated as
+    holding an attempt in flight: the dispatch MUST NOT launch, and declines with the same
+    pre-accept busy decline, mutating nothing. Unlike an attempt in flight this is not routine
+    backpressure, so the decline carries its own reason, `pool-unreadable`, which the failure-rate
+    alert MUST count: a pool that stays unreadable pages instead of only logging a warning (bead
+    `pg2-s3pjt`).
   - **A leftover nobody supervises.** A live session still `starting` or `ready` (no turn in
     progress) whose supervision lease has expired has no handler and no turn: a launch whose handler
     gave up or died before its prompt was taken, or a session a cancel left `ready` after its

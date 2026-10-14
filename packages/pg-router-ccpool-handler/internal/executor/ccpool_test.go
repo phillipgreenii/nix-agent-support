@@ -1076,6 +1076,50 @@ func TestDispatch_absorb_turnEndedWhileTakingOver_declines(t *testing.T) {
 	}
 }
 
+// TestDispatch_unreadablePool_declinesWithItsOwnSentinel (bead pg2-s3pjt,
+// INV-CCH-30): a pool whose sessions cannot be read declines and mutates
+// nothing, like an attempt in flight, but with ErrPoolUnreadable and NOT
+// ErrSessionInFlight: the cmd layer maps the two to different busy reasons, and
+// the failure-rate alert excludes only session-in-flight, so an unreadable pool
+// must not be classified as one. Both read sites are covered: the first read of
+// planPriorSessions, and the re-read under the lock of closeLeftover.
+func TestDispatch_unreadablePool_declinesWithItsOwnSentinel(t *testing.T) {
+	cfg := fastCfg()
+	role := feedbackRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+	stuck := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateReady,
+		Meta: map[string]string{ccpool.MetaKeyLeaseUntil: "1969-12-31T23:00:00Z"},
+	}
+	for _, tc := range []struct {
+		name string
+		cc   *dtest.FakeCC
+	}{
+		{"first read fails", &dtest.FakeCC{ListErr: errors.New("ccpool list: boom")}},
+		{"re-read under the leftover lock fails", &dtest.FakeCC{ListSeq: [][]ccpool.Session{{stuck}}, ListErr: errors.New("ccpool list: boom"), ListErrFrom: 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := cfg
+			cfg.WorktreeDir = t.TempDir()
+			deps := newExec(tc.cc, &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}, cfg).deps
+			deps.ExternalID = "att-2"
+			deps.LockDir = t.TempDir()
+			deps.Git = &dtest.NoopGit{}
+			deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+			_, err := (ccpoolExecutor{}).Dispatch(context.Background(), DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}, EventID: "evt-1"}, deps)
+			if !errors.Is(err, ErrPoolUnreadable) {
+				t.Fatalf("err = %v, want ErrPoolUnreadable", err)
+			}
+			if errors.Is(err, ErrSessionInFlight) {
+				t.Fatalf("an unreadable pool must not read as session-in-flight (the alert excludes that reason): %v", err)
+			}
+			if len(tc.cc.Ensured)+len(tc.cc.Sent)+len(tc.cc.Closed)+len(tc.cc.SetMetaCalls()) != 0 {
+				t.Errorf("a decline mutates nothing; Ensured=%v Sent=%v Closed=%v SetMeta=%v", tc.cc.Ensured, tc.cc.Sent, tc.cc.Closed, tc.cc.SetMetaCalls())
+			}
+		})
+	}
+}
+
 // showCountBD counts the bead reads ("show") a dispatch makes.
 type showCountBD struct {
 	*dtest.ScriptBD

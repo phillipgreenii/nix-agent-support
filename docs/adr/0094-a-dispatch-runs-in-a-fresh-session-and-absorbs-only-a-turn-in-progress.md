@@ -62,12 +62,15 @@ The rule is `INV-CCH-30` in `packages/pg-router-ccpool-handler/docs/behavior/inv
    attempt's own watchdog would have made.
 4. **Any other attempt in flight is declined.** A session still being launched, one whose turn has
    ended (or whose session has died) while its handler still holds the lease, one for another event or
-   an event that cannot be compared, one someone closed while it still runs, one whose bead is already
-   closed, and a pool that cannot be read are neither absorbed nor launched beside: the dispatch
-   returns the pre-accept busy decline with reason `session-in-flight`, mutating nothing, and the core
-   re-offers it later. Like a full pool this is routine backpressure, so the failure-rate alert does
-   not count it. A session still being launched is declined rather than absorbed so that an absorbing
-   dispatch never waits on a session that may never receive its prompt.
+   an event that cannot be compared, one someone closed while it still runs and one whose bead is
+   already closed are neither absorbed nor launched beside: the dispatch returns the pre-accept busy
+   decline with reason `session-in-flight`, mutating nothing, and the core re-offers it later. Like a
+   full pool this is routine backpressure, so the failure-rate alert does not count it. A pool that
+   cannot be read counts as holding one in flight and declines the same way, but with its own reason,
+   `pool-unreadable`, which the failure-rate alert does count: it is not routine backpressure, and
+   hiding it behind the `session-in-flight` exclusion would let a persistently unreadable pool page
+   nobody (amended by bead `pg2-s3pjt`). A session still being launched is declined rather than
+   absorbed so that an absorbing dispatch never waits on a session that may never receive its prompt.
 5. **A leftover nobody supervises is closed and replaced.** A session still `starting` or `ready`
    whose lease has expired has no handler and no turn: a launch that failed or whose handler died
    before its prompt was taken, or a session a cancel left `ready` after its handler had gone. The

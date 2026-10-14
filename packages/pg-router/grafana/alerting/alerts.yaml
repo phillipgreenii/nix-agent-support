@@ -549,10 +549,13 @@ groups:
       #
       # reason=session-in-flight is EXCLUDED too (pg2-qaeb8, pg-router-ccpool-
       # handler INV-CCH-30, ADR 0094): the handler declines a dispatch while an
-      # earlier attempt of the same bead and role is in flight (or its pool's
-      # sessions cannot be read) instead of launching a second session beside
-      # it. Like a full pool it is routine backpressure the core re-offers; its
-      # per-reason count stays visible on the declined counter.
+      # earlier attempt of the same bead and role is in flight instead of
+      # launching a second session beside it. Like a full pool it is routine
+      # backpressure the core re-offers; its per-reason count stays visible on
+      # the declined counter. A pool whose sessions cannot be read is NOT part
+      # of that exclusion (pg2-s3pjt): the handler declines it the same way but
+      # with its own reason, pool-unreadable, which this rule deliberately still
+      # counts, so a persistently unreadable pool pages (like capacity-unknown).
       - uid: pg-router-failure-rate
         title: pg-router failure rate is non-zero (by class)
         condition: C

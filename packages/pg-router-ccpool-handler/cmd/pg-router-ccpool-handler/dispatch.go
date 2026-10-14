@@ -478,19 +478,25 @@ const (
 	busyReasonCommandBusy = "command-busy"
 	// busyReasonSessionInFlight (bead pg2-qaeb8, INV-CCH-30, ADR 0094): an
 	// earlier attempt of the same bead and role is in flight and this dispatch
-	// may not absorb it, or the pool's sessions cannot be read
-	// (executor.ErrSessionInFlight). Routine backpressure like a full pool: the
-	// Grafana failure-rate rule excludes this reason, and the decline stays
-	// visible per reason on the declined counter.
+	// may not absorb it (executor.ErrSessionInFlight). Routine backpressure like
+	// a full pool: the Grafana failure-rate rule excludes this reason, and the
+	// decline stays visible per reason on the declined counter.
 	busyReasonSessionInFlight = "session-in-flight"
+	// busyReasonPoolUnreadable (bead pg2-s3pjt, INV-CCH-30): the pool's sessions
+	// cannot be read (executor.ErrPoolUnreadable). The dispatch still declines
+	// as if an attempt were in flight, but this is NOT routine backpressure, so
+	// it gets its own reason: the failure-rate rule does not exclude it, and a
+	// persistently unreadable pool pages (under session-in-flight it was hidden
+	// by that exclusion).
+	busyReasonPoolUnreadable = "pool-unreadable"
 )
 
 // busyDeclineReason maps err to the wire's busy-decline reason tag when err
-// is one of executor's five "decline and retry later" sentinels (bead
+// is one of executor's six "decline and retry later" sentinels (bead
 // pg2-j4uwg's capacity pair, widened by pg2-8vn8t's low-disk sentinel,
-// pg2-358u3's command-busy sentinel and pg2-qaeb8's session-in-flight
-// sentinel): ok is false for any other err
-// (including nil), matching none of them. All five still map to the SAME wire-level conformance.ExitBusy — the core's
+// pg2-358u3's command-busy sentinel, pg2-qaeb8's session-in-flight
+// sentinel and pg2-s3pjt's pool-unreadable sentinel): ok is false for any
+// other err (including nil), matching none of them. All six still map to the SAME wire-level conformance.ExitBusy — the core's
 // retry/backoff cadence never depends on which reason applied (INV-FAIL-1)
 // — reason exists purely so pg-router core's declined metric/status
 // breakdown can tell them apart (see this file's runDispatch call site and
@@ -508,6 +514,8 @@ func busyDeclineReason(err error) (reason string, ok bool) {
 		return busyReasonCommandBusy, true
 	case errors.Is(err, executor.ErrSessionInFlight):
 		return busyReasonSessionInFlight, true
+	case errors.Is(err, executor.ErrPoolUnreadable):
+		return busyReasonPoolUnreadable, true
 	default:
 		return "", false
 	}

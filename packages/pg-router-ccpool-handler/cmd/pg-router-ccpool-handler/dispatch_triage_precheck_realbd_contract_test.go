@@ -32,7 +32,7 @@ import (
 // "Launch path reached" is told from "declined" the way the fake-bd tests tell
 // it: the dispatch PATH holds only `bd`, no `ccpool`, so a dispatch that gets
 // past the precheck stops at its first ccpool call and declines with reason
-// session-in-flight.
+// pool-unreadable.
 //
 // Hermetic environment: the PROCESS environment (which runDispatch's bd runner
 // inherits) is rebuilt from an ALLOWLIST (see allowlistProcessEnv), so no GIT_*
@@ -191,14 +191,14 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 		id         string
 		wantReason string
 	}{
-		{"open escalated bead launches as before", openEscalated, busyReasonSessionInFlight},
-		{"open escalated bead held by a peer launches as before", peerHeld, busyReasonSessionInFlight},
+		{"open escalated bead launches as before", openEscalated, busyReasonPoolUnreadable},
+		{"open escalated bead held by a peer launches as before", peerHeld, busyReasonPoolUnreadable},
 		{"closed bead is declined", closed, "skipped-bead-not-open"},
 		{"human bead is declined", human, "skipped-bead-human"},
 		{"de-escalated bead is declined", deEscalated, "skipped-bead-not-escalated"},
 		{"deferred bead is declined", deferred, "skipped-bead-deferred"},
 		{"blocked bead is declined", blocked, "skipped-bead-blocked"},
-		{"unreadable bead fails open", unreadable, busyReasonSessionInFlight},
+		{"unreadable bead fails open", unreadable, busyReasonPoolUnreadable},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -231,7 +231,7 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 				t.Fatalf("bead refresh failed = %v for %s, want %v:\n%s", refreshFailed, tc.id, tc.id == unreadable, logs.String())
 			}
 			skipRecords := precheckSkipRecords(t, filepath.Join(stateHome, "pg-router-ccpool-handler", "events.jsonl"))
-			if tc.wantReason == busyReasonSessionInFlight {
+			if tc.wantReason == busyReasonPoolUnreadable {
 				if len(skipRecords) != 0 {
 					t.Fatalf("a dispatch that launches must write no precheck_skip record, got %v", skipRecords)
 				}

@@ -106,6 +106,13 @@ func TestResidualFailureRateRule(t *testing.T) {
 			t.Errorf("residual rule lost %q", need)
 		}
 	}
+	// pg2-s3pjt: the handler declines an unreadable ccpool pool with its own
+	// reason, pool-unreadable, precisely so it is NOT hidden by the
+	// session-in-flight exclusion. Neither the matcher nor the rule text may
+	// ever exclude it: a persistently unreadable pool must page.
+	if strings.Contains(got, "pool-unreadable") {
+		t.Errorf("residual must keep counting pool-unreadable, not exclude it: %q", got)
+	}
 }
 
 // pg2-u2yub: triager failures are bulkheaded out of the residual and alerted
@@ -144,6 +151,7 @@ func TestResidualExcludesUpstreamKilledOnly(t *testing.T) {
 		"command-busy":       false,
 		"":                   false, // plain handler-error, dispatch-failure: keep paging
 		"capacity-unknown":   false,
+		"pool-unreadable":    false, // pg2-s3pjt: an unreadable pool is not backpressure; it must keep paging
 		"upstream-killed2":   false,
 	} {
 		if got := re.MatchString(reason); got != wantExcluded {

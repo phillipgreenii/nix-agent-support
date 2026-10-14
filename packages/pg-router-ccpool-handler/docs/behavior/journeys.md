@@ -133,10 +133,11 @@ Extensions:
   start of its budget. This is the redelivery a daemon restart or a crash window produces. Any
   other attempt still in flight (one being launched; one whose turn has ended or whose session has
   died while its handler still holds the lease; one for another event or with no event id to
-  compare; one closed while it still runs; one whose bead is already closed; or a pool that cannot
-  be read) makes this module decline `busy` with reason `session-in-flight` and launch nothing; the
-  core re-offers the event later, and a dispatch that finds no attempt in flight launches a fresh
-  session. A leftover nobody supervises (still `starting` or `ready`, its lease expired) is closed
+  compare; one closed while it still runs; or one whose bead is already closed) makes this module
+  decline `busy` with reason `session-in-flight` and launch nothing; a pool that cannot be read is
+  treated as holding one in flight and declines `busy` the same way but with its own reason,
+  `pool-unreadable`, which the failure-rate alert counts (bead `pg2-s3pjt`). The core re-offers the
+  event later, and a dispatch that finds no attempt in flight launches a fresh session. A leftover nobody supervises (still `starting` or `ready`, its lease expired) is closed
   and replaced by this dispatch's own session. Any other session is never reused, whoever closed
   it: a re-review after a head advance, a re-request after a hand-back and a reopened bead each
   get a fresh session.

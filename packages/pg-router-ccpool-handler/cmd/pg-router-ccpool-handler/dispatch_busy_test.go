@@ -71,12 +71,14 @@ func TestRunDispatch_poolCapacityUnknownExitsBusyWithReason(t *testing.T) {
 	}
 }
 
-// TestRunDispatch_unreadablePoolExitsBusySessionInFlight: with no `ccpool` on
+// TestRunDispatch_unreadablePoolExitsBusyPoolUnreadable: with no `ccpool` on
 // PATH at all, the prior-session read itself fails. A pool whose sessions
 // cannot be read counts as holding an attempt in flight (INV-CCH-30), so the
-// dispatch declines busy with reason session-in-flight before the admission
-// gate, launching nothing.
-func TestRunDispatch_unreadablePoolExitsBusySessionInFlight(t *testing.T) {
+// dispatch declines busy before the admission gate, launching nothing, but
+// with its own reason pool-unreadable (bead pg2-s3pjt), NOT session-in-flight:
+// the failure-rate alert excludes session-in-flight, and a persistently
+// unreadable pool must page.
+func TestRunDispatch_unreadablePoolExitsBusyPoolUnreadable(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
 
 	dir := t.TempDir()
@@ -100,8 +102,11 @@ func TestRunDispatch_unreadablePoolExitsBusySessionInFlight(t *testing.T) {
 	if err := json.Unmarshal([]byte(got), &reply); err != nil {
 		t.Fatalf("stdout = %q, not valid JSON: %v", got, err)
 	}
-	if reply.Reason != busyReasonSessionInFlight {
-		t.Fatalf("reason = %q, want %q", reply.Reason, busyReasonSessionInFlight)
+	if reply.Reason != "pool-unreadable" || busyReasonPoolUnreadable != "pool-unreadable" {
+		t.Fatalf("reason = %q (constant %q), want %q", reply.Reason, busyReasonPoolUnreadable, "pool-unreadable")
+	}
+	if reply.Reason == busyReasonSessionInFlight {
+		t.Fatalf("an unreadable pool must not hide behind the alert-excluded %q", busyReasonSessionInFlight)
 	}
 }
 
@@ -180,6 +185,26 @@ func TestRunDispatch_busyDeclineReasonSessionInFlight(t *testing.T) {
 	for _, other := range []string{busyReasonAtCapacity, busyReasonCapacityUnknown, busyReasonLowDisk, busyReasonCommandBusy} {
 		if other == reason {
 			t.Fatalf("session-in-flight must carry its own tag, not %q", other)
+		}
+	}
+}
+
+// TestRunDispatch_busyDeclineReasonPoolUnreadable: the executor's
+// pool-unreadable sentinel (bead pg2-s3pjt), wrapped as the executor wraps it,
+// maps to its own reason tag, distinct from every other busy reason and in
+// particular from session-in-flight, which the failure-rate alert excludes.
+func TestRunDispatch_busyDeclineReasonPoolUnreadable(t *testing.T) {
+	wrapped := fmt.Errorf("%w: ccpool list: boom", executor.ErrPoolUnreadable)
+	reason, busy := busyDeclineReason(wrapped)
+	if !busy {
+		t.Fatalf("a wrapped executor.ErrPoolUnreadable must be recognized as a busy decline")
+	}
+	if reason != "pool-unreadable" {
+		t.Fatalf("reason = %q, want %q", reason, "pool-unreadable")
+	}
+	for _, other := range []string{busyReasonAtCapacity, busyReasonCapacityUnknown, busyReasonLowDisk, busyReasonCommandBusy, busyReasonSessionInFlight} {
+		if other == reason {
+			t.Fatalf("pool-unreadable must carry its own tag, not %q", other)
 		}
 	}
 }

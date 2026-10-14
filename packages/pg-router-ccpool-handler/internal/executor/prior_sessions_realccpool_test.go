@@ -583,7 +583,8 @@ func TestPriorSessions_realCCPool(t *testing.T) {
 		})
 	}
 
-	// A pool whose sessions cannot be read counts as one in flight: a directory
+	// A pool whose sessions cannot be read counts as one in flight but declines with its own
+	// ErrPoolUnreadable, not ErrSessionInFlight (bead pg2-s3pjt): a directory
 	// that is not a ccpool pool makes the real `ccpool list` fail.
 	run("decline: a pool that cannot be read", func(t *testing.T, p *realPool) {
 		if err := os.WriteFile(filepath.Join(p.poolDir, "foreign.txt"), []byte("x"), 0o600); err != nil {
@@ -592,8 +593,8 @@ func TestPriorSessions_realCCPool(t *testing.T) {
 		if _, err := p.cc.List(p.ctx()); err == nil {
 			t.Fatal("precondition: the real ccpool must refuse to list a directory that is not a pool")
 		}
-		if _, err := p.dispatch(realRole("worker"), bead, "evt-1", "", "new", "in_progress"); !errors.Is(err, ErrSessionInFlight) {
-			t.Fatalf("err = %v, want ErrSessionInFlight", err)
+		if _, err := p.dispatch(realRole("worker"), bead, "evt-1", "", "new", "in_progress"); !errors.Is(err, ErrPoolUnreadable) {
+			t.Fatalf("err = %v, want ErrPoolUnreadable", err)
 		}
 	})
 

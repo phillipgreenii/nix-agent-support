@@ -104,13 +104,23 @@ var ErrLowDisk = worktree.ErrLowDisk
 
 // ErrSessionInFlight: an earlier attempt of the same bead and role is in flight
 // (its turn is in progress, or a handler still holds its supervision lease) and
-// this dispatch may not absorb it, or the pool's sessions cannot be read
-// (INV-CCH-30, ADR 0094's Decision item 4). Nothing was mutated: no bead, no
-// session, no worktree. The cmd layer maps it to the transport's pre-accept busy
-// decline with reason session-in-flight, so the core re-offers the event later;
-// like a full pool it is routine backpressure, and the failure-rate alert
-// excludes that reason.
+// this dispatch may not absorb it (INV-CCH-30, ADR 0094's Decision item 4).
+// Nothing was mutated: no bead, no session, no worktree. The cmd layer maps it
+// to the transport's pre-accept busy decline with reason session-in-flight, so
+// the core re-offers the event later; like a full pool it is routine
+// backpressure, and the failure-rate alert excludes that reason.
 var ErrSessionInFlight = errors.New("ccpool: an earlier attempt of this bead and role is in flight")
+
+// ErrPoolUnreadable: the pool's sessions cannot be read (the ccpool list call
+// failed), so the dispatch cannot tell whether an earlier attempt is in flight
+// and, as INV-CCH-30 requires, treats the pool as holding one: it declines and
+// launches nothing. Nothing was mutated. It is a decline like
+// ErrSessionInFlight (same pre-accept busy decline, same re-offer), but it gets
+// its OWN reason, pool-unreadable (bead pg2-s3pjt): an unreadable pool is not
+// routine backpressure, and under session-in-flight the failure-rate alert's
+// exclusion hid a persistently unreadable pool. The failure-rate alert counts
+// pool-unreadable, so it pages when the condition persists.
+var ErrPoolUnreadable = errors.New("ccpool: the pool's sessions cannot be read")
 
 // run is the ccpool dispatch: Ensure a fresh per-attempt session, Send the
 // rendered nudge (async), then wait for completion — racing the budget watchdog when
@@ -133,14 +143,15 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	case verdictDecline:
 		if plan.session == "" {
 			// An unreadable pool declines the same way (it counts as one in flight),
-			// but unlike routine backpressure it is worth an operator's look, and the
-			// failure-rate alert does not count it: say so at WARN.
+			// but unlike routine backpressure it is worth an operator's look: it
+			// carries its own reason (pool-unreadable), which the failure-rate
+			// alert counts, and is logged at WARN.
 			slog.Warn("dispatch declined: the pool's sessions cannot be read; treating it as an attempt in flight",
 				"role", d.Role.Name, "bead", d.Item.ID, "event", d.EventID, "why", plan.why)
-		} else {
-			slog.Info("dispatch declined: an earlier attempt of this bead and role is in flight",
-				"role", d.Role.Name, "bead", d.Item.ID, "event", d.EventID, "session", plan.session, "why", plan.why)
+			return report.Result{}, fmt.Errorf("%w: %s", ErrPoolUnreadable, plan.describe())
 		}
+		slog.Info("dispatch declined: an earlier attempt of this bead and role is in flight",
+			"role", d.Role.Name, "bead", d.Item.ID, "event", d.EventID, "session", plan.session, "why", plan.why)
 		return report.Result{}, fmt.Errorf("%w: %s", ErrSessionInFlight, plan.describe())
 	case verdictAbsorb:
 		// Take the per-session lock and refresh the supervision lease BEFORE
@@ -886,8 +897,10 @@ func usesWorktreeIsolation(cfg roles.IsolationConfig) bool {
 //     progress it may not absorb, or a session a handler may still be
 //     supervising, whatever its state: it holds the lease, or the session has
 //     no lease yet and is still inside its launch window), an absorb candidate
-//     whose bead is closed or cannot be read, or a pool whose sessions cannot
-//     be read.
+//     whose bead is closed or cannot be read.
+//   - decline (ErrPoolUnreadable): a pool whose sessions cannot be read counts
+//     as holding one in flight. Same decline, its own reason (pool-unreadable)
+//     so the failure-rate alert still counts it (bead pg2-s3pjt).
 //   - launch: nothing in flight. A leftover nobody supervises (live, still
 //     starting or ready, and no longer supervised) is closed first, under the
 //     per-session lock, and every settled session (turn ended, or no longer
@@ -904,7 +917,7 @@ type priorVerdict int
 const (
 	verdictLaunch  priorVerdict = iota // nothing in flight: launch a fresh session
 	verdictAbsorb                      // the same event's turn in progress: wait on it as this dispatch's own
-	verdictDecline                     // another attempt in flight: decline session-in-flight
+	verdictDecline                     // another attempt in flight (session-in-flight) or an unreadable pool (pool-unreadable)
 )
 
 // priorPlan is planPriorSessions' decision.
@@ -1036,7 +1049,7 @@ func inFlightWhy(s ccpool.Session, eventID string) string {
 // planPriorSessions reads the pool once and decides what this dispatch does
 // about the sessions it already holds for the bead and role (see the section
 // comment above). A list error is a pool that cannot be read, which counts as
-// one in flight: decline.
+// one in flight: decline with ErrPoolUnreadable.
 func (r *ccpoolRun) planPriorSessions(ctx context.Context, d DispatchContext, display string) priorPlan {
 	sessions, err := r.deps.CC.List(ctx)
 	if err != nil {
@@ -1091,7 +1104,7 @@ func (r *ccpoolRun) closeLeftover(ctx context.Context, d DispatchContext, s ccpo
 		defer lock.Unlock()
 		sessions, err := r.deps.CC.List(ctx)
 		if err != nil {
-			return fmt.Errorf("%w: the pool's sessions cannot be read: %v", ErrSessionInFlight, err)
+			return fmt.Errorf("%w: %v", ErrPoolUnreadable, err)
 		}
 		found := false
 		for _, cur := range sessions {
