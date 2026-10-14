@@ -73,7 +73,7 @@ type rig struct {
 	rt  *router.Router
 }
 
-func newRig(t *testing.T) *rig {
+func newRig(t *testing.T, opts ...func(*feed.Config)) *rig {
 	t.Helper()
 	st, _, err := store.Open(filepath.Join(t.TempDir(), "store.db"), store.Options{Synchronous: "OFF"})
 	if err != nil {
@@ -82,7 +82,11 @@ func newRig(t *testing.T) *rig {
 	t.Cleanup(func() { _ = st.Close() })
 	clk := governor.NewManualClock(t0)
 	q := &fakeQueries{members: map[string]feed.Members{}, runs: map[string]int{}}
-	f, err := feed.New(feed.Config{Store: st, Queries: q, Clock: clk, Retention: 14 * day, ConsumerStaleAfter: 7 * day})
+	cfg := feed.Config{Store: st, Queries: q, Clock: clk, Retention: 14 * day, ConsumerStaleAfter: 7 * day}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	f, err := feed.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

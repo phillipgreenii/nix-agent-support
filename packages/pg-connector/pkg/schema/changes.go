@@ -60,6 +60,41 @@ type PRChangesResult struct {
 	SourcesFreshness []SourceFreshness `json:"sources_freshness"`
 }
 
+// CIChangeEntity is the entity of a ci changes entry: the PR's CURRENT stored CI
+// state, as the ci instance answers it, with Version and HeadSHA set to the
+// delivered row's OWN recorded values (the log stores no snapshots). PRID is the
+// wire reference owner/repo#n; Rollup is the stored summary's checks state folded
+// to "success", "failure", "pending" or "none" exactly as `pr show`'s
+// checks_rollup is; Runs are the stored runs group's runs in the shape list_runs
+// answers (newest first, pr_id and as_of set), an empty array and never null.
+type CIChangeEntity struct {
+	PRID    string  `json:"pr_id"`
+	Rollup  string  `json:"rollup"`
+	Runs    []CIRun `json:"runs"`
+	Version int64   `json:"version"`
+	HeadSHA string  `json:"head_sha"`
+}
+
+// CIChange is one changes[] entry of the ci instance's changes op (bead
+// pg2-z5fax.4.9; CISchemaVersion 7). Change, Source, Seq, Kinds and Fields mean
+// what they mean in PRChange; Entity is the PR's current stored CI state.
+type CIChange struct {
+	Change string          `json:"change"`
+	Source string          `json:"source"`
+	Entity CIChangeEntity  `json:"entity"`
+	Seq    int64           `json:"seq"`
+	Kinds  []string        `json:"kinds"`
+	Fields json.RawMessage `json:"fields"`
+}
+
+// CIChangesResult is the answer of the ci instance's changes op. Every array is
+// an empty array, never null.
+type CIChangesResult struct {
+	Sources          []ChangeSource    `json:"sources"`
+	Changes          []CIChange        `json:"changes"`
+	SourcesFreshness []SourceFreshness `json:"sources_freshness"`
+}
+
 // ChangesAckResult is the answer of the changes_ack op: the key's stored
 // position after the acknowledgement.
 type ChangesAckResult struct {

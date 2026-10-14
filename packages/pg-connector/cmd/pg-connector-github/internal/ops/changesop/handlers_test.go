@@ -17,8 +17,8 @@ import (
 func TestHandlersProvideTheTwoPROpsAtThePRSchemaVersion(t *testing.T) {
 	r := newRig(t)
 	hs := Handlers(Deps{})
-	if len(hs) != 1 || len(hs["pr"]) != 2 {
-		t.Fatalf("handlers = %v, want exactly pr/changes and pr/changes_ack", hs)
+	if len(hs) != 2 || len(hs["pr"]) != 2 || len(hs["ci"]) != 2 {
+		t.Fatalf("handlers = %v, want exactly pr and ci, each with changes and changes_ack", hs)
 	}
 	for _, op := range []string{OpChanges, OpChangesAck} {
 		h := hs["pr"][op]

@@ -51,7 +51,13 @@ package schema
 // unset, so every version-5 consumer keeps decoding unchanged and the old
 // backends, which never set them, emit byte-identical runs; the bump follows
 // PRSchemaVersion's rule that ANY field-shape change bumps the version.
-const CISchemaVersion = 6
+//
+// Bumped 6 -> 7 by bead pg2-z5fax.4.9 (pg-connector-github daemon, "ci changes
+// and changes_ack ops"), which added the ci instance's changes and changes_ack
+// ops and their wire shapes CIChangeEntity, CIChange and CIChangesResult (see
+// changes.go). The CIRun shape itself is unchanged; the bump follows the same
+// rule that ANY change to the capability's wire shapes bumps the version.
+const CISchemaVersion = 7
 
 // CIRun is the ci capability's shared JSON wire shape, returned by the ci
 // capability's "list_runs" op and carried by

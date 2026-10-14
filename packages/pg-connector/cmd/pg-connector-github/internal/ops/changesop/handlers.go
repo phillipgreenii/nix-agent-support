@@ -16,7 +16,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
-// The ops, as the router keys them under the pr instance.
+// The ops, as the router keys them under the pr and ci instances.
 const (
 	OpChanges    = "changes"
 	OpChangesAck = "changes_ack"
@@ -38,7 +38,9 @@ type Deps struct {
 
 // Handlers returns the handlers of the change feed, keyed by instance and then
 // op: for pr the ops changes {consumer, query, cached, reset} and changes_ack
-// {consumer, query, next_seq}, each stamped with schema.PRSchemaVersion.
+// {consumer, query, next_seq}, each stamped with schema.PRSchemaVersion, and for
+// ci the ops changes and changes_ack with the same arguments, each stamped with
+// schema.CISchemaVersion and acting on the key (consumer, ci, query).
 func Handlers(deps Deps) map[string]map[string]scriptout.OpHandler {
 	if deps.Clock == nil {
 		deps.Clock = governor.SystemClock{}
@@ -48,6 +50,10 @@ func Handlers(deps Deps) map[string]map[string]scriptout.OpHandler {
 		"pr": {
 			OpChanges:    {SchemaVersion: schema.PRSchemaVersion, Handle: h.changes},
 			OpChangesAck: {SchemaVersion: schema.PRSchemaVersion, Handle: h.ack},
+		},
+		"ci": {
+			OpChanges:    {SchemaVersion: schema.CISchemaVersion, Handle: h.ciChanges},
+			OpChangesAck: {SchemaVersion: schema.CISchemaVersion, Handle: h.ciAck},
 		},
 	}
 }
@@ -190,6 +196,11 @@ func (h *handler) changes(ctx context.Context, raw json.RawMessage) (any, error)
 }
 
 func (h *handler) ack(ctx context.Context, raw json.RawMessage) (any, error) {
+	return h.ackKind(ctx, raw, feed.KindPR)
+}
+
+// ackKind acknowledges the key (consumer, kind, query) of the request.
+func (h *handler) ackKind(ctx context.Context, raw json.RawMessage, kind string) (any, error) {
 	m, err := args(raw)
 	if err != nil {
 		return nil, err
@@ -208,13 +219,13 @@ func (h *handler) ack(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 	router.Annotate(ctx, "store", false, 0, 0)
 
-	if err := h.deps.Feed.Ack(ctx, feed.KindPR, consumer, query, next); err != nil {
+	if err := h.deps.Feed.Ack(ctx, kind, consumer, query, next); err != nil {
 		return nil, mapError(OpChangesAck, err)
 	}
 	// The key's stored position after the acknowledgement. The position is the
 	// stored consumer row's acknowledged sequence number, which is what
 	// Feed.Positions reports for the key, without that call's scan of every key.
-	row, found, err := h.deps.Store.GetConsumer(ctx, consumer, feed.KindPR, query)
+	row, found, err := h.deps.Store.GetConsumer(ctx, consumer, kind, query)
 	if err != nil {
 		return nil, mapError(OpChangesAck, err)
 	}

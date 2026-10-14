@@ -92,7 +92,7 @@ func TestCurrentSchemaVersions_FollowTheAnnotationBumps(t *testing.T) {
 	if got := CurrentSchemaVersions["pr"]; got != 12 {
 		t.Errorf("pr = %d, want 12", got)
 	}
-	if got := CurrentSchemaVersions["ci"]; got != 6 {
-		t.Errorf("ci = %d, want 6", got)
+	if got := CurrentSchemaVersions["ci"]; got != 7 {
+		t.Errorf("ci = %d, want 7", got)
 	}
 }

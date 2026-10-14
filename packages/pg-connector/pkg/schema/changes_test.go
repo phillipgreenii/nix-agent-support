@@ -79,3 +79,29 @@ func TestPR_VersionIsOmittedWhenZero(t *testing.T) {
 		t.Errorf("version missing: %s", raw)
 	}
 }
+
+func TestCIChange_JSONNames(t *testing.T) {
+	raw, err := json.Marshal(CIChange{
+		Change: "changed", Source: "s",
+		Entity: CIChangeEntity{PRID: "o/r#1", Rollup: "failure", Runs: []CIRun{}, Version: 4, HeadSHA: "h"},
+		Seq:    7, Kinds: []string{"ci_changed"}, Fields: json.RawMessage(`[]`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"change":"changed","source":"s","entity":{"pr_id":"o/r#1","rollup":"failure","runs":[],"version":4,"head_sha":"h"},"seq":7,"kinds":["ci_changed"],"fields":[]}`
+	if string(raw) != want {
+		t.Errorf("ci change = %s, want %s", raw, want)
+	}
+}
+
+func TestCIChangesResult_JSONNames(t *testing.T) {
+	raw, err := json.Marshal(CIChangesResult{Sources: []ChangeSource{}, Changes: []CIChange{}, SourcesFreshness: []SourceFreshness{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"sources":[],"changes":[],"sources_freshness":[]}`
+	if string(raw) != want {
+		t.Errorf("result = %s, want %s", raw, want)
+	}
+}

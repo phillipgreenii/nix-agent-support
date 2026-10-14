@@ -36,5 +36,22 @@
 // is unavailable, an authentication failure unauthenticated, anything else
 // unavailable.
 //
+// # The CI view
+//
+// The ci instance serves the same two ops (changes {consumer, query, cached,
+// reset} and changes_ack {consumer, query, next_seq}, stamped with
+// schema.CISchemaVersion) under the cursor key (consumer, ci, query), for a
+// CI-only consumer. The rows are the PR rows of the log; feed.DeliveryForKey
+// keeps ci_changed rows of a member, and a PR entering or leaving the query or
+// removed, and names the change word. Each entity is the PR's CURRENT stored CI
+// state (schema.CIChangeEntity: pr_id, the checks rollup folded as pr show folds
+// it, and the stored runs group's runs in the list_runs shape) with the ROW'S OWN
+// version and head_sha; the runs are as stored now, because the log keeps no
+// snapshots. The ci key and the pr key of one (consumer, query) cannot both
+// exist: the feed refuses the second with invalid_argument naming the first.
+// The pr feed already delivers every ci_changed row and is the path pg-router
+// and pg-desk read; the ci view exists for a consumer that must not parse PR
+// rows.
+//
 // Registration of the handlers is the assembly's.
 package changesop
