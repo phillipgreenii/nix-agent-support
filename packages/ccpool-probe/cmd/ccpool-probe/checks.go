@@ -5,7 +5,7 @@
 //  1. checkNeedsInput — LIVE ccpool sessions in needs_input state that
 //     pg-router-ccpool-handler dispatched (item 1).
 //  2. checkZombieDrift — "zombie" session count (state working AND not
-//     live) vs. a persisted baseline (item 2).
+//     live AND no close reason) vs. a persisted baseline (item 2).
 //  3. checkNeverPrompted — live sessions parked in ccpool's "ready" state
 //     (launched, no turn ever started) across two consecutive runs
 //     (bead pg2-bkzrc).
@@ -208,13 +208,20 @@ func checkZombieDrift(hasPrevious bool, previous, current, consecutiveGrowthBefo
 }
 
 // countZombieSessions counts rows in ccpool's "working" state whose
-// process is NOT live (state == working && !live): a session ccpool
-// believes is mid-turn but whose process is gone — the zombie signal
+// process is NOT live AND that carry no close reason (state == working &&
+// !live && close_reason == ""): a session ccpool believes is mid-turn but
+// whose process is gone and that nothing ever closed — the zombie signal
 // ccpool's own metric documents (packages/ccpool/internal/telemetry/
 // metrics.go: live=false, state=working) [design: Contract's "ccpool's
 // own list CLI" bullet; "ccpool-probe run checks" item 2].
 //
-// Deliberately NOT counted (pg2-d845f):
+// Deliberately NOT counted (pg2-bluoa, operator ruling 2026-10-14, Option
+// A): a working && !live row WITH a close reason. ccpool never fabricates
+// a settled state on close (ADR 0015), so a closed row keeps state=working
+// forever and the count would only ever accumulate. Hangs stay visible
+// through ccpool_reap_closures_total{reason=idle_ttl}.
+//
+// Also NOT counted (pg2-d845f):
 //   - errored (live or dead): errored history only ever grows (ccpool
 //     keeps the rows), so counting it would trip drift on ordinary churn;
 //     an errored session is a recorded failure, not a hung one.
@@ -228,7 +235,7 @@ func checkZombieDrift(hasPrevious bool, previous, current, consecutiveGrowthBefo
 func countZombieSessions(rows []ccpoolSessionRow) int {
 	n := 0
 	for _, r := range rows {
-		if r.State == "working" && !r.Live {
+		if r.State == "working" && !r.Live && r.CloseReason == "" {
 			n++
 		}
 	}

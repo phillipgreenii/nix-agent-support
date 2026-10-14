@@ -100,12 +100,16 @@ var errCcpoolKilled = fmt.Errorf("%w: killed (timeout or signal)", errCcpoolFail
 // packages/ccpool — extra fields on the real wire shape are ignored by
 // encoding/json.
 type ccpoolSessionRow struct {
-	ExternalID string            `json:"external_id"`
-	Name       string            `json:"name"`
-	State      string            `json:"state"`
-	Live       bool              `json:"live"`
-	CWD        string            `json:"cwd"`
-	Meta       map[string]string `json:"meta,omitempty"`
+	ExternalID string `json:"external_id"`
+	Name       string `json:"name"`
+	State      string `json:"state"`
+	Live       bool   `json:"live"`
+	// CloseReason is ccpool's own close_reason (ADR 0072): "" for a row
+	// ccpool never closed. countZombieSessions uses it to tell a hung
+	// working row from closed history (pg2-bluoa).
+	CloseReason string            `json:"close_reason,omitempty"`
+	CWD         string            `json:"cwd"`
+	Meta        map[string]string `json:"meta,omitempty"`
 }
 
 // listCcpoolSessions runs `ccpool list --all --filter pgrouter.pool=pg-router

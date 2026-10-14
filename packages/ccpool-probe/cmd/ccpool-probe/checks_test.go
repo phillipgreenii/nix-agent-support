@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -139,8 +140,8 @@ func TestCheckZombieDriftGrowthProducesFinding(t *testing.T) {
 	}
 }
 
-// TestCountZombieSessions pins the zombie definition (pg2-d845f): ONLY
-// state == working && !live counts. errored history grows without bound
+// TestCountZombieSessions pins the zombie definition (pg2-d845f, pg2-bluoa):
+// ONLY state == working && !live && no close reason counts. errored history grows without bound
 // and a dead ready/starting row never reached a turn, so neither counts;
 // no live row counts.
 func TestCountZombieSessions(t *testing.T) {
@@ -173,6 +174,43 @@ func TestCountZombieSessions(t *testing.T) {
 				t.Fatalf("countZombieSessions(%s live=%v) = %d, want %d", c.state, c.live, got, c.want)
 			}
 		})
+	}
+}
+
+// TestCountZombieSessionsExcludesClosedRows pins pg2-bluoa (operator ruling
+// 2026-10-14, Option A): a working && !live row that ccpool closed (any
+// close reason) is closed history, not a hung session, and must not count.
+func TestCountZombieSessionsExcludesClosedRows(t *testing.T) {
+	for _, reason := range []string{"idle_ttl", "cap_eviction", "operator", "handler", "exited", "dead_needs_input_ttl"} {
+		t.Run(reason, func(t *testing.T) {
+			rows := []ccpoolSessionRow{{State: "working", Live: false, CloseReason: reason}}
+			if got := countZombieSessions(rows); got != 0 {
+				t.Fatalf("countZombieSessions(working/dead close_reason=%s) = %d, want 0", reason, got)
+			}
+		})
+	}
+	rows := []ccpoolSessionRow{
+		{State: "working", Live: false},
+		{State: "working", Live: false, CloseReason: "idle_ttl"},
+		{State: "working", Live: false, CloseReason: "handler"},
+	}
+	if got := countZombieSessions(rows); got != 1 {
+		t.Fatalf("got %d, want 1 (only the unclosed dead working row)", got)
+	}
+}
+
+// TestCcpoolSessionRowDecodesCloseReason: the probe must read ccpool's own
+// close_reason wire field, or the exclusion above is silently inert.
+func TestCcpoolSessionRowDecodesCloseReason(t *testing.T) {
+	var rows []ccpoolSessionRow
+	if err := json.Unmarshal([]byte(`[{"state":"working","live":false,"close_reason":"idle_ttl"}]`), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].CloseReason != "idle_ttl" {
+		t.Fatalf("rows = %+v, want CloseReason idle_ttl", rows)
+	}
+	if got := countZombieSessions(rows); got != 0 {
+		t.Fatalf("decoded closed row counted as zombie: %d", got)
 	}
 }
 
