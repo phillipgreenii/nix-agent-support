@@ -28,6 +28,7 @@ func buildPB(t *testing.T) string {
 	// Module root is two levels up from internal/gate.
 	cmd := exec.Command("go", "build", "-o", out, "./cmd/pb")
 	cmd.Dir = mustModuleRoot(t)
+	cmd.Env = goBuildEnviron()
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build pb: %v\n%s", err, b)
 	}

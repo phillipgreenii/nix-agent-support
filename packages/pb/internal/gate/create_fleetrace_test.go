@@ -54,6 +54,13 @@ func (hermeticCLIRunner) Run(ctx context.Context, name string, args []string, op
 }
 
 func TestFleetRace_beadHeldUntilGateResolves(t *testing.T) {
+	fleetRaceBeadHeldUntilGateResolves(t)
+}
+
+// fleetRaceBeadHeldUntilGateResolves is the body of the test above, shared with
+// the foreign-git-environment guard (hermetic_env_test.go).
+func fleetRaceBeadHeldUntilGateResolves(t *testing.T) {
+	t.Helper()
 	requireBinaries(t, "bd", "git")
 	isolateBeadsEnv(t)
 
