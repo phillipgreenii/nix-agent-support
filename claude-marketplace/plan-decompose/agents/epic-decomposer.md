@@ -70,8 +70,8 @@ constraint in the prompt itself, since a fresh agent has no other way to know it
 
 **phase-split-reviewer** (one Agent call per review round; `subagent_type:
 "plan-decompose:phase-split-reviewer"`, `model: sonnet` — state the model explicitly at the
-call site, matching the existing precedent in `agents/plan-decomposer.md`'s own
-semantic-post-checker dispatch template):
+call site, matching the existing precedent in `plan-decompose:plan-decompose`'s "Sub-dispatch
+templates" (its semantic-post-checker dispatch):
 
 > The full design text, the existing phase inventory (step 4's `bd list` result), and the
 > proposed new phase(s) (step 5's sketch). Check: (a) coverage — every design element lands in

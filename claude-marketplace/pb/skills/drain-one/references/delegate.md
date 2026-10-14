@@ -55,8 +55,8 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
    Nor is it a STUCK trigger: each `pb:drain-stuck` exit either closes the bead or releases it
    with `--status open` (DEFER-ON-EVENT's `--defer +7d` is only a timer), which UNDOES the defer
    and returns the packet to the open pool, where every queue consumer claims, checks, and
-   releases it in an endless cross-session spin (the `plan-decompose` skill's "Stamp-mismatch
-   releases"). Instead:
+   releases it in an endless cross-session spin (the `plan-decompose` skill's
+   `references/reconcile.md`, "Stamp-mismatch releases"). Instead:
    1. Release it DEFERRED, in ONE call that also clears the assignee (B-2/B-3, and B-4: a move
       out of `in_progress` to `deferred` is a release too, so it MUST clear the assignee):
 
@@ -71,8 +71,9 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
       reconcile's HOLD marker are what reconcile reads). NEVER `--status open` here.
 
    2. Unless the report confirms the implementer already posted it, comment one line on the
-      docket that a reconcile is owed — the `plan-decompose` skill's mode `reconcile`, whose
-      "Stamp catch-up (no amendment)" is the remedy when the docket's last reconcile completed:
+      docket that a reconcile is owed — the `plan-decompose` skill's mode `reconcile`
+      (`references/reconcile.md`), whose "Stamp catch-up (no amendment)" is the remedy when the
+      docket's last reconcile completed:
 
       ```bash
       bd comment <docket> "stamp check refused <id> (pd_curated_rev=<n>, pd_rev=<R>): reconcile owed (stamp catch-up if the last reconcile completed)" --actor "ID"

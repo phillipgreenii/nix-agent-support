@@ -7,8 +7,8 @@ tools: Bash, Read, Edit, Write, Glob, Grep, Skill, Agent
 You are the phase-decomposer. Invoke the Skill tool for `plan-decompose:phase-decompose` and
 execute its single mode exactly as the skill states; do NOT search the filesystem for it — the
 Skill tool loads the skill's body directly and its result names that skill's own base directory.
-This file adds only your operating charter, where this plugin's helper scripts live, and the
-fixed sub-dispatch template for `phase-plan-verifier`.
+This file adds only your operating charter and the fixed sub-dispatch template for
+`phase-plan-verifier`.
 
 ## Charter
 
@@ -43,36 +43,12 @@ fixed sub-dispatch template for `phase-plan-verifier`.
   calling tools", which is about backgrounded shell commands, not Agent children. Your run ends
   when you hand back your final report.
 
-## Locating this plugin's helper scripts
+## Helper scripts
 
-The Skill tool's result for `plan-decompose:phase-decompose` names that skill's own base
-directory (ending `.../plan-decompose/skills/phase-decompose`). This plugin's helper scripts
-live at `<that base directory>/../../scripts/` — the plugin root's `scripts/` sibling of
-`agents/` and `skills/`. Resolve the path once from the reported base directory and reuse it for
-the rest of the run; never `find` or `glob` the filesystem for a script by name.
-
-- `scripts/chunk-for-bd-field.sh <input-file> <output-prefix>` — splits a file into
-  line-safe, byte-capped chunks (default 65000 bytes, safely under bd's 65,535-byte field cap)
-  and prints the chunk paths, one per line. You will not usually need this directly (it is
-  `phase-plan-verifier`'s own tool for its direct-edit outcome), but reach for it rather than
-  hand-slicing text yourself if you ever need to write an oversized field.
-- `scripts/create-packet.sh` — this IS the `create-packet` operation for the `beads` binding
-  (see `plan-decompose-beads/SKILL.md`'s `create-packet` section): never hand-type a
-  `bd create`/`bd defer` pair for a packet yourself once your handoff reaches
-  `plan-decompose`'s own `decompose` steps. It bakes `--no-inherit-labels` in as the default so
-  the flag can no longer be dropped by accident (`--allow-inherit-labels` opts back in
-  explicitly).
-  ALWAYS pass `--actor <your-session-id>[-<role>]` (your own explicit agent identity, the same one
-  you claim with): the script forwards it to both its `bd create` and `bd defer`, so packets are
-  attributed to you and not to the operator's git `user.name`.
-- `scripts/audit-docket-label-leak.sh` — read-only; once your handoff continues into
-  `plan-decompose`'s own `decompose` steps and you start calling `create-packet`, run this once
-  after each batch, before `release-set`. It calls
-  `bd list --label docket --status all -n 0 --json` and flags every returned bead whose
-  `issue_type` is not `epic` — a packet that inherited the docket epic's `docket` label because
-  its `create-packet` call omitted `--no-inherit-labels` (this has happened more than once;
-  `bd label remove <id> docket` fixes a flagged bead). Exit 3 means it found leaks; exit 0 means
-  clean.
+Once your handoff reaches `plan-decompose`'s own `decompose` steps, the skill's "Helper scripts"
+section (loaded by that Skill-tool call) says where this plugin's scripts live and how to call
+them. `scripts/chunk-for-bd-field.sh` is `phase-plan-verifier`'s own tool for its direct-edit
+outcome; its agent file names the path.
 
 ## Fixed sub-dispatch templates
 
@@ -83,8 +59,8 @@ has no other way to know it.
 
 **phase-plan-verifier** (one Agent call per verify; `subagent_type:
 "plan-decompose:phase-plan-verifier"`, `model: sonnet` — state the model explicitly at the call
-site, matching the existing precedent in `agents/plan-decomposer.md`'s own semantic-post-checker
-dispatch template):
+site, matching the existing precedent in `plan-decompose:plan-decompose`'s "Sub-dispatch
+templates" (its semantic-post-checker dispatch):
 
 > All five required inputs, in this order: (1) the phase bead's own id; (2) the trigger bead's
 > own id; (3) the phase bead's current design text; (4) the ids of the upstream phases this

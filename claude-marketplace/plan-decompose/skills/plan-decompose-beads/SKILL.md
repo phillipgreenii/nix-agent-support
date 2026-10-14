@@ -11,7 +11,13 @@ description: >-
 # plan-decompose-beads — the bd binding
 
 Maps every abstract operation of the `plan-decompose` core skill onto `bd`, one heading per
-core-table row, same grouping and order. Empirical facts were probed 2026-08-27 against
+core-table row, same grouping and order, with two exceptions. The mappings only mode `reconcile`
+and mode `report` use — `amend-design`, "Reconcile restamps" (the restamp mechanics of
+`write-metadata`) and `append-metric` / `read-metrics` — live in
+`references/reconcile-and-report.md`; load it only when running those modes, never for mode
+`decompose`. And a "Children list" heading, which no core-table row names, holds the lightweight
+children read that mode `decompose` step 3's RESUME dedup and both of those modes use, so it stays
+here. Empirical facts were probed 2026-08-27 against
 bd 1.0.x on this workspace (commands shown); the workspace now runs bd 1.3.1 and these
 probes have NOT been re-run on it (only the epic/task `blocks` edge check was, 2026-10-09; see
 `epic-decompose`'s Wire step); re-verify on a bd major bump.
@@ -22,27 +28,19 @@ probes have NOT been re-run on it (only the epic/task `blocks` edge check was, 2
 against the design source. `-n 0` and `--status all` are load-bearing: the default caps at 50
 rows AND hides closed beads.
 
-**`pd_phase` comparison is EXACT-STRING, never substring/prefix** (`pg2-2sk88`):
-`released:partial` contains `released` as a literal substring, so a `jq` filter or shell test
-written as `pd_phase | contains("released")` (or a bare prefix check) would match BOTH
-literals and silently route a partial release into the core skill's "nothing to do" branch.
-Compare the full string — `.metadata.pd_phase == "released"` vs `== "released:partial"` — as
-two distinct cases.
+**`pd_phase` comparison** (the rule — EXACT-STRING, never substring/prefix — is core skill
+step 1's; `pg2-2sk88`): in `jq` or shell write `.metadata.pd_phase == "released"` and
+`== "released:partial"` as two distinct cases; `pd_phase | contains("released")` or a bare
+prefix test matches BOTH literals and silently routes a partial release into the "nothing to do"
+branch.
 
-**Correction of an earlier claim in this section** (`pg2-2sk88`): a prior revision of this
-binding asserted that deliberately-partial decomposition "needs no branch" here, reasoning
-that `epic-decompose` always mints a distinct `pd_source` per phase (the synthetic
-`<program-epic>#phase<n>` form) before any decomposition runs, so one literal source could
-never be invoked twice for two different intended scopes. That reasoning covers ONLY phasing
-decided UPFRONT through `epic-decompose`. It does NOT cover a `plan-decompose` docket that,
-mid-decomposition (core skill step 3/5), sanctioned leaving some design elements out of that
-round's packets on its own initiative (core skill step 7(a)'s "or is recorded via
-`write-report` as deliberately not decomposed") — that docket keeps its ORIGINAL, unqualified
-`pd_source`; no `epic-decompose` phase-split ever ran; yet its decomposition report's
-not-decomposed list is non-empty at release. The core skill's step 1 routing rule DOES need,
-and now has, a branch for that: it keys on the docket's `pd_phase` literal
-(`released` vs `released:partial`, written by step 10), never on whether `epic-decompose` was
-ever invoked.
+**Partial decomposition needs a branch** (`pg2-2sk88`; an earlier revision of this section
+claimed it did not, reasoning that `epic-decompose` mints a distinct `pd_source` per phase —
+true only for phasing decided UPFRONT through `epic-decompose`): a `plan-decompose` docket that
+sanctions leaving design elements out mid-decomposition (core skill step 7(a)) keeps its
+ORIGINAL, unqualified `pd_source` yet has a non-empty not-decomposed list at release. Core
+skill step 1 routes on the `pd_phase` literal (`released` vs `released:partial`, written by
+step 10), never on whether `epic-decompose` ran.
 
 **Minting `<design-source>#remainder<n>`** (core skill step 1, when a `released:partial` hit
 has unchanged design text): `bd list --label docket --status all -n 0 --json`, filter
@@ -59,7 +57,7 @@ Epic bead, label `docket`; design of record VERBATIM in the DESIGN field (`--des
 Field cap: description/design cap at 65,535 bytes (previously verified in this workspace); a
 larger design chunks into `bd comment --file` parts with the DESIGN field holding the header
 plus a numbered index (`part <n>/<m>: comment <id>`) that `read-docket-design` follows in
-order. Produce the chunk files with the `plan-decomposer` agent's `scripts/chunk-for-bd-field.sh`
+order. Produce the chunk files with the core skill's "Helper scripts" `chunk-for-bd-field.sh`
 (one call over the whole design) rather than computing byte offsets by hand. Put a container
 note in the description: "do not claim this container bead for direct work". Drain's
 `--exclude-type epic` keeps epics out of its queue — that exclusion lives in drain, NOT in bd
@@ -100,20 +98,16 @@ also runs the `bd defer <new-id>` step immediately after create — HELD is stat
 finished. The create-then-defer window is one script call wide, not a two-command sequence a
 caller has to remember to chain.
 
-**Why a script and not a documented command** (`pg2-oc52e`/`pg2-b439c`): a raw `bd create`
-command shown here as prose — even with `--no-inherit-labels` written directly into the
-example — was still omitted from hand-typed invocations more than once (`pg2-2j5ac`'s
-children `.5`-`.10`, then independently `pg2-84o3m.31`): a caller retyping the command from
-memory can drop a flag partway through regardless of how clearly the example reads. Routing
-packet creation through this script removes the flag from the call site's typing surface
-entirely, rather than relying on the doc being read carefully enough one more time. Still run
+**Why a script** (`pg2-oc52e`/`pg2-b439c`): a raw `bd create` shown as prose, even with
+`--no-inherit-labels` in the example, was still dropped from hand-typed invocations more than
+once (`pg2-2j5ac`'s children `.5`-`.10`, then `pg2-84o3m.31`); the script removes the flag from
+the call site's typing surface. Still run
 `claude-marketplace/plan-decompose/scripts/audit-docket-label-leak.sh` after any batch of
-`create-packet` calls anyway (read-only; calls `bd list --label docket --status all -n 0
---json` and flags every returned bead whose `issue_type` is not `epic`) — it is a second,
-independent net that also catches a leak from a DIFFERENT operation that still calls `bd
-create` directly (`create-docket`'s own phase-bead usage below, which this script does not
-cover). Fix a flagged bead with `bd label remove <id> docket` (never re-run `create-packet`
-for it).
+`create-packet` calls (read-only; calls `bd list --label docket --status all -n 0 --json` and
+flags every returned bead whose `issue_type` is not `epic`): it is a second net that also catches
+a leak from an operation that still calls `bd create` directly (`create-docket`'s phase-bead
+usage above). Fix a flagged bead with `bd label remove <id> docket` (never re-run
+`create-packet` for it).
 
 **Label convention** (epic-decompose/phase-decompose): the same `--parent`-label-inheritance
 hazard this note already flags applies to phase and trigger beads too — phase beads carry both
@@ -122,20 +116,11 @@ is controlled by the explicit `--label`/`--no-inherit-labels` flags passed at cr
 the parent's own labels.
 
 **Revising an already-created packet's content** (core skill mode `decompose` steps 5-7's
-loop-backs to step 3; incident on docket `tc-rjzd3`, fixed as `tc-g7tmr`): `create-packet` runs once per
-packet. A fix-loop pass that edits a packet already created uses `bd update <packet-id>
---body-file <fixed-content-file>` — content only. It MUST NOT call `create-packet` again (that
-would create a duplicate packet) and MUST NOT pair the content update with
-`--set-metadata pd_curated_rev=...` or any other `write-metadata` touch to `pd_curated_rev`:
-that stamp is written once, at the packet's original `create-packet` call, pinned to the
-docket's `pd_rev` at that moment, and stays untouched by every later `decompose` fix-loop pass
-no matter how many rounds run. Only mode `reconcile` ever changes it again (`bd update
-<packet-id> --set-metadata pd_curated_rev=<new-pd_rev>`) — for AFFECTED packets after
-re-curation (its step 3), for UNAFFECTED packets after the affectedness check (its step 5,
-which runs only once the reconcile completes; an aborted reconcile restamps no unaffected
-packet) — and only because `pd_rev` itself bumped, or, in a stamp catch-up, because an earlier
-reconcile left the packet behind. See `read-metadata` / `write-metadata` below for the
-restamp mechanics.
+loop-backs to step 3; incident on docket `tc-rjzd3`, fixed as `tc-g7tmr`): `bd update
+<packet-id> --body-file <fixed-content-file>` — content only; `create-packet` runs once per
+packet. The stamp rule that forbids `create-packet` again and any `--set-metadata
+pd_curated_rev=...` here is the core skill's "Curation stamp". The restamps mode `reconcile`
+performs are in "Reconcile restamps" in `references/reconcile-and-report.md`.
 
 ## `wire-ordering`
 
@@ -163,23 +148,17 @@ current-value state in notes — notes are append-only narrative and cannot supe
 `pd_rev`. Remove a key with `bd update <id> --unset-metadata <key>` (listed by
 `bd update --help`, bd 1.2.2) — this is how `pd_stale` is cleared.
 
-**Reconcile restamps** (core skill mode `reconcile` steps 3 and 5): each of the two steps
-takes its OWN fresh children read — step 5 MUST NOT reuse step 3's, because consumers may
-have claimed, refused, or re-deferred packets in between. The read is
-`bd list --parent <docket> --status all -n 0 --json` (probed 2026-09-30, bd 1.2.2: rows sit
-under `.data[]`, each with `id`, `status`, `assignee`, `metadata`), skipping
-`status == "closed"`. A row is CLAIMED when its `status` is `in_progress`, or its `status` is
-`open` with a non-empty `assignee` (neither null nor `""`); a DEFERRED row is never claimed,
-even with a leftover assignee — a deferred packet is not being worked. Because a revision may
-be stored as a JSON number or a string (see above), compare revisions — for order AND for
-equality — through jq `tonumber` on both sides (e.g.
-`(.metadata.pd_curated_rev | tonumber) < R`); never lexically (`"10" < "9"` is true) and
-never raw (`4 == "4"` is false). Mappings: HOLD a re-curated packet = `bd defer <packet-id>`
-plus `bd update <packet-id> --set-metadata pd_curated_rev=<R> --set-metadata pd_stale=<R>`;
-restamp an unaffected packet = `bd update <packet-id> --set-metadata pd_curated_rev=<R>`;
-clear a marker = `bd update <packet-id> --unset-metadata pd_stale`; release = `bd undefer
-<packet-id>`. Read each touched packet back (`read-metadata`) before listing it in the step-6
-reconcile report.
+## Children list
+
+`bd list --parent <docket> --status all -n 0 --json` — the lightweight children read: mode
+`decompose` step 3's RESUME dedup, mode `reconcile` and mode `report` all use it. Rows sit under
+`.data[]`, each with `id`, `status`, `assignee`, `metadata` and `comment_count` (probed
+2026-09-30, bd 1.2.2) and (probed 2026-10-01) also `description` and `acceptance_criteria`, but
+never comment bodies, so one unbounded call is cheap regardless of docket size; a caller reads
+only the fields it needs. `metadata` DOES appear as a JSON key on `bd show`/`bd list --json` once
+any key is set on that issue (probed via a scratch bead) but is OMITTED entirely, not `null`, when
+empty; check for key presence, not truthiness. `-n 0` and `--status all` are load-bearing here as
+in `find-docket`.
 
 ## `release-set`
 
@@ -197,78 +176,6 @@ is opt-in), so an open-but-assigned bead is claimable.
 for pre-docket gap reports. Comments are append-only and immune to bd's whole-row-clobber
 concurrency failure; use `--file` (with a quoted heredoc) when the text carries backticks or
 dollar signs.
-
-## `append-metric` / `read-metrics`
-
-Append: `bd comment <packet-id> "<pd_metrics record>"`.
-
-Read, for mode `report` (scoped to one docket, paginated over its children — probed
-2026-08-28 against bd 1.2.2):
-
-- **`--offset` is unreachable from this CLI.** `bd list`'s help documents `--offset` as
-  "Only supported under `--proxied-server`", and that flag is not itself exposed:
-  `bd list --parent <docket> --status all -n <k> --offset <n> --json` fails with
-  `Error: --offset is only supported under --proxied-server`, and adding
-  `--proxied-server` fails with `Error: unknown flag: --proxied-server`. So server-side
-  offset pagination does not exist here — pagination is done CLIENT-SIDE, over the cheap
-  part, never the expensive part:
-  1. **Children list, once** — `bd list --parent <docket> --status all -n 0 --json`. Each
-     row carries id/status/`metadata`/`comment_count` and (bd 1.2.2, probed 2026-10-01) also
-     `description` and `acceptance_criteria`, but never comment bodies, so one unbounded call
-     here is cheap enough regardless of docket size; this procedure reads only the id/status/
-     `metadata`/`comment_count` fields and ignores the rest (confirmed
-     `metadata` DOES appear as a JSON key on `bd show`/`bd list --json` once any key is set
-     on that issue — probed via a scratch bead — but is OMITTED entirely, not `null`, when
-     empty; check for key presence, not truthiness).
-  2. **Chunk that id list locally** into pages (default 20) and, for each page, call
-     `bd comments <id> --json` for every child IN that page — one call per child, folding
-     results into running totals before advancing to the next page. This is the paginated,
-     bounded step: it is what "never load the whole docket at once" actually guards, since
-     comment threads (not the children list) are the part whose size scales with docket
-     history.
-  3. **Skip for free**: a child whose `bd list` row already shows `comment_count: 0` needs
-     no `bd comments` call at all — count it directly as `no-record`.
-- **Estimate side** (mode `report` step 2): `bd comments <docket-id> --json`, find the most
-  recent comment matching the `write-report` packet-index shape (from `decompose` step 10 or
-  a `reconcile` re-curation report), and read its per-packet fixed-read/budget estimates from
-  that comment's text. When more than one such report exists, the estimate for a given
-  packet id is the one from the MOST RECENT report that carries an estimate for it — an
-  initial release estimate superseded by a reconcile's re-estimate (a reconcile step-6 report
-  estimates each packet it re-curated). A reconcile report that lists a packet only as
-  restamped-unaffected carries no estimate for it, so it does not supersede an earlier one.
-
-## `amend-design`
-
-Two phases — RESOLVE the merged text, then (only after the core skill's mode-`reconcile`
-step 1 pre-check passes it) COMMIT it to bd. Never write to bd before the pre-check runs; the
-text resolved here is exactly what gets pre-checked.
-
-**Resolve.** Input is either a **unified diff** against the design text `read-docket-design`
-currently returns, or **full replacement text** — the caller states which explicitly; never
-infer the shape from content (design prose can itself contain lines starting with `---`/`+++`,
-which would misfire a content-sniffing heuristic).
-
-- **No prior revision to diff against** (the docket's design field is empty/absent, or
-  `read-metadata` shows no `pd_rev` at all): a diff input MUST be refused with a gap report —
-  there is nothing to apply it to. Full-text input MUST be accepted unconditionally and used
-  as the resolved text as-is. This is the fallback for the first amend on a docket with no
-  design yet.
-- **A prior revision exists:**
-  - **Full-text input** — the resolved text is the input itself (the pre-existing v1 form;
-    always available — diff support does not remove it).
-  - **Diff input** — reassemble the current design across chunks when chunked, write it to a
-    scratch file, then apply the diff: `patch <scratchfile> < <diff-file>` for a `diff -u`
-    hunk, or `git apply --unidiff-zero <diff-file>` against the same scratch file for a
-    `git diff --no-index`-style hunk. The apply command's exit status is authoritative: a
-    rejected hunk (nonzero exit, a `.rej` file produced) MUST HALT the amendment with a gap
-    report — never apply partially or guess past a reject. The patched scratch file's content
-    is the resolved text.
-
-**Commit** (only after the pre-check passes the resolved text): rewrite the DESIGN field with
-it (superseded text struck/rewritten, the ruling recorded verbatim — never two live
-instructions); for chunked designs, rewrite the header/index and APPEND new-revision chunks,
-striking superseded chunks in the index (comments cannot be edited); bump `pd_rev` via
-`--set-metadata`.
 
 ## `close-docket`
 

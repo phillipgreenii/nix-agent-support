@@ -1,9 +1,10 @@
-# Plan: make plan-decompose faster (fixes 1–4) — revision 3
+# Plan: make plan-decompose faster (fixes 1–4) — revision 5
 
 Repo root (all paths relative to it unless absolute):
 `/Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support`. Plugin root
 `claude-marketplace/plan-decompose/` is abbreviated `PD/`. Revision 3 folds in review rounds 1–2
-(round 1: B1–B3, S1–S7, N1–N8; round 2: N-1–N-5).
+(round 1: B1–B3, S1–S7, N1–N8; round 2: N-1–N-5); revisions 4 and 5 are recorded under
+"Execution status".
 
 ## Evidence (measured 2026-10-12/13 from session transcripts)
 
@@ -48,8 +49,6 @@ message = waiting). Scripts: `/tmp/pd-analysis/`.
 - 4D (cold-read each packet as soon as written): "if this is simple, i like it." — assessed not
   simple for its gain (see Excluded).
 - Acceptance: "only the aceptance field needs to hold the acceptance."
-- PENDING operator OK (extensions beyond the rulings, marked ⊕ below): by-reference inputs for
-  semantic-post-checker, phase-split-reviewer and plan-sanity-check's fallback reviewer.
 
 ## Behavior preserved (MUST NOT change)
 
@@ -67,20 +66,38 @@ message = waiting). Scripts: `/tmp/pd-analysis/`.
 - The `tc-wklt` rule for backgrounded SHELL jobs / `Monitor` stays; this plan only scopes it.
 - No migration of existing dockets or packets; `pg-pr` (frozen) untouched.
 
-## Execution status (revision 4, 2026-10-13)
+## Execution status (revision 5, 2026-10-14)
 
-Operator asked to implement P2 and P3 first, ahead of P1. Resulting order:
+Operator asked (2026-10-13) to implement P2 and P3 first, ahead of P1. Resulting order, now
+executed as one bead per step:
 
-- P2 runs now, unchanged. P1 later MUST keep the P2 contract paragraph in all three
-  orchestrator agent files.
-- P3 is split. **P3a (now):** new `PD/agents/cold-reader.md` (named-files rule); the cold-read
-  dispatch template moves from `plan-decomposer.md` into `PD/skills/plan-decompose/SKILL.md`
-  step 6 itself, so phase-decomposer gets it without waiting for P1 (P1 later relocates it into
-  the "Sub-dispatch templates" section); the dispatch passes two paths — the body file and the
-  acceptance file passed to `create-packet.sh` (`--body-file`, `--acceptance-file`) or to the
-  fix-loop `bd update`. **P3b (after P1, P4, P5):** the `drafts/` → `packets/` layout and the ⊕
-  items (post-checker, phase-split-reviewer, plan-sanity-check fallback), which also await
-  operator OK.
+| Step | Bead        | State                                          |
+| ---- | ----------- | ---------------------------------------------- |
+| P1   | `pg2-kcwi3` | split and dedup (this change)                  |
+| P2   | `pg2-47tth` | done (wait contract)                           |
+| P3a  | `pg2-7eath` | done (cold-reader agent, two-path dispatch)    |
+| P3b  | `pg2-0bc0f` | after P1, P4, P5                               |
+| P4   | `pg2-ltvod` | after P1                                       |
+| P5   | `pg2-2npcm` | after P1 and P4 (both edit step 3 and anatomy) |
+| P6   | `pg2-3gizb` | after P4, P5                                   |
+| P7   | `pg2-nb8lf` | after P2, P3b, P6                              |
+| P8   | `pg2-8k0fo` | after P7                                       |
+
+- P2 ran unchanged. P1 MUST keep the P2 contract paragraph, verbatim, in all three orchestrator
+  agent files.
+- P3 is split. **P3a (done):** new `PD/agents/cold-reader.md` (named-files rule); the cold-read
+  dispatch template moved from `plan-decomposer.md` into `PD/skills/plan-decompose/SKILL.md`
+  step 6 itself, so phase-decomposer gets it without waiting for P1 (P1 relocates the dispatch
+  into the "Sub-dispatch templates" section); the dispatch passes two paths — the body file and
+  the acceptance file passed to `create-packet.sh` (`--body-file`, `--acceptance-file`) or to
+  the fix-loop `bd update`. **P3b (after P1, P4, P5):** the `drafts/` → `packets/` layout and
+  the ⊕ items (post-checker, phase-split-reviewer, plan-sanity-check fallback). The operator
+  approved all three ⊕ extensions on 2026-10-13 (ruling verbatim on `pg2-0bc0f`: "Post-checker
+  (Recommended), Phase-split-reviewer, Sanity-check fallback").
+- P5 is ordered after P4: both edit SKILL.md step 3 and the anatomy, so P5 runs on P4's text.
+- P8 is narrowed to the post-apply re-measure (`pg2-8k0fo`): each step runs its own hooks and
+  its own read-only diff review and lands on its own, so the "per commit" and "one review over
+  the final diff" bullets under P8 below are carried by every step bead instead.
 
 ## Steps and order
 

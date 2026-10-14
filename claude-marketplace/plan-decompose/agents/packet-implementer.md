@@ -29,7 +29,7 @@ otherwise.
    `pd_stale` is unset (never overwrite an existing value — `reconcile-pending` or reconcile's
    HOLD marker is what reconcile reads to know the packet still needs re-curation),
    comment one line on the docket that a reconcile is owed (when the docket's last reconcile
-   completed, that is the skill's stamp catch-up), and stop.
+   completed, that is the skill's stamp catch-up, `references/reconcile.md`), and stop.
 3. **Read the packet content once** (`bd show <packet>`). Work from it. Read the files it
    names and anything under `Expected additional reads:`; that is planned, not escalation.
 4. **Implement**, then run the packet's Validation commands exactly. A command that fits its

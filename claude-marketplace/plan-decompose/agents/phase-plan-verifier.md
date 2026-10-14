@@ -57,8 +57,8 @@ corrected to match (not a judgment call, just updating what changed):
 4. If the design text is large enough that hand-slicing it risks exceeding bd's field cap, use
    this plugin's `scripts/chunk-for-bd-field.sh` (found at
    `<repo-root>/claude-marketplace/plan-decompose/scripts/chunk-for-bd-field.sh`) rather than
-   computing byte offsets yourself — see `agents/plan-decomposer.md`'s "Locating this plugin's
-   helper scripts" for the pattern this script is used under.
+   computing byte offsets yourself — see `plan-decompose:plan-decompose`'s "Helper scripts" section
+   for the pattern this script is used under.
 
 ## Outcome 2: genuine open question — escalate
 
