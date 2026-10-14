@@ -108,11 +108,33 @@ The rule is `INV-CCH-30` in `packages/pg-router-ccpool-handler/docs/behavior/inv
 - Accepted: a declined event is re-offered only until it expires. A born-expired event (a drain
   event) is dropped and re-derived on its source's next query, and an event of another type can expire
   while an attempt of the same bead and role stays in flight.
-- Accepted: a lease outlives a handler that returned early by whatever is left of it (for a failed
-  launch, up to one launch wait plus one lease TTL), so a later dispatch declines for that long before
-  it closes and replaces the leftover. Requiring a returning handler to end its own lease would shorten
-  that window; it is left as an option for `pg2-qaeb8`, because a handler whose session another
-  dispatch absorbed must not end the lease that dispatch now refreshes.
+- Accepted: a lease outlives a handler that returned, by whatever is left of it: a row keeps its
+  `lease_until` after the handler has gone and after the session is closed, and `supervised` counts an
+  unexpired lease whatever the row's state and liveness. So a dispatch of the same bead and role that
+  arrives after a handler returned declines (`session-in-flight`) until the lease lapses, at most one
+  lease TTL (2 minutes by default; for a failed launch, up to one launch wait plus one TTL), and is then
+  re-offered. Decided not to make a returning handler end its own lease (bead `pg2-4ooaw`, 2026-10-14,
+  the option this ADR first left to `pg2-qaeb8`):
+  - The window is rarely hit. A settled review row is purged about 20 minutes after it settles, queue
+    latency is hours, and the shortest gap between a close and the next launch of the same bead in five
+    days was 47 minutes (bead `pg2-pq2ej`, above). A quick re-review after a fix push needs the author
+    to push and a source to notice, which takes longer than the TTL. The one fast re-emit seen, the
+    hand-back loop of `pg2-92rfu`, is better throttled than served.
+  - The cost of hitting it is a delayed re-offer, not a lost one: a decline is pre-accept backpressure
+    that the core re-offers at the `INV-FAIL-2` cadence until the event expires. A born-expired event
+    is re-derived on its source's next query (accepted above).
+  - It cannot be made safe cheaply. Ending a lease is only correct once nothing supervises the session,
+    and a handler cannot tell that from its own state: a dispatch that absorbed its session refreshes
+    the same lease, so a clear by the earlier handler would open a gap in the absorber's coverage (and
+    let a fresh session start in the per-bead worktree while the absorber is still cleaning it up),
+    and a compare-and-clear is not atomic with `ccpool meta set` because the refreshers do not take the
+    per-session lock. A session whose close was deferred for active subagents (`INV-CCH-17`) must keep
+    its lease, so the clear would need to be conditioned on the row being closed and not live. A
+    cancel, a panic and a kill must not clear it either (the shutdown sweep of `INV-CCH-14` owns a
+    cancel, and a kill runs no code), so only the normal return paths could, which leaves the lease
+    window in place for exactly the exits that matter most and adds a second, divergent behavior.
+  - Reconsider it only if a re-dispatch of the same bead and role within the TTL is observed in
+    practice (the `session-in-flight` decline log line carries the session, the event and the reason).
 - Accepted: a settled session whose subagents are still writing after its handler has gone is not in
   flight, so in a pool with a free slot a fresh session can start in the shared per-bead worktree
   before they stop. A one-slot pool declines at capacity instead (`INV-CCH-6`).
