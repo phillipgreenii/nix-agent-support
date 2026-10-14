@@ -1,0 +1,21 @@
+{
+  "total_count": 2,
+  "jobs": [
+    {
+      "id": 70010,
+      "run_id": 3001,
+      "name": "changes",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/phillipgreenii/widgets/actions/runs/3001/job/70010"
+    },
+    {
+      "id": 70011,
+      "run_id": 3001,
+      "name": "build-test-validate",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/phillipgreenii/widgets/actions/runs/3001/job/70011"
+    }
+  ]
+}
