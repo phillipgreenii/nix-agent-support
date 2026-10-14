@@ -4,7 +4,7 @@
 
 import { isBlank, plural, relativeDue, safeHref } from "./format.mjs";
 import { dueText, statusIcon, statusText } from "./present.mjs";
-import { KIND_TITLES, checklists, displayZone, isActionable } from "./select.mjs";
+import { KIND_TITLES, checklists, displayZone, isActionable, shownZone } from "./select.mjs";
 import { h } from "./vdom.mjs";
 import { button, field } from "./view-common.mjs";
 import { taskForm } from "./feature-tasks.mjs";
@@ -67,9 +67,9 @@ function taskRow(model, dispatch, task) {
     h(
       "div",
       { class: "task-main" },
-      h("span", { class: "status" }, h("span", { "aria-hidden": "true" }, `${statusIcon(task)} `), statusText(task, model.now)),
+      h("span", { class: "status" }, h("span", { "aria-hidden": "true" }, `${statusIcon(task)} `), statusText(task, model.now, shownZone(model))),
       h("span", { class: "title" }, href ? h("a", { href, rel: "noopener noreferrer", target: "_blank" }, task.title) : task.title),
-      h("span", { class: "due" }, `due ${dueText(task, model.now)}`),
+      h("span", { class: "due" }, `due ${dueText(task, model.now, shownZone(model))}`),
       rel?.overdue ? h("span", { class: "overdue" }, h("span", { "aria-hidden": "true" }, "⚠ "), rel.text) : null,
       task.status === "skipped" && task.reason ? h("span", { class: "reason" }, `Reason: ${task.reason}`) : null,
       task.status === "withdrawn" ? h("span", { class: "hint" }, "Not in the active profile.") : null,

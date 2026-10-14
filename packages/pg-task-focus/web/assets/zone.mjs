@@ -118,9 +118,36 @@ export function inputValueSecondsInZone(ms, tz) {
   return `${inputValueInZone(ms, tz)}:${pad(p.second)}`;
 }
 
-/** `YYYY-MM-DD HH:MM` of an instant in a zone. */
-export function dateTimeInZone(ms, tz) {
-  return `${dateInZone(ms, tz)} ${clockInZone(ms, tz)}`;
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** `9:05 AM`, the 12-hour clock of an instant in a zone: midnight is `12:00 AM` and noon `12:00 PM`. */
+export function clock12InZone(ms, tz) {
+  const p = partsInZone(ms, tz);
+  const hour = p.hour % 12 === 0 ? 12 : p.hour % 12;
+  return `${hour}:${pad(p.minute)} ${p.hour < 12 ? "AM" : "PM"}`;
+}
+
+/**
+ * The one compact form the page shows an instant in, in the zone given (the
+ * browser's), on a 12-hour clock and with no zone name: `9:00 AM` on the day of
+ * `nowMs`, `Mon 9:00 AM` within six days either side of it, and `Oct 12, 9:00 AM`
+ * otherwise (`Oct 12, 2025, 9:00 AM` when the year is not the current one).
+ *
+ * @param {number} ms
+ * @param {string} tz
+ * @param {number} nowMs
+ */
+export function stampInZone(ms, tz, nowMs) {
+  const clock = clock12InZone(ms, tz);
+  const date = dateInZone(ms, tz);
+  const today = dateInZone(nowMs, tz);
+  const apart = daysBetween(today, date);
+  if (apart === 0) return clock;
+  const p = partsInZone(ms, tz);
+  if (Math.abs(apart) <= 6) return `${WEEKDAYS[new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay()]} ${clock}`;
+  const year = p.year === partsInZone(nowMs, tz).year ? "" : `, ${p.year}`;
+  return `${MONTHS[p.month - 1]} ${p.day}${year}, ${clock}`;
 }
 
 const INPUT_RE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/;

@@ -40,6 +40,14 @@ export function displayZone(model) {
   return model.browserZone || "UTC";
 }
 
+/**
+ * The zone every DISPLAYED instant is shown in: the browser's, falling back to
+ * the display zone where the browser names none. Inputs keep `displayZone`.
+ */
+export function shownZone(model) {
+  return model.browserZone || displayZone(model);
+}
+
 /** The periods that have ended and wait to be rolled over, in day, week, sprint order. */
 export function endedPeriods(state) {
   return (state?.periods ?? []).filter((p) => p.ended);

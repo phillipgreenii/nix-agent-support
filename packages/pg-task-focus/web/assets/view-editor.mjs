@@ -6,10 +6,10 @@
 import { cyclesOf, editorState, operationPreview } from "./feature-editor.mjs";
 import { batchOf, batchSize, editableFields, effectiveMs, isCorrectable, isRetractable, lookupOf, sentence, shortId } from "./events.mjs";
 import { durationWords } from "./format.mjs";
-import { cycleTypes, displayZone } from "./select.mjs";
+import { cycleTypes, displayZone, shownZone } from "./select.mjs";
 import { h } from "./vdom.mjs";
 import { button, control, errorBox, field } from "./view-common.mjs";
-import { clockInZone, dateInZone, dateTimeInZone } from "./zone.mjs";
+import { clock12InZone, dateInZone, stampInZone } from "./zone.mjs";
 
 const TYPE_CHOICES = [
   ["", "All events"],
@@ -37,7 +37,7 @@ export function editorArea(model, dispatch) {
     "div",
     { class: "editor" },
     h("h2", { id: "editor-h" }, "Editor"),
-    h("p", { class: "hint" }, `Nothing is ever deleted: a fix adds an event that takes an earlier one back, and the original stays in the log. Times are in ${zone}.`),
+    h("p", { class: "hint" }, `Nothing is ever deleted: a fix adds an event that takes an earlier one back, and the original stays in the log. Times are shown in your browser's zone, and a time you fill in is read in ${zone}.`),
     operationsBar(model, dispatch, ed),
     ed.op ? operationForm(model, dispatch, ed, zone) : null,
     filters(model, dispatch, ed),
@@ -103,13 +103,13 @@ function rows(model, dispatch, ed, it, items, look, zone) {
   const main = h(
     "tr",
     { key: it.id, class: `event${it.retracted ? " retracted" : ""}${highlighted ? " highlighted" : ""}`, "data-event-id": it.id, tabindex: "-1", "aria-current": highlighted ? "true" : undefined },
-    h("td", {}, h("time", { datetime: e.effective_at }, dateTimeInZone(ms, zone)), h("span", { class: "sub" }, ` ${zone}`)),
-    h("td", {}, h("span", { class: "type" }, e.type), " ", sentence(it, look, zone), batch ? h("span", { class: "sub" }, ` · batch ${shortId(batch)}, ${batchSize(items, batch)} events`) : null),
+    h("td", {}, h("time", { datetime: e.effective_at }, stampInZone(ms, shownZone(model), model.now))),
+    h("td", {}, h("span", { class: "type" }, e.type), " ", sentence(it, look, shownZone(model), model.now), batch ? h("span", { class: "sub" }, ` · batch ${shortId(batch)}, ${batchSize(items, batch)} events`) : null),
     h("td", {}, flags.join(", ")),
     h("td", { class: "row-actions" }, rowActions(model, dispatch, ed, it, batch, corrected)),
   );
   const out = [main];
-  if (ed.showOriginal[it.id]) out.push(originalRow(it, look, zone, ed.view));
+  if (ed.showOriginal[it.id]) out.push(originalRow(model, it, look, ed.view));
   if (ed.correct?.id === it.id) out.push(correctRow(model, dispatch, ed, it, zone));
   if (ed.rowError?.id === it.id) out.push(h("tr", { key: `${it.id}:err`, class: "row-error" }, h("td", { colspan: "4" }, errorBox(model, ed.rowError.record, { onDismiss: () => dispatch("editor.dismissRowError") }))));
   return out;
@@ -134,7 +134,8 @@ function rowActions(model, dispatch, ed, it, batch, corrected) {
   ];
 }
 
-function originalRow(it, look, zone, view) {
+function originalRow(model, it, look, view) {
+  const zone = shownZone(model);
   const orig = it.original ?? it.event;
   const ms = Date.parse(orig.effective_at);
   return h(
@@ -143,7 +144,7 @@ function originalRow(it, look, zone, view) {
     h(
       "td",
       { colspan: "4" },
-      h("p", {}, h("strong", {}, view === "corrected" ? "As first logged: " : "As logged: "), `${dateTimeInZone(ms, zone)} ${zone}, `, sentence({ ...it, event: orig }, look, zone)),
+      h("p", {}, h("strong", {}, view === "corrected" ? "As first logged: " : "As logged: "), `${stampInZone(ms, zone, model.now)}, `, sentence({ ...it, event: orig }, look, zone, model.now)),
       it.corrected_by.length > 0 ? h("p", { class: "sub" }, `Corrected by ${it.corrected_by.map(shortId).join(", ")}.`) : null,
       it.retracted ? h("p", { class: "sub" }, `Retracted by ${shortId(it.retracted_by ?? "")}.`) : null,
     ),
@@ -244,7 +245,7 @@ function operationForm(model, dispatch, ed, zone) {
       model,
       { id: "op-cycle", label: "Cycle", tag: "select", value: op.cycleId, mutates: true, onchange: (e) => dispatch("op.field", "cycleId", e.target.value) },
       cycles.length === 0 ? h("option", { value: "" }, "No cycles in the log") : null,
-      cycles.map((c) => h("option", { key: c.id, value: c.id }, `${c.title}, started ${dateTimeInZone(c.startedAt, zone)}`)),
+      cycles.map((c) => h("option", { key: c.id, value: c.id }, `${c.title}, started ${stampInZone(c.startedAt, shownZone(model), model.now)}`)),
     ),
     isBreak
       ? [
@@ -253,7 +254,7 @@ function operationForm(model, dispatch, ed, zone) {
         ]
       : field(model, { id: "op-at", label: `The cycle really ended (${zone})`, type: "datetime-local", step: "1", value: op.at, mutates: true, oninput: (e) => dispatch("op.field", "at", e.target.value) }),
     problem ? h("p", { class: "hint", "data-op-problem": "true" }, problem) : null,
-    preview ? timeline(preview, rec, zone) : null,
+    preview ? timeline(preview, rec, shownZone(model), model.now) : null,
     op.problem ? h("p", { class: "problem", role: "alert" }, op.problem) : null,
     op.error ? errorBox(model, op.error, { onRetry: () => dispatch("op.submit") }) : null,
     h(
@@ -265,9 +266,9 @@ function operationForm(model, dispatch, ed, zone) {
   );
 }
 
-/** The before and after of a change: each running segment with its date and zone, and the running time. */
-function timeline(preview, rec, zone) {
-  const seg = (s) => `${dateInZone(s.start, zone)} ${clockInZone(s.start, zone)} to ${s.end === null ? "now" : `${dateInZone(s.end, zone) === dateInZone(s.start, zone) ? "" : `${dateInZone(s.end, zone)} `}${clockInZone(s.end, zone)}`}`;
+/** The before and after of a change: each running segment, with its date when it is not today, and the running time. */
+function timeline(preview, rec, zone, nowMs) {
+  const seg = (s) => `${stampInZone(s.start, zone, nowMs)} to ${s.end === null ? "now" : dateInZone(s.end, zone) === dateInZone(s.start, zone) ? clock12InZone(s.end, zone) : stampInZone(s.end, zone, nowMs)}`;
   const col = (label, side) =>
     h(
       "div",
@@ -279,7 +280,7 @@ function timeline(preview, rec, zone) {
   return h(
     "div",
     { class: "timeline", role: "group", "aria-label": "Before and after" },
-    h("p", { class: "hint" }, `${rec.title}, times in ${zone}. The service checks the change when you confirm it, and refuses it with its reason if it cannot be done.`),
+    h("p", { class: "hint" }, `${rec.title}, times in your browser's zone. The service checks the change when you confirm it, and refuses it with its reason if it cannot be done.`),
     h("div", { class: "timeline-cols" }, col("Before", preview.before), col("After", preview.after)),
     preview.unchanged ? h("p", { class: "hint" }, "This would change nothing.") : null,
   );

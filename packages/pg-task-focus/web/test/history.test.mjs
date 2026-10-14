@@ -38,7 +38,7 @@ test("a deep link to a stopped cycle shows its running time, its note and its pa
   const p = h.page();
   assert.ok(p.byAttr("data-detail", "cycle")[0]);
   assert.ok(p.has("Review cycle"));
-  assert.ok(p.has("Stopped at 2026-10-06 09:40 America/New_York"));
+  assert.ok(p.has("Stopped at Tue 9:40 AM"));
   assert.ok(p.has("Running time 40m"));
   assert.ok(p.has("Note: reviewed it"));
   assert.ok(p.has("pr: 9"));

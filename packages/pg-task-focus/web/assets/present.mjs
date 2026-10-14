@@ -1,24 +1,21 @@
 // The sentences and short texts the views share: a task's status, its due
-// time with its zone, a cycle's status. Pure.
+// time, a cycle's status. Pure.
 
 import { durationWords, relativeDue } from "./format.mjs";
-import { clockInZone, dateInZone, parseInstant } from "./zone.mjs";
+import { parseInstant, stampInZone } from "./zone.mjs";
 
-/** `09:30 America/New_York`, with the date when it is not today in that zone. */
-export function dueText(task, nowMs) {
+/** The due time in the zone given (the browser's), in the page's compact form: `9:30 AM`, `Mon 9:30 AM`, `Oct 12, 9:30 AM`. */
+export function dueText(task, nowMs, zone) {
   const due = parseInstant(task.due);
-  if (due === null) return `${task.due} ${task.due_zone}`;
-  const tz = task.due_zone;
-  const time = `${clockInZone(due, tz)} ${tz}`;
-  return dateInZone(due, tz) === dateInZone(nowMs, tz) ? time : `${dateInZone(due, tz)} ${time}`;
+  return due === null ? task.due : stampInZone(due, zone, nowMs);
 }
 
 /** The task's status in words (never a colour alone). */
-export function statusText(task, nowMs) {
+export function statusText(task, nowMs, zone) {
   switch (task.status) {
     case "completed": {
       const at = parseInstant(task.resolved_at ?? "");
-      return at === null ? "Done" : `Done ${clockInZone(at, task.due_zone)} ${task.due_zone}`;
+      return at === null ? "Done" : `Done ${stampInZone(at, zone, nowMs)}`;
     }
     case "skipped":
       return "Skipped";
@@ -36,10 +33,10 @@ export function statusIcon(task) {
   return { completed: "✓", skipped: "⏭", missed: "✗", withdrawn: "–" }[task.status] ?? "○";
 }
 
-/** `Next: <title>, due <time zone>, in 22m` (or `overdue 12m`). */
-export function nextLine(task, nowMs) {
+/** `Next: <title>, due <time>, in 22m` (or `overdue 12m`). */
+export function nextLine(task, nowMs, zone) {
   const rel = relativeDue(parseInstant(task.due) ?? nowMs, nowMs);
-  return `Next: ${task.title}, due ${dueText(task, nowMs)}, ${rel.text}`;
+  return `Next: ${task.title}, due ${dueText(task, nowMs, zone)}, ${rel.text}`;
 }
 
 /** `Ran 12m of 25m` for a paused cycle. */

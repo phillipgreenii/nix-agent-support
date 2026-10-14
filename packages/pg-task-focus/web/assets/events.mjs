@@ -3,7 +3,7 @@
 // tasks and cycles they name. An item is one entry of GET /api/v1/events:
 // {id, event, original?, corrected_by, retracted, retracted_by?}.
 
-import { clockInZone, dateInZone, parseInstant } from "./zone.mjs";
+import { parseInstant, stampInZone } from "./zone.mjs";
 
 /** The event types that cannot be corrected (the daemon refuses them). */
 const NOT_CORRECTABLE = new Set(["event.corrected", "event.retracted", "batch.committed"]);
@@ -104,12 +104,13 @@ export function lookupOf(items, state) {
 }
 
 /**
- * An event in one sentence, in the zone given.
+ * An event in one sentence, with its times in the zone given (the browser's).
  * @param {object} item
  * @param {ReturnType<typeof lookupOf>} look
  * @param {string} zone
+ * @param {number} nowMs
  */
-export function sentence(item, look, zone) {
+export function sentence(item, look, zone, nowMs) {
   const e = item.event;
   const d = e.data ?? {};
   switch (e.type) {
@@ -121,8 +122,7 @@ export function sentence(item, look, zone) {
       return `Profile set to ${d.profile}`;
     case "task.materialized": {
       const due = parseInstant(d.due);
-      const tz = d.due_rule?.tz ?? zone;
-      return `Task added: ${d.title}, due ${due === null ? d.due : `${dateInZone(due, tz)} ${clockInZone(due, tz)} ${tz}`}`;
+      return `Task added: ${d.title}, due ${due === null ? d.due : stampInZone(due, zone, nowMs)}`;
     }
     case "task.completed":
       return `Completed: ${look.task(d.task_id)}`;

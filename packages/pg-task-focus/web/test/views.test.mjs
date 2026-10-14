@@ -241,7 +241,7 @@ test("the header shows the periods, the profile, what is next, and the ended ban
   assert.ok(p.has("America/New_York"));
   assert.ok(p.has("Profile: normal"));
   assert.ok(p.hasButton("New day: roll over"), "the exact banner string is the next action");
-  assert.ok(p.has("Next: Post the plan for the day, due 09:30 America/New_York, in 30m"));
+  assert.ok(p.has("Next: Post the plan for the day, due 9:30 AM, in 30m"));
   assert.equal(p.buttons("New day: roll over").length, 1, "one control, in the header");
   p.click("New day: roll over");
   assert.equal(calls[0][0], "period.open");
@@ -266,12 +266,12 @@ test("with an empty log the page invites the operator to set up, and shows an em
   assert.deepEqual(calls.map((c) => c[0]), ["period.open", "period.open"]);
 });
 
-test("each period has an empty state, a task shows its status in words and its due time with a zone", () => {
+test("each period has an empty state, a task shows its status in words and its due time in the browser's zone", () => {
   const m = model({ state: state({ tasks: [task({ id: "day:2026-10-07:a", title: "A", status: "completed", resolved_at: "2026-10-07T13:12:00.000Z", due: "2026-10-07T13:00:00.000Z" }), task({ id: "day:2026-10-07:b", title: "B", status: "skipped", reason: "not today" }), task({ id: "day:2026-10-07:c", title: "C", status: "missed" }), task({ id: "day:2026-10-07:d", title: "D", status: "withdrawn" }), task({ id: "day:2026-10-07:e", title: "E", due: "2026-10-07T12:00:00.000Z", overdue: true })] }) });
   const { p } = draw(m);
   const row = (id) => page(p.byAttr("data-task-id", id)[0]);
-  assert.ok(row("day:2026-10-07:a").has("Done 09:12 America/New_York"));
-  assert.ok(row("day:2026-10-07:a").has("due 09:00 America/New_York"));
+  assert.ok(row("day:2026-10-07:a").has("Done 9:12 AM"));
+  assert.ok(row("day:2026-10-07:a").has("due 9:00 AM"));
   assert.ok(row("day:2026-10-07:b").has("Skipped"));
   assert.ok(row("day:2026-10-07:b").has("Reason: not today"));
   assert.ok(row("day:2026-10-07:c").has("Missed"));
@@ -283,6 +283,20 @@ test("each period has an empty state, a task shows its status in words and its d
   assert.equal(row("day:2026-10-07:d").buttons(/Done/).length, 0);
   assert.equal(row("day:2026-10-07:c").buttons(/Done|Skip/).length, 3, "a missed task can still be completed or skipped");
   assert.equal(row("day:2026-10-07:e").buttons(/Done|Skip/).length, 3);
+});
+
+test("a task due 09:00 in New York shows the browser's own zone's time, with no zone name", () => {
+  const due = task({ id: "day:2026-10-07:a", title: "A", due: "2026-10-07T13:00:00.000Z", due_zone: "America/New_York", status: "completed", resolved_at: "2026-10-07T13:12:00.000Z" });
+  const next = task({ id: "day:2026-10-07:b", title: "B", due: "2026-10-07T13:30:00.000Z", due_zone: "America/New_York" });
+  const m = model({ browserZone: "America/Los_Angeles", state: state({ tasks: [due, next], next }) });
+  const { p } = draw(m);
+  const row = page(p.byAttr("data-task-id", "day:2026-10-07:a")[0]);
+  assert.ok(row.has("due 6:00 AM"), row.text());
+  assert.ok(row.has("Done 6:12 AM"), row.text());
+  assert.ok(p.has("Next: B, due 6:30 AM, in 30m"), p.text());
+  assert.doesNotMatch(row.text(), /America|\b\d{2}:\d{2}\b/, "no zone name and no 24-hour clock in the row");
+  const tokyo = draw(model({ browserZone: "Asia/Tokyo", state: state({ tasks: [due, next], next }) })).p;
+  assert.ok(page(tokyo.byAttr("data-task-id", "day:2026-10-07:a")[0]).has("due 10:00 PM"), "the same instant, 13 hours on");
 });
 
 test("Done is one action that raises one intent, with no time", () => {

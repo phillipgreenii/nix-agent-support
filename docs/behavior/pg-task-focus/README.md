@@ -126,7 +126,7 @@ it where there is one:
 - `INV-CLI-1` to `INV-CLI-13` are in [`command-line.md`](command-line.md).
 - `INV-OBS-1` to `INV-OBS-10` are in [`observability.md`](observability.md).
 - `INV-CONN-1` to `INV-CONN-12` are in [`connector.md`](connector.md).
-- `INV-WEB-1` to `INV-WEB-22` are in [`web-ui.md`](web-ui.md).
+- `INV-WEB-1` to `INV-WEB-23` are in [`web-ui.md`](web-ui.md).
 
 ### Operator rulings and where they are stated
 

@@ -158,7 +158,7 @@ function opHarness() {
   return h;
 }
 
-test("Insert break shows the cycle's running time before and after, with the zone, then sends the break", async () => {
+test("Insert break shows the cycle's running time before and after, in the browser's zone, then sends the break", async () => {
   const h = opHarness();
   await h.start();
   await new Promise((r) => setTimeout(r, 5));
@@ -167,13 +167,13 @@ test("Insert break shows the cycle's running time before and after, with the zon
   h.dispatch("op.field", "from", "2026-10-07T12:00");
   h.dispatch("op.field", "to", "2026-10-07T13:00");
   const p = h.page();
-  assert.ok(p.has("times in America/New_York"));
+  assert.ok(p.has("times in your browser's zone"));
   assert.ok(p.has("The service checks the change when you confirm it"));
   const before = page(p.byAttr("data-timeline", "before")[0]);
   const after = page(p.byAttr("data-timeline", "after")[0]);
-  assert.ok(before.has("2026-10-07 09:00 to 13:30"), before.text());
+  assert.ok(before.has("9:00 AM to 1:30 PM"), before.text());
   assert.ok(before.has("Running time 4h30m"));
-  assert.ok(after.has("2026-10-07 09:00 to 12:00") && after.has("2026-10-07 13:00 to 13:30"), after.text());
+  assert.ok(after.has("9:00 AM to 12:00 PM") && after.has("1:00 PM to 1:30 PM"), after.text());
   assert.ok(after.has("Running time 3h30m"));
   await h.dispatch("op.submit");
   const post = h.lastPost();
@@ -203,7 +203,7 @@ test("End at shows the cycle ended earlier and sends a stop with the time", asyn
   await h.dispatch("op.open", "endat");
   h.dispatch("op.field", "at", "2026-10-07T11:00");
   const p = h.page();
-  assert.ok(page(p.byAttr("data-timeline", "after")[0]).has("2026-10-07 09:00 to 11:00"));
+  assert.ok(page(p.byAttr("data-timeline", "after")[0]).has("9:00 AM to 11:00 AM"));
   await h.dispatch("op.submit");
   const post = h.lastPost();
   assert.equal(post.post, "/api/v1/cycles/stop");

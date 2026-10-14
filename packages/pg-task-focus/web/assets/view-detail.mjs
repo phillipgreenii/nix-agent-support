@@ -6,10 +6,10 @@
 import { entityItems, historyOf, routeKey } from "./feature-history.mjs";
 import { effectiveMs, lookupOf, sentence } from "./events.mjs";
 import { durationWords } from "./format.mjs";
-import { cycleOfState, displayZone, taskOfState } from "./select.mjs";
+import { cycleOfState, shownZone, taskOfState } from "./select.mjs";
 import { cycleSegments, runningMs } from "./timeline.mjs";
 import { h } from "./vdom.mjs";
-import { dateTimeInZone } from "./zone.mjs";
+import { stampInZone } from "./zone.mjs";
 
 /** The detail card for the route, or null when the route names nothing the state does not already show. */
 export function entityDetail(model) {
@@ -26,14 +26,14 @@ export function entityDetail(model) {
   if (hist.error) {
     return h("section", { class: "detail" }, h("p", { class: "problem", role: "alert" }, hist.error.detail ?? `The log could not be read for this ${label}.`));
   }
-  const zone = displayZone(model);
+  const zone = shownZone(model);
   const items = entityItems(hist.items, route);
   if (items.length === 0) {
     return h("section", { class: "detail", "data-detail": "unknown" }, h("p", { class: "problem", role: "alert" }, `The log has no ${label} with the id ${route.id}.`), h("p", {}, "The rest of the page is unchanged."));
   }
   const look = lookupOf(hist.items, model.state);
   const live = items.filter((it) => !it.retracted);
-  const lines = live.map((it) => h("li", { key: it.id }, `${dateTimeInZone(effectiveMs(it), zone)} ${zone}: `, sentence(it, look, zone), " ", h("a", { href: `#/events/${encodeURIComponent(it.id)}` }, "In the editor")));
+  const lines = live.map((it) => h("li", { key: it.id }, `${stampInZone(effectiveMs(it), zone, model.now)}: `, sentence(it, look, zone, model.now), " ", h("a", { href: `#/events/${encodeURIComponent(it.id)}` }, "In the editor")));
   return route.name === "task" ? taskDetail(route, live, lines, look) : cycleDetail(model, route, hist, lines, zone);
 }
 
@@ -59,7 +59,7 @@ function cycleDetail(model, route, hist, lines, zone) {
     "section",
     { class: "detail", "data-detail": "cycle", "aria-labelledby": "detail-h", tabindex: "-1" },
     h("h2", { id: "detail-h" }, rec.title || route.id),
-    h("p", {}, rec.stoppedAt !== null ? `Stopped at ${dateTimeInZone(rec.stoppedAt, zone)} ${zone}. ` : "Not running now. ", `Running time ${durationWords(runningMs(rec.segments, model.now) / 1000)}.`),
+    h("p", {}, rec.stoppedAt !== null ? `Stopped at ${stampInZone(rec.stoppedAt, zone, model.now)}. ` : "Not running now. ", `Running time ${durationWords(runningMs(rec.segments, model.now) / 1000)}.`),
     note?.note ? h("p", { class: "note" }, `Note: ${note.note}`) : null,
     note?.kv?.length > 0 ? h("ul", { class: "kv" }, note.kv.map((p, i) => h("li", { key: i }, `${p.key}: ${p.value}`))) : null,
     h("ul", {}, lines),

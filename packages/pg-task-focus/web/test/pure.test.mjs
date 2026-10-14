@@ -85,13 +85,75 @@ test("zones: ordinary conversions, seconds, rejection of what is not a date", ()
   assert.equal(zone.toRFC3339(ms), "2026-10-07T13:30:15.000Z");
   assert.equal(zone.clockInZone(ms, NY), "09:30");
   assert.equal(zone.inputValueSecondsInZone(ms, NY), "2026-10-07T09:30:15");
-  assert.equal(zone.dateTimeInZone(ms, "UTC"), "2026-10-07 13:30");
+  assert.equal(zone.clock12InZone(ms, "UTC"), "1:30 PM");
   assert.equal(zone.instantFromInput("2026-02-31T10:00", NY), null);
   assert.equal(zone.instantFromInput("tomorrow", NY), null);
   assert.equal(zone.instantFromInput("2026-10-07T09:30", "Not/AZone"), null);
   assert.equal(zone.isZone("EST5EDT"), true);
   assert.equal(zone.isZone(""), false);
   assert.equal(zone.isZone("Not/AZone"), false);
+});
+
+test("the 12-hour clock: am and pm, midnight and noon", () => {
+  const at = (iso) => Date.parse(iso);
+  assert.equal(zone.clock12InZone(at("2026-10-07T00:00:00Z"), "UTC"), "12:00 AM", "midnight is 12 AM, not 0");
+  assert.equal(zone.clock12InZone(at("2026-10-07T00:05:00Z"), "UTC"), "12:05 AM");
+  assert.equal(zone.clock12InZone(at("2026-10-07T09:00:00Z"), "UTC"), "9:00 AM", "no leading zero on the hour");
+  assert.equal(zone.clock12InZone(at("2026-10-07T11:59:00Z"), "UTC"), "11:59 AM");
+  assert.equal(zone.clock12InZone(at("2026-10-07T12:00:00Z"), "UTC"), "12:00 PM", "noon is 12 PM");
+  assert.equal(zone.clock12InZone(at("2026-10-07T13:30:00Z"), "UTC"), "1:30 PM");
+  assert.equal(zone.clock12InZone(at("2026-10-07T23:59:00Z"), "UTC"), "11:59 PM");
+  assert.equal(zone.clock12InZone(at("2026-10-07T13:30:00Z"), NY), "9:30 AM", "read in the zone named");
+});
+
+test("the compact stamp: today, within the week, otherwise the date", () => {
+  const at = (iso) => Date.parse(iso);
+  const now = at("2026-10-07T13:00:00Z"); // Wednesday 9:00 AM in New York
+  const stamp = (iso, tz = NY) => zone.stampInZone(at(iso), tz, now);
+  assert.equal(stamp("2026-10-07T13:30:00Z"), "9:30 AM", "today is the clock alone");
+  assert.equal(stamp("2026-10-07T23:30:00Z"), "7:30 PM", "later today");
+  assert.equal(stamp("2026-10-07T04:00:00Z"), "12:00 AM", "midnight today");
+  assert.equal(stamp("2026-10-06T13:40:00Z"), "Tue 9:40 AM", "yesterday is named by its weekday");
+  assert.equal(stamp("2026-10-13T13:00:00Z"), "Tue 9:00 AM", "six days ahead is still the week");
+  assert.equal(stamp("2026-10-01T13:00:00Z"), "Thu 9:00 AM", "six days back is still the week");
+  assert.equal(stamp("2026-10-14T13:00:00Z"), "Oct 14, 9:00 AM", "a week ahead is the date");
+  assert.equal(stamp("2026-09-30T13:00:00Z"), "Sep 30, 9:00 AM", "a week back is the date");
+  assert.equal(stamp("2027-01-05T14:00:00Z"), "Jan 5, 2027, 9:00 AM", "another year names the year");
+  assert.equal(stamp("2025-12-31T14:00:00Z"), "Dec 31, 2025, 9:00 AM");
+  for (const iso of ["2026-10-07T13:30:00Z", "2026-10-06T13:40:00Z", "2026-11-20T13:00:00Z"]) {
+    assert.doesNotMatch(stamp(iso), /America|Z$|\b1[3-9]:|\b2[0-3]:/, "no zone name and no 24-hour clock");
+  }
+});
+
+test("the compact stamp reads the instant in the zone given, not the rule's zone", () => {
+  const at = (iso) => Date.parse(iso);
+  const due = at("2026-10-07T13:00:00Z"); // 09:00 America/New_York
+  const now = at("2026-10-07T12:00:00Z");
+  assert.equal(zone.stampInZone(due, NY, now), "9:00 AM");
+  assert.equal(zone.stampInZone(due, "America/Los_Angeles", now), "6:00 AM");
+  assert.equal(zone.stampInZone(due, "Europe/London", now), "2:00 PM");
+  assert.equal(zone.stampInZone(due, "Asia/Kolkata", now), "6:30 PM", "a half-hour zone");
+  // The zone moves the date as well as the clock: 11 PM Wednesday in New York is Thursday noon in Tokyo.
+  const late = at("2026-10-08T03:00:00Z");
+  const noon = at("2026-10-07T13:00:00Z");
+  assert.equal(zone.stampInZone(late, NY, noon), "11:00 PM");
+  assert.equal(zone.stampInZone(late, "Asia/Tokyo", noon), "Thu 12:00 PM");
+});
+
+test("the compact stamp across daylight saving", () => {
+  const at = (iso) => Date.parse(iso);
+  // Clocks fall back at 2026-11-01 02:00 EDT: 1:30 AM occurs twice, an hour apart.
+  const now = at("2026-11-01T12:00:00Z");
+  assert.equal(zone.stampInZone(at("2026-11-01T05:30:00Z"), NY, now), "1:30 AM", "first 1:30 (EDT)");
+  assert.equal(zone.stampInZone(at("2026-11-01T06:30:00Z"), NY, now), "1:30 AM", "second 1:30 (EST)");
+  assert.equal(zone.stampInZone(at("2026-11-01T14:00:00Z"), NY, now), "9:00 AM", "9 AM after the change is 14:00Z");
+  assert.equal(zone.stampInZone(at("2026-10-31T13:00:00Z"), NY, now), "Sat 9:00 AM", "9 AM before the change is 13:00Z");
+  // Clocks spring forward at 2026-03-08 02:00 EST: 02:xx does not exist.
+  const spring = at("2026-03-08T12:00:00Z");
+  assert.equal(zone.stampInZone(at("2026-03-08T06:59:00Z"), NY, spring), "1:59 AM");
+  assert.equal(zone.stampInZone(at("2026-03-08T07:00:00Z"), NY, spring), "3:00 AM", "the skipped hour is not shown");
+  // A weekday across the change keeps the wall-clock hour.
+  assert.equal(zone.stampInZone(at("2026-11-02T14:00:00Z"), NY, at("2026-10-31T13:00:00Z")), "Mon 9:00 AM");
 });
 
 test("civil date arithmetic", () => {
@@ -191,11 +253,11 @@ const ev = (id, type, at, data, extra = {}) => ({ id, event: { v: 1, id, at, eff
 test("an event is one sentence, and says the task's title and not its id", () => {
   const items = [ev("01JM", "task.materialized", "2026-10-07T12:00:00.000Z", { task_id: "day:2026-10-07:post-plan", title: "Post the plan", due: "2026-10-07T13:30:00.000Z", due_rule: { at: "09:30", tz: NY } })];
   const look = lookupOf(items, null);
-  assert.match(sentence(items[0], look, NY), /^Task added: Post the plan, due 2026-10-07 09:30 America\/New_York$/);
+  assert.match(sentence(items[0], look, NY, Date.parse("2026-10-07T12:00:00.000Z")), /^Task added: Post the plan, due 9:30 AM$/);
   const done = ev("01JD", "task.completed", "2026-10-07T13:40:00.000Z", { task_id: "day:2026-10-07:post-plan" });
-  assert.equal(sentence(done, look, NY), "Completed: Post the plan");
+  assert.equal(sentence(done, look, NY, 0), "Completed: Post the plan");
   const skip = ev("01JS", "task.skipped", "2026-10-07T13:40:00.000Z", { task_id: "x:y", reason: "not today" });
-  assert.equal(sentence(skip, look, NY), "Skipped: x:y (reason: not today)");
+  assert.equal(sentence(skip, look, NY, 0), "Skipped: x:y (reason: not today)");
 });
 
 test("which events can be corrected and retracted, and the fields of each", () => {

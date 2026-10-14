@@ -202,13 +202,13 @@ test("the period modal bootstraps the day, week and sprint after a preview", asy
   assert.equal(model.state.profile, "normal");
 });
 
-test("the checklists show the tasks with their due times and zones, and what is next", async () => {
+test("the checklists show the tasks with their due times in the browser zone, and what is next", async () => {
   const p = P();
   for (const t of ["Plan the day", "Post the plan for the day", "Post the end-of-day summary", "Write the weekly status update", "Do the capacity check and post planning input"]) assert.ok(p.has(t), t);
-  assert.ok(p.has("due 09:00 America/New_York"));
+  assert.ok(p.has("due 9:00 AM"));
   assert.ok(p.has("Day: 2026-10-07 (zq-sentinel-label), America/New_York"));
   assert.ok(p.has("Start of day") && p.has("End of day"));
-  assert.match(p.text(), /Next: [A-Z].*, due 09:00 America\/New_York, in 10m/);
+  assert.match(p.text(), /Next: [A-Z].*, due 9:00 AM, in 10m/);
   assert.ok(p.has("No cycle is running. Start one below."));
   assert.ok(p.has("Profile: normal"));
 });
@@ -252,7 +252,7 @@ test("Done at sends the chosen time, read in the zone the page names", async () 
   await P().submitOf("Done at a time: Write the weekly status update");
   await until(() => model.state.tasks.find((x) => x.id === t.id)?.status === "completed", "completed at a chosen time");
   assert.equal(model.state.tasks.find((x) => x.id === t.id).resolved_at, "2026-10-07T12:55:00.000Z");
-  assert.ok(P().has("Done 08:55 America/New_York"));
+  assert.ok(P().has("Done 8:55 AM"));
 });
 
 test("a cycle starts from the form, runs, pauses, and a repeated pause is a quiet no-op", async () => {
@@ -522,7 +522,7 @@ test("Insert break shows the cycle's running time before and after, then the dae
   const after = page(p.byAttr("data-timeline", "after")[0]);
   assert.ok(before.has("Running time 45m"), before.text());
   assert.ok(after.has("Running time 35m"), after.text());
-  assert.ok(after.has("2026-10-07 09:40 to 09:50") && after.has("2026-10-07 10:00 to 10:05"), after.text());
+  assert.ok(after.has("9:40 AM to 9:50 AM") && after.has("10:00 AM to 10:05 AM"), after.text());
   assert.ok(p.has("The service checks the change when you confirm it"));
   await dispatch("op.submit");
   await until(() => model.ui.editor.op === null, "the break accepted");
@@ -566,7 +566,7 @@ test("a retraction the daemon refuses names the events it depends on, as links i
 test("deep links: a stopped cycle and a task of an earlier day show the log's account; the current ones are focused", async () => {
   await goto(`#/cycles/${ctx.dwId}`);
   await until(() => P().byAttr("data-detail", "cycle").length === 1, "the cycle's detail");
-  assert.ok(P().has("Stopped at 2026-10-07 10:05 America/New_York"));
+  assert.ok(P().has("Stopped at Wed 10:05 AM"));
   assert.ok(P().has("Running time 35m"), "the break reduced it");
   assert.ok(P().has(`Note: ${NOTE}`));
   assert.ok(P().has("ticket: ABC-1"));

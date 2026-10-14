@@ -7,7 +7,7 @@
 import { breakCycle, correctEvent, endCycleAt, retract } from "./actions.mjs";
 import { batchOf, editableFields, effectiveMs, isCorrectable, lookupOf, sentence } from "./events.mjs";
 import { isBlank } from "./format.mjs";
-import { displayZone } from "./select.mjs";
+import { displayZone, shownZone } from "./select.mjs";
 import { cycleSegments, previewChange } from "./timeline.mjs";
 import { addDays, dateInZone, inputValueSecondsInZone, instantFromInput, parseInstant, toRFC3339 } from "./zone.mjs";
 
@@ -338,7 +338,7 @@ export function registerEditor(store) {
         ed(m).rowError = null;
         m.ui.editor.rowErrorFor = item.id;
       });
-      await store.perform(retract(item, batch, "", sentence(item, look, displayZone(model))), { errorTo: setErr("row") });
+      await store.perform(retract(item, batch, "", sentence(item, look, shownZone(model), model.now)), { errorTo: setErr("row") });
     },
     "editor.dismissRowError": () =>
       store.update((m) => {

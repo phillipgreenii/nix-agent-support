@@ -16,7 +16,7 @@ obeys are in [`periods-and-rollover.md`](periods-and-rollover.md), [`cycles-and-
 - **`STORY-WEB-SEE-AND-ACT`** <!-- uuid: ecd5948f-6094-4b73-9f4c-2b44eb66c911 --> — As the operator, I want one page that shows what is due, what is
   overdue and what is running, and lets me complete or skip a task, or start, pause, switch and stop a
   cycle, in one action each, so the routine costs me no thought. _(→ `JOURNEY-WEB-TASK-DONE`,
-  `JOURNEY-WEB-INTERRUPT`; `INV-WEB-9`, `INV-WEB-10`, `INV-WEB-11`, `INV-WEB-12`, `INV-WEB-13`.)_
+  `JOURNEY-WEB-INTERRUPT`; `INV-WEB-9`, `INV-WEB-10`, `INV-WEB-11`, `INV-WEB-12`, `INV-WEB-13`, `INV-WEB-23`.)_
 - **`STORY-WEB-LIVE`** <!-- uuid: 80b9657b-5dad-4024-975f-d53d9d5b008b --> — As the operator who also uses the command line and the menu bar, I want an
   open tab to show a change made anywhere at once, and to say so when it has lost the service, so the page
   is never quietly out of date. _(→ `JOURNEY-WEB-LIVE`; `INV-WEB-3`.)_
@@ -69,10 +69,10 @@ Extensions:
 ### `JOURNEY-WEB-TASK-DONE` — completing and skipping a task <!-- uuid: dccfca8d-167e-4844-84f5-b4b8d715db89 -->
 
 **Primary actor:** `ACTOR-OPERATOR`. **Other actors:** `ACTOR-CLIENT`. _Requires:_ `INV-WEB-9`, `INV-WEB-10`,
-`INV-WEB-11`. _Includes:_ none.
+`INV-WEB-11`, `INV-WEB-23`. _Includes:_ none.
 
-1. The operator opens the page. Each checklist lists its tasks with the due time and its zone, and the
-   header says what is next (`INV-WEB-9`).
+1. The operator opens the page. Each checklist lists its tasks with the due time in the browser's zone, and
+   the header says what is next (`INV-WEB-9`, `INV-WEB-23`).
 2. The operator presses Done on a task. The task is completed now, with no further input, and an Undo
    appears for ten seconds (`INV-WEB-10`, `INV-WEB-11`).
 3. For another task the operator presses Skip, types a reason and confirms; the Undo appears again.
@@ -183,7 +183,7 @@ Extensions:
 1. In the editor the operator sees the corrected events, with the original one click away on any event that
    was fixed.
 2. The operator chooses "Insert break", names the cycle and the two times in the zone shown, and sees the
-   cycle's running time before and after, with the date and zone (`INV-WEB-17`).
+   cycle's running time before and after, with the date when it is not today (`INV-WEB-17`, `INV-WEB-23`).
 3. The operator confirms. The service accepts, and the editor shows the new pause and resume as one batch
    that can be retracted whole (`INV-WEB-16`).
 
@@ -234,7 +234,7 @@ Extensions:
 **Counterparty:** `ACTOR-OPERATOR` (kind: actor; essential participant: the page exists to be used).
 **What crosses in:** the operator's actions, the state, configuration, event listing and stream of
 `INTF-API`, and the operator's clock and zone as the browser knows them. **What crosses out:** requests of
-`INTF-API` and nothing else. **What must hold:** `INV-WEB-1` to `INV-WEB-22`.
+`INTF-API` and nothing else. **What must hold:** `INV-WEB-1` to `INV-WEB-23`.
 
 ## Invariants
 
@@ -282,11 +282,11 @@ Extensions:
 ### Header, periods and profile
 
 - **`INV-WEB-7`** <!-- uuid: 97dc1755-0403-43ec-995d-da6b38a9c5b8 --> — The header MUST show the current day, week and sprint with their dates, labels and
-  zone, the active profile, and the next task as `Next: <title>, due <HH:MM> <zone>, in <time>` (or that
+  zone, the active profile, and the next task as `Next: <title>, due <time>, in <time>` (or that
   nothing is due). For a period that has ended it MUST show exactly `New day: roll over`, `New week: roll over`
   or `New sprint: roll over` as the next action and tell assistive technology once. With an empty log it MUST
-  invite the operator to set the day, week and sprint. A due time MUST always appear with its zone
-  identifier. _(Realizes `INV-PERIOD-16` and `INV-PERIOD-25` for the web client.)_
+  invite the operator to set the day, week and sprint. A due time MUST appear in the form of
+  `INV-WEB-23`. _(Realizes `INV-PERIOD-16` and `INV-PERIOD-25` for the web client.)_
 - **`INV-WEB-8`** <!-- uuid: 40cb2f2d-e02a-45d1-8a65-e328d6d65c75 --> — The period modal MUST: propose today in the chosen zone as the start of each kind
   and, for a week or sprint, an end of the start plus the length of the previous period; default the zone
   from the browser and let the operator change it; take several ended kinds as one confirmation; allow
@@ -304,7 +304,7 @@ Extensions:
 ### Checklists
 
 - **`INV-WEB-9`** <!-- uuid: 4aa68838-819d-4dea-a449-517bfbef6393 --> — The page MUST list, for each current period, its tasks in the service's order,
-  grouped, each with its status in words, its due time and zone, and, when overdue, a text and an icon and
+  grouped, each with its status in words, its due time (`INV-WEB-23`), and, when overdue, a text and an icon and
   never colour alone. Every area MUST have an explicit empty state, and a period that has ended MUST say so
   where its tasks are.
 - **`INV-WEB-10`** <!-- uuid: c045a049-f808-45fb-9822-4a48599cc9e6 --> — Completing an open or missed task MUST take one action and default to now, sending no
@@ -346,7 +346,7 @@ Extensions:
   names events MUST link each of them into the editor. _(Realizes `INV-CORR-8` to `INV-CORR-13`,
   `INV-CORR-16`.)_
 - **`INV-WEB-17`** <!-- uuid: 05270498-d500-4935-b30b-41a9b33e045b --> — "Insert break (from, to)" and "End at (time)" MUST read the times in a zone the page
-  names, show a before-and-after timeline of the cycle's running segments with the date and the zone
+  names, show a before-and-after timeline of the cycle's running segments with the date when it is not today
   before the operator confirms, and say that the service checks the change when it is confirmed; the
   refusal, with its own sentence, MUST leave nothing changed. _(Realizes `INV-CORR-15`, `INV-CORR-17`.)_
 - **`INV-WEB-18`** <!-- uuid: 57cb4d16-7fc2-48df-a9c8-f1e63a65105d --> — A correction MUST be able to change an event's time and its editable fields, including
@@ -372,7 +372,18 @@ Extensions:
 - **`INV-WEB-21`** <!-- uuid: d08bc753-80e6-4954-be94-52c5ee750180 --> — Every time the operator types MUST be read in a zone the page names beside the input
   (the active day period's zone), converted by the rules of `INV-TIME-6` and `INV-TIME-7` (a time that does
   not exist resolves to the first valid instant after the gap, a time that occurs twice to its earlier
-  occurrence); every time the page shows MUST carry its zone.
+  occurrence); every time the page shows follows `INV-WEB-23`.
+- **`INV-WEB-23`** <!-- uuid: a6d7d849-bcb0-4071-8003-462d4fdc21ca --> — Every instant the page SHOWS (a due time, a completion time, an event's time, a cycle's
+  stop time, a timeline segment, the time of the last state when the connection is lost) MUST be shown in
+  the browser's zone, on a 12-hour clock with `AM` or `PM`, and MUST NOT carry a zone name or a 24-hour clock.
+  The form is one compact form everywhere: the time alone (`9:00 AM`) on today's date, the weekday and time
+  (`Mon 9:00 AM`) within six days either side of today, and otherwise the month, day and time
+  (`Oct 12, 9:00 AM`, with the year when it is not the current one). Not shown this way, because they are
+  zone-explicit by design: the value of a time the operator types (24-hour, read in the zone named beside
+  the input, `INV-WEB-21`), the zone field of the period modal, and the rule text of a period or a day.
+  _(Operator ruling, Phillip, 2026-10-13, bead `pg2-r5xy1`: "the date and times should be using the current
+  timezone of the browser. it should also be using am/pm, not 24 hour." Supersedes the web client's part of
+  `INV-TIME-8`.)_
 - **`INV-WEB-22`** <!-- uuid: d156371e-d4f5-45c9-8790-8d9957a2f2b7 --> — The page MUST NOT emit telemetry, write to the console, use browser storage, a beacon
   or a cookie, or request anything but the service's own API and assets; free text the operator types
   (a reason, a note, a label, a value) MUST leave the page only as the body of a request to the service,

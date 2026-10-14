@@ -4,10 +4,10 @@
 
 import { relativeDue } from "./format.mjs";
 import { nextLine } from "./present.mjs";
-import { KINDS, KIND_TITLES, periodOf, readOnlySentence } from "./select.mjs";
+import { KINDS, KIND_TITLES, periodOf, readOnlySentence, shownZone } from "./select.mjs";
 import { h } from "./vdom.mjs";
 import { button, errorBox } from "./view-common.mjs";
-import { clockInZone, parseInstant } from "./zone.mjs";
+import { parseInstant, stampInZone } from "./zone.mjs";
 
 /** The banners: read-only, connection, a quiet notice, and the last failed request. */
 export function banners(model, dispatch) {
@@ -35,8 +35,8 @@ function connectionBanner(model, dispatch) {
   if (!model.loaded) {
     text = e ? e.detail : "Reading the state from the service…";
   } else {
-    const when = clockInZone(model.receivedAt, model.browserZone || "UTC");
-    text = `The connection to the service was lost. This is the state it had at ${when}${model.browserZone ? ` ${model.browserZone}` : " UTC"}; it will update when the service is back.`;
+    const when = stampInZone(model.receivedAt, shownZone(model), model.now);
+    text = `The connection to the service was lost. This is the state it had at ${when}; it will update when the service is back.`;
   }
   return h(
     "p",
@@ -99,7 +99,7 @@ function periodItem(model, dispatch, p, kind) {
 function nextItem(model, st) {
   if (!st.next) return h("p", { class: "next", "data-next": "none" }, "Nothing is due.");
   const overdue = relativeDue(parseInstant(st.next.due) ?? model.now, model.now).overdue;
-  return h("p", { class: overdue ? "next next-overdue" : "next", "data-next": st.next.id }, overdue ? h("span", { "aria-hidden": "true" }, "⚠ ") : null, nextLine(st.next, model.now));
+  return h("p", { class: overdue ? "next next-overdue" : "next", "data-next": st.next.id }, overdue ? h("span", { "aria-hidden": "true" }, "⚠ ") : null, nextLine(st.next, model.now, shownZone(model)));
 }
 
 /** The navigation between the two areas. */

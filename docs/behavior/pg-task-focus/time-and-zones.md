@@ -34,7 +34,7 @@ _Requires:_ `INV-TIME-1`, `INV-TIME-2`, `INV-TIME-6`, `INV-TIME-7`, `INV-TIME-8`
    (`INV-TIME-6`). It is not shifted by the length of the gap.
 3. On the autumn day the clocks go back, a due time of 01:30 happens twice and resolves to the
    earlier occurrence (`INV-TIME-7`).
-4. Every client shows the due time together with its zone identifier (`INV-TIME-8`).
+4. Every client shows the due time together with its zone identifier (`INV-TIME-8`); the web client instead shows it in the browser's zone (`INV-WEB-23`).
 
 Extensions:
 
@@ -115,7 +115,7 @@ link). **What must hold:** `INV-TIME-1` to `INV-TIME-10`.
   back) MUST resolve to its earlier occurrence, implemented and tested explicitly.
 - **`INV-TIME-8`** <!-- uuid: 55b49c89-1686-4ac3-a1fb-491e42ce7b68 --> — A period's dates are civil dates with no zone. A due rule
   resolves a civil date of its period in the rule's own zone; a rule whose zone differs from the
-  period's zone is legal. Every client MUST show every due time together with its zone identifier.
+  period's zone is legal. Every client MUST show every due time together with its zone identifier, except the web client, which shows instants in the browser's zone with no zone name (`INV-WEB-23`; operator ruling, Phillip, 2026-10-13).
 - **`INV-TIME-9`** <!-- uuid: 1b0a1bb7-4031-4d5a-b25b-001e55a307a7 --> — A period MUST store the zone in force when it was created,
   and that zone decides one thing: which civil date "today" is, for the "the date has moved on"
   banner. "Today" is therefore read in the period's zone, never the machine's zone. A request that
