@@ -1,0 +1,34 @@
+{
+  "HeadSHA": "head1",
+  "Reviews": [
+    {
+      "ID": "PRR_low",
+      "DatabaseID": 11,
+      "URL": "https://example.invalid/r/11",
+      "CommitOID": "head0",
+      "Body": "low body",
+      "Comments": [
+        {
+          "ID": "c1",
+          "DatabaseID": 1,
+          "Path": "a.go",
+          "Line": 3,
+          "Body": "x",
+          "OriginalCommitOID": "head1",
+          "ReviewThreadID": "PRRT_1"
+        }
+      ]
+    },
+    {
+      "ID": "PRR_high",
+      "DatabaseID": 22,
+      "URL": "https://example.invalid/r/22",
+      "CommitOID": "head0",
+      "Body": "high body",
+      "Comments": []
+    }
+  ],
+  "Submitted": [
+    { "ID": "PRR_done", "DatabaseID": 9, "CommitOID": "head0", "Comments": [] }
+  ]
+}
