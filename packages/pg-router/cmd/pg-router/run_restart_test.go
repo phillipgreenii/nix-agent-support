@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -15,6 +18,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/event"
+	"github.com/phillipgreenii/pg-router/internal/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/metrics"
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
@@ -100,6 +104,9 @@ type restartDaemon struct {
 	drain   time.Duration // the shutdown drain timeout of a role that does not survive
 	queries query.SourceSet
 	mp      metric.MeterProvider // nil: the daemon's own default provider
+	// eventLog opens <logDir>/events.jsonl for the daemon, as the production
+	// wiring does, so a test can read the dispatch rows it writes.
+	eventLog bool
 }
 
 // run starts the daemon and returns its exit code on the channel.
@@ -115,6 +122,14 @@ func (d restartDaemon) run(ctx context.Context, t *testing.T) <-chan int {
 	roleDirWith(t, d.roleCfg)(&cfg)
 	h := &wireclient.Client{Runner: d.runner, Command: func(_ roles.Role, sub string) ([]string, error) { return []string{"fake-handler", sub}, nil }}
 	o := &orchestrator.Orchestrator{Cfg: cfg, Handler: h, Bindings: core.NewBindings("t1")}
+	if d.eventLog {
+		lw, err := eventlog.New(filepath.Join(d.logDir, "events.jsonl"))
+		if err != nil {
+			t.Fatalf("open the event log: %v", err)
+		}
+		t.Cleanup(func() { _ = lw.Close() })
+		o.Log = lw
+	}
 	ch := make(chan int, 1)
 	go func() {
 		ch <- runLongRunningBody(ctx, preparedRun{cfg: cfg, o: o, cleanup: func() {}, declaredRoles: cfg.Roles}, d.drain)
@@ -256,5 +271,238 @@ func TestRunLongRunning_noStartupDispatchPassOnceShutdownWasRequested(t *testing
 	awaitExit(t, done, "the daemon")
 	if n, steps, _ := r.snapshot(); n != 0 {
 		t.Fatalf("%d dispatch(es) offered after shutdown was requested (steps %v), want none", n, steps)
+	}
+}
+
+// The adoption tests below: the new daemon's handler adopts the session the old daemon
+// left running and reports the dispatch's own start (DEC-EVENT-5, bead pg2-dm6de), so a
+// restart neither lengthens the wait nor shortens the run.
+
+// restartHole is how long the surviving dispatch keeps running between daemon one's exit
+// and daemon two's start: the span a re-timed start loses, long enough that scheduling
+// jitter cannot hide it.
+const restartHole = 500 * time.Millisecond
+
+// instantRunner is a shutdownRunner that notes when its first dispatch began: the
+// dispatch's own start, which the next daemon's adopting handler reports.
+type instantRunner struct {
+	*shutdownRunner
+	mu    sync.Mutex
+	first time.Time
+}
+
+func (r *instantRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
+	if argv[len(argv)-1] == "dispatch" {
+		r.mu.Lock()
+		if r.first.IsZero() {
+			r.first = time.Now()
+		}
+		r.mu.Unlock()
+	}
+	return r.shutdownRunner.Run(ctx, argv, stdin)
+}
+
+func (r *instantRunner) firstDispatch() time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.first
+}
+
+// adoptingRunner is the second daemon's handler: it blocks in dispatch until released and
+// then replies as a handler that adopted the session does, naming the dispatch's original
+// start in startedAt. An empty startedAt leaves the field out, as every other handler does.
+type adoptingRunner struct {
+	started   chan struct{} // closed on the first dispatch call
+	release   chan struct{} // close to let the dispatch reply
+	startedAt string
+	once      sync.Once
+}
+
+func (r *adoptingRunner) Run(ctx context.Context, argv []string, _ []byte) ([]byte, int, error) {
+	if argv[len(argv)-1] != "dispatch" {
+		return []byte(`{"schemaVersion":"1","id":"x","outcome":"ok"}`), 0, nil
+	}
+	r.once.Do(func() { close(r.started) })
+	select {
+	case <-r.release:
+		reply := map[string]any{"schemaVersion": "1", "id": "x", "outcome": "delivered"}
+		if r.startedAt != "" {
+			reply["startedAt"] = r.startedAt
+		}
+		body, err := json.Marshal(reply)
+		return body, 0, err
+	case <-ctx.Done():
+		return nil, 0, ctx.Err()
+	}
+}
+
+// awaitJSONLine polls a JSONL file a running daemon appends to until a line satisfying
+// match turns up. The file is read as bytes, not opened as a queue log, whose lock the
+// daemon holds; a line still being written fails to decode and is skipped.
+func awaitJSONLine(t *testing.T, path, why string, match func(map[string]any) bool) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if data, err := os.ReadFile(path); err == nil {
+			for _, line := range bytes.Split(data, []byte("\n")) {
+				var m map[string]any
+				if json.Unmarshal(line, &m) == nil && match(m) {
+					return m
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: no matching line in %s", why, path)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// adoptionRestart is what a daemon restart over a surviving dispatch left behind.
+type adoptionRestart struct {
+	firstStart  time.Time // when daemon one's handler began the dispatch
+	restarted   time.Time // just before daemon two was started
+	rowSeen     time.Time // when daemon two's dispatch row was read
+	acceptStart time.Time // the accept record's startedAt
+	acceptAt    time.Time // the accept record's settle instant
+	row         map[string]any
+}
+
+// restartOverSurvivingDispatch runs two daemons over one queue log. Daemon one offers the
+// event and exits while its handler keeps working; daemon two re-offers it to a handler
+// that adopts it and, when handlerReportsStart, replies with the instant daemon one's
+// handler began. Daemon two's first producer tick cannot finish, so the re-offer, and the
+// gauge reading 1, can only come from the startup dispatch pass.
+func restartOverSurvivingDispatch(t *testing.T, handlerReportsStart bool) adoptionRestart {
+	t.Helper()
+	logDir := shortDir(t)
+	seedDurableQueue(t, logDir, eventqueue.Event{ID: "survivor-1", Type: "t1", ExpiresAt: time.Now().Add(time.Hour)})
+
+	r1 := &instantRunner{shutdownRunner: newShutdownRunner()}
+	t.Cleanup(func() { close(r1.release) }) // let the old handler's goroutine end last
+	ctx1, signal1 := context.WithCancel(context.Background())
+	t.Cleanup(signal1)
+	done1 := restartDaemon{logDir: logDir, runner: r1, roleCfg: survivingRoleJSON, drain: time.Minute}.run(ctx1, t)
+	awaitClosed(t, r1.started, 20*time.Second, "daemon one never offered the queued event")
+	firstStart := r1.firstDispatch()
+	signal1()
+	awaitExit(t, done1, "daemon one")
+	time.Sleep(restartHole) // the dispatch keeps running while no daemon is up
+
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	slow := newBlockingSource()
+	r2 := &adoptingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	if handlerReportsStart {
+		r2.startedAt = firstStart.UTC().Format(time.RFC3339Nano)
+	}
+	ctx2, signal2 := context.WithCancel(context.Background())
+	restarted := time.Now()
+	done2 := restartDaemon{
+		logDir: logDir, runner: r2, roleCfg: survivingRoleJSON, drain: time.Minute,
+		queries: query.SourceSet{{Name: "slow", Query: slow}}, mp: mp, eventLog: true,
+	}.run(ctx2, t)
+	var releaseOnce, stopOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(r2.release) }) }
+	t.Cleanup(func() {
+		stopOnce.Do(func() {
+			close(slow.release)
+			release()
+			signal2()
+			awaitExit(t, done2, "daemon two")
+		})
+	})
+	awaitClosed(t, slow.entered, 20*time.Second, "daemon two never began its first producer tick")
+	awaitClosed(t, r2.started, 10*time.Second,
+		"the surviving dispatch was not re-offered although the first producer tick was already running: the first dispatch pass must precede it")
+
+	// The role reads in flight from the startup pass, not 0 until the tick ends.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		v, ok := readInFlight(t, reader, "r1")
+		if ok && v == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s{role=r1} = %d (series present=%v) while the re-offered dispatch is running, want 1", metrics.MetricListenerInFlight, v, ok)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// The adopting handler finishes: the offer settles, and daemon two writes its
+	// dispatch row (events.jsonl) and its accept record (queue.jsonl).
+	release()
+	row := awaitJSONLine(t, filepath.Join(logDir, "events.jsonl"), "daemon two never wrote the dispatch row",
+		func(m map[string]any) bool { return m["kind"] == "dispatch" })
+	rowSeen := time.Now()
+	accept := awaitJSONLine(t, filepath.Join(logDir, "queue.jsonl"), "daemon two never wrote the accept record",
+		func(m map[string]any) bool { return m["op"] == "accept" && m["eventId"] == "survivor-1" })
+	instant := func(field string) time.Time {
+		s, _ := accept[field].(string)
+		v, err := time.Parse(time.RFC3339Nano, s)
+		if err != nil {
+			t.Fatalf("accept record %s = %q: %v", field, s, err)
+		}
+		return v
+	}
+	return adoptionRestart{
+		firstStart: firstStart, restarted: restarted, rowSeen: rowSeen,
+		acceptStart: instant("startedAt"), acceptAt: instant("at"), row: row,
+	}
+}
+
+func durationMs(t *testing.T, row map[string]any) time.Duration {
+	t.Helper()
+	ms, ok := row["duration_ms"].(float64)
+	if !ok {
+		t.Fatalf("the dispatch row has no duration_ms: %v", row)
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+// A handler that adopted the surviving session reports the dispatch's own start, and
+// the new daemon uses it: the accept record and the dispatch row carry daemon one's
+// instant, and the run spans the restart instead of starting at the re-offer.
+func TestRunLongRunning_restartAdoptedDispatchKeepsItsOriginalStart(t *testing.T) {
+	r := restartOverSurvivingDispatch(t, true)
+
+	if !r.acceptStart.Equal(r.firstStart) {
+		t.Fatalf("accept startedAt = %v, want the reported start %v (the dispatch's own, %v before the restart ended)", r.acceptStart, r.firstStart, r.restarted.Sub(r.firstStart))
+	}
+	if got, want := r.row["started_at"], r.firstStart.UTC().Format(time.RFC3339Nano); got != want {
+		t.Fatalf("row started_at = %v, want the reported start %v", got, want)
+	}
+	// duration_ms spans the restart hole, and it cannot exceed the time the dispatch has existed.
+	dur := durationMs(t, r.row)
+	if dur < restartHole {
+		t.Fatalf("duration_ms = %v, want at least the %v restart hole it spans", dur, restartHole)
+	}
+	if existed := r.rowSeen.Sub(r.firstStart); dur > existed {
+		t.Fatalf("duration_ms = %v is longer than the dispatch has existed (%v)", dur, existed)
+	}
+	// The run the metric reads (settle - start, from the accept record) spans the hole too.
+	if run := r.acceptAt.Sub(r.acceptStart); run < restartHole {
+		t.Fatalf("accept record run = %v, want at least the %v restart hole", run, restartHole)
+	}
+}
+
+// The negative control: the same restart with a handler that reports no start, as every
+// handler did before this field existed. The dispatch is timed from the re-offer, today's
+// behavior, so the restart hole is read as time before the dispatch began.
+func TestRunLongRunning_restartWithoutAReportedStartTimesTheDispatchFromTheReoffer(t *testing.T) {
+	r := restartOverSurvivingDispatch(t, false)
+
+	if r.acceptStart.Before(r.restarted) {
+		t.Fatalf("accept startedAt = %v precedes daemon two's launch %v: it is the re-offer's instant, not daemon one's %v", r.acceptStart, r.restarted, r.firstStart)
+	}
+	if lost := r.acceptStart.Sub(r.firstStart); lost < restartHole {
+		t.Fatalf("accept startedAt is only %v after the dispatch really began, want at least the %v restart hole it re-timed away", lost, restartHole)
+	}
+	if got, want := r.row["started_at"], r.acceptStart.UTC().Format(time.RFC3339Nano); got != want {
+		t.Fatalf("row started_at = %v, want the offer's own start %v, the accept record's", got, want)
+	}
+	// duration_ms is the offer's own run: it cannot reach back before daemon two existed.
+	if dur, bound := durationMs(t, r.row), r.rowSeen.Sub(r.restarted); dur > bound {
+		t.Fatalf("duration_ms = %v is longer than daemon two has existed (%v): the run reached back across the restart", dur, bound)
 	}
 }
