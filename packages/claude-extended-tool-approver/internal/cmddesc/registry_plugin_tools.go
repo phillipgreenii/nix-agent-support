@@ -555,13 +555,41 @@ var ghPrCreateSchema = CommandSchema{
 	EndOfOptions:    true,
 }
 
+// ghPrReadySchema: `gh pr ready [<number> | <url> | <branch>] [--undo]`.
+// Operator ruling (Phillip, 2026-10-05, recorded on pg2-xu7sz): "gh pr ready
+// --undo <n>: APPROVE. Plain gh pr ready STAYS Abstain (pg2-psiqh,
+// 2026-08-24, unchanged); only the draft-restoring --undo direction is
+// approved." The implicit "mutate" operation on the "github" resource (which
+// RemoteMutation leaves Unknown, i.e. Abstain) is what plain `gh pr ready`
+// keeps; `--undo` retargets it to "pr-ready-undo" (Permitted on github): it
+// converts a PR BACK to a draft, the safe direction of the draft-first
+// landing, instructed by pb drain-beads LAND VERIFY. `--undo=false`/`=0` (a
+// value on a no-argument flag) is not modeled and abstains, as does every
+// flag not listed here.
+var ghPrReadySchema = CommandSchema{
+	Name:       "ready",
+	Provenance: "gh pr ready --help, this host 2026-10-05",
+	Flags: map[string]FlagSpec{
+		"--undo": {Transform: EffectTransform{Kind: TransformRetargetRemote, From: "mutate", To: "pr-ready-undo"}},
+		"-R":     literal1, "--repo": literal1, "--help": inert,
+	},
+	Positionals:     PositionalSpec{Rest: Literal},
+	ImplicitEffects: []ImplicitEffect{{Role: Remote("mutate"), Target: "github"}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutMetadata,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
 // ghSchema is the ONE registered `gh` schema. It holds pg2-cjfpy.2's `gh pr
 // view|list|status|diff|checks|create` and, folded in from
 // registry_ziprecruiter.go (pg2-cjfpy.4), `gh auth status`, `gh extension
-// list` and the local `gh stack` verbs (zrGhSubcommands). `gh pr ready`
-// (Abstain, pg2-psiqh) and `gh pr merge` (human-only; the integrate-branch
-// handler MUST NOT run it) are deliberately absent: ruled human steps, so a
-// ruling collision this schema does not override.
+// list` and the local `gh stack` verbs (zrGhSubcommands). `gh pr merge`
+// (human-only; the integrate-branch handler MUST NOT run it) is deliberately
+// absent: a ruled human step, so a ruling collision this schema does not
+// override. `gh pr ready` is modeled by ghPrReadySchema: ONLY the
+// draft-restoring `--undo` direction approves (pg2-xu7sz); plain `gh pr ready`
+// (Abstain, pg2-psiqh) is unchanged.
 var ghSchema = CommandSchema{
 	Name:         "gh",
 	Provenance:   "gh --help (GitHub CLI), this host 2026-10-05",
@@ -587,6 +615,7 @@ var ghSchema = CommandSchema{
 				"diff":   ghPrReadSchema("diff", []string{"--color", "-e", "--exclude"}, []string{"--name-only", "--patch"}),
 				"checks": ghPrReadSchema("checks", []string{"--json", "-q", "--jq", "-t", "--template"}, []string{"--required"}),
 				"create": ghPrCreateSchema,
+				"ready":  ghPrReadySchema,
 			},
 		},
 		"auth":      zrGhSubcommands["auth"],

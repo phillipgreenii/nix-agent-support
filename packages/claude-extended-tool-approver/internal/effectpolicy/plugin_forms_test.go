@@ -263,7 +263,19 @@ var pluginForms = []pluginForm{
 	{"integrate-branch", "git diff --name-only main...", evalcontract.Approve, ""},
 	{"integrate-branch", "git status --porcelain", evalcontract.Approve, ""},
 	{"integrate-branch", "git stash list", evalcontract.Approve, ""},
-	{"integrate-branch", "git worktree remove <ROOT>/.worktrees/wt", evalcontract.Abstain, "clean-worktree state ladder (operator ruling tc-vn5z): approves only for a verified-clean worktree"},
+	// pg2-xu7sz: no --force approves without any state probe (git itself refuses a
+	// dirty/locked worktree); the force forms keep the tc-vn5z state ladder.
+	{"integrate-branch", "git worktree remove <ROOT>/.worktrees/wt", evalcontract.Approve, ""},
+	{"integrate-branch", "git worktree remove --force <ROOT>/.worktrees/wt", evalcontract.Abstain, "operator ruling pg2-xu7sz: --force forms stay on the tc-vn5z clean-worktree state ladder (undeterminable state abstains)"},
+	{"integrate-branch", "git worktree remove -f <ROOT>/.worktrees/wt", evalcontract.Abstain, "operator ruling pg2-xu7sz: --force forms stay on the tc-vn5z clean-worktree state ladder (undeterminable state abstains)"},
+	{"pb", "gh pr ready --undo 12", evalcontract.Approve, ""},
+	{"pb", "gh pr ready 12 --undo", evalcontract.Approve, ""},
+	{"pb", "gh pr ready 12", evalcontract.Abstain, "operator ruling pg2-psiqh (2026-08-24, unchanged by pg2-xu7sz): only the draft-restoring --undo approves"},
+	{"pb", "gh pr ready", evalcontract.Abstain, "operator ruling pg2-psiqh (2026-08-24, unchanged by pg2-xu7sz): only the draft-restoring --undo approves"},
+	{"pb", "gh pr ready --undo=false 12", evalcontract.Abstain, "a value on the no-argument --undo flag is unmodeled"},
+	{"pb", "git -C <ROOT> branch -D drain/pg2-abc12", evalcontract.Approve, ""},
+	{"pb", "git -C <ROOT> branch -D main", evalcontract.Approve, "operator ruling pg2-xu7sz: ANY branch"},
+	{"pb", "git -C <ROOT> branch -Df drain/pg2-abc12", evalcontract.Abstain, "only the plain -D spelling is modeled; the -Df cluster is unmodeled"},
 	{"integrate-branch", "git worktree prune", evalcontract.Approve, ""},
 	{"integrate-branch", "git branch -d feature", evalcontract.Approve, ""},
 	{"integrate-branch", "git rebase --continue", evalcontract.Approve, ""},
@@ -540,7 +552,9 @@ var pluginForms = []pluginForm{
 	// Abstain -- see TestGitStashPushGrading.
 	{"pn-workspace-rules", "git -C <ROOT> stash push -u -m unique-tag", evalcontract.Approve, ""},
 	{"pn-workspace-rules", "git -C <ROOT> reset --hard origin/main", evalcontract.Abstain, "operator ruling pg2-4yy4r item 4 / pg2-ur9zc: git reset --hard Abstains in every spelling"},
-	{"pn-workspace-rules", "git -C <ROOT> branch -D pn-update/20261005", evalcontract.Abstain, "operator ruling pg2-4yy4r item 5 / pg2-fkmg4: git branch Abstains on any unsafe spelling; -D deletes an unmerged branch"},
+	// pg2-xu7sz (operator ruling, Phillip, 2026-10-05, in an /unblock-human-beads
+	// session) SUPERSEDES pg2-4yy4r item 5 / pg2-fkmg4 for -D: approve for ANY branch.
+	{"pn-workspace-rules", "git -C <ROOT> branch -D pn-update/20261005", evalcontract.Approve, ""},
 	{"pn-workspace-rules", "git -C <ROOT> branch -f main origin/main", evalcontract.Abstain, "operator ruling pg2-4yy4r item 5 / pg2-fkmg4: -f force-moves a branch ref"},
 	// tail -F of the pn event stream: the literal path is a zone the path
 	// policy does not know (an operator opts it in with CETA_EXTRA_READONLY_ROOTS);

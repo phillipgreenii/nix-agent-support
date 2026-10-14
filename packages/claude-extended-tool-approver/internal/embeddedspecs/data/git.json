@@ -587,6 +587,18 @@
               "source": "git branch -h: \"-v, --[no-]verbose show hash and subject, give twice for upstream branch\""
             }
           },
+          "-D": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            }
+          },
           "-a": {
             "arity": "none",
             "operand": {
@@ -653,7 +665,7 @@
             "kind": "unmodeled"
           },
           "restOverride": {
-            "flags": ["-l", "--list", "-d", "--delete"],
+            "flags": ["-l", "--list", "-d", "--delete", "-D"],
             "role": {
               "kind": "literal"
             }
@@ -668,7 +680,7 @@
               "kind": "path-modify"
             },
             "target": ".git",
-            "whenFlags": ["-d", "--delete"],
+            "whenFlags": ["-d", "--delete", "-D"],
             "citation": {
               "source": "git branch --help: \"usage: git branch [\u003coptions\u003e] [-r | -a] [--merged] [--no-merged] or: git branch [\u003coptions\u003e] [-f] [--recurse-submodules] \u003cbranch-name\u003e [\u003cstart-point\u003e] or: git branch [\u003coptions\u003e] [-l] [\u003cpattern\u003e...]\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\") is derived from this synopsis"
             }
@@ -6280,11 +6292,12 @@
             },
             "positionals": {
               "rest": {
-                "kind": "path-delete"
+                "kind": "literal"
               },
               "restOverride": {
+                "flags": ["-f", "--force"],
                 "role": {
-                  "kind": "literal"
+                  "kind": "path-delete"
                 }
               },
               "minRest": 1,

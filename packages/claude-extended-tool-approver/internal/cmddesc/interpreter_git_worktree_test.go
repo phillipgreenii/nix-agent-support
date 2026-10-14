@@ -6,12 +6,13 @@ import (
 	"testing"
 )
 
-// TestGitWorktreeRemove: the single positional is a PathDelete — the SAME
+// TestGitWorktreeRemove: WITHOUT -f/--force the positional is Literal (inert):
+// git itself refuses a dirty or locked worktree, so removal approves with no
+// path effect and no state probe (operator ruling, Phillip, 2026-10-05,
+// pg2-xu7sz). WITH -f/--force the positional is a PathDelete — the SAME
 // access class a plain `rm -rf <worktree-root>` gets — so DeleteAccess's
-// worktree-state ladder (internal/effectpolicy) is what judges it, not
-// anything in this package. This test only proves the SCHEMA SHAPE: one
-// PathDelete effect, `-f`/`--force` inert (repeatable, does not change the
-// effect).
+// worktree-state ladder (internal/effectpolicy) still judges the force forms.
+// This test only proves the SCHEMA SHAPE.
 func TestGitWorktreeRemove(t *testing.T) {
 	reg := DefaultRegistry()
 	gitSchema, ok := reg.Lookup("git")
@@ -22,20 +23,21 @@ func TestGitWorktreeRemove(t *testing.T) {
 
 	got := in.Interpret(leaf(t, "git worktree remove .worktrees/clean"), gitSchema, Context{})
 	want := []Effect{
-		{Kind: EffectPath, Path: ".worktrees/clean", Access: AccessDelete, Source: "arg 0", FromPositional: true},
 		{Kind: EffectStdio, Stream: StreamStdout, Metadata: true},
 	}
 	if !got.Sufficient || !reflect.DeepEqual(got.Effects, want) {
-		t.Errorf("git worktree remove .worktrees/clean: got %+v, want %+v", got, want)
+		t.Errorf("git worktree remove .worktrees/clean: got %+v, want %+v (no path effect without --force)", got, want)
 	}
 
-	force := in.Interpret(leaf(t, "git worktree remove --force .worktrees/dirty"), gitSchema, Context{})
-	wantForce := []Effect{
-		{Kind: EffectPath, Path: ".worktrees/dirty", Access: AccessDelete, Source: "arg 1", FromPositional: true},
-		{Kind: EffectStdio, Stream: StreamStdout, Metadata: true},
-	}
-	if !force.Sufficient || !reflect.DeepEqual(force.Effects, wantForce) {
-		t.Errorf("git worktree remove --force .worktrees/dirty: got %+v, want %+v (force must not change the effect)", force, wantForce)
+	for _, spelling := range []string{"--force", "-f"} {
+		force := in.Interpret(leaf(t, "git worktree remove "+spelling+" .worktrees/dirty"), gitSchema, Context{})
+		wantForce := []Effect{
+			{Kind: EffectPath, Path: ".worktrees/dirty", Access: AccessDelete, Source: "arg 1", FromPositional: true},
+			{Kind: EffectStdio, Stream: StreamStdout, Metadata: true},
+		}
+		if !force.Sufficient || !reflect.DeepEqual(force.Effects, wantForce) {
+			t.Errorf("git worktree remove %s .worktrees/dirty: got %+v, want %+v (force keeps the PathDelete state ladder)", spelling, force, wantForce)
+		}
 	}
 
 	noArg := in.Interpret(leaf(t, "git worktree remove"), gitSchema, Context{})

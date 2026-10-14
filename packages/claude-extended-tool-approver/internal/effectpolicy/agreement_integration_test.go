@@ -611,6 +611,23 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 	// (slice 3x): the spike is more permissive here only because it
 	// genuinely MODELS the tool where production has no opinion at all, not
 	// because any policy was loosened.
+	// pg2-xu7sz (operator ruling, Phillip, 2026-10-05): `git branch -D` approves
+	// for ANY branch in the new engine. The live engine's git rule still refuses
+	// -D (it is a spike-side policy change gated by the P15 report at
+	// testdata/p15/pb-held-forms.md; the A/B cutover applies it to production).
+	"git_branch_force_delete_approves": {
+		Class: "looser-than-abstain",
+		Cause: "operator ruling pg2-xu7sz (Phillip, 2026-10-05): git branch -D approves for ANY " +
+			"branch; production's git rule (internal/rules/git) still refuses the force delete " +
+			"(NoOpinion) until the new engine is cut over. Approve-reachability report: " +
+			"testdata/p15/pb-held-forms.md.",
+	},
+	"git_branch_force_delete_main_approves": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as git_branch_force_delete_approves: the operator chose \"any " +
+			"branch\", not drain/*-only, so even the primary branch name approves (git itself " +
+			"refuses to delete the checked-out branch).",
+	},
 	"treefmt_bare": {
 		Class: "looser-than-abstain",
 		Cause: "no production rule recognises \"treefmt\"; the spike's implicit whole-tree " +

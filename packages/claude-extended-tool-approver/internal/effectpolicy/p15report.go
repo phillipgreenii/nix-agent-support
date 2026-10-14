@@ -36,7 +36,14 @@ func (e P15Entry) Permitted() bool { return e.Decision == evalcontract.Approve }
 type P15Report struct {
 	// Subject is the command whose approve paths are reviewed ("git push").
 	Subject string
-	Entries []P15Entry
+	// Generator and Test name the generator function and the pinning test,
+	// echoed into the rendered header.
+	Generator string
+	Test      string
+	Entries   []P15Entry
+	// root, when set, is the probe root; Markdown renders it as <ROOT> so the
+	// pinned report does not leak a fixture directory.
+	root string
 }
 
 // PermittedEntries returns the entries that feed an approve path.
@@ -48,6 +55,111 @@ func (r *P15Report) PermittedEntries() []P15Entry {
 		}
 	}
 	return out
+}
+
+// probe evaluates one probe command through the real engine (default
+// registry and policies) and appends the entry.
+func (r *P15Report) probe(root string, reg cmddesc.Registry, fact, probe string) {
+	resp := Evaluate(evalcontract.Request{Command: probe, CWD: root, ProjectRoot: root}, reg, DefaultPolicies(), DefaultGraphPolicies())
+	r.Entries = append(r.Entries, P15Entry{Fact: fact, Probe: probe, Decision: resp.Decision})
+}
+
+// probeFlags probes every flag of schema, building each probe as
+// prefix + flag (+ " x" for a one-argument flag) + suffix, sorted by flag.
+func (r *P15Report) probeFlags(root string, reg cmddesc.Registry, schema cmddesc.CommandSchema, prefix, suffix string) {
+	flags := make([]string, 0, len(schema.Flags))
+	for f := range schema.Flags {
+		flags = append(flags, f)
+	}
+	sort.Strings(flags)
+	for _, f := range flags {
+		probe := prefix + " " + f
+		if schema.Flags[f].Arity == cmddesc.ArityOne {
+			probe += " x"
+		}
+		r.probe(root, reg, "flag "+f, probe+suffix)
+	}
+}
+
+// GenerateHeldFormsP15 builds the P15 report for the three pb-plugin forms
+// pg2-xu7sz approves (operator rulings, Phillip, 2026-10-05): `gh pr ready
+// --undo`, `git branch -D` and `git worktree remove` without --force. Every
+// flag of each command's schema is probed (so a flag the change did not
+// intend to approve shows up as a non-approve row), plus the positional and
+// combination shapes the rulings name. Verdicts come from Evaluate, never
+// from reading a spec value (P14). root is a project root the probes run in;
+// the worktree probes name the fixture's `.worktrees/{clean,dirty,ignored-only}`
+// slots, whose state the test's fake worktree-state probe fixes.
+func GenerateHeldFormsP15(root string) (*P15Report, error) {
+	reg := cmddesc.DefaultRegistry()
+	git, ok := reg.Lookup("git")
+	if !ok {
+		return nil, fmt.Errorf("p15: no git schema registered")
+	}
+	gh, ok := reg.Lookup("gh")
+	if !ok {
+		return nil, fmt.Errorf("p15: no gh schema registered")
+	}
+	branch, ok := git.Subcommands["branch"]
+	if !ok {
+		return nil, fmt.Errorf("p15: no git branch schema registered")
+	}
+	wt, ok := git.Subcommands["worktree"].Subcommands["remove"]
+	if !ok {
+		return nil, fmt.Errorf("p15: no git worktree remove schema registered")
+	}
+	ready, ok := gh.Subcommands["pr"].Subcommands["ready"]
+	if !ok {
+		return nil, fmt.Errorf("p15: no gh pr ready schema registered")
+	}
+
+	rep := &P15Report{root: root, Subject: "pb held forms (gh pr ready --undo, git branch -D, git worktree remove)", Generator: "GenerateHeldFormsP15", Test: "TestP15ReportHeldForms"}
+	rep.probeFlags(root, reg, ready, "gh pr ready", " 12")
+	for _, p := range []struct{ fact, probe string }{
+		{"(positional) gh pr ready, no --undo", "gh pr ready 12"},
+		{"(positional) gh pr ready, no number and no --undo", "gh pr ready"},
+		{"(positional) gh pr ready --undo, no number", "gh pr ready --undo"},
+		{"(positional) gh pr ready --undo, URL", "gh pr ready --undo https://github.com/o/r/pull/12"},
+		{"(positional) gh pr ready --undo, runtime-expanded number", `gh pr ready --undo "$N"`},
+		{"(positional) gh pr ready after end-of-options", "gh pr ready -- --undo"},
+		{"(combination) --undo with a value", "gh pr ready --undo=false 12"},
+		{"(combination) --undo with --repo", "gh pr ready --repo o/r --undo 12"},
+	} {
+		rep.probe(root, reg, p.fact, p.probe)
+	}
+
+	rep.probeFlags(root, reg, branch, "git branch", " feature")
+	for _, p := range []struct{ fact, probe string }{
+		{"(positional) -D of a drain branch", "git branch -D drain/pg2-abc12"},
+		{"(positional) -D of the primary branch", "git branch -D main"},
+		{"(positional) -D of a remote-tracking ref", "git branch -r -D origin/feature"},
+		{"(positional) -D with -C repo", "git -C " + root + " branch -D feature"},
+		{"(positional) -D of a runtime-expanded name", `git branch -D "$B"`},
+		{"(combination) -D with -f", "git branch -D -f feature"},
+		{"(combination) -D with --force", "git branch -D --force feature"},
+		{"(combination) -Df cluster", "git branch -Df feature"},
+		{"(combination) -D with -m", "git branch -D -m feature other"},
+		{"(combination) -f alone (force-move)", "git branch -f main origin/main"},
+	} {
+		rep.probe(root, reg, p.fact, p.probe)
+	}
+
+	rep.probeFlags(root, reg, wt, "git worktree remove", " .worktrees/clean")
+	for _, p := range []struct{ fact, probe string }{
+		{"(positional) clean worktree, no --force", "git worktree remove .worktrees/clean"},
+		{"(positional) dirty worktree, no --force (git itself refuses)", "git worktree remove .worktrees/dirty"},
+		{"(positional) ignored-files-only worktree, no --force (residual risk)", "git worktree remove .worktrees/ignored-only"},
+		{"(positional) absolute worktree path, no --force", "git worktree remove " + root + "/.worktrees/clean"},
+		{"(positional) no operand", "git worktree remove"},
+		{"(positional) runtime-expanded path", `git worktree remove "$WT"`},
+		{"(combination) --force of a clean worktree", "git worktree remove --force .worktrees/clean"},
+		{"(combination) --force of a dirty worktree", "git worktree remove --force .worktrees/dirty"},
+		{"(combination) --force of an ignored-files-only worktree", "git worktree remove -f .worktrees/ignored-only"},
+		{"(combination) doubled --force of a clean worktree", "git worktree remove -f -f .worktrees/clean"},
+	} {
+		rep.probe(root, reg, p.fact, p.probe)
+	}
+	return rep, nil
 }
 
 // GenerateGitPushP15 builds the P15 report for `git push` (the first
@@ -63,7 +175,7 @@ func GenerateGitPushP15(root string) (*P15Report, error) {
 	if !ok {
 		return nil, fmt.Errorf("p15: no git push schema registered")
 	}
-	rep := &P15Report{Subject: "git push"}
+	rep := &P15Report{Subject: "git push", Generator: "GenerateGitPushP15", Test: "TestP15ReportGitPush"}
 	eval := func(fact, probe string) {
 		resp := Evaluate(evalcontract.Request{Command: probe, CWD: root, ProjectRoot: root}, reg, DefaultPolicies(), DefaultGraphPolicies())
 		rep.Entries = append(rep.Entries, P15Entry{Fact: fact, Probe: probe, Decision: resp.Decision})
@@ -107,8 +219,8 @@ func GenerateGitPushP15(root string) (*P15Report, error) {
 func (r *P15Report) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# P15 approve-reachability report: %s\n\n", r.Subject)
-	b.WriteString("Generated by `GenerateGitPushP15` (internal/effectpolicy/p15report.go) and pinned by\n")
-	b.WriteString("`TestP15ReportGitPush`; regenerate with `go test ./internal/effectpolicy -run TestP15ReportGitPush -update`.\n")
+	fmt.Fprintf(&b, "Generated by `%s` (internal/effectpolicy/p15report.go) and pinned by\n", r.Generator)
+	fmt.Fprintf(&b, "`%s`; regenerate with `go test ./internal/effectpolicy -run %s -update`.\n", r.Test, r.Test)
 	b.WriteString("Each row is one spec fact probed through the real engine (default registry and policies).\n\n")
 	b.WriteString("## Facts that feed an approve path\n\n")
 	for _, e := range r.PermittedEntries() {
@@ -118,5 +230,9 @@ func (r *P15Report) Markdown() string {
 	for _, e := range r.Entries {
 		fmt.Fprintf(&b, "- %s: `%s` => **%s**\n", e.Fact, e.Probe, e.Decision)
 	}
-	return b.String()
+	out := b.String()
+	if r.root != "" {
+		out = strings.ReplaceAll(out, r.root, "<ROOT>")
+	}
+	return out
 }

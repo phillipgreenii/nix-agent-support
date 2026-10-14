@@ -908,6 +908,12 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 //     ruling, Phillip, 2026-07-30, pg2-4yy4r item 2 / pg2-25oru: this
 //     workspace lands PRs draft-first; a human marks them ready).
 //
+//   - "pr-ready-undo": `gh pr ready --undo` — Permitted on the "github"
+//     resource: it converts a pull request BACK to a draft, the safe
+//     direction of the draft-first landing (operator ruling, Phillip,
+//     2026-10-05, pg2-xu7sz). Plain `gh pr ready` (marks it ready) stays
+//     "mutate" and Abstains (pg2-psiqh).
+//
 //   - "fetch": `git fetch <remote>` — Permitted for a plain configured
 //     remote NAME (no scheme, no path separator, not option-shaped): objects
 //     flow INTO this clone's own refs/object store and no modeled flag runs a
@@ -1037,6 +1043,11 @@ func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 		return Finding{Verdict: Unknown, Reason: "pr-create-draft is only covered for the github resource"}, true
 	case "pr-create":
 		return Finding{Verdict: Forbidden, Reason: "a non-draft pull request skips the draft-first landing step (operator ruling 2026-07-30, pg2-25oru: gh pr create without --draft is rejected)"}, true
+	case "pr-ready-undo":
+		if e.Resource == "github" {
+			return Finding{Verdict: Permitted, Reason: "converting a pull request back to a draft (gh pr ready --undo; operator ruling 2026-10-05, pg2-xu7sz)"}, true
+		}
+		return Finding{Verdict: Unknown, Reason: "pr-ready-undo is only covered for the github resource"}, true
 	case "fetch":
 		if isPlainRemoteName(e.Resource) {
 			return Finding{Verdict: Permitted, Reason: "fetch from a named git remote only brings objects into this clone's own refs"}, true

@@ -11638,8 +11638,8 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
-    "expected_verdict": "not-approve",
-    "notes": "pg2-33slg: operator ruling pg2-4yy4r item 5 (pg2-fkmg4): unsafe spelling abstains."
+    "expected_verdict": "approve",
+    "notes": "pg2-xu7sz: operator ruling (Phillip, 2026-10-05) SUPERSEDES pg2-4yy4r item 5 / pg2-fkmg4 for -D: git branch -D approves for ANY branch (was not-approve under pg2-33slg)."
   },
   {
     "case": "repo_base_regrade_git__C__repo_branch__f_main_origin_main",
@@ -11697,5 +11697,149 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "pg2-33slg: runtime expansion path; the literal path needs an operator CETA_EXTRA_READONLY_ROOTS opt-in."
+  },
+  {
+    "case": "pb_plugin_gh_pr_ready_undo",
+    "tags": ["pb-plugin-instructed", "pg2-xu7sz"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "gh pr ready --undo 12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-xu7sz: operator ruling (Phillip, 2026-10-05): gh pr ready --undo approves (converts back to draft). Instructed by claude-marketplace/pb (drain-beads.md LAND VERIFY; skills/drain-one/references/land.md)."
+  },
+  {
+    "case": "pb_plugin_gh_pr_ready_undo_flag_after_number",
+    "tags": ["pb-plugin-instructed", "pg2-xu7sz"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "gh pr ready 12 --undo" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-xu7sz: --undo may follow the PR number."
+  },
+  {
+    "case": "pb_plugin_gh_pr_ready_plain",
+    "tags": ["pb-plugin-instructed", "pg2-xu7sz"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "gh pr ready 12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xu7sz GUARDRAIL: plain gh pr ready (marks a PR ready) STAYS Abstain (pg2-psiqh, 2026-08-24); only --undo is approved."
+  },
+  {
+    "case": "pb_plugin_gh_pr_ready_bare",
+    "tags": ["pb-plugin-instructed", "pg2-xu7sz"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "gh pr ready" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xu7sz GUARDRAIL: bare gh pr ready STAYS Abstain (pg2-psiqh)."
+  },
+  {
+    "case": "pb_plugin_gh_pr_ready_undo_false",
+    "tags": ["pb-plugin-instructed", "pg2-xu7sz"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "gh pr ready --undo=false 12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xu7sz GUARDRAIL: --undo=false would mark the PR ready; a value on the no-argument flag is unmodeled and abstains."
+  },
+  {
+    "case": "pb_plugin_git_branch_force_delete_drain",
+    "tags": ["pb-plugin-instructed", "pg2-xu7sz"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -C /repo branch -D drain/pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-xu7sz: operator ruling (Phillip, 2026-10-05): git -C <repo> branch -D approves for ANY branch. Instructed by claude-marketplace/pb (commands/unblock-human-beads.md class 1a leg (b))."
+  },
+  {
+    "case": "pb_plugin_git_branch_force_delete_main",
+    "tags": ["pb-plugin-instructed", "pg2-xu7sz"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -C /repo branch -D main" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-xu7sz: operator chose 'any branch', not drain/*-only, so even main approves (git refuses the checked-out branch itself)."
+  },
+  {
+    "case": "pb_plugin_git_branch_force_delete_cluster",
+    "tags": ["pb-plugin-instructed", "pg2-xu7sz"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -C /repo branch -Df drain/pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xu7sz GUARDRAIL: only the plain -D spelling is modeled; combined short-flag clusters abstain."
+  },
+  {
+    "case": "pb_plugin_git_worktree_remove_abs",
+    "tags": ["pb-plugin-instructed", "pg2-xu7sz"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git worktree remove /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support/.worktrees/pg2-abc12"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-xu7sz: operator ruling (Phillip, 2026-10-05): git worktree remove <abs path> approves without --force; git itself refuses a dirty or locked worktree, so no live state probe is consulted. Instructed by claude-marketplace/pb (commands/unblock-human-beads.md class 1a)."
+  },
+  {
+    "case": "pb_plugin_git_worktree_remove_force",
+    "tags": ["pb-plugin-instructed", "pg2-xu7sz"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git worktree remove --force /repo/.worktrees/pg2-abc12"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xu7sz GUARDRAIL: --force forms stay on the clean-worktree state ladder (tc-vn5z); an undeterminable worktree abstains."
   }
 ]

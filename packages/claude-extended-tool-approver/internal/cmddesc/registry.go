@@ -825,13 +825,24 @@ var gitBranchSchema = CommandSchema{
 		// stay unmodeled. A ref deletion is the same ".git" metadata write
 		// the other ref-moving verbs state.
 		"-d": inert, "--delete": inert,
+		// pg2-xu7sz: `-D` (force delete: deletes an unmerged branch) is
+		// APPROVED for ANY branch. Operator ruling (Phillip, 2026-10-05, in
+		// an /unblock-human-beads session, recorded on pg2-xu7sz): "git -C
+		// <repo> branch -D <branch>: APPROVE for ANY branch (operator chose
+		// 'any branch', not drain/*-only)". It supersedes the pg2-4yy4r item
+		// 5 / pg2-fkmg4 Abstain for `-D` (pg2-33slg), which the `-f`/`-m`
+		// spellings keep. Gate 5 (ADR 0075 P15): the approve-reachability
+		// report for this change is committed at internal/effectpolicy/testdata/p15/pb-held-forms.md.
+		// The long `--delete --force` spelling and the `-Df`/`-Dt` clusters
+		// stay unmodeled and abstain.
+		"-D": inert,
 	},
 	Positionals: PositionalSpec{
 		Rest:         Unmodeled,
-		RestOverride: RestOverride{Flags: []string{"-l", "--list", "-d", "--delete"}, Role: Literal},
+		RestOverride: RestOverride{Flags: []string{"-l", "--list", "-d", "--delete", "-D"}, Role: Literal},
 	},
 	ImplicitEffects: []ImplicitEffect{
-		{Role: PathModify, Target: ".git", WhenFlags: []string{"-d", "--delete"}},
+		{Role: PathModify, Target: ".git", WhenFlags: []string{"-d", "--delete", "-D"}},
 	},
 	Stdin:        StdinNever,
 	Stdout:       StdoutMetadata,
@@ -851,6 +862,10 @@ var gitBranchSchema = CommandSchema{
 // own command and a plain rm -rf are seen to share ONE classification."
 // Flags verified against this host's git 2.54.0: `git worktree -h` (lists
 // every subcommand's synopsis) plus each subcommand's own `-h`.
+//
+// pg2-xu7sz: `git worktree remove <path>` WITHOUT -f/--force is APPROVED
+// deterministically (see gitWorktreeRemoveSchema); the force forms keep the
+// worktree-state ladder below.
 //
 // `-f`/`--force` on remove/add/move is modeled INERT throughout, not as a
 // transform: real git refuses a DIRTY worktree removal without --force (and
@@ -884,13 +899,31 @@ var gitWorktreeListSchema = CommandSchema{
 // abstain for if clean but ignored files exist." See this file's own doc
 // comment above for why `-f`/`--force` (including doubled, for a locked
 // worktree) does not change the verdict.
+//
+// pg2-xu7sz (operator ruling, Phillip, 2026-10-05, recorded on pg2-xu7sz):
+// "git worktree remove <abs path>: APPROVE, no --force. --force forms stay
+// Abstain." Without -f/--force the positional is therefore Literal (inert):
+// git ITSELF refuses a dirty (modified/staged/untracked) or locked worktree
+// when not forced, so the tool is its own guard and the verdict no longer
+// depends on a live `git status` probe (which also needs the PATH-resolved
+// git to match the operator's configured TrustedExecPath, pathspec
+// trustedGitPath, and so could not be pinned in the corpus). The RestOverride
+// restores the PathDelete role, and with it the tc-vn5z state ladder (clean
+// -> Approve, dirty -> Reject, ignored/undeterminable -> Abstain), whenever
+// -f/--force appears: the force forms gain NO new approval. Residual risk the
+// ruling accepts: git does not count IGNORED files as dirty, so a no-force
+// remove can delete an ignored-only worktree (the case tc-vn5z abstained on).
 var gitWorktreeRemoveSchema = CommandSchema{
 	Name:       "remove",
 	Provenance: "git version 2.54.0, git worktree remove -h",
 	Flags: map[string]FlagSpec{
 		"-f": inert, "--force": inert,
 	},
-	Positionals:  PositionalSpec{Rest: PathDelete, MinRest: 1},
+	Positionals: PositionalSpec{
+		Rest:         Literal,
+		MinRest:      1,
+		RestOverride: RestOverride{Flags: []string{"-f", "--force"}, Role: PathDelete},
+	},
 	Stdin:        StdinNever,
 	Stdout:       StdoutMetadata,
 	UnknownFlag:  UnknownFlagInsufficient,

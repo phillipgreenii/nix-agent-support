@@ -354,7 +354,7 @@ func TestPluginToolSpotChecks(t *testing.T) {
 		"git merge-base --is-ancestor a b", "git cherry -v main f", "git ls-tree -r --name-only main -- p", "git ls-files d",
 		"git grep -c -- sym main -- p", "git symbolic-ref --short refs/remotes/origin/HEAD", "git remote", "git stash list",
 		"git fetch --quiet origin", "git rebase --continue", "git merge --ff-only f", "git checkout --theirs -- flake.lock",
-		"git branch -d f", "git range-diff a..b c..d", "git diff --no-ext-diff --name-only --diff-filter=U",
+		"git branch -d f", "git branch -D f", "gh pr ready --undo 1", "git worktree remove /repo/.worktrees/wt", "git range-diff a..b c..d", "git diff --no-ext-diff --name-only --diff-filter=U",
 		"git diff --no-index a b", "git rev-parse --path-format=absolute --git-common-dir", "git rev-list --count a..b",
 		"git -c rerere.enabled=false -C /repo rebase main",
 	}
@@ -364,14 +364,14 @@ func TestPluginToolSpotChecks(t *testing.T) {
 		}
 	}
 	insufficient := []string{
-		"pg-ccaudit ingest", "pg-ccaudit query q -db /tmp/x", "launchctl bootout x", "gh pr merge 1", "gh pr ready 1",
+		"pg-ccaudit ingest", "pg-ccaudit query q -db /tmp/x", "launchctl bootout x", "gh pr merge 1", "gh pr ready --undo=false 1",
 		"gh pr view 1 --web", "pn workspace push --no-verify", "pn workspace workforest remove --force b",
 		"pn workspace doctor --fix", "pn workspace workforest remove b", "prek run -c /tmp/evil.toml", "pg-hooks run pre-commit -- --config x", "bats --formatter /tmp/e t",
 		"nix build github:evil/x", "nix build --impure .#x", "nix flake update --commit-lock-file", "rg --pre /tmp/e x",
 		"fd -x rm", "session-mode hook session-end", "claude-extended-tool-approver archive",
 		"claude-extended-tool-approver spec-drift-check --embedded --record", "git stash pop", "git stash -u",
 		"git checkout main", "git rebase -i main", "git rebase --exec x main", "git merge origin/main", "git fetch --upload-pack=x origin",
-		"git branch -D f", "git branch f", "git apply p.diff", "man -P less jq",
+		"git branch -Df f", "git branch -D -f f", "git branch f", "git apply p.diff", "man -P less jq",
 	}
 	for _, c := range insufficient {
 		if got := interpretDefault(t, c); got.Sufficient {

@@ -40,3 +40,47 @@ func TestP15ReportGitPush(t *testing.T) {
 	}
 	compareGolden(t, filepath.Join("testdata", "p15", "git-push.md"), md)
 }
+
+// TestP15ReportHeldForms pins the committed P15 approve-reachability report
+// for pg2-xu7sz (gate 5 of the operator rulings, Phillip, 2026-10-05): the
+// three forms the rulings approve -- `gh pr ready --undo`, `git branch -D`,
+// `git worktree remove` without --force -- and ONLY those. Every other spec
+// fact of those three commands must stay non-approving.
+func TestP15ReportHeldForms(t *testing.T) {
+	root, _ := fixture(t)
+	rep, err := GenerateHeldFormsP15(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	permitted := map[string]bool{}
+	for _, e := range rep.PermittedEntries() {
+		permitted[e.Probe] = true
+	}
+	for _, want := range []string{
+		"gh pr ready --undo 12",
+		"git branch -D feature",
+		"git branch -D main",
+		"git worktree remove .worktrees/clean",
+		"git worktree remove .worktrees/dirty",
+	} {
+		if !permitted[want] {
+			t.Errorf("P15 report does not list %q as feeding a Permitted path", want)
+		}
+	}
+	for _, mustNot := range []string{
+		"gh pr ready 12", "gh pr ready", "gh pr ready --undo=false 12", "gh pr ready -- --undo",
+		"git branch -D -f feature", "git branch -Df feature", "git branch -D --force feature",
+		"git branch -D -m feature other", "git branch -f main origin/main",
+		"git worktree remove",
+		"git worktree remove --force .worktrees/dirty", "git worktree remove -f .worktrees/ignored-only",
+	} {
+		if permitted[mustNot] {
+			t.Errorf("P15 report lists %q as Permitted; it must not approve", mustNot)
+		}
+	}
+	md := rep.Markdown()
+	if strings.Contains(md, root) {
+		t.Error("report leaks the fixture root")
+	}
+	compareGolden(t, filepath.Join("testdata", "p15", "pb-held-forms.md"), md)
+}

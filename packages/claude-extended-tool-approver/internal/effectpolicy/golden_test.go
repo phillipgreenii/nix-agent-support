@@ -1036,6 +1036,18 @@ var goldenCases = []goldenCase{
 	{"git_branch_list", "git branch -a", evalcontract.Approve, nil},
 	{"git_branch_foo", "git branch foo", evalcontract.Abstain, nil},
 	{"git_branch_list_pattern", "git branch --list maint-1", evalcontract.Approve, nil},
+	// gh pr ready (pg2-xu7sz, operator ruling Phillip 2026-10-05): only the
+	// draft-restoring --undo direction approves; plain `gh pr ready` stays
+	// Abstain (pg2-psiqh); a value on the bool flag is unmodeled.
+	{"gh_pr_ready_undo_approves", "gh pr ready --undo 12", evalcontract.Approve, nil},
+	{"gh_pr_ready_plain_abstains", "gh pr ready 12", evalcontract.Abstain, nil},
+	{"gh_pr_ready_undo_value_abstains", "gh pr ready --undo=false 12", evalcontract.Abstain, nil},
+	// pg2-xu7sz (operator ruling, Phillip, 2026-10-05): -D approves for ANY
+	// branch; -f and the -Df cluster stay Abstain.
+	{"git_branch_force_delete_approves", "git branch -D feature", evalcontract.Approve, nil},
+	{"git_branch_force_delete_main_approves", "git branch -D main", evalcontract.Approve, nil},
+	{"git_branch_force_delete_cluster_abstains", "git branch -Df feature", evalcontract.Abstain, nil},
+	{"git_branch_force_move_abstains", "git branch -f main origin/main", evalcontract.Abstain, nil},
 
 	// git worktree: nested Subcommands, slice 3ac (tc-lc8f item 4h; tc-vn5z
 	// item 5) — remove/add/move/prune/lock/unlock/repair are now modeled
@@ -1045,10 +1057,18 @@ var goldenCases = []goldenCase{
 	// {clean,dirty,ignored-only}` and its fake worktree-state probe are the
 	// SAME ones rm_rf_worktree_* above already uses.
 	{"git_worktree_list", "git worktree list", evalcontract.Approve, nil},
+	// pg2-xu7sz (operator ruling, Phillip, 2026-10-05): WITHOUT -f/--force the
+	// removal approves whatever the worktree's state — git itself refuses a
+	// dirty/locked worktree, so no state probe is consulted; WITH --force
+	// the SAME state ladder as rm -rf still judges it (clean approves, dirty
+	// rejects, ignored-only abstains: the force forms gain no new approval).
 	{"git_worktree_remove_clean", "git worktree remove .worktrees/clean", evalcontract.Approve, nil},
+	{"git_worktree_remove_dirty_approves", "git worktree remove .worktrees/dirty", evalcontract.Approve, nil},
+	{"git_worktree_remove_ignored_only_approves", "git worktree remove .worktrees/ignored-only", evalcontract.Approve, nil},
+	{"git_worktree_remove_force_clean", "git worktree remove --force .worktrees/clean", evalcontract.Approve, nil},
 	{"git_worktree_remove_force_dirty", "git worktree remove --force .worktrees/dirty", evalcontract.Reject, nil},
-	{"git_worktree_remove_dirty", "git worktree remove .worktrees/dirty", evalcontract.Reject, nil},
-	{"git_worktree_remove_ignored_only", "git worktree remove .worktrees/ignored-only", evalcontract.Abstain, nil},
+	{"git_worktree_remove_force_ignored_only", "git worktree remove -f .worktrees/ignored-only", evalcontract.Abstain, nil},
+	{"git_worktree_remove_force_notaworktree", "git worktree remove --force .worktrees/notaworktree", evalcontract.Abstain, nil},
 	{"git_worktree_prune", "git worktree prune", evalcontract.Approve, nil},
 	{"git_worktree_prune_dry_run", "git worktree prune -n", evalcontract.Approve, nil},
 	{"git_worktree_add_new", "git worktree add .worktrees/new feature", evalcontract.Approve, nil},
