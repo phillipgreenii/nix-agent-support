@@ -38,6 +38,9 @@ type RigOptions struct {
 	Clock *governor.ManualClock
 	// OnGroupRefreshed is the service's hook.
 	OnGroupRefreshed func(prev *store.GroupRow, next store.GroupRow, info groupsvc.RefreshInfo)
+	// OnGroupStoring and OnGone are the service's transactional hooks.
+	OnGroupStoring func(ctx context.Context, tx *store.Tx, prev *store.GroupRow, next store.GroupRow, info groupsvc.RefreshInfo) error
+	OnGone         func(ctx context.Context, tx *store.Tx, node string, purpose governor.Purpose) error
 	// Identity receives the authentication markers.
 	Identity groupsvc.AuthMarker
 	// PollInterval is the scheduler's poll interval; zero means 5 ms.
@@ -118,6 +121,7 @@ func NewRig(t *testing.T, o RigOptions) *Rig {
 	svc, err := groupsvc.New(groupsvc.Config{
 		Store: st, Scheduler: sched, Summary: sum, Rules: rules, Aliases: aliases, Resolver: resolver,
 		Identity: o.Identity, Clock: clk, Governor: o.Gov, Expiry: expiry, OnGroupRefreshed: o.OnGroupRefreshed,
+		OnGroupStoring: o.OnGroupStoring, OnGone: o.OnGone,
 	})
 	if err != nil {
 		t.Fatal(err)

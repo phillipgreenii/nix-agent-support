@@ -59,7 +59,9 @@ var ErrNoFetcher = errors.New("groupsvc: no fetcher registered for the group")
 // Store is the part of the daemon store the service uses; *store.Store
 // satisfies it.
 type Store interface {
-	groups.GenStore
+	groups.ThenStore
+	// InTx runs fn in one store transaction (see store.Store.InTx).
+	InTx(ctx context.Context, fn func(tx *store.Tx) error) error
 	GetEntity(ctx context.Context, kind, id string) (store.EntityRow, bool, error)
 	PutEntity(ctx context.Context, e store.EntityRow) error
 	TouchEntity(ctx context.Context, kind, id string, at time.Time) error
@@ -92,6 +94,22 @@ type RefreshInfo struct {
 	// Class and Purpose are what the call was admitted as.
 	Class   governor.Class
 	Purpose governor.Purpose
+}
+
+// The origins a refresh request can note, as the change engine reads them when
+// it classifies the refresh that follows.
+const (
+	OriginQuery   = "query"
+	OriginRefresh = "refresh"
+	OriginWrite   = "write"
+	OriginRead    = "read"
+)
+
+// OriginHints receives the origin of a refresh the service is about to queue
+// because of a write or a refresh request: class 2 serves both, and the group
+// engine's Purpose does not tell them apart from a background refresh.
+type OriginHints interface {
+	NoteOrigin(node, group, origin string)
 }
 
 // Observer receives the staleness and revalidation facts telemetry reports.
@@ -136,6 +154,18 @@ type Config struct {
 	// runs on the executor's goroutine and MUST NOT block. The change engine
 	// attaches here.
 	OnGroupRefreshed func(prev *store.GroupRow, next store.GroupRow, info RefreshInfo)
+	// OnGroupStoring runs INSIDE the store transaction that writes a refreshed
+	// group, after the row is written, and only when the row is stored (a refresh
+	// superseded by a newer generation runs nothing, which is how a refresh that
+	// started before a write logs no change). prev is the row read before the
+	// fetch (nil when it had no content) and next the row now stored. An error
+	// rolls the group write back and fails the task. It MUST use only tx.
+	OnGroupStoring func(ctx context.Context, tx *store.Tx, prev *store.GroupRow, next store.GroupRow, info RefreshInfo) error
+	// OnGone runs inside the store transaction that tombstones an entity a group
+	// fetch found gone, and only when the entity was visible before, with the
+	// purpose the fetch was admitted under. An error rolls the tombstone back
+	// and fails the task. It MUST use only tx.
+	OnGone func(ctx context.Context, tx *store.Tx, node string, purpose governor.Purpose) error
 }
 
 // Service runs the refresh of the non-summary groups and the read-through.
@@ -146,6 +176,7 @@ type Service struct {
 	mu       sync.Mutex
 	fetchers map[string]groups.Fetcher
 	observer Observer
+	hints    OriginHints
 	// commits counts the refreshes stored per (entity, group) since start; an
 	// Ensure compares it before and after its fetch to say FromOrigin.
 	commits map[pairKey]uint64
@@ -223,6 +254,20 @@ func (s *Service) SetObserver(o Observer) {
 	s.mu.Lock()
 	s.observer = o
 	s.mu.Unlock()
+}
+
+// SetOriginHints installs the receiver of the origin hints InvalidateAndQueueAs
+// records; nil means none.
+func (s *Service) SetOriginHints(h OriginHints) {
+	s.mu.Lock()
+	s.hints = h
+	s.mu.Unlock()
+}
+
+func (s *Service) originHints() OriginHints {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hints
 }
 
 func (s *Service) obs() Observer {

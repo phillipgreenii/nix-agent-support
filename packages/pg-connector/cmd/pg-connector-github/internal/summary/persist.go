@@ -18,9 +18,31 @@ type Store interface {
 	PutEntity(ctx context.Context, e store.EntityRow) error
 	GetGroup(ctx context.Context, kind, id, group string) (store.GroupRow, bool, error)
 	PutGroup(ctx context.Context, g store.GroupRow) error
+	// InTx runs fn in one store transaction (see store.Store.InTx).
+	InTx(ctx context.Context, fn func(tx *store.Tx) error) error
 }
 
 var _ Store = (*store.Store)(nil)
+
+// FetchInfo says what a summary was admitted as. The zero value means unknown.
+type FetchInfo struct {
+	Class   governor.Class
+	Purpose governor.Purpose
+}
+
+// StoreHook runs inside the store transaction that writes a refreshed summary,
+// after the entity and group rows are written, with the summary stored before
+// (nil for a first sighting), what Persist computed and how the summary was
+// fetched. An error rolls the transaction back, so the summary is not stored,
+// and is returned by PersistWith. The hook MUST use only tx: the store's single
+// connection is occupied by it.
+type StoreHook func(ctx context.Context, tx *store.Tx, prev *Summary, st Stored, info FetchInfo) error
+
+// GoneHook runs inside the store transaction that sets tombstoned_at, and only
+// when the entity was visible before. purpose is what the lookup that found the
+// node gone was admitted under. An error rolls the transaction back, so the
+// entity stays visible. The hook MUST use only tx.
+type GoneHook func(ctx context.Context, tx *store.Tx, node string, purpose governor.Purpose) error
 
 // Persister stores fetched summaries.
 type Persister struct {
@@ -33,6 +55,8 @@ type Persister struct {
 	TerminalTTL time.Duration
 	// Clock is the time source; nil means the system clock.
 	Clock governor.Clock
+	// Hook, when set, runs in the same transaction as the content write.
+	Hook StoreHook
 }
 
 // Stored is what Persist did with one summary.
@@ -51,6 +75,9 @@ type Stored struct {
 	// Summary.Mergeable. A later phase turns it into a change row.
 	MergeabilityChanged bool
 	PrevMergeable       string
+	// Prev is the summary stored before this one; nil for a first sighting (or a
+	// stored row whose content does not decode).
+	Prev *Summary
 	// Rename is set when the alias held a different reference for this node id:
 	// the repository was renamed or transferred. The alias has been updated.
 	Rename *entity.Update
@@ -73,17 +100,64 @@ type Stored struct {
 // A Gone summary is not stored: it returns a Stored with Summary.Gone and
 // nothing else. The entity row keeps its version and keep-alive flag; version
 // bumps belong to the change log.
+//
+// Persist is PersistWith with the zero FetchInfo.
 func (p *Persister) Persist(ctx context.Context, s Summary) (Stored, error) {
+	return p.PersistWith(ctx, s, FetchInfo{})
+}
+
+// PersistWith is Persist for a summary admitted as info. It reads the previous
+// rows, applies the mergeability rule, writes the entity and group rows and
+// calls Hook (when set) in ONE store transaction: an error from Hook rolls the
+// transaction back, so the summary is not stored, and is returned. The alias
+// update runs BEFORE the transaction (it cannot run inside one), so Stored.Rename
+// is known to the hook; it is idempotent and describes no content, so it
+// survives a rollback.
+func (p *Persister) PersistWith(ctx context.Context, s Summary, info FetchInfo) (Stored, error) {
 	if s.Gone {
 		return Stored{Summary: s}, nil
 	}
 	now := p.now()
 
-	prevGroup, hadGroup, err := p.Store.GetGroup(ctx, entity.KindPR, s.NodeID, GroupName)
+	ref, err := entity.NewRef(s.Repo, s.Number)
+	if err != nil {
+		return Stored{}, fmt.Errorf("summary: %s: %w", s.NodeID, err)
+	}
+	up, err := p.Identity.Put(ctx, s.NodeID, ref)
 	if err != nil {
 		return Stored{}, err
 	}
-	row, hadRow, err := p.Store.GetEntity(ctx, entity.KindPR, s.NodeID)
+
+	var st Stored
+	err = p.Store.InTx(ctx, func(tx *store.Tx) error {
+		var err error
+		st, err = p.persistIn(ctx, tx, s, now)
+		if err != nil {
+			return err
+		}
+		if up.Renamed {
+			u := up
+			st.Rename = &u
+		}
+		if p.Hook != nil {
+			return p.Hook(ctx, tx, st.Prev, st, info)
+		}
+		return nil
+	})
+	if err != nil {
+		return Stored{}, err
+	}
+	return st, nil
+}
+
+// persistIn reads the previous rows and writes the entity and group rows
+// through tx.
+func (p *Persister) persistIn(ctx context.Context, tx *store.Tx, s Summary, now time.Time) (Stored, error) {
+	prevGroup, hadGroup, err := tx.GetGroup(ctx, entity.KindPR, s.NodeID, GroupName)
+	if err != nil {
+		return Stored{}, err
+	}
+	row, hadRow, err := tx.GetEntity(ctx, entity.KindPR, s.NodeID)
 	if err != nil {
 		return Stored{}, err
 	}
@@ -111,6 +185,12 @@ func (p *Persister) Persist(ctx context.Context, s Summary) (Stored, error) {
 	}
 	if hadGroup {
 		st.PrevFingerprint = prevGroup.Fingerprint
+		if len(prevGroup.Content) > 0 {
+			var prev Summary
+			if json.Unmarshal(prevGroup.Content, &prev) == nil {
+				st.Prev = &prev
+			}
+		}
 	}
 	if changed {
 		st.PrevMergeable = prevMergeable
@@ -121,7 +201,7 @@ func (p *Persister) Persist(ctx context.Context, s Summary) (Stored, error) {
 	if entity.Known(carried) {
 		row.LastKnownMergeable = carried
 	}
-	if err := p.Store.PutEntity(ctx, row); err != nil {
+	if err := tx.PutEntity(ctx, row); err != nil {
 		return Stored{}, err
 	}
 	group := prevGroup
@@ -133,20 +213,8 @@ func (p *Persister) Persist(ctx context.Context, s Summary) (Stored, error) {
 	group.LastError = ""
 	group.Generation++
 	group.FetchedForHead, group.FetchedForBase = s.HeadRefOid, s.BaseRefOid
-	if err := p.Store.PutGroup(ctx, group); err != nil {
+	if err := tx.PutGroup(ctx, group); err != nil {
 		return Stored{}, err
-	}
-
-	ref, err := entity.NewRef(s.Repo, s.Number)
-	if err != nil {
-		return Stored{}, fmt.Errorf("summary: %s: %w", s.NodeID, err)
-	}
-	up, err := p.Identity.Put(ctx, s.NodeID, ref)
-	if err != nil {
-		return Stored{}, err
-	}
-	if up.Renamed {
-		st.Rename = &up
 	}
 	return st, nil
 }

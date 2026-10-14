@@ -160,7 +160,7 @@ func (e *executor) apply(ctx context.Context, j job, o groups.Outcome, info Refr
 	s, group := e.s, e.f.Group()
 	if o.Err != nil {
 		if errors.Is(o.Err, groups.ErrGone) {
-			return s.tombstone(ctx, j.node)
+			return s.tombstone(ctx, j.node, info.Purpose)
 		}
 		return e.fail(ctx, j, o.Err)
 	}
@@ -184,12 +184,16 @@ func (e *executor) apply(ctx context.Context, j job, o groups.Outcome, info Refr
 		Content: o.Content, Fingerprint: fp, FetchedAt: fetchedAt, FreshUntil: freshUntil, MaxAgeAt: maxAgeAt,
 		LastError: o.LastError, FetchedForHead: stamps.Head, FetchedForBase: stamps.Base,
 	}
-	stored, err := groups.Commit(ctx, s.cfg.Store, j.tok, row)
+	row.Kind, row.ID, row.Group, row.Generation = j.tok.Kind, j.tok.ID, j.tok.Group, j.tok.Generation+1
+	var then func(tx *store.Tx) error
+	if s.cfg.OnGroupStoring != nil {
+		then = func(tx *store.Tx) error { return s.cfg.OnGroupStoring(ctx, tx, j.prev, row, info) }
+	}
+	stored, err := groups.CommitThen(ctx, s.cfg.Store, j.tok, row, then)
 	if err != nil {
 		return err
 	}
 	if stored {
-		row.Kind, row.ID, row.Group, row.Generation = j.tok.Kind, j.tok.ID, j.tok.Group, j.tok.Generation+1
 		s.countCommit(j.node, group)
 		if s.cfg.Identity != nil {
 			s.cfg.Identity.Clear()
@@ -233,18 +237,29 @@ func (s *Service) recordError(ctx context.Context, node, group string, cause err
 	_, _ = s.cfg.Store.PutGroupIf(ctx, row, row.Generation)
 }
 
-// tombstone marks the entity gone: GitHub no longer shows it. Its queued tasks
-// are cancelled and its stored groups are left for expiry.
-func (s *Service) tombstone(ctx context.Context, node string) error {
-	row, ok, err := s.cfg.Store.GetEntity(ctx, entity.KindPR, node)
-	if err != nil {
-		return err
-	}
-	if ok {
-		row.TombstonedAt = s.now()
-		if err := s.cfg.Store.PutEntity(ctx, row); err != nil {
+// tombstone marks the entity gone: GitHub no longer shows it. The row is read
+// and tombstoned_at is written in one transaction (so the write cannot rewind a
+// version raised meanwhile), and OnGone runs in it, only when the entity was
+// visible before; an OnGone error rolls the tombstone back. Its queued tasks are
+// cancelled and its stored groups are left for expiry.
+func (s *Service) tombstone(ctx context.Context, node string, purpose governor.Purpose) error {
+	err := s.cfg.Store.InTx(ctx, func(tx *store.Tx) error {
+		row, ok, err := tx.GetEntity(ctx, entity.KindPR, node)
+		if err != nil || !ok {
 			return err
 		}
+		visible := row.TombstonedAt.IsZero()
+		row.TombstonedAt = s.now()
+		if err := tx.PutEntity(ctx, row); err != nil {
+			return err
+		}
+		if visible && s.cfg.OnGone != nil {
+			return s.cfg.OnGone(ctx, tx, node, purpose)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	s.cfg.Scheduler.CancelEntity(node)
 	return nil

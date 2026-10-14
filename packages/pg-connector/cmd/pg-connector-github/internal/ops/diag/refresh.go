@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/entity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groups"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groupsvc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
@@ -164,7 +165,7 @@ func (r *refresher) queue(ctx context.Context, node string, ref entity.Ref, want
 		if !have && g != groups.Summary {
 			continue // skipped by the executor until a summary exists
 		}
-		if err := r.deps.Engine.InvalidateAndQueue(ctx, node, g); err != nil {
+		if err := r.deps.Engine.InvalidateAndQueueAs(ctx, node, g, groupsvc.OriginRefresh); err != nil {
 			return Queued{}, wireErr("refresh "+out.ID, err)
 		}
 		out.Groups = append(out.Groups, g)

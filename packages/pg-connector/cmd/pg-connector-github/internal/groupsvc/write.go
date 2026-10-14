@@ -139,14 +139,21 @@ func (s *Service) groupKnown(group string) error {
 	return nil
 }
 
-// InvalidateAndQueue marks what a successful write changed: it calls
+// InvalidateAndQueue is InvalidateAndQueueAs with OriginWrite.
+func (s *Service) InvalidateAndQueue(ctx context.Context, id, group string) error {
+	return s.InvalidateAndQueueAs(ctx, id, group, OriginWrite)
+}
+
+// InvalidateAndQueueAs marks what a successful write changed: it calls
 // groups.Invalidate for the group (so a refresh begun earlier loses and the next
 // read goes to origin) and queues the group's refresh at class 2, due now. group
 // is any group name including summary; for summary only an existing row's
 // fresh_until is set (a summary row is never created) and the refresh is queued.
 // id is canonicalized like SerializeWrite; an unseen PR (an unknown reference, or
-// an entity the store has no row for) is a no-op.
-func (s *Service) InvalidateAndQueue(ctx context.Context, id, group string) error {
+// an entity the store has no row for) is a no-op. Before it invalidates, it
+// tells the origin hints (when set) the origin of the refresh it is about to
+// queue; an unseen PR notes nothing.
+func (s *Service) InvalidateAndQueueAs(ctx context.Context, id, group, origin string) error {
 	if err := s.groupKnown(group); err != nil {
 		return err
 	}
@@ -157,6 +164,9 @@ func (s *Service) InvalidateAndQueue(ctx context.Context, id, group string) erro
 	ent, ok, err := s.cfg.Store.GetEntity(ctx, entity.KindPR, node)
 	if err != nil || !ok || !ent.TombstonedAt.IsZero() {
 		return err
+	}
+	if h := s.originHints(); h != nil {
+		h.NoteOrigin(node, group, origin)
 	}
 	if err := groups.Invalidate(ctx, s.cfg.Store, entity.KindPR, node, group, s.now()); err != nil {
 		return err

@@ -17,6 +17,15 @@ type GenStore interface {
 
 var _ GenStore = (*store.Store)(nil)
 
+// ThenStore is GenStore plus the compare-and-swap that runs a callback in the
+// same transaction as the write; *store.Store satisfies it.
+type ThenStore interface {
+	GenStore
+	PutGroupIfThen(ctx context.Context, g store.GroupRow, expectGeneration int64, then func(tx *store.Tx) error) (bool, error)
+}
+
+var _ ThenStore = (*store.Store)(nil)
+
 // Token is the generation a group row had when a refresh started. A Commit with
 // it stores only if the row has not moved since.
 type Token struct {
@@ -49,6 +58,16 @@ func Commit(ctx context.Context, st GenStore, tok Token, row store.GroupRow) (st
 	row.Kind, row.ID, row.Group = tok.Kind, tok.ID, tok.Group
 	row.Generation = tok.Generation + 1
 	return st.PutGroupIf(ctx, row, tok.Generation)
+}
+
+// CommitThen is Commit, and ONLY when it stored the row it calls then in the
+// same transaction (then may be nil). An error from then rolls the group write
+// back and is returned with stored false. then MUST use only the transaction's
+// own methods: the store's single connection is occupied by it.
+func CommitThen(ctx context.Context, st ThenStore, tok Token, row store.GroupRow, then func(tx *store.Tx) error) (stored bool, err error) {
+	row.Kind, row.ID, row.Group = tok.Kind, tok.ID, tok.Group
+	row.Generation = tok.Generation + 1
+	return st.PutGroupIfThen(ctx, row, tok.Generation, then)
 }
 
 // Invalidate marks the group stale after a write: it bumps the generation,

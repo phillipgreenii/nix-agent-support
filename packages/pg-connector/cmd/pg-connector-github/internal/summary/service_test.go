@@ -121,6 +121,8 @@ type rigOpts struct {
 	batchSize int
 	onRefresh func(prev *Summary, next Stored)
 	onBatch   func(ids []string, role scheduler.Role)
+	hook      StoreHook
+	onGone    GoneHook
 	// reuse an existing store and clock (a simulated restart).
 	st  *store.Store
 	clk *governor.ManualClock
@@ -147,7 +149,7 @@ func newRig(t *testing.T, o rigOpts) *rig {
 		o.batchSize = MaxBatch
 	}
 	f := &countingFetcher{clk: clk, gov: o.gov}
-	pers := &Persister{Store: st, Identity: entity.NewIdentity(st, clk), TTL: testTTL, TerminalTTL: testTerminal, Clock: clk}
+	pers := &Persister{Store: st, Identity: entity.NewIdentity(st, clk), TTL: testTTL, TerminalTTL: testTerminal, Clock: clk, Hook: o.hook}
 	opt := scheduler.Options{Clock: clk, Workers: o.workers, FillHorizon: testTTL}
 	if o.gov != nil {
 		opt.Gate = o.gov
@@ -156,7 +158,7 @@ func newRig(t *testing.T, o rigOpts) *rig {
 	svc, err := NewService(ServiceConfig{
 		Store: st, Persister: pers, Fetcher: f, Identity: pers.Identity, Scheduler: sched, Clock: clk,
 		KeepaliveWindow: testWindow, Expiry: testExpiry, BatchSize: o.batchSize,
-		OnSummaryRefreshed: o.onRefresh, OnBatchSent: o.onBatch,
+		OnSummaryRefreshed: o.onRefresh, OnBatchSent: o.onBatch, OnGone: o.onGone,
 	})
 	if err != nil {
 		t.Fatal(err)

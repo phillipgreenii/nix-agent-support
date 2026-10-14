@@ -29,7 +29,7 @@
 //
 // pr refresh queues summary, detail, conversation, files, commits and runs by
 // default (pending only when named); ci refresh queues summary and runs. Each
-// named group is first invalidated (groupsvc.Service.InvalidateAndQueue: a
+// named group is first invalidated (groupsvc.Service.InvalidateAndQueueAs: a
 // refresh that began before the call loses, and any reader sees the group stale
 // at once) and then queued at class 2, so a repeated call merges into the queued
 // task. For a pull request the daemon has never seen the handler resolves the
@@ -76,7 +76,7 @@ var Ops = []string{OpRefresh, OpExplain}
 // *groupsvc.Service satisfies it.
 type Engine interface {
 	Resolve(ctx context.Context, id string) (string, entity.Ref, error)
-	InvalidateAndQueue(ctx context.Context, id, group string) error
+	InvalidateAndQueueAs(ctx context.Context, id, group, origin string) error
 }
 
 var _ Engine = (*groupsvc.Service)(nil)

@@ -2,7 +2,6 @@ package summary
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -42,6 +41,9 @@ type ServiceStore interface {
 	// refresh stored meanwhile (the carried-forward mergeable value).
 	TouchEntity(ctx context.Context, kind, id string, at time.Time) error
 	EnsureEntity(ctx context.Context, kind, id string) error
+	// SetKeepAlive changes only the keep_alive column, so a keep-alive flip
+	// cannot rewind a version a concurrent change write raised.
+	SetKeepAlive(ctx context.Context, kind, id string, keep bool) error
 }
 
 var _ ServiceStore = (*store.Store)(nil)
@@ -73,6 +75,11 @@ type ServiceConfig struct {
 	// changes from it; nothing is registered in Phase 2. It runs on the
 	// executor's goroutine and MUST NOT block.
 	OnSummaryRefreshed func(prev *Summary, next Stored)
+	// OnGone runs inside the store transaction that tombstones an entity
+	// GitHub no longer shows, and only when the entity was visible before, with
+	// the purpose the failed lookup was admitted under. An error rolls the
+	// tombstone back and fails the task. It MUST use only tx.
+	OnGone GoneHook
 	// OnBatchSent fires for every `nodes(ids:)` batch, once with the node ids
 	// that were due (role due) and once with those that filled spare slots (role
 	// fill), each only when non-empty, before the call is made.
@@ -461,8 +468,7 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 	for _, row := range rows {
 		in := s.inSet(row, m, now)
 		if in != row.KeepAlive {
-			row.KeepAlive = in
-			if err := s.cfg.Store.PutEntity(ctx, row); err != nil {
+			if err := s.cfg.Store.SetKeepAlive(ctx, entity.KindPR, row.ID, in); err != nil {
 				return evicted, err
 			}
 		}
@@ -613,7 +619,7 @@ func (e executor) Execute(ctx context.Context, items []scheduler.Item) []schedul
 			s.recordError(ctx, ids[k], err)
 			continue
 		}
-		res[i].Err = s.store(ctx, got[k], rows[i], members)
+		res[i].Err = s.store(ctx, got[k], rows[i], members, FetchInfo{Class: class, Purpose: purposeOf(class)})
 	}
 	return res
 }
@@ -626,33 +632,21 @@ func failAll(res []scheduler.Result, err error) []scheduler.Result {
 }
 
 // store persists one fetched summary and books the next refresh.
-func (s *Service) store(ctx context.Context, sum Summary, row store.EntityRow, members map[string]bool) error {
+func (s *Service) store(ctx context.Context, sum Summary, row store.EntityRow, members map[string]bool, info FetchInfo) error {
 	if sum.Gone {
 		// GitHub no longer returns the node: stop refreshing it and let expiry
 		// collect it.
 		if row.ID != "" {
-			row.TombstonedAt = s.now()
-			return s.cfg.Store.PutEntity(ctx, row)
+			return s.tombstone(ctx, row.ID, info.Purpose)
 		}
 		return nil
 	}
-	var prev *Summary
-	if s.cfg.OnSummaryRefreshed != nil {
-		if g, ok, err := s.cfg.Store.GetGroup(ctx, entity.KindPR, sum.NodeID, GroupName); err != nil {
-			return err
-		} else if ok {
-			var p Summary
-			if err := json.Unmarshal(g.Content, &p); err == nil {
-				prev = &p
-			}
-		}
-	}
-	st, err := s.cfg.Persister.Persist(ctx, sum)
+	st, err := s.cfg.Persister.PersistWith(ctx, sum, info)
 	if err != nil {
 		return err
 	}
 	if s.cfg.OnSummaryRefreshed != nil {
-		s.cfg.OnSummaryRefreshed(prev, st)
+		s.cfg.OnSummaryRefreshed(st.Prev, st)
 	}
 	// Book the next cycle while the entity stays in the set.
 	now := s.now()
@@ -665,6 +659,27 @@ func (s *Service) store(ctx context.Context, sum Summary, row store.EntityRow, m
 	}
 	due := now.Add(s.cfg.Persister.FreshFor(sum.State))
 	return s.cfg.Scheduler.Reschedule(taskFor(sum.NodeID, members[sum.NodeID], due, cur.LastAccess))
+}
+
+// tombstone sets tombstoned_at and, only when the entity was visible before,
+// runs OnGone, in one transaction. The row is read inside the transaction, so
+// the write cannot rewind a version raised meanwhile.
+func (s *Service) tombstone(ctx context.Context, node string, purpose governor.Purpose) error {
+	return s.cfg.Store.InTx(ctx, func(tx *store.Tx) error {
+		row, ok, err := tx.GetEntity(ctx, entity.KindPR, node)
+		if err != nil || !ok {
+			return err
+		}
+		visible := row.TombstonedAt.IsZero()
+		row.TombstonedAt = s.now()
+		if err := tx.PutEntity(ctx, row); err != nil {
+			return err
+		}
+		if visible && s.cfg.OnGone != nil {
+			return s.cfg.OnGone(ctx, tx, node, purpose)
+		}
+		return nil
+	})
 }
 
 // recordError notes a failed fetch on the stored group, when there is one.
