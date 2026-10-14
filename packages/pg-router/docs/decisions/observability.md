@@ -98,8 +98,9 @@ classification of an error the core already receives, not a status stream, so `I
 other clauses are unchanged.
 
 **Amended** (operator ruling, Phillip, 2026-10-05, option C; bead `pg2-fy2pm`). A `handler-error`
-whose text carries BOTH substrings of the **upstream-killed sentinel** (`scriptout:` and
-`signal: killed`, `interfaces.md`) is counted with `reason="upstream-killed"`. Precedence is
+whose text carries the **upstream-killed sentinel** (`scriptout:` with `signal: killed`, or with
+`deadline exceeded after` as amended by `pg2-gp50o` below; `interfaces.md`) is counted with
+`reason="upstream-killed"`. Precedence is
 `triager-failure`, then `budget-exceeded`, then `upstream-killed`. Why: the connector's 30s exec
 timeout SIGKILLs a slow `gh` call; those kills are transient GitHub slowness that the 30-minute PR
 sweep heals (21 of 22 failed dispatches were followed by an ok dispatch of the same PR), yet each one
@@ -117,6 +118,16 @@ pre-initialized because the core does not know the role set. **Not covered:** a 
 that lacks the sentinel (for example `error connecting to api.github.com`) keeps paging the residual
 rule individually. Same bounds as above: the reason is a fixed constant and `role` stays
 config-bounded.
+
+**Clarified** (bead `pg2-gp50o`, the second triage of the desk-pr failure series; scope-preserving,
+not a new ruling). The same connector exec-timeout event can read `deadline exceeded after <elapsed>
+(limit <limit>) in op=...` ending in `context deadline exceeded` instead of `signal: killed`,
+depending on what the killed child reported (2 of 28 desk-pr deadline failures logged from
+2026-10-07 to 2026-10-14, both a `gh pr view` call). Those slipped past the sentinel and paged the residual
+rule although they are the very kill option C excludes. The sentinel is therefore `scriptout:` with
+`signal: killed` OR `deadline exceeded after`; `scriptout:` stays mandatory, so the out-of-memory
+reasoning above is unchanged and the `error connecting to api.github.com` exclusion above still
+stands.
 
 **Amended** (operator ruling A, Phillip, 2026-10-05; bead `pg2-vn4jb`). The budget-stop rule
 (`pg-router-budget-stops`) is **repeat-only**: it pages when a role records **2 or more**

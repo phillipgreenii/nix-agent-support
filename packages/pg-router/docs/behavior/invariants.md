@@ -244,8 +244,8 @@ sequenceDiagram
   (`DEC-OBS-3`, amended). The same holds for a handler error
   from an escalation-triage role, counted with `reason="triager-failure"` so it stays out of the
   worker/review failure-rate series (`DEC-OBS-3`, amended). A handler error that carries the documented
-  **upstream-killed sentinel** (`interfaces.md`, "Upstream-killed sentinel": BOTH `scriptout:` and
-  `signal: killed`) is counted with `reason="upstream-killed"`, ranking below `triager-failure` and
+  **upstream-killed sentinel** (`interfaces.md`, "Upstream-killed sentinel": `scriptout:` with
+  `signal: killed` or `deadline exceeded after`) is counted with `reason="upstream-killed"`, ranking below `triager-failure` and
   `budget-exceeded`; it is excluded from the residual failure-rate alert and **MUST** page only on a
   sustained burst (`DEC-OBS-3`, amended). A **second narrow exception is opt-in per
   role** (`DEC-RETRY-2`): a role MAY declare a small bounded number of re-runs, and the core then

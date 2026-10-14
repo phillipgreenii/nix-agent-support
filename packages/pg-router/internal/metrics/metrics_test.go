@@ -1349,6 +1349,40 @@ func TestOnHandlerFailure_UpstreamKilledRequiresBothSubstrings(t *testing.T) {
 	}
 }
 
+// pg2-gp50o: the connector's own "deadline exceeded after <elapsed> (limit
+// <limit>)" text marks the same exec-timeout event as "signal: killed" when the
+// killed child reported plain "context deadline exceeded" instead (a gh call
+// observed live). It counts as upstream-killed ONLY together with "scriptout:",
+// so a bare "deadline exceeded after" from any other source is not tagged.
+func TestOnHandlerFailure_UpstreamKilledDeadlineSentinel(t *testing.T) {
+	h := newHarness(t)
+	got := handlerFailureSeries(t, h, []struct {
+		role string
+		err  error
+	}{
+		// Live shape (gh pr view): the child's own error is "context deadline
+		// exceeded", no "signal: killed" anywhere in the text.
+		{"desk-pr", fmt.Errorf(`wireclient: role "desk-pr" exited 1: %w`, errors.New(
+			`pg-connector [pr show item-1 --fresh]: exit 1: unavailable: scriptout: unavailable: `+
+				`deadline exceeded after 31.216s (limit 30s) in op=show args={"id":"item-1"}: `+
+				`gh pr view 1 --repo o/r --json id: context deadline exceeded (is gh on PATH?)`,
+		))},
+		// Not a connector deadline: no scriptout marker.
+		{"desk-pr", errors.New(`deadline exceeded after 5s waiting for a lease`)},
+		// A scriptout failure that is neither a kill nor a deadline.
+		{"desk-pr", errors.New(`exit 1: unavailable: scriptout: pg-connector-pr-github: not found`)},
+	})
+	want := map[string]int64{"desk-pr|upstream-killed": 1, "desk-pr|": 2}
+	if len(got) != len(want) {
+		t.Fatalf("series = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("series %q = %d, want %d (all: %v)", k, got[k], v, got)
+		}
+	}
+}
+
 // pg2-fy2pm precedence: triager-failure wins over upstream-killed, and
 // budget-exceeded wins over upstream-killed (triager > budget > upstream-killed).
 func TestOnHandlerFailure_UpstreamKilledPrecedence(t *testing.T) {

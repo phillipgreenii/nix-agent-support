@@ -364,9 +364,19 @@ const ReasonTriagerFailure = "triager-failure"
 // error_class=killed across the process boundary, so it matches on text, which
 // makes the pair a contract (docs/behavior/interfaces.md, "Upstream-killed
 // sentinel"). (pg2-fy2pm)
+//
+// UpstreamKilledDeadlineSentinel is the connector's own stable text for the
+// SAME event when the backend's deadline fires first: its structured error
+// "deadline exceeded after <elapsed> (limit <limit>) in op=..." wraps whatever
+// the killed child reported, which is "signal: killed" for most calls but
+// plain "context deadline exceeded" for some (a `gh pr view` call, observed
+// 2026-10-07 and 2026-10-11). It substitutes for the signal sentinel ONLY
+// together with the scriptout sentinel, so a bare "deadline exceeded" from any
+// other source is not tagged. (pg2-gp50o)
 const (
 	UpstreamKilledScriptoutSentinel = "scriptout:"
 	UpstreamKilledSignalSentinel    = "signal: killed"
+	UpstreamKilledDeadlineSentinel  = "deadline exceeded after"
 )
 
 // ReasonUpstreamKilled is the "reason" label a FailureClassHandlerError series
@@ -1240,11 +1250,13 @@ func (e *Emitter) OnHandlerFailure(_, _, listenerID string, err error) {
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(attrs...))
 }
 
-// isUpstreamKilled reports whether a handler error text carries BOTH
-// UpstreamKilledScriptoutSentinel and UpstreamKilledSignalSentinel.
+// isUpstreamKilled reports whether a handler error text carries
+// UpstreamKilledScriptoutSentinel together with either
+// UpstreamKilledSignalSentinel or UpstreamKilledDeadlineSentinel.
 func isUpstreamKilled(msg string) bool {
 	return strings.Contains(msg, UpstreamKilledScriptoutSentinel) &&
-		strings.Contains(msg, UpstreamKilledSignalSentinel)
+		(strings.Contains(msg, UpstreamKilledSignalSentinel) ||
+			strings.Contains(msg, UpstreamKilledDeadlineSentinel))
 }
 
 // OnDispatchRetry implements orchestrator.DispatchRetryObserver

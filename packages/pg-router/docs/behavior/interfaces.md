@@ -402,13 +402,18 @@ across the process boundary, so it matches on this leading substring; the handle
 
 **Upstream-killed sentinel.** When a handler's upstream call is killed by the connector's exec
 timeout (for example a slow `gh` call SIGKILLed after 30s), the error text it reports **MUST contain
-BOTH stable substrings `scriptout:` and `signal: killed`** (for example `exit 1: unavailable:
-scriptout: pg-connector-pr-github: signal: killed`). The core cannot see a handler's own error class
-across the process boundary, so it matches on this text, and it **MUST require both substrings**:
-`signal: killed` alone is also what an out-of-memory kill of any worker or ccpool session looks
-like, and that **MUST NOT** be tagged `upstream-killed`. Precedence among `handler-error` reasons is
+the stable substring `scriptout:` together with EITHER `signal: killed` OR `deadline exceeded
+after`** (for example `exit 1: unavailable: scriptout: pg-connector-pr-github: signal: killed`, or
+`exit 1: unavailable: scriptout: unavailable: deadline exceeded after 31.2s (limit 30s) in op=show
+...: context deadline exceeded`). The second form is the connector's own structured deadline error,
+which wraps whatever the killed child reported; that child text is `signal: killed` for most calls
+but plain `context deadline exceeded` for some, so the deadline text is the same event. The core
+cannot see a handler's own error class across the process boundary, so it matches on this text, and
+it **MUST require `scriptout:`**: `signal: killed` alone is also what an out-of-memory kill of any
+worker or ccpool session looks like, and that **MUST NOT** be tagged `upstream-killed` (nor
+`deadline exceeded after` without `scriptout:`). Precedence among `handler-error` reasons is
 **triager-failure, then budget-exceeded, then upstream-killed**. The two substrings are a
-**contract**: changing either breaks the core's `reason="upstream-killed"` classification and the
+**contract**: changing any of the three breaks the core's `reason="upstream-killed"` classification and the
 sustained-only alert rule built on it (`DEC-OBS-3`). Other slow-GitHub failures that do not carry
 both substrings (for example `error connecting to api.github.com`) are **not** covered and keep
 counting under the residual failure-rate series.
