@@ -3932,6 +3932,17 @@
                     echo "FAIL: the pb:drain-one skill lost the writes-nothing wording for pb drain isolate's hook-bundle report" >&2
                     exit 1
                   fi
+                  # pg2-7gtae / ADR 0097: the drain protocol's lease-is-advisory
+                  # tripwire. Nobody may enable `bd reclaim` (a reaper keyed on
+                  # lease expiry) against drain/pool claims until worker or
+                  # pg-router heartbeats are chosen, implemented and recorded.
+                  drain_rules="$surface/claude-marketplace/pb/skills/drain-one/references/rules.md"
+                  for want in 'is ADVISORY for drain and pool claims' 'MAY enable `bd reclaim`, or any reaper keyed on lease expiry' 'worker heartbeats or pg-router heartbeats have first been chosen'; do
+                    if ! grep -qF -- "$want" "$drain_rules"; then
+                      echo "FAIL: the pb:drain-one per-bead rules lost the lease-is-advisory tripwire wording (pg2-7gtae): $want" >&2
+                      exit 1
+                    fi
+                  done
                   if ! grep -qF 'is NOT a per-change or land-time gate' "$surface/home/programs/agent-rules/pgii-agent-rules.md"; then
                     echo "FAIL: the core agent rules lost the 'full nix flake check is NOT a per-change or land-time gate' rule" >&2
                     exit 1

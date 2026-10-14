@@ -93,6 +93,13 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   that retries it spins forever. STOP the loop (do not start or restart dolt), report that
   the operator must run the schema migration, and leave claims released per B-1/B-2.
   Runbook: `docs/beads-1-3-1-schema-migration.md` in the `phillipg-nix-ziprecruiter` repo.
+- A `bd` claim lease (the `Lease:` line of `bd show`, a TTL of about 5 minutes that nothing
+  renews) is ADVISORY for drain and pool claims: an expired lease MUST NOT be read as proof the
+  holder is dead, and nothing here heartbeats it (pool budgets run up to 2 hours per bead). Nobody
+  MAY enable `bd reclaim`, or any reaper keyed on lease expiry, against drain or pool claims until
+  worker heartbeats or pg-router heartbeats have first been chosen, implemented and recorded: a
+  reaper would rob live workers and let a peer claim the same bead. A worker MAY run
+  `bd heartbeat <id>` for its own claim but MUST NOT rely on it. ADR 0097, `pg2-7gtae`.
 - Never use `--no-verify`; fix hook violations instead.
 - Landing MUST go through the `integrate-branch:integrate-branch` dispatcher with NO
   handler named, so every repo lands by the strategy IT declares in
