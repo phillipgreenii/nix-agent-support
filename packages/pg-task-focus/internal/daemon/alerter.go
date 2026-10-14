@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,9 +144,11 @@ func (a *Alerter) play(ctx context.Context, al alert.Alert) {
 	title, body := "Cycle", "Time is up."
 	if c, ok := snap.Model.Cycle(al.CycleID); ok {
 		title = c.Title
+		status := "Time is up."
 		if al.Kind == alert.Reminder {
-			body = fmt.Sprintf("%d min over", int(-c.Remaining(a.clock.Now())/time.Minute))
+			status = fmt.Sprintf("%d min over", int(-c.Remaining(a.clock.Now())/time.Minute))
 		}
+		body = overtimeBody(c.Title, c.Note, status)
 	}
 	a.metrics.AlertsPlayed.WithLabelValues(string(al.Kind)).Inc()
 	if al.Sound != "" {
@@ -159,6 +162,47 @@ func (a *Alerter) play(ctx context.Context, al alert.Alert) {
 		a.metrics.AlertFailures.Inc()
 	}
 	a.log.Info("alert played", "kind", string(al.Kind), "cycle_id", string(al.CycleID))
+}
+
+// Bounds on the notification body, in runes. The body is the cycle title, the
+// note when it has one and the status, so the part the operator wrote is cut
+// to fit and ends in truncationMarker where it was cut.
+const (
+	maxBodyTitleRunes = 60
+	maxBodyNoteRunes  = 100
+	truncationMarker  = "…"
+)
+
+// overtimeBody is the body of an overtime notification: it names the cycle and
+// its note, so the notification says what the operator is over on, for example
+// "Deep work: Reviewed the plan. Time is up." and, with no note,
+// "Deep work. Time is up.". The title and the note are bounded (a note
+// is free text of any length and may span lines, which a notification does not
+// show well) and are only ever text: the notifier passes the body to osascript
+// as an argument, never inside the script.
+func overtimeBody(title, note, status string) string {
+	title = truncateRunes(oneLine(title), maxBodyTitleRunes)
+	note = truncateRunes(oneLine(note), maxBodyNoteRunes)
+	if note == "" {
+		return title + ". " + status
+	}
+	return title + ": " + note + ". " + status
+}
+
+// oneLine joins the words of s with single spaces and drops a trailing period,
+// which the body adds back.
+func oneLine(s string) string {
+	return strings.TrimRight(strings.Join(strings.Fields(s), " "), ".")
+}
+
+// truncateRunes cuts s to at most n runes, the last of them the truncation
+// marker when anything was cut.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return strings.TrimRight(string(r[:n-1]), " ") + truncationMarker
 }
 
 // Drain waits for queued alerts to be handled; for tests.

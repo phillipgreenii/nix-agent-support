@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/notify"
 )
 
 // poll moves the fake clock to t and polls the scheduler, as the daemon's own
@@ -169,5 +172,87 @@ func TestRestartPlaysOneCatchUpAlert(t *testing.T) {
 	e.settle()
 	if got := e.player.Played(); len(got) != 1 {
 		t.Fatalf("a burst of %d alerts after a restart, want one catch-up: %v", len(got), got)
+	}
+}
+
+// overtimeNotifications runs a deep-work cycle (50 minutes, a reminder every
+// 10) with the given note, or none, through its expiry and its first
+// reminder, and returns the two notifications.
+func overtimeNotifications(t *testing.T, note string) (expiry, reminder notifyRecord) {
+	t.Helper()
+	e := newEnv(t, options{})
+	e.bootstrap()
+	e.clock.Set(local(9, 0))
+	c := e.startCycle("deep-work")
+	if note != "" {
+		e.ok("/api/v1/cycles/annotate", map[string]any{"cycle_id": c, "note": note})
+	}
+	e.pollAt(local(9, 50))
+	eventually(t, "the expiry notification", func() bool { return len(e.player.Notified()) >= 1 })
+	e.pollAt(local(10, 0))
+	eventually(t, "the reminder notification", func() bool { return len(e.player.Notified()) >= 2 })
+	n := e.player.Notified()
+	return n[0], n[1]
+}
+
+type notifyRecord = notify.Notification
+
+// A notification names the cycle and, when it has one, the note: it says what
+// the operator is over on.
+func TestOvertimeNotificationsNameTheCycleAndItsNote(t *testing.T) {
+	for _, tc := range []struct {
+		name, note, wantExpiry, wantReminder string
+	}{
+		{"a note", "Reviewed the plan", "Deep work cycle: Reviewed the plan. Time is up.", "Deep work cycle: Reviewed the plan. 10 min over"},
+		{"no note", "", "Deep work cycle. Time is up.", "Deep work cycle. 10 min over"},
+		{"a note ending in a period", "Reviewed the plan.", "Deep work cycle: Reviewed the plan. Time is up.", "Deep work cycle: Reviewed the plan. 10 min over"},
+		{"a multi-line note", "line one\n\n  line two", "Deep work cycle: line one line two. Time is up.", "Deep work cycle: line one line two. 10 min over"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expiry, reminder := overtimeNotifications(t, tc.note)
+			if expiry.Title != "Deep work cycle" || expiry.Body != tc.wantExpiry {
+				t.Errorf("expiry = %+v, want body %q", expiry, tc.wantExpiry)
+			}
+			if reminder.Title != "Deep work cycle" || reminder.Body != tc.wantReminder {
+				t.Errorf("reminder = %+v, want body %q", reminder, tc.wantReminder)
+			}
+		})
+	}
+}
+
+// A long note is cut to a bounded body that ends in the truncation marker
+// where the note was cut, and a note that fits is left whole.
+func TestOvertimeNotificationBoundsALongNote(t *testing.T) {
+	long := strings.Repeat("word ", 200)
+	expiry, reminder := overtimeNotifications(t, long)
+	for _, n := range []notifyRecord{expiry, reminder} {
+		if got := utf8.RuneCountInString(n.Body); got > 200 {
+			t.Errorf("the body is %d runes, want at most 200: %q", got, n.Body)
+		}
+		if !strings.HasPrefix(n.Body, "Deep work cycle: word word") || !strings.Contains(n.Body, "…. ") {
+			t.Errorf("the body does not show the cut note and its marker: %q", n.Body)
+		}
+	}
+	if !strings.HasSuffix(expiry.Body, "…. Time is up.") || !strings.HasSuffix(reminder.Body, "…. 10 min over") {
+		t.Errorf("the status must follow the cut note: %q, %q", expiry.Body, reminder.Body)
+	}
+
+	exact := strings.Repeat("n", 100)
+	expiry, _ = overtimeNotifications(t, exact)
+	if want := "Deep work cycle: " + exact + ". Time is up."; expiry.Body != want {
+		t.Errorf("a note of exactly the limit was cut: %q", expiry.Body)
+	}
+}
+
+// A note with quotes, backslashes and AppleScript syntax reaches the notifier
+// as the plain text it is: the notifier passes it to osascript as an argument.
+func TestOvertimeNotificationKeepsQuotesInTheNote(t *testing.T) {
+	note := `say "hi" \ 'x' & do shell script "id"`
+	expiry, reminder := overtimeNotifications(t, note)
+	if want := "Deep work cycle: " + note + ". Time is up."; expiry.Body != want {
+		t.Errorf("expiry body = %q, want %q", expiry.Body, want)
+	}
+	if want := "Deep work cycle: " + note + ". 10 min over"; reminder.Body != want {
+		t.Errorf("reminder body = %q, want %q", reminder.Body, want)
 	}
 }
