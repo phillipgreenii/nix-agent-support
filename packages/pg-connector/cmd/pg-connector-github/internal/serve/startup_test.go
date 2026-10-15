@@ -54,15 +54,18 @@ func TestServeStartsAndAnswersTheListOpFromTheOrigin(t *testing.T) {
 	}
 }
 
-func TestServeRegistersExactlyThePhase3aOps(t *testing.T) {
+func TestServeRegistersExactlyTheDaemonsOps(t *testing.T) {
 	d := servetest.StartDaemon(t, servetest.Options{})
 
 	registered := map[string][]string{
 		"pr": {
 			scriptout.OpAuthStatus, "explain", scriptout.OpList, "status",
 			"show", "files", "commits", "review_pending", "review_submit", "search", scriptout.OpListActivity, "refresh",
+			"changes", "changes_ack",
 		},
-		"ci": {scriptout.OpAuthStatus, "explain", "status", "list_runs", "get_logs", "rerun_failed", "refresh"},
+		"ci": {
+			scriptout.OpAuthStatus, "explain", "status", "list_runs", "get_logs", "rerun_failed", "refresh", "changes", "changes_ack",
+		},
 	}
 	for inst, ops := range registered {
 		for _, op := range ops {
@@ -72,13 +75,9 @@ func TestServeRegistersExactlyThePhase3aOps(t *testing.T) {
 			}
 		}
 	}
-	// ci has no list op, and the change feed (Phase 3b) is not here yet.
+	// ci has no list op, and an op neither instance registers is unknown_op.
 	for _, c := range []struct{ inst, op string }{
 		{"ci", scriptout.OpList},
-		{"pr", "changes"},
-		{"pr", "changes_ack"},
-		{"ci", "changes"},
-		{"ci", "changes_ack"},
 		{"pr", "list_runs"},
 		{"ci", "show"},
 	} {

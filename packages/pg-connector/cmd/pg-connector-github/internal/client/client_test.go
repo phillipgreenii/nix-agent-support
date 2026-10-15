@@ -115,15 +115,18 @@ func TestCapabilitiesAnsweredStaticallyWithNoDaemon(t *testing.T) {
 	}
 }
 
-// The Phase 3a op tables and what capabilities declares: every op the daemon
-// registers for the instance, the old binary's schema versions and its
-// activity_kinds vocabulary (kept next to cache_opt_out and owns_changes).
+// The op tables and what capabilities declares: every op the daemon registers
+// for the instance (Phase 3a's and the change feed's changes and changes_ack),
+// the old binary's schema versions and its activity_kinds vocabulary (kept next
+// to cache_opt_out and owns_changes).
 func TestPhase3aOpTablesAndTheCapabilitiesDeclaration(t *testing.T) {
 	wantPR := []string{
-		"auth_status", "capabilities", "commits", "explain", "files", "list", "list_activity", "refresh",
-		"review_pending", "review_submit", "search", "show", "status",
+		"auth_status", "capabilities", "changes", "changes_ack", "commits", "explain", "files", "list",
+		"list_activity", "refresh", "review_pending", "review_submit", "search", "show", "status",
 	}
-	wantCI := []string{"auth_status", "capabilities", "explain", "get_logs", "list_runs", "refresh", "rerun_failed", "status"}
+	wantCI := []string{
+		"auth_status", "capabilities", "changes", "changes_ack", "explain", "get_logs", "list_runs", "refresh", "rerun_failed", "status",
+	}
 	if got := PR().OpNames(); !slices.Equal(got, wantPR) {
 		t.Errorf("pr ops = %v, want %v", got, wantPR)
 	}

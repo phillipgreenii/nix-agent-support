@@ -23,36 +23,54 @@
 //     the telemetry.
 //  6. The viewer is resolved (a failure is not fatal: the daemon is then
 //     unauthenticated or retrying, and says so in auth_status).
-//  7. The posted-review sidecar is opened from the daemon's own environment
-//     (a failure is logged and the write path answers unavailable; startup
-//     goes on), the metered gh runner and Provider are built, the group
-//     engine is built and the six group fetchers (detail, conversation, files,
-//     commits, pending, runs) are registered with it, the revalidation handler
-//     is installed on the summary service's OnSummaryRefreshed hook, the
-//     telemetry observer is installed, and the three identity flushes are
-//     registered (the @me query flush, the pending-group flush and the
-//     sidecar-view flush).
-//  8. The ops are registered: pr list, auth_status, status, show, files,
-//     commits, review_pending, review_submit, search, list_activity, refresh and
-//     explain; ci auth_status, status, list_runs, get_logs, rerun_failed,
-//     refresh and explain. Every other op stays unknown_op.
-//  9. The scheduler's queue is rebuilt from the stored due times, the summary
+//  7. The change engine is built (it detects inside the store transactions, so
+//     it comes before the services it is installed on) and is installed at
+//     construction on the summary persister's Hook, the summary service's
+//     OnGone and the group engine's OnGroupStoring and OnGone; the group
+//     engine gets it as its origin hints. The posted-review sidecar is opened
+//     from the daemon's own environment (a failure is logged and the write
+//     path answers unavailable; startup goes on), the metered gh runner and
+//     Provider are built, the group engine is built and the six group
+//     fetchers (detail, conversation, files, commits, pending, runs) are
+//     registered with it, the revalidation handler is installed on the
+//     summary service's OnSummaryRefreshed hook, the telemetry observers (the
+//     group engine's and the change engine's) are installed, and the three
+//     identity flushes are registered (the @me query flush, the pending-group
+//     flush and the sidecar-view flush). The query runner is built with the
+//     change engine and a confirming entity read, so the membership rows
+//     (entered_query, left_query) are written.
+//  8. The change feed is built over the runner (a store that was moved aside
+//     in step 4 is recorded for it here, so the first poll of every cursor key
+//     answers cursor_expired) and the settle lifecycle over the engine and the
+//     group engine. A failure of either aborts startup.
+//  9. The ops are registered: pr list, auth_status, status (with the changes
+//     section), show, files, commits, review_pending, review_submit, search,
+//     list_activity, changes, changes_ack, refresh and explain (with the
+//     pending settle row and the last changes); ci auth_status, status,
+//     list_runs, get_logs, rerun_failed, changes, changes_ack, refresh and
+//     explain. Every other op stays unknown_op.
+//  10. The scheduler's queue is rebuilt from the stored due times, the summary
 //     service's first and the group engine's after it (nothing is fetched by
 //     the rebuild itself: the governor admits every spend, so a start after a
-//     long outage catches up at the governor's rate), and the scheduler starts.
-//  10. The gate opens.
+//     long outage catches up at the governor's rate); then the settle
+//     lifecycle recovers the pending change rows the last run left (it
+//     re-queues the groups each awaits, or appends the row at once when its
+//     deadline has passed); then the scheduler, the settle loop and the sweep
+//     (expiry and the change feed's retention) start.
+//  11. The gate opens.
 //
 // A SIGTERM (ctx ending) drains: the listener closes, in-flight requests finish,
 // then the registered hooks run in order (the engine's in-flight writes finish,
-// the scheduler and the background loops stop, the telemetry flushes, and the
+// the scheduler and the background loops stop, every pending settle row is
+// appended so no detected change is lost, the telemetry flushes, and the
 // store's WAL checkpoint and close come last) and the lock is released.
 //
 // # What is not here
 //
-// The change engine (classifier, settle barrier, changes and changes_ack, the
-// per-group baselines) belongs to a later phase; its ops are not registered, so
-// the router answers unknown_op for them. The revalidation hook is composed
-// with chain so that phase can add its own handler after the revalidation one.
+// The umbrella's forwarding of changes, the ci changes verb and the
+// owns_changes handling belong to a later phase; the daemon's own ops are
+// complete. The revalidation hook is composed with chain; the change engine is
+// not on it (it detects inside the store transaction).
 package serve
 
 import (
@@ -71,11 +89,14 @@ import (
 
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/changes"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/changeview"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ciprovider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/conversation"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/detail"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/entity"
+	chgfeed "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/feed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groups"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groupsvc"
@@ -83,6 +104,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/logs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/metered"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/auth"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/changesop"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/ciops"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/diag"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/list"
@@ -187,6 +209,7 @@ func Run(ctx context.Context, o Options) int {
 	drain := &proc.Hooks{}
 	drain.Register("writes", d.drainWrites)
 	drain.Register("background", d.stopBackground)
+	drain.Register("changes", d.flushChanges)
 	drain.Register("telemetry", d.stopTelemetry)
 	drain.Register("store", d.closeStore)
 
@@ -237,12 +260,22 @@ type daemon struct {
 	draining    bool
 	bg          sync.WaitGroup
 
+	// opened is what store.Open reported (its Outcome says whether the feed must
+	// record a moved-aside store); set once by openStore, before anything else
+	// reads it.
+	opened store.Result
+
 	gov    atomic.Pointer[governor.Governor]
 	sched  atomic.Pointer[scheduler.Scheduler]
 	engine atomic.Pointer[groupsvc.Service]
+	// feed and settle are the change engine's parts the telemetry gauges, the
+	// sweep and the drain reach; nil until startup built them (a hook that finds
+	// nil does nothing).
+	chgFeed atomic.Pointer[chgfeed.Feed]
+	settle  atomic.Pointer[changes.Lifecycle]
 }
 
-// start runs startup steps 4 to 10 (see the package comment).
+// start runs startup steps 4 to 11 (see the package comment).
 func (d *daemon) start(ctx context.Context) error {
 	cfg := d.cfg
 	hooks := d.o.Hooks
@@ -285,6 +318,22 @@ func (d *daemon) start(ctx context.Context) error {
 			return scheduler.State{}
 		},
 		KnownOp: func(instance, op string) bool { return slices.Contains(d.rt.Ops(instance), op) },
+
+		// The change engine's polled gauges. The feed is built after the telemetry
+		// (it needs the query runner), so its positions are late-bound: until it
+		// exists they report nothing.
+		Pending:   st.CountPending,
+		Queries:   func(ctx context.Context) ([]store.QueryRow, error) { return st.ListQueries(ctx, true) },
+		Started:   time.Now(),
+		Consumers: d.consumerPositions,
+		ConfiguredQueries: func() []string {
+			names := make([]string, 0, len(cfg.PR.Queries))
+			for name := range cfg.PR.Queries {
+				names = append(names, name)
+			}
+			slices.Sort(names)
+			return names
+		},
 	})
 	if err != nil {
 		d.log.Log("telemetry_init_failed", "error", err.Error())
@@ -351,6 +400,20 @@ func (d *daemon) start(ctx context.Context) error {
 		Interval: hooks.ViewerInterval, RetryInterval: hooks.ViewerInterval,
 	})
 
+	// The change engine detects inside the store transactions of the summary
+	// persister and the group engine, so it is built first and installed at
+	// construction on every transactional seam (the persister's Hook, the
+	// summary service's OnGone, the group engine's OnGroupStoring and OnGone).
+	// A construction failure aborts startup like any other component.
+	chg, err := changes.New(changes.Config{
+		SettleTimeout: cfg.SettleTimeout.Std(),
+		BodyCap:       int(cfg.ChangeBodyCap),
+	})
+	if err != nil {
+		return fmt.Errorf("change engine: %w", err)
+	}
+	chg.SetObserver(telemetry.NewChangeObserver(tel))
+
 	// The summary service is built before the group engine (the engine needs
 	// it), and its OnSummaryRefreshed hook is fixed at construction, so the hook
 	// is a late-bound closure: the handler is installed below, once the engine
@@ -360,7 +423,9 @@ func (d *daemon) start(ctx context.Context) error {
 		Store: st,
 		Persister: &summary.Persister{
 			Store: st, Identity: ent, TTL: cfg.SummaryTTL.Std(), TerminalTTL: cfg.TerminalTTL.Std(),
+			Hook: chg.DetectSummary,
 		},
+		OnGone:          chg.DetectGone,
 		Fetcher:         &summary.Fetcher{GH: gh, Governor: gov, Feed: feed, BatchSize: cfg.BatchSize},
 		Identity:        ent,
 		Scheduler:       sched,
@@ -380,6 +445,10 @@ func (d *daemon) start(ctx context.Context) error {
 	runner, err := query.New(query.Config{
 		Settings: cfg, Store: st, Identity: ent, Tracker: svc, GH: gh,
 		Governor: gov, Feed: feed, Scheduler: sched, Auth: tracker,
+		// The membership rows (entered_query, left_query) and the entity read
+		// that confirms a departure.
+		Changes: chg, Confirm: query.NewConfirmer(svc, st),
+		Log: d.log.Log,
 	})
 	if err != nil {
 		return fmt.Errorf("query runner: %w", err)
@@ -411,10 +480,12 @@ func (d *daemon) start(ctx context.Context) error {
 		Store: st, Scheduler: sched, Summary: svc, Rules: rules, Aliases: ent,
 		Resolver: &entity.Resolver{Identity: ent, GH: gh, Governor: gov, Feed: feed, BatchSize: cfg.BatchSize},
 		Identity: tracker, Governor: gov, Expiry: cfg.Expiry.Std(),
+		OnGroupStoring: chg.DetectGroup, OnGone: chg.DetectGone,
 	})
 	if err != nil {
 		return fmt.Errorf("group engine: %w", err)
 	}
+	engine.SetOriginHints(chg)
 	d.engine.Store(engine)
 	// The detail fetcher retries and falls back per PR by itself, so its gh is
 	// the origin WITHOUT the retrying runner: a batch 502 would otherwise be
@@ -441,6 +512,30 @@ func (d *daemon) start(ctx context.Context) error {
 	})
 	hook := chain(reval.OnSummaryRefreshed)
 	onRefreshed.Store(&hook)
+
+	// The change feed over the query runner's stored membership, and the settle
+	// lifecycle that ends the pending rows (its queue is the group engine). A
+	// failure of either aborts startup. A store that was moved aside has lost the
+	// change log and every cursor, so the feed is told, and the first poll of
+	// every key answers cursor_expired.
+	chgFeed, err := chgfeed.New(chgfeed.Config{
+		Store: st, Queries: chgfeed.NewQueries(runner, st),
+		Retention: cfg.ChangeLogRetention.Std(), ConsumerStaleAfter: cfg.ConsumerStaleAfter.Std(),
+		Observer: telemetry.NewFeedObserver(tel),
+	})
+	if err != nil {
+		return fmt.Errorf("change feed: %w", err)
+	}
+	d.chgFeed.Store(chgFeed)
+	if d.opened.Outcome == store.OutcomeMovedAside {
+		if err := chgFeed.NoteMovedAside(ctx, time.Now()); err != nil {
+			return fmt.Errorf("record the moved-aside store for the change feed: %w", err)
+		}
+	}
+	settle := &changes.Lifecycle{
+		Engine: chg, Store: st, Queue: engine, Interval: time.Second, Log: d.log.Log,
+	}
+	d.settle.Store(settle)
 
 	// A viewer switch flushes every stored result that depends on the viewer
 	// and re-queues the configured queries at once; the pending groups and the
@@ -471,11 +566,21 @@ func (d *daemon) start(ctx context.Context) error {
 	d.background(bgCtx, "viewer", func(ctx context.Context) { d.viewerLoop(ctx, tracker) })
 
 	// The ops.
+	cvCfg := changeview.Config{Store: st, Settle: settle, Positions: chgFeed, Refs: ent}
+	changeStatus, err := changeview.NewStatusSource(cvCfg)
+	if err != nil {
+		return fmt.Errorf("status change source: %w", err)
+	}
+	changeExplain, err := changeview.NewReader(cvCfg)
+	if err != nil {
+		return fmt.Errorf("explain change reader: %w", err)
+	}
 	static := status.StaticFromConfig(cfg, d.o.Version)
 	d.started = time.Now()
 	auth.Register(d.rt, tracker)
 	if err := status.Register(d.rt, status.Config{
 		Static: static, Budgets: gov, Scheduler: sched, Queries: st, Identity: tracker, Started: d.started,
+		Changes: changeStatus,
 	}); err != nil {
 		return err
 	}
@@ -498,11 +603,17 @@ func (d *daemon) start(ctx context.Context) error {
 	}) {
 		d.rt.Register("ci", op, h)
 	}
+	for instance, ops := range changesop.Handlers(changesop.Deps{Feed: chgFeed, Store: st, Aliases: ent}) {
+		for op, h := range ops {
+			d.rt.Register(instance, op, h)
+		}
+	}
 	// refresh and the extended explain (which replaces the Phase 2 explain
 	// registration: the router refuses a duplicate).
 	dd := diag.Deps{
 		Engine: engine, Summaries: svc, Queries: runner, Config: cfg, Store: st, Aliases: ent,
 		Queue: sched, Rules: rules, Jobs: st,
+		Changes: changeExplain,
 	}
 	for _, handlers := range []map[string]map[string]scriptout.OpHandler{diag.RefreshHandlers(dd), diag.ExplainHandlers(dd)} {
 		for instance, ops := range handlers {
@@ -522,8 +633,20 @@ func (d *daemon) start(ctx context.Context) error {
 	if err := runner.Schedule(ctx); err != nil {
 		return fmt.Errorf("schedule the configured queries: %w", err)
 	}
+	// Pending settle rows the last run left: re-queue the groups each awaits, or
+	// end it at once when its deadline passed. After the queue rebuilds (the
+	// re-queued tasks must merge with the stored ones) and before the scheduler
+	// starts (nothing can complete a row concurrently).
+	queued, completed, err := settle.Recover(ctx)
+	if err != nil {
+		return fmt.Errorf("recover the pending change rows: %w", err)
+	}
+	if queued+completed > 0 {
+		d.log.Log("pending_changes_recovered", "queued", queued, "completed", completed)
+	}
 	d.background(bgCtx, "scheduler", func(ctx context.Context) { sched.Run(ctx) })
-	d.background(bgCtx, "sweep", func(ctx context.Context) { d.sweepLoop(ctx, svc, runner, st, tel) })
+	d.background(bgCtx, "settle", func(ctx context.Context) { settle.Run(ctx) })
+	d.background(bgCtx, "sweep", func(ctx context.Context) { d.sweepLoop(ctx, svc, runner, st, tel, chgFeed) })
 
 	if ctx.Err() != nil {
 		return errCancelled
@@ -597,6 +720,7 @@ func (d *daemon) openStore() error {
 	}
 	d.mu.Lock()
 	d.st = st
+	d.opened = res
 	d.mu.Unlock()
 	return nil
 }
@@ -653,10 +777,12 @@ func (d *daemon) viewerLoop(ctx context.Context, t *identity.Tracker) {
 	}
 }
 
-// sweepLoop applies expiry on a timer: the summary service's sweep, the job
-// table's horizon prune and the configured queries' expiry, and reports what the
-// first two evicted to the store.evictions metric (tel may be nil).
-func (d *daemon) sweepLoop(ctx context.Context, svc *summary.Service, runner *query.Runner, st *store.Store, tel *telemetry.Telemetry) {
+// sweepLoop applies expiry and retention on a timer: the summary service's
+// sweep, the job table's horizon prune, the configured queries' expiry and the
+// change feed's retention (the change log and the stale consumer keys), and
+// reports what the first two evicted to the store.evictions metric (tel may be
+// nil).
+func (d *daemon) sweepLoop(ctx context.Context, svc *summary.Service, runner *query.Runner, st *store.Store, tel *telemetry.Telemetry, cf *chgfeed.Feed) {
 	interval := d.o.Hooks.SweepInterval
 	if interval <= 0 {
 		interval = defaultSweepInterval
@@ -684,12 +810,16 @@ func (d *daemon) sweepLoop(ctx context.Context, svc *summary.Service, runner *qu
 		if _, err := runner.Expire(ctx, d.cfg.Expiry.Std()); err != nil {
 			d.log.Log("query_expiry_failed", "error", err.Error())
 		}
+		if _, _, err := cf.Prune(ctx); err != nil {
+			d.log.Log("change_retention_failed", "error", err.Error())
+		}
 	}
 }
 
 // chain returns the function that calls each given summary hook in order. It
-// mutates nothing and holds no state; the change engine's handler is chained
-// after the revalidation one.
+// mutates nothing and holds no state. Only the after-commit handlers ride it
+// (today the revalidation handler): the change engine detects inside the store
+// transaction instead, through the persister's Hook.
 func chain(fns ...func(*summary.Summary, summary.Stored)) func(*summary.Summary, summary.Stored) {
 	return func(prev *summary.Summary, next summary.Stored) {
 		for _, fn := range fns {
@@ -720,6 +850,34 @@ func (d *daemon) stopBackground(context.Context) error {
 	}
 	d.bg.Wait()
 	return nil
+}
+
+// flushChanges appends every pending settle row, so a SIGTERM loses no detected
+// change. It runs after stopBackground: the scheduler has stopped and waited for
+// its running batches (Scheduler.Run calls Wait when its context ends, and the
+// loops are in the same wait group), so no refresh is in flight and no detection
+// can appear after it. A daemon whose startup never built the lifecycle has
+// nothing to flush.
+func (d *daemon) flushChanges(ctx context.Context) error {
+	l := d.settle.Load()
+	if l == nil {
+		return nil
+	}
+	n, err := l.FlushAll(ctx)
+	if n > 0 {
+		d.log.Log("pending_changes_flushed", "rows", n)
+	}
+	return err
+}
+
+// consumerPositions is the telemetry's source of consumer positions: the feed's,
+// or none until the feed exists.
+func (d *daemon) consumerPositions(ctx context.Context) ([]chgfeed.Position, error) {
+	f := d.chgFeed.Load()
+	if f == nil {
+		return nil, nil
+	}
+	return f.Positions(ctx)
 }
 
 // stopTelemetry flushes the exporters.

@@ -186,11 +186,6 @@ func TestConformancePhase2OpsAnswerResponseEnvelopes(t *testing.T) {
 		invoke(t, b, `{"op":"explain","args":{"id":"example-org/widget#9999"}}`).wantError(t, inst.name+" explain unseen", "not_found")
 		invoke(t, b, `{"op":"explain","args":{}}`).wantError(t, inst.name+" explain without id", "invalid_argument")
 
-		// An op no phase delivered yet is unknown_op, from the daemon: the
-		// change feed belongs to a later phase.
-		for _, op := range []string{"changes", "changes_ack"} {
-			invoke(t, b, `{"op":"`+op+`","args":{}}`).wantError(t, inst.name+" "+op, "unknown_op")
-		}
 		// An op a phase delivered is registered: with no arguments it is the
 		// handler's invalid_argument, never unknown_op.
 		for _, op := range delivered3aOps(inst.name) {
@@ -235,14 +230,15 @@ func phase2Ops(instance string) []string {
 	return append(ops, "get_logs", "rerun_failed")
 }
 
-// delivered3aOps are the ops Phase 3a added whose empty-argument answer is
-// invalid_argument (review_submit, search and list_activity validate their own
-// arguments later and are covered by the daemon's own tests).
+// delivered3aOps are the ops Phase 3a and the change feed (Phase 3b) added whose
+// empty-argument answer is invalid_argument (review_submit, search and
+// list_activity validate their own arguments later and are covered by the
+// daemon's own tests; changes and changes_ack require a consumer and a query).
 func delivered3aOps(instance string) []string {
 	if instance == "pr" {
-		return []string{"show", "files", "commits", "review_pending", "refresh"}
+		return []string{"show", "files", "commits", "review_pending", "refresh", "changes", "changes_ack"}
 	}
-	return []string{"list_runs", "refresh"}
+	return []string{"list_runs", "refresh", "changes", "changes_ack"}
 }
 
 func TestConformanceFailureCodesFollowTheClosedTaxonomy(t *testing.T) {
