@@ -1,0 +1,12 @@
+2026-10-15 16:00:00 -0400
+Assertion status system-wide:
+   PreventUserIdleDisplaySleep    1
+   PreventUserIdleSystemSleep     1
+Listed by owning process:
+   pid 355(Google Chrome Helper (Renderer)): [0x0000000100000001] 01:02:03 PreventUserIdleDisplaySleep named: "Playing video"
+	Details: hand-authored variant: a display-sleep assertion from a process name with spaces and parentheses
+   pid 612(coreaudiod): [0x0000000100000002] 2+03:04:05 PreventUserIdleSystemSleep named: "com.apple.audio.context1.preventuseridlesleep"
+	Details: hand-authored variant: an age of a day or more
+   pid 700(NoAge): [0x0000000100000003] garbage PreventUserIdleSystemSleep named: "unparsable age column"
+   pid abc(BadPid): [0x0000000100000004] 00:00:01 PreventUserIdleSystemSleep named: "unparsable pid"
+   pid 801(NetworkSync): [0x0000000100000005] 00:10:00 NoIdleSleepAssertion named: "a type this tool does not special-case"

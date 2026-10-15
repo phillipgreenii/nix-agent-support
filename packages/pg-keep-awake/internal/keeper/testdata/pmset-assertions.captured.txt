@@ -1,0 +1,30 @@
+2026-10-15 15:38:11 -0400
+Assertion status system-wide:
+   BackgroundTask                 0
+   ApplePushServiceTask           0
+   UserIsActive                   1
+   PreventUserIdleDisplaySleep    0
+   SoftwareUpdateTask             0
+   PreventSystemSleep             1
+   ExternalMedia                  0
+   PreventUserIdleSystemSleep     1
+   NetworkClientActive            0
+Listed by owning process:
+   pid 12129(caffeinate): [0x00025a9d00018602] 00:02:57 PreventUserIdleSystemSleep named: "caffeinate command-line tool"
+	Details: caffeinate asserting for 300 secs
+	Localized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.
+	Timeout will fire in 122 secs Action=TimeoutActionRelease
+   pid 79878(caffeinate): [0x00021a970001a0ea] 04:45:14 PreventUserIdleSystemSleep named: "caffeinate command-line tool"
+	Details: caffeinate asserting for 180000 secs
+	Localized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.
+	Timeout will fire in 162885 secs Action=TimeoutActionRelease
+   pid 79878(caffeinate): [0x00021a970007a0eb] 04:45:14 PreventSystemSleep named: "caffeinate command-line tool"
+	Details: caffeinate asserting for 180000 secs
+	Localized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.
+	Timeout will fire in 162885 secs Action=TimeoutActionRelease
+   pid 479(WindowServer): [0x00025aef0009860d] 00:00:01 UserIsActive named: "com.apple.iohideventsystem.queue.tickle"
+	Timeout will fire in 599 secs Action=TimeoutActionRelease
+   pid 419(powerd): [0x00025af00001860e] 00:01:35 PreventUserIdleSystemSleep named: "Powerd - Prevent sleep while display is on"
+Kernel Assertions: 0x104=USB,MAGICWAKE
+   id=556  level=255 0x100=MAGICWAKE creat=  mod= description=en0 owner=IOSkywalkNetworkBSDClient
+   id=666  level=255 0x4=USB creat= description=com.apple.usb.externaldevice.01200000 owner=USB3.0 Hub
