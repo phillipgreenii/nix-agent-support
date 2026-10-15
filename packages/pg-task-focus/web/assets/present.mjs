@@ -5,20 +5,20 @@ import { durationWords, relativeDue } from "./format.mjs";
 import { parseInstant, stampInZone } from "./zone.mjs";
 
 /**
- * The sentence of a no-op's notice. The service sends the note with each instant
- * written out in UTC and the rule zone (for the command line) and, when the note
- * names an instant, `note_parts`: the same sentence as pieces of text and
- * instants. The page rebuilds the sentence from the pieces, showing each instant
- * in the zone given (the browser's) in the page's compact form, so the notice
- * has no zone name and no 24-hour clock. Without parts the note is shown as sent.
+ * A sentence the service sent twice: written out for the command line (each
+ * instant in UTC and the rule zone, on a 24-hour clock) and as `parts`, pieces
+ * of text and instants. The page rebuilds the sentence from the pieces, showing
+ * each instant in the zone given (the browser's) in the page's compact form, so
+ * the sentence has no zone name and no 24-hour clock. Without parts the
+ * sentence is shown as sent.
  *
- * @param {{note?: string, note_parts?: {text?: string, at?: string}[]}} result
+ * @param {string | undefined} sentence
+ * @param {{text?: string, at?: string}[] | null | undefined} parts
  * @param {number} nowMs
  * @param {string} zone
  */
-export function noteText(result, nowMs, zone) {
-  const parts = result.note_parts;
-  if (!Array.isArray(parts) || parts.length === 0) return result.note;
+export function sentenceInZone(sentence, parts, nowMs, zone) {
+  if (!Array.isArray(parts) || parts.length === 0) return sentence;
   return parts
     .map((p) => {
       if (p.at === undefined) return p.text ?? "";
@@ -26,6 +26,17 @@ export function noteText(result, nowMs, zone) {
       return ms === null ? p.at : stampInZone(ms, zone, nowMs);
     })
     .join("");
+}
+
+/**
+ * The sentence of a no-op's notice: the service's `note` and its `note_parts`.
+ *
+ * @param {{note?: string, note_parts?: {text?: string, at?: string}[]}} result
+ * @param {number} nowMs
+ * @param {string} zone
+ */
+export function noteText(result, nowMs, zone) {
+  return sentenceInZone(result.note, result.note_parts, nowMs, zone);
 }
 
 /** The due time in the zone given (the browser's), in the page's compact form: `9:30 AM`, `Mon 9:30 AM`, `Oct 12, 9:30 AM`. */

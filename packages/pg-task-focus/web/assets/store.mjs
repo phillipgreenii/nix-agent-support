@@ -7,7 +7,7 @@
 // and the id generator are injected, so every rule here runs under node.
 
 import { ApiError } from "./api.mjs";
-import { noteText } from "./present.mjs";
+import { noteText, sentenceInZone } from "./present.mjs";
 import { overtimeNow, parseRoute, shownZone } from "./select.mjs";
 
 /** How long an Undo stays, in milliseconds. */
@@ -173,7 +173,8 @@ export function createStore({ api, now, newId, browserZone = "", hash = "" }) {
       kind: e.kind,
       status: e.status,
       reason: e.reason,
-      detail: e.detail,
+      // A refusal that names an instant is rebuilt from its parts, in the browser's zone like every other instant on the page.
+      detail: sentenceInZone(e.detail, e.detailParts, now(), shownZone(model)),
       traceId: e.traceId,
       details: e.details,
       retryable: e.outcomeUnknown,

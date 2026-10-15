@@ -430,3 +430,147 @@ func TestBuildNeedsAModelAConfigAndIDs(t *testing.T) {
 		t.Error("a nil command was built")
 	}
 }
+
+// A refusal that writes out an instant also comes as parts, so a client can
+// show each instant its own way. One refusal of each site that builds its
+// sentence with an instant: the parts name the instants in the order the
+// sentence writes them, and the message is the same sentence the command line
+// shows, with each instant in UTC and the day period's zone.
+func TestRefusalMessageComesAsTextAndInstantParts(t *testing.T) {
+	withdrawn := func() *logb {
+		b := bootstrapped(t)
+		b.batch(
+			10,
+			func(bt event.ID) event.Payload { return event.ProfileChanged{Profile: "on-call", Batch: bt} },
+			func(bt event.ID) event.Payload { return event.TaskWithdrawn{TaskID: postPlan, Batch: bt} },
+		)
+		return b
+	}
+	stopped := func() *logb {
+		b := interrupted(t)
+		b.add(20, stopOf(cycleA))
+		return b
+	}
+	twoPaused := func() *logb {
+		b := bootstrapped(t)
+		b.add(0, startOf(cycleA, deepWork))
+		b.add(10, pauseOf(cycleA))
+		b.add(20, startOf(cycleB, review))
+		b.add(25, pauseOf(cycleB))
+		return b
+	}
+	future := at(30).Add(time.Hour)
+	tests := []struct {
+		name   string
+		log    func() *logb
+		now    time.Time
+		cmd    command.Command
+		reason command.Reason
+		ats    []time.Time // nil: at least one instant
+	}{
+		{
+			"a break that is not before its end", func() *logb { return runningFrom0(t) }, at(60),
+			command.BackfillBreak{CycleID: cycleA, From: at(30), To: at(20)},
+			command.ReasonInvalidRequest,
+			[]time.Time{at(30), at(20)},
+		},
+		{"a task already resolved", func() *logb {
+			b := bootstrapped(t)
+			b.add(10, event.TaskCompleted{TaskID: postPlan})
+			return b
+		}, at(20), command.CompleteTask{TaskID: postPlan}, command.ReasonTaskAlreadyResolved, []time.Time{at(10), at(20)}},
+		{"a task withdrawn", withdrawn, at(20), command.CompleteTask{TaskID: postPlan}, command.ReasonTaskWithdrawn, []time.Time{at(10), at(20)}},
+		{
+			"an effective_at in the future", func() *logb { return runningFrom0(t) }, at(30),
+			command.BoostCycle{CycleID: cycleA, Minutes: 5, EffectiveAt: &future},
+			command.ReasonFutureEffectiveAt,
+			[]time.Time{future, at(30)},
+		},
+		{"a clock behind the log", func() *logb {
+			b := runningFrom0(t)
+			b.add(30, event.CycleBoosted{CycleID: cycleA, Minutes: 5})
+			return b
+		}, at(20), command.PauseCycle{CycleID: cycleA}, command.ReasonClockBehindLog, []time.Time{at(20), at(30)}},
+		{"a switch with nothing running", stopped, at(30), command.SwitchCycle{To: cycleB}, command.ReasonNoRunningCycle, []time.Time{at(30)}},
+		{"a verb with no cycle running", func() *logb { return bootstrapped(t) }, at(30), command.PauseCycle{}, command.ReasonNoRunningCycle, []time.Time{at(30)}},
+		{"a verb with several cycles to mean", twoPaused, at(30), command.PauseCycle{}, command.ReasonCycleAmbiguous, []time.Time{at(30)}},
+		{
+			"a period that does not move forward", func() *logb { return bootstrapped(t) }, at(24 * 60),
+			command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day1)}},
+			command.ReasonPeriodUnchanged,
+			[]time.Time{at(24 * 60), at(-60)},
+		},
+		{"a period change with cycles active", func() *logb {
+			b := bootstrapped(t)
+			b.add(0, startOf(cycleA, deepWork))
+			b.add(10, interruptOf(cycleB, cycleA, review))
+			return b
+		}, at(24 * 60), command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}}, command.ReasonCycleActive, []time.Time{at(0), at(10)}},
+		{"a finding of the replay", func() *logb {
+			b := bootstrapped(t)
+			b.add(0, startOf(cycleA, deepWork))
+			b.add(10, pauseOf(cycleA))
+			b.add(20, startOf(cycleB, review))
+			return b
+		}, at(30), command.ResumeCycle{CycleID: cycleA}, command.ReasonAnotherCycleRunning, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env := envOf(t, tc.log(), tc.now)
+			r := mustReject(t, env, tc.cmd, tc.reason) // also checks the parts are the message
+			var ats []time.Time
+			for _, p := range r.MessageParts {
+				if !p.At.IsZero() {
+					ats = append(ats, p.At)
+				}
+			}
+			switch {
+			case len(ats) == 0:
+				t.Fatalf("no instant in the parts of %q", r.Message)
+			case tc.ats != nil && !slices.EqualFunc(ats, tc.ats, time.Time.Equal):
+				t.Errorf("instants of the parts = %v, want %v, for %q", ats, tc.ats, r.Message)
+			}
+			// The message is still the command line's sentence: UTC and the zone, 24-hour.
+			if !stamp.MatchString(r.Message) || !strings.Contains(r.Message, "America/New_York") {
+				t.Errorf("Message = %q, want each instant in UTC and the day period's zone", r.Message)
+			}
+		})
+	}
+}
+
+// A refusal that names no instant has no parts, and a message that is not
+// parts is told apart from one that is: the check mustReject makes of every
+// refusal fails for the faults it exists to catch.
+func TestPartsProblemFindsAMissingOrWrongPart(t *testing.T) {
+	m := runningFrom0(t).model()
+	written := m.FormatInstant(at(30))
+	sentence := "The clock reads " + written + ", earlier than the log."
+	good := command.Rejection{
+		Message: sentence, Instants: []time.Time{at(30)},
+		MessageParts: []command.NotePart{{Text: "The clock reads "}, {At: at(30)}, {Text: ", earlier than the log."}},
+	}
+	tests := []struct {
+		name string
+		r    command.Rejection
+		bad  bool
+	}{
+		{"parts that are the message", good, false},
+		{"no instant and no parts", command.Rejection{Message: "No cycle exists in the log."}, false},
+		{"an instant written out and no parts", command.Rejection{Message: sentence, Instants: []time.Time{at(30)}}, true},
+		{"an instant left in a text part", command.Rejection{
+			Message: sentence, Instants: []time.Time{at(30)},
+			MessageParts: []command.NotePart{{Text: "The clock reads " + written + ", earlier than the log."}},
+		}, true},
+		{"parts that are not the message", command.Rejection{
+			Message: sentence, Instants: []time.Time{at(30)},
+			MessageParts: []command.NotePart{{Text: "The clock reads "}, {At: at(31)}, {Text: ", earlier than the log."}},
+		}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := partsProblem(m, tc.r); (got != "") != tc.bad {
+				t.Errorf("partsProblem = %q, want a problem: %v", got, tc.bad)
+			}
+		})
+	}
+}

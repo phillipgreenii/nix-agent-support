@@ -309,7 +309,9 @@ the service that hosts the library, not by the log.
   the same facts (`entity`, `events`, `instants`; the cycles for `cycle_active`, `cycle_ambiguous`
   and `another_cycle_running`; the store health for `store_unavailable`). A message MUST cite only
   the ids of events that are stored: the event a request would add is "the new event" and a cycle it
-  would create is "the new cycle".
+  would create is "the new cycle". When the message names an instant the rejection also carries the
+  message as parts, pieces of text and instants, so a client that shows instants its own way (the web
+  client, `INV-WEB-4`) can rebuild the sentence without parsing it.
 - **`INV-LOG-15`** <!-- uuid: 8db9ea3c-6d7c-4b8b-b30b-5735b2b05241 --> — Every instant in a message MUST be given in UTC (RFC 3339
   with `Z`) followed in parentheses by the same instant in the active day period's zone with its
   identifier once a day period exists (`2026-10-07T14:00:00Z (10:00 America/New_York)`), so no zone

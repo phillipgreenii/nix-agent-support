@@ -67,15 +67,18 @@ type Details struct {
 // the closed set the API documents; TraceID names the trace of the request,
 // for a bug report.
 type Problem struct {
-	Type     string   `json:"type"`
-	Title    string   `json:"title"`
-	Status   int      `json:"status"`
-	Detail   string   `json:"detail"`
-	Instance string   `json:"instance,omitempty"`
-	Reason   string   `json:"reason"`
-	TraceID  string   `json:"trace_id"`
-	Details  *Details `json:"details,omitempty"`
-	Store    *Store   `json:"store,omitempty"`
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Detail string `json:"detail"`
+	// DetailParts is Detail as text and instants, present when Detail names an
+	// instant, so a client can show the instant in its own zone and clock.
+	DetailParts []NotePart `json:"detail_parts,omitempty"`
+	Instance    string     `json:"instance,omitempty"`
+	Reason      string     `json:"reason"`
+	TraceID     string     `json:"trace_id"`
+	Details     *Details   `json:"details,omitempty"`
+	Store       *Store     `json:"store,omitempty"`
 	// Health is set on the not_ready problem of /readyz: the health document
 	// with the failing check named.
 	Health *Health `json:"health,omitempty"`
@@ -88,6 +91,7 @@ func ProblemOf(r *command.Rejection, instance, traceID string, store *Store) Pro
 		Type: ProblemType(r.Reason), Title: Title(r.Reason), Status: StatusOf(r.Reason), Detail: r.Message,
 		Instance: instance, Reason: string(r.Reason), TraceID: traceID,
 	}
+	p.DetailParts = noteParts(r.MessageParts)
 	d := Details{Entity: r.Entity}
 	for _, id := range r.Events {
 		d.Events = append(d.Events, string(id))

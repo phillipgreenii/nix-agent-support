@@ -166,7 +166,8 @@ every response the service sends in the tests is checked against it.
 
 - **`INV-SVC-5`** <!-- uuid: 7aee2795-b6b1-4ea0-b8eb-78f58ac4e414 --> — Every refusal MUST be an RFC 9457 `application/problem+json`
   document carrying a `reason` from one closed set, a `trace_id`, a `detail` that is a plain sentence
-  naming the entity, the instants and the stored event ids involved, and structured `details`
+  naming the entity, the instants and the stored event ids involved (and, when it names an instant, the
+  same sentence as `detail_parts`, pieces of text and instants), and structured `details`
   (`entity`, `events`, `instants`, the `cycles` of an ambiguous, blocked or conflicting cycle verb,
   and the `store` of a store refusal); every response carries a `traceresponse` header, also when no
   collector is attached. The closed set is the library's catalog plus the reasons only the transport

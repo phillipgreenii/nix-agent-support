@@ -3,7 +3,7 @@ import { test } from "node:test";
 import * as actions from "../assets/actions.mjs";
 import { batchOf, editableFields, effectiveMs, isCorrectable, isRetractable, lookupOf, sentence } from "../assets/events.mjs";
 import { durationWords, isBlank, plural, relativeDue, safeHref, shortTitle, timerText } from "../assets/format.mjs";
-import { noteText } from "../assets/present.mjs";
+import { noteText, sentenceInZone } from "../assets/present.mjs";
 import { cycleTypes, overtimeNow, parseRoute, remainingNow, routeHash, tabTitle } from "../assets/select.mjs";
 import { cycleSegments, previewChange, runningMs, withBreak, withEndAt } from "../assets/timeline.mjs";
 import { ULID_PATTERN, ulid } from "../assets/ulid.mjs";
@@ -139,6 +139,17 @@ test("a notice's instant is shown in the zone given, not the rule zone the servi
   assert.equal(noteText(result, Date.parse("2026-10-09T13:00:00Z"), "Asia/Tokyo"), "Deep work cycle has been paused since Wed 11:00 PM.", "the date follows the zone and the clock");
   assert.equal(noteText({ note: "Nothing to retract." }, now, NY), "Nothing to retract.", "a note without parts is as sent");
   assert.equal(noteText({ note: "n", note_parts: [{ text: "since " }, { at: "garbage" }] }, now, NY), "since garbage", "an unreadable instant is shown as sent");
+});
+
+test("a refusal sentence is rebuilt from its parts in the zone given, and is as sent without parts", () => {
+  const now = Date.parse("2026-10-07T13:00:00Z");
+  const detail = "The break's from, 2026-10-07T14:00:00.000Z (10:00 America/New_York), is not before its to, 2026-10-07T13:30:00.000Z (09:30 America/New_York).";
+  const parts = [{ text: "The break's from, " }, { at: "2026-10-07T14:00:00.000Z" }, { text: ", is not before its to, " }, { at: "2026-10-07T13:30:00.000Z" }, { text: "." }];
+  assert.equal(sentenceInZone(detail, parts, now, NY), "The break's from, 10:00 AM, is not before its to, 9:30 AM.");
+  assert.equal(sentenceInZone(detail, parts, now, "Asia/Tokyo"), "The break's from, 11:00 PM, is not before its to, 10:30 PM.");
+  assert.equal(sentenceInZone(detail, undefined, now, NY), detail);
+  assert.equal(sentenceInZone(detail, [], now, NY), detail);
+  assert.equal(sentenceInZone(detail, null, now, NY), detail);
 });
 
 test("the compact stamp reads the instant in the zone given, not the rule's zone", () => {

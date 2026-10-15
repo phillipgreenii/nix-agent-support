@@ -50,8 +50,27 @@ func TestScriptedDay(t *testing.T) {
 	if first["changed"] != true || again["replayed"] != true {
 		t.Fatalf("idempotency: %v then %v", first, again)
 	}
-	e.refused("/api/v1/tasks/day:2026-10-07:plan-day/complete", map[string]any{"id": e.id()}, 409, "task_already_resolved")
-	e.refused("/api/v1/tasks/day:2026-10-07:nope/skip", map[string]any{"reason": "x"}, 404, "unknown_task")
+	resolved := e.refused("/api/v1/tasks/day:2026-10-07:plan-day/complete", map[string]any{"id": e.id()}, 409, "task_already_resolved")
+	// The refusal's sentence also comes as text and instant parts, so a client can show the instants in its own zone;
+	// the sentence itself is still the command line's, with each instant in UTC and the day period's zone.
+	var rebuilt strings.Builder
+	instants := 0
+	detailParts, _ := resolved["detail_parts"].([]any)
+	for _, p := range detailParts {
+		part := p.(map[string]any)
+		if part["at"] != nil {
+			instants++
+		}
+		if text, ok := part["text"].(string); ok && part["at"] == nil {
+			rebuilt.WriteString(text)
+		}
+	}
+	if instants != 2 || !strings.Contains(resolved["detail"].(string), "America/New_York") || strings.Contains(rebuilt.String(), "America/New_York") {
+		t.Fatalf("a task_already_resolved refusal comes as text and two instants, with the sentence unchanged: %v", resolved)
+	}
+	if unknown := e.refused("/api/v1/tasks/day:2026-10-07:nope/skip", map[string]any{"reason": "x"}, 404, "unknown_task"); unknown["detail_parts"] != nil {
+		t.Fatalf("a refusal that names no instant has no parts: %v", unknown)
+	}
 	e.refused("/api/v1/tasks/day:2026-10-07:post-plan/skip", map[string]any{"reason": "   "}, 400, "invalid_request")
 	e.ok("/api/v1/tasks/day:2026-10-07:post-plan/skip", map[string]any{"reason": "not needed today"})
 

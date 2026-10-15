@@ -13,9 +13,10 @@ export class ApiError extends Error {
    * @param {string} [f.reason] a code of the closed set, for a problem
    * @param {string} [f.traceId]
    * @param {object} [f.details] the problem's structured details
+   * @param {{text?: string, at?: string}[]} [f.detailParts] the detail as text and instants, when it names an instant
    * @param {object} [f.store] the store object of a store_unavailable
    */
-  constructor({ kind, detail, status = 0, reason = "", traceId = "", details = null, store = null }) {
+  constructor({ kind, detail, status = 0, reason = "", traceId = "", details = null, detailParts = null, store = null }) {
     super(detail);
     this.name = "ApiError";
     this.kind = kind;
@@ -24,6 +25,7 @@ export class ApiError extends Error {
     this.reason = reason;
     this.traceId = traceId;
     this.details = details;
+    this.detailParts = detailParts;
     this.store = store;
   }
 
@@ -96,6 +98,7 @@ export function createApi({ fetch: fetchImpl = globalThis.fetch?.bind(globalThis
         detail: json.detail,
         traceId: traceIdOf(res.headers, json),
         details: json.details ?? null,
+        detailParts: Array.isArray(json.detail_parts) ? json.detail_parts : null,
         store: json.store ?? json.details?.store ?? null,
       });
     }

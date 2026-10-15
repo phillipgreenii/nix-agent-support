@@ -1,7 +1,10 @@
 package command_test
 
 import (
+	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -212,7 +215,52 @@ func mustReject(t *testing.T, env command.Env, c command.Command, want command.R
 	if len(p.Events) != 0 || p.Candidate != nil || p.NoOp {
 		t.Errorf("a rejected %T planned %d events (NoOp %v)", c, len(p.Events), p.NoOp)
 	}
-	return testutil.RejectionOf(t, err, want)
+	r := testutil.RejectionOf(t, err, want)
+	if problem := partsProblem(env.Model, r); problem != "" {
+		t.Errorf("a rejected %T: %s", c, problem)
+	}
+	return r
+}
+
+// stamp is an instant as every message writes it (UTC, to the millisecond).
+var stamp = regexp.MustCompile(`\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z`)
+
+// partsProblem is what is wrong with how rejection r gives its message as
+// parts, or "" when nothing is: a message that writes out one of the
+// rejection's instants MUST come with parts, no piece of text MUST still carry
+// an instant (a sentence that shows an instant's form as an example, such as the
+// refusal of an unreadable instant, names none and has no parts), and the parts, with
+// each instant written out the way the message writes it, MUST be the message.
+// mustReject checks every refusal of the package's tests with it, so a refusal
+// that builds its sentence with an instant cannot leave the instant out of its
+// parts without a test failing.
+func partsProblem(m *projection.Model, r command.Rejection) string {
+	if len(r.MessageParts) == 0 {
+		for _, t := range r.Instants {
+			if strings.Contains(r.Message, m.FormatInstant(t)) {
+				return fmt.Sprintf("the message %q writes out the instant %s but has no parts", r.Message, m.FormatInstant(t))
+			}
+		}
+		return ""
+	}
+	var joined strings.Builder
+	for _, part := range r.MessageParts {
+		switch {
+		case !part.At.IsZero() && part.Text != "":
+			return fmt.Sprintf("a part has both text %q and an instant", part.Text)
+		case part.At.IsZero():
+			if stamp.MatchString(part.Text) {
+				return fmt.Sprintf("the text %q still writes out an instant", part.Text)
+			}
+			joined.WriteString(part.Text)
+		default:
+			joined.WriteString(m.FormatInstant(part.At))
+		}
+	}
+	if joined.String() != r.Message {
+		return fmt.Sprintf("the parts read %q, not the message %q", joined.String(), r.Message)
+	}
+	return ""
 }
 
 // mustNoOp builds a command that MUST be a no-op and returns its note.

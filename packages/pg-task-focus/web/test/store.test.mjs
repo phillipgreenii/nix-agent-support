@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ApiError } from "../assets/api.mjs";
+import { ApiError, createApi } from "../assets/api.mjs";
 import { UNDO_MS } from "../assets/store.mjs";
 import { cycle, dimmed, period, readOnlyStore, state, T0 } from "./fixtures.mjs";
 import { harness, networkError, problem, said, tick } from "./harness.mjs";
@@ -134,8 +134,8 @@ test("an Undo the daemon refuses shows the daemon's sentence, naming the depende
   assert.ok(h.page().has(sentence));
 });
 
-test("a refusal is shown in the daemon's words, unchanged, with its code and trace id", async () => {
-  const detail = "Plan the day is already completed by event …AAAAAAAA at 2026-10-07T13:00:00Z (09:00 America/New_York).";
+test("a refusal that names no instant is shown in the daemon's words, unchanged, with its code and trace id", async () => {
+  const detail = "Plan the day is already completed by event …AAAAAAAA.";
   const h = harness({
     post: () => {
       throw problem("task_already_resolved", detail);
@@ -151,6 +151,31 @@ test("a refusal is shown in the daemon's words, unchanged, with its code and tra
   assert.ok(h.page().has(detail));
   await h.store.retry();
   assert.equal(h.posts().length, 1, "a refusal is not repeated");
+});
+
+test("a refusal that names an instant shows it in the browser's zone, on a 12-hour clock, with no zone name", async () => {
+  // The service writes the sentence for the command line (UTC and the rule zone, 24-hour) and sends the same sentence as parts.
+  const detail = "Plan the day is already completed by event …AAAAAAAA at 2026-10-07T13:00:00.000Z (09:00 America/New_York).";
+  const detailParts = [{ text: "Plan the day is already completed by event …AAAAAAAA at " }, { at: "2026-10-07T13:00:00.000Z" }, { text: "." }];
+  // The harness clock is 2026-10-07T13:00Z, so the instant is today in each zone.
+  for (const [browserZone, text] of [
+    ["America/New_York", "Plan the day is already completed by event …AAAAAAAA at 9:00 AM."],
+    ["America/Los_Angeles", "Plan the day is already completed by event …AAAAAAAA at 6:00 AM."],
+    ["Asia/Tokyo", "Plan the day is already completed by event …AAAAAAAA at 10:00 PM."],
+  ]) {
+    const h = harness({
+      browserZone,
+      post: () => {
+        throw problem("task_already_resolved", detail, { detailParts });
+      },
+    });
+    await h.start();
+    await h.dispatch("task.done", h.model.state.tasks[0]);
+    assert.equal(h.model.error.detail, text, browserZone);
+    assert.doesNotMatch(h.model.error.detail, /America|Asia|Z\b|\b(1[3-9]|2[0-3]):\d\d/, "no zone name and no 24-hour clock");
+    assert.ok(h.page().has(text), "the error box shows the rebuilt sentence");
+    assert.equal(h.model.error.reason, "task_already_resolved");
+  }
 });
 
 test("an unreachable daemon leaves the outcome unknown, and a repeat sends the same id", async () => {
@@ -267,6 +292,17 @@ test("the ApiError of a problem keeps what the page shows", () => {
   assert.ok(e instanceof ApiError);
   assert.equal(e.message, "Deep work cycle is stopped.");
   assert.equal(e.outcomeUnknown, false);
+});
+
+test("the API client keeps the detail_parts of a problem, and none when the daemon sent none", async () => {
+  const answer = (body) => createApi({ fetch: async () => ({ ok: false, status: 409, text: async () => JSON.stringify(body), headers: new Map() }) });
+  const base = { reason: "task_already_resolved", detail: "Done at 2026-10-07T13:00:00.000Z (09:00 America/New_York).", trace_id: "t" };
+  const parts = [{ text: "Done at " }, { at: "2026-10-07T13:00:00.000Z" }, { text: "." }];
+  const withParts = await answer({ ...base, detail_parts: parts }).getState().catch((e) => e);
+  assert.deepEqual(withParts.detailParts, parts);
+  assert.equal(withParts.detail, base.detail, "the sentence itself is kept as sent");
+  const without = await answer(base).getState().catch((e) => e);
+  assert.equal(without.detailParts, null);
 });
 
 test("a refresh asked for while one is in flight resolves only after a read that began after the ask", async () => {

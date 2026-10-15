@@ -17,7 +17,7 @@ export const tick = () => new Promise((r) => setTimeout(r, 0));
 
 /** A problem as the daemon sends it, as an ApiError. */
 export function problem(reason, detail, extra = {}) {
-  return new ApiError({ kind: "problem", status: extra.status ?? 409, reason, detail, traceId: "trace1", details: extra.details ?? null, store: extra.store ?? null });
+  return new ApiError({ kind: "problem", status: extra.status ?? 409, reason, detail, traceId: "trace1", details: extra.details ?? null, detailParts: extra.detailParts ?? null, store: extra.store ?? null });
 }
 
 export function networkError() {

@@ -118,7 +118,12 @@ func Build(env Env, c Command) (Plan, error) {
 		}
 		b.hash = h
 	}
-	return p.plan(b)
+	plan, err := p.plan(b)
+	var r *Rejection
+	if errors.As(err, &r) {
+		r.MessageParts = b.messageParts(r)
+	}
+	return plan, err
 }
 
 // placeholderID stands in for an id that is not drawn yet when the size of a
@@ -135,6 +140,52 @@ type builder struct {
 
 // instant writes t as every message does.
 func (b *builder) instant(t time.Time) string { return b.env.Model.FormatInstant(t) }
+
+// messageParts is r's message as text and instants: the message cut around
+// each written-out instant of r.Instants, which carries every instant a
+// refusal's sentence names (a refusal built here, and a finding of the replay).
+// Joining the parts with each instant written out by instant gives the message
+// again. It is nil when the message names no instant. Every refusal is split
+// here, once, as Build returns it, so no refusal site can leave its instants
+// out.
+func (b *builder) messageParts(r *Rejection) []NotePart {
+	type hit struct {
+		from, to int
+		at       time.Time
+	}
+	var hits []hit
+	for _, t := range r.Instants {
+		s := b.instant(t)
+		for off := 0; ; {
+			i := strings.Index(r.Message[off:], s)
+			if i < 0 {
+				break
+			}
+			hits = append(hits, hit{off + i, off + i + len(s), t})
+			off += i + len(s)
+		}
+	}
+	slices.SortFunc(hits, func(x, y hit) int { return x.from - y.from })
+	var parts []NotePart
+	pos := 0
+	for _, h := range hits {
+		if h.from < pos {
+			continue // inside an instant already taken
+		}
+		if h.from > pos {
+			parts = append(parts, NotePart{Text: r.Message[pos:h.from]})
+		}
+		parts = append(parts, NotePart{At: h.at})
+		pos = h.to
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	if pos < len(r.Message) {
+		parts = append(parts, NotePart{Text: r.Message[pos:]})
+	}
+	return parts
+}
 
 // invalid is an invalid_request with a sentence.
 func (b *builder) invalid(format string, args ...any) *Rejection {

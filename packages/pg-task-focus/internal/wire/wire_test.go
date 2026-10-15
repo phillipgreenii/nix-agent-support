@@ -123,6 +123,35 @@ func TestResultNotePartsCarryTheInstantAsRFC3339(t *testing.T) {
 	}
 }
 
+func TestProblemOfCarriesTheMessagePartsAsDetailParts(t *testing.T) {
+	when := time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC)
+	sentence := "No cycle is running at 2026-10-07T14:00:00.000Z (10:00 America/New_York), so there is nothing to stop."
+	tests := []struct {
+		name  string
+		parts []command.NotePart
+		want  string
+	}{
+		{"none", nil, `"detail":"` + sentence + `","reason"`},
+		{
+			"text around an instant",
+			[]command.NotePart{{Text: "No cycle is running at "}, {At: when}, {Text: " (10:00 America/New_York), so there is nothing to stop."}},
+			`"detail":"` + sentence + `","detail_parts":[{"text":"No cycle is running at "},{"at":"2026-10-07T14:00:00.000Z"},{"text":" (10:00 America/New_York), so there is nothing to stop."}],"reason"`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &command.Rejection{Reason: command.ReasonNoRunningCycle, Message: sentence, MessageParts: tc.parts}
+			got, err := json.Marshal(wire.ProblemOf(r, "", "trace", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(got), tc.want) {
+				t.Errorf("Problem = %s, want it to contain %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestProblemOfCarriesTheStructuredDetails(t *testing.T) {
 	r := &command.Rejection{
 		Reason: command.ReasonCycleAmbiguous, Message: "Two cycles qualify.", Entity: "",

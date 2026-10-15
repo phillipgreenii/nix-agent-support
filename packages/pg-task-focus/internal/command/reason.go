@@ -125,14 +125,19 @@ type CycleRef struct {
 // calls it "the new event"), and Instants always includes the new event's
 // effective_at once the request has one. Cycles names the candidates of a
 // cycle_ambiguous, the blockers of a cycle_active and the cycles of an
-// another_cycle_running, each with its title.
+// another_cycle_running, each with its title. MessageParts is Message as text
+// and instants, set by Build when Message names an instant, so a client that
+// shows instants its own way (the web client, in the browser's zone) can
+// rebuild the sentence without parsing it; Message itself always has each
+// instant written out in UTC and the day period's zone, for the command line.
 type Rejection struct {
-	Reason   Reason
-	Message  string
-	Entity   string
-	Events   []event.ID
-	Instants []time.Time
-	Cycles   []CycleRef
+	Reason       Reason
+	Message      string
+	MessageParts []NotePart
+	Entity       string
+	Events       []event.ID
+	Instants     []time.Time
+	Cycles       []CycleRef
 }
 
 // Error implements error with the message.

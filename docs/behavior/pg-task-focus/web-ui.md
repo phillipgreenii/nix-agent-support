@@ -141,7 +141,8 @@ _Includes:_ none.
 _Includes:_ none.
 
 1. The operator completes a task that another client already completed. The page shows the service's own
-   sentence, naming the resolving event, with its code and trace id (`INV-WEB-4`).
+   sentence, naming the resolving event and showing its instants in the browser's zone, with its code and
+   trace id (`INV-WEB-4`).
 2. The operator presses Pause on a cycle that is already paused. Nothing is refused and nothing is shown as
    an error; the page may say, quietly, why nothing changed (`INV-WEB-5`).
 
@@ -259,11 +260,14 @@ Extensions:
   timer MUST run from the service's remaining time at its read, less the time since the page received
   it on the page's own clock, so a skewed clock shows the right time.
 - **`INV-WEB-4`** <!-- uuid: fb61f185-cc84-472a-8f68-6417a89b2b7c --> — When the service refuses a request the page MUST show the service's own sentence
-  (the problem's detail), unchanged, with its `reason` code and `trace_id`, and MUST NOT replace it with a
-  generic message. When the service cannot be reached, or answers that the store is unavailable with the
+  (the problem's detail), unchanged except for its instants, with its `reason` code and `trace_id`, and MUST
+  NOT replace it with a generic message. When the sentence names an instant, the page MUST rebuild it from
+  the problem's `detail_parts` and show each instant as `INV-WEB-23` requires, never as the service's own
+  text writes it (UTC and the rule zone); without parts it shows the detail as sent. When the service cannot be reached, or answers that the store is unavailable with the
   outcome unknown, the page MUST say that the outcome is unknown and offer a retry that repeats the same
   request. A refusal of a cycle verb that lists several candidate cycles MUST be shown as a choice among
-  them. _(Operator ruling, 2026-10-08, decision log row 43.)_
+  them. _(Operator ruling, 2026-10-08, decision log row 43; instants: operator ruling, Phillip,
+  2026-10-14, bead `pg2-ndozl`, "(a) INV-WEB-23 wins".)_
 - **`INV-WEB-5`** <!-- uuid: 0c901789-b50a-4185-b43c-2624dae0f9b4 --> — A pause, resume, stop or switch that finds its cycle already in that state is a
   success with `changed: false`; the page MUST NOT show it as an error and MUST NOT change its display,
   and MAY say the service's one-sentence note, quietly. When the note names an instant, the page MUST
@@ -377,14 +381,14 @@ Extensions:
   occurrence); every time the page shows follows `INV-WEB-23`.
 - **`INV-WEB-23`** <!-- uuid: a6d7d849-bcb0-4071-8003-462d4fdc21ca --> — Every instant the page SHOWS (a due time, a completion time, an event's time, a cycle's
   stop time, a timeline segment, the time of the last state when the connection is lost, an instant in
-  the quiet notice of a no-op) MUST be shown in
+  the quiet notice of a no-op, an instant in the sentence of a refusal) MUST be shown in
   the browser's zone, on a 12-hour clock with `AM` or `PM`, and MUST NOT carry a zone name or a 24-hour clock.
   The form is one compact form everywhere: the time alone (`9:00 AM`) on today's date, the weekday and time
   (`Mon 9:00 AM`) within six days either side of today, and otherwise the month, day and time
   (`Oct 12, 9:00 AM`, with the year when it is not the current one). Not shown this way, because they are
   zone-explicit by design: the value of a time the operator types (24-hour, read in the zone named beside
-  the input, `INV-WEB-21`), the zone field of the period modal, the rule text of a period or a day, and
-  the service's own sentence of a refusal (`INV-WEB-4`), which is shown unchanged.
+  the input, `INV-WEB-21`), the zone field of the period modal, and the rule text of a period or a day.
+  The sentence of a refusal is no exception: its instants are rebuilt from its parts (`INV-WEB-4`).
   _(Operator ruling, Phillip, 2026-10-13, bead `pg2-r5xy1`: "the date and times should be using the current
   timezone of the browser. it should also be using am/pm, not 24 hour." Supersedes the web client's part of
   `INV-TIME-8`.)_

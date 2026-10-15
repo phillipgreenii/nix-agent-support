@@ -499,7 +499,7 @@
     },
     "NotePart": {
       "additionalProperties": false,
-      "description": "One piece of a note, either `text` or `at`, never both.",
+      "description": "One piece of a note or of a problem's detail, either `text` or `at`, never both.",
       "properties": {
         "at": {
           "$ref": "#/$defs/Instant"
@@ -606,6 +606,13 @@
       "properties": {
         "detail": {
           "type": "string"
+        },
+        "detail_parts": {
+          "description": "The `detail` as pieces of text and instants, present when the\ndetail names an instant, so a client can show each instant in its\nown zone and clock. Joining the pieces with each instant written out\nthe way `detail` writes it gives the detail.\n",
+          "items": {
+            "$ref": "#/$defs/NotePart"
+          },
+          "type": "array"
         },
         "details": {
           "$ref": "#/$defs/ProblemDetails"

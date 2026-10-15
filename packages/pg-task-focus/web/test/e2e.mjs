@@ -367,19 +367,24 @@ test("a change made by another client appears without polling", async () => {
   assert.equal(model.conn, "live");
 });
 
-test("a refusal shows the daemon's own sentence, byte for byte, with its code and trace id", async () => {
+test("a refusal shows the daemon's sentence with each instant in the page's zone, with its code and trace id", async () => {
   const done = model.state.tasks.find((t) => t.status === "completed");
   await dispatch("task.done", done);
   await settle();
   const e = model.error;
   assert.equal(e.reason, "task_already_resolved");
   assert.ok(e.traceId.length >= 16);
-  // The same request made directly gets the same sentence.
+  // The same request made directly gets the command line's sentence (UTC and the rule zone, 24-hour) and the same sentence as parts.
   const direct = await realFetch(`${BASE}/api/v1/tasks/${encodeURIComponent(done.id)}/complete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   const problem = await direct.json();
   assert.equal(direct.status, 409);
-  assert.equal(e.detail, problem.detail, "the page's sentence is the daemon's, unchanged");
-  assert.ok(P().has(problem.detail));
+  assert.match(problem.detail, /Z \(\d\d:\d\d America\/New_York\)/, "the daemon's sentence is the command line's");
+  assert.ok(problem.detail_parts.some((p) => p.at !== undefined), "and also comes as parts that name the instants");
+  assert.equal(problem.detail_parts.map((p) => p.text ?? "").join(""), problem.detail.replace(/\d{4}-\d\d-\d\dT[\d:.]+Z \(\d\d:\d\d America\/New_York\)/g, ""), "the parts are the sentence with its instants taken out");
+  assert.notEqual(e.detail, problem.detail, "the page rebuilt the sentence");
+  assert.doesNotMatch(e.detail, /America|\dZ\b|\b(1[3-9]|2[0-3]):\d\d/, "no zone name and no 24-hour clock");
+  assert.match(e.detail, /\b(1[0-2]|[1-9]):\d\d [AP]M\b/, "each instant in the page's compact form");
+  assert.ok(P().has(e.detail));
   assert.ok(P().has(`trace ${e.traceId}`));
   dispatch("error.dismiss");
 });

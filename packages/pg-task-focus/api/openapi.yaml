@@ -818,7 +818,7 @@ components:
         version: { $ref: "#/components/schemas/Version" }
     NotePart:
       type: object
-      description: One piece of a note, either `text` or `at`, never both.
+      description: One piece of a note or of a problem's detail, either `text` or `at`, never both.
       additionalProperties: false
       properties:
         text: { type: string }
@@ -1038,6 +1038,14 @@ components:
         status:
           { type: integer, enum: [400, 403, 404, 405, 409, 415, 422, 500, 503] }
         detail: { type: string }
+        detail_parts:
+          type: array
+          description: |
+            The `detail` as pieces of text and instants, present when the
+            detail names an instant, so a client can show each instant in its
+            own zone and clock. Joining the pieces with each instant written out
+            the way `detail` writes it gives the detail.
+          items: { $ref: "#/components/schemas/NotePart" }
         instance: { type: string }
         reason: { $ref: "#/components/schemas/Reason" }
         trace_id: { type: string }
