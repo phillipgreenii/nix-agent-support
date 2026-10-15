@@ -27,6 +27,12 @@ func TestClassifyExit_shapes(t *testing.T) {
 		{"unable to connect", "Unable to connect to API (FailedToOpenSocket)", facts("errored", false, true), APITransient},
 		{"stream idle", "Stream idle timeout - partial response received", facts("errored", false, true), APITransient},
 		{"rate limit", "You've hit your limit · resets 3:30pm (America/New_York)", facts("errored", false, true), APIRateLimit},
+		// The recorded spend-limit death (2026-10-14, pg2-e0imq): straight and curly
+		// apostrophe. It MUST be api-rate-limit, not session-errored, which also
+		// covers errored sessions that are not limits (the case above and below).
+		{"spend limit, straight apostrophe", "You've hit your individual spend limit · run /usage-credits to ask your admin for a higher limit · your session limit resets 4:30am (America/New_York)", facts("errored", false, true), APIRateLimit},
+		{"spend limit, curly apostrophe", "You’ve hit your individual spend limit · run /usage-credits to ask your admin for a higher limit · your session limit resets 4:30am (America/New_York)", facts("idle", true, true), APIRateLimit},
+		{"spend limit, have spelling", "You have hit your individual spend limit", facts("errored", false, true), APIRateLimit},
 		{"auth 401", "Please run /login · API Error: 401 Invalid authentication credentials", facts("errored", false, true), APIAuth},
 		{"context limit", "Prompt is too long: 215000 tokens > 200000 maximum", facts("errored", false, true), ContextLimit},
 		{"api error outranks earlier git failure", "fatal: Could not read from remote repository.\nAPI Error: 529 Overloaded", facts("errored", false, true), APITransient},

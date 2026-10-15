@@ -247,7 +247,12 @@ sequenceDiagram
   **upstream-killed sentinel** (`interfaces.md`, "Upstream-killed sentinel": `scriptout:` with
   `signal: killed` or `deadline exceeded after`) is counted with `reason="upstream-killed"`, ranking below `triager-failure` and
   `budget-exceeded`; it is excluded from the residual failure-rate alert and **MUST** page only on a
-  sustained burst (`DEC-OBS-3`, amended). A **second narrow exception is opt-in per
+  sustained burst (`DEC-OBS-3`, amended). A handler error that carries the documented
+  **usage-limit sentinel** (`interfaces.md`, "Usage-limit sentinel":
+  `session ended on a usage limit or API outage`, a session that died on an account usage or spend
+  limit or an API outage) is counted with `reason="usage-limit"`, ranking below `triager-failure`, `budget-exceeded` and
+  `upstream-killed`; it is excluded from the residual failure-rate alert and **MUST NOT** page at
+  all, remaining visible as its own series (`DEC-OBS-3`, amended). A **second narrow exception is opt-in per
   role** (`DEC-RETRY-2`): a role MAY declare a small bounded number of re-runs, and the core then
   re-runs a dispatch whose handler failed with a **transient** class (`killed`, `deadline`,
   `unavailable`) — never a deterministic failure — carrying each failed attempt as a pre-accept

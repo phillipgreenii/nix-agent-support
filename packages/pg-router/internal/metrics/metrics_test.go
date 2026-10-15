@@ -1211,7 +1211,7 @@ func TestOnHandlerFailure_TriagerFailuresAreBulkheaded(t *testing.T) {
 		reason, _ := dp.Attributes.Value("reason")
 		got[role.AsString()+"|"+reason.AsString()] += dp.Value
 		switch reason.AsString() {
-		case "at-capacity", ReasonBudgetExceeded, "origin-unavailable", ReasonTriagerFailure, ReasonUpstreamKilled:
+		case "at-capacity", ReasonBudgetExceeded, "origin-unavailable", ReasonTriagerFailure, ReasonUpstreamKilled, ReasonUsageLimit:
 		default:
 			residual += dp.Value
 		}
@@ -1400,6 +1400,76 @@ func TestOnHandlerFailure_UpstreamKilledPrecedence(t *testing.T) {
 		"alpha-escalation-triager|triager-failure": 1,
 		"worker|budget-exceeded":                   1,
 		"desk-pr|upstream-killed":                  1,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("series = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("series %q = %d, want %d (all: %v)", k, got[k], v, got)
+		}
+	}
+}
+
+// pg2-e0imq: the handler error of a session that ended on a usage or spend limit
+// or an API outage carries the documented substring and is counted as
+// class=handler-error with its own reason, usage-limit, and the config-bounded
+// role label. The text is the handler's real exempt unclaimed-end error as the
+// wireclient wraps it.
+func TestOnHandlerFailure_UsageLimitSentinel(t *testing.T) {
+	h := newHarness(t)
+	got := handlerFailureSeries(t, h, []struct {
+		role string
+		err  error
+	}{
+		{"drain", fmt.Errorf(`wireclient: role "drain" exited 1: %w`, errors.New(`zr-d: session ended on a usage limit or API outage before claiming its bead (api-rate-limit; no strike counted)`))},
+		{"drain", errors.New(`zr-e: session ended on a usage limit or API outage before claiming its bead (api-transient; no strike counted)`)},
+		// The two-strike unclaimed ends keep no reason (they stay in the residual).
+		{"drain", errors.New(`zr-f: session ended without claiming its bead (first end)`)},
+		{"drain", errors.New(`wireclient: role "drain" exited 1: zr-g: session exited before completing`)},
+	})
+	want := map[string]int64{"drain|usage-limit": 2, "drain|": 2}
+	if len(got) != len(want) {
+		t.Fatalf("series = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("series %q = %d, want %d (all: %v)", k, got[k], v, got)
+		}
+	}
+}
+
+// The substring is a contract with the handler (interfaces.md, "Usage-limit
+// sentinel"); a reworded constant would silently reclassify the series.
+func TestUsageLimitSentinelIsTheDocumentedContract(t *testing.T) {
+	if UsageLimitSentinel != "session ended on a usage limit or API outage" {
+		t.Errorf("UsageLimitSentinel = %q; the documented contract is %q", UsageLimitSentinel, "session ended on a usage limit or API outage")
+	}
+	if ReasonUsageLimit != "usage-limit" {
+		t.Errorf("ReasonUsageLimit = %q, want usage-limit", ReasonUsageLimit)
+	}
+}
+
+// pg2-e0imq precedence: usage-limit ranks BELOW triager-failure, budget-exceeded
+// and upstream-killed, so those keep their current reasons when the same error
+// text also carries the usage-limit substring.
+func TestOnHandlerFailure_UsageLimitPrecedence(t *testing.T) {
+	h := newHarness(t)
+	limit := `session ended on a usage limit or API outage before claiming its bead (api-rate-limit; no strike counted)`
+	got := handlerFailureSeries(t, h, []struct {
+		role string
+		err  error
+	}{
+		{"alpha-escalation-triager", errors.New(`exit 1: ` + limit)},
+		{"worker", errors.New(`exit 1: session budget exceeded: role=worker limit=time; ` + limit)},
+		{"desk-pr", errors.New(`exit 1: unavailable: scriptout: pg-connector-pr-github: signal: killed; ` + limit)},
+		{"drain", errors.New(`exit 1: ` + limit)},
+	})
+	want := map[string]int64{
+		"alpha-escalation-triager|triager-failure": 1,
+		"worker|budget-exceeded":                   1,
+		"desk-pr|upstream-killed":                  1,
+		"drain|usage-limit":                        1,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("series = %v, want %v", got, want)

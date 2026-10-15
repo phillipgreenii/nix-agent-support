@@ -451,7 +451,12 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 	}
 	if errors.Is(err, ErrUnclaimedEnd) {
 		var ue *unclaimedEnd
-		if errors.As(err, &ue) && ue.escalated {
+		if errors.As(err, &ue) && ue.exempt {
+			// A usage or spend limit or an API outage (INV-CCH-28): no strike and
+			// no bead write, so no verb.
+			return report.Result{}
+		}
+		if ue != nil && ue.escalated {
 			return failureAction(report.Escalated, beadID)
 		}
 		return failureAction(report.Unclaimed, beadID)
@@ -1629,19 +1634,35 @@ const unclaimedEndLabel = "drain-unclaimed-end"
 // it is a returned error because waitDone's other non-failure results have no
 // carrier (a nil error means "completed" and would clear pool-evicted); the wait
 // failure mapping reports it as Unclaimed on the first strike and Escalated on
-// the second (see unclaimedEnd). It is NOT a session failure:
-// recordDispatchFailure records no dispatch_result for it, since it carries no
-// failure signature and would count in the failure metrics as a dispatch
-// failure.
+// the second (see unclaimedEnd); an end that died on a usage limit or API outage
+// is exempt from both (INV-CCH-28). It is NOT a session failure:
+// recordDispatchFailure records no dispatch_result for it, so it does not count
+// in the failure metrics as a dispatch failure. Its own unclaimed_end record
+// carries the failure signature instead.
 var ErrUnclaimedEnd = errors.New("session ended without claiming its bead")
 
+// UsageLimitEndSentinel is the documented, stable substring the error of an
+// EXEMPT unclaimed end carries (docs/behavior/interfaces.md, "Usage-limit
+// sentinel"): the session ended without claiming its bead because it died on a
+// usage or spend limit or an API outage (INV-CCH-28). pg-router matches on this
+// text (its own copy of the constant) to give the failure its own reason, so the
+// wording MUST NOT change without changing both sides.
+const UsageLimitEndSentinel = "session ended on a usage limit or API outage"
+
 // unclaimedEnd is the concrete error behind ErrUnclaimedEnd: escalated says
-// whether this was the SECOND consecutive strike (human was added).
+// whether this was the SECOND consecutive strike (human was added); exempt says
+// the end was caused by a usage or spend limit or an API outage, so no strike
+// was counted (INV-CCH-28) and the error carries UsageLimitEndSentinel.
 type unclaimedEnd struct {
 	escalated bool
+	exempt    bool
+	signature failsig.Signature
 }
 
 func (e *unclaimedEnd) Error() string {
+	if e.exempt {
+		return fmt.Sprintf("%s before claiming its bead (%s; no strike counted)", UsageLimitEndSentinel, e.signature)
+	}
 	if e.escalated {
 		return "session ended without claiming its bead (second consecutive end; escalated to human)"
 	}
@@ -1661,14 +1682,41 @@ var ErrPeerHeld = errors.New("bead held by another actor")
 // the error that carries it: the first strike adds drain-unclaimed-end only, the
 // second adds human, mirroring escalateEviction. A bd hiccup reading the label
 // counts as a first strike that wrote nothing (the safe direction: no human).
+//
+// The dying session is classified first, with the one shared classification
+// (INV-CCH-9; captureSignature is captured-once, and waitDone already ran it
+// before any teardown). An end whose signature is api-rate-limit or
+// api-transient (a usage or spend limit, a 429, an API outage) is EXEMPT: it
+// writes nothing to the bead, leaves an existing strike as it is, and returns an
+// error carrying UsageLimitEndSentinel. The exemption keys on the signature
+// alone; it never reads the capacity usage-limit reading, which can say "not
+// limited" inside a blocked window. The unclaimed_end record carries
+// failure_signature and signature_evidence either way, and still no
+// dispatch_result is recorded for an unclaimed end.
 func (r *ccpoolRun) unclaimedEndResult(ctx context.Context, d DispatchContext, name string) error {
-	escalated := r.escalateUnclaimedEnd(ctx, d.Item.ID)
-	slog.Info("session ended without claiming its bead", "session", name, "bead", d.Item.ID, "escalated", escalated)
+	sig := r.captureSignature()
+	exempt := unclaimedEndExempt(sig.Signature)
+	escalated := false
+	if !exempt {
+		escalated = r.escalateUnclaimedEnd(ctx, d.Item.ID)
+	}
+	slog.Info("session ended without claiming its bead", "session", name, "bead", d.Item.ID, "escalated", escalated,
+		"exempt", exempt, "failure_signature", string(sig.Signature), "signature_evidence", sig.Evidence)
 	if r.deps.Log != nil {
 		_ = r.deps.Log.Emit("info", "unclaimed_end", "session ended without claiming its bead",
-			map[string]any{"role": d.Role.Name, "bead": d.Item.ID, "session": name, "escalated": escalated})
+			map[string]any{
+				"role": d.Role.Name, "bead": d.Item.ID, "session": name, "escalated": escalated,
+				"failure_signature": string(sig.Signature), "signature_evidence": sig.Evidence,
+			})
 	}
-	return fmt.Errorf("%s: %w", d.Item.ID, &unclaimedEnd{escalated: escalated})
+	return fmt.Errorf("%s: %w", d.Item.ID, &unclaimedEnd{escalated: escalated, exempt: exempt, signature: sig.Signature})
+}
+
+// unclaimedEndExempt reports whether an unclaimed end with this signature is
+// outside the two-strike policy: the session died on a limit or an outage, not
+// on anything about the bead (INV-CCH-28).
+func unclaimedEndExempt(s failsig.Signature) bool {
+	return s == failsig.APIRateLimit || s == failsig.APITransient
 }
 
 // escalateUnclaimedEnd is the two-strike idiom of escalateLaunchFailure and

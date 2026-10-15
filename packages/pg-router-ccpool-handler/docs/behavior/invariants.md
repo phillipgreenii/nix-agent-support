@@ -105,6 +105,14 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
     bead is not complete), `session-gone` (the pane is dead or the row vanished). When the
     signature is `unknown` or one of the `session-*` signatures, the evidence MUST be the
     session facts followed by the last three non-empty transcript lines, so it is never empty.
+    `api-rate-limit` covers every wording of an account limit Claude Code writes, including the
+    spend-limit status line (`You've hit your individual spend limit`, with a straight or curly
+    apostrophe, or `You have hit your individual spend limit`) as well as `You've hit your limit`
+    and a 429; a session that errored for any other reason stays `session-errored`.
+  - **Unclaimed end.** The `unclaimed_end` event-log record of `INV-CCH-28` MUST carry the same
+    `failure_signature` and `signature_evidence`, classified by this same shared classification and
+    captured before the session is closed or purged. It keeps its kind and its other fields, and an
+    unclaimed end still writes NO `dispatch_result` record.
     ccpool reports no process exit status or signal (`ADR 0015`: observed state only), so none is
     recorded. `budget` MUST be set only for a watchdog hard stop and reuses its `limit`, `used`,
     and `cap` fields; there MUST be no second budget
@@ -654,13 +662,30 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     prefix, which `INV-CCH-11` owns), added on the first strike and read on the second, removed on
     any end where the session did claim its bead and on close. The first strike reports the
     dispatch as unclaimed, the second as escalated; neither is a session failure, so neither
-    writes a `dispatch_result` failure record. A claim made and released inside one poll interval
+    writes a `dispatch_result` failure record. Each end writes one `unclaimed_end` record carrying
+    `failure_signature` and `signature_evidence` (`INV-CCH-9`), which is how an end is told apart
+    from a limit death below. A claim made and released inside one poll interval
     can miss the latch; the guard that the bead is `open`, not `human`, not deferred and without
     blocker keeps a worker's own park, deferral or conversion in that window from being struck.
     Not covered, accepted: a bead that cannot take a label because it is a read-only template
     earns the strikes but cannot be given `human`, so it would be re-offered without bound; the
     role's query is expected to exclude templates, and the worker's own check ends without
     claiming one.
+  - **Limit and outage exemption.** An unclaimed end whose session died on a usage or spend limit
+    or an API outage is NOT a strike (operator ruling, Phillip, 2026-10-14, bead `pg2-e0imq`,
+    superseding `pg2-0fsuu`'s "policy MUST NOT change" for this class only). The class is read from
+    the failure signature of `INV-CCH-9` alone: `api-rate-limit` (a usage or spend limit, a 429) and
+    `api-transient` (a 5xx, `529 Overloaded`, a dropped socket, an unreachable API). Such an end
+    MUST NOT add `drain-unclaimed-end`, MUST NOT add `human`, and MUST leave an existing
+    `drain-unclaimed-end` exactly as it was (neither added to nor cleared, so the count of
+    consecutive ends for other causes is preserved); it writes nothing to the bead and reports no
+    verb. The decision MUST NOT depend on the capacity usage-limit reading that `INV-CCH-26` logs
+    at a death: that reading was `false` inside a blocked window, so it cannot be the key. Every
+    other signature (`api-auth`, `context-limit`, `git-*`, `session-*`, `unknown`, and so on) keeps
+    the two-strike policy above exactly. The error the dispatch returns for an exempt end MUST
+    contain the stable substring `session ended on a usage limit or API outage`
+    (`packages/pg-router/docs/behavior/interfaces.md`, "Usage-limit sentinel"), so the router can count it under its own reason
+    instead of as an unexplained handler failure.
   - **Absorption.** A dispatch under this mode that ends with its bead still open leaves a settled
     session like any other, and a settled session is never absorbed (`INV-CCH-17`, `INV-CCH-30`):
     a same-event re-request after a hand-back runs in a fresh session.

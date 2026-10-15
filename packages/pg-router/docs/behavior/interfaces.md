@@ -388,7 +388,10 @@ an escalation-triage role (role name contains `triage`) is counted under `handle
 `reason="triager-failure"` instead, so triager failures never share the worker/review failure-rate
 series (`DEC-OBS-3`, amended); and a handler error carrying the **upstream-killed sentinel** below (an
 upstream call killed by the connector's exec timeout) is counted with `reason="upstream-killed"` so
-isolated kills do not page individually (`DEC-OBS-3`, amended).
+isolated kills do not page individually (`DEC-OBS-3`, amended); and a handler error carrying the
+**usage-limit sentinel** below (a session that died on an account usage or spend limit or an API
+outage) is counted with `reason="usage-limit"`, an external limit that does not page
+(`DEC-OBS-3`, amended).
 
 | class            | meaning                                                       | response                                            |
 | ---------------- | ------------------------------------------------------------- | --------------------------------------------------- |
@@ -427,6 +430,20 @@ worker or ccpool session looks like, and that **MUST NOT** be tagged `upstream-k
 sustained-only alert rule built on it (`DEC-OBS-3`). Other slow-GitHub failures that do not carry
 both substrings (for example `error connecting to api.github.com`) are **not** covered and keep
 counting under the residual failure-rate series.
+
+**Usage-limit sentinel.** When a handler's session ended without claiming its bead because it died
+on an account usage or spend limit or an API outage (the handler's `api-rate-limit` and
+`api-transient` failure signatures), the error text it reports **MUST contain the stable substring
+`session ended on a usage limit or API outage`** (for example `zr-1: session ended on a usage limit
+or API outage before claiming its bead (api-rate-limit; no strike counted)`). The handler exempts
+such an end from its own strike policy (its `INV-CCH-28`), so the error is the only signal the
+core receives; the core cannot see the handler's failure signature across the process boundary, so
+it matches on this text, and it counts the error as a `handler-error` with `reason="usage-limit"`.
+Precedence among `handler-error` reasons is **triager-failure, then budget-exceeded, then
+upstream-killed, then usage-limit**. The substring is a **contract**: changing it breaks the core's
+`reason="usage-limit"` classification and the residual failure-rate exclusion built on it
+(`DEC-OBS-3`). An unclaimed end for any other cause carries no such substring and keeps counting
+under the residual failure-rate series.
 
 **Obligations.** A handler **MUST tolerate a duplicate event** (be idempotent) and **MUST support
 the deferred form**, so a paused or long-running handler session never pins an open call from the
@@ -493,7 +510,8 @@ sequenceDiagram
     name, config-bounded: one value per configured role), so a single starved or failing role is
     visible rather than averaged away (`DEC-OBS-5`); a handler-reported error (`handler-error`)
     carrying the **budget-stop sentinel** below is additionally labelled `reason="budget-exceeded"`,
-    and one carrying the **upstream-killed sentinel** below `reason="upstream-killed"`
+    and one carrying the **upstream-killed sentinel** below `reason="upstream-killed"`, and one
+    carrying the **usage-limit sentinel** below `reason="usage-limit"`
     (`DEC-OBS-3`). The other post-accept classes are
     **not** counted here — after acceptance the handler owns the work (`INV-FAIL-1`), so classifying
     its outcomes is the handler's own concern on the handler's own surface;

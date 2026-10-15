@@ -137,6 +137,24 @@ rule although they are the very kill option C excludes. The sentinel is therefor
 reasoning above is unchanged and the `error connecting to api.github.com` exclusion above still
 stands.
 
+**Amended** (operator ruling, Phillip, 2026-10-14; bead `pg2-e0imq`, from the `pg2-291qr` triage).
+A `handler-error` whose text carries the **usage-limit sentinel** (`session ended on a usage limit
+or API outage`, `interfaces.md`) is counted with `reason="usage-limit"`. Precedence is
+`triager-failure`, then `budget-exceeded`, then `upstream-killed`, then `usage-limit`. Why: the
+account hit its individual spend limit in three consecutive 5-hour windows (2026-10-13 22:00Z to
+2026-10-14 08:30Z), and each window ended eleven drain sessions without claiming their bead; the
+handler returned an error for each, which the core counted as a plain `handler-error` and so fired
+`pg-router-failure-rate` once per window (`pg2-28t19`, `pg2-291qr`, and a third episode). An
+external limit or an API outage is not a defect of this system. The operator ruled that such a
+session MUST NOT count as a strike (handler `INV-CCH-28`) and MUST be reported under its own reason
+so that class stops paging. The residual rule now excludes `usage-limit`. **No sustained-burst rule
+is added**, unlike `upstream-killed` and like `at-capacity`: the operator also ruled to live with
+the spend-limit windows, so a burst rule would only recreate the pages this removes. The count stays
+visible as `pg_router_failures_total{class="handler-error",reason="usage-limit"}`. The substring is
+matched by the core and emitted by the handler from two separate Go modules, so each side pins the
+literal in its own test. Same bounds as above: the reason is a fixed constant and `role` stays
+config-bounded.
+
 **Amended** (operator ruling A, Phillip, 2026-10-05; bead `pg2-vn4jb`). The budget-stop rule
 (`pg-router-budget-stops`) is **repeat-only**: it pages when a role records **2 or more**
 `reason="budget-exceeded"` handler errors in a 1-hour window

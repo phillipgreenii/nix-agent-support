@@ -80,6 +80,12 @@ var positives = map[string][]string{
 		"You've hit your limit · resets 7:10pm (America/New_York)",
 		"You\u2019ve hit your usage limit",
 	},
+	"spend-limit-hit": {
+		// The wording recorded 2026-10-14 (pg2-e0imq), straight and curly apostrophe.
+		"You've hit your individual spend limit · run /usage-credits to ask your admin for a higher limit · your session limit resets 4:30am (America/New_York)",
+		"You’ve hit your individual spend limit · run /usage-credits to ask your admin for a higher limit · your session limit resets 4:30am (America/New_York)",
+		"You have hit your individual spend limit",
+	},
 	"api-error-429": {
 		"API Error: 429 Too Many Requests",
 	},
@@ -180,6 +186,11 @@ var negatives = map[string][]string{
 	"usage-limit-hit": {
 		"You've hit the target; the limit was not reached",
 		"the usage limit was raised to 500",
+	},
+	"spend-limit-hit": {
+		"You've hit the spend target; the limit was not reached",
+		"the individual spend limit was raised to 500",
+		"You have hit your stride on this task",
 	},
 	"api-error-429": {
 		"API Error: 4290 is not a status",

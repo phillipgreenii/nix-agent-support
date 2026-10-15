@@ -21,7 +21,11 @@ This module's own obligations under both — tolerating a duplicate event, suppo
 ack form, reporting `unavailable`/`busy` pre-accept declines, never leaking a post-accept failure
 class back to the core as anything but an opaque outcome string — are exactly the obligations
 those two sections already state on the implementer. Restating them here would risk the two
-copies drifting; this module is bound by the upstream text as written.
+copies drifting; this module is bound by the upstream text as written. That includes the stable
+substrings a handler error carries for the core to classify (the "Budget-stop sentinel",
+"Upstream-killed sentinel" and "Usage-limit sentinel" of that `INTF-HANDLER` section): this module
+emits the usage-limit one, `session ended on a usage limit or API outage`, in the error of an
+unclaimed end that died on a usage or spend limit or an API outage (`INV-CCH-28`).
 
 ## Boundary crossings (this module is the initiator; named, not fully specified)
 

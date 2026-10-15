@@ -387,6 +387,24 @@ const (
 // triager-failure, then budget-exceeded, then upstream-killed. (pg2-fy2pm)
 const ReasonUpstreamKilled = "upstream-killed"
 
+// UsageLimitSentinel is the documented, stable substring a handler's error text
+// carries when its session ended without claiming its bead because it died on a
+// usage or spend limit or an API outage (docs/behavior/interfaces.md,
+// "Usage-limit sentinel"; the handler's own copy is
+// pg-router-ccpool-handler's executor.UsageLimitEndSentinel). The core cannot
+// errors.Is across the process boundary, so it matches on this text, which makes
+// the wording a contract. (pg2-e0imq)
+const UsageLimitSentinel = "session ended on a usage limit or API outage"
+
+// ReasonUsageLimit is the "reason" label a FailureClassHandlerError series
+// carries when the handler error contains UsageLimitSentinel. An external usage
+// or spend limit (operator ruling, Phillip, 2026-10-14) is not a defect of this
+// system, so it is excluded from pg-router-failure-rate and stays visible only
+// as pg_router_failures_total{reason="usage-limit"}; there is no burst alert.
+// Precedence is triager-failure, then budget-exceeded, then upstream-killed,
+// then usage-limit. (pg2-e0imq)
+const ReasonUsageLimit = "usage-limit"
+
 // TriagerRoleMarker is the substring that marks a role name as an
 // escalation-triage role. It deliberately mirrors the handler's own
 // convention (pg-router-ccpool-handler's humanOnlyReason treats a role as
@@ -1231,6 +1249,7 @@ func (e *Emitter) OnDispatchFailure(_, listenerID string) {
 // reason=ReasonTriagerFailure (bulkhead, wins over every other reason); else a
 // budget-stop sentinel carries reason=ReasonBudgetExceeded; else an error with
 // BOTH upstream-killed sentinels carries reason=ReasonUpstreamKilled (pg2-fy2pm);
+// else a usage-limit sentinel carries reason=ReasonUsageLimit (pg2-e0imq);
 // else no reason.
 func (e *Emitter) OnHandlerFailure(_, _, listenerID string, err error) {
 	attrs := []attribute.KeyValue{
@@ -1246,6 +1265,8 @@ func (e *Emitter) OnHandlerFailure(_, _, listenerID string, err error) {
 		attrs = append(attrs, attribute.String("reason", ReasonBudgetExceeded))
 	case err != nil && isUpstreamKilled(err.Error()):
 		attrs = append(attrs, attribute.String("reason", ReasonUpstreamKilled))
+	case err != nil && strings.Contains(err.Error(), UsageLimitSentinel):
+		attrs = append(attrs, attribute.String("reason", ReasonUsageLimit))
 	}
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(attrs...))
 }

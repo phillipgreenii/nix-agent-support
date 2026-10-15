@@ -60,6 +60,12 @@ var table = []rule{
 	// Usage limit: "You've hit your limit · resets 7:10pm (...)" or a 429. The
 	// apostrophe may be straight or curly, so it is matched as any one char.
 	{APIRateLimit, "usage-limit-hit", regexp.MustCompile(`(?i)\byou.ve hit your (?:usage )?limit\b`)},
+	// Spend limit: "You've hit your individual spend limit, run /usage-credits
+	// to ask your admin for a higher limit, your session limit resets 4:30am
+	// (America/New_York)" (recorded 2026-10-14), with a straight or curly
+	// apostrophe, or the "You have hit ..." spelling. The qualifiers
+	// (individual, usage, spend) may come in any order before "limit".
+	{APIRateLimit, "spend-limit-hit", regexp.MustCompile(`(?i)\byou(?:.ve| have) hit your (?:(?:individual|usage|spend) )+limit\b`)},
 	{APIRateLimit, "api-error-429", regexp.MustCompile(`(?i)\bAPI Error: 429\b`)},
 	// Bad or expired credentials. Not retryable without a human /login.
 	{APIAuth, "please-run-login", regexp.MustCompile(`(?i)\bplease run /login\b`)},

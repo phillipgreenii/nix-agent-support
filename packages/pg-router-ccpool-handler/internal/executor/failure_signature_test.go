@@ -373,4 +373,15 @@ func TestRunbookRecipes(t *testing.T) {
 	if !strings.Contains(byRole, "git-auth review default") || !strings.Contains(byRole, "budget worker p2") {
 		t.Errorf("per-role/pool recipe = %q", byRole)
 	}
+	// The unclaimed_end rows (pg2-e0imq) are not dispatch results: the recipes above
+	// still ignore them, and the exempt-ends recipe lists only the limit and outage ones.
+	if strings.Contains(byRole, "api-rate-limit") {
+		t.Errorf("the per-role recipe must not count unclaimed_end rows: %q", byRole)
+	}
+	exempt := run("-r", `select(.kind=="unclaimed_end" and (.failure_signature=="api-rate-limit"
+         or .failure_signature=="api-transient"))
+         | "\(.time) \(.role) \(.bead) \(.failure_signature)"`)
+	if strings.TrimSpace(exempt) != "2026-10-14T08:02:40.000000000Z drain zr-6 api-rate-limit" {
+		t.Errorf("exempt-ends recipe = %q", exempt)
+	}
 }

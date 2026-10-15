@@ -13,7 +13,7 @@ import (
 // matched by the first two.
 const (
 	wantBudgetExpr   = `sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[1h])) >= 2`
-	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|session-in-flight|skipped-.+"}[10m]))`
+	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|session-in-flight|skipped-.+"}[10m]))`
 	wantTriagerExpr  = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="triager-failure"}[10m]))`
 )
 
@@ -93,13 +93,20 @@ func TestResidualFailureRateRule(t *testing.T) {
 	// (intentionally silent), budget-exceeded (its own rule) and triager-failure
 	// (its own rule, pg2-u2yub: a failing escalation triager must not fire the
 	// worker/review failure-rate alert), upstream-killed (a gh call killed by the
-	// 30s scriptout timeout; its own sustained-only rule, pg2-fy2pm). And the
+	// 30s scriptout timeout; its own sustained-only rule, pg2-fy2pm), usage-limit
+	// (a session that died on an account usage or spend limit or an API outage,
+	// ruled not to page, no rule of its own, pg2-e0imq). And the
 	// handler's review-precheck
 	// declines (skipped-*, pg2-5x29j), which are healthy and moot by construction, and
 	// the handler's session-in-flight decline (pg2-qaeb8, INV-CCH-30), routine
 	// backpressure like at-capacity. Nothing else.
-	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|session-in-flight|skipped-.+"`) {
-		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure, upstream-killed, session-in-flight and skipped-*: %q", got)
+	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|session-in-flight|skipped-.+"`) {
+		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure, upstream-killed, usage-limit, session-in-flight and skipped-*: %q", got)
+	}
+	// pg2-e0imq: the annotation names the new carve-out, and the rule's own
+	// comment documents it, so the exclusion is never an unexplained matcher.
+	if !strings.Contains(r, "reason=usage-limit") {
+		t.Error("residual annotation must name the usage-limit exclusion")
 	}
 	for _, need := range []string{"for: 10m", "noDataState: OK", "execErrState: Error", "{{ $labels.role }}", "{{ $labels.class }}"} {
 		if !strings.Contains(r, need) {
@@ -129,6 +136,25 @@ func TestTriagerFailuresRule(t *testing.T) {
 	}
 }
 
+// pg2-e0imq: usage-limit is excluded from the residual and, unlike upstream-killed,
+// has NO alert of its own (the operator ruled an external limit does not page; the
+// series stays visible as pg_router_failures_total{reason="usage-limit"}). The
+// only expr that mentions the reason is the residual's exclusion matcher.
+func TestUsageLimitHasNoAlertOfItsOwn(t *testing.T) {
+	b, err := os.ReadFile("../../grafana/alerting/alerts.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range regexp.MustCompile(`(?m)^\s*expr: (.+)$`).FindAllStringSubmatch(string(b), -1) {
+		if strings.Contains(m[1], "usage-limit") && m[1] != wantResidualExpr {
+			t.Errorf("only the residual's exclusion may mention usage-limit, got expr %q", m[1])
+		}
+	}
+	if strings.Contains(string(b), "uid: pg-router-usage-limit") {
+		t.Error("usage-limit must not get a rule of its own")
+	}
+}
+
 // pg2-fy2pm: the residual no longer matches reason=upstream-killed, but still
 // matches every reason the Emitter can attach otherwise (and no reason at
 // all), so an OOM/SIGKILL without "scriptout:" keeps paging individually.
@@ -146,6 +172,7 @@ func TestResidualExcludesUpstreamKilledOnly(t *testing.T) {
 		"origin-unavailable": true,
 		"at-capacity":        true,
 		"skipped-pr-merged":  true,
+		"usage-limit":        true, // pg2-e0imq: an external usage/spend limit or API outage
 		"session-in-flight":  true, // pg2-qaeb8: routine backpressure (INV-CCH-30)
 		"low-disk":           false,
 		"command-busy":       false,
@@ -153,6 +180,8 @@ func TestResidualExcludesUpstreamKilledOnly(t *testing.T) {
 		"capacity-unknown":   false,
 		"pool-unreadable":    false, // pg2-s3pjt: an unreadable pool is not backpressure; it must keep paging
 		"upstream-killed2":   false,
+		"usage-limit2":       false,
+		"usage":              false,
 	} {
 		if got := re.MatchString(reason); got != wantExcluded {
 			t.Errorf("residual excludes reason %q = %v, want %v", reason, got, wantExcluded)

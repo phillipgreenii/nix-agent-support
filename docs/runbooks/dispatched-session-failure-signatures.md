@@ -58,8 +58,22 @@ Fixture output for the first recipe is `2026-09-23T14:01:00.000000000Z` / `worke
 
 - `api-transient`, `api-rate-limit`, `api-auth`, and `context-limit` mean Claude Code wrote that
   API error into the transcript tail (a 5xx or `529 Overloaded`, a dropped socket or idle
-  stream; a usage limit or 429; a 401 or `Please run /login`; `Prompt is too long`). Evidence is
-  the matching transcript line.
+  stream; a usage limit, a spend limit such as `You've hit your individual spend limit`, or a
+  429; a 401 or `Please run /login`; `Prompt is too long`). Evidence is the matching transcript
+  line.
+- `unclaimed_end` records (a drain session that ended without claiming its bead) carry the same
+  `failure_signature` and `signature_evidence`, and still no `dispatch_result`. An end whose
+  signature is `api-rate-limit` or `api-transient` is exempt from the two-strike policy: the bead
+  gets no `drain-unclaimed-end` label and no `human` (an existing label is left as it was), and the
+  handler's error carries `session ended on a usage limit or API outage`, which pg-router counts as
+  `reason="usage-limit"`. Every other signature keeps the two strikes. To list the exempt ends:
+
+  ```bash
+  jq -r 'select(.kind=="unclaimed_end" and (.failure_signature=="api-rate-limit"
+         or .failure_signature=="api-transient"))
+         | "\(.time) \(.role) \(.bead) \(.failure_signature)"' "$LOG"
+  ```
+
 - `session-errored`, `session-idle`, and `session-gone` mean no transcript text explained the
   exit, so the ccpool session facts last observed named it: state `errored` (a StopFailure with
   no recognizable error text), state `idle` (the turn ended and the bead is not complete), or a
