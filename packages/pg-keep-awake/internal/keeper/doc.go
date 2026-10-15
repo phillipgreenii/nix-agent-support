@@ -16,10 +16,15 @@
 //     reconcile results into status.json and WriteSnapshot writes it
 //     atomically (mode 0600), once per tick before the heartbeat is touched
 //     (snapshot.go); ExternalProbe lists the non-keeper `pmset -g assertions`
-//     holders, failing soft (snapshot_external.go).
-//
-// The tick loop, the heartbeat, the singleton lock and config loading are
-// filled in by later packets; they call
-// Reconciler.Reconcile with the tick's ReconcileInputs and read the
-// ReconcileResult.
+//     holders, failing soft (snapshot_external.go);
+//   - the tick loop: the keeper process takes the singleton keeper.lock
+//     (TryLockInstance); Keeper (keeper.go) creates keeper.heartbeat first,
+//     adopts a running pair and then runs the six steps every
+//     heartbeat_interval (sweep; one battery read and the gate; desired state;
+//     observe; converge; write status.json and only then touch
+//     keeper.heartbeat). It consumes anchor-exit.json and
+//     removes a past-until pause.json, emits OTel through the telemetry
+//     Emitter, and on SIGTERM runs the graceful-shutdown sweep. LoadConfig
+//     (keeper_files.go) is the startup-only configuration load with its
+//     last-good fallback.
 package keeper
