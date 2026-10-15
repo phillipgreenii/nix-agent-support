@@ -10,8 +10,8 @@
 //
 // It implements no pkg/provider.AuthChecker: it resolves no credential of
 // its own at all — "no Slack token is provisioned" is this bead's own
-// binding decision, and claude/the Slack MCP resolve their own ambient
-// configuration. This binary's dispatch table therefore carries no
+// binding decision, and claude holds the Slack MCP's own OAuth state
+// itself. This binary's dispatch table therefore carries no
 // auth_status entry (see pkg/provider/thread.NewDispatchTable), which
 // pg-connector's own generic `auth status` fan-out
 // (cmd/pg-connector/auth.go) already recognizes via the wire-level

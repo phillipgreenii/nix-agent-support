@@ -113,6 +113,42 @@ naming `attention_labels`.
 `pg-connector-issue-beads` takes its tracker from `--beads-dir DIR`, then
 `$PG_CONNECTOR_ISSUE_BEADS_DIR`, then `$BEADS_DIR`; with none of the three it refuses to run.
 
+`pg-connector-thread-slack` execs `claude -p` against a Slack MCP server that its own config
+block declares (the umbrella copies `backends.<name>` into every `show` and `list` request; the
+home-manager `backends` option passes it through untouched). Every `claude` key is optional:
+
+```yaml
+backends:
+  pg-connector-thread-slack:
+    queries:
+      involving-me: ["is:thread after:-14d"]
+    claude:
+      cwd: /work/root # the directory the claude child runs in; unset: inherited
+      model: example-model # passed as --model; unset: claude's default model
+      mcp_config: '{"mcpServers":{"slack":{"type":"http","url":"https://mcp.example.invalid/mcp"}}}'
+      max_turns: 16 # passed as --max-turns; unset: 6; 1 to 30, anything else is invalid_argument
+```
+
+`mcp_config` is an inline JSON string or the path of a JSON file, passed as `--mcp-config`. When it
+is set the child also gets `--strict-mcp-config`, `--setting-sources user` and
+`--disable-slash-commands`, so it loads only that server and none of the working directory's
+project settings, hooks or plugins. The server MUST be named `slack`. Unset, none of those flags
+is passed and claude resolves MCP servers from its own configuration, which from a working
+directory with none declared reaches no Slack tool at all. The child is only ever allowed the five
+read tools (`mcp__slack__slack_search_public`, `slack_search_channels`, `slack_read_thread`,
+`slack_read_channel`, `slack_read_user_profile`), comma-separated in one `--allowed-tools`
+argument, so no send, schedule, draft or canvas tool is pre-approved. A relative `after:-Nd` in a
+query is rewritten per call to an absolute `after:YYYY-MM-DD` (UTC; other relative forms pass
+through), because Slack search reads dates, not offsets.
+
+`max_turns` bounds the claude child's tool round trips (`--max-turns`). The default of 6 fits a
+single `show` lookup but not the full `list` prompt, which measured runs needed 6, 12 and 13 turns
+for, so a deployment that polls with `list` sets a higher value. A negative value or one above 30
+is rejected as `invalid_argument` rather than clamped, so a typo cannot lift the cap on a runaway
+run. A `claude` run is slower than the shared per-op defaults; raise this backend's deadline with
+the `timeouts.list` / `timeouts.show` keys of the same config block (described under the
+per-backend deadline override).
+
 ## Subcommands
 
 | Command                                                           | Description                                                                                                                    |

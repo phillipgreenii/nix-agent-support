@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-thread-slack/internal/eventlog"
@@ -264,6 +265,117 @@ func TestBackend_List_MalformedReplyIsUnavailable(t *testing.T) {
 	_, err := b.List(context.Background(), schema.QueryExpr{"in:#general"}, false)
 	if !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
+	}
+}
+
+// ----------------------------------------------------------------------
+// Relative dates (bead pg2-apllc)
+// ----------------------------------------------------------------------
+
+// testClock is a fixed instant whose LOCAL date differs from its UTC date:
+// 20:00 on the 14th at UTC-8 is 04:00 on the 15th UTC, so a test that passes
+// proves "today" is the UTC date, not the zone's.
+func testClock() time.Time {
+	return time.Date(2026, time.October, 14, 20, 0, 0, 0, time.FixedZone("UTC-8", -8*3600))
+}
+
+func TestAbsolutizeAfter(t *testing.T) {
+	now := testClock() // 2026-10-15T04:00:00Z
+	cases := []struct {
+		name, in, want string
+	}{
+		{"days become an absolute UTC date", "to:@me is:thread after:-14d", "to:@me is:thread after:2026-10-01"},
+		{"zero days is today (UTC)", "after:-0d", "after:2026-10-15"},
+		{"one day", "after:-1d", "after:2026-10-14"},
+		{"crosses a month boundary", "after:-30d", "after:2026-09-15"},
+		{"crosses a year boundary", "after:-300d", "after:2025-12-19"},
+		{"leading zeros", "after:-007d", "after:2026-10-08"},
+		{"token anywhere in the expression", "in:#general after:-2d is:thread", "in:#general after:2026-10-13 is:thread"},
+		{"every occurrence", "after:-1d after:-2d", "after:2026-10-14 after:2026-10-13"},
+		{"whitespace is preserved", "a   after:-1d\tb", "a   after:2026-10-14\tb"},
+
+		// Everything else passes through unchanged.
+		{"already absolute", "after:2026-09-30", "after:2026-09-30"},
+		{"weeks are unsupported", "after:-2w", "after:-2w"},
+		{"hours are unsupported", "after:-14h", "after:-14h"},
+		{"no unit", "after:-14", "after:-14"},
+		{"no sign", "after:14d", "after:14d"},
+		{"positive sign", "after:+14d", "after:+14d"},
+		{"other modifier", "before:-14d", "before:-14d"},
+		{"negated modifier", "-after:-14d", "-after:-14d"},
+		{"prefixed token", "xafter:-14d", "xafter:-14d"},
+		{"suffixed token", "after:-14dx", "after:-14dx"},
+		{"quoted token", `"after:-14d"`, `"after:-14d"`},
+		{"overflowing N", "after:-99999999999999999999d", "after:-99999999999999999999d"},
+		{"N beyond the cap", "after:-36501d", "after:-36501d"},
+		{"empty", "", ""},
+		{"no modifier at all", "in:#general", "in:#general"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := absolutizeAfter(c.in, now); got != c.want {
+				t.Fatalf("absolutizeAfter(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+	// The cap itself is still rewritten.
+	if got := absolutizeAfter("after:-36500d", now); strings.Contains(got, "-36500d") {
+		t.Fatalf("absolutizeAfter at the cap = %q, want a rewritten date", got)
+	}
+}
+
+// TestBackend_List_AbsolutizesRelativeAfterInPrompt: the prompt the model
+// receives carries the absolute date, computed from the INJECTED clock, and
+// never the relative token Slack's search cannot read.
+func TestBackend_List_AbsolutizesRelativeAfterInPrompt(t *testing.T) {
+	var prompts []string
+	b := New(&fakeRunner{handle: func(prompt string) (string, error) {
+		prompts = append(prompts, prompt)
+		return envelope(`{"items":[]}`), nil
+	}})
+	b.now = testClock
+	if _, err := b.List(context.Background(), schema.QueryExpr{"to:@me is:thread after:-14d", "in:#general"}, false); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(prompts) != 2 {
+		t.Fatalf("%d prompts, want 2 (one per expression)", len(prompts))
+	}
+	if !strings.Contains(prompts[0], `"to:@me is:thread after:2026-10-01"`) {
+		t.Fatalf("prompt = %q, want the absolute date from the injected clock", prompts[0])
+	}
+	if strings.Contains(prompts[0], "after:-14d") {
+		t.Fatalf("prompt = %q still carries the relative token", prompts[0])
+	}
+	if !strings.Contains(prompts[1], `"in:#general"`) {
+		t.Fatalf("prompt = %q, want an expression with no relative date unchanged", prompts[1])
+	}
+}
+
+// TestBackend_ClockStampsAsOf: show and list stamp AsOf from the injected
+// clock, in UTC.
+func TestBackend_ClockStampsAsOf(t *testing.T) {
+	b := New(&fakeRunner{handle: func(prompt string) (string, error) {
+		if strings.Contains(prompt, "search Slack threads") {
+			return envelope(`{"items":[{"id":"t1","channel":"C1","permalink":"https://x.invalid/1","text":"a"}]}`), nil
+		}
+		return envelope(`{"found":true,"id":"t1","channel":"C1","permalink":"https://x.invalid/1"}`), nil
+	}})
+	b.now = testClock
+	const want = "2026-10-15T04:00:00Z"
+
+	shown, err := b.Show(context.Background(), "t1")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if shown.AsOf != want {
+		t.Fatalf("Show AsOf = %q, want %q", shown.AsOf, want)
+	}
+	listed, err := b.List(context.Background(), schema.QueryExpr{"in:#general"}, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(listed.Entities) != 1 || listed.Entities[0].AsOf != want {
+		t.Fatalf("List entities = %+v, want AsOf %q", listed.Entities, want)
 	}
 }
 

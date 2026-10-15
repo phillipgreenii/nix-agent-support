@@ -68,15 +68,21 @@ mkGoApp {
   # types directly.
   #
   # No wrapProgram for `claude`: it is provisioned separately on this
-  # machine's own PATH (already configured, including its Slack MCP
-  # server — this bead's own Objective/Files sections), matching
-  # pg-connector-issue-jira.nix's identical decision for `pjira` and
-  # pg-connector-pr-github.nix's identical decision for `gh`. The binary is
-  # installed once, wherever this workspace's own home-manager profile puts
-  # it, not per-consumer here.
+  # machine's own PATH, matching pg-connector-issue-jira.nix's identical
+  # decision for `pjira` and pg-connector-pr-github.nix's identical decision
+  # for `gh`. The binary is installed once, wherever this workspace's own
+  # home-manager profile puts it, not per-consumer here.
+  #
+  # Which Slack MCP server `claude` talks to is NOT whatever the machine has
+  # configured: the backend declares it from its own config block,
+  # `backends.pg-connector-thread-slack.claude` (`mcp_config`, plus `cwd` and
+  # `model`), supplied by the consuming flake at runtime and documented in
+  # cmd/pg-connector-thread-slack/internal/runner.go. A machine that relied
+  # on ambient configuration reached no Slack tool at all from a launchd
+  # poll's working directory (bead pg2-s417i), so nothing here may assume one.
 
   meta = with lib; {
-    description = "pg-connector's thread capability Tier-2 backend, transporting over claude -p to the machine's already-configured Slack MCP — a scriptout-only binary with no independent CLI identity";
+    description = "pg-connector's thread capability Tier-2 backend, transporting over claude -p to a Slack MCP server declared in its own config — a scriptout-only binary with no independent CLI identity";
     platforms = platforms.all;
   };
 }

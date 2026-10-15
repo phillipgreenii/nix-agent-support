@@ -1,10 +1,11 @@
 // backend.go: Backend implements pkg/provider/thread.Provider by exec'ing
-// `claude -p` as pure transport to the Slack MCP already configured on
-// this machine (this bead's own Objective/Binding decisions) — never
-// deriving a field from the model's own judgment (the compute-only rule,
-// [design: 8]). Every field this backend reports is either a plain fact
-// the Slack MCP's own tool response carries, or (AsOf/Stale) computed
-// deterministically in Go from this call's own completion time.
+// `claude -p` as pure transport to a Slack MCP server (the one this
+// backend's own `claude` config declares; see runner.go's package doc
+// comment) — never deriving a field from the model's own judgment (the
+// compute-only rule, [design: 8]). Every field this backend reports is
+// either a plain fact the Slack MCP's own tool response carries, or
+// (AsOf/Stale) computed deterministically in Go from this call's own
+// completion time.
 //
 // The exact prompt wording (showPrompt/listPrompt below) is a freedom
 // boundary this bead's own Contract explicitly leaves to the implementer,
@@ -23,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -37,12 +39,23 @@ import (
 // implementation.
 type Backend struct {
 	runner Runner
+	// now is the clock: it stamps AsOf and defines "today" for
+	// absolutizeAfter. A field so tests can pin it; nil means time.Now.
+	now func() time.Time
 }
 
 // New returns a Backend wrapping the given Runner. Production wiring
 // passes NewCLIRunner(); tests inject a fake Runner.
 func New(r Runner) *Backend {
-	return &Backend{runner: r}
+	return &Backend{runner: r, now: time.Now}
+}
+
+// clock returns the current time from the injected clock.
+func (b *Backend) clock() time.Time {
+	if b.now == nil {
+		return time.Now()
+	}
+	return b.now()
 }
 
 // Compile-time check that Backend satisfies the thread capability's
@@ -50,12 +63,11 @@ func New(r Runner) *Backend {
 var _ thread.Provider = (*Backend)(nil)
 
 // Deliberately NO `var _ provider.AuthChecker = (*Backend)(nil)`: this
-// backend resolves no credential of its own at all (claude/the Slack MCP
-// resolve their own ambient configuration; "no Slack token is
-// provisioned" is this bead's own binding decision), so it has nothing an
-// auth_status op could meaningfully check — mirroring how
-// pg-connector-issue-beads (no external credential of its own either)
-// also implements no AuthChecker.
+// backend resolves no credential of its own at all (claude holds the Slack
+// MCP's own OAuth state itself; "no Slack token is provisioned" is this
+// bead's own binding decision), so it has nothing an auth_status op could
+// meaningfully check — mirroring how pg-connector-issue-beads (no external
+// credential of its own either) also implements no AuthChecker.
 
 // claudeEnvelope is the `claude -p --output-format json` result object —
 // only the fields this package needs are decoded, mirroring
@@ -297,6 +309,43 @@ If %q does not resolve to a real thread, respond with exactly {"found": false}.
 Report every field as a plain fact taken directly from the Slack MCP tool's own response. Never infer, summarize, paraphrase, or guess a value — if the MCP's response does not carry a field, omit it (except "found" and "id"/"channel"/"permalink", which are always required when found is true).`, id, id)
 }
 
+// maxRelativeAfterDays bounds the N of an after:-Nd token absolutizeAfter
+// rewrites (100 years), so date arithmetic can never overflow on a typo'd
+// value; a larger N is passed through unchanged like any other unsupported
+// relative value.
+const maxRelativeAfterDays = 36500
+
+// relativeAfterToken matches one WHOLE whitespace-delimited search token of
+// the form after:-<N>d (N days).
+var relativeAfterToken = regexp.MustCompile(`^after:-([0-9]+)d$`)
+
+// searchToken is one maximal run of non-whitespace in a search expression.
+var searchToken = regexp.MustCompile(`\S+`)
+
+// absolutizeAfter rewrites every relative `after:-Nd` token of modifier to the
+// absolute `after:YYYY-MM-DD` it means as of now, because Slack's public
+// search documents `after:` as a date (YYYY-MM-DD) and does not understand a
+// relative value. "Today" is the UTC date of now, so the lookback does not
+// depend on the host's zone, and it is date-granular, so it is approximate to
+// within a day. Only N days (-Nd) is supported; every other relative form
+// (-2w, -14h, a bare -14), a non-`after:` modifier, an already-absolute date
+// and an N above maxRelativeAfterDays pass through unchanged, as does all
+// whitespace. The clock is a parameter so the rewrite is deterministic under
+// test.
+func absolutizeAfter(modifier string, now time.Time) string {
+	return searchToken.ReplaceAllStringFunc(modifier, func(tok string) string {
+		m := relativeAfterToken.FindStringSubmatch(tok)
+		if m == nil {
+			return tok
+		}
+		days, err := strconv.Atoi(m[1])
+		if err != nil || days > maxRelativeAfterDays {
+			return tok
+		}
+		return "after:" + now.UTC().AddDate(0, 0, -days).Format("2006-01-02")
+	})
+}
+
 // listPrompt builds the claude -p prompt for List's one search-modifier
 // expression — carries the configured search modifier and instructs a
 // full, from-the-oldest search rather than an incremental one [design:
@@ -378,7 +427,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Thread, error) {
 		eventlog.RecordFailure(ctx, eventlog.StageReplyIncomplete, "")
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: thread reply missing one of id/channel/permalink")
 	}
-	return toSchemaThread(&reply.slackThreadFields, time.Now().UTC()), nil
+	return toSchemaThread(&reply.slackThreadFields, b.clock().UTC()), nil
 }
 
 // List implements thread.Provider.List via claude -p (see this file's own
@@ -402,6 +451,10 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		if modifier == "" {
 			continue
 		}
+		// Slack's search wants an absolute date after:; a configured
+		// after:-Nd is rewritten here, per call, so the lookback window
+		// slides with the clock (see absolutizeAfter).
+		modifier = absolutizeAfter(modifier, b.clock())
 		result, err := b.runClaude(ctx, listPrompt(modifier), listReplySchema)
 		if err != nil {
 			return nil, err
@@ -411,7 +464,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 			eventlog.RecordFailure(ctx, eventlog.StageReplyDecode, decodeErr.Error())
 			return nil, scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: decode thread list reply: "+decodeErr.Error())
 		}
-		asOf := time.Now().UTC()
+		asOf := b.clock().UTC()
 		for i := range reply.Items {
 			item := reply.Items[i]
 			if item.ID == "" || seen[item.ID] {

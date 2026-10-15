@@ -1007,7 +1007,8 @@ status, version, truncated}` shape with no `reason` field, unlike `list`'s `sour
   (`cmd/pg-connector-thread-slack`) emit nothing over OpenTelemetry or Prometheus and write no
   structured logs of their own — pg-connector still has no telemetry emitter anywhere in this
   module (unchanged from every telemetry note above). This backend's own transport (exec'ing
-  `claude -p` against the Slack MCP already configured on this machine) writes no log of its own
+  `claude -p` against the Slack MCP server its own `backends.pg-connector-thread-slack.claude`
+  config declares) writes no log of its own
   either; a transport failure or a malformed/schema-invalid reply surfaces only as this call's own
   wire-level `unavailable` error (never a panic), exactly like every other backend's own failure
   path in this catalog. `list`'s own `truncated: true` (unconditional for this backend, per its own

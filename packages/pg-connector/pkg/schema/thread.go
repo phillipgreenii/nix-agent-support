@@ -8,7 +8,7 @@
 // Unlike issue/pr, thread has no write ops at all (Provider declares only
 // Show/List — see pkg/provider/thread/iface.go) and exactly one Tier-2
 // backend at this phase (pg-connector-thread-slack, transport-only over
-// claude -p against the machine's already-configured Slack MCP) — see
+// claude -p against a Slack MCP server its own config declares) — see
 // cmd/pg-connector-thread-slack.
 package schema
 

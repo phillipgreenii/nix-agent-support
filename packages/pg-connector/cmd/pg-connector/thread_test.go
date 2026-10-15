@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -357,5 +358,117 @@ func TestHumanizeThreadListOutcome_IdsOnly(t *testing.T) {
 	}
 	if !strings.Contains(out, "thread-1") {
 		t.Fatalf("humanizeThreadListOutcome = %q, want it to contain the matched id", out)
+	}
+}
+
+// threadBackendBlockMarker is the JSON text the umbrella must forward to the
+// backend when threadBackendBlockYAML is registered: BackendConfig re-encodes
+// the YAML block as compact JSON, and the request carries it verbatim.
+const (
+	threadBackendBlockMarker = `"claude":{"cwd":"/work/root"}`
+	threadBackendBlockYAML   = "backends:\n  %s:\n    claude:\n      cwd: /work/root\n"
+)
+
+// writeThreadConfigWithBackendBlock is writeThreadConfigFor plus a
+// backends.<backend> block (bead pg2-apllc): the config block the umbrella
+// must copy into every request it sends to that backend.
+func writeThreadConfigWithBackendBlock(t *testing.T, backend string) {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := dir + "/config.yaml"
+	body := "connector:\n  thread:\n    - " + backend + "\n" + strings.Replace(threadBackendBlockYAML, "%s", backend, 1)
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+}
+
+// writeConfigGatedFakeBackend creates a fake backend that answers ok ONLY
+// when the request it reads on stdin contains marker (the config the
+// umbrella must have forwarded), and an unavailable error otherwise, so a
+// test observes forwarding through the answer alone.
+func writeConfigGatedFakeBackend(t *testing.T, name, marker, ok string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, name)
+	content := "#!/bin/sh\nreq=$(cat)\ncase \"$req\" in\n" +
+		"  *'" + marker + "'*)\ncat <<'FAKE_BACKEND_EOF'\n" + ok + "\nFAKE_BACKEND_EOF\n;;\n" +
+		"  *)\nprintf '{\"protocolVersion\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"backend config block not forwarded\"}}\\n'\n;;\n" +
+		"esac\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatalf("write config-gated fake backend: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestRun_ThreadShow_ForwardsBackendConfig (bead pg2-apllc AC5): "thread
+// show" copies the backend's registered backends.<name> block into the show
+// request, so a backend reading ConfigFromContext in show sees it. The
+// negative control re-runs the same backend with no block registered and
+// expects the refusal, so the first call's success is not vacuous.
+func TestRun_ThreadShow_ForwardsBackendConfig(t *testing.T) {
+	const backend = "backend-thread-show-cfg"
+	writeConfigGatedFakeBackend(t, backend, threadBackendBlockMarker,
+		`{"protocolVersion":1,"schemaVersion":1,"result":{"id":"thread-1","channel":"C123","permalink":"https://slack.example/p1","reply_count":1,"text":"t","mentions_me":false,"as_of":"2026-09-19T00:00:00Z","stale":false}}`)
+
+	writeThreadConfigWithBackendBlock(t, backend)
+	stdout, _, code := executePr(t, []string{"thread", "show", "thread-1"})
+	if code != 0 {
+		t.Fatalf("with a registered block: exit code = %d, want 0 (the backend never saw its config); stdout=%s", code, stdout)
+	}
+
+	writeThreadConfigFor(t, backend)
+	stdout, _, code = executePr(t, []string{"thread", "show", "thread-1"})
+	if code == 0 {
+		t.Fatalf("with NO block registered: exit code = 0, want a refusal; stdout=%s", stdout)
+	}
+}
+
+// TestRun_ThreadList_ForwardsBackendConfig (bead pg2-apllc AC5): the same
+// proof for "thread list", whose fan-out attaches the block through
+// registryConfig.
+func TestRun_ThreadList_ForwardsBackendConfig(t *testing.T) {
+	const backend = "backend-thread-list-cfg"
+	writeConfigGatedFakeBackend(t, backend, threadBackendBlockMarker,
+		`{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[{"id":"thread-1","channel":"C123","reply_count":1,"as_of":"2026-09-19T00:00:00Z","stale":false}],"present_ids":["thread-1"],"cursor":null,"truncated":true}}`)
+
+	writeThreadConfigWithBackendBlock(t, backend)
+	stdout, _, code := executePr(t, []string{"thread", "list", "--query", "mine"})
+	if code != 0 {
+		t.Fatalf("with a registered block: exit code = %d, want 0 (the backend never saw its config); stdout=%s", code, stdout)
+	}
+	var outcome threadListOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
+		t.Fatalf("decode outcome: %v (stdout=%s)", err, stdout)
+	}
+	if len(outcome.PresentIDs) != 1 || outcome.PresentIDs[0] != "thread-1" {
+		t.Fatalf("PresentIDs = %v, want [thread-1]", outcome.PresentIDs)
+	}
+
+	writeThreadConfigFor(t, backend)
+	stdout, _, code = executePr(t, []string{"thread", "list", "--query", "mine"})
+	if code == 0 {
+		t.Fatalf("with NO block registered: exit code = 0, want a degraded source; stdout=%s", stdout)
+	}
+}
+
+// TestRun_ThreadChanges_ForwardsBackendConfig: the pg-router thread-me source
+// polls "thread changes", whose ledger refresh calls the backend's list op
+// through invokeOne; it must carry the block too (it is the path that
+// delivered nothing in production, bead pg2-s417i).
+func TestRun_ThreadChanges_ForwardsBackendConfig(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	const backend = "backend-thread-changes-cfg"
+	writeConfigGatedFakeBackend(t, backend, threadBackendBlockMarker,
+		`{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[{"id":"thread-1","channel":"C123","reply_count":1,"as_of":"2026-09-19T00:00:00Z","stale":false}],"present_ids":["thread-1"],"cursor":null,"truncated":true}}`)
+
+	writeThreadConfigWithBackendBlock(t, backend)
+	stdout, _, code := executePr(t, []string{"thread", "changes", "--query", "involving-me", "--consumer", "pg-router"})
+	if code != 0 {
+		t.Fatalf("with a registered block: exit code = %d, want 0 (the backend never saw its config); stdout=%s", code, stdout)
+	}
+	w := decodeChangesWire(t, stdout)
+	if kinds := changeKindsFor(w.Changes); kinds["added"] != 1 {
+		t.Fatalf("kinds = %+v, want 1 added thread", kinds)
 	}
 }
