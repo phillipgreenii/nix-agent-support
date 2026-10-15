@@ -36,9 +36,14 @@ type Origin struct {
 	// Gov, when set, admits and settles one GraphQL point per call, as the real
 	// summary fetcher does.
 	Gov *governor.Governor
+	// Latency, when set, runs inside every Fetch call after the call was
+	// admitted and booked and before it answers: a test that models the origin's
+	// round trip on a fake clock blocks in it until the clock has moved.
+	Latency func()
 
 	mu      sync.Mutex
 	prs     map[string]*PR
+	changes map[string]int
 	next    int
 	calls   []OriginCall
 	gate    chan struct{}
@@ -63,7 +68,19 @@ func (o *Origin) Set(nodeID string, pr PR) {
 func (o *Origin) Update(nodeID string, fn func(*PR)) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.changes == nil {
+		o.changes = map[string]int{}
+	}
+	o.changes[nodeID]++
 	fn(o.pr(nodeID))
+}
+
+// Changes is the number of Update calls the origin has seen for a node id: the
+// changes the origin made to that PR after it was first described.
+func (o *Origin) Changes(nodeID string) int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.changes[nodeID]
 }
 
 func (o *Origin) pr(nodeID string) *PR {
@@ -115,7 +132,7 @@ func (o *Origin) summaryLocked(nodeID string) summary.Summary {
 func (o *Origin) Fetch(_ context.Context, call ratefeed.Meta, ids []string) ([]summary.Summary, int64, error) {
 	o.mu.Lock()
 	o.calls = append(o.calls, OriginCall{IDs: slices.Clone(ids), Class: call.Class})
-	gate, entered, gov, ferr := o.gate, o.entered, o.Gov, o.err
+	gate, entered, gov, ferr, lat := o.gate, o.entered, o.Gov, o.err, o.Latency
 	if entered != nil {
 		o.entered = nil
 		close(entered)
@@ -133,6 +150,9 @@ func (o *Origin) Fetch(_ context.Context, call ratefeed.Meta, ids []string) ([]s
 	}
 	if gate != nil {
 		<-gate
+	}
+	if lat != nil {
+		lat()
 	}
 	if ferr != nil {
 		return nil, 0, ferr

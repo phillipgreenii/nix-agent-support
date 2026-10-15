@@ -33,6 +33,10 @@ type RigOptions struct {
 	Settings *config.Settings
 	// Expiry overrides the settings' expiry.
 	Expiry time.Duration
+	// AliasStore, when set, is what the alias table is read and written through
+	// (a memo over Store, for a test that makes millions of lookups); nil means
+	// the store itself.
+	AliasStore entity.AliasStore
 	// Store and Clock reuse an existing store and clock (a simulated restart).
 	Store *store.Store
 	Clock *governor.ManualClock
@@ -41,6 +45,9 @@ type RigOptions struct {
 	// OnGroupStoring and OnGone are the service's transactional hooks.
 	OnGroupStoring func(ctx context.Context, tx *store.Tx, prev *store.GroupRow, next store.GroupRow, info groupsvc.RefreshInfo) error
 	OnGone         func(ctx context.Context, tx *store.Tx, node string, purpose governor.Purpose) error
+	// OnSummaryRefreshed and SummaryOnGone are the summary service's hooks.
+	OnSummaryRefreshed func(prev *summary.Summary, next summary.Stored)
+	SummaryOnGone      summary.GoneHook
 	// Identity receives the authentication markers.
 	Identity groupsvc.AuthMarker
 	// PollInterval is the scheduler's poll interval; zero means 5 ms.
@@ -98,7 +105,11 @@ func NewRig(t *testing.T, o RigOptions) *Rig {
 	if o.Expiry > 0 {
 		expiry = o.Expiry
 	}
-	aliases := entity.NewIdentity(st, clk)
+	var aliasStore entity.AliasStore = st
+	if o.AliasStore != nil {
+		aliasStore = o.AliasStore
+	}
+	aliases := entity.NewIdentity(aliasStore, clk)
 	origin := NewOrigin()
 	origin.Gov = o.Gov
 	pers := &summary.Persister{
@@ -112,6 +123,7 @@ func NewRig(t *testing.T, o RigOptions) *Rig {
 	sum, err := summary.NewService(summary.ServiceConfig{
 		Store: st, Persister: pers, Fetcher: origin, Identity: aliases, Scheduler: sched, Clock: clk,
 		KeepaliveWindow: settings.KeepaliveWindow.Std(), Expiry: expiry, BatchSize: o.BatchSize,
+		OnSummaryRefreshed: o.OnSummaryRefreshed, OnGone: o.SummaryOnGone,
 	})
 	if err != nil {
 		t.Fatal(err)
