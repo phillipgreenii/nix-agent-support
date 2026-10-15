@@ -538,9 +538,11 @@ let
   # PermissionMode=dontAsk (auto-deny, no prompt possible).
   #
   # Code-executing toolchain grants (go build|test|vet|mod, gofmt) are NOT here
-  # (bead pg2-cwn44): they live in the named `toolSets.go` set, which a role
-  # opts into with `roles.<name>.ccpool.toolSets` (see that option).
-  defaultAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)";
+  # (bead pg2-cwn44), and neither are prek and pre-commit (bead pg2-bg9qq: they
+  # run the repo-defined hook code): they live in the named `toolSets.go` and
+  # `toolSets.hooks` sets, which a role opts into with
+  # `roles.<name>.ccpool.toolSets` (see that option).
+  defaultAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)";
 
   # launchConfigFile (this bead, pg2-qsred: home-manager module has no
   # launch-config surface, so real dispatch fails on empty WorktreeDir).
@@ -1158,8 +1160,9 @@ in
         in `roles.<name>.ccpool.toolSets`; the set's grants are then rendered into
         that role's `extraAllowedTools`. The module defines the `go` set (at
         `mkDefault` priority, so a consumer may define further sets without
-        losing it, or replace it): the Go toolchain's code-executing verbs (go
-        build/test/vet/mod, gofmt, gofumpt), which are deliberately NOT in the
+        losing it, or replace it): `go`, the Go toolchain's code-executing verbs
+        (go build/test/vet/mod, gofmt, gofumpt), and `hooks`, the repo hook
+        runners (prek, pre-commit; bead pg2-bg9qq), both deliberately NOT in the
         handler-wide list. Granting a command does not put it on PATH; the
         binaries come from the primary user's home-manager profile.
       '';
@@ -1677,6 +1680,15 @@ in
           "Bash(go mod:*)"
           "Bash(gofmt:*)"
           "Bash(gofumpt:*)"
+        ];
+        # toolSets.hooks (bead pg2-bg9qq): the repo hook runners. They run the hook
+        # code the repo's config names, attacker-controlled on an untrusted PR
+        # checkout (ADR 0035), so only a role that runs hooks directly on a trusted
+        # tree declares it. A `git commit` fires hooks without this grant, and
+        # pg-hooks is granted separately per role. mkDefault, like `go`.
+        toolSets.hooks = lib.mkDefault [
+          "Bash(prek:*)"
+          "Bash(pre-commit:*)"
         ];
         # handlerCommandDir: this bead, pg2-pteab.
         inherit handlerCommandDir;

@@ -243,6 +243,14 @@ func bashPermits(allowed, cmd string) bool {
 	return false
 }
 
+// hookRunnerCmds are the repo hook runner command lines the handler-wide
+// default MUST deny (bead pg2-bg9qq): prek and pre-commit run the hook code the
+// repo's own config names, attacker-controlled on an untrusted PR checkout
+// (agent-support ADR 0035).
+var hookRunnerCmds = []string{
+	"prek run --files a.go", "prek run", "pre-commit run --files a.go", "pre-commit install",
+}
+
 // goToolchainCmds are the code-executing Go toolchain command lines the
 // handler-wide default MUST deny (bead pg2-cwn44): each runs code from the
 // tree it is pointed at, which for an untrusted PR checkout is
@@ -272,6 +280,49 @@ func TestDefault_allowedToolsDeniesGoToolchain(t *testing.T) {
 		if bashPermits(defaultAllowedTools("some-pr-tool"), cmd) {
 			t.Errorf("defaultAllowedTools(prTool) permits %q", cmd)
 		}
+	}
+}
+
+// TestDefault_allowedToolsDeniesHookRunners (bead pg2-bg9qq): the handler-wide
+// default grants NO prek / pre-commit command, so a role that declares no
+// hooks tool set is denied them by the allowlist. The positive control proves
+// the helper can see a grant at all, so the denial is not vacuous.
+func TestDefault_allowedToolsDeniesHookRunners(t *testing.T) {
+	for name, def := range map[string]string{
+		"Default":                Default().AllowedTools,
+		"defaultAllowedTools()":  defaultAllowedTools(""),
+		"defaultAllowedTools(p)": defaultAllowedTools("some-pr-tool"),
+	} {
+		for _, cmd := range hookRunnerCmds {
+			if bashPermits(def, cmd) {
+				t.Errorf("%s permits %q; hook runner grants belong to the hooks tool set only", name, cmd)
+			}
+		}
+		if !bashPermits(def, "git status") {
+			t.Fatalf("positive control failed for %s: bashPermits cannot see the git status grant", name)
+		}
+	}
+}
+
+// TestMergeAllowedTools_hooksSetGrantsOnlyTheDeclaringRole (bead pg2-bg9qq): a
+// role whose extraAllowedTools carry the hooks set (what the nix module
+// renders for a role declaring toolSets = [ "hooks" ]) is permitted prek and
+// pre-commit, while the default and a role with no extras are not, and the
+// hooks set does not drag in a go grant.
+func TestMergeAllowedTools_hooksSetGrantsOnlyTheDeclaringRole(t *testing.T) {
+	hooksSet := []string{"Bash(prek:*)", "Bash(pre-commit:*)"}
+	def := Default().AllowedTools
+	declares := MergeAllowedTools(def, hooksSet)
+	for _, cmd := range hookRunnerCmds {
+		if !bashPermits(declares, cmd) {
+			t.Errorf("role declaring the hooks set is denied %q", cmd)
+		}
+	}
+	if bashPermits(declares, "go test ./...") {
+		t.Error("hooks set must not grant go test")
+	}
+	if got := MergeAllowedTools(def, nil); bashPermits(got, "prek run") {
+		t.Errorf("role declaring no set is permitted prek: %q", got)
 	}
 }
 

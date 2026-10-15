@@ -286,6 +286,45 @@ func TestBuildDeps_goToolSetReachesOnlyTheDeclaringRole(t *testing.T) {
 	}
 }
 
+// TestBuildDeps_hooksToolSetReachesOnlyTheDeclaringRole (bead pg2-bg9qq): the
+// hooks twin of the go test above. A role whose role file carries the hooks
+// set in extraAllowedTools (what the nix module renders for toolSets =
+// [ "hooks" ]) runs with prek and pre-commit permitted, while a sibling that
+// declares no set (review, feedback, triager shaped) is denied both by the
+// handler-wide default.
+func TestBuildDeps_hooksToolSetReachesOnlyTheDeclaringRole(t *testing.T) {
+	cfg := config.Default()
+	worker := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{
+		ExtraAllowedTools: []string{"Skill", "Bash(prek:*)", "Bash(pre-commit:*)"},
+	}}
+	review := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{ExtraAllowedTools: []string{"Bash(pg-pr review:*)"}}}
+	bare := roles.Role{Name: "feedback", CCPool: &roles.CCPoolConfig{}}
+
+	allowed := func(r roles.Role) string { return buildDeps(cfg, r).CC.(*ccpool.CLIRunner).AllowedTools }
+	permits := func(list, cmd string) bool {
+		for _, g := range config.SplitAllowedTools(list) {
+			p, ok := strings.CutPrefix(g, "Bash(")
+			if !ok {
+				continue
+			}
+			if p, ok = strings.CutSuffix(p, ":*)"); ok && (cmd == p || strings.HasPrefix(cmd, p+" ")) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, cmd := range []string{"prek run --files a.go", "pre-commit run --files a.go"} {
+		if !permits(allowed(worker), cmd) {
+			t.Errorf("role declaring the hooks set is denied %q: %q", cmd, allowed(worker))
+		}
+		for _, r := range []roles.Role{review, bare} {
+			if permits(allowed(r), cmd) {
+				t.Errorf("role %q declares no hooks set but is permitted %q: %q", r.Name, cmd, allowed(r))
+			}
+		}
+	}
+}
+
 // TestBuildDeps_roleEffortOverridesHandlerEffort (bead pg2-svkob, INV-CCH-31)
 // proves buildDeps replaces the handler-wide launch-config Effort with a
 // ccpool role's own Effort for that role's runner (and its Deps.Cfg) only: a

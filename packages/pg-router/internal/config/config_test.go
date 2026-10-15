@@ -528,15 +528,16 @@ func TestDefaultAllowedTools_prToolGrant(t *testing.T) {
 	}
 }
 
-// TestBaseAllowedTools_deniesGoToolchain (bead pg2-cwn44): pg-router's own
-// compiled-in default carries no code-executing Go toolchain grant (they ride
+// TestBaseAllowedTools_deniesGoToolchain (bead pg2-cwn44, widened by pg2-bg9qq to
+// prek and pre-commit): pg-router's own compiled-in default carries no
+// code-executing Go toolchain or hook runner grant (they ride
 // in a role's own extraAllowedTools via the nix "go" tool set), keeping this
 // mirror in step with packages/pg-router-ccpool-handler/internal/config.
 func TestBaseAllowedTools_deniesGoToolchain(t *testing.T) {
 	for _, list := range []string{baseAllowedTools, defaultAllowedTools(""), defaultAllowedTools("review-tool"), Default().AllowedTools} {
-		for _, bad := range []string{"Bash(go ", "Bash(gofmt", "Bash(gofumpt"} {
+		for _, bad := range []string{"Bash(go ", "Bash(gofmt", "Bash(gofumpt", "Bash(prek", "Bash(pre-commit"} {
 			if strings.Contains(list, bad) {
-				t.Errorf("AllowedTools %q contains %q; go toolchain grants belong to the go tool set only", list, bad)
+				t.Errorf("AllowedTools %q contains %q; go toolchain and hook runner grants belong to the go / hooks tool sets only", list, bad)
 			}
 		}
 	}

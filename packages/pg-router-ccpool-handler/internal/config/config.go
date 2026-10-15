@@ -331,9 +331,11 @@ func (c Config) WorkerBudget() budget.Budget {
 // bead pg2-nk6th.5, merged by buildDeps via MergeAllowedTools); the named tool
 // sets are defined in the nix module (home/programs/pg-router-ccpool-handler,
 // option toolSets) and render into that field, so this package carries no tool
-// set of its own. prek and pre-commit are the same exposure class and stay
-// here for now (pg2-cwn44 decision: out of scope, see that bead).
-const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)"
+// set of its own. `prek` and `pre-commit` are the same exposure class (they run
+// the repo-defined hook code) and are held back the same way (bead pg2-bg9qq):
+// they live in the nix-defined "hooks" tool set, declared only by the roles that
+// run hooks directly.
+const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)"
 
 // defaultAllowedTools builds the AllowedTools default: baseAllowedTools plus,
 // when prTool is configured, a Bash(<prTool>:*) grant — mirrors

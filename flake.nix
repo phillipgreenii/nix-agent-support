@@ -6759,13 +6759,15 @@
                           # effort (bead pg2-svkob): a per-role claude --effort
                           # override renders into this role's own JSON only.
                           effort = "high";
-                          # toolSets (bead pg2-cwn44): declares the built-in "go" set
-                          # and a consumer-defined "hooks" set; the role's own
-                          # extraAllowedTools repeats one go grant to prove the
-                          # rendered list is de-duplicated, first occurrence wins.
+                          # toolSets (bead pg2-cwn44, pg2-bg9qq): declares the built-in
+                          # "go" and "hooks" sets and a consumer-defined "linter" set;
+                          # the role's own extraAllowedTools repeats one go grant to
+                          # prove the rendered list is de-duplicated, first occurrence
+                          # wins.
                           toolSets = [
                             "go"
                             "hooks"
+                            "linter"
                           ];
                           extraAllowedTools = [
                             "Skill"
@@ -6785,12 +6787,16 @@
                           onDispatchFail = "unclaim";
                           promptBody = "triage prompt";
                           precheck = "triage";
+                          # toolSets (bead pg2-bg9qq): a hooks-only role, proving the
+                          # "hooks" set is separable from "go".
+                          toolSets = [ "hooks" ];
                         };
                       };
                     };
                     # A consumer-defined set (bead pg2-cwn44): defining one must not
-                    # drop the module's built-in "go" set (mkDefault priority).
-                    toolSets.hooks = [ "Bash(pg-hooks:*)" ];
+                    # drop the module's built-in "go" and "hooks" sets (mkDefault
+                    # priority).
+                    toolSets.linter = [ "Bash(pg-hooks:*)" ];
                     # Handler-wide pool (bead pg2-h5vno): the pool every role
                     # WITHOUT its own pool dispatches into (the production
                     # escalation-triager roles) -- poolMetrics must report it
@@ -7254,7 +7260,7 @@
                         # carries no go grant anywhere in its role file, and the
                         # handler-wide launch-config allowlist carries none either:
                         # this is the negative that keeps go test off every other role.
-                        [ "$(jq -c .ccpool.extraAllowedTools "$roleWithOwnPoolHandlerDir/drain.json")" = '["Skill","Bash(gofumpt:*)","Bash(go build:*)","Bash(go test:*)","Bash(go vet:*)","Bash(go mod:*)","Bash(gofmt:*)","Bash(pg-hooks:*)"]' ]
+                        [ "$(jq -c .ccpool.extraAllowedTools "$roleWithOwnPoolHandlerDir/drain.json")" = '["Skill","Bash(gofumpt:*)","Bash(go build:*)","Bash(go test:*)","Bash(go vet:*)","Bash(go mod:*)","Bash(gofmt:*)","Bash(prek:*)","Bash(pre-commit:*)","Bash(pg-hooks:*)"]' ]
                         for f in "$roleWithOwnPoolHandlerDir/review.json" "$roleWithOwnPoolHandlerDir/triage.json" "$handlerCommandDir/feedback.json" "$handlerCommandDir/worker.json"; do
                           if jq -r '(.ccpool.extraAllowedTools // [])[]' "$f" | grep -Eq '^Bash\(go (build|test|vet|mod):|^Bash\(gofmt:|^Bash\(gofumpt:'; then
                             echo "role file $f carries a go grant but declares no go tool set" >&2
@@ -7264,6 +7270,24 @@
                         for lc in "$launchConfigFile" "$defaultLaunchConfigFile"; do
                           if jq -r .allowedTools "$lc" | tr ',' '\n' | grep -Eq '^Bash\(go (build|test|vet|mod):|^Bash\(gofmt:|^Bash\(gofumpt:'; then
                             echo "handler-wide allowedTools in $lc carries a go grant" >&2
+                            exit 1
+                          fi
+                        done
+
+                        # hooks set (bead pg2-bg9qq): same shape for prek / pre-commit.
+                        # drain (above) carries them; triage declares ONLY hooks (so
+                        # hooks is separable from go); review, feedback and worker
+                        # declare no set and carry neither, nor does any launch config.
+                        [ "$(jq -c .ccpool.extraAllowedTools "$roleWithOwnPoolHandlerDir/triage.json")" = '["Bash(prek:*)","Bash(pre-commit:*)"]' ]
+                        for f in "$roleWithOwnPoolHandlerDir/review.json" "$handlerCommandDir/feedback.json" "$handlerCommandDir/worker.json"; do
+                          if jq -r '(.ccpool.extraAllowedTools // [])[]' "$f" | grep -Eq '^Bash\((prek|pre-commit):'; then
+                            echo "role file $f carries a prek/pre-commit grant but declares no hooks tool set" >&2
+                            exit 1
+                          fi
+                        done
+                        for lc in "$launchConfigFile" "$defaultLaunchConfigFile"; do
+                          if jq -r .allowedTools "$lc" | tr ',' '\n' | grep -Eq '^Bash\((prek|pre-commit):'; then
+                            echo "handler-wide allowedTools in $lc carries a prek/pre-commit grant" >&2
                             exit 1
                           fi
                         done
