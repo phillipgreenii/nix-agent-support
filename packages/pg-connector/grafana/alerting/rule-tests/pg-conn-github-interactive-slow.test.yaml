@@ -1,0 +1,117 @@
+# promtool unit tests for the pg-conn-github-interactive-slow alert. Run by the flake check
+# test-pg-connector-github-alert-rules, which generates rules.yml next to this file: the Grafana
+# rule's refId A wrapped as `alert: <uid>` with
+# `expr: (max(pg_connector_github_queue_oldest_overdue_seconds{class="interactive"})) > 30`, the
+# rule's `for: 5m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: one gauge sample per 1m scrape, label `class` (interactive, invalidated, query,
+# keepalive or fill) plus service_name and job. `max()` has no `by`, so a firing alert carries
+# severity only.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an interactive overdue age above 30 held for the 5m for fires with severity only
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="interactive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "45x60"
+    alert_rule_test:
+      # Pending since 0, not yet through `for`.
+      - eval_time: 4m
+        alertname: pg-conn-github-interactive-slow
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: pg-conn-github-interactive-slow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: an interactive overdue age of exactly 30 and of 29 never fire
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="interactive",service_name="pg-connector-github",job="a"}
+        values: "30x60"
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="interactive",service_name="pg-connector-github",job="b"}
+        values: "29x60"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_github_interactive_slow)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-github-interactive-slow
+        exp_alerts: []
+
+  - name: an age of 31, just over the bar, fires after the for
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="interactive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "31x60"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: pg-conn-github-interactive-slow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a breach shorter than the 5m for never fires
+    interval: 1m
+    input_series:
+      # Over 30 at 0m..3m (4 samples), then drained.
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="interactive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "120x3 0x60"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: pg-conn-github-interactive-slow
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: pg-conn-github-interactive-slow
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-conn-github-interactive-slow
+        exp_alerts: []
+
+  - name: a large overdue age on any other class does not fire (interactive class only)
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="invalidated",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "5000x60"
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="query",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "5000x60"
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="keepalive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "5000x60"
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="fill",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "5000x60"
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="interactive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "2x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-github-interactive-slow
+        exp_alerts: []
+
+  - name: an interactive series fires even beside healthy neighbours of other classes
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="interactive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "90x60"
+      - series: pg_connector_github_queue_oldest_overdue_seconds{class="fill",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-conn-github-interactive-slow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: an absent series gives no alert (noDataState is OK for this rule)
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_daemon_up{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-github-interactive-slow
+        exp_alerts: []

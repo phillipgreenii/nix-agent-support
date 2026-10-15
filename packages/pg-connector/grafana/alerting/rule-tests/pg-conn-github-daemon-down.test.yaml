@@ -1,0 +1,118 @@
+# promtool unit tests for the pg-conn-github-daemon-down alert. Run by the flake check
+# test-pg-connector-github-alert-rules, which generates rules.yml next to this file from
+# packages/pg-connector/grafana/check-alert-rules.sh: the Grafana rule's refId A wrapped as
+# `alert: <uid>` with `expr: (min(pg_connector_github_daemon_up)) < 1`, the rule's `for: 2m` and
+# labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# Time model: the collector delivers one sample per 1m scrape, as the Prometheus name of the
+# catalog (dots to underscores, no _total) with the resource label service_name. `min()` has no
+# `by`, so a firing alert carries severity only.
+#
+# NOT provable here: the rule's polarity is noDataState: Alerting in Grafana, so an ABSENT series
+# is what pages in production. promtool cannot run noDataState, so the absent-series case below
+# pins only that the PromQL yields no sample and no alert (the half promtool can see); the Grafana
+# half is pinned by check-alert-structure.sh.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: daemon_up of 0 fires once held for the 2m for, with severity critical only
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_daemon_up{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0x30"
+    alert_rule_test:
+      # Pending since 0, not yet through `for`.
+      - eval_time: 1m
+        alertname: pg-conn-github-daemon-down
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: pg-conn-github-daemon-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: daemon_up of 1 never fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_daemon_up{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1x30"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_github_daemon_down)
+        eval_time: 20m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-conn-github-daemon-down
+        exp_alerts: []
+
+  - name: a single scrape of 0 (shorter than the 2m for) never fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_daemon_up{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1x3 0 1x30"
+    alert_rule_test:
+      # The 0 sample is at 4m: pending there, resolved at 5m.
+      - eval_time: 4m
+        alertname: pg-conn-github-daemon-down
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: pg-conn-github-daemon-down
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-conn-github-daemon-down
+        exp_alerts: []
+
+  - name: the lowest of several daemon_up series decides, one 0 fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_daemon_up{service_name="pg-connector-github",job="a"}
+        values: "1x30"
+      - series: pg_connector_github_daemon_up{service_name="pg-connector-github",job="b"}
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-conn-github-daemon-down
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: an absent daemon_up series gives no sample and no Prometheus alert (Grafana pages via noDataState Alerting)
+    interval: 1m
+    input_series:
+      # Another series of the daemon is present, daemon_up is not.
+      - series: pg_connector_github_store_bytes{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1000x30"
+    promql_expr_test:
+      - expr: min(pg_connector_github_daemon_up)
+        eval_time: 10m
+        exp_samples: []
+      - expr: count(wrapped:pg_conn_github_daemon_down)
+        eval_time: 10m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-conn-github-daemon-down
+        exp_alerts: []
+
+  - name: a series that stops being written goes absent after the staleness window, so no sample (the case noDataState Alerting exists for)
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_daemon_up{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1x5"
+    promql_expr_test:
+      - expr: min(pg_connector_github_daemon_up)
+        eval_time: 4m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+      # 5m lookback after the last sample at 5m: gone by 11m.
+      - expr: min(pg_connector_github_daemon_up)
+        eval_time: 11m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: pg-conn-github-daemon-down
+        exp_alerts: []

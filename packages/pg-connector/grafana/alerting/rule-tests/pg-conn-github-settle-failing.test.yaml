@@ -1,0 +1,121 @@
+# promtool unit tests for the pg-conn-github-settle-failing alert. Run by the flake check
+# test-pg-connector-github-alert-rules, which generates rules.yml next to this file: the Grafana
+# rule's refId A wrapped as `alert: <uid>` with
+# `expr: (sum(increase(pg_connector_github_change_settle{result!="settled"}[30m])) / sum(increase(pg_connector_github_change_settle[30m]))) > 0.2`,
+# the rule's `for: 10m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: counters are written the way the collector delivers them, one sample per 1m scrape,
+# no _total suffix, label `result` (settled, failed or timeout) plus service_name and job. The
+# ratio is read at 60m, after the 30m window holds only steady-state history. 100 settle attempts a
+# minute-pair are written as per-minute increments, so `0+79x120` is 79 settled a minute and
+# `0+21x120` 21 failed a minute, a 21 percent failure ratio. `sum()` has no `by`, so a firing alert
+# carries severity only. The rule fires strictly ABOVE 20 percent: exactly 20 percent is not a
+# breach, and the Binding decision's "20 percent fires" is therefore pinned as 21 percent.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: 21 percent of settles failing fires after the for, with severity only
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_change_settle{result="settled",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0+79x120"
+      - series: pg_connector_github_change_settle{result="failed",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0+21x120"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-settle-failing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: 19 percent of settles failing does not fire
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_change_settle{result="settled",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0+81x120"
+      - series: pg_connector_github_change_settle{result="failed",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0+19x120"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_github_settle_failing)
+        eval_time: 60m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-settle-failing
+        exp_alerts: []
+
+  - name: failed and timeout together count as non-settled (11 plus 11 of 100 is 22 percent)
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_change_settle{result="settled",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0+78x120"
+      - series: pg_connector_github_change_settle{result="failed",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0+11x120"
+      - series: pg_connector_github_change_settle{result="timeout",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0+11x120"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-settle-failing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: an idle counter with no increase gives no alert (0/0 is NaN, never above the bar)
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_change_settle{result="settled",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "40x120"
+      - series: pg_connector_github_change_settle{result="failed",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "30x120"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_github_settle_failing)
+        eval_time: 60m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-settle-failing
+        exp_alerts: []
+
+  - name: only settled results moving (no failed series at all) gives no alert
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_change_settle{result="settled",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0+10x120"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-settle-failing
+        exp_alerts: []
+
+  - name: a failure burst shorter than the 10m for never fires
+    interval: 1m
+    input_series:
+      # Healthy 10 settles a minute. At 40m a burst of 100 failures lands: 100 of about 400 in the
+      # 30m window is 25 percent, pending for one eval. At 41m a catch-up of 1000 settles lands
+      # and the ratio drops to about 7 percent, far inside the 10m for.
+      - series: pg_connector_github_change_settle{result="settled",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0+10x40 1400+10x60"
+      - series: pg_connector_github_change_settle{result="failed",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0x39 100x70"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-conn-github-settle-failing
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: pg-conn-github-settle-failing
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-conn-github-settle-failing
+        exp_alerts: []
+
+  - name: no settle series at all gives no alert (noDataState is OK for this rule)
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_daemon_up{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-settle-failing
+        exp_alerts: []

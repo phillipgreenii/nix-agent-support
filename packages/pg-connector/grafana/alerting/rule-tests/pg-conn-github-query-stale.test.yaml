@@ -1,0 +1,117 @@
+# promtool unit tests for the pg-conn-github-query-stale alert. Run by the flake check
+# test-pg-connector-github-alert-rules, which generates rules.yml next to this file: the Grafana
+# rule's refId A wrapped as `alert: <uid>` with
+# `expr: (max by (query) (pg_connector_github_query_last_success_age_seconds)) > 240`, the rule's
+# `for: 10m` and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# Time model: one sample per 1m scrape, the Prometheus name of the catalog, the label `query` plus
+# the collector's service_name and job. A firing alert carries the `by` label (query) plus
+# severity; job and service_name are aggregated away.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an age above 240 held for the 10m for fires with the query label and severity
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_query_last_success_age_seconds{query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "300x60"
+    alert_rule_test:
+      # Pending since 0, not yet through `for`.
+      - eval_time: 9m
+        alertname: pg-conn-github-query-stale
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: pg-conn-github-query-stale
+        exp_alerts:
+          - exp_labels:
+              query: team
+              severity: warning
+
+  - name: an age of exactly 240 (the 2 x 120 s bar) and 239 never fire
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_query_last_success_age_seconds{query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "240x60"
+      - series: pg_connector_github_query_last_success_age_seconds{query="mine",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "239x60"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_github_query_stale)
+        eval_time: 40m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-conn-github-query-stale
+        exp_alerts: []
+
+  - name: an age of 241, just over the bar, fires after the for
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_query_last_success_age_seconds{query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "241x60"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-conn-github-query-stale
+        exp_alerts:
+          - exp_labels:
+              query: team
+              severity: warning
+
+  - name: a breach shorter than the 10m for never fires
+    interval: 1m
+    input_series:
+      # 300 for the scrapes at 0m..7m (8 samples, pending until 7m), then fresh again.
+      - series: pg_connector_github_query_last_success_age_seconds{query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "300x7 10x60"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: pg-conn-github-query-stale
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: pg-conn-github-query-stale
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-conn-github-query-stale
+        exp_alerts: []
+
+  - name: only the stale query fires, a fresh neighbour stays quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_query_last_success_age_seconds{query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "500x60"
+      - series: pg_connector_github_query_last_success_age_seconds{query="mine",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "30x60"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: pg-conn-github-query-stale
+        exp_alerts:
+          - exp_labels:
+              query: team
+              severity: warning
+
+  - name: the max by (query) folds duplicate series of one query (two scrape targets) into one alert
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_query_last_success_age_seconds{query="team",service_name="pg-connector-github",job="a"}
+        values: "100x60"
+      - series: pg_connector_github_query_last_success_age_seconds{query="team",service_name="pg-connector-github",job="b"}
+        values: "400x60"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: pg-conn-github-query-stale
+        exp_alerts:
+          - exp_labels:
+              query: team
+              severity: warning
+
+  - name: an absent series gives no alert (noDataState is OK for this rule)
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_daemon_up{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-github-query-stale
+        exp_alerts: []

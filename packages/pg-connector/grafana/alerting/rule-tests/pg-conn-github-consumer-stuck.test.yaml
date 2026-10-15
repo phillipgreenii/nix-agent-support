@@ -1,0 +1,106 @@
+# promtool unit tests for the pg-conn-github-consumer-stuck alert. Run by the flake check
+# test-pg-connector-github-alert-rules, which generates rules.yml next to this file: the Grafana
+# rule's refId A wrapped as `alert: <uid>` with
+# `expr: (max by (consumer, query) (pg_connector_github_consumer_oldest_unacked_age_seconds)) > 900`,
+# the rule's `for: 5m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: one gauge sample per 1m scrape, labels consumer and query plus service_name and job.
+# A firing alert carries the `by` labels (consumer, query) plus severity.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an unacked age above 900 held for the 5m for fires with consumer, query and severity
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="desk",query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1000x60"
+    alert_rule_test:
+      # Pending since 0, not yet through `for`.
+      - eval_time: 4m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts:
+          - exp_labels:
+              consumer: desk
+              query: team
+              severity: warning
+
+  - name: an unacked age of exactly 900 and of 899 never fire
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="desk",query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "900x60"
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="desk",query="mine",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "899x60"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_github_consumer_stuck)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts: []
+
+  - name: an unacked age of 901, just over the bar, fires after the for
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="desk",query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "901x60"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts:
+          - exp_labels:
+              consumer: desk
+              query: team
+              severity: warning
+
+  - name: a breach shorter than the 5m for never fires
+    interval: 1m
+    input_series:
+      # Over 900 at 0m..3m (4 samples), then acknowledged.
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="desk",query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "2000x3 0x60"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts: []
+
+  - name: only the stuck consumer and query pair fires, a healthy pair stays quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="desk",query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "3000x60"
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="desk",query="mine",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "10x60"
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="other",query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts:
+          - exp_labels:
+              consumer: desk
+              query: team
+              severity: warning
+
+  - name: an absent series gives no alert (noDataState is OK for this rule)
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_daemon_up{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts: []

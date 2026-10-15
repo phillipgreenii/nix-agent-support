@@ -4946,6 +4946,30 @@
                     touch "$out"
                   '';
 
+              # pg-connector-github: the PromQL behaviour of its six Prometheus alert rules
+              # (docket pg2-z5fax.6). refId A of each rule listed in
+              # packages/pg-connector/grafana/check-alert-rules.sh is wrapped as a Prometheus
+              # alert and the cases under grafana/alerting/rule-tests/ run under
+              # `promtool test rules`. The Grafana-only fields (noDataState, execErrState,
+              # annotations) and the Loki rule are pinned by the structure check below.
+              test-pg-connector-github-alert-rules =
+                pkgs.runCommand "test-pg-connector-github-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.prometheus.cli
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    bash ${./packages/pg-connector/grafana/check-alert-rules.sh} \
+                      ${./packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml} \
+                      ${./packages/pg-connector/grafana/alerting/rule-tests}
+                    touch "$out"
+                  '';
+
               # pg-connector-github metric catalog vs the Metric* constants of the daemon's
               # telemetry package: the catalog checks, then the script's own mutant self-tests.
               test-pg-connector-github-metrics-catalog =
