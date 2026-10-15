@@ -271,13 +271,19 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 			}
 		}
 		out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceSucceeded, Count: len(result.PresentIDs)})
+		// One load/evict/save for the whole listing, not one per entity: the
+		// per-entity write re-read and re-wrote the entire (about 9.7 MB) PR
+		// cache file for each of the n entities (bead pg2-w1ubx, the same fix
+		// as issue list's pg2-z0qfu).
+		raws := make([]json.RawMessage, 0, len(result.Entities))
 		for _, entity := range result.Entities {
 			raw, err := json.Marshal(entity)
 			if err != nil {
 				continue
 			}
-			putLiveEntity(ctx, reg, "pr", b, raw)
+			raws = append(raws, raw)
 		}
+		putLiveEntities(ctx, reg, "pr", b, raws)
 	}
 	return out
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -907,6 +908,85 @@ func TestHumanizeReviewPending(t *testing.T) {
 	for _, want := range []string{"STALE", "1 total, 0 at head", "reviewed head: false", "extra pending reviews: 1", "last append: 2026-01-01T00:00:00Z (+3 at h1)", "a.go:3 at h1"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("record text missing %q: %q", want, got)
+		}
+	}
+}
+
+// TestRun_PrList_WritesTheListingBackWithOneCacheSave pins the poll-cost fix
+// of bead pg2-w1ubx, the PR twin of issue list's pg2-z0qfu. `pr list` writes
+// every listed entity through to the umbrella entity cache; it used to do so
+// one entity at a time, and each write re-read and re-wrote the WHOLE cache
+// file (about 9.7 MB for PRs), so a poll's CPU grew with listed-entities x
+// cache-size. The listing is now written back with one load, evict and save.
+// The negative control is the old per-entity putLiveEntity loop: restoring it
+// makes this test fail with one save per entity. The cache content is also
+// compared with what the per-entity writer produces, so the batch cannot drift.
+func TestRun_PrList_WritesTheListingBackWithOneCacheSave(t *testing.T) {
+	const backend = "backend-pr-list-batch"
+	const n = 40
+	asOf := time.Now().UTC().Format(time.RFC3339)
+	entities := make([]string, 0, n)
+	ids := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("o/r#%d", i+1)
+		ids = append(ids, fmt.Sprintf("%q", id))
+		entities = append(entities, fmt.Sprintf(`{"id":%q,"repo":"o/r","number":%d,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false,"as_of":%q,"stale":false}`, id, i+1, asOf))
+	}
+	writeOpAwareFakeBackend(t, backend, map[string]string{
+		"list": fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[%s],"present_ids":[%s],"cursor":null,"truncated":false}}`,
+			strings.Join(entities, ","), strings.Join(ids, ",")),
+	}, `{}`)
+	writeConfigFor(t, backend)
+
+	before := cacheSaves.Load()
+	stdout, _, code := executePr(t, []string{"pr", "list", "--query", "mine"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if got := cacheSaves.Load() - before; got != 1 {
+		t.Fatalf("a %d-entity listing made %d cache saves, want exactly 1 (one load/evict/save per listing, not per entity)", n, got)
+	}
+
+	var outcome prListOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
+		t.Fatalf("decode outcome: %v (stdout=%s)", err, stdout)
+	}
+	if len(outcome.Entities) != n {
+		t.Fatalf("listing returned %d entities, want %d", len(outcome.Entities), n)
+	}
+
+	got, err := loadCache(CacheKey{Type: "pr", Backend: backend})
+	if err != nil {
+		t.Fatalf("loadCache: %v", err)
+	}
+	if len(got.Entries) != n {
+		t.Fatalf("cache holds %d entries, want all %d listed entities", len(got.Entries), n)
+	}
+
+	// Reference: the per-entity writer over the same entities, into a second
+	// backend's cache. Its entries MUST equal the batch's, content and as_of.
+	const refBackend = "backend-pr-list-batch-reference"
+	for _, entity := range outcome.Entities {
+		raw, mErr := json.Marshal(entity)
+		if mErr != nil {
+			t.Fatalf("marshal %s: %v", entity.ID, mErr)
+		}
+		putLiveEntity(context.Background(), &Registry{}, "pr", refBackend, raw)
+	}
+	want, err := loadCache(CacheKey{Type: "pr", Backend: refBackend})
+	if err != nil {
+		t.Fatalf("loadCache reference: %v", err)
+	}
+	if len(want.Entries) != n {
+		t.Fatalf("reference cache holds %d entries, want %d", len(want.Entries), n)
+	}
+	for id, w := range want.Entries {
+		g, ok := got.Entries[id]
+		if !ok {
+			t.Fatalf("batch cache is missing listed entity %s", id)
+		}
+		if string(g.Content) != string(w.Content) || !g.AsOf.Equal(w.AsOf) || g.level() != w.level() {
+			t.Fatalf("entity %s differs from the per-entity write: batch=%s/%s/%s want=%s/%s/%s", id, g.Content, g.AsOf, g.level(), w.Content, w.AsOf, w.level())
 		}
 	}
 }
