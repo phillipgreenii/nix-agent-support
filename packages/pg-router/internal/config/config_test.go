@@ -48,10 +48,53 @@ func (s stubLocator) Locate(name string) error {
 	return fmt.Errorf("stub locator: %q not found", name)
 }
 
+// callerHome and callerXDGConfigHome are the HOME and XDG_CONFIG_HOME this test
+// binary was started with, captured before TestMain replaces them. They exist
+// only so TestUserConfigIsUnreachable can prove the replacement happened.
+var callerHome, callerXDGConfigHome string
+
 func TestMain(m *testing.M) {
 	defaultLocator = prefixLocator{}
 	unsetRouterEnv()
-	os.Exit(m.Run())
+	callerHome, callerXDGConfigHome = os.Getenv("HOME"), os.Getenv("XDG_CONFIG_HOME")
+	os.Exit(runWithPrivateUserHome(m))
+}
+
+// runWithPrivateUserHome points HOME and XDG_CONFIG_HOME at a fresh temp dir
+// for the whole run, so configHome() cannot resolve to the real user's
+// ~/.config (or $XDG_CONFIG_HOME) and Load() cannot read a real
+// pg-router/config.toml, whether or not a test calls absentGlobalConfig
+// (bead pg2-50k41). A test that needs other values sets them with t.Setenv,
+// whose cleanup restores these.
+func runWithPrivateUserHome(m *testing.M) int {
+	dir, err := os.MkdirTemp("", "pg-router-config-test-home-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "config tests: cannot create private HOME:", err)
+		return 1
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	_ = os.Setenv("HOME", dir)
+	_ = os.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+	return m.Run()
+}
+
+// TestUserConfigIsUnreachable pins runWithPrivateUserHome: by default the
+// user-level config lookup resolves under a temp dir, never to the HOME or
+// XDG_CONFIG_HOME the test binary was started with.
+func TestUserConfigIsUnreachable(t *testing.T) {
+	got := configHome()
+	tmp := os.TempDir()
+	if !strings.HasPrefix(got, tmp) {
+		t.Errorf("configHome() = %q, want a path under the temp dir %q", got, tmp)
+	}
+	for name, real := range map[string]string{"HOME": callerHome, "XDG_CONFIG_HOME": callerXDGConfigHome} {
+		if real != "" && (got == real || strings.HasPrefix(got, real+string(filepath.Separator))) {
+			t.Errorf("configHome() = %q is under the caller's %s %q", got, name, real)
+		}
+	}
+	if home := os.Getenv("HOME"); !strings.HasPrefix(home, tmp) {
+		t.Errorf("HOME = %q, want a path under the temp dir %q", home, tmp)
+	}
 }
 
 // unsetRouterEnv removes every PG_ROUTER_* variable from this test process
@@ -84,8 +127,19 @@ func unsetRouterEnv() {
 func TestPackageTestsPassWithRouterEnvExported(t *testing.T) {
 	cmd := exec.CommandContext(t.Context(), os.Args[0], // #nosec G204 -- re-executes this test binary
 		"-test.skip=^"+t.Name()+"$", fmt.Sprintf("-test.short=%t", testing.Short()))
+	// The child also starts with an XDG_CONFIG_HOME holding a malformed
+	// pg-router config: a test that reached it would fail (pg2-50k41).
+	poisoned := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(poisoned, "pg-router"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(poisoned, "pg-router", "config.toml"), []byte("not = valid [[[ toml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cmd.Env = append(
 		os.Environ(),
+		"XDG_CONFIG_HOME="+poisoned,
+		"HOME="+poisoned,
 		"PG_ROUTER_CONFIG=/nonexistent/pg2-pjqk3/config.toml",
 		"PG_ROUTER_HANDLER_COMMAND=/nonexistent/pg2-pjqk3/handler",
 		"PG_ROUTER_HANDLER_COMMAND_DIR=/nonexistent/pg2-pjqk3/roles",
