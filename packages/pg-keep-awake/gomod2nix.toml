@@ -1,9 +1,14 @@
 schema = 3
 cachePackages = [
+  'github.com/BurntSushi/toml',
   'golang.org/x/sys/unix',
 ]
 
 [mod]
+  [mod.'github.com/BurntSushi/toml']
+    version = 'v1.6.0'
+    hash = 'sha256-ptdUJvuc21ixeLt+M5way/na3aCnCO4MYHWulWp8NEY='
+
   [mod.'golang.org/x/sys']
     version = 'v0.49.0'
     hash = 'sha256-/1S3yy3in72ygZT1CKymvOzJZqCMYiGSqZDfvSyB3LI='

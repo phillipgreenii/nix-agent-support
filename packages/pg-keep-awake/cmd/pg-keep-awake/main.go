@@ -27,6 +27,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "--version", "version":
 		fmt.Fprintf(stdout, "pg-keep-awake %s\n", Version)
 		return 0
+	case "config":
+		return runConfig(args[1:], stdout, stderr)
 	case "--help", "-h", "help":
 		fmt.Fprintln(stdout, "pg-keep-awake: the single holder of the Mac keep-awake assertion")
 		fmt.Fprintln(stdout, "usage: pg-keep-awake <command> [args]")
