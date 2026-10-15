@@ -113,7 +113,7 @@ func TestReap_overCapClosesOldestFirst(t *testing.T) {
 
 // TestReap_ttlSparesHumanPausedSession: a `needs_input` session idle FAR past
 // idle_ttl is PRESERVED, not closed — it is parked awaiting a human decision and
-// must survive so they can still `ccpool attach` (ADR 0037, ZR INV-CCPOOL-6).
+// must survive so they can still `ccpool attach` (ADR 0037).
 // A non-paused session of the same age is still closed, so the carve-out is
 // state-scoped and does not disable the TTL pass.
 func TestReap_ttlSparesHumanPausedSession(t *testing.T) {
@@ -168,7 +168,7 @@ func TestReap_capEvictionSparesHumanPausedSession(t *testing.T) {
 // TestReap_capEvictionLeavesPoolOverCapWhenAllPaused pins the ACCEPTED FAILURE
 // MODE of ADR 0037: when every live session is human-paused, reap closes NOTHING
 // and the pool is deliberately left ABOVE max_sessions. Cap eviction gets no
-// last-resort override — continuity beats efficiency (INV-PREC-1), and the cap is
+// last-resort override — continuity beats efficiency (pg-router's precedence ordering), and the cap is
 // not an admission gate (Ensure never consults max_sessions), so an over-cap pool
 // cannot starve new work. Only an operator (`ccpool close`) clears these.
 func TestReap_capEvictionLeavesPoolOverCapWhenAllPaused(t *testing.T) {

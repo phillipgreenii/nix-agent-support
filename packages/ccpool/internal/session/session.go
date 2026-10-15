@@ -338,8 +338,8 @@ func (s *Service) Ensure(ctx context.Context, externalID, cwd, model string, opt
 //
 // ensureLocked calls it as soon as the row is in its launching state and BEFORE
 // the launch wait (launchAndWait), not after the session reaches ready: a caller
-// that stamps a supervision lease through --meta (pg-router-ccpool-handler,
-// INV-CCH-18) needs a session that is still starting, or whose launch fails or
+// that stamps a supervision lease through --meta (the pg-router-ccpool-handler
+// supervision lease) needs a session that is still starting, or whose launch fails or
 // times out, to carry that lease and its dispatch tags (bead pg2-7139f). It runs
 // AFTER the path-4 phantom-row prune, whose store.Delete cascade already cleared
 // any prior session's metadata, so a fresh Claude session under a reused

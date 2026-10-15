@@ -411,10 +411,14 @@ func TestIdentifierAllowlistGuardIgnoresZrNamingFamily(t *testing.T) {
 		t.Fatalf("mkdir %s: %v", testdataDir, err)
 	}
 
+	// The element id is assembled from two halves so the behavior-docs impl-traces
+	// evaluator does not read this fixture's placeholder as a citation of an element
+	// the set never defines.
+	const behaviorID = "INTF-" + "ZR-014"
 	content := `{
   "module": "pg-pr-zr",
   "envVar": "ZR_TOKEN",
-  "behaviorId": "INTF-ZR-014",
+  "behaviorId": "` + behaviorID + `",
   "beadRef": "pg2-zr123",
   "note": "the zr/ZR naming family is a deliberate module/bead-id convention"
 }

@@ -111,7 +111,7 @@ type LedgerError struct {
 }
 
 // ledgerErrorTruncated is LedgerError.Code for an origin answer that
-// arrived without error but did not cover the whole query (INV-FRESH-3).
+// arrived without error but did not cover the whole query (INV-LEDGER-FRESH-3).
 const ledgerErrorTruncated = "truncated"
 
 // RecordFetchSuccess stamps RefreshedAt = now. Callers MUST invoke it only
@@ -129,10 +129,10 @@ func (l *Ledger) RecordFetchError(now time.Time, code string) {
 }
 
 // RecordFetchOutcome classifies one completed origin fetch attempt and
-// records it (spec INV-FRESH-1..3):
+// records it (spec INV-LEDGER-FRESH-1..3):
 //   - fetchErr == nil and not truncated: success, stamp RefreshedAt.
 //   - fetchErr == nil and truncated: a partial answer is NOT a success
-//     (INV-FRESH-3); record LastError with code "truncated", no stamp.
+//     (INV-LEDGER-FRESH-3); record LastError with code "truncated", no stamp.
 //   - ErrUnknownOp / ErrQueryNotRecognized: the backend is not a source for
 //     this query ("not applicable" / a name it does not define), so there
 //     is nothing to be fresh or stale about; record nothing.
@@ -140,7 +140,7 @@ func (l *Ledger) RecordFetchError(now time.Time, code string) {
 //
 // It reports whether it changed the ledger (false only for the two
 // "not a source" errors). It is never called for a cache-served answer
-// (INV-FRESH-2).
+// (INV-LEDGER-FRESH-2).
 func (l *Ledger) RecordFetchOutcome(now time.Time, truncated bool, fetchErr error) bool {
 	switch {
 	case fetchErr == nil && !truncated:

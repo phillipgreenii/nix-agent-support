@@ -231,7 +231,8 @@ func newChangesCmd() *cobra.Command {
 		// the same adapter emit time, and expiresAt = at + window (bead
 		// pg2-1ldvy). Truncated to whole seconds because the wire carries
 		// RFC3339 seconds; expiresAt is computed from the truncated at so
-		// expiresAt - at is exactly the window.
+		// expiresAt - at is exactly the window. expiresAt is the bound pg-router's
+		// retry evaluates at attempt time (INV-EVT-4).
 		emitAt := changesNow().UTC().Truncate(time.Second)
 
 		items := make([]rawItem, 0, len(wire.Changes))
@@ -281,6 +282,7 @@ func newChangesCmd() *cobra.Command {
 					fmt.Fprintln(cmd.ErrOrStderr(), err)
 					return errFailed
 				}
+				// The suffixed id is what the core de-duplicates on (INV-EVT-3).
 				item.ID = id.ID + "@" + digest
 				item.At = emitAt.Format(time.RFC3339)
 				item.ExpiresAt = emitAt.Add(retryWindow).Format(time.RFC3339)

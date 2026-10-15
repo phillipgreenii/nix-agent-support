@@ -58,7 +58,8 @@ stated as its own interface (`INTF-DENY`), not folded into ordinary observation.
 - **Extent (out)** — the agent binary's own internal behavior; any workflow product built on top
   of ccpool (claims, roles, budgets-as-policy, work trackers); credential handling (the launched
   agent performs its own credential lookup; ccpool has no credential concern of its own); concrete
-  transport, storage, and process mechanics — those are this package's own decision docs.
+  transport, storage, and process mechanics — those are this package's own decision docs, which
+  receive such content by the method's relocation procedure (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · USECASE-5`).
 - **Floor** — ccpool speaks in pools, sessions, state, dispatch, metadata, and notifications —
   never in sockets, hook JSON, SQL columns, or subprocess names, and never in a workflow product's
   vocabulary borrowed without restating it at this set's own floor (`INV-20`).
@@ -92,5 +93,6 @@ row is declared for that set: nothing here is a citation of it, by design (`INV-
 | `INV-22`       | traceability is a listing obligation on every story, use case and journey, not a coverage section                                     | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`       | [b2502527-1340-4a1f-858c-aaa80c601317](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
 | `INV-23`       | the realization-gap register is set-level, named `## Realization gaps`, and never an element                                          | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`       | [f3bba3e7-440f-4109-a4de-9d37daa34bcf](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
 | `GOAL-7`       | a set SHOULD show intent through examples                                                                                             | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`       | [42ad1aa1-af11-4387-bf02-e0f028f80434](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
+| `USECASE-5`    | the method's procedure for relocating implementation content out of a behavior doc                                                    | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`       | [7d6de948-3ef5-426a-949e-2dd872f06d28](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/journeys.md)         |
 | `INTF-NONUDGE` | the no-nudge opt-out contract a co-resident monitor honors; ccpool is the implementer that sets its marker                            | `phillipgreenii-nix-agent-support · packages/pa-monitor/docs/behavior` | [7f6f582f-8261-4ae8-b39b-c76e8f027b36](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pa-monitor/docs/behavior/interfaces.md) |
 | `INTF-STATE`   | the co-resident monitor's account-level usage surface, distinct from ccpool's own per-session meter                                   | `phillipgreenii-nix-agent-support · packages/pa-monitor/docs/behavior` | [93bcbd55-729c-404f-ba79-2b0dd412c077](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pa-monitor/docs/behavior/interfaces.md) |

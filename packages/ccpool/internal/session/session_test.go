@@ -709,8 +709,8 @@ func TestEnsure_freshLaunchUnderReusedExternalIDClearsPriorMetadata(t *testing.T
 
 // TestEnsure_dispatchMetadataLandsBeforeLaunchWait: --meta must be on the row
 // while the session is still starting, not only once it reaches ready. A caller
-// that stamps its supervision lease through --meta (pg-router-ccpool-handler,
-// INV-CCH-18) otherwise has a launching session with no lease (bead pg2-7139f).
+// that stamps its supervision lease through --meta (the pg-router-ccpool-handler
+// supervision lease) otherwise has a launching session with no lease (bead pg2-7139f).
 // Each launching route is driven against the real sqlite store, and the
 // metadata is read from inside the launch wait.
 func TestEnsure_dispatchMetadataLandsBeforeLaunchWait(t *testing.T) {

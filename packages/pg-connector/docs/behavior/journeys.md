@@ -549,8 +549,8 @@ the backend has opted out of the cache.
 answer whether it came from the origin or from a cache entry and how old it is, so the cache never
 passes stale content off as current.
 _Requires:_ `INV-CACHE-1`, `INV-CACHE-2`, `INV-CACHE-3`, `INV-CACHE-4`, `INV-CACHE-5`,
-`INV-CACHE-6`, `INV-CACHE-7`, `INV-CACHE-8`, `INV-LEDGER-FRESH-1`, `INV-LEDGER-FRESH-2`,
-`INV-LEDGER-FRESH-3`, `INV-LEDGER-FRESH-4`, `INV-EXIT-1`, `INV-OUT-1`.
+`INV-CACHE-6`, `INV-CACHE-7`, `INV-CACHE-8`, `INV-CACHE-10`, `INV-LEDGER-FRESH-1`,
+`INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-3`, `INV-LEDGER-FRESH-4`, `INV-EXIT-1`, `INV-OUT-1`.
 _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 
 **Flow.** The operator runs `show`. A live full-detail cache entry within `read_ttl` answers it
@@ -563,7 +563,8 @@ the stale entry marked `stale` rather than failing, and a `list` fallback serves
 that are live members of the requested query (`INV-CACHE-1`, `INV-CACHE-3`). `changes` always asks
 the origin, so that it can detect change; in its refresher mode it fetches full entities only for
 members that are new or aged, and confirms a disappearance with one read before reporting `removed`
-(`INV-CACHE-6`, `INV-CACHE-7`). Every completed origin fetch is stamped on the query's ledger key:
+(`INV-CACHE-6`, `INV-CACHE-7`). A write the backend accepted drops the written entity's entry, so the
+next `show` reads the origin rather than the pre-write entity (`INV-CACHE-10`). Every completed origin fetch is stamped on the query's ledger key:
 a whole-query answer records `refreshed_at`; a partial or failed one records `last_error` and
 leaves `refreshed_at` alone; an answer served from the cache or ledger advances nothing; and
 `ledger show` reports both fields for every key, as `null` when absent

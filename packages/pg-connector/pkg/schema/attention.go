@@ -122,9 +122,9 @@ func (s Severity) IsValid() bool {
 }
 
 // severityRank maps each valid Severity to its canonical rank — the sole
-// place this ordering is defined (INV-VER-1-style "defined once, never
-// re-derived" convention, applied here to severity rather than schema
-// version).
+// place this ordering is defined (the "defined once, never
+// re-derived" convention INV-VER-1 sets for the schema version, applied here
+// to severity instead).
 var severityRank = map[Severity]int{
 	SeverityLow:      0,
 	SeverityMedium:   1,

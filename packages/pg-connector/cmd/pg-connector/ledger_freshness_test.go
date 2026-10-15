@@ -12,7 +12,7 @@ import (
 
 // Freshness stamps on the delta ledger (INV-LEDGER-FRESH-1..4, bead
 // pg2-ll4dw.1; spec 2026-10-05 pg-desk attention evaluator and connector
-// refresh cache, INV-FRESH-1..4).
+// refresh cache, whose freshness rules these are).
 
 var freshnessNow = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 
@@ -44,7 +44,7 @@ func TestLedgerRecordFetch_TruncatedIsNotASuccess(t *testing.T) {
 	l := newEmptyLedger()
 	l.RecordFetchOutcome(freshnessNow, true, nil)
 	if l.RefreshedAt != nil {
-		t.Fatalf("a truncated answer stamped RefreshedAt = %v (INV-FRESH-3)", l.RefreshedAt)
+		t.Fatalf("a truncated answer stamped RefreshedAt = %v (INV-LEDGER-FRESH-3)", l.RefreshedAt)
 	}
 	if l.LastError == nil || l.LastError.Code != ledgerErrorTruncated {
 		t.Fatalf("LastError = %+v, want code %q", l.LastError, ledgerErrorTruncated)
@@ -124,7 +124,7 @@ func TestLoadLedger_LegacyFileWithoutStampsHasNilStamps(t *testing.T) {
 		t.Fatalf("loadLedger: %v", err)
 	}
 	if l.RefreshedAt != nil || l.LastError != nil {
-		t.Fatalf("legacy ledger gained stamps: %v / %+v (INV-FRESH-4: no recorded success stays unknown)", l.RefreshedAt, l.LastError)
+		t.Fatalf("legacy ledger gained stamps: %v / %+v (INV-LEDGER-FRESH-4: no recorded success stays unknown)", l.RefreshedAt, l.LastError)
 	}
 }
 
@@ -161,7 +161,7 @@ func TestRun_PrChanges_CompleteFetch_StampsRefreshedAt(t *testing.T) {
 	}
 }
 
-// INV-FRESH-2: a cache-served answer MUST NOT advance freshness.
+// INV-LEDGER-FRESH-2: a cache-served answer MUST NOT advance freshness.
 func TestRun_PrChanges_Cached_DoesNotStamp(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	marker := filepath.Join(t.TempDir(), "invoked.log")
@@ -182,7 +182,7 @@ func TestRun_PrChanges_Cached_DoesNotStamp(t *testing.T) {
 	}
 	at, lastErr := loadStamps(t, key)
 	if at == nil || !at.Equal(old) {
-		t.Fatalf("RefreshedAt = %v after a --cached call, want unchanged %v (INV-FRESH-2)", at, old)
+		t.Fatalf("RefreshedAt = %v after a --cached call, want unchanged %v (INV-LEDGER-FRESH-2)", at, old)
 	}
 	if lastErr != nil {
 		t.Fatalf("a --cached call wrote LastError = %+v", lastErr)
@@ -201,11 +201,11 @@ func TestRun_PrChanges_CachedOnFreshLedger_LeavesRefreshedAtUnknown(t *testing.T
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	if at, _ := loadStamps(t, key); at != nil {
-		t.Fatalf("RefreshedAt = %v, want nil (no recorded success, INV-FRESH-4)", at)
+		t.Fatalf("RefreshedAt = %v, want nil (no recorded success, INV-LEDGER-FRESH-4)", at)
 	}
 }
 
-// INV-FRESH-3: a truncated answer is not a success.
+// INV-LEDGER-FRESH-3: a truncated answer is not a success.
 func TestRun_PrChanges_Truncated_DoesNotStamp(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	writeOpAwareFakeBackend(t, "backend-fresh-trunc", map[string]string{
@@ -219,7 +219,7 @@ func TestRun_PrChanges_Truncated_DoesNotStamp(t *testing.T) {
 	}
 	at, lastErr := loadStamps(t, key)
 	if at != nil {
-		t.Fatalf("RefreshedAt = %v after a truncated answer, want nil (INV-FRESH-3)", at)
+		t.Fatalf("RefreshedAt = %v after a truncated answer, want nil (INV-LEDGER-FRESH-3)", at)
 	}
 	if lastErr == nil || lastErr.Code != ledgerErrorTruncated {
 		t.Fatalf("LastError = %+v, want code %q", lastErr, ledgerErrorTruncated)

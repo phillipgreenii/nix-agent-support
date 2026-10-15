@@ -36,7 +36,8 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   launching a session and MUST NOT launch when the pool reports no free slot or cannot be
   read; capacity is the handler's own to enforce (`INV-CONC-1`). It signals this ONLY through the
   transport's pre-accept busy decline (`conformance.ExitBusy`, exit `9` on the default CLI
-  transport of `DEC-WIRE-1`), so the core re-offers the event with backoff; it mutates no bead
+  transport of `DEC-WIRE-1`), so the core re-offers the event with backoff, at one cadence
+  whatever the decline reason (`INV-FAIL-1`); it mutates no bead
   and creates no worktree. This is consistent with `INV-CCH-3`: busy is a pre-accept signal,
   not a post-accept outcome. A pool that reports its account usage window at its limit
   (`packages/ccpool/docs/behavior · INV-POOL-4`) has no free slot by construction, so it takes this

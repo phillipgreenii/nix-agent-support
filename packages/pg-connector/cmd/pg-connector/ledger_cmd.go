@@ -80,7 +80,7 @@ type ledgerShowRow struct {
 	Consumers map[string]ConsumerState `json:"consumers"`
 	// RefreshedAt/LastError are the freshness stamps (bead pg2-ll4dw.1).
 	// Both are emitted unconditionally, as null when absent, so a reader
-	// can tell "never succeeded" (INV-FRESH-4) from "field missing".
+	// can tell "never succeeded" (INV-LEDGER-FRESH-4) from "field missing".
 	RefreshedAt *time.Time   `json:"refreshed_at"`
 	LastError   *LedgerError `json:"last_error"`
 }

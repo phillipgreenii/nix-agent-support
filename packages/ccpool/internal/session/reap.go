@@ -21,9 +21,9 @@ import (
 // Deliberately ONE predicate shared by Pass 1 (TTL) and Pass 2 (cap eviction) so
 // the two passes cannot drift, mirroring pg-router's closeUnlessNeedsInput (shared by
 // teardownAll and run-role's single-session teardown). pg-router's orchestrator is
-// this predicate's peer across the seam; both realize the deployment set's
-// INV-CCPOOL-6 ("a session projected as paused for a human decision MUST be
-// preserved, not reaped").
+// this predicate's peer across the seam; both realize the deployment-set rule
+// that a session projected as paused for a human decision MUST be preserved,
+// not reaped (ADR 0037).
 //
 // Preservation covers CLOSURE only, never Pass 0's phantom prune: a row that is not
 // live and whose Claude session is gone holds no attachable context, so there is

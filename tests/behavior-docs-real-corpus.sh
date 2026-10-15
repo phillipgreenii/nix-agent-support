@@ -125,17 +125,27 @@ printf '%s\n' "${SETS[@]}" | grep -Fx -- "$METHOD_SET" >/dev/null || {
 # impl_root <set> — the implementation tree the IMPL evaluator reconciles a set
 # against, or empty when this runner has no implementation path for the set.
 #
-# Only pg-router has one. That is what the runner applied before discovery (bead
-# pg2-wr6lm.4) and discovery does not change it: pointing impl-traces.sh at every
-# `packages/<name>` tree is a separate widening that surfaces code-side citation
-# findings, each of which needs a CODE edit. Measured at bead pg2-ksssh (2026-10-15),
-# FAIL and NOTICE lines per set when impl-traces.sh is pointed at its own package
-# tree: ccpool 5, pa-monitor 2, pg-pr 4, pg-connector 17, pg-router-ccpool-handler 2,
-# pg-router-source-pg-connector 1, work-report 1. A set gains an implementation path
-# by gaining a line here, once its code citations resolve.
+# A set gains an implementation path by gaining a line here, and gains it ONLY once
+# impl-traces.sh reports no FAIL against its own package tree (bead pg2-30r9q: each
+# line was added after the code-side citations, or the set's imports table, were
+# fixed so the citations resolve). The lines are per set, not a glob, so the next
+# set a new package brings is not silently asserted against code that has never been
+# reconciled with it; add its line when it is clean.
+#
+# `behavior-docs/docs/behavior` (the method) has no implementation tree, and the
+# nested `packages/pg-connector/docs/behavior/github` set is not a discovered set
+# (discovery matches `*/docs/behavior/README.md`); its code is reconciled through the
+# parent's imports table, which declares the `INV-GH-*` elements the code cites.
 impl_root() {
   case "$1" in
+  packages/ccpool/docs/behavior) printf '%s\n' "packages/ccpool" ;;
+  packages/pa-monitor/docs/behavior) printf '%s\n' "packages/pa-monitor" ;;
+  packages/pg-connector/docs/behavior) printf '%s\n' "packages/pg-connector" ;;
+  packages/pg-pr/docs/behavior) printf '%s\n' "packages/pg-pr" ;;
+  packages/pg-router-ccpool-handler/docs/behavior) printf '%s\n' "packages/pg-router-ccpool-handler" ;;
+  packages/pg-router-source-pg-connector/docs/behavior) printf '%s\n' "packages/pg-router-source-pg-connector" ;;
   packages/pg-router/docs/behavior) printf '%s\n' "packages/pg-router" ;;
+  packages/work-report/docs/behavior) printf '%s\n' "packages/work-report" ;;
   *) ;;
   esac
 }

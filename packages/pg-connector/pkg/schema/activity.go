@@ -55,8 +55,9 @@ type ActivityItem struct {
 // ActivityListArgs is the list_activity op's args.
 type ActivityListArgs struct {
 	// Since is inclusive, RFC3339 with offset. Empty means open-ended: the
-	// start of the backend's own record (INV-RANGE-1 names an open-ended
-	// range as legal); Truncated then carries whatever cap the system imposes.
+	// start of the backend's own record (the work-report set names an
+	// open-ended range as legal); Truncated then carries whatever cap the system
+	// imposes.
 	Since string `json:"since,omitempty"`
 	// Before is exclusive, RFC3339 with offset, always present (the umbrella
 	// fills "now" when the caller gives none).

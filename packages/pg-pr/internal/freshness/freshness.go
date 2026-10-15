@@ -9,11 +9,12 @@
 // stale once it exceeds a bound) come from a single definition instead of being
 // re-derived per seam.
 //
-// Policy authority: the pg-router deployment's INV-FRESH-1 ("don't act on stale
-// truth": any surface an operator or observer acts on MUST expose its own as-of
-// time and flag its data as stale once that data exceeds a bound; a readiness or
-// status signal derived from data past that bound MUST NOT be presented as
-// current).
+// Policy authority: INV-ASOF-1 and INV-ASOF-2 of pg-pr's behavior set, the
+// "don't act on stale truth" rule the pg-router deployment set originally owned
+// and ADR 0034 relocated here: any surface an operator or observer acts on MUST
+// expose its own as-of time and flag its data as stale once that data exceeds a
+// bound; a readiness or status signal derived from data past that bound MUST NOT
+// be presented as current.
 package freshness
 
 import "time"

@@ -505,7 +505,7 @@ func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, 
 		// INV-LEDGER-FRESH-1/-2: only here, after a completed
 		// non-cached origin answer, does the ledger learn a fetch
 		// happened. A truncated answer is recorded as a partial, not a
-		// success (INV-FRESH-3).
+		// success (INV-LEDGER-FRESH-3).
 		// A refresher pass in which a fetch failed is partial too, however
 		// complete its membership was (INV-CACHE-6).
 		partial := truncated || (res.pass != nil && res.pass.incomplete)
