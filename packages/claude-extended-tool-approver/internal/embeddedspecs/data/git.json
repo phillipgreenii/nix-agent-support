@@ -596,7 +596,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"-D delete branch (even if not merged)\""
             }
           },
           "-a": {

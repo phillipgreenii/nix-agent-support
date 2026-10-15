@@ -514,16 +514,16 @@
             "provenance": "gh pr ready --help, this host 2026-10-05",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gh\"]"
+                "source": "gh pr ready --help: \"Mark a pull request as ready for review.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gh\"]"
+                "source": "gh pr ready --help: \"USAGE gh pr ready [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gh\"]"
+                "source": "gh pr ready --help: \"USAGE gh pr ready [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gh\"]"
+                "source": "gh pr ready --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -536,7 +536,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gh\"]"
+                  "source": "gh pr ready --help: \"INHERITED FLAGS --help Show help for command\""
                 }
               },
               "--repo": {
@@ -548,7 +548,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gh\"]"
+                  "source": "gh pr ready --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
                 }
               },
               "--undo": {
@@ -562,7 +562,7 @@
                   "to": "pr-ready-undo"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gh\"]"
+                  "source": "gh pr ready --help: \"--undo Convert a pull request to \\\"draft\\\"\""
                 }
               },
               "-R": {
@@ -574,7 +574,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gh\"]"
+                  "source": "gh pr ready --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
                 }
               }
             },
@@ -588,7 +588,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gh\"]"
+                "source": "gh pr ready --help: \"USAGE gh pr ready [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\""
               }
             },
             "implicitEffects": [
@@ -599,7 +599,7 @@
                 },
                 "target": "github",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gh\"]"
+                  "source": "gh pr ready --help: \"Mark a pull request as ready for review.\" -- documents the command whose implicit effect (target \"github\", role \"remote:mutate\") is derived from this description"
                 }
               }
             ],
@@ -1174,7 +1174,7 @@
                 "source": "gh pr edit --help: \"Edit a pull request.\" (the help text embedded in the gh 2.102.0 binary; a live gh pr edit --help is denied to an unattended session, so it was read from the binary)"
               },
               "stdin": {
-                "source": "gh pr edit --help: \"Usage: gh pr edit [<number> | <url> | <branch>] [flags]\" (no explicit stdin wording for the modeled flags; the only flag that reads standard input, --body-file -, is not modeled; classified \"never\" from the documented operand/argument shape in this synopsis)"
+                "source": "gh pr edit --help: \"Usage: gh pr edit [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording for the modeled flags; the only flag that reads standard input, --body-file -, is not modeled; classified \"never\" from the documented operand/argument shape in this synopsis)"
               },
               "stdout": {
                 "source": "gh pr edit --help: \"Edit a pull request.\" and \"the pull request's URL is still printed to stdout\" (stdout classification taken from this description of what the command prints)"
@@ -1267,7 +1267,7 @@
                 }
               },
               "citation": {
-                "source": "gh pr edit --help: \"Usage: gh pr edit [<number> | <url> | <branch>] [flags]\" and \"Without an argument, the pull request that belongs to the current branch is selected.\""
+                "source": "gh pr edit --help: \"Usage: gh pr edit [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" and \"Without an argument, the pull request that belongs to the current branch is selected.\""
               }
             },
             "implicitEffects": [
@@ -2580,10 +2580,10 @@
                 "source": "gh stack link --help: \"Create or update a stack on GitHub from branch names, PR numbers, or PR URLs.\" (the help text embedded in the gh-stack 0.1.0 binary; a live gh stack link --help is denied to an unattended session, so it was read from the binary)"
               },
               "stdin": {
-                "source": "gh stack link --help: \"Usage: gh stack link [flags] <stack-number | branch-or-pr> <branch-or-pr> [...]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+                "source": "gh stack link --help: \"Usage: gh stack link [flags] \u003cstack-number | branch-or-pr\u003e \u003cbranch-or-pr\u003e [...]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
               },
               "stdout": {
-                "source": "gh stack link --help: \"Create or update a stack on GitHub from branch names, PR numbers, or PR URLs.\" (stdout classification taken from this description of what the command prints: progress lines such as \"Created PR #N for <branch> (base: <base>)\" per the extension's skill doc)"
+                "source": "gh stack link --help: \"Create or update a stack on GitHub from branch names, PR numbers, or PR URLs.\" (stdout classification taken from this description of what the command prints: progress lines such as \"Created PR #N for \u003cbranch\u003e (base: \u003cbase\u003e)\" per the extension's skill doc)"
               },
               "unknownFlag": {
                 "source": "gh stack link --help: full option listing reviewed (--base, --open, --remote); the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies, and --open (\"Mark new and existing PRs as ready for review\"; a class C collision with the gh pr ready Abstain ruling) is deliberately not modeled"
@@ -2658,7 +2658,7 @@
                 }
               },
               "citation": {
-                "source": "gh stack link --help: \"Usage: gh stack link [flags] <stack-number | branch-or-pr> <branch-or-pr> [...]\" and, in the extension's skill doc, \"Provide at least two branches/PRs to create or update a stack, or a stack number followed by the new branches/PRs to append them to the top of an existing stack\""
+                "source": "gh stack link --help: \"Usage: gh stack link [flags] \u003cstack-number | branch-or-pr\u003e \u003cbranch-or-pr\u003e [...]\" and, in the extension's skill doc, \"Provide at least two branches/PRs to create or update a stack, or a stack number followed by the new branches/PRs to append them to the top of an existing stack\""
               }
             },
             "implicitEffects": [
@@ -2667,7 +2667,7 @@
                   "kind": "remote",
                   "operation": "push"
                 },
-                "target": "<default-remote>",
+                "target": "\u003cdefault-remote\u003e",
                 "dynamic": true,
                 "citation": {
                   "source": "gh stack link --help: \"Branch arguments are automatically pushed to the remote before creating or looking up PRs.\" (the effect declared here is what this command does, per this description); upstream github/gh-stack cmd/link.go pushBranchArgs calls git.Push(remote, branches, false, true), i.e. force=false, atomic=true: a plain atomic push, no --force and no --force-with-lease"
@@ -2794,7 +2794,7 @@
                   "kind": "remote",
                   "operation": "push-lease"
                 },
-                "target": "<default-remote>",
+                "target": "\u003cdefault-remote\u003e",
                 "dynamic": true,
                 "citation": {
                   "source": "gh stack push --help: \"Uses explicit per-branch --force-with-lease checks.\" (the effect declared here is what this command does, per this description)"
@@ -3082,7 +3082,7 @@
                   "kind": "remote",
                   "operation": "push-lease"
                 },
-                "target": "<default-remote>",
+                "target": "\u003cdefault-remote\u003e",
                 "dynamic": true,
                 "citation": {
                   "source": "gh stack submit --help: \"1. Pushes all branches to the remote\" (the effect declared here is what this command does, per this description)"
@@ -3191,7 +3191,7 @@
                   "kind": "remote",
                   "operation": "push-lease"
                 },
-                "target": "<default-remote>",
+                "target": "\u003cdefault-remote\u003e",
                 "dynamic": true,
                 "citation": {
                   "source": "gh stack sync --help: \"5. Pushes all branches atomically (using --force-with-lease --atomic)\" (the effect declared here is what this command does, per this description)"
@@ -3401,7 +3401,7 @@
                 "source": "gh stack unstack --help: \"Remove a stack from local tracking and unstack it on GitHub.\""
               },
               "stdin": {
-                "source": "gh stack unstack --help: \"Usage: gh stack unstack [<stack-number>] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+                "source": "gh stack unstack --help: \"Usage: gh stack unstack [\u003cstack-number\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
               },
               "stdout": {
                 "source": "gh stack unstack --help: \"Remove a stack from local tracking and unstack it on GitHub.\" (stdout classification taken from this description of what the command prints)"
@@ -3460,7 +3460,7 @@
                 }
               },
               "citation": {
-                "source": "gh stack unstack --help: \"Usage: gh stack unstack [<stack-number>] [flags]\""
+                "source": "gh stack unstack --help: \"Usage: gh stack unstack [\u003cstack-number\u003e] [flags]\""
               }
             },
             "implicitEffects": [

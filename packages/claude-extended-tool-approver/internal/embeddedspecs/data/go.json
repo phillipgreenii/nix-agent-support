@@ -376,7 +376,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-toolexec 'cmd args' a program to use to invoke toolchain programs like vet and asm.\" (build flag shared by go build)"
             }
           },
           "-trimpath": {
@@ -1237,7 +1237,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-toolexec 'cmd args' a program to use to invoke toolchain programs like vet and asm.\" (build flag shared by go get)"
             }
           },
           "-trimpath": {
@@ -1657,7 +1657,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-toolexec 'cmd args' a program to use to invoke toolchain programs like vet and asm.\" (build flag shared by go install)"
             }
           },
           "-trimpath": {
@@ -2113,7 +2113,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-toolexec 'cmd args' a program to use to invoke toolchain programs like vet and asm.\" (build flag shared by go list)"
             }
           },
           "-trimpath": {
@@ -3297,7 +3297,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-toolexec 'cmd args' a program to use to invoke toolchain programs like vet and asm.\" (build flag shared by go run)"
             }
           },
           "-trimpath": {
@@ -3556,7 +3556,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"-exec xprog Run the test binary using xprog. The behavior is the same as in 'go run'.\""
             }
           },
           "-failfast": {
@@ -3820,7 +3820,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-toolexec 'cmd args' a program to use to invoke toolchain programs like vet and asm.\" (build flag shared by go test)"
             }
           },
           "-trimpath": {
@@ -4324,7 +4324,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-toolexec 'cmd args' a program to use to invoke toolchain programs like vet and asm.\" (build flag shared by go vet)"
             }
           },
           "-trimpath": {

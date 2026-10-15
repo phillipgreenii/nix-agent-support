@@ -133,7 +133,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sqlite3\"]"
+        "source": "sqlite3 -help: \"Usage: sqlite3 [OPTIONS] [FILENAME [SQL...]] / FILENAME is the name of an SQLite database. A new database is created if the file does not previously exist.\""
       }
     },
     "stdin": "never",

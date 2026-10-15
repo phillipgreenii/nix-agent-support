@@ -350,16 +350,16 @@
         "provenance": "nix develop --help (Nix 2.34.8), this host 2026-10-11",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix develop --help: \"nix develop - run a bash shell that provides the build environment of a derivation\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix develop --help: \"nix develop [option...] installable\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix develop --help: \"nix develop [option...] installable\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix develop --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -396,7 +396,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+              "source": "nix develop --help: \"· --help\" (\"Show usage information.\")"
             }
           },
           "--option": {
@@ -454,7 +454,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+              "source": "nix develop --help: \"· --print-build-logs / -L\" (\"Print full build logs on standard error.\")"
             }
           },
           "-L": {
@@ -466,7 +466,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+              "source": "nix develop --help: \"· --print-build-logs / -L\" (\"Print full build logs on standard error.\")"
             }
           }
         },
@@ -480,7 +480,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix develop --help: \"nix develop [option...] installable\""
           }
         },
         "implicitEffects": [
@@ -491,7 +491,7 @@
             "target": ".",
             "whenNoPositionals": true,
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+              "source": "nix develop --help: \"nix develop [option...] installable\" and \"# nix develop\" (\"Start a shell with the build environment of the default package of the flake in the current directory\") -- documents the command whose implicit effect (target \".\", role \"flake-ref\", when no positional is given) is derived from this synopsis and example"
             }
           },
           {
@@ -500,7 +500,7 @@
             },
             "target": "nix develop without -c starts an interactive shell",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+              "source": "nix develop --help: \"· --command / -c command args\" (\"Instead of starting an interactive shell, start the specified command and arguments.\") -- documents that without --command nix develop starts an interactive shell (role \"unmodeled\")"
             }
           }
         ],
@@ -1114,16 +1114,16 @@
         "provenance": "nix shell --help (Nix 2.34.8), this host 2026-10-11",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix shell --help: \"nix env shell - run a shell in which the specified packages are available\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix shell --help: \"nix env shell [option...] installables...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix shell --help: \"nix env shell [option...] installables...\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix shell --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -1160,7 +1160,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+              "source": "nix shell --help: \"· --help\" (\"Show usage information.\")"
             }
           },
           "--option": {
@@ -1218,7 +1218,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+              "source": "nix shell --help: \"· --print-build-logs / -L\" (\"Print full build logs on standard error.\")"
             }
           },
           "-L": {
@@ -1230,7 +1230,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+              "source": "nix shell --help: \"· --print-build-logs / -L\" (\"Print full build logs on standard error.\")"
             }
           }
         },
@@ -1244,7 +1244,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix shell --help: \"nix env shell [option...] installables...\""
           }
         },
         "implicitEffects": [
@@ -1254,7 +1254,7 @@
             },
             "target": "nix shell without -c starts an interactive shell",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+              "source": "nix shell --help: \"If no command is specified, it starts the default shell of your user account specified by $SHELL.\" -- documents that without --command nix shell starts an interactive shell (role \"unmodeled\")"
             }
           }
         ],
