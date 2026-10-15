@@ -1589,8 +1589,19 @@ func judgeWrite(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 	}
 	if abs != "" && !accessModifySecretCarveOut(ctx.PathEval, e.Access, abs) {
 		kinds := pathspec.EffectiveKinds(ctx.PathEval)
-		if v := pathspec.ResolveAccessWithSecrets(kinds, abs).Write; v.Result == pathspec.Forbidden {
+		v := pathspec.ResolveAccessWithSecrets(kinds, abs).Write
+		if v.Result == pathspec.Forbidden {
 			return Finding{Verdict: Forbidden, Reason: v.Reason}, true
+		}
+		// tc-whx5o (operator ruling 2026-10-14, "it should abstain"): a HELD
+		// (Unknown) write facet, e.g. the R7/D12 advisory Claude config set,
+		// abstains ahead of the zone verdict so an outer zone's ordinary
+		// CanWrite() cannot approve it. A zone-level reject still wins.
+		if v.Result == pathspec.Unknown && v.Held {
+			if access := ctx.PathEval.Evaluate(e.Path); !access.CanWrite() && access != patheval.PathUnknown {
+				return Finding{Verdict: Forbidden, Reason: "write to " + access.String() + " zone"}, true
+			}
+			return Finding{Verdict: Unknown, Reason: v.Reason}, true
 		}
 	}
 	access := ctx.PathEval.Evaluate(e.Path)

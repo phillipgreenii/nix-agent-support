@@ -142,6 +142,11 @@ func (a AccessResult) String() string {
 type Verdict struct {
 	Result AccessResult
 	Reason string
+	// Held marks an Unknown that is a DECISIVE abstain (a workspace's
+	// holdKeep: "stop the outward search, needs consent") rather than "no
+	// declaration matched". Policy layers MUST NOT let an outer zone's
+	// ordinary default approve a Held facet (tc-whx5o).
+	Held bool
 }
 
 // PathAccess is a resolved path's independent Read/Write/Delete verdicts —
@@ -596,7 +601,7 @@ func exportVerdict(f facetResolution) Verdict {
 	case Permitted:
 		return Verdict{Result: Permitted, Reason: "permitted by " + f.kindName + " workspace at " + f.root}
 	case holdKeep:
-		return Verdict{Result: Unknown, Reason: "held by " + f.kindName + " workspace at " + f.root}
+		return Verdict{Result: Unknown, Reason: "held by " + f.kindName + " workspace at " + f.root, Held: true}
 	default:
 		return Verdict{Result: Unknown, Reason: "no workspace declaration matched"}
 	}

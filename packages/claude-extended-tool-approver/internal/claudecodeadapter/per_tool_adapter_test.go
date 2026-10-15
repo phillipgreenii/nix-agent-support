@@ -211,18 +211,12 @@ func TestPerToolAdapter(t *testing.T) {
 			}
 		})
 
-		// R7/D12 ABSTAIN set. pathspec already answers Unknown (held) for these
-		// (claudeconfig.go: "an ABSTAIN-set path must not let an outer zone's
-		// ordinary CanWrite() default still approve it"), but effectpolicy.judgeWrite
-		// only consumes pathspec's Forbidden and then falls through to patheval's
-		// zone verdict, so today a Write to CLAUDE.md / .claude/commands/** is
-		// APPROVED. Reported as an engine finding by tc-o14i5.3.15 (not fixed here:
-		// engine precedence is outside this test-only packet). Remove the Skip when
-		// the policy layer honours the held (Unknown) write facet.
+		// R7/D12 ABSTAIN set (tc-whx5o): pathspec holds these Unknown and
+		// judgeWrite honours the held write facet, so they abstain.
 		t.Run("advisory Claude config abstains (R7/D12 ABSTAIN set)", func(t *testing.T) {
 			for _, rel := range []string{"CLAUDE.md", ".claude/commands/c.md", ".claude/skills/s/SKILL.md"} {
-				if r := evalTool(t, root, "Write", filepath.Join(root, rel)); r.Decision == evalcontract.Approve {
-					t.Skipf("KNOWN ENGINE GAP: Write to %s approved (%s); pathspec holds it Unknown but judgeWrite ignores the hold", rel, r.Reason)
+				if r := evalTool(t, root, "Write", filepath.Join(root, rel)); r.Decision != evalcontract.Abstain {
+					t.Errorf("%s: got %s (%s), want abstain", rel, r.Decision, r.Reason)
 				}
 			}
 		})

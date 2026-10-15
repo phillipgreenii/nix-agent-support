@@ -156,3 +156,43 @@ func TestPathAccessPolicy_GOMODCACHE_RealHost(t *testing.T) {
 		t.Errorf("write elsewhere under ~/go/pkg: applies=%v verdict=%s (%s), want NOT Permitted (still read-only)", applies, wf.Verdict, wf.Reason)
 	}
 }
+
+// TestPathAccessPolicy_HeldWriteFacetAbstains (tc-whx5o, operator ruling
+// 2026-10-14 "it should abstain") enumerates the writes whose verdict
+// changes from Permitted (an outer zone's ordinary CanWrite) to Unknown
+// because pathspec HOLDS their write facet (claudeProtectedWrite's
+// holdKeep set: advisory Claude config), and the neighbours that must stay
+// Permitted (no held facet) or Forbidden (pathspec REJECT set).
+func TestPathAccessPolicy_HeldWriteFacetAbstains(t *testing.T) {
+	root, _ := fixture(t)
+	pe := patheval.NewWithCWD(root, root)
+	ctx := PolicyContext{PathEval: pe, CWD: root}
+
+	cases := []struct {
+		rel  string
+		want FindingVerdict
+	}{
+		// approve -> abstain
+		{"CLAUDE.md", Unknown},
+		{"CLAUDE.local.md", Unknown},
+		{".claude/CLAUDE.md", Unknown},
+		{".claude/commands/c.md", Unknown},
+		{".claude/skills/s/SKILL.md", Unknown},
+		{".claude/agents/a.md", Unknown},
+		{".claude/rules/r.md", Unknown},
+		// unchanged
+		{"README.md", Permitted},
+		{"docs/CLAUDE.md", Permitted},
+		{".claude/other.txt", Permitted},
+		{".claude/settings.json", Forbidden},
+		{".claude/hooks/h.sh", Forbidden},
+		{".mcp.json", Forbidden},
+	}
+	for _, tc := range cases {
+		e := cmddesc.Effect{Kind: cmddesc.EffectPath, Access: cmddesc.AccessModify, Path: filepath.Join(root, tc.rel)}
+		f, applies := PathAccessPolicy{}.Judge(e, ctx)
+		if !applies || f.Verdict != tc.want {
+			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.rel, applies, f.Verdict, f.Reason, tc.want)
+		}
+	}
+}
