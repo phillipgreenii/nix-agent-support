@@ -8842,6 +8842,32 @@
                     touch $out
                   '';
 
+              # Set DISCOVERY of the runner above (bead pg2-ksssh): the runner finds
+              # every `*/docs/behavior/README.md` instead of listing sets, so a new
+              # set cannot be missed. This drives the real runner's `--list-sets`
+              # mode over fixture trees (dot-directory pruning, byte order, the loud
+              # no-set and no-method-set exits) and over the flake source (the four
+              # sets that were once left out are discovered).
+              test-behavior-docs-real-corpus-discovery =
+                pkgs.runCommand "test-behavior-docs-real-corpus-discovery"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.bash
+                      pkgs.gawk
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.coreutils
+                      pkgs.findutils
+                    ];
+                  }
+                  ''
+                    export CORPUS_RUNNER="${./tests/behavior-docs-real-corpus.sh}"
+                    export CORPUS_REPO_ROOT="${./.}"
+                    bats ${./tests/behavior-docs-real-corpus.bats}
+                    touch $out
+                  '';
+
               # Durable eval test for the claude-marketplaces consumer module
               # (pg2-7j5j). Uses a MOCK marketplace derivation carrying the same
               # passthru shape repo-base's mkClaudeMarketplace produces — no build

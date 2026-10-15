@@ -435,9 +435,13 @@ counting under the residual failure-rate series.
 on an account usage or spend limit or an API outage (the handler's `api-rate-limit` and
 `api-transient` failure signatures), the error text it reports **MUST contain the stable substring
 `session ended on a usage limit or API outage`** (for example `zr-1: session ended on a usage limit
-or API outage before claiming its bead (api-rate-limit; no strike counted)`). The handler exempts
-such an end from its own strike policy (its `INV-CCH-28`), so the error is the only signal the
-core receives; the core cannot see the handler's failure signature across the process boundary, so
+or API outage before claiming its bead (api-rate-limit; no strike counted)`).
+
+The handler exempts such an end from its own strike policy
+(`phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior · INV-CCH-28`),
+so the error is the only signal the core receives.
+
+The core cannot see the handler's failure signature across the process boundary, so
 it matches on this text, and it counts the error as a `handler-error` with `reason="usage-limit"`.
 Precedence among `handler-error` reasons is **triager-failure, then budget-exceeded, then
 upstream-killed, then usage-limit**. The substring is a **contract**: changing it breaks the core's

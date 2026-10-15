@@ -41,9 +41,10 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   not a post-accept outcome. A pool that reports its account usage window at its limit
   (`packages/ccpool/docs/behavior · INV-POOL-4`) has no free slot by construction, so it takes this
   same path under the same decline reason, and a launch that ccpool refuses for that reason after
-  the capacity read is the same decline: the handler MUST NOT stamp or escalate the bead for it. A command-backed role whose configured argv exits `9` is the same
-  signal: the handler MUST report it as the pre-accept busy decline (reason `command-busy`), not
-  as a handler failure, and MUST NOT carry the command's stderr into that decline.
+  the capacity read is the same decline: the handler MUST NOT stamp or escalate the bead for it.
+  - **A command-backed role.** A command-backed role whose configured argv exits `9` is the same
+    signal: the handler MUST report it as the pre-accept busy decline (reason `command-busy`), not
+    as a handler failure, and MUST NOT carry the command's stderr into that decline.
 - **`INV-CCH-7`** — when a session ends before its bead completes, the handler MUST read
   ccpool's recorded close reason. An external close (`idle_ttl`, `cap_eviction`, `operator`)
   MUST release the bead (status open, assignee cleared) with a comment naming the reason,
@@ -131,9 +132,10 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   fixed reason `origin-unavailable`: it MUST mutate no bead, make no beads or ccpool call, set no
   `human`, and trigger no per-bead escalation, and the core re-offers the event as for
   `INV-CCH-6`/`INV-CCH-8`. The origin key MUST appear only in the handler's own log and event
-  records, never in the reason, so the reason stays a bounded label. The gate lives here, at the
-  handler boundary, because only the handler knows which repo a dispatch runs in; the core's
-  global gate over its fixed named set (`INV-LIFE-2`) is not changed by it.
+  records, never in the reason, so the reason stays a bounded label.
+  - **Where the gate lives.** The gate lives here, at the handler boundary, because only the handler
+    knows which repo a dispatch runs in; the core's global gate over its fixed named set
+    (`INV-LIFE-2`) is not changed by it.
   - The probe MUST check that the repo root exists and holds a git checkout, then MUST ask the
     origin for its HEAD under a hard timeout, in the same hermetic git environment every other git
     child of this module gets (repository-naming variables dropped; credential delivery such as
@@ -254,7 +256,9 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     sessions over `max_sessions` (never `starting`/`ready`/`working`); both stamp a close reason
     (`phillipgreenii-nix-agent-support` ADR 0072). (c) Spared sessions still count toward
     `max_sessions`, so `INV-CCH-6` stops the next daemon from launching past the cap while they
-    run. (d) A daemon restart MUST NOT kill the dispatch of a ccpool-backed role: the daemon does
+    run.
+
+    (d) A daemon restart MUST NOT kill the dispatch of a ccpool-backed role: the daemon does
     not cancel it and does not wait for it, so the handler keeps supervising its session (and
     refreshing the lease) across the restart. The unsettled offer is re-offered by the next
     daemon. While the session's turn is still in progress, that redelivered dispatch absorbs the
@@ -268,6 +272,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     working one has its time budget enforced from its launch time. Until then the session runs
     unsupervised. (e) A worktree left with no session row at all
     is reclaimed by the worktree-keyed sweep of `INV-CCH-19`.
+
 - **`INV-CCH-15`** — a dispatch-time worktree cleanup (after a session reaches a terminal outcome)
   MUST NOT remove a per-bead worktree while another live session in `starting`, `ready`, `working`
   or `needs_input` still uses the same directory; the last session to detach removes it. A
@@ -349,6 +354,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     dispatch then closes and replaces it as a leftover (`INV-CCH-30`).
   - **`needs_input`**: left alone (`phillipgreenii-nix-agent-support` ADR 0037); a SUPERVISED drain
     session is bounded by `INV-CCH-29`, an orphan is not.
+
     A dispatch that absorbs a session whose turn is still in progress (`INV-CCH-30`, `INV-EVT-2`)
     MUST take the same per-session lock and refresh the lease before it starts waiting, and MUST
     measure that session's budget from its original launch time, so absorbing an orphan still at
@@ -356,10 +362,12 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     closed, so it is never absorbed: a redelivery of the same dispatch launches a fresh session
     (`INV-CCH-30`). Every reclaim and every orphan hard stop is
     recorded as an event naming the session, bead, role, pool, state, lease expiry and launch time.
+
     Not covered, accepted: an orphan is handled only when its OWN role next dispatches (until then
     only `ccpool`'s idle timeout bounds it); a role with no time budget leaves a `working` orphan
     alone; and only the time budget is enforced for an orphan, not tokens or cost. Operator ruling
     (Phillip, 2026-10-05, bead `pg2-g2u9m`); see ADR 0083.
+
 - **`INV-CCH-19`** — a per-bead worktree, and its `pg-router/<bead>` anchor branch, MUST NOT stay
   behind once nothing can be using it, even when no session row leads to it: a handler killed or
   crashed after it created the worktree but before the session existed, or a session closed
@@ -529,7 +537,9 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   the source stops listing the bead or the event expires (`INV-EVT-4`), so a sustained rate of
   declines is expected there, and (c) also skips a same-head re-dispatch after a session that died
   mid-review, leaving its pending review for the human; a drain event is born expired, so the core
-  offers it once and drops it, and there is no retry. Bead `pg2-5x29j` (review); the `ready`
+  offers it once and drops it, and there is no retry.
+
+  **Provenance.** Bead `pg2-5x29j` (review); the `ready`
   check and the generalisation are bead `pg2-nk6th.3` (the `triage` check: `pg2-p9lcg`), plan `2026-10-08-drain-worker-roles`
   section A2; found by the 2026-10-07 router health review (about 11 of 50 review sessions in 72
   hours had nothing worth reviewing).
@@ -622,7 +632,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   therefore 35 minutes for a 25-minute budget and 40 minutes for a 30-minute budget. Bead
   `pg2-nk6th.2`, plan `2026-10-08-drain-worker-roles` section A1.
 
-- **`INV-CCH-28`** — a role whose session claims its bead and MAY legitimately give it back
+- **`INV-CCH-28`** <!-- uuid: dea93749-b558-4331-9b46-5ac4c4d399ae --> — a role whose session claims its bead and MAY legitimately give it back
   unfinished (a drain worker that parks, defers, converts or refuses a bead) MUST be able to use the
   completion mode `close-or-release`, alongside `close-only`, `close-or-handback`,
   `close-or-triage` and `close-or-split-triage`; the other modes are unchanged. A dispatch under

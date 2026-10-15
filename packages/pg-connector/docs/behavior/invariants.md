@@ -207,7 +207,7 @@ distinction come from the behavior-docs method
 
 > Written by bead `pg2-ll4dw.1` (spec
 > `docs/superpowers/specs/2026-10-05-pg-desk-attention-evaluator-and-connector-refresh-cache-design.md`,
-> section 5, the `INV-FRESH-*` freshness contract this set's half realizes). Freshness is the time
+> section 5, the freshness contract this set's half realizes). Freshness is the time
 > of the last SUCCESSFUL origin fetch; the delta ledger is where the umbrella records it, per
 > `(type, backend, query)` key, so a consumer can read data age locally without a network call.
 > For a backend that owns its cache and changes the backend, not the umbrella, observes the origin
@@ -555,7 +555,7 @@ list`'s merge layer, which passes it through unread. A dedup group's `group` is 
   beads backend only (operator ruling, Phillip, 2026-10-09, bead `pg2-wyeq4`, option B:
   "reintroduce list_attention in the beads backend, driven by a configurable attention_labels list;
   accept reversing D3 for beads"); the PR and Jira backends still answer `unknown_op`, and the
-  retired `INV-ATTN-CI-1` stays removed (see ADR 0081, Amendment 2026-10-09).
+  retired CI attention item stays removed (see ADR 0081, Amendment 2026-10-09).
 - **`INV-SEARCH-BEADS-1`** <!-- uuid: 8e459d29-474d-4e8a-b19e-be1d944c9c2a --> — The beads backend MUST answer `search` by
   wrapping `bd search` over the tracker instance it serves: the query is matched by bd (bead titles
   and ids, every status including `closed`, so a filed-or-fixed check cannot silently answer no)
@@ -672,7 +672,7 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
 > `pg-connector-calendar-osx-bridge`'s `list_attention`; the rules below bind every `calendar`
 > backend that reports calendar events as attention items. A `calendar` backend whose attention
 > items are not calendar events is outside them: `pg-connector-calendar-task-focus` reports the
-> focus service's tasks and cycles (`INV-CONN-7` in `docs/behavior/pg-task-focus`).
+> focus service's tasks and cycles (see the focus service's own behavior docs, `docs/behavior/pg-task-focus`).
 
 - **`INV-CAL-2`** <!-- uuid: a75011e5-d5f9-4ef1-b501-33231f795c9a --> — A `calendar` backend MUST
   report each event in its `list_attention` result at a `severity` determined by where `now` falls

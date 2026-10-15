@@ -70,6 +70,23 @@ See the [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md
   get a clear, retryable `unavailable` that names where to look rather than an empty "nothing
   changed" or old content the umbrella does not hold. _(→ `USECASE-POLL-CHANGES`,
   `USECASE-DAEMON-DOWN-READ`; `INV-CACHE-9`, `INV-LEDGER-FRESH-5`, `INV-ERR-1`, `INV-EXIT-1`.)_
+- **`STORY-OP-13`** <!-- uuid: a260725e-4e73-4368-b752-046812439ff9 --> — read the same PR or
+  issue repeatedly without every reader calling its origin, and be told for each answer whether it
+  came from the origin or from a cache entry and how old it is, so a cache never passes stale
+  content off as current. _(→ `USECASE-CACHED-READ`; `INV-CACHE-4`, `INV-CACHE-5`,
+  `INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-4`.)_
+- **`STORY-OP-14`** <!-- uuid: a8d513e2-b211-40f8-8d0b-9f13239f48ad --> — see my calendar in the
+  attention feed so that a meeting stands out as it nears and while it runs, at a level that
+  follows the clock alone and never my guess at its importance. _(→ `USECASE-CALENDAR-ATTENTION`;
+  `INV-CAL-2`, `INV-CAL-3`, `INV-CAL-4`, `INV-CAL-6`.)_
+- **`STORY-OP-15`** <!-- uuid: 4778d7fa-0a22-4142-9aef-754c2e469909 --> — read and sort my mail
+  through the umbrella knowing that nothing in the stack, whatever its name, can delete a message,
+  and that mail does not add items to the attention feed on its own. _(→ `USECASE-MAIL-READ`;
+  `INV-MAIL-1`, `INV-MAIL-3`, `INV-MAIL-4`.)_
+- **`STORY-OP-16`** <!-- uuid: 895b3086-1c35-47ba-936e-6f90af01f637 --> — see which of my agent
+  sessions are waiting on me, most urgent first, without being shown the same account-wide usage
+  cap that an alert already raises. _(→ `USECASE-AGENTSESSION-ATTENTION`; `INV-AGS-1`,
+  `INV-AGS-2`.)_
 
 ## Journey
 
@@ -257,7 +274,7 @@ failure, `INV-EXIT-1`) rather than requiring any minimum registration.
 **Intent:** call an op that queries every backend registered for a type/capability at once (`ci
 list`, `auth status`, `config validate`) and get back a per-backend outcome breakdown plus one
 exit code distinguishing all-succeeded from partial from total failure.
-_Requires:_ `INV-VER-1`, `INV-AUTH-1`, `INV-EXIT-1`, `INV-EXIT-2`, `INV-OUT-1`.
+_Requires:_ `INV-VER-1`, `INV-AUTH-1`, `INV-EXIT-1`, `INV-EXIT-2`, `INV-OUT-1`, `INV-FANOUT-1`.
 _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 
 **Flow.** The umbrella dispatches one `INTF-WIRE` request per registered backend of the type
@@ -271,6 +288,9 @@ e.g. no `AuthChecker` implemented) counts as healthy, never as a failure (`INV-E
 `config validate` specifically, a `capabilities` response's self-declared `schemaVersions` is also
 checked against this build's own expectations, and any recognized-capability disagreement is
 folded into that backend's row as `degraded` with a `version_mismatch` reason (`INV-VER-1`). The
+per-backend requests run concurrently, so a backend that is down or slow delays only its own row
+and the fan-out takes as long as its slowest backend, not the sum of every backend's deadline;
+the rows and every merged result still come out in registration order (`INV-FANOUT-1`). The
 merged result is then rendered per the operator's chosen output mode (`USECASE-CHOOSE-OUTPUT`).
 
 ```mermaid
@@ -344,7 +364,7 @@ Extensions:
 form at all — and get back every registered source's own contribution, aggregated per that
 capability's own rule, plus the ordinary fan-out exit code.
 _Requires:_ `INV-REG-3`, `INV-EXIT-1`, `INV-OUT-1`, `INV-ATTN-1`, `INV-ATTN-URL-1`, `INV-ATTN-GROUP-1`,
-`INV-ATTN-CONTENT-1`, `INV-CONOBS-4`, `INV-SEARCH-1`.
+`INV-ATTN-CONTENT-1`, `INV-CONOBS-4`, `INV-SEARCH-1`, `INV-ATTN-BEADS-1`, `INV-SEARCH-BEADS-1`.
 _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 
 **Flow.** The umbrella resolves the backend set from the capability's own top-level key
@@ -378,6 +398,10 @@ Extensions:
   `total_before_cap` only when the cap actually cuts items — the fan-out exit code is unaffected.
 - `search --fields ...` requests specific result attributes; an unrecognized one produces a
   `warnings[]` entry, never an error and never a `sources[]`-level failure.
+- A beads backend among the sources contributes to `attention list` only the beads of its tracker
+  that carry one of its configured attention labels, and answers `unavailable` naming the setting
+  when none is configured (`INV-ATTN-BEADS-1`). It answers `search` by wrapping the tracker's own
+  search over every status, closed beads included (`INV-SEARCH-BEADS-1`).
 
 ### `USECASE-ALERT-READ` — read currently-firing alerts, their history, and the unknown-versus-none distinction <!-- uuid: 32809625-aff9-4052-9f86-523438b9e392 -->
 
@@ -389,8 +413,9 @@ triage tool).
 **Intent:** (1) an indicator reads `attention list` and renders "no alerts", the surviving items
 plus an "incomplete" marker, or "unknown"; (2) a triage tool reads `alert list` and
 `alert history` and applies its own grouping policy; (3) either can tell none from unknown.
-_Requires:_ `INV-ALERT-1`, `INV-ALERT-2`, `INV-ALERT-3`, `INV-ALERT-5`, `INV-ALERT-7`,
-`INV-EXIT-1`, `INV-OUT-1`, `INV-ATTN-1`, `INV-CONOBS-4`.
+_Requires:_ `INV-ALERT-1`, `INV-ALERT-2`, `INV-ALERT-3`, `INV-ALERT-4`, `INV-ALERT-5`,
+`INV-ALERT-6`, `INV-ALERT-7`, `INV-ALERT-8`, `INV-EXIT-1`, `INV-OUT-1`, `INV-ATTN-1`,
+`INV-CONOBS-4`.
 _Includes:_ `USECASE-FANOUT-CALL`, `USECASE-CROSSCUT-FANOUT-CALL`.
 
 **Flow.** `alert list [--query NAME]` and `alert history --since T --until T [--query NAME]` fan out
@@ -399,6 +424,12 @@ across `connector.alert` and concatenate (no cross-source dedup); `alert show ID
 itself (`INV-ALERT-7`). Reachable with nothing firing is `succeeded`, `count: 0`, exit `0`; an
 unreachable backend is `degraded` (exit `2` with surviving sources, `3` when none survive) and a
 consumer MUST read that as UNKNOWN, never as an empty list (`INV-ALERT-5`).
+
+Each backend maps its source's own severity onto the attention severity scale itself and omits a
+severity it cannot map rather than inventing one (`INV-ALERT-4`). An acknowledged alert stays in the
+attention result, one severity level lower than the same alert unacknowledged, so unacknowledged
+alerts are read first (`INV-ALERT-8`). The capability is read-only: there is no verb to
+acknowledge, silence or hide an alert (`INV-ALERT-6`).
 
 ```mermaid
 flowchart TD
@@ -506,6 +537,146 @@ Extensions:
   store, and the caller retries as above.
 - The caller needs a read of its own write after a push or a PR creation: it passes `--fresh` on the
   read or runs `pr refresh <id>` (PLANNED, not available); a polling caller does neither.
+
+### `USECASE-CACHED-READ` — read an entity through the umbrella's cache and tell how fresh the answer is <!-- uuid: 556f9d0e-57cb-48aa-b844-4267ebad6f25 -->
+
+**Actor:** `ACTOR-OP`.
+**Level:** user-goal.
+**Preconditions:** the `pr` or `issue` backend does not own its cache and changes (a backend that
+does is `USECASE-POLL-CHANGES`'s and `USECASE-DAEMON-DOWN-READ`'s case), and neither the type nor
+the backend has opted out of the cache.
+**Intent:** read an entity repeatedly without every reader calling the origin, and learn for each
+answer whether it came from the origin or from a cache entry and how old it is, so the cache never
+passes stale content off as current.
+_Requires:_ `INV-CACHE-1`, `INV-CACHE-2`, `INV-CACHE-3`, `INV-CACHE-4`, `INV-CACHE-5`,
+`INV-CACHE-6`, `INV-CACHE-7`, `INV-CACHE-8`, `INV-LEDGER-FRESH-1`, `INV-LEDGER-FRESH-2`,
+`INV-LEDGER-FRESH-3`, `INV-LEDGER-FRESH-4`, `INV-EXIT-1`, `INV-OUT-1`.
+_Includes:_ `USECASE-CHOOSE-OUTPUT`.
+
+**Flow.** The operator runs `show`. A live full-detail cache entry within `read_ttl` answers it
+without calling the backend; an older or missing entry is fetched from the origin, and concurrent
+readers of one entity collapse to one origin call. A list summary never answers a `show`, and a
+summary never replaces a detail entry (`INV-CACHE-2`, `INV-CACHE-4`). The answer says whether it
+was `served_from` the origin or the cache and its `age_seconds`; `--fresh` skips the read-through
+but never the stale fallback (`INV-CACHE-5`). When the origin is `unavailable` the umbrella serves
+the stale entry marked `stale` rather than failing, and a `list` fallback serves only the entities
+that are live members of the requested query (`INV-CACHE-1`, `INV-CACHE-3`). `changes` always asks
+the origin, so that it can detect change; in its refresher mode it fetches full entities only for
+members that are new or aged, and confirms a disappearance with one read before reporting `removed`
+(`INV-CACHE-6`, `INV-CACHE-7`). Every completed origin fetch is stamped on the query's ledger key:
+a whole-query answer records `refreshed_at`; a partial or failed one records `last_error` and
+leaves `refreshed_at` alone; an answer served from the cache or ledger advances nothing; and
+`ledger show` reports both fields for every key, as `null` when absent
+(`INV-LEDGER-FRESH-1`, `INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-3`, `INV-LEDGER-FRESH-4`). The
+result is rendered per the operator's chosen output mode (`USECASE-CHOOSE-OUTPUT`), and the
+opt-outs, the fail-open rule and the exit codes of `show`, `list` and `changes` are unchanged by
+the cache policy (`INV-CACHE-8`, `INV-EXIT-1`).
+
+```mermaid
+flowchart TD
+    show["operator runs show"] --> fresh{"--fresh, or no live detail entry within read_ttl?"}
+    fresh -->|"no"| hit["serve the cache entry: served_from cache, age_seconds (INV-CACHE-4, INV-CACHE-5)"]
+    fresh -->|"yes"| origin["fetch from the origin under a single-flight lock (INV-CACHE-4)"]
+    origin --> ok{"origin answered?"}
+    ok -->|"yes"| stamp["serve served_from origin; stamp the ledger key (INV-LEDGER-FRESH-1)"]
+    ok -->|"unavailable"| stale["serve the stale detail entry marked stale; stamp nothing (INV-CACHE-1, INV-LEDGER-FRESH-2)"]
+```
+
+Extensions:
+
+- The type or the backend opted out of the cache: `show` is neither read through nor written, and
+  the ledger is still kept (`INV-CACHE-1`, `INV-CACHE-4`).
+- A consumer that has just detected a change and needs the current entity passes `--fresh`, because
+  a detail entry younger than `read_ttl` is otherwise served (`INV-CACHE-8`).
+
+### `USECASE-CALENDAR-ATTENTION` — see calendar events in the attention feed, ramped by time alone <!-- uuid: 8bf21ca6-1f5e-43be-a397-436ef2252c5d -->
+
+**Actor:** `ACTOR-OP` (typically a consumer reading `attention list`, such as an indicator).
+**Level:** user-goal.
+**Preconditions:** a `calendar` backend that reports calendar events as attention items is
+registered under `attention.sources`.
+**Intent:** see what is coming up on the calendar and what is happening now, at an attention level
+that depends only on where the current time falls relative to the event.
+_Requires:_ `INV-CAL-1`, `INV-CAL-2`, `INV-CAL-3`, `INV-CAL-4`, `INV-CAL-5`, `INV-CAL-6`,
+`INV-STATE-1`.
+
+**Flow.** The backend considers every event that has not ended and starts before `now` plus the
+look-ahead window (`attention_window`, default 24 hours); an in-progress event is a candidate
+however long ago it started, and a declined event is never reported (`INV-CAL-5`, `INV-CAL-6`). An
+event that starts later than the lead time (`attention_lead_time`, default 15 minutes) from now is
+`low`; one that starts within the lead time is `high`; one in progress is `critical` for its whole
+duration and drops out once it ends. An all-day event is always `low` (`INV-CAL-2`, `INV-CAL-3`).
+The level depends on time only: the event's priority, a match against `important_people` and a
+tentative reply never change it, and the backend keeps no state between calls (`INV-CAL-4`,
+`INV-STATE-1`). A malformed duration, a negative lead time or a non-positive window is answered as
+`invalid_argument` (`INV-CAL-5`).
+
+```mermaid
+flowchart TD
+    ev["calendar event"] --> declined{"declined by the user?"}
+    declined -->|"yes"| omit["not reported (INV-CAL-6)"]
+    declined -->|"no"| allday{"all-day event?"}
+    allday -->|"yes"| low1["low (INV-CAL-3)"]
+    allday -->|"no"| when{"where does now fall?"}
+    when -->|"starts later than the lead time"| low2["low (INV-CAL-2)"]
+    when -->|"starts within the lead time"| high["high (INV-CAL-2)"]
+    when -->|"in progress"| crit["critical until it ends (INV-CAL-2)"]
+```
+
+Extensions:
+
+- A backend that matches an attendee against a configured `important_people` list, for a purpose
+  other than attention, matches case-insensitively: an entry containing `@` is compared only to the
+  attendee's email, with no domain normalization, and any other entry only to the attendee's name,
+  by exact match, never by substring (`INV-CAL-1`).
+
+### `USECASE-MAIL-READ` — read and triage mail with no way to delete it <!-- uuid: a9d4d76b-5fd6-4a66-b5b3-6e71097b621b -->
+
+**Actor:** `ACTOR-OP`.
+**Level:** user-goal.
+**Preconditions:** a `mail` backend is registered under `connector.mail`.
+**Intent:** list, read, search and sort mail through the umbrella, certain that no operation of the
+whole stack can destroy a message, and without mail producing attention items of its own.
+_Requires:_ `INV-MAIL-1`, `INV-MAIL-2`, `INV-MAIL-3`, `INV-MAIL-4`, `INV-CAL-1`.
+
+**Flow.** The only operations a `mail` backend offers are `list`, `show`, `search_messages`,
+`mark_read`, `mark_unread`, `archive`, `unarchive` and `fetch_attachment`; none removes, trashes or
+purges a message, and an archived message stays retrievable (`INV-MAIL-1`). `list` and
+`search_messages` with no mailbox named cover every configured mailbox in order, skip a configured
+mailbox the bridge does not know, and show a message filed under several mailboxes once
+(`INV-MAIL-4`). When a backend matches a sender against `important_people`, it first splits the
+one `"Name <email>"` sender string into a name and an email by the fixed rule, then applies the
+calendar matching rules unchanged (`INV-MAIL-2`, `INV-CAL-1`). The backend derives no attention
+level from a mailbox's priority tag or from that match, and its `list_attention`, where it is
+registered under `attention.sources` at all, answers an empty, successful list (`INV-MAIL-3`,
+`INV-MAIL-4`).
+
+```mermaid
+flowchart TD
+    req["operator asks a mail backend for an operation"] --> known{"one of the eight operations?"}
+    known -->|"no, including any removal under any name"| refuse["not offered (INV-MAIL-1)"]
+    known -->|"yes"| run["run it; archive keeps the message retrievable (INV-MAIL-1)"]
+    run --> att{"is the operation list_attention?"}
+    att -->|"yes"| empty["answer an empty successful list (INV-MAIL-4)"]
+```
+
+### `USECASE-AGENTSESSION-ATTENTION` — see which agent sessions need a person, without repeating an alert <!-- uuid: 6f77845a-c61b-4a16-9c1f-39899d822da1 -->
+
+**Actor:** `ACTOR-OP` (typically a consumer reading `attention list`).
+**Level:** user-goal.
+**Preconditions:** an `agentsession` backend that answers `list_attention` is registered under
+`attention.sources`.
+**Intent:** learn which agent sessions are waiting on a person, and how urgently, without the same
+account-wide fact appearing twice.
+_Requires:_ `INV-AGS-1`, `INV-AGS-2`, `INV-ATTN-URL-1`, `INV-CONOBS-4`.
+
+**Flow.** The backend reports one `agentsession` item per session that needs a person and no other:
+a blocked session is `high` when it waits on human input or authentication and `medium` for a usage
+limit or any other blocker, and a session flagged long-idle is `low`. Each item's id is the session
+id and it carries no `url` (`INV-AGS-1`, `INV-ATTN-URL-1`). The backend does not report that the
+account's 5-hour or weekly usage cap was hit, because an alert already raises that fact and reaches
+the same consumer through the `alert` backend (`INV-AGS-2`, `INV-CONOBS-4`); a single session
+blocked on a usage limit is a per-session fact no alert covers and is still reported.
 
 ### `USECASE-BACKEND-OBSERVABILITY` — keep a backend's own health out of attention and in its own telemetry <!-- uuid: a4bd8e4a-e378-496e-8d6b-42bfd7f119b8 -->
 

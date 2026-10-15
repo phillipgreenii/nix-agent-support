@@ -128,9 +128,11 @@ printf '%s\n' "${SETS[@]}" | grep -Fx -- "$METHOD_SET" >/dev/null || {
 # Only pg-router has one. That is what the runner applied before discovery (bead
 # pg2-wr6lm.4) and discovery does not change it: pointing impl-traces.sh at every
 # `packages/<name>` tree is a separate widening that surfaces code-side citation
-# findings in ccpool, pa-monitor, pg-pr, pg-connector and the ccpool handler, each of
-# which needs a CODE edit (bead pg2-ksssh records the count). A set gains an
-# implementation path by gaining a line here, once its code citations resolve.
+# findings, each of which needs a CODE edit. Measured at bead pg2-ksssh (2026-10-15),
+# FAIL and NOTICE lines per set when impl-traces.sh is pointed at its own package
+# tree: ccpool 5, pa-monitor 2, pg-pr 4, pg-connector 17, pg-router-ccpool-handler 2,
+# pg-router-source-pg-connector 1, work-report 1. A set gains an implementation path
+# by gaining a line here, once its code citations resolve.
 impl_root() {
   case "$1" in
   packages/pg-router/docs/behavior) printf '%s\n' "packages/pg-router" ;;
