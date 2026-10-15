@@ -85,13 +85,14 @@ func TestChangesWire_TheOpsAreRegisteredAndListedForPRAndCI(t *testing.T) {
 	p := runInProcess(t, d, nil)
 	defer p.stop(t)
 
-	// The pr feed answers PRSchemaVersion 12 and the ci feed CISchemaVersion 7:
-	// the literals are what the old wire documents, so a bump of the schema
-	// constant without the client table (or the reverse) fails here.
+	// The pr feed answers PRSchemaVersion and the ci feed CISchemaVersion: the
+	// client table must list each op with its instance's current constant, so a
+	// schema bump (the constants move with every wire-shape change) that misses
+	// the table fails here.
 	for _, c := range []struct {
 		inst    client.Instance
 		version int
-	}{{client.PR(), 12}, {client.CI(), 7}} {
+	}{{client.PR(), schema.PRSchemaVersion}, {client.CI(), schema.CISchemaVersion}} {
 		registered := p.rt.Ops(c.inst.Name)
 		for _, op := range []string{"changes", "changes_ack"} {
 			if !slices.Contains(registered, op) {
