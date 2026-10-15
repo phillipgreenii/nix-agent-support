@@ -1,0 +1,217 @@
+{
+  "-- / TERM": {
+    "exit": -1,
+    "signal": 15,
+    "stderr": ""
+  },
+  "-dims -t 1 combined flags": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-dims / TERM": {
+    "exit": -1,
+    "signal": 15,
+    "stderr": ""
+  },
+  "-dt without value": {
+    "exit": 1,
+    "signal": 0,
+    "stderr": "caffeinate: option requires an argument -- t\nusage: caffeinate [-disu] [-t timeout] [-w Process ID] [command arguments...]\n"
+  },
+  "-i -t 1": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-t 0 / TERM": {
+    "exit": -1,
+    "signal": 15,
+    "stderr": ""
+  },
+  "-t 1": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-t LONG_MAX": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-t abc": {
+    "exit": 1,
+    "signal": 0,
+    "stderr": "usage: caffeinate [-disu] [-t timeout] [-w Process ID] [command arguments...]\n"
+  },
+  "-t and -w, timer first": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-t and -w, watch first": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-t negative": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-t overflow": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-t with -w nonexistent": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-t without value": {
+    "exit": 1,
+    "signal": 0,
+    "stderr": "caffeinate: option requires an argument -- t\nusage: caffeinate [-disu] [-t timeout] [-w Process ID] [command arguments...]\n"
+  },
+  "-w -1": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-w 0 / TERM": {
+    "exit": -1,
+    "signal": 15,
+    "stderr": ""
+  },
+  "-w PID": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-w abc": {
+    "exit": 1,
+    "signal": 0,
+    "stderr": "usage: caffeinate [-disu] [-t timeout] [-w Process ID] [command arguments...]\n"
+  },
+  "-w nonexistent pid": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "-w without value": {
+    "exit": 1,
+    "signal": 0,
+    "stderr": "caffeinate: option requires an argument -- w\nusage: caffeinate [-disu] [-t timeout] [-w Process ID] [command arguments...]\n"
+  },
+  "attached -it1": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "attached -t1": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "attached -wPID": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "missing utility": {
+    "exit": 127,
+    "signal": 0,
+    "stderr": "pg-no-such-command-zz: No such file or directory\n"
+  },
+  "no arguments / HUP": {
+    "exit": -1,
+    "signal": 1,
+    "stderr": ""
+  },
+  "no arguments / INT": {
+    "exit": -1,
+    "signal": 2,
+    "stderr": ""
+  },
+  "no arguments / TERM": {
+    "exit": -1,
+    "signal": 15,
+    "stderr": ""
+  },
+  "numeric prefix -t 0x1": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "numeric prefix -t 1.5": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "numeric prefix -t 1x": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "repeated -t last wins": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "repeated -w last wins": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "unknown flag": {
+    "exit": 1,
+    "signal": 0,
+    "stderr": "caffeinate: illegal option -- z\nusage: caffeinate [-disu] [-t timeout] [-w Process ID] [command arguments...]\n"
+  },
+  "unknown flag after valid flag": {
+    "exit": 1,
+    "signal": 0,
+    "stderr": "caffeinate: illegal option -- z\nusage: caffeinate [-disu] [-t timeout] [-w Process ID] [command arguments...]\n"
+  },
+  "utility after --": {
+    "exit": 4,
+    "signal": 0,
+    "stderr": ""
+  },
+  "utility exit 0": {
+    "exit": 0,
+    "signal": 0,
+    "stderr": ""
+  },
+  "utility exit 7": {
+    "exit": 7,
+    "signal": 0,
+    "stderr": ""
+  },
+  "utility ignores -t": {
+    "exit": 6,
+    "signal": 0,
+    "stderr": ""
+  },
+  "utility ignores dead -w": {
+    "exit": 8,
+    "signal": 0,
+    "stderr": ""
+  },
+  "utility killed by TERM": {
+    "exit": -1,
+    "signal": 15,
+    "stderr": ""
+  },
+  "utility options are not parsed": {
+    "exit": 2,
+    "signal": 0,
+    "stderr": ""
+  },
+  "utility with flags": {
+    "exit": 3,
+    "signal": 0,
+    "stderr": ""
+  }
+}
