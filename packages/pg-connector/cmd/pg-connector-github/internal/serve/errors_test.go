@@ -74,6 +74,7 @@ func TestErrorTable_GitHub5xx_RetriesThreeTimesThenServesStaleInsideExpiry(t *te
 	d := servetest.NewDaemon(t, servetest.Options{Before: seed})
 	d.Start(t)
 	mustList(t, d, servetest.QueryMine, nil)
+	awaitFirstSightingFetches(t, d, 3)
 	d.Shim.WaitQuiet(t, 500*time.Millisecond, 30*time.Second)
 
 	// A transient failure that clears inside the three attempts is invisible.
@@ -137,6 +138,7 @@ func TestErrorTable_GitHubTimeout_TheCallersDeadlineServesStale(t *testing.T) {
 	d := servetest.NewDaemon(t, servetest.Options{Before: seed})
 	d.Start(t)
 	mustList(t, d, servetest.QueryMine, nil)
+	awaitFirstSightingFetches(t, d, 3)
 	d.Shim.WaitQuiet(t, 500*time.Millisecond, 30*time.Second)
 
 	// GitHub answers, but after the caller's deadline: the refresh is not
@@ -254,6 +256,7 @@ func TestErrorTable_PrimaryLimitBelowTheReserve_StopsEverySpendAndNamesTheReserv
 	d := servetest.NewDaemon(t, servetest.Options{Before: seed})
 	d.Start(t)
 	mustList(t, d, servetest.QueryMine, nil)
+	awaitFirstSightingFetches(t, d, 3)
 	d.Shim.WaitQuiet(t, 500*time.Millisecond, 30*time.Second)
 
 	// GitHub now reports 100 points left, under rate_reserve_points (1000). The
@@ -294,6 +297,7 @@ func TestErrorTable_AuthFailure_FetchesAreUnauthenticatedCachedReadsStayWithThei
 	d := servetest.NewDaemon(t, servetest.Options{Hooks: "viewer_interval=300ms", Before: seed})
 	d.Start(t)
 	mustList(t, d, servetest.QueryMine, nil)
+	awaitFirstSightingFetches(t, d, 3)
 	d.Shim.WaitQuiet(t, 500*time.Millisecond, 30*time.Second, "search", "nodes")
 	if a := authStatus(t, d); a.State != scriptout.AuthOK {
 		t.Fatalf("fixture: authenticated before the failure: %+v", a)
@@ -348,6 +352,7 @@ func TestErrorTable_ViewerChanged_FlushesIdentityScopedQueriesAndLogsIt(t *testi
 	d.Start(t)
 	mustList(t, d, servetest.QueryMine, nil)
 	mustList(t, d, servetest.QueryTeam, nil)
+	awaitFirstSightingFetches(t, d, 3)
 	d.Shim.WaitQuiet(t, 500*time.Millisecond, 30*time.Second, "search", "nodes")
 
 	fetchedAt := func(key string) int64 {

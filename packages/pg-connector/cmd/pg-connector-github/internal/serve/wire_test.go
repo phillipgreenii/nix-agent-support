@@ -88,6 +88,7 @@ func TestErrorTable_UnknownQuery_IsQueryNotRecognizedWhateverTheRequestCarries(t
 	d := servetest.StartDaemon(t, servetest.Options{Before: seed})
 	// The daemon's own config decides: a query the request's config block
 	// defines but the daemon does not is still not recognized.
+	awaitFirstSightingFetches(t, d, 3)
 	d.Shim.WaitQuiet(t, 500*time.Millisecond, 30*time.Second) // the configured queries' own first runs
 	before := len(d.Shim.OriginCalls())
 	req := listReq("not-a-configured-query", nil)

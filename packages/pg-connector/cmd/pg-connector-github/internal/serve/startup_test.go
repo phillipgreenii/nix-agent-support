@@ -40,6 +40,7 @@ func TestServeStartsAndAnswersTheListOpFromTheOrigin(t *testing.T) {
 	// The daemon refreshes its configured queries on its own as well: after
 	// the dust settles each query ran once and the summaries were fetched in
 	// batches (never one call per PR).
+	awaitFirstSightingFetches(t, d, 3)
 	d.Shim.WaitQuiet(t, 500*time.Millisecond, 20*time.Second)
 	if got := d.Shim.CountKind("search"); got != 2 {
 		t.Errorf("search calls = %d, want 2 (mine and team, once each)", got)

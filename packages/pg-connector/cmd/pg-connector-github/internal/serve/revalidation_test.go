@@ -46,12 +46,17 @@ func revalidations(t *testing.T, reader *sdkmetric.ManualReader) map[string]int6
 
 func TestRevalidation_AnUnchangedSummaryExtendsDetailAndConversationAndAHeadChangeRepullsTheRest(t *testing.T) {
 	// The summary is re-read every second; detail and conversation are fresh for
-	// two seconds and may be extended up to an hour.
+	// six seconds and may be extended up to an hour. The six seconds are the
+	// margin the daemon has on a loaded host: an unchanged summary refresh must
+	// extend them before they lapse, and a lapse is a re-pull by design, so a
+	// host that delays a summary refresh by more than the margin turns an
+	// "extended" into a legitimate "re-pulled". The test waits out the margin
+	// from the groups' own fresh_until, not from a fixed sleep.
 	d := servetest.NewDaemon(t, servetest.Options{
 		Before: seed3a,
 		Config: map[string]any{
-			"summary_ttl": "1s", "terminal_ttl": "1s", "detail_ttl": "2s", "detail_max_age": "1h",
-			"conversation_ttl": "2s", "conversation_max_age": "1h",
+			"summary_ttl": "1s", "terminal_ttl": "1s", "detail_ttl": "6s", "detail_max_age": "1h",
+			"conversation_ttl": "6s", "conversation_max_age": "1h",
 		},
 	})
 	reader := sdkmetric.NewManualReader()
@@ -66,6 +71,7 @@ func TestRevalidation_AnUnchangedSummaryExtendsDetailAndConversationAndAHeadChan
 	until(t, 30*time.Second, "the first-sighting population", func() bool {
 		return d.Shim.CountKind("runs") >= 3 && d.Shim.CountKind("reviews") >= 3 && d.Shim.CountKind("detail") >= 1
 	})
+	awaitFirstSightingFetches(t, d, 3)
 	if got := d.Shim.CountKind("files") + d.Shim.CountKind("commits"); got != 0 {
 		t.Errorf("a first sighting fetched files or commits (%d calls)", got)
 	}
@@ -73,25 +79,32 @@ func TestRevalidation_AnUnchangedSummaryExtendsDetailAndConversationAndAHeadChan
 	callOK(t, d, "pr", "files", map[string]any{"id": prA.Ref()})
 	callOK(t, d, "pr", "commits", map[string]any{"id": prA.Ref()})
 
-	detailFreshUntil := func() time.Time {
+	groupFreshUntil := func(group string) time.Time {
 		res := decode[explain.Result](t, callOK(t, d, "pr", "explain", map[string]any{"id": prA.Ref()}))
 		for _, g := range res.Groups {
-			if g.Group == "detail" && g.FreshUntil != nil {
+			if g.Group == group && g.FreshUntil != nil {
 				return *g.FreshUntil
 			}
 		}
-		t.Fatal("no detail group")
+		t.Fatalf("no %s group", group)
 		return time.Time{}
 	}
+	detailFreshUntil := func() time.Time { return groupFreshUntil("detail") }
 	detailCalls, conversationCalls := d.Shim.CountKind("detail"), d.Shim.CountKind("reviews")
 	firstUntil, summariesBefore := detailFreshUntil(), d.Shim.CountKind("nodes")
+	// Neither group is due before this: the later of the two stored expiries.
+	lapse := firstUntil
+	if c := groupFreshUntil("conversation"); c.After(lapse) {
+		lapse = c
+	}
 
 	// Summary refreshes keep coming and find the PR unchanged: the detail and
 	// conversation groups are extended instead of re-pulled, and the counter says
 	// so, before their hard age.
 	until(t, 30*time.Second, "an extension to be counted", func() bool { return revalidations(t, reader)["extended"] > 0 })
 	until(t, 30*time.Second, "the detail group's fresh_until to move", func() bool { return detailFreshUntil().After(firstUntil) })
-	time.Sleep(2500 * time.Millisecond) // longer than detail_ttl: without extension a re-pull would have happened
+	// Wait out the stored expiry: without extension a re-pull would have happened.
+	time.Sleep(time.Until(lapse.Add(500 * time.Millisecond)))
 	if got := d.Shim.CountKind("nodes"); got <= summariesBefore {
 		t.Fatalf("fixture: the summary was not refreshed in the meantime (%d calls)", got)
 	}

@@ -49,6 +49,7 @@ func TestPrivacy_AFixtureTokenNeverAppearsInTheStoreOrTheLogs(t *testing.T) {
 	// fetches, the viewer, local ops, and each kind of origin failure.
 	mustList(t, d, servetest.QueryMine, nil)
 	mustList(t, d, servetest.QueryTeam, map[string]any{"ids_only": true})
+	awaitFirstSightingFetches(t, d, 3)
 	d.Shim.WaitQuiet(t, 500*time.Millisecond, 30*time.Second, "search", "nodes")
 	for _, req := range []scriptout.Request{
 		{Op: scriptout.OpAuthStatus},
