@@ -172,8 +172,122 @@ var (
 	listActivityExecTimeout    = ListActivityExecTimeout
 )
 
-// backendTimeoutFor is the deadline serveLoop applies to a request for op.
-func backendTimeoutFor(op string) time.Duration {
+// OpShow is the wire name of the single-item read op. Like OpList it is named
+// here because this file is where per-op call budgets are chosen: "show" is the
+// one other op whose budget a backend's config may override (timeouts.show).
+const OpShow = "show"
+
+// TimeoutsConfigKey is the one member of a backend's opaque config block
+// (Request.Config) that pkg/scriptout itself reads [bead pg2-apllc]: an object
+// whose keys are op names (timeouts.list, timeouts.show) and whose values are
+// Go duration strings. Every other key of the block stays the owning backend's
+// own business.
+const TimeoutsConfigKey = "timeouts"
+
+// MinConfiguredTimeout and MaxConfiguredTimeout bound a configured per-op
+// deadline (timeouts.<op>): one rule for every configurable op.
+//
+// 1s: anything shorter cannot cover a single child process start and is far
+// more likely a unit mistake (a bare number of seconds written as a Go
+// duration) than an intent.
+//
+// 300s: pg-router has no per-source timeout and runs its sources serially
+// ahead of dispatch, so a typo such as 1h would stall the whole tick, once per
+// poll. 300s covers the slowest measured claude -p list (192s) with headroom;
+// the umbrella's kill is then 305s.
+const (
+	MinConfiguredTimeout = 1 * time.Second
+	MaxConfiguredTimeout = 300 * time.Second
+)
+
+// configurableTimeoutOp reports whether op's budget may be overridden by the
+// backend's config. Only list and show are: every other op (list_activity, the
+// writes, capabilities, ...) keeps the budget its handlers are sized against,
+// and ignores a timeouts block entirely, so one bad entry cannot break an op it
+// does not govern.
+func configurableTimeoutOp(op string) bool {
+	return op == OpList || op == OpShow
+}
+
+// configuredTimeout is the ONE parser of timeouts.<op> in a backend's config
+// block: both the backend's own deadline (backendTimeoutFor, serve.go) and the
+// umbrella's exec deadline (execTimeoutFor, exec.go) go through it, so the two
+// sides can never read the same bytes differently.
+//
+// It returns (d, true, nil) for a valid override, (0, false, nil) when none is
+// configured for op (no config, a config that is not an object, no timeouts
+// member or a null one, no entry for op or a null one), and an error wrapping
+// ErrInvalidArgument that names the key for a value that is not a Go duration
+// string or lies outside [MinConfiguredTimeout, MaxConfiguredTimeout], or for a
+// timeouts member that is not an object. This package does not own the rest of
+// the block's shape, so a block that is not an object is not an error here.
+func configuredTimeout(op string, cfg json.RawMessage) (time.Duration, bool, error) {
+	if !configurableTimeoutOp(op) || len(bytes.TrimSpace(cfg)) == 0 {
+		return 0, false, nil
+	}
+	var block map[string]json.RawMessage
+	if json.Unmarshal(cfg, &block) != nil {
+		return 0, false, nil
+	}
+	rawTimeouts, ok := block[TimeoutsConfigKey]
+	if !ok || isJSONNull(rawTimeouts) {
+		return 0, false, nil
+	}
+	key := TimeoutsConfigKey + "." + op
+	var timeouts map[string]json.RawMessage
+	if err := json.Unmarshal(rawTimeouts, &timeouts); err != nil {
+		return 0, false, WrapError(ErrInvalidArgument, fmt.Sprintf(
+			"config %s must be an object of Go duration strings keyed by op, got %s",
+			TimeoutsConfigKey, SummarizeArgs(rawTimeouts),
+		))
+	}
+	raw, ok := timeouts[op]
+	if !ok || isJSONNull(raw) {
+		return 0, false, nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return 0, false, WrapError(ErrInvalidArgument, fmt.Sprintf(
+			"config %s must be a Go duration string such as \"60s\", got %s", key, SummarizeArgs(raw),
+		))
+	}
+	d, err := time.ParseDuration(text)
+	if err != nil {
+		return 0, false, WrapError(ErrInvalidArgument, fmt.Sprintf(
+			"config %s %q is not a Go duration such as \"60s\": %v", key, text, err,
+		))
+	}
+	if d < MinConfiguredTimeout || d > MaxConfiguredTimeout {
+		return 0, false, WrapError(ErrInvalidArgument, fmt.Sprintf(
+			"config %s %q is outside the allowed range %s to %s",
+			key, text, MinConfiguredTimeout, MaxConfiguredTimeout,
+		))
+	}
+	return d, true, nil
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+// validateTimeoutConfig returns the error configuredTimeout reports for op and
+// cfg, if any. serveLoop answers it as the call's own invalid_argument before
+// running the handler.
+func validateTimeoutConfig(op string, cfg json.RawMessage) error {
+	_, _, err := configuredTimeout(op, cfg)
+	return err
+}
+
+// backendTimeoutFor is the deadline serveLoop applies to a request for op
+// carrying config block cfg. Precedence: a valid timeouts.<op> in cfg, then
+// the op's swappable variable (which tests swap), which starts at the
+// constant. An invalid configured value falls back to the variable; serveLoop
+// has already refused such a request with invalid_argument, so the fallback is
+// only ever observed by the umbrella side (execTimeoutFor).
+func backendTimeoutFor(op string, cfg json.RawMessage) time.Duration {
+	if d, ok, err := configuredTimeout(op, cfg); err == nil && ok {
+		return d
+	}
 	switch op {
 	case OpList:
 		return listBackendTimeout
@@ -184,9 +298,16 @@ func backendTimeoutFor(op string) time.Duration {
 }
 
 // execTimeoutFor is the deadline runInvoke applies to the umbrella's exec of a
-// backend serving op. It is always later than backendTimeoutFor(op) by
-// BackendDeadlineMargin.
-func execTimeoutFor(op string) time.Duration {
+// backend serving op with config block cfg. A valid timeouts.<op> in cfg makes
+// it that value plus BackendDeadlineMargin, so the backend (which reads the
+// same bytes through the same parser) always answers first; otherwise it is the
+// op's swappable variable. An invalid configured value falls back to that
+// variable, the umbrella cannot know better: the backend refuses the request
+// with invalid_argument well before it.
+func execTimeoutFor(op string, cfg json.RawMessage) time.Duration {
+	if d, ok, err := configuredTimeout(op, cfg); err == nil && ok {
+		return d + BackendDeadlineMargin
+	}
 	switch op {
 	case OpList:
 		return listExecTimeout

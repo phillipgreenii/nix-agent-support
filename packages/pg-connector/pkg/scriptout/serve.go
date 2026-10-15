@@ -71,8 +71,8 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 	}
 
 	// ctx carries a DefaultBackendTimeout deadline (via the swappable
-	// backendTimeout var — exec.go applies execTimeout the same way on the
-	// umbrella side) rather than the unbounded context.Background() this
+	// backendTimeout var, or the config's own timeouts.<op>; exec.go applies
+	// execTimeout the same way on the umbrella side) rather than the unbounded context.Background() this
 	// used to pass. Every handler in this design threads ctx straight
 	// through to its own gh/git/bd exec.CommandContext calls, so this one
 	// deadline transitively bounds those children too — a hung `gh`, a
@@ -88,11 +88,21 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 	// timed out [bead pg2-5dyz2]. The margin sits on the umbrella's side so
 	// this budget stays the full 30s [bead pg2-27z7j].
 	start := time.Now()
+	// A timeouts.<op> entry of the request's config block that is not a Go
+	// duration inside [MinConfiguredTimeout, MaxConfiguredTimeout] is the
+	// caller's invalid_argument, answered before the handler runs and naming
+	// the key; the umbrella, which reads the same bytes, falls back to the
+	// default deadline for that op so this answer arrives first [bead
+	// pg2-apllc].
+	if err := validateTimeoutConfig(req.Op, req.Config); err != nil {
+		return writeErrorResponse(env.out, entry.SchemaVersion, err)
+	}
 	// limit is DefaultBackendTimeout, ListBackendTimeout for the list op
-	// [bead pg2-4ae4q], or ListActivityBackendTimeout for the list_activity op
-	// [bead pg2-m4z5k]; the umbrella adds BackendDeadlineMargin to whichever
-	// applies (exec.go's execTimeoutFor).
-	limit := backendTimeoutFor(req.Op)
+	// [bead pg2-4ae4q], ListActivityBackendTimeout for the list_activity op
+	// [bead pg2-m4z5k], or the request config's own timeouts.list /
+	// timeouts.show [bead pg2-apllc]; the umbrella adds BackendDeadlineMargin
+	// to whichever applies (exec.go's execTimeoutFor).
+	limit := backendTimeoutFor(req.Op, req.Config)
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	// Every op handler transitively receives the request's own opaque

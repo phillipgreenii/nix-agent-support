@@ -374,9 +374,13 @@ func (r *Registry) singleRef(entityType string) (backendRef, bool, error) {
 // top-level backends.<name> key (bead pg2-2j5ac.28.1), as raw
 // JSON — nil (not an error) when no such block exists, matching every
 // other Registry accessor's "absent key -> zero value, not an error"
-// convention (List/Single's own doc comments). The umbrella (Invoke)
-// never parses this block's own contents — the returned bytes are copied
-// VERBATIM into every wire request sent to name.
+// convention (List/Single's own doc comments). The registry never parses this
+// block's own contents — the returned bytes are copied VERBATIM into every
+// wire request sent to name. The one key anything in the umbrella's call path
+// reads is timeouts.<op> (list, show): scriptout's execTimeoutFor reads it
+// from that same request to size the umbrella's exec deadline, and the
+// backend's own serve loop reads it to size its call deadline (bead
+// pg2-apllc).
 func (r *Registry) BackendConfig(name string) (json.RawMessage, error) {
 	if r == nil {
 		return nil, nil

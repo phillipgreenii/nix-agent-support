@@ -43,6 +43,11 @@ distinction come from the behavior-docs method
   umbrella MUST NOT validate `config`'s contents — it is opaque at the wire-envelope layer, since
   `INTF-WIRE` is capability-agnostic by design; only a capability's own dispatch table (or a value
   common to more than one capability, like the `list` op's own `queries` key) ever interprets it.
+  One member is read at the wire layer itself: `timeouts.list` and `timeouts.show`, Go duration
+  strings from 1s to 300s that replace that op's call deadline for that backend (bead pg2-apllc).
+  The umbrella reads them only to size its own exec deadline (the configured value plus the 5s
+  kill margin) and never rejects one: an invalid or out-of-range value makes the BACKEND answer
+  `invalid_argument` naming the key, and the umbrella meanwhile uses the op's default deadline.
   `config` MUST NOT be logged with a secret exposed — see `INV-STATE-1`. The umbrella copying
   `config` into every request does not oblige a backend to read policy from it: a daemon-backed
   backend (see the [glossary](glossary.md)) MAY take its policy from its own rendered config file

@@ -101,7 +101,7 @@ func TestBackendDeadlineFiresBeforeUmbrella(t *testing.T) {
 // budget is a real extension, and that the global budget was not raised.
 func TestPerOpDeadlinesKeepTheKillMargin(t *testing.T) {
 	for _, op := range []string{OpList, OpListActivity, "show", "comment", OpCapabilities, "review_submit"} {
-		backend, exec := backendTimeoutFor(op), execTimeoutFor(op)
+		backend, exec := backendTimeoutFor(op, nil), execTimeoutFor(op, nil)
 		if exec-backend != BackendDeadlineMargin {
 			t.Errorf("op %q: exec %v - backend %v = %v, want exactly BackendDeadlineMargin %v",
 				op, exec, backend, exec-backend, BackendDeadlineMargin)
@@ -113,10 +113,10 @@ func TestPerOpDeadlinesKeepTheKillMargin(t *testing.T) {
 	if ListBackendTimeout <= DefaultBackendTimeout {
 		t.Errorf("ListBackendTimeout %v is not longer than DefaultBackendTimeout %v", ListBackendTimeout, DefaultBackendTimeout)
 	}
-	if got := backendTimeoutFor("show"); got != DefaultBackendTimeout {
+	if got := backendTimeoutFor("show", nil); got != DefaultBackendTimeout {
 		t.Errorf("a non-list op's budget is %v, want the unchanged DefaultBackendTimeout %v", got, DefaultBackendTimeout)
 	}
-	if got := execTimeoutFor("show"); got != DefaultExecTimeout {
+	if got := execTimeoutFor("show", nil); got != DefaultExecTimeout {
 		t.Errorf("a non-list op's exec deadline is %v, want the unchanged DefaultExecTimeout %v", got, DefaultExecTimeout)
 	}
 }
@@ -138,10 +138,10 @@ func TestPerOpDeadlinesArePinned(t *testing.T) {
 		{OpCapabilities, 30 * time.Second, 35 * time.Second},
 	}
 	for _, c := range cases {
-		if got := backendTimeoutFor(c.op); got != c.backend {
+		if got := backendTimeoutFor(c.op, nil); got != c.backend {
 			t.Errorf("op %q: backend budget %v, want %v", c.op, got, c.backend)
 		}
-		if got := execTimeoutFor(c.op); got != c.exec {
+		if got := execTimeoutFor(c.op, nil); got != c.exec {
 			t.Errorf("op %q: umbrella deadline %v, want %v", c.op, got, c.exec)
 		}
 	}

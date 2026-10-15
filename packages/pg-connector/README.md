@@ -350,6 +350,34 @@ write in-flight rows to their event log: a `phase":"start"` row before each call
 call with a start row and no final row (same `pid`, `op` and `args`) was killed or crashed, and its last
 heartbeat's `elapsed_ms` is a lower bound on how long it ran.
 
+Per-backend deadline override (bead `pg2-apllc`). A backend whose `list` or `show` cannot fit its op's
+default budget (`list` 40s, `show` 30s; `list_activity` has its own 60s) can raise it for that one op in
+its own config block, as a Go duration string at the exact key `timeouts.list` or `timeouts.show`:
+
+```yaml
+backends:
+  pg-connector-thread-slack:
+    timeouts:
+      list: 60s # the backend's deadline for list; the umbrella kills it at 65s
+```
+
+The umbrella copies the block into every request, so BOTH sides read the same bytes through one parser
+(`scriptout.configuredTimeout`): the backend arms the configured value, the umbrella arms it plus
+`BackendDeadlineMargin` (5s), so the backend still answers first. Only that op changes: `show`,
+`list_activity` and every other op keep their default whatever `timeouts.list` says (and the
+other way round). A value is valid from `1s` to `300s`. The cap exists because `pg-router` has no
+per-source timeout and runs its sources serially ahead of dispatch, so a typo such as `1h` would stall
+the whole tick for an hour, once per poll. An invalid or out-of-range value (not a duration, below `1s`,
+above `300s`, or not a string) makes the BACKEND answer `invalid_argument` naming the key (for example
+`config timeouts.list "1h" is outside the allowed range 1s to 5m0s`) before it runs the handler; the
+umbrella cannot judge it first, so it arms the op's default and the backend's answer arrives first.
+`pg-connector config validate` does NOT surface it (it calls only `auth_status` and `capabilities`, which
+are not configurable ops); the first `list` or `show` does. Precedence: the config value, then the
+swappable test variables in `pkg/scriptout/limits.go`, then the constants; unset changes nothing for any
+backend. `timeouts` is read by `pkg/scriptout` alone, so a backend that decodes its own config strictly
+MUST allow the key: `pg-connector-github`'s `internal/config/config.go` uses `DisallowUnknownFields`, so a
+`timeouts` key there would be rejected (harmless, it needs none).
+
 The writer mechanics the backends share (the common event fields, size-based rotation, the path
 rule, call timing) live in `pkg/eventlog`; each backend still owns its log path, its event shape and
 its alert rules. Other external-service connectors are expected to follow the same pattern.
