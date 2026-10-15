@@ -448,6 +448,28 @@ in
     package = pkgs.pg-connector-github;
     ghPath = lib.getExe pkgs.gh;
   };
+  # The registry the module renders for an enabled daemon (docket pg2-z5fax.5,
+  # Phase 3c), as the umbrella loads it: only the five registry lists, with the
+  # daemon config's store path replaced by one fixed example path, so the
+  # result is comparable to tests/fixtures/pg-connector-home/
+  # github-instances.yaml (the SAME bytes as the Go parse fixture
+  # packages/pg-connector/cmd/pg-connector/testdata/registry-github-instances.yaml).
+  # The `backends` blocks (config stamp), `state` and `configSchemaVersion` are
+  # dropped: the stamp follows the config's content and is pinned by
+  # `githubCases` and the jq checks of the check.
+  githubInstancesNormalized =
+    pkgs.runCommand "pg-connector-github-instances-normalized"
+      {
+        nativeBuildInputs = [ pkgs.yq-go ];
+        configPath = toString (ghOpts ghEnabledNoOs).configFile;
+        fixedPath = "/example/state/pg-connector-github/config.json";
+      }
+      ''
+        yq '
+          {"connector": .connector, "search": .search, "activity": .activity, "attention": .attention}
+          | (.. | select(tag == "!!str") | select(. == strenv(configPath))) = strenv(fixedPath)
+        ' ${render (githubRegistry // { github = githubOn; })} > $out
+      '';
   # Instances in every registration, alongside plain strings.
   instances = render instancesExample;
   # Beads attention_labels render per instance next to the registrations.

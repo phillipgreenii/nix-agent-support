@@ -11938,6 +11938,7 @@
                 let
                   rendered = import ./tests/pg-connector-home-render.nix { inherit lib pkgs; };
                   fixtures = ./tests/fixtures/pg-connector-home;
+                  goGithubInstances = ./packages/pg-connector/cmd/pg-connector/testdata/registry-github-instances.yaml;
                 in
                 pkgs.runCommand "pg-connector-home-rendering"
                   {
@@ -11983,6 +11984,14 @@
                     # together (compared semantically, like every other golden
                     # here, so a prettier reindent of either copy cannot trip it)
                     same ${fixtures + "/instances.yaml"} ${./packages/pg-connector/cmd/pg-connector/testdata/registry-instances.yaml}
+                    # deployment-shaped registry (docket pg2-z5fax.5, Phase 3c): the
+                    # module's rendered registry for an enabled daemon (the five
+                    # registry lists, the config store path normalized to the fixed
+                    # example path) is the golden, and the golden is the Go
+                    # registry's parse fixture, so a rewrite change the Go parser
+                    # could not load fails one of these two clauses
+                    same ${fixtures + "/github-instances.yaml"} ${rendered.githubInstancesNormalized}
+                    same ${fixtures + "/github-instances.yaml"} ${goGithubInstances}
                     ${lib.optionalString (!rendered.malformedInstancesRejected) ''
                       echo "a malformed pg-connector instance still evaluates" >&2
                       exit 1

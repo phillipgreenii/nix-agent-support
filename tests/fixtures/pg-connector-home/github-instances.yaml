@@ -1,0 +1,40 @@
+activity:
+  sources:
+    - command:
+        - pg-connector-github
+        - --config
+        - /example/state/pg-connector-github/config.json
+        - pr
+      name: pg-connector-pr-github
+attention:
+  sources:
+    - pg-connector-issue-beads
+    - command:
+        - pg-connector-github
+        - --config
+        - /example/state/pg-connector-github/config.json
+        - pr
+      name: pg-connector-pr-github
+connector:
+  ci:
+    - command:
+        - pg-connector-github
+        - --config
+        - /example/state/pg-connector-github/config.json
+        - ci
+      name: pg-connector-ci-github-actions
+  pr:
+    - command:
+        - pg-connector-github
+        - --config
+        - /example/state/pg-connector-github/config.json
+        - pr
+      name: pg-connector-pr-github
+search:
+  sources:
+    - command:
+        - pg-connector-github
+        - --config
+        - /example/state/pg-connector-github/config.json
+        - pr
+      name: pg-connector-pr-github
