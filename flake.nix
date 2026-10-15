@@ -430,6 +430,13 @@
           pg-task-focus = final.callPackage ./packages/pg-task-focus {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-keep-awake: Pattern A (ADR 0008), the single holder of the Mac
+          # keep-awake assertion plus its caffeinate-compatible shim (docket
+          # pg2-8bgxg.2). Two binaries from one module; no local `replace`, so no
+          # modRoot.
+          pg-keep-awake = final.callPackage ./packages/pg-keep-awake {
+            inherit (goBuilders) mkGoApp;
+          };
           # ccpool-probe: Pattern A (ADR 0008), same shape as
           # pg-router-probe above — a standalone deterministic health
           # probe over ccpool's own operational health from pg-router's
@@ -1533,6 +1540,7 @@
                 "ccpool-probe"
                 "pg-rescue"
                 "pg-task-focus"
+                "pg-keep-awake"
               ];
 
               # Subset of simpleGoLintModules with build-tagged test files
@@ -4879,6 +4887,15 @@
                     PG_TASK_FOCUS_REQUIRE_NODE = "1";
                     __darwinAllowLocalNetworking = true;
                   });
+
+              # pg-keep-awake (docket pg2-8bgxg.2) - whole-module Go test gate.
+              # Pattern A: flat src at the module dir, no local replace. The
+              # integration-test skip line is added by the 15-integration packet.
+              pg-keep-awake-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-keep-awake-go-tests";
+                src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
+                gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
+              };
 
               # pg-desk-shadow (bead pg2-nu7h0) - whole-module Go test gate. Pattern
               # A: flat src at the module dir, no local replace. sqlite3 on PATH
@@ -12773,6 +12790,7 @@
               ccpool-probe
               pg-rescue
               pg-task-focus
+              pg-keep-awake
               integrate-branch-support
               pg-desk
               pg-desk-attention

@@ -1,0 +1,9 @@
+schema = 3
+cachePackages = [
+  'golang.org/x/sys/unix',
+]
+
+[mod]
+  [mod.'golang.org/x/sys']
+    version = 'v0.49.0'
+    hash = 'sha256-/1S3yy3in72ygZT1CKymvOzJZqCMYiGSqZDfvSyB3LI='
