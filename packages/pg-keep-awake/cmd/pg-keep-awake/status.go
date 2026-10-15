@@ -89,7 +89,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	set := newFlagSet("status", stderr)
 	asJSON := set.Bool("json", false, "print exactly one JSON object")
 	check := set.Bool("check", false, "exit 5 when the keeper is down, 6 when degraded")
-	if exit, done := parseFlags(set, args); done {
+	if exit, done := parseFlags(set, args, stdout); done {
 		return exit
 	}
 	if set.NArg() != 0 {

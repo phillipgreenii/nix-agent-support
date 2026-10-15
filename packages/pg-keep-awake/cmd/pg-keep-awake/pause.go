@@ -14,10 +14,10 @@ import (
 // runPause writes pause.json: the keeper drops the assertion while it
 // exists. Without --for the pause has no end (until null). It touches no
 // lease.
-func runPause(args []string, _, stderr io.Writer) int {
+func runPause(args []string, stdout, stderr io.Writer) int {
 	set := newFlagSet("pause", stderr)
 	forStr := set.String("for", "", "end the pause after this duration (for example 30m)")
-	if exit, done := parseFlags(set, args); done {
+	if exit, done := parseFlags(set, args, stdout); done {
 		return exit
 	}
 	if set.NArg() != 0 {
@@ -46,9 +46,9 @@ func runPause(args []string, _, stderr io.Writer) int {
 
 // runResume removes pause.json. No pause, or no state directory, is not an
 // error.
-func runResume(args []string, _, stderr io.Writer) int {
+func runResume(args []string, stdout, stderr io.Writer) int {
 	set := newFlagSet("resume", stderr)
-	if exit, done := parseFlags(set, args); done {
+	if exit, done := parseFlags(set, args, stdout); done {
 		return exit
 	}
 	if set.NArg() != 0 {

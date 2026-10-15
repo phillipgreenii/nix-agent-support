@@ -1,6 +1,6 @@
-// Command pg-keep-awake is the single holder of the Mac keep-awake assertion.
-// This scaffold carries no feature logic; later packets add one subcommand at
-// a time to run.
+// Command pg-keep-awake is the single holder of the Mac keep-awake assertion
+// and its command line, the only supported interface to it. Every command
+// answers --help (help.go).
 package main
 
 import (
@@ -45,10 +45,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runAnchor(args[1:], stdout, stderr)
 	case "status":
 		return runStatus(args[1:], stdout, stderr)
-	case "--help", "-h", "help":
-		fmt.Fprintln(stdout, "pg-keep-awake: the single holder of the Mac keep-awake assertion")
-		fmt.Fprintln(stdout, "usage: pg-keep-awake <command> [args]")
+	case "--help", "-h", "-help":
+		fmt.Fprint(stdout, topHelp)
 		return 0
+	case "help":
+		if len(args) == 1 {
+			fmt.Fprint(stdout, topHelp)
+			return 0
+		}
+		// `help <command...>` is `<command...> --help`.
+		return run(append(append([]string{}, args[1:]...), "--help"), stdout, stderr)
 	}
 	fmt.Fprintf(stderr, "pg-keep-awake: unknown command %q\n", args[0])
 	return 2

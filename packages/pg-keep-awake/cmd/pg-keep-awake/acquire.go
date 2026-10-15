@@ -24,7 +24,7 @@ func runAcquire(args []string, stdout, stderr io.Writer) int {
 	forStr := set.String("for", "", "expire the lease after this duration (for example 30m)")
 	var flags flagSet
 	flags.register(set)
-	if exit, done := parseFlags(set, args); done {
+	if exit, done := parseFlags(set, args, stdout); done {
 		return exit
 	}
 	if set.NArg() != 0 {

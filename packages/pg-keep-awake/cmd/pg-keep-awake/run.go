@@ -33,7 +33,7 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 	key := set.String("key", "", "lease key (default: <pid>-<start_us> of this process)")
 	var flags flagSet
 	flags.register(set)
-	if exit, done := parseFlags(set, args); done {
+	if exit, done := parseFlags(set, args, stdout); done {
 		return exit
 	}
 	if *owner == "" {

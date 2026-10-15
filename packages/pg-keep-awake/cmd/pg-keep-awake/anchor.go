@@ -15,7 +15,7 @@ import (
 // takes every parameter from argv, never reads config.toml and keeps no
 // connection to the keeper. A missing or malformed flag is a usage error
 // (exit 2) that writes nothing. After writing anchor-exit.json it exits 0.
-func runAnchor(args []string, _, stderr io.Writer) int {
+func runAnchor(args []string, stdout, stderr io.Writer) int {
 	set := newFlagSet("anchor", stderr)
 	release := set.Int("release-pct", -1, "exit when on battery at or below this percent (0: never)")
 	blind := set.Int("blind-pct", -1, "exit when unreadable and the last good reading was on battery at or below this percent (0: off)")
@@ -23,7 +23,7 @@ func runAnchor(args []string, _, stderr io.Writer) int {
 	heartbeat := set.String("heartbeat", "", "the keeper's heartbeat file")
 	intervalStr := set.String("interval", "", "polling period (the keeper's heartbeat interval, for example 30s)")
 	stateDir := set.String("state-dir", "", "the state directory anchor-exit.json is written under")
-	if exit, done := parseFlags(set, args); done {
+	if exit, done := parseFlags(set, args, stdout); done {
 		return exit
 	}
 	if set.NArg() != 0 {

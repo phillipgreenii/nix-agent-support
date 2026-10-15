@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io"
 
@@ -18,6 +17,10 @@ const (
 
 // runConfig dispatches `pg-keep-awake config <subcommand>`.
 func runConfig(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && isHelpFlag(args[0]) {
+		printHelp(stdout, configGroupHelp, nil)
+		return exitOK
+	}
 	if len(args) == 0 || args[0] != "check" {
 		fmt.Fprintln(stderr, "usage: pg-keep-awake config check [--config PATH]")
 		return exitUsage
@@ -30,11 +33,10 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 // where an absent file is valid (it means the built-in defaults); an explicit
 // --config PATH that does not exist is invalid.
 func runConfigCheck(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("config check", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newFlagSet("config check", stderr)
 	path := fs.String("config", "", "config file to validate (default: the keeper's config.toml)")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if exit, done := parseFlags(fs, args, stdout); done {
+		return exit
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(stderr, "usage: pg-keep-awake config check [--config PATH]")

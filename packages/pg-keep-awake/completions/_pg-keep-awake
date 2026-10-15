@@ -1,0 +1,94 @@
+#compdef pg-keep-awake
+# keeper and anchor are long-running modes started by launchd and the keeper,
+# so they are left out of the offered commands.
+_pg_keep_awake() {
+  local -a subcmds
+  subcmds=(
+    'acquire:create or refresh a keep-awake lease and print its id'
+    'release:remove a lease, or every lease of an owner with --all'
+    'run:hold a lease for the life of one command'
+    'status:show what holds the Mac awake'
+    'pause:drop the assertion for a while, keeping every lease'
+    'resume:end a pause'
+    'config:validate a configuration file'
+    'help:show help for a command'
+  )
+  local -a caffeine_flags
+  caffeine_flags=(
+    '-d[prevent the display from sleeping]'
+    '-i[prevent the system from idle sleeping (default)]'
+    '-m[prevent the disk from idle sleeping]'
+    '-s[prevent the system from sleeping on AC power]'
+  )
+
+  if (( CURRENT == 2 )); then
+    _describe 'subcommand' subcmds
+    return
+  fi
+
+  case $words[2] in
+    acquire)
+      _arguments \
+        '--owner=[lease owner (required)]:owner' \
+        '--key=[lease key]:key' \
+        '--pid=[bind the lease to this process]:pid' \
+        '--for=[expire the lease after this duration]:duration' \
+        $caffeine_flags \
+        '(- *)--help[show help]'
+      ;;
+    release)
+      _arguments \
+        '--owner=[lease owner (required)]:owner' \
+        '(--all)--key=[lease key]:key' \
+        '(--key)--all[remove every lease of the owner]' \
+        '(- *)--help[show help]'
+      ;;
+    run)
+      _arguments \
+        '--owner=[lease owner (required)]:owner' \
+        '--key=[lease key]:key' \
+        $caffeine_flags \
+        '(- *)--help[show help]' \
+        '*::command: _normal'
+      ;;
+    status)
+      _arguments \
+        '--json[print exactly one JSON object]' \
+        '--check[exit 5 when the keeper is down, 6 when degraded]' \
+        '(- *)--help[show help]'
+      ;;
+    pause)
+      _arguments \
+        '--for=[end the pause after this duration]:duration' \
+        '(- *)--help[show help]'
+      ;;
+    resume | keeper)
+      _arguments '(- *)--help[show help]'
+      ;;
+    anchor)
+      _arguments \
+        '--release-pct=[exit when on battery at or below this percent]:percent' \
+        '--blind-pct=[exit when unreadable at or below this percent]:percent' \
+        '--watchdog=[heartbeat staleness limit]:duration' \
+        '--heartbeat=[the keeper heartbeat file]:file:_files' \
+        '--interval=[polling period]:duration' \
+        '--state-dir=[the state directory]:directory:_files -/' \
+        '(- *)--help[show help]'
+      ;;
+    config)
+      if (( CURRENT == 3 )); then
+        _values 'action' check
+      elif [[ $words[3] == check ]]; then
+        _arguments \
+          '--config=[config file to validate]:file:_files' \
+          '(- *)--help[show help]'
+      fi
+      ;;
+    help)
+      if (( CURRENT == 3 )); then
+        _values 'command' acquire release run status pause resume config keeper anchor
+      fi
+      ;;
+  esac
+}
+_pg_keep_awake "$@"

@@ -20,20 +20,27 @@ const exitStateDir = 3
 const defaultKey = "default"
 
 // newFlagSet builds a flag set that reports parse errors on stderr and does
-// not exit, so the subcommand can map them to exit 2.
+// not exit, so the subcommand can map them to exit 2. Its Usage is silent:
+// parseFlags prints the command's help (stdout for --help) or its usage line
+// (stderr for a mistake).
 func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
 	set := flag.NewFlagSet(name, flag.ContinueOnError)
 	set.SetOutput(stderr)
+	set.Usage = func() {}
 	return set
 }
 
 // parseFlags parses args and reports (exit, done). done is true when the
-// caller must return exit now (a parse failure or -h).
-func parseFlags(set *flag.FlagSet, args []string) (exit int, done bool) {
+// caller must return exit now: a parse failure (the error and the usage line
+// go to stderr, exit 2) or -h/--help (the full help goes to stdout, exit 0).
+func parseFlags(set *flag.FlagSet, args []string, stdout io.Writer) (exit int, done bool) {
 	if err := set.Parse(args); err != nil {
+		h := commandHelps[set.Name()]
 		if errors.Is(err, flag.ErrHelp) {
+			printHelp(stdout, h, set)
 			return exitOK, true
 		}
+		fmt.Fprintln(set.Output(), h.usage)
 		return exitUsage, true
 	}
 	return 0, false

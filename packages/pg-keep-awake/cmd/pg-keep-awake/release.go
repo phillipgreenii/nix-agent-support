@@ -13,12 +13,12 @@ const releaseUsage = "usage: pg-keep-awake release --owner O [--key K | --all]"
 
 // runRelease removes one lease (key default without --key) or, with --all,
 // every lease of the owner. A lease that does not exist is not an error.
-func runRelease(args []string, _, stderr io.Writer) int {
+func runRelease(args []string, stdout, stderr io.Writer) int {
 	set := newFlagSet("release", stderr)
 	owner := set.String("owner", "", "lease owner (required)")
 	key := set.String("key", "", "lease key (default: "+defaultKey+")")
 	all := set.Bool("all", false, "remove every lease of the owner")
-	if exit, done := parseFlags(set, args); done {
+	if exit, done := parseFlags(set, args, stdout); done {
 		return exit
 	}
 	if set.NArg() != 0 {

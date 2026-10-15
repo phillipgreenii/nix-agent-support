@@ -23,9 +23,9 @@ import (
 // then the defaults on a bad file; it never crash-loops on one), adopts a
 // running pair and ticks until SIGTERM, when it runs the graceful-shutdown
 // sweep and exits 0.
-func runKeeper(args []string, _, stderr io.Writer) int {
+func runKeeper(args []string, stdout, stderr io.Writer) int {
 	set := newFlagSet("keeper", stderr)
-	if exit, done := parseFlags(set, args); done {
+	if exit, done := parseFlags(set, args, stdout); done {
 		return exit
 	}
 	if set.NArg() != 0 {
