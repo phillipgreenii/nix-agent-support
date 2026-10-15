@@ -84,6 +84,17 @@ type Config struct {
 	CaffeinateBatteryHoldPct       int
 	CaffeinateBatteryReleasePct    int
 	CaffeinateBatteryHysteresisPct int
+	// The three CaffeinateBattery* values above are DEPRECATED: pg-keep-awake
+	// owns the battery rule now and reads its own [battery] settings. They are
+	// still parsed (so an existing config.toml keeps loading) but no longer
+	// drive anything in pa-monitor.
+
+	// KeepAwakeBin is the absolute path of the pg-keep-awake executable that
+	// pa-monitor calls to hold and release the keep-awake assertion. Sourced
+	// from the top-level keep_awake_bin key. Empty means "find pg-keep-awake on
+	// PATH", which is NOT reliable under launchd; the home-manager module is
+	// expected to set it to the store path.
+	KeepAwakeBin string
 }
 
 // AutoSessionWrapUpConfig is the [auto_session_wrap_up] block.
@@ -179,6 +190,8 @@ type tomlConfig struct {
 	CaffeinateBatteryHoldPct       *int `toml:"caffeinate_battery_hold_pct"`
 	CaffeinateBatteryReleasePct    *int `toml:"caffeinate_battery_release_pct"`
 	CaffeinateBatteryHysteresisPct *int `toml:"caffeinate_battery_hysteresis_pct"`
+
+	KeepAwakeBin *string `toml:"keep_awake_bin"`
 }
 
 // tomlAutoSessionWrapUp is the [auto_session_wrap_up] block (bead tc-m08w3).
@@ -340,6 +353,9 @@ func apply(cfg *Config, raw tomlConfig) {
 	// A release threshold above the hold threshold would stop a running hold
 	// the rule never meant to restrict; cap it at the hold threshold.
 	cfg.CaffeinateBatteryReleasePct = min(cfg.CaffeinateBatteryReleasePct, cfg.CaffeinateBatteryHoldPct)
+	if raw.KeepAwakeBin != nil {
+		cfg.KeepAwakeBin = strings.TrimSpace(*raw.KeepAwakeBin)
+	}
 	if raw.WorkingThresholdS != nil {
 		cfg.WorkingThreshold = time.Duration(*raw.WorkingThresholdS) * time.Second
 	}

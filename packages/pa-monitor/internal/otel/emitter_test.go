@@ -452,51 +452,48 @@ func TestRecordScan_CacheHitSkipsWorkloadCounters(t *testing.T) {
 	}
 }
 
-// TestEmitter_RecordCaffeinateBatteryRelease_Counter asserts the low-battery
-// release counter by value (bead pg2-s86z9): each release increments the series
-// for its `reason`, the reasons are born at 0 at startup, and the caller's other
-// attributes ride along without being able to overwrite `reason`.
-func TestEmitter_RecordCaffeinateBatteryRelease_Counter(t *testing.T) {
+// TestEmitter_RecordKeepAwakeKeeperUp asserts the keeper_up gauge by value: it
+// is not observed before the first push (no ghost series), reads 1 for an up
+// keeper and 0 for a down one, and carries the caller's attributes.
+func TestEmitter_RecordKeepAwakeKeeperUp(t *testing.T) {
 	e, reader := newTestEmitter(t)
 
-	// Born at zero before any release, one series per reason.
-	m, ok := collectMetric(t, reader, "pa_monitor.caffeinate.battery_releases_total")
-	if !ok {
-		t.Fatal("pa_monitor.caffeinate.battery_releases_total not emitted at startup")
-	}
-	sum, ok := m.Data.(metricdata.Sum[int64])
-	if !ok {
-		t.Fatalf("battery_releases_total is %T, want metricdata.Sum[int64]", m.Data)
-	}
-	if len(sum.DataPoints) != len(CaffeinateBatteryReleaseReasons) {
-		t.Fatalf("startup series = %d, want %d (one per reason)", len(sum.DataPoints), len(CaffeinateBatteryReleaseReasons))
-	}
-	for _, dp := range sum.DataPoints {
-		if dp.Value != 0 {
-			t.Errorf("startup value = %d, want 0", dp.Value)
-		}
+	if _, ok := collectMetric(t, reader, "pa_monitor.keep_awake.keeper_up"); ok {
+		t.Fatal("keeper_up observed before any RecordKeepAwakeKeeperUp call")
 	}
 
-	e.RecordCaffeinateBatteryRelease("release_threshold", map[string]string{"plan_tier": "max_5x", "reason": "spoofed"})
-	e.RecordCaffeinateBatteryRelease("release_threshold", map[string]string{"plan_tier": "max_5x"})
-	e.RecordCaffeinateBatteryRelease("spawn_blocked", nil)
-
-	m, _ = collectMetric(t, reader, "pa_monitor.caffeinate.battery_releases_total")
-	sum = m.Data.(metricdata.Sum[int64])
-	got := map[string]int64{}
-	for _, dp := range sum.DataPoints {
-		reason, present := dp.Attributes.Value("reason")
-		if !present {
-			t.Fatalf("data point without a reason label: %+v", dp)
+	read := func() (int64, string) {
+		t.Helper()
+		m, ok := collectMetric(t, reader, "pa_monitor.keep_awake.keeper_up")
+		if !ok {
+			t.Fatal("pa_monitor.keep_awake.keeper_up not emitted after RecordKeepAwakeKeeperUp")
 		}
-		got[reason.AsString()] += dp.Value
-		if reason.AsString() == "release_threshold" && dp.Value > 0 {
-			if tier, _ := dp.Attributes.Value("plan_tier"); tier.AsString() != "max_5x" {
-				t.Errorf("plan_tier = %q, want max_5x", tier.AsString())
-			}
+		g, ok := m.Data.(metricdata.Gauge[int64])
+		if !ok {
+			t.Fatalf("keeper_up is %T, want metricdata.Gauge[int64]", m.Data)
 		}
+		if len(g.DataPoints) != 1 {
+			t.Fatalf("keeper_up data points = %d, want 1", len(g.DataPoints))
+		}
+		tier, _ := g.DataPoints[0].Attributes.Value("plan_tier")
+		return g.DataPoints[0].Value, tier.AsString()
 	}
-	if got["release_threshold"] != 2 || got["spawn_blocked"] != 1 || got["spoofed"] != 0 {
-		t.Errorf("counts = %v, want release_threshold=2 spawn_blocked=1 and no spoofed series", got)
+
+	e.RecordKeepAwakeKeeperUp(true, map[string]string{"plan_tier": "max_5x"})
+	if v, tier := read(); v != 1 || tier != "max_5x" {
+		t.Errorf("up keeper: value=%d plan_tier=%q, want 1/max_5x", v, tier)
+	}
+	e.RecordKeepAwakeKeeperUp(false, map[string]string{"plan_tier": "max_5x"})
+	if v, _ := read(); v != 0 {
+		t.Errorf("down keeper: value=%d, want 0", v)
+	}
+}
+
+// TestEmitter_BatteryReleaseCounterRetired: the keeper owns the battery rule
+// now, so pa-monitor no longer registers or emits its own release counter.
+func TestEmitter_BatteryReleaseCounterRetired(t *testing.T) {
+	_, reader := newTestEmitter(t)
+	if _, ok := collectMetric(t, reader, "pa_monitor.caffeinate.battery_releases_total"); ok {
+		t.Fatal("pa_monitor.caffeinate.battery_releases_total is still emitted; it moved to pg_keep_awake.battery.releases_total")
 	}
 }

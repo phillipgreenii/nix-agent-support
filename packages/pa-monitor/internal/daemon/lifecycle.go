@@ -583,7 +583,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				// re-read user toggle from shared state in case Caffeinate RPC changed it
 				opts.Caffeinate.SetToggle(state.isCaffeinateOn())
 				opts.Caffeinate.Tick(false)
-				recordCaffeinateBattery(&opts, state)
+				recordCaffeinateKeeper(&opts, state)
 			}
 			return
 		}
@@ -691,9 +691,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			prevState := opts.Caffeinate.State()
 			opts.Caffeinate.Tick(keepAwake)
 			newState := opts.Caffeinate.State()
-			recordCaffeinateBattery(&opts, state)
-			batteryGate := opts.Caffeinate.BatteryStatus().Gate
-			// active is true when the subprocess is running OR when the
+			recordCaffeinateKeeper(&opts, state)
+			processState := opts.Caffeinate.ProcessState()
+			// active is true when the lease is held OR when the
 			// user toggle is on but the manager is waiting for agents to
 			// start before spawning (StateOff + toggle=true). Without the
 			// toggleOn guard, a tick with keepAwake=false would reset
@@ -714,13 +714,13 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			// The MODE (toggleOn) is already on caffeinateOn. Reading the
 			// manager's real state here revives the long-dead grace display.
 			graceRemaining := opts.Caffeinate.GraceRemaining()
-			state.setCaffeinateState(active, cause, newState, graceRemaining)
-			// The gauge reports whether the Mac is being held awake (or armed to
-			// be), so a low battery that withholds the assertion reads 0 even
-			// with the toggle on (pg2-s86z9). The legacy `active` flag above
-			// stays the toggle-driven intent for the TUI.
-			gaugeActive := active && !(batteryGate.Restricts() && newState == caffeinate.StateOff)
-			opts.Emitter.RecordCaffeinateActive(gaugeActive, caffeinateProcessLabel(newState), int(graceRemaining.Seconds()), map[string]string{"plan_tier": opts.PlanTier})
+			state.setCaffeinateState(active, cause, processState, graceRemaining)
+			// The gauge reports whether the Mac is being held awake: the
+			// keeper's own assertion.held from status --json, so a low battery
+			// that withholds the assertion, a down keeper, or a toggle on with
+			// nothing to hold all read 0 (pg2-s86z9). The legacy `active` flag
+			// above stays the toggle-driven intent for the TUI.
+			opts.Emitter.RecordCaffeinateActive(opts.Caffeinate.Held(), caffeinateProcessLabel(processState), int(graceRemaining.Seconds()), map[string]string{"plan_tier": opts.PlanTier})
 			if prevState == caffeinate.StateOff && newState != caffeinate.StateOff {
 				opts.Emitter.RecordCaffeinateRound(map[string]string{"cause": cause})
 			}
@@ -935,19 +935,14 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	}
 }
 
-// recordCaffeinateBattery publishes the low-battery rule's verdict from the
-// Caffeinate.Tick that just ran (for `status`) and turns each release the tick
-// recorded into a counter increment and a log event. Called from both tick
-// paths so a release is counted whether or not a poller is wired.
-func recordCaffeinateBattery(opts *RunOptions, state *sharedState) {
-	b := opts.Caffeinate.BatteryStatus()
-	state.setCaffeinateBattery(b)
-	for _, reason := range opts.Caffeinate.TakeBatteryReleases() {
-		opts.Emitter.RecordCaffeinateBatteryRelease(reason, map[string]string{
-			"plan_tier": opts.PlanTier,
-			"gate":      b.Gate.String(),
-		})
-	}
+// recordCaffeinateKeeper publishes what the Caffeinate.Tick that just ran read
+// from pg-keep-awake: the battery gate it reported (for `status`) and whether
+// `status --check` found the keeper running (the pa_monitor_keep_awake_keeper_up
+// alert signal). Called from both tick paths so the signal is emitted whether
+// or not a poller is wired.
+func recordCaffeinateKeeper(opts *RunOptions, state *sharedState) {
+	state.setCaffeinateBattery(opts.Caffeinate.BatteryStatus())
+	opts.Emitter.RecordKeepAwakeKeeperUp(opts.Caffeinate.KeeperUp(), map[string]string{"plan_tier": opts.PlanTier})
 }
 
 // hasUnattemptedNudgeableDisrupt reports whether any session in the tree has a

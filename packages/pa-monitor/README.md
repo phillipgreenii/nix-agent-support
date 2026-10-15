@@ -131,6 +131,20 @@ changed):
 
 ### Low-battery keep-awake rule
 
+> **Moved to pg-keep-awake.** pa-monitor no longer starts its own `caffeinate` or evaluates this rule.
+> It keeps the mode toggle, the busy detection and the grace period, and calls the `pg-keep-awake` CLI:
+> `acquire --owner pa-monitor --pid <daemon pid>` when it wants the Mac awake (repeated about once a
+> minute while it does) and `release --owner pa-monitor` when it does not. The keeper applies the
+> battery rule below with its own `[battery]` settings; pa-monitor reads `status --json` back for the
+> held state and gate. `pa_monitor.caffeinate.active` is the keeper's `assertion.held`;
+> `pa_monitor.keep_awake.keeper_up` (Prometheus `pa_monitor_keep_awake_keeper_up`) is 0 when
+> `pg-keep-awake status --check` exits 5 and 1 for exit 0 or 6; a failed `acquire` or a degraded keeper
+> (exit 6) shows as `process=error`; and `pa_monitor.caffeinate.battery_releases_total` is no longer
+> emitted (use `pg_keep_awake.battery.releases_total`). The executable is located through the
+> `keep_awake_bin` config key (an absolute path, so lookup never depends on launchd's `PATH`), falling
+> back to `PATH` when it is unset. The `caffeinate_battery_*_pct` keys are deprecated and ignored. The
+> rest of this section describes the rule as the keeper now applies it.
+
 While any session is working (or a nudgeable error has had no attempt yet) the daemon holds the Mac
 awake with a `caffeinate` subprocess. On 2026-10-09 and 2026-10-10 the Mac lost AC power, kept that
 assertion under agent load, and ran its battery down to 1% to 3%, which stalled the host for about

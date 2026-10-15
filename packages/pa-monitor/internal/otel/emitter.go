@@ -85,7 +85,6 @@ type Emitter struct {
 	weekLimitHits        metric.Int64Counter
 	caffeinateRounds     metric.Int64Counter
 	caffeinateGrace      metric.Int64Counter
-	caffeinateBatteryRel metric.Int64Counter
 	contextLimitHits     metric.Int64Counter
 	nudgesSent           metric.Int64Counter
 	nudgeSendFailures    metric.Int64Counter
@@ -140,6 +139,11 @@ type Emitter struct {
 	// is populated and subsequent observations carry plan_tier etc -- the
 	// label-less ghost series sticks around forever as a stuck-at-0 line.
 	caffeinateActiveKnown bool
+	// keeperUpVal / keeperUpAttrs / keeperUpKnown mirror the same triplet for
+	// the pa_monitor.keep_awake.keeper_up gauge (pg-keep-awake status --check).
+	keeperUpVal   int64
+	keeperUpAttrs []attribute.KeyValue
+	keeperUpKnown bool
 	// autoResumeEnabledVal / autoResumeEnabledAttrs / autoResumeEnabledKnown
 	// mirror the caffeinate triplet for the pa_monitor.auto_resume.enabled
 	// gauge.
@@ -308,6 +312,13 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
+	// Independent alert signal: 1 while pg-keep-awake status --check says the
+	// keeper is running (exit 0 or 6), 0 when it is down (exit 5) or cannot be
+	// asked. Prometheus name: pa_monitor_keep_awake_keeper_up.
+	keeperUpGauge, err := meter.Int64ObservableGauge("pa_monitor.keep_awake.keeper_up")
+	if err != nil {
+		return err
+	}
 	// Per-session gauges. Cardinality contract: session_id is unbounded
 	// over the lifetime of the daemon (every started session is a new id),
 	// so the producer (RecordSessionInfo) MUST cap which sessions it
@@ -367,14 +378,6 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	}
 	if e.caffeinateGrace, err = meter.Int64Counter("pa_monitor.caffeinate.grace_expirations_total"); err != nil {
 		return err
-	}
-	// Birth each reason's zero series so increase() over a range that includes
-	// emitter creation captures the first release (R7, same as limit_hits above).
-	if e.caffeinateBatteryRel, err = meter.Int64Counter("pa_monitor.caffeinate.battery_releases_total"); err != nil {
-		return err
-	}
-	for _, reason := range CaffeinateBatteryReleaseReasons {
-		e.caffeinateBatteryRel.Add(context.Background(), 0, metric.WithAttributes(attribute.String("reason", reason)))
 	}
 	if e.contextLimitHits, err = meter.Int64Counter("pa_monitor.session.context.limit_hits_total"); err != nil {
 		return err
@@ -444,6 +447,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		nudgeDeferredObs := e.nudgeDeferredObs
 		caffVal, caffAttrs, caffKnown := e.caffeinateActiveVal, e.caffeinateAttrs, e.caffeinateActiveKnown
 		caffGrace := e.caffeinateGraceVal
+		keeperVal, keeperAttrs, keeperKnown := e.keeperUpVal, e.keeperUpAttrs, e.keeperUpKnown
 		autoVal, autoAttrs, autoKnown := e.autoResumeEnabledVal, e.autoResumeEnabledAttrs, e.autoResumeEnabledKnown
 		blockCost, blockAttrs, blockKnown := e.blockCostUSD, e.blockCostAttrs, e.blockCostKnown
 		weekCost, weekAttrs, weekKnown := e.weekCostUSD, e.weekCostAttrs, e.weekCostKnown
@@ -459,6 +463,9 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		if caffKnown {
 			o.ObserveInt64(caffGauge, caffVal, metric.WithAttributes(caffAttrs...))
 			o.ObserveInt64(caffGraceGauge, caffGrace, metric.WithAttributes(caffAttrs...))
+		}
+		if keeperKnown {
+			o.ObserveInt64(keeperUpGauge, keeperVal, metric.WithAttributes(keeperAttrs...))
 		}
 		if autoKnown {
 			o.ObserveInt64(autoResumeGauge, autoVal, metric.WithAttributes(autoAttrs...))
@@ -510,7 +517,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 			o.ObserveInt64(weekUsageResetsGauge, weekUsageResetsAt, metric.WithAttributes(weekUsageAttrs...))
 		}
 		return nil
-	}, sessionsGauge, caffGauge, caffGraceGauge, autoResumeGauge, sessionsErroredGauge,
+	}, sessionsGauge, caffGauge, caffGraceGauge, autoResumeGauge, keeperUpGauge, sessionsErroredGauge,
 		nudgeDeferredGauge,
 		blockCostGauge, weekCostGauge,
 		sessionInfoGauge, sessionTokensGauge, sessionCostGauge,
@@ -634,6 +641,26 @@ func (e *Emitter) RecordCaffeinateActive(active bool, process string, graceRemai
 	e.caffeinateGraceVal = int64(graceRemainingSeconds)
 	e.caffeinateAttrs = kv
 	e.caffeinateActiveKnown = true
+	e.mu.Unlock()
+}
+
+// RecordKeepAwakeKeeperUp sets the pa_monitor.keep_awake.keeper_up gauge: up is
+// true while pg-keep-awake status --check reports the keeper running (exit 0 or
+// 6). nil-safe. Mirrors RecordCaffeinateActive: pushed each tick by the daemon
+// and observed only after the first push.
+func (e *Emitter) RecordKeepAwakeKeeperUp(up bool, attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	v := int64(0)
+	if up {
+		v = 1
+	}
+	kv := attrsToKV(attrs)
+	e.mu.Lock()
+	e.keeperUpVal = v
+	e.keeperUpAttrs = kv
+	e.keeperUpKnown = true
 	e.mu.Unlock()
 }
 
@@ -782,32 +809,6 @@ func (e *Emitter) RecordCaffeinateGraceExpired(attrs map[string]string) {
 		e.caffeinateGrace.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
 	e.LogEvent("caffeinate.grace_expired", attrs)
-}
-
-// CaffeinateBatteryReleaseReasons are the `reason` label values of
-// pa_monitor.caffeinate.battery_releases_total. They mirror the reasons in
-// internal/core/caffeinate (ReasonReleaseThreshold, ReasonSpawnBlocked); the
-// otel package does not import the state machine, so a test pins the match.
-var CaffeinateBatteryReleaseReasons = []string{"release_threshold", "spawn_blocked"}
-
-// RecordCaffeinateBatteryRelease increments
-// pa_monitor.caffeinate.battery_releases_total for one low-battery release of
-// the keep-awake assertion and emits the matching caffeinate.battery_release
-// log event. reason is added to attrs as the `reason` label. nil-safe.
-func (e *Emitter) RecordCaffeinateBatteryRelease(reason string, attrs map[string]string) {
-	if e == nil {
-		return
-	}
-	merged := map[string]string{"reason": reason}
-	for k, v := range attrs {
-		if k != "reason" {
-			merged[k] = v
-		}
-	}
-	if e.caffeinateBatteryRel != nil {
-		e.caffeinateBatteryRel.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(merged)...))
-	}
-	e.LogEvent("caffeinate.battery_release", merged)
 }
 
 // RecordContextLimitHit increments pa_monitor.session.context.limit_hits_total

@@ -594,6 +594,22 @@ func loadTOML(t *testing.T, content string) Config {
 	return cfg
 }
 
+// TestKeepAwakeBin: the pg-keep-awake executable is configured by an absolute
+// path (so lookup does not depend on launchd's PATH); unset means "search PATH".
+func TestKeepAwakeBin(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "nonexistent.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.KeepAwakeBin != "" {
+		t.Errorf("default KeepAwakeBin = %q, want empty", cfg.KeepAwakeBin)
+	}
+	cfg = loadTOML(t, "keep_awake_bin = \"/nix/store/abc-pg-keep-awake/bin/pg-keep-awake\"\n")
+	if cfg.KeepAwakeBin != "/nix/store/abc-pg-keep-awake/bin/pg-keep-awake" {
+		t.Errorf("KeepAwakeBin = %q", cfg.KeepAwakeBin)
+	}
+}
+
 // TestCaffeinateBatteryDefaults pins the initial HOLD/RELEASE thresholds of the
 // low-battery keep-awake rule (bead pg2-s86z9): 30 and 20, 5 points hysteresis.
 func TestCaffeinateBatteryDefaults(t *testing.T) {

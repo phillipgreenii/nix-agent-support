@@ -271,14 +271,13 @@ func TestCaffeinate_TogglePersistsAcrossTicks(t *testing.T) {
 		Nudges:   sqlite.NewNudgeStore(db),
 	})
 
-	// Caffeinate manager with no-op Spawn/Kill so the test doesn't try to
-	// launch a real caffeinate(1) process.
+	// Caffeinate manager with a no-op keeper so the test doesn't call a real
+	// pg-keep-awake (this test is about the toggle surviving ticks, not about
+	// the keeper; the real CLI is exercised in keepawake_cli_test.go).
 	caffMgr := &caffeinate.Manager{
-		Grace:   60 * time.Second,
-		Spawn:   func(int) error { return nil },
-		Kill:    func() error { return nil },
-		IsAlive: nil,
-		Now:     time.Now,
+		Grace:  60 * time.Second,
+		Keeper: noopKeeper{},
+		Now:    time.Now,
 	}
 
 	// tickSeen is closed after the first tick fires so we can advance to it.

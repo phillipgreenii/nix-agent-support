@@ -19,7 +19,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
-	"github.com/phillipgreenii/pa-monitor/internal/core/power"
 	"github.com/phillipgreenii/pa-monitor/internal/core/provider"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
@@ -127,7 +126,7 @@ func startPprofFromEnv(getenv func(string) string, w io.Writer) func() {
 // runDaemon does — same store wiring, same WriteService / ReadService
 // construction, same fields — but stops short of calling daemon.RunWith.
 // The returned cleanup function releases the WriteService goroutine,
-// closes the otel emitter, and kills any caffeinate subprocess; callers
+// closes the otel emitter, and releases pa-monitor's keep-awake lease; callers
 // must always invoke it.
 //
 // runDaemon uses this in production; daemon_test.go uses it for a smoke
@@ -168,27 +167,19 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 
 	runtimePath := filepath.Join(paths.Dir, "runtime.json")
 
-	// Caffeinate manager — daemon owns its own Proc so the wrapper PID
-	// is the daemon itself; agents are simply observed by the poller.
-	caffProc := &caffeinate.Proc{}
+	// Keep-awake manager. pa-monitor no longer runs its own caffeinate or
+	// evaluates the low-battery rule: it asks pg-keep-awake, through its CLI,
+	// to hold the Mac (acquire) or stop (release), binding the lease to the
+	// daemon's own pid. The executable comes from config (keep_awake_bin, an
+	// absolute path) so it does not depend on launchd's PATH.
 	caffMgr := &caffeinate.Manager{
-		Grace:   cfg.CaffeinateGrace,
-		Spawn:   caffProc.Spawn,
-		Kill:    caffProc.Kill,
-		IsAlive: caffProc.IsAlive,
-		Now:     time.Now,
-		PID:     os.Getpid(),
-		// Low-battery rule (pg2-s86z9): stop holding the Mac awake on a low
-		// battery. NewReader is pmset on darwin and a no-op elsewhere.
-		Battery: power.NewReader(),
-		BatteryPolicy: caffeinate.BatteryPolicy{
-			HoldPct:       cfg.CaffeinateBatteryHoldPct,
-			ReleasePct:    cfg.CaffeinateBatteryReleasePct,
-			HysteresisPct: cfg.CaffeinateBatteryHysteresisPct,
-		},
+		Grace:  cfg.CaffeinateGrace,
+		Keeper: &caffeinate.CLI{Configured: cfg.KeepAwakeBin},
+		Now:    time.Now,
+		PID:    os.Getpid(),
 	}
-	// Ensure caffeinate is killed even if Run returns abnormally.
-	cleanups = append(cleanups, func() { _ = caffProc.Kill() })
+	// Release the lease even if Run returns abnormally.
+	cleanups = append(cleanups, caffMgr.Shutdown)
 
 	// Connection-timing windows, DERIVED from the two base cadences in config
 	// (internal/timing). StaleAfter is guaranteed >= 3x the heartbeat interval
