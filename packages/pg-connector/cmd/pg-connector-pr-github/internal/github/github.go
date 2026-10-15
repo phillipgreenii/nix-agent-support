@@ -686,11 +686,20 @@ func (p *Provider) listForAuthor(ctx context.Context, repo, author string) ([]ap
 // rollup/reviews) was the original way to fill them in; List now gets
 // head OID/checks rollup from SearchPRsEnriched's own batched GraphQL
 // query instead (bead pg2-aehpr, see searchBatchedQuery's doc comment).
-var searchPRFields = "number,title,url,state,body,isDraft,author,labels,repository,updatedAt,commentsCount"
+//
+// id was added by bead pg2-12yur: gh exports the search result's GraphQL
+// node id as "id" (the field name is in the verified list above), which the
+// ids-only list reports as PRListResult.NodeIDs so the umbrella's refresher can
+// fetch the members it needs with one batched show_many call. It costs no
+// extra call.
+var searchPRFields = "id,number,title,url,state,body,isDraft,author,labels,repository,updatedAt,commentsCount"
 
 // ghSearchPR is `gh search prs --json <searchPRFields>`'s own decoded
 // shape.
 type ghSearchPR struct {
+	// ID is the PR's GraphQL node id (bead pg2-12yur); empty for a field set
+	// that does not request it (SearchPRsActivity).
+	ID      string `json:"id"`
 	Number  int    `json:"number"`
 	Title   string `json:"title"`
 	URL     string `json:"url"`
@@ -731,6 +740,7 @@ func (p ghSearchPR) toAPI() api.PR {
 		CommentCount: p.CommentsCount,
 		CreatedAt:    p.CreatedAt,
 		ClosedAt:     p.ClosedAt,
+		NodeID:       p.ID,
 	}
 	for _, l := range p.Labels {
 		out.Labels = append(out.Labels, l.Name)
@@ -943,7 +953,22 @@ query($q: String!, $after: String) {
   search(query: $q, type: ISSUE, first: %d, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      ... on PullRequest {
+      %s
+    }
+  }
+}
+`, searchBatchedPageSize, pullRequestSummaryFragment)
+
+// pullRequestSummaryFragment is the `... on PullRequest { ... }` selection
+// both the batched search (searchBatchedQuery) and the batched fetch by node
+// id (nodesByIDsQuery) request: the SUMMARY-level PR, the field set
+// schema.PRListFields names. It is one constant so the two documents cannot
+// drift: the 74 boundary in searchBatchedPageSize and nodesBatchedChunkSize was
+// measured for exactly this selection, and the pins in
+// search_list_fields_test.go and nodes_by_ids_test.go fail on any change to it.
+// See searchBatchedQuery's doc comment for what each field is for and which
+// fields the selection must NOT add.
+const pullRequestSummaryFragment = `... on PullRequest {
         id
         number title url state body isDraft updatedAt reviewDecision mergeable
         author { login }
@@ -954,11 +979,7 @@ query($q: String!, $after: String) {
         reviewThreads { totalCount }
         headRefOid
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-      }
-    }
-  }
-}
-`, searchBatchedPageSize)
+      }`
 
 // ghBatchedSearchNode is one `... on PullRequest` node in
 // searchBatchedQuery's own response shape. A node whose fragment did not

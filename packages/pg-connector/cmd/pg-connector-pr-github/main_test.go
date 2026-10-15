@@ -65,6 +65,10 @@ func (fakeGH) SearchPRsActivity(ctx context.Context, query string, limit int) ([
 	return nil, nil
 }
 
+func (fakeGH) SummariesByNodeIDs(ctx context.Context, nodeIDs []string, gate github.RateGate) (map[string]api.PR, error) {
+	return map[string]api.PR{}, nil
+}
+
 func (fakeGH) ReadRateLimit(ctx context.Context) (github.RateLimit, error) {
 	return github.RateLimit{Remaining: 5000, ResetAt: "2026-10-03T14:00:00Z"}, nil
 }
@@ -335,6 +339,36 @@ func TestNewDispatchTable_ListsReviewPending(t *testing.T) {
 	table := newDispatchTable(newTestBackend(t))
 	if _, ok := table["review_pending"]; !ok {
 		t.Fatalf("review_pending missing from dispatch table; ops = %v", table.Ops())
+	}
+}
+
+// TestNewDispatchTable_ListsShowMany: the GitHub backend implements the optional
+// ShowManyReader capability (bead pg2-12yur), so show_many is registered, listed
+// in capabilities.ops, and answers over the wire: an id the origin resolves to
+// nothing comes back in missing, not as an error.
+func TestNewDispatchTable_ListsShowMany(t *testing.T) {
+	table := newDispatchTable(newTestBackend(t))
+	if _, ok := table["show_many"]; !ok {
+		t.Fatalf("show_many missing from dispatch table; ops = %v", table.Ops())
+	}
+	var out bytes.Buffer
+	scriptout.ServeOne(table, strings.NewReader(`{"op":"show_many","args":{"refs":[{"id":"owner/repo#1","node_id":"PR_a"}]}}`), &out)
+	var resp struct {
+		SchemaVersion int `json:"schemaVersion"`
+		Result        struct {
+			Entities []json.RawMessage `json:"entities"`
+			Missing  []string          `json:"missing"`
+		} `json:"result"`
+		Error *struct{ Code string } `json:"error"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
+		t.Fatalf("decode %s: %v", out.String(), err)
+	}
+	if resp.Error != nil || len(resp.Result.Missing) != 1 || resp.Result.Missing[0] != "owner/repo#1" || len(resp.Result.Entities) != 0 {
+		t.Fatalf("response = %s, want the unresolved id in missing", out.String())
+	}
+	if resp.SchemaVersion != 13 {
+		t.Fatalf("schemaVersion = %d, want 13", resp.SchemaVersion)
 	}
 }
 

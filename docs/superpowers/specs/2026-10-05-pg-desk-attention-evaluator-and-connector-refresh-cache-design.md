@@ -729,6 +729,18 @@ sequenceDiagram
     end
 ```
 
+> **Ruling 2026-10-15 (Phillip, bead `pg2-12yur`):** the "batched detail fetch" above is a batched
+> SUMMARY-level fetch by ids (`nodes(ids: [...])` with the field set `list` returns, 1 point per 1
+> to 74 ids and 2 points for 75 to 100, the shape section 6.6 measured), not a detail-level fetch.
+> The refresher therefore carries its own freshness stamp, so a summary it fetched counts as fresh
+> for the refresher without making the entity detail-fresh (`INV-CACHE-2`, `INV-CACHE-6`,
+> `INV-CACHE-7` keep their meaning for detail entries). Accepted costs: a comment-text edit is
+> caught at the next `show`, not by the refresher; a failed chunk fails every id in it; a deleted or
+> inaccessible node comes back null and is confirmed with one `show`; the 74-id chunk size depends
+> on the field set, which a pinned-field-set test guards. `cache_refresh_after` keeps no default;
+> adopting the 120 s recommendation is a follow-up. Implemented as the optional `pr` op `show_many`
+> (`packages/pg-connector/docs/behavior/interfaces.md`).
+
 - **Membership** answers "which ids match this criterion". It is cheap, and its diff against the
   ledger index decides additions and removals. A removal needs a confirmation read before a
   tombstone, the same rule the `pg2-ii38x` design proposes (still pending the decision bead `pg2-32wg6`).

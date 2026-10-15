@@ -44,7 +44,27 @@ id=$(printf '%s' "$req" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 echo "$op $id" >> "$D/calls.log"
 case "$op" in
 capabilities)
-  printf '{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list"]}\n'
+  if [ -f "$D/show_many-enabled" ]; then
+    printf '{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list","show_many"]}\n'
+  else
+    printf '{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list"]}\n'
+  fi
+  ;;
+show_many)
+  # n is this call's 1-based number. The request is kept whole so a test can
+  # read which refs were asked for; the answer is show_many-error-<n> (an error
+  # code), show_many-<n>.json, or show_many.json, in that order, else unknown_op.
+  n=$(grep -c '^show_many ' "$D/calls.log")
+  printf '%s\n' "$req" >> "$D/show_many.requests"
+  if [ -f "$D/show_many-error-$n" ]; then
+    printf '{"protocolVersion":1,"schemaVersion":13,"error":{"code":"%s","message":"scripted"}}\n' "$(cat "$D/show_many-error-$n")"
+  elif [ -f "$D/show_many-$n.json" ]; then
+    cat "$D/show_many-$n.json"
+  elif [ -f "$D/show_many.json" ]; then
+    cat "$D/show_many.json"
+  else
+    printf '{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unknown_op","message":"no"}}\n'
+  fi
   ;;
 show)
   [ -f "$D/delay" ] && sleep "$(cat "$D/delay")"

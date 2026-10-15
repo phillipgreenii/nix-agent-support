@@ -30,9 +30,11 @@ import (
 //     show without calling the backend. Default defaultCacheReadTTL; "0" or
 //     "off" disables the read-through.
 //   - cacheStateRefreshAfterKey: turns the changes refresher on and sets the
-//     age past which a tracked entity is re-fetched. No default: the
-//     refresher fetches one entity per show call (no batched fetch-by-ids op
-//     exists yet), so it is opt-in.
+//     age past which a tracked entity is re-fetched. No default: the refresher
+//     stays opt-in. A backend with the batched show_many op (pr on GitHub)
+//     is refreshed at about 1 GraphQL point per 74 members; one without it
+//     (issue) spends one show per new or aged member, so the 120s default the
+//     spec recommends is a follow-up decision, not made here (bead pg2-12yur).
 const (
 	cacheStateReadTTLKey      = "cache_read_ttl"
 	cacheStateRefreshAfterKey = "cache_refresh_after"
@@ -309,6 +311,12 @@ type cacheWrite struct {
 	id      string
 	content json.RawMessage
 	asOf    time.Time
+	// level, when set, overrides the level the batch is written at (the
+	// refresher writes detail and summary entities in one batch).
+	level CacheLevel
+	// refreshed stamps the entry with the refresher's freshness stamp
+	// (Cache.PutRefreshed, INV-CACHE-6).
+	refreshed bool
 }
 
 // putEntitiesCacheLevel writes a batch of entities to (entityType,
@@ -334,7 +342,15 @@ func putEntitiesCacheLevel(ctx context.Context, reg *Registry, entityType, backe
 	now := time.Now()
 	sort.SliceStable(writes, func(i, j int) bool { return writes[i].id < writes[j].id })
 	for _, w := range writes {
-		c.PutLevel(w.id, w.content, w.asOf, now, level)
+		lv := level
+		if w.level != "" {
+			lv = w.level
+		}
+		if w.refreshed {
+			c.PutRefreshed(w.id, w.content, w.asOf, now, lv)
+		} else {
+			c.PutLevel(w.id, w.content, w.asOf, now, lv)
+		}
 	}
 	c.Evict(resolveCacheSizeCap(reg), cacheTombstoneRetention, noConsumersTracked, now)
 	_ = saveCache(key, c)

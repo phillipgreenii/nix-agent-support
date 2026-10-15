@@ -236,10 +236,18 @@ list`/`search` accept no such flag — see "Cross-cutting capabilities" above) t
   own `as_of` (`INV-CACHE-5`).
 - **`--fresh`** — the `show` flag that skips `read_ttl` and asks the origin (`INV-CACHE-5`).
 - **Refresher** — `changes` run with `cache_refresh_after` set: it reads membership cheaply,
-  re-fetches only new or aged entities, confirms removals, and writes `detail` entries
-  (`INV-CACHE-6`, `INV-CACHE-7`).
+  re-fetches only new or aged entities (in batches of at most 74 with `show_many` where the backend
+  has it, one `show` each otherwise), confirms removals, and writes `detail` entries for what
+  `show` returned and `summary` entries for what `show_many` returned (`INV-CACHE-6`,
+  `INV-CACHE-7`).
 - **`refresh_after`** — the age past which the refresher re-fetches a tracked entity
   (`cache_refresh_after`, no default; the refresher is off while it is unset).
+- **Refresher stamp** — the `refreshed_at` field of a cache entry: when the refresher last confirmed
+  the entity at the origin at any level. It lets a `summary` fetched by `show_many` settle a member
+  for the refresher without making the entity look `detail`-fresh to a `show` (`INV-CACHE-6`,
+  `INV-CACHE-2`).
+- **`show_many`** — the optional `pr` op that fetches the summary-level PR of many ids at once
+  (`INTF-WIRE`); a backend that lacks it is refreshed with `show`.
 
 ## Outcome reporting and CLI exit codes
 

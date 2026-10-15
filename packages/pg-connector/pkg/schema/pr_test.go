@@ -90,13 +90,45 @@ func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 }
 
 // TestPRSchemaVersion_IsCurrent pins PRSchemaVersion at its current value
-// (PRReview.SubmittedAt bumped 8 -> 9, PRReview.CommitOID bumped 9 -> 10, read-answer annotations bumped 10 -> 11, change feed bumped 11 -> 12) so
+// (PRReview.SubmittedAt bumped 8 -> 9, PRReview.CommitOID bumped 9 -> 10, read-answer annotations bumped 10 -> 11, change feed bumped 11 -> 12, show_many and list node_ids bumped 12 -> 13) so
 // an accidental future edit that
 // forgets to bump it alongside a new field-shape change is caught here
 // first.
 func TestPRSchemaVersion_IsCurrent(t *testing.T) {
-	if PRSchemaVersion != 12 {
-		t.Fatalf("PRSchemaVersion = %d, want 12", PRSchemaVersion)
+	if PRSchemaVersion != 13 {
+		t.Fatalf("PRSchemaVersion = %d, want 13", PRSchemaVersion)
+	}
+}
+
+// TestPRShowManyAndNodeIDs_WireShape pins the show_many result's wire keys
+// and the ids-only list's optional node_ids map (bead pg2-12yur): node_ids
+// is omitted when unset, so a backend that reports none emits a
+// byte-identical list answer.
+func TestPRShowManyAndNodeIDs_WireShape(t *testing.T) {
+	raw, err := json.Marshal(PRShowManyResult{Entities: []PR{{ID: "o/r#1"}}, Missing: []string{"o/r#2"}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, k := range []string{"entities", "missing"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("show_many result missing key %q: %s", k, raw)
+		}
+	}
+	if len(m) != 2 {
+		t.Errorf("show_many result carries undocumented keys: %s", raw)
+	}
+
+	list, _ := json.Marshal(PRListResult{PresentIDs: []string{"o/r#1"}})
+	if strings.Contains(string(list), "node_ids") {
+		t.Errorf("an unset NodeIDs must be omitted: %s", list)
+	}
+	list, _ = json.Marshal(PRListResult{PresentIDs: []string{"o/r#1"}, NodeIDs: map[string]string{"o/r#1": "PR_x"}})
+	if !strings.Contains(string(list), `"node_ids":{"o/r#1":"PR_x"}`) {
+		t.Errorf("node_ids missing from the list answer: %s", list)
 	}
 }
 

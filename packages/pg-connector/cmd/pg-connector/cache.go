@@ -74,6 +74,17 @@ type CacheEntry struct {
 	// Level is the level of Content; empty (an entry written before levels
 	// existed) reads as CacheLevelSummary.
 	Level CacheLevel `json:"level,omitempty"`
+	// RefreshedAt is the refresher's own freshness stamp (INV-CACHE-6): when
+	// the changes refresher last confirmed this entity at the origin, at any
+	// level. It exists because a summary fetched by the batched show_many op
+	// must count as fresh for the refresher without becoming a detail answer:
+	// a summary write never replaces or re-stamps a live detail entry
+	// (INV-CACHE-2), so AsOf alone would leave the entity looking aged and the
+	// refresher would refetch it every pass. Nothing but the refresher's young
+	// test (Cache.RefreshYoung) reads it: show read-through, the stale fallback
+	// and eviction ignore it, so it cannot change what a detail entry means.
+	// Nil for an entry the refresher never confirmed.
+	RefreshedAt *time.Time `json:"refreshed_at,omitempty"`
 }
 
 // level reports e's effective level, mapping the legacy empty value to
@@ -316,6 +327,48 @@ func (c *Cache) GetDetail(id string, maxAge time.Duration, now time.Time) (conte
 	return entry.Content, entry.AsOf, true
 }
 
+// RefreshYoung is the refresher's young test (INV-CACHE-6): it reports whether
+// the changes refresher confirmed id at the origin within maxAge of now, so a
+// tracked member needs no fetch. An entry counts when it is live and either its
+// refresher stamp (RefreshedAt, set by PutRefreshed for a summary or a detail
+// the refresher fetched) or, for a detail-level entry, its own as_of is within
+// maxAge. It deliberately does NOT treat a summary entry's as_of as a
+// confirmation: an ordinary list write is not the refresher's fetch.
+//
+// It is separate from GetDetail on purpose. GetDetail answers "may a show be
+// served from this entry", which only a detail entry within read_ttl can
+// satisfy; RefreshYoung answers "does the refresher need to ask the origin",
+// which a summary refresh also settles. A summary refresh therefore moves this
+// test and leaves GetDetail exactly as it was.
+func (c *Cache) RefreshYoung(id string, maxAge time.Duration, now time.Time) bool {
+	entry, ok := c.Entries[id]
+	if !ok || entry.RemovedAt != nil {
+		return false
+	}
+	var basis time.Time
+	if entry.level() == CacheLevelDetail {
+		basis = entry.AsOf
+	}
+	if entry.RefreshedAt != nil && entry.RefreshedAt.After(basis) {
+		basis = *entry.RefreshedAt
+	}
+	return !basis.IsZero() && now.Sub(basis) <= maxAge
+}
+
+// PutRefreshed is PutLevel for an entity the changes refresher fetched: it
+// writes the content exactly as PutLevel does (a summary never replaces a live
+// detail entry's content) and then stamps the entry's RefreshedAt with asOf,
+// the time the origin was read, never moving an existing stamp backwards.
+func (c *Cache) PutRefreshed(id string, content json.RawMessage, asOf, now time.Time, level CacheLevel) {
+	c.PutLevel(id, content, asOf, now, level)
+	entry := c.Entries[id]
+	if entry.RefreshedAt == nil || asOf.After(*entry.RefreshedAt) {
+		stamp := asOf
+		entry.RefreshedAt = &stamp
+		c.Entries[id] = entry
+	}
+}
+
 // MarkAccessed updates id's LastAccess to now. No-op if id is absent.
 func (c *Cache) MarkAccessed(id string, now time.Time) {
 	entry, ok := c.Entries[id]
@@ -347,8 +400,9 @@ func (c *Cache) PutLevel(id string, content json.RawMessage, asOf, now time.Time
 	if c.Entries == nil {
 		c.Entries = map[string]CacheEntry{}
 	}
-	if existing, ok := c.Entries[id]; ok && level != CacheLevelDetail &&
-		existing.RemovedAt == nil && existing.level() == CacheLevelDetail {
+	existing, hadLive := c.Entries[id]
+	hadLive = hadLive && existing.RemovedAt == nil
+	if hadLive && level != CacheLevelDetail && existing.level() == CacheLevelDetail {
 		existing.LastAccess = now
 		c.Entries[id] = existing
 		return
@@ -356,7 +410,14 @@ func (c *Cache) PutLevel(id string, content json.RawMessage, asOf, now time.Time
 	if level != CacheLevelDetail {
 		level = CacheLevelSummary
 	}
-	c.Entries[id] = CacheEntry{Content: content, AsOf: asOf, LastAccess: now, Level: level}
+	entry := CacheEntry{Content: content, AsOf: asOf, LastAccess: now, Level: level}
+	if hadLive {
+		// The refresher's stamp survives a content replacement: it records when
+		// the refresher confirmed the entity, which a later list write does not
+		// undo.
+		entry.RefreshedAt = existing.RefreshedAt
+	}
+	c.Entries[id] = entry
 }
 
 // Remove tombstones id: Content and AsOf are left exactly as they were

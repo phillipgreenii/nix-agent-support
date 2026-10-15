@@ -63,6 +63,12 @@ type ghProvider interface {
 	// every page; a gate error refuses the read and is returned as-is. This
 	// is how List enforces the reserve without a separate probe call.
 	SearchPRsEnrichedGated(ctx context.Context, query string, gate github.RateGate) ([]api.PR, github.RateLimit, error)
+	// SummariesByNodeIDs fetches the summary-level PR of each GraphQL node id
+	// in one batched document per 74 ids (bead pg2-12yur); an id the origin
+	// resolves to nothing is absent from the map. The gate judges each
+	// document's own rate-limit reading, like SearchPRsEnrichedGated's. It
+	// backs the optional show_many op (show_many.go).
+	SummariesByNodeIDs(ctx context.Context, nodeIDs []string, gate github.RateGate) (map[string]api.PR, error)
 	// SearchPRsActivity runs one GitHub search-syntax query for the activity
 	// capability: the result carries createdAt/closedAt, and limit is the
 	// result cap (GitHub search caps any query at 1000).
@@ -370,6 +376,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 	if idsOnly {
 		seen := make(map[string]bool)
 		ids := make([]string, 0)
+		var nodeIDs map[string]string
 		for _, q := range query {
 			prs, err := b.gh.SearchPRs(ctx, withUpdatedQualifier(q, rng))
 			if err != nil {
@@ -387,9 +394,17 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 				}
 				seen[id] = true
 				ids = append(ids, id)
+				if prs[i].NodeID != "" {
+					if nodeIDs == nil {
+						nodeIDs = make(map[string]string)
+					}
+					nodeIDs[id] = prs[i].NodeID
+				}
 			}
 		}
-		return &schema.PRListResult{PresentIDs: ids, Cursor: nil, Truncated: imprecise}, nil
+		// NodeIDs (bead pg2-12yur) lets the umbrella's refresher ask show_many
+		// for the members it needs; it is omitted when the search reported none.
+		return &schema.PRListResult{PresentIDs: ids, Cursor: nil, Truncated: imprecise, NodeIDs: nodeIDs}, nil
 	}
 
 	gate := func(rl github.RateLimit) error { return enforceRateReserve(ctx, rl) }

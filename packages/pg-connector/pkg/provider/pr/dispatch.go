@@ -18,7 +18,8 @@ import (
 
 // NewDispatchTable builds the pr capability's op-dispatch table for p:
 // show, list, files, and commits always; auth_status only when p also
-// implements pkg/provider.AuthChecker, asserted via a type-check rather
+// implements pkg/provider.AuthChecker, and review_submit, review_pending and
+// show_many only when p implements the matching optional interface, asserted via a type-check rather
 // than folded into the Provider interface (INV-AUTH-1). Every handler
 // passes p's returned error straight through unwrapped — a well-behaved
 // Provider implementation (built by the Tier-2 backend packet) is
@@ -157,6 +158,23 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode review_pending args: "+err.Error())
 				}
 				return rp.PendingReview(ctx, a)
+			},
+		}
+	}
+
+	// show_many is an optional capability (same type-assert pattern):
+	// registered, and so listed in capabilities.ops, only for a provider
+	// implementing ShowManyReader. It is the batched, summary-level fetch by
+	// id the umbrella's changes refresher prefers over one show per id.
+	if sm, ok := p.(ShowManyReader); ok {
+		table["show_many"] = scriptout.OpHandler{
+			SchemaVersion: schema.PRSchemaVersion,
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a ShowManyRequest
+				if err := scriptout.Decode(args, &a); err != nil {
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode show_many args: "+err.Error())
+				}
+				return sm.ShowMany(ctx, a)
 			},
 		}
 	}

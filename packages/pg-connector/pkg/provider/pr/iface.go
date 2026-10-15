@@ -281,3 +281,33 @@ type PendingReviewResult struct {
 type PendingReviewReader interface {
 	PendingReview(ctx context.Context, req PendingReviewRequest) (PendingReviewResult, error)
 }
+
+// ShowManyRef is one PR a show_many request names: its id (the same id every
+// other pr op takes) and the backend-native node id the batched fetch asks the
+// origin with. The ids-only list reports node ids (PRListResult.NodeIDs), so a
+// caller that read membership can ask without a lookup.
+type ShowManyRef struct {
+	ID     string `json:"id"`
+	NodeID string `json:"node_id"`
+}
+
+// ShowManyRequest is the show_many op's input (bead pg2-12yur).
+type ShowManyRequest struct {
+	Refs []ShowManyRef `json:"refs"`
+}
+
+// ShowManyReader is an OPTIONAL capability of a pr backend: it fetches the
+// SUMMARY-level PR (the field set the cheap list populates, never comment or
+// review bodies) for many ids in as few origin calls as the origin allows. It
+// is deliberately not part of Provider; NewDispatchTable registers the
+// show_many op only when the provider type-asserts to it, so a backend without
+// it keeps compiling and simply lacks the op (the umbrella's refresher then
+// fetches each id with show).
+//
+// A ref the origin answers with nothing (deleted, inaccessible, not a PR) MUST
+// be reported in PRShowManyResult.Missing, not as an error; a call that cannot
+// be answered MUST be an error wrapped with scriptout.Err* from INV-ERR-1's
+// taxonomy, which fails every id in the request.
+type ShowManyReader interface {
+	ShowMany(ctx context.Context, req ShowManyRequest) (*schema.PRShowManyResult, error)
+}

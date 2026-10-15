@@ -49,6 +49,12 @@ type fakeGH struct {
 	// List's own non-ids_only path only (bead pg2-aehpr).
 	searchFn         func(ctx context.Context, query string) ([]api.PR, error)
 	searchEnrichedFn func(ctx context.Context, query string) ([]api.PR, error)
+	// nodesFn backs ghProvider.SummariesByNodeIDs (show_many, bead pg2-12yur);
+	// nodesCalls records the node ids of each call and nodesGateCalls counts the
+	// readings offered to the gate.
+	nodesFn        func(ctx context.Context, nodeIDs []string) (map[string]api.PR, error)
+	nodesCalls     [][]string
+	nodesGateCalls int
 	// searchActivityFn backs ghProvider.SearchPRsActivity (list_activity).
 	searchActivityFn func(ctx context.Context, query string, limit int) ([]api.PR, error)
 	rateLimit        int
@@ -178,6 +184,31 @@ func (f *fakeGH) SearchPRsEnrichedGated(ctx context.Context, query string, gate 
 		}
 	}
 	return prs, rl, nil
+}
+
+// SummariesByNodeIDs models the real provider: the fetch happens first, THEN
+// the reading carried in its response is offered to gate, and a refusal
+// discards the results.
+func (f *fakeGH) SummariesByNodeIDs(ctx context.Context, nodeIDs []string, gate github.RateGate) (map[string]api.PR, error) {
+	f.nodesCalls = append(f.nodesCalls, append([]string(nil), nodeIDs...))
+	var got map[string]api.PR
+	if f.nodesFn != nil {
+		var err error
+		if got, err = f.nodesFn(ctx, nodeIDs); err != nil {
+			return nil, err
+		}
+	}
+	remaining := f.rateLimit
+	if remaining == 0 {
+		remaining = rateLimitOrDefaultReserve
+	}
+	f.nodesGateCalls++
+	if gate != nil {
+		if err := gate(github.RateLimit{Remaining: remaining, ResetAt: f.rateLimitResetAt}); err != nil {
+			return nil, err
+		}
+	}
+	return got, nil
 }
 
 func (f *fakeGH) SearchPRsActivity(ctx context.Context, query string, limit int) ([]api.PR, error) {

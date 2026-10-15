@@ -163,6 +163,10 @@ type rawListResult struct {
 	PresentIDs []string          `json:"present_ids"`
 	Cursor     json.RawMessage   `json:"cursor"`
 	Truncated  bool              `json:"truncated"`
+	// NodeIDs is an ids-only pr list's id -> backend-native node id map
+	// (schema.PRListResult.NodeIDs, bead pg2-12yur); the refresher hands it back
+	// to a backend's show_many op. Absent from every other answer.
+	NodeIDs map[string]string `json:"node_ids"`
 }
 
 // changesEntry is one item in the wire response's changes[] array

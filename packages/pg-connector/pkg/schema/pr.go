@@ -113,7 +113,15 @@ import "encoding/json"
 // the old backends, which never set Version, emit byte-identical entities; the
 // bump follows this const's own rule that ANY field-shape change bumps the
 // version, additive or not.
-const PRSchemaVersion = 12
+//
+// Bumped 12 -> 13 by bead pg2-12yur, which added the optional show_many op
+// (a batched fetch of summary-level PRs by id: PRShowManyResult) and the
+// optional PRListResult.NodeIDs map the ids-only list reports so a caller can
+// ask for it. Both are additive and omitted when unset, so every version-12
+// consumer keeps decoding unchanged and a backend without the op simply never
+// registers it; the bump follows this const's own rule that ANY field-shape
+// change bumps the version, additive or not.
+const PRSchemaVersion = 13
 
 // PRListFields is the authoritative set of schema.PR JSON field names the
 // cheap `list` populates (bead pg2-x3h8c.2). The list's batched search
@@ -424,6 +432,29 @@ type PRListResult struct {
 	// sets it, and a consumer that never reads it, are unaffected, so this
 	// does not bump the schema version.
 	FingerprintExcludes []string `json:"fingerprint_excludes,omitempty"`
+
+	// NodeIDs maps a present id to the PR's backend-native node id, reported
+	// by a backend's ids-only list for the ids it can name (bead pg2-12yur).
+	// The umbrella's refresher hands them back in a show_many request, which
+	// fetches by node id: without them a member that is new to the caller has
+	// no node id to ask with. Omitted when the backend reports none, and an
+	// id missing from the map simply has no node id. Additive (PRSchemaVersion
+	// 12 -> 13).
+	NodeIDs map[string]string `json:"node_ids,omitempty"`
+}
+
+// PRShowManyResult is the optional show_many op's output (bead pg2-12yur): the
+// SUMMARY-level PR (the same field set the cheap list populates, PRListFields,
+// never comments or review bodies) for each requested ref the origin answered.
+// A ref the origin answered with nothing (a deleted PR, one the identity
+// cannot see, or a node that is not a PR) is named in Missing instead, so a
+// null node is a per-id answer and never a failure of the whole call; a call
+// that cannot be answered at all is an error from the closed taxonomy, which
+// fails every id in the request. Entities and Missing together name each
+// requested id exactly once.
+type PRShowManyResult struct {
+	Entities []PR     `json:"entities"`
+	Missing  []string `json:"missing"`
 }
 
 // PRFile is one changed file entry in a PR's diff, an element of the

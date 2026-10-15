@@ -122,7 +122,8 @@ distinction come from the behavior-docs method
   entry, so a list summary is never served to a caller that asked for the full entity. A write of a
   `summary` MUST NOT replace or downgrade the content of a live `detail` entry for the same id; a
   write of a `detail` MUST replace any entry. An entry persisted before levels existed MUST be read
-  as `summary`.
+  as `summary`. A `summary` written by the refresher is stamped with the refresher's own freshness
+  stamp (`INV-CACHE-6`); the stamp does not change the entry's level, content or `as_of`.
 - **`INV-CACHE-3`** <!-- uuid: 001bf296-3510-4932-a944-fb3fef29ec8c --> — The `list` stale
   fallback MUST be scoped to the requested query: it MUST serve only cached entities whose ids are
   live members of that query's ledger index, and MUST serve nothing for a query whose ledger index
@@ -148,15 +149,31 @@ distinction come from the behavior-docs method
 - **`INV-CACHE-6`** <!-- uuid: d3116653-4bd4-4aaf-9e6e-a865c3c7aa64 --> — `changes` MUST NOT be
   served from `read_ttl`: it is the thing that detects change, so it always asks the origin
   (unless `--cached`). When `refresh_after` is configured for the type (the refresher mode, off by
-  default), `changes` MUST read membership with the ids-only `list`, MUST fetch a full entity only
-  for a member that is new to the ledger or whose `detail` entry is missing or older than
+  default), `changes` MUST read membership with the ids-only `list`, MUST fetch an entity only for
+  a member that is new to the ledger or that the refresher has not confirmed within
   `refresh_after`, and MUST classify changes only among the entities it fetched, so a member whose
-  entry is young reports no change until it ages. Every entity it fetched MUST be written to the
-  cache as `detail`, only after the response has been written and flushed. A refresh pass in which
-  any fetch failed is not a whole-query answer: it MUST record `last_error` with the code
-  `truncated` and MUST NOT record `refreshed_at` (`INV-LEDGER-FRESH-3`), though the changes it did
-  classify are still reported. Outside the refresher mode, `changes` MUST write each entity it
-  listed to the cache as `summary`, after the response is flushed.
+  entry is young reports no change until it ages. The refresher fetches with the backend's batched
+  `show_many` op, in chunks of at most 74 ids, when the backend lists it in its `capabilities`
+  (`pr` only); otherwise, and for any id the batched call could not answer, it fetches with
+  `show`, one call per entity. A `show_many` answer is SUMMARY level (the field set `list`
+  returns, no comment or review bodies): a change that only edits comment text is caught at the
+  next `show`, not by the refresher. Every entity it fetched MUST be written to the cache, as
+  `detail` when it came from `show` and as `summary` when it came from `show_many`, only after the
+  response has been written and flushed. A member counts as confirmed, and so is not fetched
+  again, while EITHER its `detail` entry's own `as_of` OR the refresher's own freshness stamp
+  (`refreshed_at` on the cache entry) is within `refresh_after`. The stamp is set only by a write
+  the refresher makes; it MUST NOT be read by anything but this test, so a `summary` fetched by
+  `show_many` counts as fresh for the refresher while it neither replaces a live `detail` entry
+  (`INV-CACHE-2`) nor makes the entity satisfy a `show` read-through (`INV-CACHE-4`). A failed
+  `show_many` chunk fails every id in it: those ids MUST NOT be retried one by one, stay aged for
+  the next call, and make the pass incomplete; an `unavailable` chunk MUST stop the pass's
+  further fetching. An id the batched call answered with nothing (a deleted or inaccessible node)
+  MUST be confirmed with one `show`, which supplies its `detail` content or, when it fails,
+  leaves the pass incomplete. A refresh pass in which any fetch failed is not a whole-query
+  answer: it MUST record `last_error` with the code `truncated` and MUST NOT record
+  `refreshed_at` (`INV-LEDGER-FRESH-3`), though the changes it did classify are still reported.
+  Outside the refresher mode, `changes` MUST write each entity it listed to the cache as
+  `summary`, after the response is flushed.
 - **`INV-CACHE-7`** <!-- uuid: bb80b573-8500-45f0-b65e-ea1f39e4abe3 --> — In the refresher mode, an
   id that is in the ledger index but absent from a complete membership answer MUST be confirmed by
   one read of the entity before it is reported `removed`. If the read returns the entity (for
