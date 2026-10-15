@@ -266,6 +266,10 @@ type changesBackendResult struct {
 	version   int64                    // the backend's own sources[].version
 	freshness []schema.SourceFreshness // the answer's sources_freshness[]
 	notes     []string                 // lines for stderr after the flush
+
+	// notOwning is true for a ci backend that does not declare owns_changes:
+	// answered by the umbrella itself (ci_changes.go), never forwarded.
+	notOwning bool
 }
 
 // newChangesCmd builds the "changes" cobra command for entityType (pr or
@@ -319,6 +323,9 @@ func newChangesCmd(entityType string) *cobra.Command {
 		}
 		results := fanOutChanges(cmd.Context(), reg, entityType, backends, query, consumer, cached, reset)
 		outcomeSources := changesOutcomeSources(results)
+		if allNotOwningChanges(results) {
+			return writeTargetedResult(cmd, nil, ciNotOwningErr(results), func(json.RawMessage) (string, error) { return "", nil })
+		}
 		if allQueryNotRecognized(outcomeSources) {
 			return writeTargetedResult(cmd, nil, listQueryNotRecognizedErr(entityType, query), func(json.RawMessage) (string, error) { return "", nil })
 		}
@@ -428,8 +435,14 @@ func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, 
 	// the call and never fall back to the ledger diff. A backend whose
 	// capabilities call fails has declared nothing and keeps the ledger path
 	// (the fail-open rule of cacheEnabled, INV-CACHE-8).
-	if owns, err := backendOwnsChanges(ctx, reg, b); err == nil && owns {
+	owns, ownsErr := backendOwnsChanges(ctx, reg, b)
+	if ownsErr == nil && owns {
 		return forwardChangesOne(ctx, reg, entityType, b, query, consumerID, cached, reset)
+	}
+	// ci has no list op, so there is no ledger path for it: a ci backend that
+	// does not own changes is answered here and never sent anything (ci_changes.go).
+	if entityType == "ci" {
+		return ciNotOwningResult(entityType, b, query, ownsErr)
 	}
 
 	key := LedgerKey{Type: entityType, Backend: b, Query: query, Instance: instance}
@@ -789,6 +802,21 @@ func changesWireFor(results []changesBackendResult) changesWire {
 // deferred and then added. newCalendarChangesCmd/newThreadChangesCmd are
 // this docket's/bead pg2-955py's own additions; each calls newChangesCmd
 // unchanged, exactly like their siblings.
+// changeEntityLabel names a change's entity for the human-mode line: its id, or
+// for a ci entity (which carries no id) its pr_id, or "?".
+func changeEntityLabel(entity json.RawMessage) string {
+	if id, err := entityID(entity); err == nil {
+		return id
+	}
+	var ci struct {
+		PRID string `json:"pr_id"`
+	}
+	if err := json.Unmarshal(entity, &ci); err == nil && ci.PRID != "" {
+		return ci.PRID
+	}
+	return "?"
+}
+
 func newPrChangesCmd() *cobra.Command       { return newChangesCmd("pr") }
 func newIssueChangesCmd() *cobra.Command    { return newChangesCmd("issue") }
 func newCalendarChangesCmd() *cobra.Command { return newChangesCmd("calendar") }
@@ -807,10 +835,7 @@ func humanizeChangesOutcome(w changesWire) string {
 	} else {
 		fmt.Fprintf(&b, "changes (%d):\n", len(w.Changes))
 		for _, c := range w.Changes {
-			id, err := entityID(c.Entity)
-			if err != nil {
-				id = "?"
-			}
+			id := changeEntityLabel(c.Entity)
 			fmt.Fprintf(&b, "  %s %s (from %s)\n", c.Change, id, c.Source)
 		}
 	}

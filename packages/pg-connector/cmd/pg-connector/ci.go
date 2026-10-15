@@ -253,6 +253,7 @@ func newCiCmd() *cobra.Command {
 		Short: "CI capability commands",
 	}
 	ciCmd.AddCommand(newCiListCmd())
+	ciCmd.AddCommand(newCiChangesCmd())
 	ciCmd.AddCommand(newCiLogsCmd())
 	ciCmd.AddCommand(newCiRerunFailedCmd())
 	return ciCmd
