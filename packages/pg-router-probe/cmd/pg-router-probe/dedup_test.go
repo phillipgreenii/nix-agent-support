@@ -44,30 +44,6 @@ func TestDecideActionMatchByAlias(t *testing.T) {
 	}
 }
 
-func TestDecideActionQueueGrowthSkipsSameBand(t *testing.T) {
-	f := finding{Kind: kindQueueGrowth, Fingerprint: "queue-growth:backlog", State: "medium"}
-	existing := []connectorIssue{{ID: "zr-1", Metadata: map[string]string{
-		metaFingerprint: "queue-growth:backlog",
-		metaState:       "medium",
-	}}}
-	action, _ := decideAction(f, existing, noGrafanaCtx)
-	if action != actionSkip {
-		t.Fatalf("got %v", action)
-	}
-}
-
-func TestDecideActionQueueGrowthUpdatesOnNewBand(t *testing.T) {
-	f := finding{Kind: kindQueueGrowth, Fingerprint: "queue-growth:backlog", State: "high"}
-	existing := []connectorIssue{{ID: "zr-1", Metadata: map[string]string{
-		metaFingerprint: "queue-growth:backlog",
-		metaState:       "medium",
-	}}}
-	action, _ := decideAction(f, existing, noGrafanaCtx)
-	if action != actionUpdate {
-		t.Fatalf("got %v", action)
-	}
-}
-
 func TestDecideActionBinaryHashSkipsSameHash(t *testing.T) {
 	f := finding{Kind: kindBinaryHashMismatch, Fingerprint: binaryHashMismatchFingerprint, State: "def456"}
 	existing := []connectorIssue{{ID: "zr-1", Metadata: map[string]string{
@@ -93,7 +69,7 @@ func TestDecideActionBinaryHashUpdatesOnNewHash(t *testing.T) {
 }
 
 func TestTrackedMetadataRoundTripsThroughDecideAction(t *testing.T) {
-	f := finding{Kind: kindQueueGrowth, Fingerprint: "queue-growth:backlog", State: "medium"}
+	f := finding{Kind: kindBinaryHashMismatch, Fingerprint: binaryHashMismatchFingerprint, State: "def456"}
 	tracked := trackedMetadata(f)
 	existing := []connectorIssue{{ID: "zr-1", Metadata: tracked}}
 	// The exact same finding, matched against the metadata it would have

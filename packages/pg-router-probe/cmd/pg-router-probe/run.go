@@ -1,4 +1,4 @@
-// run.go: the "run" verb — the real work. Runs the three checks
+// run.go: the "run" verb — the real work. Runs the checks
 // (checks.go), applies the "nothing new" dedup rule (dedup.go) against
 // pg-connector's every-non-closed-escalated-bead dedup query (connector.go's
 // defaultDedupQuery, NOT the ready-only escalated-work triager query), files/updates a
@@ -13,7 +13,7 @@
 //	                 block a clean exit.
 //	2 usage error -- a cobra-level flag/arg problem (see main.go's run()).
 //	3 total failure -- every sub-check was unreachable/unconfigured (none
-//	                 of the three produced a result); this run writes
+//	                 of them produced a result); this run writes
 //	                 nothing at all (no bd issue is filed on a
 //	                 total-failure run) [design: "Exit codes" paragraph].
 //	4 partial     -- at least one CONFIGURED sub-check was attempted and
@@ -264,8 +264,8 @@ func newRunCmd() *cobra.Command {
 	}
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "Run the three health checks, filing/updating an escalated bd issue on a real finding",
-		Long: `Run the three health checks, filing/updating an escalated bd issue on a real finding.
+		Short: "Run the health checks, filing/updating an escalated bd issue on a real finding",
+		Long: `Run the health checks, filing/updating an escalated bd issue on a real finding.
 
 Beads are created with the label "escalated". A firing Grafana alert whose rule
 sets the label escalation="human" is filed with labels "escalated" AND "human"
@@ -280,8 +280,8 @@ never closes beads; close one once its alert clears after remediation.`,
 	cmd.Flags().DurationVar(&opts.grafanaTimeout, "grafana-timeout", opts.grafanaTimeout, "explicit timeout for the Grafana HTTP call")
 	cmd.Flags().DurationVar(&opts.pgConnectorTimeout, "pg-connector-timeout", opts.pgConnectorTimeout, "explicit timeout for each pg-connector subprocess call (list/create/update/comment)")
 	cmd.Flags().StringSliceVar(&opts.ruleUIDs, "rule-uid", opts.ruleUIDs, "Grafana rule UID to check (repeatable); defaults to the registered rule UIDs")
-	cmd.Flags().IntVar(&opts.queueDepth, "queue-depth", 0, "current queue depth reading; unset skips the queue-depth drift check (the backlog check is independent)")
-	cmd.Flags().IntVar(&opts.backlog, "backlog", 0, "current backlog reading; unset skips the backlog drift check (the queue-depth check is independent)")
+	cmd.Flags().IntVar(&opts.queueDepth, "queue-depth", 0, "current queue depth reading, recorded in the snapshot only (no check escalates on it)")
+	cmd.Flags().IntVar(&opts.backlog, "backlog", 0, "current backlog reading, recorded in the snapshot only (no check escalates on it)")
 	cmd.Flags().BoolVar(&opts.backlogFromStatus, "backlog-from-status", false, "read the backlog from `pg-router status --json` (sum of queues[].depth) instead of --backlog")
 	cmd.Flags().StringVar(&opts.pgRouterPath, "pg-router-path", opts.pgRouterPath, "pg-router binary used by --backlog-from-status")
 	cmd.Flags().DurationVar(&opts.statusTimeout, "status-timeout", opts.statusTimeout, "explicit timeout for the `pg-router status --json` call")
@@ -376,9 +376,12 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		}
 	}
 
-	// Sub-check 2: queue/backlog drift.
+	// Sub-check 2: queue/backlog reading. Record-only since pg2-7729r: the
+	// drift escalation was deleted by operator ruling (pg2-po4nj option A),
+	// so a reading is fetched (or taken from --queue-depth/--backlog) and
+	// persisted in the snapshot but never produces a finding.
 	// The two readings are independent: either flag alone configures its
-	// own check (pg2-5g9e0 -- only --backlog is wired in production; there
+	// own reading (pg2-5g9e0 -- only --backlog is wired in production; there
 	// is no defined single-queue reading for --queue-depth).
 	if opts.backlogFromStatus {
 		var n int
@@ -397,20 +400,10 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	}
 	if !opts.haveQueueDepth && !opts.haveBacklog {
 		if !opts.backlogFromStatus {
-			skipped = append(skipped, "queue-backlog-drift: not configured (--queue-depth/--backlog unset)")
+			skipped = append(skipped, "queue-backlog-reading: not configured (--queue-depth/--backlog unset)")
 		}
 	} else {
 		ranAny = true
-		if opts.haveQueueDepth {
-			if f := checkQueueGrowth("queue-depth", hadPrev, prevSnap.QueueDepth, opts.queueDepth); f != nil {
-				findings = append(findings, *f)
-			}
-		}
-		if opts.haveBacklog {
-			if f := checkQueueGrowth("backlog", hadPrev, prevSnap.Backlog, opts.backlog); f != nil {
-				findings = append(findings, *f)
-			}
-		}
 	}
 
 	// Sub-check 3: binary hash sanity.

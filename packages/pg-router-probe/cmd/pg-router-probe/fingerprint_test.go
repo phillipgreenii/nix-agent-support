@@ -77,15 +77,6 @@ func TestGrafanaAlertFingerprintDistinguishesTypeLabel(t *testing.T) {
 	}
 }
 
-func TestQueueGrowthFingerprint(t *testing.T) {
-	if got := queueGrowthFingerprint("queue-depth"); got != "queue-growth:queue-depth" {
-		t.Fatalf("got %q", got)
-	}
-	if got := queueGrowthFingerprint("backlog"); got != "queue-growth:backlog" {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func TestBinaryHashMismatchFingerprintIsFixed(t *testing.T) {
 	if binaryHashMismatchFingerprint != "binary-hash-mismatch" {
 		t.Fatalf("got %q", binaryHashMismatchFingerprint)

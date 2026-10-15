@@ -150,8 +150,8 @@ own split between `lat-survey`'s exact-match and the LLM step's fuzzy rename det
 - `needs_input` findings (`ccpool-probe`): `needs-input:<ccpool session external_id>`.
 - Zombie-count drift (`ccpool-probe`): `zombie-count:<severity band>` (see "nothing new" rule
   below for how the band is computed).
-- Queue/backlog drift, daemon/handler hash mismatch (`pg-router-probe`): `queue-growth:<type>` /
-  `binary-hash-mismatch`.
+- Daemon/handler hash mismatch (`pg-router-probe`): `binary-hash-mismatch`. (The
+  `queue-growth:<type>` fingerprint for queue/backlog drift was deleted with its check, pg2-7729r.)
 
 **"Nothing new" rule** (governs whether a probe creates, comments, or does nothing, for an
 existing fingerprint match):
@@ -160,22 +160,18 @@ existing fingerprint match):
   bead's last comment.
 - `needs_input` finding: skip unless the session's own state actually changed (e.g. it's no
   longer `needs_input`, or a materially different question is now pending) since the last note.
-- Zombie-count / queue-growth finding: skip unless the value moved into a new severity band since
+- Zombie-count finding: skip unless the value moved into a new severity band since
   the last note (bands: e.g. baseline / +50% / +100% / sustained-growth — exact thresholds are an
   implementation detail, not re-derived here).
-- Queue-growth detection (`pg-router-probe`, pg2-ktbfk / pg2-3gqtw) compares the current reading
-  with the previous run's persisted snapshot, so the snapshot MUST be persisted (its parent
-  directory is created on first write; a persist failure makes the run exit 4). A reading
-  escalates only when the previous reading was already elevated AND the current one either grew
-  by more than 25% or did not decrease while in the high band. A periodic sweep burst that fully
-  drains between ticks and is re-sampled at the same phase every tick (e.g. 72 -> 75 -> 71) MUST
-  NOT escalate; a backlog that stops draining while sweeps keep enqueueing stacks bursts on the
-  residual and does escalate on the second tick. Known blind spot: a flat, non-draining backlog
-  of routine-burst size with no further enqueues is not distinguishable by peak-phase samples;
-  the Grafana queue-stalled / queue-depth-growing rules cover that case. (Since 2026-10-12
-  `pg-router-queue-stalled` means a backlog with nothing processing it, a dispatch that is in
-  flight counts as processing however long it runs, and `pg-router-queue-slow-growth` covers a
-  backlog that grows under a working consumer; pg-router `DEC-OBS-10`.)
+- Queue-growth detection (`pg-router-probe`, pg2-ktbfk / pg2-3gqtw) was DELETED by operator ruling
+  (Phillip, 2026-10-14, bead pg2-po4nj option A, applied by pg2-7729r), following the precedent
+  pg2-p93c0 that deleted the Grafana `pg-router-backlog-growing` twin: it fired 15 or more times
+  from 2026-10-06 to 2026-10-14 (e.g. 96 -> 156, 38 -> 118) and every occurrence self-cleared by
+  the next reading. `pg-router-probe` still reads the backlog and persists it in its snapshot, but
+  no reading escalates. A stalled queue is covered by the Grafana `pg-router-queue-stalled` rule (a
+  backlog with nothing processing it, where a dispatch in flight counts as processing however long
+  it runs) and `pg-router-queue-slow-growth` (a backlog that grows under a working consumer;
+  pg-router `DEC-OBS-10`).
 
 A probe MUST run this check via `pg-connector issue list --query escalated-work --backend
 pg-connector-issue-beads` (with `PG_CONNECTOR_ISSUE_BEADS_DIR` set), never `bd search`/`bd list`
@@ -226,7 +222,7 @@ Each binary exposes two subcommands, mirroring `pg-desk`'s own `heartbeat-item`/
 1. Grafana currently-firing alerts filtered to pg-router's 4 registered rule UIDs
    (`pg-router-liveness-down`, `pg-router-backlog-growing`, `pg-router-queue-depth-growing`,
    `pg-router-failure-rate`), same Grafana access pattern `lat-survey` already uses.
-2. Queue/backlog drift vs. a persisted last-run snapshot.
+2. (Deleted, pg2-7729r: queue/backlog drift vs. a persisted last-run snapshot.)
 3. Daemon/handler binary hash sanity (unexpected change with no corresponding deploy record).
 
 **`ccpool-probe run` checks**:

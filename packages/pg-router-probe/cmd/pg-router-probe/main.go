@@ -4,7 +4,7 @@
 // heartbeat-item/heartbeat split (packages/pg-desk/cmd/pg-desk/heartbeat_item.go,
 // heartbeat.go): tick-item is a trivial, side-effect-free item emitter so
 // pg-router has something to dispatch on a schedule; run is the real work
-// (three deterministic health checks, deduplicated bd issue filing via
+// (deterministic health checks, deduplicated bd issue filing via
 // pg-connector, exit-code signaling).
 //
 // Unlike its sibling adapters (pg-router-source-pg-connector,

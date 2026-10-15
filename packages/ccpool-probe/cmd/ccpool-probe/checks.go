@@ -181,7 +181,7 @@ func classifyZombieBand(previous, current, consecutiveGrowthBefore int) (severit
 // checkZombieDrift compares the current zombie count (countZombieSessions)
 // against the previous snapshot's own reading [design: item 2]. It
 // returns (nil, 0) whenever there is no prior baseline to diff against —
-// this run is quiet on drift by construction, matching checkQueueGrowth's
+// this run is quiet on drift by construction, matching checkBinaryHash's
 // own no-baseline behavior in pg-router-probe. Otherwise it always
 // returns the fresh consecutive-growth streak (for snapshot.go to
 // persist, regardless of whether THIS run's band was alert-worthy), and a

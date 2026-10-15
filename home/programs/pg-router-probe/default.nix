@@ -12,8 +12,9 @@ in
   options.phillipgreenii.programs.pg-router-probe = {
     enable = lib.mkEnableOption ''
       pg-router-probe (a deterministic health probe over pg-router's own
-      operational health: Grafana firing-alert check, queue/backlog drift
-      check, daemon/handler binary hash sanity check -- files/updates an
+      operational health: Grafana firing-alert check and daemon/handler
+      binary hash sanity check (the queue/backlog reading is recorded in the
+      snapshot only; it escalates nothing) -- files/updates an
       `escalated`-labeled bd issue via pg-connector on a real finding, no
       LLM involved).
 

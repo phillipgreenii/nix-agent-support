@@ -1,11 +1,12 @@
-// snapshot.go: the persisted last-run snapshot checks 2 (queue/backlog
-// drift) and 3 (binary hash sanity) compare their current reading
-// against [design: "pg-router-probe run checks" items 2/3].
+// snapshot.go: the persisted last-run snapshot the binary hash sanity check
+// compares its current reading against [design: "pg-router-probe run
+// checks" item 3]. The queue-depth/backlog readings are also persisted here
+// but no check compares them any more (pg2-7729r deleted the drift check).
 //
 // Snapshot robustness [design: "Snapshot robustness" paragraph]: a
 // missing, corrupted, or version-mismatched last-run snapshot are all
 // treated IDENTICALLY by loadSnapshot below — logged by the caller, then
-// treated as "no prior baseline" (this run is quiet on drift checks by
+// treated as "no prior baseline" (this run is quiet on the hash check by
 // construction, since there is nothing to diff against) — and
 // overwritten with a fresh, version-stamped snapshot at the end of a
 // successful run (run.go).
@@ -144,7 +145,7 @@ func loadSnapshot(path string) (snapshot, bool) {
 // parent directory (0o700) when missing: the default location,
 // $HOME/.local/state/pg-router-probe, does not exist on a fresh host, and
 // without this every write failed (pg2-3gqtw), leaving every run without a
-// baseline and the queue-growth check permanently inert.
+// baseline and the baseline-diffing checks permanently inert.
 func saveSnapshot(path string, s snapshot) error {
 	s.Version = snapshotVersion
 	data, err := json.MarshalIndent(s, "", "  ")

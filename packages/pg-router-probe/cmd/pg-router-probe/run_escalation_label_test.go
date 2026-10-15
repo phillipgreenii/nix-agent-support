@@ -153,7 +153,7 @@ func TestAddingEscalationHumanKeepsMatchingOpenBead(t *testing.T) {
 }
 
 func TestEscalationLabelsHumanOnlyForGrafanaAlerts(t *testing.T) {
-	if got := escalationLabels(finding{Kind: kindQueueGrowth, Escalation: escalationHuman}); !slices.Equal(got, []string{"escalated"}) {
+	if got := escalationLabels(finding{Kind: kindBinaryHashMismatch, Escalation: escalationHuman}); !slices.Equal(got, []string{"escalated"}) {
 		t.Fatalf("non-alert finding labels = %v", got)
 	}
 }

@@ -116,16 +116,13 @@ type dedupContext struct {
 //     same startsAt and last noted >= stillFiringInterval ago ->
 //     actionStillFiring; otherwise actionSkip. An open match wins over any
 //     closed match because only open beads are passed in here.
-//   - kindQueueGrowth: skip unless the value moved into a new severity
-//     band since the last note (f.State already carries the CURRENT
-//     band; see checkQueueGrowth) [bullet 3, queue-growth half].
 //   - kindBinaryHashMismatch: file only when the hash differs from the
 //     one already on the matched bead — this probe's OWN dedup rule, the
 //     design leaves this kind's rule genuinely undecided [Binding
 //     decisions: hash-mismatch paragraph]. "File" is read here as "write
 //     to bd" in the SAME comment+update sense every other kind uses
 //     (never overwrite the body — Body template's closing sentence
-//     applies across every kind, not just grafana/queue-growth), not as
+//     applies across every kind, not just grafana), not as
 //     a literal second bead sharing the fixed binary-hash-mismatch
 //     fingerprint (matchExisting would have found the first one anyway).
 //
@@ -158,7 +155,7 @@ func decideAction(f finding, existing []connectorIssue, dc dedupContext) (dedupA
 		if dc.now.Sub(dc.state.LastNoted) >= dc.stillFiringInterval {
 			return actionStillFiring, match
 		}
-	case kindQueueGrowth, kindBinaryHashMismatch:
+	case kindBinaryHashMismatch:
 		if match.Metadata[metaState] != f.State {
 			return actionUpdate, match
 		}

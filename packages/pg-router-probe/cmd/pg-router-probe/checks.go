@@ -1,13 +1,20 @@
-// checks.go: the three deterministic health checks run performs, each
+// checks.go: the two deterministic health checks run performs, each
 // independently testable via fixtures [design: "pg-router-probe run
 // checks"]:
 //
 //  1. checkGrafanaAlerts — Grafana currently-firing alerts filtered to the
 //     registered rule UIDs (item 1).
-//  2. checkQueueGrowth — queue/backlog drift vs. a persisted last-run
-//     snapshot (item 2).
-//  3. checkBinaryHash — daemon/handler binary hash sanity: an unexpected
+//  2. checkBinaryHash — daemon/handler binary hash sanity: an unexpected
 //     change with no corresponding deploy record (item 3).
+//
+// The design's item 2, queue/backlog drift against the persisted last-run
+// snapshot, was deleted by operator ruling (pg2-po4nj option A, applied by
+// pg2-7729r): it fired 15 or more times in 2026-10-06..14 and every
+// occurrence self-cleared by the next reading. A backlog that is actually
+// stuck stays covered by the Grafana pg-router-queue-stalled and
+// pg-router-queue-slow-growth rules, which this probe forwards. The probe
+// still reads and persists the backlog (run.go, snapshot.go) but never
+// escalates on it.
 //
 // Every function here is a pure function of its typed inputs: it makes no
 // HTTP call, runs no subprocess, and touches no file — that plumbing
@@ -30,14 +37,13 @@ import (
 	"time"
 )
 
-// findingKind identifies which of the three checks produced a finding —
+// findingKind identifies which of the checks produced a finding —
 // also the wire value each finding's rendered body implicitly carries via
 // its own Kind-specific Summary/Evidence text.
 type findingKind string
 
 const (
 	kindGrafanaAlert       findingKind = "grafana-alert"
-	kindQueueGrowth        findingKind = "queue-growth"
 	kindBinaryHashMismatch findingKind = "binary-hash-mismatch"
 )
 
@@ -46,7 +52,6 @@ const (
 // specific to Kind:
 //   - kindGrafanaAlert: the alert's own current state (e.g. "active"); the
 //     episode identity is StartsAt, not State (dedup.go).
-//   - kindQueueGrowth: the current severity band name.
 //   - kindBinaryHashMismatch: the current binary hash.
 type finding struct {
 	Kind        findingKind
@@ -102,105 +107,6 @@ func checkGrafanaAlerts(alerts []grafanaAlert) []finding {
 		})
 	}
 	return findings
-}
-
-// severityBand classifies a raw queue-depth/backlog reading. Thresholds
-// are this packet's own implementation choice (no design citation: exact
-// severity-band thresholds are explicitly left undecided by the design) —
-// chosen only to be deterministic and fixture-testable, not tuned against
-// real traffic.
-type severityBand string
-
-const (
-	bandNone   severityBand = "none"
-	bandLow    severityBand = "low"
-	bandMedium severityBand = "medium"
-	bandHigh   severityBand = "high"
-)
-
-func classifyBand(value int) severityBand {
-	switch {
-	case value < 10:
-		return bandNone
-	case value < 50:
-		return bandLow
-	case value < 200:
-		return bandMedium
-	default:
-		return bandHigh
-	}
-}
-
-// sweepGrowthTolerancePermille: current may exceed previous by up to 25%
-// (current*1000 <= previous*1250) and still be treated as the SAME routine
-// burst re-sampled. It absorbs jitter in how far into a periodic burst
-// each tick lands (e.g. 71 vs 77) while a backlog that stacks a new burst
-// on a residual one (roughly +100% per tick) clearly exceeds it.
-const sweepGrowthTolerancePermille = 1250
-
-// checkQueueGrowth compares current against the previous snapshot's own
-// reading for one kind ("queue-depth" or "backlog"). It returns nil
-// (no finding) unless the reading looks RUNAWAY or STUCK (pg2-ktbfk,
-// refined by pg2-3gqtw): the previous reading was already in a non-none
-// band AND the current reading is in a non-none band AND either
-//
-//   - it GREW materially: current exceeds previous by more than
-//     sweepGrowthTolerancePermille (25%), or
-//   - it did not decrease while in the high band (current >= previous and
-//     classifyBand(current) == bandHigh) -- a flat, very large backlog is
-//     stuck, not a routine burst.
-//
-// Why a flat, lower-band reading no longer escalates (pg2-3gqtw): a
-// periodic sweep (the pr.reconcile sweep runs every 30 minutes, phase-
-// locked to the probe's own 30-minute tick) enqueues a burst that fully
-// drains between ticks, and the probe samples it a fixed short offset
-// after each burst starts. Every tick therefore records a near-peak
-// reading (e.g. 70-77) with an elevated previous reading, so "elevated
-// and not lower than the last sample" held on roughly half of all routine
-// ticks. Two peak-phase samples cannot distinguish "the same burst again"
-// from "a flat backlog that never drained" -- but a backlog that really
-// does not drain WHILE the sweep keeps enqueueing stacks each new burst on
-// the residual, which shows up as material growth and still escalates on
-// the second tick.
-//
-// Known blind spot: a flat, non-draining backlog of routine-burst size
-// with NO further enqueues is indistinguishable from the routine burst by
-// peak-phase samples alone; the Grafana queue-stalled /
-// queue-depth-growing rules remain the signal for that case.
-//
-// A transient, draining spike (45 -> 33 -> ... -> 0) never escalates, and a
-// jump from the none band is deliberately confirmed by the NEXT tick
-// before it can escalate. No prior baseline also yields nil [design: item
-// 2; Binding decisions' queue-growth-specific "'Nothing new' rule" text
-// governs whether an ALREADY-OPEN bead needs a fresh comment, which is
-// dedup.go's job, not this function's].
-func checkQueueGrowth(kind string, hasPrevious bool, previous, current int) *finding {
-	if !hasPrevious {
-		return nil
-	}
-	if classifyBand(previous) == bandNone {
-		return nil
-	}
-	band := classifyBand(current)
-	if band == bandNone {
-		return nil
-	}
-	grew := current*1000 > previous*sweepGrowthTolerancePermille
-	stuckHigh := current >= previous && band == bandHigh
-	if !grew && !stuckHigh {
-		return nil
-	}
-	verb := "is not draining"
-	if current > previous {
-		verb = "is growing"
-	}
-	return &finding{
-		Kind:        kindQueueGrowth,
-		Fingerprint: queueGrowthFingerprint(kind),
-		Summary:     fmt.Sprintf("%s %s (%d -> %d, %s band)", kind, verb, previous, current, band),
-		Evidence:    fmt.Sprintf("kind=%s\nprevious=%d\ncurrent=%d\nband=%s", kind, previous, current, band),
-		State:       string(band),
-	}
 }
 
 // nixStorePrefix is the immutable store root. A binary resolved into it is

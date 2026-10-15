@@ -45,16 +45,9 @@ func grafanaAlertFingerprint(ruleUID string, labels map[string]string) string {
 	return ruleUID + "|" + strings.Join(parts, ",")
 }
 
-// queueGrowthFingerprint renders "queue-growth:<type>" [design: same
-// paragraph, fourth bullet]. type is "queue-depth" or "backlog" in this
-// probe's own usage (checks.go).
-func queueGrowthFingerprint(kind string) string {
-	return "queue-growth:" + kind
-}
-
 // binaryHashMismatchFingerprint is the fixed-string fingerprint for the
 // daemon/handler binary hash sanity check [design: same paragraph, fourth
-// bullet]. Unlike queue-growth's fingerprint, this one carries no variable
+// bullet]. It carries no variable
 // band/type — every hash-mismatch finding shares this exact string, so a
 // matching existing bead is found purely by fingerprint equality and the
 // dedup decision then turns on comparing the CURRENT hash against the

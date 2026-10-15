@@ -243,8 +243,8 @@ func TestRunProbePartialWhenOneSubcheckFails(t *testing.T) {
 			return nil, errUnreachable
 		},
 	}
-	// Seed a prior snapshot so the queue-growth sub-check has a baseline
-	// to diff against and actually produces a finding.
+	// Seed a prior snapshot so a doubled reading would have been a drift
+	// finding under the deleted check (pg2-7729r): it must stay quiet now.
 	if err := saveSnapshot(opts.snapshotPath, snapshot{QueueDepth: 20, Backlog: 20}); err != nil {
 		t.Fatal(err)
 	}
@@ -252,16 +252,16 @@ func TestRunProbePartialWhenOneSubcheckFails(t *testing.T) {
 	if exitCodeOf(t, err) != 4 {
 		t.Fatalf("expected exit 4 (partial), got err=%v", err)
 	}
-	// binary-hash was never configured either, but the run still
-	// proceeded on the queue-growth sub-check that DID run, and filed a
-	// finding for it.
-	if len(spy.created) != 2 { // queue-depth AND backlog both grew while already elevated
-		t.Fatalf("expected 2 created issues (queue-depth, backlog), got %d: %+v", len(spy.created), spy.created)
+	// binary-hash was never configured either, but the run still proceeded
+	// on the queue/backlog reading that DID run (it counts as a sub-check
+	// that ran, so this is a partial, not a total failure) and records it,
+	// without filing anything for it.
+	if len(spy.created) != 0 {
+		t.Fatalf("a queue-depth/backlog jump must not file an issue, got %d: %+v", len(spy.created), spy.created)
 	}
-	for _, c := range spy.created {
-		if len(c.body) == 0 {
-			t.Fatalf("expected a non-empty body")
-		}
+	snap, _ := loadSnapshot(opts.snapshotPath)
+	if snap.QueueDepth != 60 || snap.Backlog != 60 {
+		t.Fatalf("expected both readings persisted, got %+v", snap)
 	}
 }
 
@@ -271,7 +271,7 @@ type testError struct{ msg string }
 
 func (e *testError) Error() string { return e.msg }
 
-func TestRunProbeBacklogAloneConfiguresDriftCheck(t *testing.T) {
+func TestRunProbeBacklogAloneIsRecordedNotEscalated(t *testing.T) {
 	cmd, _ := testCmd()
 	opts := baseOpts(t)
 	opts.haveBacklog = true
@@ -283,8 +283,8 @@ func TestRunProbeBacklogAloneConfiguresDriftCheck(t *testing.T) {
 	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
 		t.Fatalf("expected exit 0, got %v", err)
 	}
-	if len(spy.created) != 1 || !strings.Contains(spy.created[0].title, "backlog") {
-		t.Fatalf("expected exactly one backlog finding, got %+v", spy.created)
+	if len(spy.created) != 0 {
+		t.Fatalf("a backlog reading must not file an issue, got %+v", spy.created)
 	}
 	snap, _ := loadSnapshot(opts.snapshotPath)
 	if snap.QueueDepth != 5 || snap.Backlog != 60 {
@@ -303,8 +303,8 @@ func TestRunProbeBacklogFromStatus(t *testing.T) {
 	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
 		t.Fatalf("expected exit 0, got %v", err)
 	}
-	if len(spy.created) != 1 {
-		t.Fatalf("expected one backlog finding, got %+v", spy.created)
+	if len(spy.created) != 0 {
+		t.Fatalf("a backlog reading must not file an issue, got %+v", spy.created)
 	}
 	snap, _ := loadSnapshot(opts.snapshotPath)
 	if snap.Backlog != 80 {
@@ -552,30 +552,39 @@ func TestReplayTransientDrainingSweepDoesNotEscalate(t *testing.T) {
 	}
 }
 
-// A stuck backlog must escalate, on the second elevated tick (not the first;
-// see TestCheckQueueGrowthFirstElevatedSampleIsConfirmedNextTick): growing
-// materially, or flat in the high band. (A flat reading at routine-burst size
-// is deliberately NOT here -- see the periodic-sweep replay below.)
-func TestReplayStuckBacklogEscalates(t *testing.T) {
+// The pg-router-probe backlog drift check was deleted (pg2-7729r, operator
+// ruling on pg2-po4nj, option A): the 96 -> 156 and 38 -> 118 jumps that
+// escalated on 2026-10-06..14 all self-cleared by the next reading, so no
+// backlog reading may escalate any more, however it moves. This runs the real
+// runProbe path with a persisted snapshot between ticks (the same path the
+// scheduled role takes). It FAILS against the pre-deletion check, which filed
+// an issue on the second tick of each pair, and on the flat high-band one.
+func TestBacklogJumpDoesNotEscalate(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		first, again int
 	}{
-		{"flat-high", 300, 300},
+		{"96-to-156", 96, 156},
+		{"38-to-118", 38, 118},
 		{"growing", 45, 90},
 		{"residual-plus-new-burst", 75, 150},
+		{"flat-high", 300, 300},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snap := filepath.Join(t.TempDir(), "snapshot.json")
-			t0 := time.Date(2026, 9, 24, 15, 0, 0, 0, time.UTC)
+			t0 := time.Date(2026, 10, 6, 15, 0, 0, 0, time.UTC)
 			if n := probeTick(t, snap, t0, 0); n != 0 {
 				t.Fatalf("baseline tick filed %d issues", n)
 			}
 			if n := probeTick(t, snap, t0.Add(30*time.Minute), tc.first); n != 0 {
-				t.Fatalf("first elevated tick must wait for confirmation, filed %d", n)
+				t.Fatalf("first elevated tick filed %d issues", n)
 			}
-			if n := probeTick(t, snap, t0.Add(60*time.Minute), tc.again); n != 1 {
-				t.Fatalf("non-draining backlog %d -> %d must escalate, filed %d", tc.first, tc.again, n)
+			if n := probeTick(t, snap, t0.Add(60*time.Minute), tc.again); n != 0 {
+				t.Fatalf("backlog %d -> %d must not escalate, filed %d", tc.first, tc.again, n)
+			}
+			// The reading is still recorded: only the escalation is gone.
+			if got, ok := loadSnapshot(snap); !ok || got.Backlog != tc.again {
+				t.Fatalf("persisted snapshot = %+v ok=%v, want backlog %d", got, ok, tc.again)
 			}
 		})
 	}
@@ -600,27 +609,6 @@ func TestReplayPhaseLockedSweepEveryTickDoesNotEscalate(t *testing.T) {
 		got, ok := loadSnapshot(snap)
 		if !ok || got.Backlog != depth {
 			t.Fatalf("tick %d: persisted snapshot = %+v ok=%v, want backlog %d", i, got, ok, depth)
-		}
-	}
-}
-
-// The same cadence, but the backlog stops draining: each new burst stacks on
-// the residual one. Routine ticks stay quiet; the first tick showing the
-// stacked backlog escalates.
-func TestReplayPhaseLockedSweepThatStopsDrainingEscalates(t *testing.T) {
-	snap := filepath.Join(t.TempDir(), "state", "pg-router-probe", "snapshot.json")
-	t0 := time.Date(2026, 10, 2, 12, 3, 0, 0, time.UTC)
-	steps := []struct {
-		depth int
-		want  int
-	}{
-		{0, 0}, {74, 0}, {77, 0}, {72, 0}, // routine
-		{149, 1}, // burst stacked on an undrained residual
-	}
-	for i, s := range steps {
-		at := t0.Add(time.Duration(i) * 30 * time.Minute)
-		if n := probeTick(t, snap, at, s.depth); n != s.want {
-			t.Fatalf("tick %d (depth %d): filed %d issues, want %d", i, s.depth, n, s.want)
 		}
 	}
 }
