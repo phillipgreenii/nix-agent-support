@@ -436,4 +436,4 @@ When you modify the pre-commit hook configuration in `flake.nix` (the `pre-commi
 nix run .#install-pre-commit-hooks
 ```
 
-Run this before committing to ensure the new/changed hooks are active. It builds a freshly rooted bundle generation under `<git-common-dir>/pg-hooks/` and writes nothing into the working tree. `state=stale` means the flake's hook inputs changed since the bundle was built. A rebuild is a nix build, so run it through `bgrun` and check it with `bgcheck`. Reference: `docs/hooks.md` in `phillipg-nix-repo-base`.
+Run this before committing to ensure the new/changed hooks are active. It builds a freshly rooted bundle generation under `<git-common-dir>/pg-hooks/` and writes nothing into the working tree. `state=stale` means the flake's hook inputs changed since the bundle was built. A rebuild is a nix build, so run it through `bgrun` and wait for it with `bgwait NAME --timeout 540` (Bash `timeout: 600000`; never poll with repeated `bgcheck`). Reference: `docs/hooks.md` in `phillipg-nix-repo-base`.

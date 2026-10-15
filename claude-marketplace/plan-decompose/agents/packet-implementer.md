@@ -34,16 +34,18 @@ otherwise.
    names and anything under `Expected additional reads:`; that is planned, not escalation.
 4. **Implement**, then run the packet's Validation commands exactly. A command that fits its
    stated timeout runs in foreground Bash with that timeout. A command that legitimately
-   outlives one turn runs via `run_in_background`, never `Monitor` — `Monitor` delivers a
-   separate notification per output line and cannot block a turn, so it cannot satisfy "wait
-   until this one thing finishes." **You are a dispatched (non-top-level) agent: no
-   task-notification ever resumes THIS invocation when that backgrounded command finishes —
+   outlives one turn is launched with `bgrun NAME -- CMD`, never with `Monitor` — `Monitor`
+   delivers a separate notification per output line and cannot block a turn, so it cannot
+   satisfy "wait until this one thing finishes." **You are a dispatched (non-top-level) agent:
+   no task-notification ever resumes THIS invocation when that backgrounded command finishes —
    that mechanism only resumes the top-level session that dispatched YOU, when its own dispatch
    of you completes.** So stay in this same invocation and keep calling tools until the
-   backgrounded job actually resolves: launch it with `bgrun NAME -- CMD` and wait with
-   `bgwait NAME` (one blocking call, at most 540 seconds; exit 2 means still running, so call
-   it again). Never poll with repeated `bgcheck`, `sleep` or `date` calls (call `bgcheck` at
-   most once between `bgwait` calls): each poll re-sends your whole context. Never end your turn with something like "I'll wait for it to finish" or
+   backgrounded job actually resolves, waiting with `bgwait NAME --timeout 540` and passing
+   that Bash call an explicit `timeout: 600000` (the Bash default of 120000 ms would kill a
+   long wait). It is one blocking call; exit 2 means the job is still running, so call it
+   again. Never call `bgcheck` more than once between `bgwait` calls, and never poll with
+   `sleep`, `date`, `tail` or repeated `bgcheck` calls: each poll re-sends your whole
+   context. Never end your turn with something like "I'll wait for it to finish" or
    "I'll check back once the notification arrives": either phrasing is a permanent no-op, not a
    pause, because this invocation gets no second turn. Only as a genuine last resort — you are
    forced to end your turn for some other reason before the command resolves — does a status

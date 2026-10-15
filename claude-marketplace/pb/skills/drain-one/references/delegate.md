@@ -113,14 +113,17 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
      and a brief MUST NOT tell it otherwise.
    - **waiting on a background job: wait ONCE with `bgwait`, never poll.** A
      command expected to outlive a single call is launched with
-     `bgrun NAME -- CMD` and awaited with `bgwait NAME` (a blocking, read-only
-     call that returns when the job's exit record exists or after at most 540
-     seconds, printing the `DONE exit=N` status line plus the log tail ONCE;
-     exit status 2 means it timed out with the job still running, so call
-     `bgwait NAME` again). The brief MUST tell the subagent: wait with
-     `bgwait`; call `bgcheck` at most once between `bgwait` calls (one peek,
-     never a loop); NEVER poll with `sleep`, `date`, `tail`, `ps` or repeated
-     identical calls. Every poll re-sends the whole context, so a
+     `bgrun NAME -- CMD` and awaited with `bgwait NAME --timeout 540` (a
+     blocking, read-only call that returns when the job's exit record exists or
+     after at most 540 seconds, printing the `DONE exit=N` status line plus the
+     log tail ONCE; exit status 2 means it timed out with the job still
+     running, so call `bgwait` again). The Bash tool call MUST also pass an
+     explicit `timeout: 600000`, because the Bash default of 120000 ms would
+     kill a long wait. The brief MUST tell the subagent: wait with
+     `bgwait NAME --timeout 540` and Bash `timeout: 600000`; never call
+     `bgcheck` more than once between `bgwait` calls (one peek, never a
+     loop); NEVER poll with `sleep`, `date`, `tail`, `ps` or repeated
+     `bgcheck` calls. Every poll re-sends the whole context, so a
      repeat-polling subagent is the single largest avoidable drain cost (one
      bead made 352 identical `bgcheck` calls; polling was about 27% of drain
      spend, bead `pg2-027m0`).
@@ -132,8 +135,9 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
      Monitor notification to arrive."** This rule covers backgrounded shell
      commands; an agent that dispatches Agent children (e.g. the plan-decompose
      decomposer agents) waits for them by ending its turn, and a brief MUST NOT
-     tell it otherwise. A `bgrun` job needs none of this: `bgwait NAME` blocks
-     in the foreground, so use it instead of a `Monitor` until-loop. A dispatched (non-top-level) agent's
+     tell it otherwise. A `bgrun` job needs none of this: `bgwait NAME --timeout 540`
+     (Bash `timeout: 600000`) blocks in the foreground, so use it instead of a
+     `Monitor` until-loop. A dispatched (non-top-level) agent's
      own invocation is a bounded request/response: the moment it stops calling
      tools and returns final text with no Agent children of its own still
      running, that invocation is OVER, permanently — there is no later

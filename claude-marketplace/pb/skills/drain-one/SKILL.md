@@ -36,10 +36,12 @@ state takes the default, which is exactly what /drain-beads does.
   and you MUST NOT end your turn while any subagent or background task is
   outstanding — await it inside the turn (a `Monitor` until-loop, loaded first
   with `ToolSearch select:Monitor`), because a session that ends its turn reads as
-  idle while an async subagent still runs. A `bgrun` job is awaited with `bgwait NAME`
-  (blocking, at most 540 seconds per call; exit 2 means still running, so call it
-  again), never by repeating `bgcheck` or polling with `sleep`/`date`: each poll
-  re-sends the whole context, and polling was about 27% of drain spend.
+  idle while an async subagent still runs. A `bgrun` job is awaited with
+  `bgwait NAME --timeout 540` and an explicit Bash `timeout: 600000` (blocking, at
+  most 540 seconds per call; exit 2 means still running, so call it again). Never
+  call `bgcheck` more than once between `bgwait` calls, and never poll with `sleep`,
+  `date`, `tail` or repeated `bgcheck`: each poll re-sends the whole context, and
+  polling was about 27% of drain spend.
 - **tracker section** (default none): a per-tracker addendum from the caller
   giving the isolation, the work branch, the worktree (`WT`) and the push and
   draft-PR authority. With none: isolate with `pb drain isolate`, `<work-branch>`

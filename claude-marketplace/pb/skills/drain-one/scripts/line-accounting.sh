@@ -69,6 +69,32 @@ cat >"$tmp/allow.txt" <<'EOF'
 1079 Rule split: the "ScheduleWakeup / --monitor-if-empty" sentence stays in the command, the rest moves to references/rules.md.
 1166 Rule on a pinned session: adds the release policy park clause.
 1185 Landing rule: adds the tracker-section clause (authority comes only from it).
+61 Later edit (J-1): the client-side filter walks the result array under either bd --json envelope, not only `.data[]`.
+92 Later edit: the never-exit-on-error line gains the persistent-condition exception (pending schema migrations).
+104 Later edit: unpushed-landing-debt wording shortened; the debt is never reported and never earns a line.
+105 Later edit: same unpushed-landing-debt rewording as old line 104.
+254 Later edit (J-1): the client-side filter is envelope-agnostic.
+306 Later edit (J-1): the children-existence probe tests the unwrapped result array, not only `.data`.
+368 Later edit (J-1): the empty-children test is envelope-agnostic.
+391 Later edit (J-1): the epic drill-down filter is envelope-agnostic.
+469 Later edit (J-1): the pd_curated_rev read unwraps either envelope before indexing.
+509 Later edit (J-1): the stamp-refusal metadata read unwraps either envelope before indexing.
+519 Later edit: the stamp-refusal rationale cites the plan-decompose reconcile reference by its file path.
+520 Later edit: same stamp-refusal rewrap as old line 519.
+535 Later edit: the reconcile-owed docket comment cites references/reconcile.md.
+536 Later edit: same reconcile-owed rewrap as old line 535.
+570 Waiting guidance rewritten (pg2-027m0, pg2-rweyq): the subagent report-fully-in-one-turn bullet now says how to wait on a bgrun job.
+571 Waiting guidance rewritten (pg2-027m0, pg2-rweyq): a bgrun job is awaited with bgwait; other backgrounded commands use a Monitor until-loop.
+575 Waiting guidance rewritten (pg2-027m0, pg2-rweyq): line re-wrapped after the bgwait edit.
+577 Waiting guidance rewritten (pg2-027m0, pg2-rweyq): line re-wrapped after the bgwait edit.
+578 Waiting guidance rewritten (pg2-027m0, pg2-rweyq): line re-wrapped after the bgwait edit.
+676 Stall-phrase check: states that it covers backgrounded shell commands, not Agent children.
+810 Lander brief waiting guidance rewritten (pg2-027m0, pg2-rweyq): a bgrun job is awaited with bgwait --timeout 540.
+932 The verify-child title gains the implementation bead id; the command text moved to references/post-deploy-gate.md.
+1077 Rule split: the ScheduleWakeup rule keeps only the orchestrator-versus-subagent distinction, now in references/rules.md.
+1078 Rule split: a subagent blocks on a bgrun job with bgwait (pg2-027m0, pg2-rweyq), other work via Monitor.
+1198 Landing-debt rule: reworded so the debt is never reported (operator ruling on unpushed commits).
+1199 Landing-debt rule: same rewording as old line 1198.
 EOF
 
 : >"$tmp/missing.txt"

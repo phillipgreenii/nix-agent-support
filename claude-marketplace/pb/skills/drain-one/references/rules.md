@@ -17,8 +17,9 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   notification-resumes-you mechanism covers an agent waiting on its own Agent-tool dispatch, which
   for the implementation and lander subagents you dispatch means YOU, the top-level orchestrator;
   a subagent gets no such notification for its own backgrounded Bash/Monitor work and MUST block
-  on that itself in the same turn: a `bgrun` job via ONE blocking `bgwait NAME` call (repeat it
-  while it exits 2; never loop on `bgcheck`, `sleep` or `date`), anything else via `Monitor`
+  on that itself in the same turn: a `bgrun` job via ONE blocking `bgwait NAME --timeout 540` call with Bash
+  `timeout: 600000` (repeat it while it exits 2; never call `bgcheck` more than once between
+  `bgwait` calls, and never poll with `sleep`, `date`, `tail` or repeated `bgcheck`), anything else via `Monitor`
   (see step 4's worked example). A subagent that
   dispatches Agent children of its own (e.g. the plan-decompose decomposer agents) is the
   exception: it waits for them by ending its turn, and each child's hand-back resumes it.

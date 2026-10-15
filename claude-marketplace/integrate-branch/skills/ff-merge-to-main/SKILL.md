@@ -463,7 +463,8 @@ When the landed diff (`$OLD_PRIMARY..HEAD`) touches a stamp input —
 `flake.lock`, `flake.nix`, or a `stampPaths` entry of the clone's current
 bundle — and the clone has a bundle, this starts the one-line command in
 `<CC>`'s `.git/pg-hooks/reinstall` in the background through `bgrun` (job
-`pg-hooks-refresh-<repo>`; check it with `bgcheck`). It prints exactly one
+`pg-hooks-refresh-<repo>`; wait for it with `bgwait pg-hooks-refresh-<repo> --timeout 540` and Bash
+`timeout: 600000`, or peek once with `bgcheck`). It prints exactly one
 `FF-4: bundle refresh ...` line and **always exits 0**: a refresh that is
 skipped (no bundle), not needed, cannot start (no `bgrun`, no `nix`, a job
 already running) or later fails is **reported in the outcome report, never a
