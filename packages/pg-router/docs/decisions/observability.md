@@ -520,6 +520,45 @@ or when consumption stays far below generation.
   each usage-limit or at-capacity window that declines its offers; the verification found the rule not
   noisy (one Alerting episode, none for `escalated.pg2`). If that proves unwanted, the lever is to count
   at-capacity declines as activity, which needs a new operator ruling.
+- **A lane whose queue empties between a decline and the re-emit is not covered (documented limit, found
+  2026-10-15, bead `pg2-u90ax`).** The "above 0 on every scrape" test is a presence test: the depth gauge
+  observes only the types in the queue at scrape time, so a drained type has no series and "every scrape"
+  means 18 of the window's 20. A born-expired type (`drain.pg2`) under a decline storm does not hold that:
+  the first decline retires the event unaccepted and the source re-emits it on its next tick, so the
+  queue holds 0 events of the type between the two. The usage-limit storm of 2026-10-14 (22:11Z to
+  23:29:50Z, no `drain-pg2` dispatch running from 22:24Z) left `drain.pg2` at 1 or 2 events whenever it
+  was present, and absent on 88 of the 201 scrapes from 22:00Z to 23:40Z (113 samples present, 201 - 113
+  = 88). Prometheus read `count_over_time(pg_router_queue_depth{type="drain.pg2"}[10m])` as 9 at 22:30Z,
+  5 at 23:00Z and 7 at 23:30Z, never the 18 the rule needs, so the lane held a standing backlog of
+  beads from 22:16Z to 23:30Z (74 minutes) and `pg-router-queue-stalled` never went Pending for it, while
+  `review.ready`, whose queue stayed non-empty, paged (Pending 22:31Z, Alerting 22:36Z). **The gaps are
+  not lost samples.** `up` and `pg_router_listener_in_flight{role="drain-pg2"}` have 20 of 20 scrapes in
+  each of those windows, `scrape_samples_scraped` is present on all 201 steps, and the 5 minute hole of
+  22:52:22Z to 22:57:22Z sits between `up == 1` samples every 30 seconds: the series is absent because
+  the scrape succeeded and the queue held none. The same storm re-emitted about 17 events per 10 minutes
+  (`increase(enqueued_total[10m])` 16.8 to 18.9 and `increase(unconsumed_expired_total[10m])` 15.8 to 17.9 at
+  22:30Z to 23:30Z). The `exporter export timeout` lines in the daemon log belong to the OTLP push path of
+  traces and logs; the metrics are pulled (`cmd/pg-router/metrics_http.go`), so they do not touch this
+  series. The same empty queue explains why `review.ready` paged 22 minutes 52 seconds after its last
+  dispatch and not after about 10: its queue held no event from 22:09:30Z to 22:21:30Z (12 minutes), and
+  the 18 scrapes were not complete until 22:30:30Z. **Chosen over** lowering the 18, because replaying
+  the rule over the 7 days from 2026-10-08 (Prometheus `query_range`, 60 second steps, episodes of 5
+  minutes or more) finds no setting that catches the storm without adding pages that are not this case.
+  At 12 of 20 the storm's `drain.pg2` condition never holds for 5 minutes, at 10 it does so twice and
+  only just (5 minutes each), at 9 it holds 5, 12 and 13 minutes and at 8 it holds 31 and 19 minutes;
+  but at 9 or 8 the week gains 44 to 47 episodes of `issue.changed` (46 and 49 against 2 today) and
+  several of `pr.changed` and `pr.reconcile`, and at 6 the whole set of types pages together at
+  2026-10-13 23:37Z to 23:44Z, which is the sleep and restart grace the 18 provides (the grace of
+  `pg2-9uvm5`). Requiring the in-flight series on 18 of 20 separately, which keeps that grace, does not
+  remove the `issue.changed` additions (the 9 and 8 figures include it). An exporter that emits an
+  explicit 0 would not help: 0 is the true depth between the retire and the re-emit. **Not changed:**
+  the expression. The signal that does read this shape is the decline itself
+  (`pg_router_failures_total{class="declined"}`, carried per `role` and `reason`, 51 to 61 per 10 minutes
+  from 22:40Z to 23:30Z with nothing processed), which would count a lane that keeps offering and declining its
+  events as a backlog. That redefines "queue > 0" for born-expired types, has to separate the benign
+  `skipped-*` reasons from `at-capacity`, and needs its own operator ruling and replay: a separate
+  bead, not a tweak to the continuity term. Until then a standing drain backlog whose queue keeps
+  emptying between declines is not seen by this rule.
 - **Slow growth (`pg-router-queue-slow-growth`).** A type pages when its arrivals,
   `increase(enqueued_total[6h]) - increase(unconsumed_expired_total[6h])` (see "Re-emitted events" below),
   are above 1.5 times `increase(throughput_total[6h])` (or there are arrivals and no completions series), at
@@ -604,4 +643,5 @@ fewer from 21:15Z, inside the counters' first 6 hours, so a cross-check and not 
 `grafana/alerting/rule-tests/` runs the same expressions under `promtool`.
 
 **Not covered, by the ruling.** A wedged session that still counts as in flight (the ccpool session rules,
-`pool-full-idle` and `needs_input`, own it); a type missing from the rule's role table.
+`pool-full-idle` and `needs_input`, own it); a type missing from the rule's role table; a born-expired
+lane whose queue empties between a decline and the re-emit (the "A lane whose queue empties" bullet above).
