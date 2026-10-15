@@ -115,14 +115,17 @@ func queryCoverageCheck(reg *Registry, backend string) (applicable bool, gaps []
 // DECISION (2026-09-18, bead pg2-rnnfz), is informational-only and does
 // not contribute to this verdict — see configValidateOne's own doc
 // comment.
+//
+// A backend that offers the optional status op also gets a health row
+// directly after its own (backend_status.go); any other backend is unchanged.
 func FanOutConfigValidate(ctx context.Context, reg *Registry, backends []string) FanOutOutcome {
 	// Sources starts as a non-nil empty slice so a zero-backend
 	// (misconfigured host) result still marshals its sources[] field as
 	// [] rather than null [bug A15].
 	out := FanOutOutcome{Sources: make([]SourceResult, 0, len(backends))}
-	out.Sources = append(out.Sources, sourceRows(backends, fanOutEach(ctx, reg, backends, func(ctx context.Context, b string) SourceResult {
+	out.Sources = append(out.Sources, withHealthRows(ctx, reg, backends, func(ctx context.Context, b string) SourceResult {
 		return configValidateOne(ctx, reg, b)
-	}))...)
+	})...)
 	return out
 }
 

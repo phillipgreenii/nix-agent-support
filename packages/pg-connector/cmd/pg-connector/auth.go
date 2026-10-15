@@ -25,11 +25,13 @@ import (
 // marshals its sources[] field as [] rather than null [bug A15] — a
 // nil slice would make `jq '.sources[]'` exit 5 on exactly the host
 // that's misconfigured.
+// A backend that offers the optional status op also gets a health row
+// directly after its own (backend_status.go); any other backend is unchanged.
 func FanOutAuthStatus(ctx context.Context, reg *Registry, backends []string) FanOutOutcome {
 	out := FanOutOutcome{Sources: make([]SourceResult, 0, len(backends))}
-	out.Sources = append(out.Sources, sourceRows(backends, fanOutEach(ctx, reg, backends, func(ctx context.Context, b string) SourceResult {
+	out.Sources = append(out.Sources, withHealthRows(ctx, reg, backends, func(ctx context.Context, b string) SourceResult {
 		return authStatusOne(ctx, reg, b)
-	}))...)
+	})...)
 	return out
 }
 
