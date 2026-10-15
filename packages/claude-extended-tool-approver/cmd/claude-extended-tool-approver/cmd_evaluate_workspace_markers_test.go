@@ -2,8 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/claudecodeadapter"
@@ -14,60 +13,13 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
-// TestCorpusRowCWD_WorkspaceMarkers pins how `evaluate --corpus` handles a row
-// whose verdict depends on the working directory being a trusted exec location
-// (effectpolicy.TrustedCheckoutExec): a row naming workspace_markers gets a
-// real, throwaway directory carrying those marker files in place of its
-// synthetic cwd, and a row without them keeps the synthetic cwd untouched.
-func TestCorpusRowCWD_WorkspaceMarkers(t *testing.T) {
-	plain := goldencorpus.PathStateFixture{CWD: "/repo", ProjectRoot: "/repo"}
-	cwd, root, cleanup, err := corpusRowCWD(plain)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cleanup()
-	if cwd != "/repo" || root != "/repo" {
-		t.Errorf("no markers: got cwd=%q root=%q, want the synthetic /repo untouched", cwd, root)
-	}
-
-	marked := goldencorpus.PathStateFixture{CWD: "/repo", ProjectRoot: "/repo", WorkspaceMarkers: []string{"pn-workspace.toml"}}
-	cwd, root, cleanup, err = corpusRowCWD(marked)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cwd != root {
-		t.Errorf("cwd %q and project root %q must agree", cwd, root)
-	}
-	info, statErr := os.Stat(cwd)
-	if statErr != nil || !info.IsDir() {
-		t.Fatalf("materialized cwd %q is not a directory: %v", cwd, statErr)
-	}
-	// The marker sits ABOVE the cwd (a workforest set directory), not in it.
-	if _, err := os.Stat(filepath.Join(cwd, "pn-workspace.toml")); err == nil {
-		t.Errorf("marker is in the cwd itself; it must sit above it, like a real workforest set")
-	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(cwd)), "pn-workspace.toml")); err != nil {
-		t.Errorf("marker file missing above the cwd: %v", err)
-	}
-	cleanup()
-	if _, err := os.Stat(cwd); !os.IsNotExist(err) {
-		t.Errorf("cleanup left %q behind", cwd)
-	}
-
-	for _, bad := range []string{"", "../escape", "a/b", "/abs"} {
-		if _, _, _, err := corpusRowCWD(goldencorpus.PathStateFixture{CWD: "/repo", WorkspaceMarkers: []string{bad}}); err == nil {
-			t.Errorf("marker name %q: want a refusal, got nil", bad)
-		}
-	}
-}
-
-// TestCorpusRowCWD_MarkerDecidesExecVerdict is the end-to-end pin: the same
+// TestMaterialize_MarkerDecidesExecVerdict is the end-to-end pin: the same
 // pn/go/pnwf commands approve from the materialized marker directory and
 // abstain from the synthetic cwd (no marker), through the real engine.
-func TestCorpusRowCWD_MarkerDecidesExecVerdict(t *testing.T) {
+func TestMaterialize_MarkerDecidesExecVerdict(t *testing.T) {
 	eval := func(t *testing.T, fx goldencorpus.PathStateFixture, command string) evalcontract.Decision {
 		t.Helper()
-		cwd, root, cleanup, err := corpusRowCWD(fx)
+		cwd, root, cleanup, err := fx.Materialize()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,5 +44,60 @@ func TestCorpusRowCWD_MarkerDecidesExecVerdict(t *testing.T) {
 		if got := eval(t, unmarked, c); got != evalcontract.Abstain {
 			t.Errorf("%q with no marker: got %s, want abstain", c, got)
 		}
+	}
+}
+
+// TestLegacyCorpusMarkerRowsGradeCorrect grades the CHECKED-IN generated
+// corpus_legacy.json (pg2-82oo9): every pnwf/pn row the legacy oracle expects
+// to approve carries workspace_markers, replays from a real marker directory,
+// and approves, and no such row the oracle does not approve does. A stale
+// regeneration (rows back on the synthetic /repo cwd) fails here.
+func TestLegacyCorpusMarkerRowsGradeCorrect(t *testing.T) {
+	rows, err := loadCorpusRows([]string{"../../internal/goldencorpus/testdata/corpus_legacy.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, policies, graphPolicies := cmddesc.DefaultRegistry(), effectpolicy.DefaultPolicies(), effectpolicy.DefaultGraphPolicies()
+	marked, approving := 0, 0
+	for _, row := range rows {
+		cmd, _ := row.ToolInput.ToolInput["command"].(string)
+		first, _, _ := strings.Cut(strings.TrimSpace(cmd), " ")
+		if row.ToolInput.ToolName != "Bash" || (first != "pn" && first != "pnwf") {
+			continue
+		}
+		if len(row.CWDPathState.WorkspaceMarkers) == 0 {
+			t.Errorf("case %q: pn/pnwf row without workspace_markers (regenerate with cmd/legacyextract)", row.Case)
+			continue
+		}
+		marked++
+		cwd, root, cleanup, err := row.CWDPathState.Materialize()
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(hookio.BashToolInput{Command: cmd})
+		if err != nil {
+			cleanup()
+			t.Fatal(err)
+		}
+		resp, err := claudecodeadapter.Evaluate(&hookio.HookInput{CWD: cwd, ToolName: "Bash", ToolInput: raw},
+			claudecodeadapter.RequestConfig{ProjectRoot: root}, reg, policies, graphPolicies)
+		cleanup()
+		if err != nil {
+			t.Fatalf("case %q: %v", row.Case, err)
+		}
+		if row.ExpectedVerdict == goldencorpus.Approve {
+			approving++
+			if resp.Decision != evalcontract.Approve {
+				t.Errorf("case %q (%q): legacy oracle approves, got %s: %s", row.Case, cmd, resp.Decision, resp.Reason)
+			}
+		} else if resp.Decision == evalcontract.Approve && !strings.Contains(cmd, "land-plan") {
+			// land-plan is the one pre-existing, marker-independent
+			// legacy-vs-new disagreement (old not-approve, new approve) in
+			// the buildtools family; see the disposition report.
+			t.Errorf("case %q (%q): legacy %s, got approve", row.Case, cmd, row.ExpectedVerdict)
+		}
+	}
+	if marked == 0 || approving < 5 {
+		t.Fatalf("marked=%d approving=%d; the guard would be vacuous", marked, approving)
 	}
 }

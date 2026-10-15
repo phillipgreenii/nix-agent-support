@@ -1494,6 +1494,24 @@
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/dangerouscmds/dangerouscmds_test.go:TestMountOperandGate (legacy RuleChain-era table test)."
   },
   {
+    "case": "legacy_attended_skill_md_shape",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --attended --session-id \"f4277a73-7f61-46e3-aad7-283884ee5324\" --title \"finish pg-router retry\" --body-file \"/tmp/body.md\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
+  },
+  {
     "case": "legacy_auto_bare_push_on_primary_now_asks_not_hard_denied_not_trusted_either",
     "tags": ["legacy", "legacy-primarypush"],
     "tool_input": {
@@ -2232,6 +2250,24 @@
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/engine/engine_integration_test.go:TestIntegration_RegressionSuite (legacy RuleChain-era table test)."
   },
   {
+    "case": "legacy_bd_dir_outside_any_readable_zone",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --unattended --session-id abc --title t --body-file /tmp/b.md --bd-dir /etc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
+  },
+  {
     "case": "legacy_benign_export_approvable",
     "tags": ["legacy", "legacy-engine"],
     "tool_input": {
@@ -2356,6 +2392,60 @@
     "rules_config": {},
     "expected_verdict": "reject",
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/dangerouscmds/dangerouscmds_test.go:TestMountOperandGate (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_body_file_dynamically_expanded",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --attended --session-id abc --title t --body-file \"$BODY\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_body_file_is_a_credential_store",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --attended --session-id abc --title t --body-file ~/.ssh/id_rsa"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_body_file_outside_any_readable_zone",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --attended --session-id abc --title t --body-file /etc/shadow"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
   },
   {
     "case": "legacy_body_flag_implies_post_and_asks",
@@ -7596,6 +7686,24 @@
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/engine/verdict_provenance_test.go:TestADR0044_EnvValueAskCohortIsSplitByProvenance (legacy RuleChain-era table test)."
   },
   {
+    "case": "legacy_explicit_actor_and_bd_dir_inside_the_project",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --unattended --session-id abc --title t --body-file /tmp/b.md --actor abc-wrapup --bd-dir /home/user/project"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
+  },
+  {
     "case": "legacy_explicit_http_scheme_to_127_0_0_1",
     "tags": ["legacy", "legacy-ssh"],
     "tool_input": {
@@ -8208,6 +8316,24 @@
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/ssh/ssh_test.go:TestSSH_DangerousInlineFlags (legacy RuleChain-era table test)."
   },
   {
+    "case": "legacy_flag_missing_its_value",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --attended --session-id abc --title"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
+  },
+  {
     "case": "legacy_flags_after_run_id",
     "tags": ["legacy", "legacy-gh"],
     "tool_input": {
@@ -8584,6 +8710,24 @@
     "rules_config": {},
     "expected_verdict": "approve",
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/gh/gh_test.go:TestGH_RunRerun (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_glued_flag_value_spelling_is_outside_the_surface",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --attended --session-id=abc --title t --body-file /tmp/b.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
   },
   {
     "case": "legacy_glued_upload_to_allowed_read_domain_abstains",
@@ -9178,6 +9322,24 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/dangerouscmds/dangerouscmds_test.go:TestMountOperandGate (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_help_1",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
   },
   {
     "case": "legacy_heredoc_into_cat_as_a_command_argument_now_approves_pg2_u65fu",
@@ -13806,6 +13968,330 @@
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgGoMutate_Approve (legacy RuleChain-era table test)."
   },
   {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row0",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row1",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks status"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row10",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks run pre-land origin/main"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row11",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks run pre-push -- --verbose"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row12",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks fix"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row13",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pre-commit-fix"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row2",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks status --porcelain"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row3",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks list"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row4",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks explain pre-commit"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row5",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks explain pre-land"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row6",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks run pre-commit"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row7",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks run pre-commit --all-files"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row8",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks run pre-commit a.nix b.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_Approve_row9",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks run pre-land"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_NeighborsStillAbstain_row0",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks-install"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_NeighborsStillAbstain (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_NeighborsStillAbstain_row1",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hooks-run pre-commit"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_NeighborsStillAbstain (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_NeighborsStillAbstain_row2",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-hook status"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_NeighborsStillAbstain (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PgHooks_NeighborsStillAbstain_row3",
+    "tags": ["legacy", "legacy-buildtools"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pre-commit-fix-all"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_PgHooks_NeighborsStillAbstain (legacy RuleChain-era table test)."
+  },
+  {
     "case": "legacy_internal_rules_buildtools_buildtools_test_TestBuildtools_PnwfVerbScoped_ApprovedVerbs_row0",
     "tags": ["legacy", "legacy-buildtools"],
     "tool_input": {
@@ -13815,7 +14301,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -13869,7 +14356,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -13905,7 +14393,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -13923,7 +14412,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -13941,7 +14431,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -13959,7 +14450,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -25692,6 +26184,402 @@
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/askpass_test.go:TestGit_AskPass_ReadsAndNeighboursAreUntouched (legacy RuleChain-era table test)."
   },
   {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_OtherShapes_Unchanged_row0",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config user.email"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_OtherShapes_Unchanged (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_OtherShapes_Unchanged_row1",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --get user.email"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_OtherShapes_Unchanged (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_OtherShapes_Unchanged_row10",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config branch.main.remote origin"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_OtherShapes_Unchanged (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_OtherShapes_Unchanged_row2",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --unset user.email"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_OtherShapes_Unchanged (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_OtherShapes_Unchanged_row3",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --unset-all user.name"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_OtherShapes_Unchanged (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_OtherShapes_Unchanged_row4",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config unset user.email"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_OtherShapes_Unchanged (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_OtherShapes_Unchanged_row5",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --global user.email x@y.z"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_OtherShapes_Unchanged (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_OtherShapes_Unchanged_row6",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --system user.email x@y.z"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_OtherShapes_Unchanged (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_OtherShapes_Unchanged_row7",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --file /tmp/x.cfg user.email x@y.z"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_OtherShapes_Unchanged (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_OtherShapes_Unchanged_row8",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config -f /tmp/x.cfg user.name x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_OtherShapes_Unchanged (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_OtherShapes_Unchanged_row9",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config commit.gpgsign false"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_OtherShapes_Unchanged (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_RealRepo_Rejected_row0",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config user.email agent@example.invalid"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_RealRepo_Rejected (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_RealRepo_Rejected_row1",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config user.name agent"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_RealRepo_Rejected (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_RealRepo_Rejected_row10",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd /tmp/fixture \u0026\u0026 git config user.email agent@example.invalid"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_RealRepo_Rejected (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_RealRepo_Rejected_row11",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd /tmp/fixture; git config user.name agent"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_RealRepo_Rejected (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_RealRepo_Rejected_row2",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --local user.email x@y.z"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_RealRepo_Rejected (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_RealRepo_Rejected_row3",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --worktree user.name x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_RealRepo_Rejected (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_RealRepo_Rejected_row4",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config set user.email x@y.z"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_RealRepo_Rejected (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_RealRepo_Rejected_row5",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config USER.Email x@y.z"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_RealRepo_Rejected (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_RealRepo_Rejected_row6",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --replace-all user.email x@y.z"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_RealRepo_Rejected (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_RealRepo_Rejected_row7",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config protocol.ext.allow always"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_RealRepo_Rejected (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_config_shared_write_test_TestConfigSharedWrite_RealRepo_Rejected_row8",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --local protocol.file.allow always"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/config_shared_write_test.go:TestConfigSharedWrite_RealRepo_Rejected (legacy RuleChain-era table test)."
+  },
+  {
     "case": "legacy_internal_rules_git_configenv_test_TestGit_ConfigEnvInjection_DoesNotOverreach_row0",
     "tags": ["legacy", "legacy-git"],
     "tool_input": {
@@ -29603,7 +30491,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git config user.email a@b.c"
+        "command": "git config --global user.email a@b.c"
       }
     },
     "cwd_path_state": {
@@ -29621,7 +30509,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git config user.name Someone"
+        "command": "git config commit.gpgsign true"
       }
     },
     "cwd_path_state": {
@@ -29639,7 +30527,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git config alias.st status"
+        "command": "git config set commit.gpgsign true"
       }
     },
     "cwd_path_state": {
@@ -29653,42 +30541,6 @@
   },
   {
     "case": "legacy_internal_rules_git_git_test_TestGit_ConfigOrdinaryWrite_Approve_row11",
-    "tags": ["legacy", "legacy-git"],
-    "tool_input": {
-      "tool_name": "Bash",
-      "tool_input": {
-        "command": "git config --unset user.email"
-      }
-    },
-    "cwd_path_state": {
-      "cwd": "/repo"
-    },
-    "mode": "default",
-    "settings": {},
-    "rules_config": {},
-    "expected_verdict": "approve",
-    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/git_test.go:TestGit_ConfigOrdinaryWrite_Approve (legacy RuleChain-era table test)."
-  },
-  {
-    "case": "legacy_internal_rules_git_git_test_TestGit_ConfigOrdinaryWrite_Approve_row12",
-    "tags": ["legacy", "legacy-git"],
-    "tool_input": {
-      "tool_name": "Bash",
-      "tool_input": {
-        "command": "git config set user.email a@b.c"
-      }
-    },
-    "cwd_path_state": {
-      "cwd": "/repo"
-    },
-    "mode": "default",
-    "settings": {},
-    "rules_config": {},
-    "expected_verdict": "approve",
-    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/git_test.go:TestGit_ConfigOrdinaryWrite_Approve (legacy RuleChain-era table test)."
-  },
-  {
-    "case": "legacy_internal_rules_git_git_test_TestGit_ConfigOrdinaryWrite_Approve_row13",
     "tags": ["legacy", "legacy-git"],
     "tool_input": {
       "tool_name": "Bash",
@@ -29711,7 +30563,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git config --global user.email a@b.c"
+        "command": "git config branch.main.remote origin"
       }
     },
     "cwd_path_state": {
@@ -29729,7 +30581,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git config commit.gpgsign true"
+        "command": "git config branch.main.merge refs/heads/main"
       }
     },
     "cwd_path_state": {
@@ -29747,7 +30599,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git config branch.main.remote origin"
+        "command": "git config push.default simple"
       }
     },
     "cwd_path_state": {
@@ -29765,7 +30617,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git config branch.main.merge refs/heads/main"
+        "command": "git config pull.rebase true"
       }
     },
     "cwd_path_state": {
@@ -29783,7 +30635,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git config push.default simple"
+        "command": "git config core.autocrlf false"
       }
     },
     "cwd_path_state": {
@@ -29801,7 +30653,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git config pull.rebase true"
+        "command": "git config init.defaultBranch main"
       }
     },
     "cwd_path_state": {
@@ -29819,7 +30671,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git config core.autocrlf false"
+        "command": "git config alias.st status"
       }
     },
     "cwd_path_state": {
@@ -29837,7 +30689,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git config init.defaultBranch main"
+        "command": "git config --unset user.email"
       }
     },
     "cwd_path_state": {
@@ -30251,7 +31103,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "GIT_DIR=/other git config user.email a@b.c"
+        "command": "GIT_DIR=/other git config commit.gpgsign true"
       }
     },
     "cwd_path_state": {
@@ -30269,7 +31121,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "GIT_WORK_TREE=/other git config user.email a@b.c"
+        "command": "GIT_WORK_TREE=/other git config commit.gpgsign true"
       }
     },
     "cwd_path_state": {
@@ -30287,7 +31139,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "GIT_DIR=/other git config core.hooksPath /tmp/h"
+        "command": "GIT_DIR=/other git config user.email a@b.c"
       }
     },
     "cwd_path_state": {
@@ -30301,6 +31153,24 @@
   },
   {
     "case": "legacy_internal_rules_git_git_test_TestGit_ConfigRedirectedContext_row4",
+    "tags": ["legacy", "legacy-git"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "GIT_DIR=/other git config core.hooksPath /tmp/h"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/git/git_test.go:TestGit_ConfigRedirectedContext (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_git_git_test_TestGit_ConfigRedirectedContext_row5",
     "tags": ["legacy", "legacy-git"],
     "tool_input": {
       "tool_name": "Bash",
@@ -38308,6 +39178,618 @@
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pathsafety/pathsafety_test.go:TestPathSafety_WriteAgentConfig_NonAbsoluteForms_Abstain (legacy RuleChain-era table test)."
   },
   {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_BackendFlag_StillApprove_row0",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue show pg2-itxtv --backend pg-connector-issue-beads-x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_BackendFlag_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_BackendFlag_StillApprove_row1",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue comment pg2-itxtv --backend pg-connector-issue-beads-x --body hi"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_BackendFlag_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_BackendFlag_StillApprove_row2",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue update pg2-itxtv --backend pg-connector-issue-beads-x --add-label human"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_BackendFlag_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_BackendFlag_StillApprove_row3",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue close pg2-itxtv --backend pg-connector-issue-beads-x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_BackendFlag_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_BackendFlag_StillApprove_row4",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue close pg2-itxtv --backend=pg-connector-issue-beads-x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_BackendFlag_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_BackendFlag_StillApprove_row5",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue close --backend pg-connector-issue-beads-x pg2-itxtv"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_BackendFlag_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_BackendFlag_StillApprove_row6",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue --backend pg-connector-issue-beads-x close pg2-itxtv"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_BackendFlag_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_EnvVarPrefix_StillApprove_row0",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/Users/phillipg/phillipg_mbp pg-connector issue show pg2-itxtv"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_EnvVarPrefix_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_EnvVarPrefix_StillApprove_row1",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/Users/phillipg/phillipg_mbp pg-connector issue comment pg2-itxtv --body hi"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_EnvVarPrefix_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_EnvVarPrefix_StillApprove_row2",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/Users/phillipg/phillipg_mbp pg-connector issue update pg2-itxtv --add-label human"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_EnvVarPrefix_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_EnvVarPrefix_StillApprove_row3",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/Users/phillipg/phillipg_mbp pg-connector issue close pg2-itxtv"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_EnvVarPrefix_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_IssueGrantedVerbs_Approve_row0",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue show pg2-itxtv"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_IssueGrantedVerbs_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_IssueGrantedVerbs_Approve_row1",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue show pg2-itxtv --backend pg-connector-issue-beads"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_IssueGrantedVerbs_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_IssueGrantedVerbs_Approve_row2",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue show pg2-itxtv --fresh"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_IssueGrantedVerbs_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_IssueGrantedVerbs_Approve_row3",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue show --fresh pg2-itxtv"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_IssueGrantedVerbs_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_IssueGrantedVerbs_Approve_row4",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue comment pg2-itxtv --body hi"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_IssueGrantedVerbs_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_IssueGrantedVerbs_Approve_row5",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue update pg2-itxtv --add-label human"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_IssueGrantedVerbs_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_IssueGrantedVerbs_Approve_row6",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue close pg2-itxtv"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_IssueGrantedVerbs_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_OtherResourcesAndBinaries_Unclaimed_row0",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector pr files"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_OtherResourcesAndBinaries_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_OtherResourcesAndBinaries_Unclaimed_row1",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector ci runs"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_OtherResourcesAndBinaries_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_OtherResourcesAndBinaries_Unclaimed_row2",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector scm worktree add"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_OtherResourcesAndBinaries_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_OtherResourcesAndBinaries_Unclaimed_row3",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector config show"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_OtherResourcesAndBinaries_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_OtherResourcesAndBinaries_Unclaimed_row4",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_OtherResourcesAndBinaries_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_OtherResourcesAndBinaries_Unclaimed_row5",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_OtherResourcesAndBinaries_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_OtherResourcesAndBinaries_Unclaimed_row6",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool list"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_OtherResourcesAndBinaries_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_OtherResourcesAndBinaries_Unclaimed_row7",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool state pg-router-pg2-escalation-triager-pg2-itxtv-20260929T061947.457718000"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_OtherResourcesAndBinaries_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_OtherResourcesAndBinaries_Unclaimed_row8",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-router run-role escalation-triager"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_OtherResourcesAndBinaries_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_OutputFlagBeforeResource_StillApprove_row0",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector --output json issue show pg2-itxtv"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_OutputFlagBeforeResource_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_OutputFlagBeforeResource_StillApprove_row1",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector --output=json issue show pg2-itxtv"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_OutputFlagBeforeResource_StillApprove (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_UngrantedIssueVerbs_Unclaimed_row0",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue create --title x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_UngrantedIssueVerbs_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_UngrantedIssueVerbs_Unclaimed_row1",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue list"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_UngrantedIssueVerbs_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_UngrantedIssueVerbs_Unclaimed_row2",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue transition pg2-itxtv --state done"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_UngrantedIssueVerbs_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_UngrantedIssueVerbs_Unclaimed_row3",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue deps pg2-itxtv"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_UngrantedIssueVerbs_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_pgconnector_pgconnector_test_TestPgConnector_UngrantedIssueVerbs_Unclaimed_row4",
+    "tags": ["legacy", "legacy-pgconnector"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue changes escalated-work"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/pgconnector/pgconnector_test.go:TestPgConnector_UngrantedIssueVerbs_Unclaimed (legacy RuleChain-era table test)."
+  },
+  {
     "case": "legacy_internal_rules_pgpr_pgpr_test_TestPgPR_GlobalFlagBeforeOrInsidePath_row0",
     "tags": ["legacy", "legacy-pgpr"],
     "tool_input": {
@@ -39145,7 +40627,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39163,7 +40646,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39181,7 +40665,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39199,7 +40684,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39217,7 +40703,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39235,7 +40722,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39253,7 +40741,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39271,7 +40760,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39289,7 +40779,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39307,7 +40798,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39325,7 +40817,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39343,7 +40836,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39361,7 +40855,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39379,7 +40874,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39397,7 +40893,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39415,7 +40912,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39433,7 +40931,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39451,7 +40950,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39469,7 +40969,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39487,7 +40988,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39505,7 +41007,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39523,7 +41026,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -39541,7 +41045,8 @@
       }
     },
     "cwd_path_state": {
-      "cwd": "/repo"
+      "cwd": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
     },
     "mode": "default",
     "settings": {},
@@ -40214,6 +41719,78 @@
     "rules_config": {},
     "expected_verdict": "approve",
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_Bgcheck_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_safecmds_safecmds_test_TestSafecmds_Bgwait_Approve_row0",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bgwait NAME"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_Bgwait_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_safecmds_safecmds_test_TestSafecmds_Bgwait_Approve_row1",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bgwait --timeout 120 NAME"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_Bgwait_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_safecmds_safecmds_test_TestSafecmds_Bgwait_Approve_row2",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bgwait -t 60 -n 40 NAME"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_Bgwait_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_safecmds_safecmds_test_TestSafecmds_Bgwait_Approve_row3",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bgwait --dir /tmp/x NAME"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_Bgwait_Approve (legacy RuleChain-era table test)."
   },
   {
     "case": "legacy_internal_rules_safecmds_safecmds_test_TestSafecmds_BrowsingCmdsKeepDynamicPaths_row0",
@@ -41314,6 +42891,42 @@
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_Help_SubcommandForm_Approve (legacy RuleChain-era table test)."
   },
   {
+    "case": "legacy_internal_rules_safecmds_safecmds_test_TestSafecmds_Help_SubcommandForm_Approve_row7",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_Help_SubcommandForm_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_safecmds_safecmds_test_TestSafecmds_Help_SubcommandForm_Approve_row8",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector help issue"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_Help_SubcommandForm_Approve (legacy RuleChain-era table test)."
+  },
+  {
     "case": "legacy_internal_rules_safecmds_safecmds_test_TestSafecmds_Help_SubcommandKnown_Approve_row0",
     "tags": ["legacy", "legacy-safecmds"],
     "tool_input": {
@@ -41338,6 +42951,24 @@
       "tool_name": "Bash",
       "tool_input": {
         "command": "git rebase --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_Help_SubcommandKnown_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_safecmds_safecmds_test_TestSafecmds_Help_SubcommandKnown_Approve_row10",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector pr --help"
       }
     },
     "cwd_path_state": {
@@ -41464,6 +43095,24 @@
       "tool_name": "Bash",
       "tool_input": {
         "command": "bd create --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_Help_SubcommandKnown_Approve (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_internal_rules_safecmds_safecmds_test_TestSafecmds_Help_SubcommandKnown_Approve_row9",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector issue --help"
       }
     },
     "cwd_path_state": {
@@ -45331,6 +46980,24 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/primarypush/primarypush_test.go:TestPrimaryPushRule (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_positional_argument",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --attended --session-id abc --title t --body-file /tmp/b.md extra"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
   },
   {
     "case": "legacy_positive_an_intervening_git_init_leaf_stays_in_the_same_chain",
@@ -49923,6 +51590,24 @@
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/dangerouscmds/dangerouscmds_test.go:TestDangerousCommands (legacy RuleChain-era table test)."
   },
   {
+    "case": "legacy_title_naming_a_sensitive_path_is_free_text_not_a_read",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --attended --session-id abc --title \"fix /etc/shadow handling\" --body-file /tmp/body.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
+  },
+  {
     "case": "legacy_top_level_heredoc_body_naming_a_path",
     "tags": ["legacy", "legacy-engine"],
     "tool_input": {
@@ -50229,6 +51914,24 @@
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/buildtools/buildtools_test.go:TestBuildtools_AllowedFlags_AbsentEntryIsUnchanged (legacy RuleChain-era table test)."
   },
   {
+    "case": "legacy_unattended_with_provenance_label",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --unattended --session-id abc123 --title \"finish the work\" --body-file /home/user/project/body.md --label auto-session-wrapped"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
+  },
+  {
     "case": "legacy_ungranted_delete_abstains",
     "tags": ["legacy", "legacy-curl"],
     "tool_input": {
@@ -50317,6 +52020,24 @@
     "rules_config": {},
     "expected_verdict": "reject",
     "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/dangerouscmds/dangerouscmds_test.go:TestMountOperandGate (legacy RuleChain-era table test)."
+  },
+  {
+    "case": "legacy_unknown_flag_1",
+    "tags": ["legacy", "legacy-safecmds"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --attended --session-id abc --title t --body-file /tmp/b.md --force"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/home/user/project"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Auto-extracted (tc-o14i5.1.3 legacyextract) from internal/rules/safecmds/safecmds_test.go:TestSafecmds_HandoffCreate (legacy RuleChain-era table test)."
   },
   {
     "case": "legacy_unknown_glued_flag_is_still_skipped_pre_existing_behavior",

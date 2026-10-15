@@ -42,6 +42,33 @@ const corpusPath = "../goldencorpus/testdata/corpus.json"
 // loader.
 func loadBashCorpusCommands(tb testing.TB) []evalcontract.Request {
 	tb.Helper()
+	rows := loadBashCorpusRows(tb)
+	reqs := make([]evalcontract.Request, len(rows))
+	for i, r := range rows {
+		reqs[i] = r.req
+	}
+	return reqs
+}
+
+// benchCorpusRow is one Bash corpus row prepared for evaluation: the request
+// to run, the row's own expected verdict, and whether it names
+// workspace_markers, so a test can grade the very requests the benchmark
+// times.
+type benchCorpusRow struct {
+	name     string
+	expected goldencorpus.Verdict
+	marked   bool
+	req      evalcontract.Request
+}
+
+// loadBashCorpusRows is loadBashCorpusCommands' row-level form. A row naming
+// workspace_markers (its verdict depends on the cwd being a trusted exec
+// location) is given a real marker directory (goldencorpus
+// PathStateFixture.Materialize), removed when tb finishes, so the benchmark
+// times the approve path a real invocation takes instead of the synthetic-cwd
+// abstain path.
+func loadBashCorpusRows(tb testing.TB) []benchCorpusRow {
+	tb.Helper()
 	data, err := os.ReadFile(corpusPath)
 	if err != nil {
 		tb.Fatalf("reading %s: %v", corpusPath, err)
@@ -51,7 +78,7 @@ func loadBashCorpusCommands(tb testing.TB) []evalcontract.Request {
 		tb.Fatalf("unmarshalling %s: %v", corpusPath, err)
 	}
 
-	var reqs []evalcontract.Request
+	var out []benchCorpusRow
 	for _, r := range rows {
 		if r.ToolInput.ToolName != "Bash" {
 			continue
@@ -60,16 +87,22 @@ func loadBashCorpusCommands(tb testing.TB) []evalcontract.Request {
 		if cmd == "" {
 			tb.Fatalf("case %q: Bash row has empty/missing tool_input.command", r.Case)
 		}
-		reqs = append(reqs, evalcontract.Request{
-			Command:     cmd,
-			CWD:         r.CWDPathState.CWD,
-			ProjectRoot: r.CWDPathState.ProjectRoot,
+		cwd, root, cleanup, err := r.CWDPathState.Materialize()
+		if err != nil {
+			tb.Fatalf("case %q: %v", r.Case, err)
+		}
+		tb.Cleanup(cleanup)
+		out = append(out, benchCorpusRow{
+			name:     r.Case,
+			expected: r.ExpectedVerdict,
+			marked:   len(r.CWDPathState.WorkspaceMarkers) > 0,
+			req:      evalcontract.Request{Command: cmd, CWD: cwd, ProjectRoot: root},
 		})
 	}
-	if len(reqs) == 0 {
+	if len(out) == 0 {
 		tb.Fatal("golden corpus has zero Bash rows")
 	}
-	return reqs
+	return out
 }
 
 // percentile returns the p-th percentile (0 < p <= 1) of durations, using

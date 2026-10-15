@@ -929,6 +929,8 @@ func buildRow(relFile, funcName string, idx int, name, cmd string, verdict golde
 		c = sanitize(c)
 	}
 
+	bashCommand, _ := toolInput["command"].(string)
+
 	family := "unknown"
 	if parts := strings.Split(filepath.ToSlash(relFile), "/"); len(parts) > 2 {
 		family = parts[2]
@@ -942,7 +944,8 @@ func buildRow(relFile, funcName string, idx int, name, cmd string, verdict golde
 		Tags:      []string{"legacy", "legacy-" + family},
 		ToolInput: goldencorpus.ToolInputFixture{ToolName: toolName, ToolInput: toolInput},
 		CWDPathState: goldencorpus.PathStateFixture{
-			CWD: cwd,
+			CWD:              cwd,
+			WorkspaceMarkers: workspaceMarkersFor(toolName, bashCommand),
 		},
 		Mode:            goldencorpus.ModeDefault,
 		ExpectedVerdict: verdict,

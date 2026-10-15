@@ -135,12 +135,19 @@ func compareRow(row goldencorpus.Row, reg cmddesc.Registry, policies []effectpol
 	if err != nil {
 		return rowOutcome{err: fmt.Errorf("legacyextract: marshalling tool_input for %s: %w", row.Case, err)}
 	}
+	// A row naming workspace_markers is replayed from a real marker directory
+	// (the synthetic cwd can never be a trusted exec location).
+	rowCWD, rowRoot, cleanup, err := row.CWDPathState.Materialize()
+	if err != nil {
+		return rowOutcome{err: fmt.Errorf("legacyextract: %s: %w", row.Case, err)}
+	}
+	defer cleanup()
 	input := &hookio.HookInput{
 		ToolName:  toolName,
 		ToolInput: raw,
-		CWD:       row.CWDPathState.CWD,
+		CWD:       rowCWD,
 	}
-	cfg := claudecodeadapter.RequestConfig{ProjectRoot: row.CWDPathState.ProjectRoot}
+	cfg := claudecodeadapter.RequestConfig{ProjectRoot: rowRoot}
 	resp, err := claudecodeadapter.Evaluate(input, cfg, reg, policies, graphPolicies)
 	if err != nil {
 		// The adapter refused the input outright (e.g. an unparseable

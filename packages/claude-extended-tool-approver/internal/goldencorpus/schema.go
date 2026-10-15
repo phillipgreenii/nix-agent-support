@@ -146,9 +146,12 @@ type PathStateFixture struct {
 	Gitignored    []string `json:"gitignored,omitempty"`
 	WorktreeState string   `json:"worktree_state,omitempty"`
 	// WorkspaceMarkers names marker files (a bare file name such as
-	// "pn-workspace.toml") that `evaluate --corpus` materializes, empty, in a
+	// "pn-workspace.toml") that PathStateFixture.Materialize creates, empty, in a
 	// throwaway directory above a workforest-set-shaped working directory, and
-	// substitutes for CWD/ProjectRoot. It is for a row whose verdict depends on
+	// substitutes for CWD/ProjectRoot. Every consumer that grades or times a
+	// row's verdict (`evaluate --corpus`, legacyextract's comparison, the
+	// Evaluate benchmark) calls Materialize; cmd/legacyextract also WRITES the
+	// field onto the pn/pnwf rows it extracts. It is for a row whose verdict depends on
 	// the working directory being a trusted exec location
 	// (effectpolicy.TrustedCheckoutExec): a synthetic cwd such as "/repo" does
 	// not exist, so an Exec fact there can never approve. A row with no

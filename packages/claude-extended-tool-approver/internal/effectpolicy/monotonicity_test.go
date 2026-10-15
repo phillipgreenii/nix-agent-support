@@ -23,7 +23,10 @@
 // the same policy context and a pair is comparable. Rows with an operator
 // fixture (vetted hosts, kube contexts, ...) are excluded because X and Y
 // would not share one configuration. This is stated here and not silently
-// filtered.
+// filtered. Likewise a row naming workspace_markers is excluded: its
+// verdict depends on a real marker directory as the cwd (see goldencorpus
+// PathStateFixture.Materialize), so it does not share the default path state
+// either, and under the synthetic /repo it would only ever abstain.
 //
 // Size: pairs are drawn deterministically (a fixed-seed 64-bit LCG over the
 // ordered pairs of distinct rows, so both X;Y and Y;X orders occur). The local
@@ -82,7 +85,7 @@ func monotonicityCommands(t testing.TB) (cmds []string, cwd, root string) {
 			continue
 		}
 		ps := r.CWDPathState
-		if ps.CWD != "/repo" || ps.ProjectRoot != "/repo" || len(ps.GitTracked) > 0 || len(ps.Gitignored) > 0 || ps.WorktreeState != "" || ps.Home != "" {
+		if ps.CWD != "/repo" || ps.ProjectRoot != "/repo" || len(ps.GitTracked) > 0 || len(ps.Gitignored) > 0 || ps.WorktreeState != "" || ps.Home != "" || len(ps.WorkspaceMarkers) > 0 {
 			continue
 		}
 		if c, _ := r.ToolInput.ToolInput["command"].(string); c != "" {
