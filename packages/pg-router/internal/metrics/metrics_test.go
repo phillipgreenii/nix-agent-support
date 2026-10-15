@@ -1563,3 +1563,25 @@ func TestSilentCountersExportZeroSeriesFromStartup(t *testing.T) {
 		t.Errorf("deduped[t] = %d after one event, want 1", got)
 	}
 }
+
+// pg2-bn5io: a dispatch handed back because the daemon is shutting down is not a
+// delivery failure: OnDeclined records nothing for ReasonShutdown, while any
+// other decline reason is still counted.
+func TestOnDeclined_ShutdownHandBackIsNotAFailure(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnDeclined("pr.changed", "desk-pr", ReasonShutdown)
+	h.emitter.OnDeclined("pr.changed", "desk-pr", "busy")
+
+	m := findMetric(t, h.collect(t), MetricFailures)
+	s := m.Data.(metricdata.Sum[int64])
+	var total int64
+	for _, dp := range s.DataPoints {
+		if reason, _ := dp.Attributes.Value("reason"); reason.AsString() == ReasonShutdown {
+			t.Errorf("a series with reason=%q was recorded: %+v", ReasonShutdown, dp)
+		}
+		total += dp.Value
+	}
+	if total != 1 {
+		t.Errorf("failures total = %d, want 1 (only the busy decline)", total)
+	}
+}

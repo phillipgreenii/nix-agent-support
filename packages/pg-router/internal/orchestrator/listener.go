@@ -273,6 +273,13 @@ func (l *roleListener) Matches(evt eventqueue.Event) bool {
 // retry is distinguishable from a busy/unavailable decline.
 const DeclineDetailDispatchRetry = "dispatch-retry"
 
+// DeclineDetailShutdown is the DeclineDetail (the `reason` the queue reports to
+// Observer.OnDeclined) of an Offer whose handler was cut short because the run's
+// context was cancelled, i.e. the daemon is shutting down (bead pg2-bn5io). The
+// hand-back is not a delivery failure: internal/metrics.ReasonShutdown carries
+// the same string and its OnDeclined does not count it.
+const DeclineDetailShutdown = "shutdown"
+
 // shouldRetry reports whether this failed attempt gets re-run: the role opted
 // in (maxRetries > 0), the run is not shutting down, the event has not already
 // expired (the queue treats an attempt past expiresAt as the last one), the
@@ -348,8 +355,9 @@ func (l *roleListener) shouldRetry(evt eventqueue.Event, err error) bool {
 // accept, at most MaxDispatchRetries times per event, so the queue re-offers
 // it at the role's RetryBackoff cadence while it is unexpired. Every failed
 // attempt still reaches handlerFailureObs; each scheduled re-run also reaches
-// retryObs. A deterministic failure, a cancelled run, or an exhausted budget
-// falls through to the unchanged accept.
+// retryObs. A deterministic failure or an exhausted budget falls through to the
+// unchanged accept. A failure while the run context is cancelled (shutdown) is
+// neither: it is handed back as DeclineDetailShutdown (bead pg2-bn5io).
 //
 // bead pg2-dm6de adds the one field an accepted OfferResult now carries: a
 // handler that adopted a dispatch an earlier daemon had started reports its
@@ -401,6 +409,23 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 			detail = bd.Reason
 		}
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy, DeclineDetail: detail}
+	}
+	if err != nil && l.ctx.Err() != nil {
+		// The run context was cancelled while the handler ran: this daemon is
+		// shutting down (for the daemon, after its drain budget; runLongRunningBody
+		// cancels the dispatch context only then), and the handler was killed by
+		// that cancellation rather than failing on its own (bead pg2-bn5io, the
+		// "role desk-pr exited -1" of a restart). Hand the event back as a pre-accept
+		// decline instead of accepting a failure: nothing durable is written, so the
+		// event stays un-accepted and the next daemon re-offers it on replay (the
+		// same mechanism ADR 0085 relies on for a surviving dispatch). It is not a
+		// handler error, so handlerFailureObs is NOT notified and no failure is
+		// counted, and it is not a retry (no ledger slot, no retryObs). A handler
+		// that finished (err == nil) in the same instant is accepted as usual below.
+		l.retries.forget(evt.ID)
+		slog.Info("orchestrator: dispatch cut short by shutdown; leaving the event for the next daemon to re-offer",
+			"role", l.role.Name, "event", evt.ID, "err", err)
+		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineNone, DeclineDetail: DeclineDetailShutdown}
 	}
 	// A resource-limit hit (l.resourceLimitObs) has no wire-level signal to
 	// detect it from anymore — see ResourceLimitObserver's own doc comment

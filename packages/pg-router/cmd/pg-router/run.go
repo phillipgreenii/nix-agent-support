@@ -81,8 +81,10 @@ const inFlightDrainTimeout = 5 * time.Second
 // 5s tail = 55s must stay under the 60s ExitTimeOut in
 // darwin/modules/pg-router/default.nix with margin -- keep the two in step,
 // and never raise this without shrinking another term. A drain that times out
-// is no worse than the old behavior: the dispatch context is then cancelled
-// and the handler killed as before.
+// cancels the dispatch context and kills the handler as before, but the
+// cancelled offer is then handed back un-accepted (roleListener.Offer, bead
+// pg2-bn5io) rather than recorded as a handler error, so the next daemon
+// re-offers the event instead of leaving it to a sweep.
 //
 // This budget applies only to roles that do NOT declare survivesShutdown
 // (bead pg2-dtigc, ADR 0085). A ccpool-backed role's dispatch lasts far longer

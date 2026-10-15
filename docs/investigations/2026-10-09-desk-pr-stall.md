@@ -168,6 +168,8 @@ The cutover (`pg2-2j5ac.52`) is the structural fix for C3 and is planned work, n
 C6: at 20:28:20Z the daemon was told to shut down; after the 20 s drain timeout it cancelled the
 in-flight desk-pr dispatch, which logged `exited -1` at 20:28:40Z. Session roles survive shutdown;
 command roles such as desk-pr do not, and a cancelled dispatch is not retried by the router.
+Resolved by bead `pg2-bn5io`: a dispatch cancelled by shutdown is now handed back un-accepted and re-offered by
+the next router, and is no longer counted as a `handler-error`.
 
 C7 (suspected): `launchd-stderr.log` shows `run: shutdown requested` at 22:15:13Z and the next start
 at 22:39:22Z. `~/.local/state/beads-migration/alt-server-config.yaml` was written at 22:16Z and the

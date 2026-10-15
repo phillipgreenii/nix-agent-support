@@ -304,6 +304,14 @@ const GateLabelOther = "OTHER"
 // outright dispatch failure (INV-FAIL-1).
 const FailureClassDeclined = "declined"
 
+// ReasonShutdown is the decline reason of a dispatch whose handler was cut short
+// because the daemon is shutting down (bead pg2-bn5io). The queue keeps the event
+// un-accepted and the next daemon re-offers it, so it is a hand-back and not a
+// delivery failure: OnDeclined does not count it. It mirrors
+// orchestrator.DeclineDetailShutdown (this package does not import orchestrator;
+// cmd/pg-router's test pins the two equal).
+const ReasonShutdown = "shutdown"
+
 // FailureClassDispatchFail is the catalog's second delivery-side failure
 // class (INV-OBS-1): an outright dispatch failure where pg-router could not
 // hand the event over at all, distinct from a graceful pre-accept decline
@@ -1246,6 +1254,9 @@ func (e *Emitter) OnUnconsumedExpired(evtType string) {
 // pg_router_failures_total{class="declined"} distinguishable by reason
 // rather than a single undifferentiated bucket.
 func (e *Emitter) OnDeclined(_, listenerID, reason string) {
+	if reason == ReasonShutdown {
+		return
+	}
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("class", FailureClassDeclined),
 		attribute.String("role", listenerID),

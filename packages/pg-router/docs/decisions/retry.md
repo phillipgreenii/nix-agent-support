@@ -56,8 +56,12 @@ narrow, **opt-in** exception, in the same spirit as `DEC-OBS-3`'s:
   at-least-once, `INV-EVT-1`, so a handler MUST be idempotent regardless).
 - **Transient classes only.** `killed`, `deadline` and `unavailable`. A deterministic failure
   (validation, authentication, an ordinary non-zero exit with a reason) is never re-run, a failure
-  while the run is shutting down is never re-run, and a busy decline keeps its own `INV-FAIL-1`
-  path.
+  while the run is shutting down is never re-run in this process, and a busy decline keeps its own
+  `INV-FAIL-1` path. A dispatch cut short by the shutdown's own cancellation (the drain budget ran
+  out) is handed back as a pre-accept decline with reason `shutdown` (bead `pg2-bn5io`): it stays
+  un-accepted, so the next router re-offers it, and it is neither a `handler-error` nor counted in
+  `pg_router_failures_total` at all. The alternative, a longer drain for command roles, does not fit
+  launchd's 60 s `ExitTimeOut` (20 s drain + 30 s session sweep + 5 s tail already fill it).
 - **Bounded.** At most `max_dispatch_retries` re-runs per event, hard-capped at 3 by config
   validation, and never past the event's `expiresAt` (`INV-EVT-4`: an attempt on an expired event
   is its last). The count is in memory only (`DEC-EVENT-1`: no attempt history on disk), so a

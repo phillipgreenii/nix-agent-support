@@ -223,14 +223,52 @@ func TestOffer_DeterministicFailureNeverRetried(t *testing.T) {
 func TestOffer_CancelledRunNeverRetried(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &seqHandler{errs: []error{killedErr}}
-	l, robs, _ := newRetryListener(t, h, 3, ctx)
+	l, robs, fobs := newRetryListener(t, h, 3, ctx)
 	cancel()
 
-	if got := l.Offer(eventqueue.Offering{ID: "dsp", Event: retryEvent("e1")}); !got.Accepted {
-		t.Fatalf("a failure during shutdown must not be re-run, got %+v", got)
+	// Bead pg2-bn5io: a dispatch cut short by shutdown is handed back un-accepted
+	// (the next daemon re-offers it on replay), tagged as a shutdown hand-back. It
+	// is neither a retry (no retry observer, no ledger slot) nor a handler error.
+	got := l.Offer(eventqueue.Offering{ID: "dsp", Event: retryEvent("e1")})
+	if got.Accepted || got.DeclineDetail != DeclineDetailShutdown {
+		t.Fatalf("a failure during shutdown must be handed back with detail %q, got %+v", DeclineDetailShutdown, got)
 	}
 	if n := len(robs.snapshot()); n != 0 {
 		t.Fatalf("retry observer calls = %d, want 0", n)
+	}
+	if n := len(fobs.calls); n != 0 {
+		t.Fatalf("handler-failure observer calls = %d, want 0 (a shutdown cut is not a handler error)", n)
+	}
+	if h.callCount() != 1 {
+		t.Fatalf("handler ran %d times, want 1", h.callCount())
+	}
+}
+
+// A handler that finished cleanly in the instant the run context was cancelled
+// is accepted as usual: only a failure is attributed to the shutdown.
+func TestOffer_CancelledRunStillAcceptsASuccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	l, _, fobs := newRetryListener(t, &seqHandler{}, 3, ctx)
+	cancel()
+
+	if got := l.Offer(eventqueue.Offering{ID: "dsp", Event: retryEvent("e1")}); !got.Accepted {
+		t.Fatalf("a successful dispatch must be accepted even after cancellation, got %+v", got)
+	}
+	if n := len(fobs.calls); n != 0 {
+		t.Fatalf("handler-failure observer calls = %d, want 0", n)
+	}
+}
+
+// Outside shutdown a deterministic handler error is still counted and accepted.
+func TestOffer_UncancelledFailureStillCountedAsHandlerError(t *testing.T) {
+	h := &seqHandler{errs: []error{&wireclient.ExitError{Role: "desk-pr", Code: 1, Detail: "boom"}}}
+	l, _, fobs := newRetryListener(t, h, 0, context.Background())
+
+	if got := l.Offer(eventqueue.Offering{ID: "dsp", Event: retryEvent("e1")}); !got.Accepted {
+		t.Fatalf("an ordinary failure must be accepted, got %+v", got)
+	}
+	if n := len(fobs.calls); n != 1 {
+		t.Fatalf("handler-failure observer calls = %d, want 1", n)
 	}
 }
 
