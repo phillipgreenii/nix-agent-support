@@ -4969,6 +4969,34 @@
                     touch "$out"
                   '';
 
+              # pg-connector-github alert rules file: structure rules S1-S7 over the file and the
+              # metric catalog, then the script's own mutant self-tests. The promtool behavioural
+              # tests of the Prometheus rules are a separate check.
+              test-pg-connector-github-alert-structure =
+                pkgs.runCommand "test-pg-connector-github-alert-structure"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.yq-go
+                      pkgs.jq
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.gawk
+                      pkgs.diffutils
+                      pkgs.coreutils
+                      pkgs.grafana-loki
+                    ];
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    script=${./packages/pg-connector/grafana/check-alert-structure.sh}
+                    alerts=${./packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml}
+                    catalog=${./packages/pg-connector/grafana/pg-connector-github-metrics.txt}
+                    bash "$script" "$alerts" "$catalog"
+                    bash "$script" --self-test "$alerts" "$catalog"
+                    touch "$out"
+                  '';
+
               # darwin/modules/beads-exporter: evaluated standalone against stubs of the
               # launchd and observability surfaces (declared in other flakes), with
               # synthetic databases alpha and beta. Proves the gate (observability off,

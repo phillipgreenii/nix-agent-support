@@ -1,0 +1,359 @@
+# pg-connector-github unified-alerting rules (docket pg2-z5fax.6, Phase 4a): the
+# service levels of the daemon's design spec ("Observability > Service levels
+# and alerts"), as six Prometheus rules over the daemon's own metrics and one
+# Loki rule over its structured log (daemon.log.jsonl).
+#
+# This file sits BESIDE pr-github-alerts.yaml (the old backend's rules, which
+# stay until Phase 6b) and is registered by the darwin module
+# darwin/modules/pg-connector-github, not by this file.
+#
+# Metric names are the Prometheus names the OpenTelemetry collector produces
+# (dots to underscores, no _total, no unit suffix) and every one of them is
+# catalogued in packages/pg-connector/grafana/pg-connector-github-metrics.txt;
+# check-alert-structure.sh (flake check test-pg-connector-github-alert-structure)
+# enforces that. The expression of every Prometheus rule has a fixed shape (no
+# service_name filter, the names are already specific) because the promtool
+# tests of the next packet are written against it; a firing alert's labels are
+# the `by` labels of its expression plus severity.
+#
+# No rule exists for the spec table's last row, "Detection delay (shadow
+# criterion)": its threshold is relative to the LIVE flow's p90, which neither
+# this daemon nor Prometheus holds. The histogram is on the dashboard and the
+# shadow report states the criterion.
+#
+# Shape notes (copied from the model files pr-github-alerts.yaml and
+# packages/pg-router/grafana/alerting/alerts.yaml): condition C over refIds
+# A (the query), B (reduce, last), C (threshold); a Prometheus rule is
+# `datasourceUid: prometheus` with the boolean `instant: true`; a Loki rule is
+# `datasourceUid: loki` with the string `queryType: instant`. Folder
+# "pg-connector" converges by title (ADR 0039 in phillipgreenii-nix-support-apps),
+# so no folderUid is ever written. Rule uids stay under Grafana's 40-char cap.
+# Annotations are static text.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-connector-github
+    folder: pg-connector
+    interval: 1m
+    rules:
+      # Daemon up. daemon_up is the daemon's OWN single liveness gauge, so
+      # noDataState is Alerting (the pg-router-liveness-down polarity): once the
+      # daemon is supposed to run, an absent series means the daemon, or its
+      # export, is gone, which is exactly what this rule exists to catch.
+      - uid: pg-conn-github-daemon-down
+        title: pg-connector-github daemon is down
+        condition: C
+        for: 2m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pg-connector-github daemon has been down for over 2 minutes"
+          description: "pg_connector_github_daemon_up has reported 0, or gone missing from Prometheus entirely, for over 2 minutes: the daemon is not running or is not exporting. Every pg-connector pr/ci call is answered unavailable meanwhile. Check the launchd entry for pg-connector-github and read daemon.log.jsonl in its state directory."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: min(pg_connector_github_daemon_up)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+
+      # Configured queries fresh. The spec's threshold is 2 x the query's own
+      # query_ttl, which this static file cannot read. The literal 240 seconds
+      # STANDS FOR 2 x 120 s, twice the LARGER query_ttl default (the `team`
+      # queries; `mine` defaults to 60 s). It therefore does NOT cover a
+      # tighter ttl: a `mine` query is only flagged after 4 ttls, not 2, and a
+      # query whose query_ttl the operator raised above 120 s needs a larger
+      # literal here, or this rule fires for a healthy query. Anything below
+      # 240 would fire for a healthy team query.
+      - uid: pg-conn-github-query-stale
+        title: pg-connector-github configured query is stale
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-github: a configured query has not refreshed successfully for over 10 minutes"
+          description: "query_last_success_age_seconds for at least one configured query has been above 240 seconds (2 x the largest default query_ttl, 120 s) for over 10 minutes: its refreshes keep failing or are starved, so callers read stale rows. The query label names it. Check budget pauses (pg_connector_github_governor_paused), auth, and daemon.log.jsonl."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (query) (pg_connector_github_query_last_success_age_seconds)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [240]
+
+      # Spend within budget. The spec's threshold is graphql_points_per_hour,
+      # which this static file cannot read. The literal 1500 STANDS FOR the
+      # SHADOW-RUN value of graphql_points_per_hour (the default of the shadow
+      # run, the first consumer of this rule; the spec's shadow criterion is
+      # "points per hour inside the cap for the whole run"). It does NOT cover
+      # the cutover value: after cutover graphql_points_per_hour defaults to
+      # 4000, so the cutover phase MUST raise this literal to 4000 (and the
+      # dashboard's cap line with it). A cap other than these two needs its
+      # own literal. The rule reads the GraphQL bucket only.
+      - uid: pg-conn-github-spend-over-cap
+        title: pg-connector-github GraphQL spend above the hourly cap
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-github spent more than 1500 GraphQL points in the last hour"
+          description: "The daemon's GraphQL spend over the trailing hour is above 1500 points, the shadow-run value of graphql_points_per_hour. See pg_connector_github_budget_spent by purpose and group for what is spending it; the governor should be pausing refreshes at the cap, so a sustained breach means the cap is not holding or the configured cap is lower than this rule's literal."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum(increase(pg_connector_github_budget_spent{bucket="graphql"}[1h]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1500]
+
+      # Interactive work keeping up: the oldest overdue interactive request has
+      # waited more than 30 seconds for 5 minutes, so a caller is being made to
+      # wait on the daemon.
+      - uid: pg-conn-github-interactive-slow
+        title: pg-connector-github interactive work is falling behind
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-github interactive queue has been overdue by more than 30 seconds for over 5 minutes"
+          description: "The oldest overdue interactive request has been waiting more than 30 seconds for over 5 minutes, so interactive pg-connector calls are slow. Check pg_connector_github_governor_paused (a budget pause starves the queue), pg_connector_github_queue_depth and request duration, and daemon.log.jsonl."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_connector_github_queue_oldest_overdue_seconds{class="interactive"})
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [30]
+
+      # Consumer stuck: a consumer's oldest unacknowledged change row is older
+      # than 15 minutes (900 seconds).
+      - uid: pg-conn-github-consumer-stuck
+        title: pg-connector-github consumer is stuck
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-github: a change consumer has had an unacknowledged row for over 15 minutes"
+          description: "The oldest unacknowledged change row of a consumer (labels consumer and query) is older than 15 minutes, so that consumer is not reading or acknowledging. Check the consumer process, pg_connector_github_consumer_redeliveries for a poison row, and cursor_expired lines in daemon.log.jsonl."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (consumer, query) (pg_connector_github_consumer_oldest_unacked_age_seconds)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [900]
+
+      # Settle holding: more than 20 percent of the settle attempts of the last
+      # 30 minutes ended failed or timeout rather than settled, so consumers'
+      # reads are going back to origin. NaN (no settle at all in the window)
+      # never exceeds the threshold, which is the healthy quiet case.
+      - uid: pg-conn-github-settle-failing
+        title: pg-connector-github change settle is failing
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-github: over 20 percent of change settles failed or timed out in the last 30 minutes"
+          description: "More than 20 percent of pg_connector_github_change_settle increases over 30 minutes had a result other than settled (failed or timeout), so consumers' reads are going back to origin instead of being served from the store. Check GitHub reachability, the budget pause state and daemon.log.jsonl."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum(increase(pg_connector_github_change_settle{result!="settled"}[30m])) / sum(increase(pg_connector_github_change_settle[30m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.2]
+
+      # Store moved aside or refused to start: any daemon.log.jsonl line whose
+      # `change` field is store_moved_aside or store_refused in the trailing 10
+      # minutes. There is no metric for it (the store did not open), hence a
+      # Loki rule. noDataState is OK: a quiet log is the healthy case.
+      #
+      # Overlap: this rule selects the same service_name as the generic
+      # "Daemon Health" error-rate alert the observability module generates for
+      # a logSources entry of that name, and a store_refused line is written at
+      # error level, so one incident could page twice. The darwin module packet
+      # decides whether that generic alert is switched off for this entry. The
+      # window is kept to 10 minutes so the two do not disagree for long on
+      # whether the incident is over.
+      - uid: pg-conn-github-store-aside
+        title: pg-connector-github store moved aside or refused
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: error
+        annotations:
+          summary: "pg-connector-github moved its store aside or refused to start in the last 10 minutes"
+          description: 'The daemon logged store_moved_aside or store_refused in the last 10 minutes: its store was corrupt or unmigratable and was moved aside and recreated (the cache is rebuilt from scratch), or the store schema is newer than this binary (a downgrade) and the daemon refused to start. Inspect the lines with {service_name="pg-connector-github"} | json | change=~"store_moved_aside|store_refused" and read the cause, found_version and supported_version fields.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-github"} | json | change=~"store_moved_aside|store_refused" [10m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
