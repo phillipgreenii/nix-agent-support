@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -441,6 +444,235 @@ func TestChanges_RetryWindow_DigestRecipeIsPinned(t *testing.T) {
 	// sha256 of {"change":"changed","source":"gh","entity_id":"o/r#1","head_sha":"h1"}
 	if want := "c42b5d1c27eb"; got != want {
 		t.Fatalf("digest = %q, want %q", got, want)
+	}
+}
+
+// ownedRow builds one change row of a backend that owns its changes, over the
+// generic PR o/r#1, with the given own version, head and extras.
+func ownedRow(version int, head, extras string) string {
+	return fmt.Sprintf(`{"change":"changed","source":"gh","entity":{"id":"o/r#1","title":"One","head_sha":%q,"version":%d},%s}`,
+		head, version, extras)
+}
+
+// pollBody wraps rows in the extended answer: sources carry next_seq and the
+// answer carries sources_freshness.
+func pollBody(rows ...string) string {
+	return `{"sources":[{"backend":"gh","status":"succeeded","version":3,"truncated":false,"next_seq":9}],` +
+		`"changes":[` + strings.Join(rows, ",") + `],` +
+		`"sources_freshness":[{"query":"q","last_success_at":"2026-10-07T11:00:00Z"}]}`
+}
+
+// poll runs one changes invocation against the given canned answer.
+func poll(t *testing.T, window, body string) (stdout string, items []rawItem) {
+	t.Helper()
+	pinEmitTime(t)
+	withFactory(t, "changes_body_env", "GO_HELPER_BODY="+body)
+	args := []string{"changes", "pr", "q", "--consumer", "c1"}
+	if window != "" {
+		args = append(args, "--retry-window", window)
+	}
+	stdout, stderr, code := runCLI(t, args...)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
+	}
+	return stdout, mustUnmarshalItems(t, stdout)
+}
+
+const ownedExtras = `"seq":41,"kinds":["comment","label"],"fields":[{"name":"labels","before":["a"],"after":["a","b"]}]`
+
+// Decision 2: seq, kinds and fields surface on the item's metadata under those
+// keys, with fields kept as the raw JSON the backend sent.
+func TestChanges_OwnedRow_DecodesSeqKindsFieldsIntoMetadata(t *testing.T) {
+	_, items := poll(t, "1h", pollBody(ownedRow(7, "h1", ownedExtras)))
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	m := items[0].Metadata
+	if seq, ok := m["seq"].(float64); !ok || seq != 41 {
+		t.Fatalf("metadata.seq = %v (%T), want 41", m["seq"], m["seq"])
+	}
+	if kinds := metadataStrings(t, items[0], "kinds"); len(kinds) != 2 || kinds[0] != "comment" || kinds[1] != "label" {
+		t.Fatalf("metadata.kinds = %v, want [comment label]", kinds)
+	}
+	fields, ok := m["fields"].([]any)
+	if !ok || len(fields) != 1 {
+		t.Fatalf("metadata.fields = %v (%T), want one element", m["fields"], m["fields"])
+	}
+	f := fields[0].(map[string]any)
+	if f["name"] != "labels" {
+		t.Fatalf("metadata.fields[0] = %v", f)
+	}
+	if !suffixedID.MatchString(items[0].ID) {
+		t.Fatalf("id = %q, want <entity id>@<12 hex>", items[0].ID)
+	}
+	if m["entity_id"] != "o/r#1" {
+		t.Fatalf("metadata.entity_id = %v", m["entity_id"])
+	}
+}
+
+// fields is printed byte-for-byte as sent (compacted), never re-encoded.
+func TestChanges_OwnedRow_FieldsPrintedAsRawJSON(t *testing.T) {
+	const raw = `[{"name":"title","before":"a <b>","after":1.50}]`
+	stdout, _ := poll(t, "", pollBody(ownedRow(7, "h1", `"fields":`+raw)))
+	if !strings.Contains(stdout, `"fields":`+raw) {
+		t.Fatalf("stdout = %s, want the raw fields %s verbatim", stdout, raw)
+	}
+}
+
+// Each of the three is independent: only the ones the row carries are printed;
+// an absent or null one is nothing.
+func TestChanges_OwnedRow_EachExtraIsIndependent(t *testing.T) {
+	cases := map[string]struct {
+		extras string
+		want   []string
+	}{
+		"seq only":     {`"seq":5`, []string{"seq"}},
+		"kinds only":   {`"kinds":["x"]`, []string{"kinds"}},
+		"fields only":  {`"fields":[]`, []string{"fields"}},
+		"nulls":        {`"seq":null,"kinds":null,"fields":null`, nil},
+		"seq + fields": {`"seq":5,"kinds":null,"fields":[]`, []string{"seq", "fields"}},
+		"empty kinds":  {`"kinds":[]`, []string{"kinds"}},
+	}
+	for name, tc := range cases {
+		_, items := poll(t, "1h", pollBody(ownedRow(7, "h1", tc.extras)))
+		for _, key := range []string{"seq", "kinds", "fields"} {
+			_, got := items[0].Metadata[key]
+			want := false
+			for _, w := range tc.want {
+				want = want || w == key
+			}
+			if got != want {
+				t.Errorf("%s: metadata[%q] present = %v, want %v (metadata=%v)", name, key, got, want, items[0].Metadata)
+			}
+		}
+	}
+}
+
+// The SAME row (same version and head) delivered in two polls keeps its id even
+// when the second answer also carries a newer row for that PR.
+func TestChanges_RetryWindow_RedeliveredRowKeepsIDAfterNewerRow(t *testing.T) {
+	_, first := poll(t, "1h", pollBody(ownedRow(7, "h1", ownedExtras)))
+	_, second := poll(t, "1h", pollBody(
+		ownedRow(7, "h1", ownedExtras),
+		ownedRow(8, "h1", `"seq":42,"kinds":["review"],"fields":[]`),
+	))
+	if len(second) != 2 {
+		t.Fatalf("len(second) = %d, want 2", len(second))
+	}
+	if first[0].ID != second[0].ID {
+		t.Fatalf("redelivered row id %q then %q, want identical", first[0].ID, second[0].ID)
+	}
+	if second[0].ID == second[1].ID {
+		t.Fatalf("version 7 and 8 rows share id %q", second[0].ID)
+	}
+}
+
+// Two rows for one PR in one poll, one head, versions 7 and 8, get two ids.
+func TestChanges_RetryWindow_TwoVersionsOnOneHeadTwoIDs(t *testing.T) {
+	_, items := poll(t, "1h", pollBody(
+		ownedRow(7, "h1", ownedExtras),
+		ownedRow(8, "h1", ownedExtras),
+	))
+	if len(items) != 2 || items[0].ID == items[1].ID {
+		t.Fatalf("ids = %q, want two distinct ids", []string{items[0].ID, items[1].ID})
+	}
+	for _, it := range items {
+		if !suffixedID.MatchString(it.ID) {
+			t.Fatalf("id %q, want <entity id>@<12 hex>", it.ID)
+		}
+	}
+}
+
+// A different seq, kinds or fields with the same version and head is the same
+// id: none of the three reaches the digest.
+func TestChanges_RetryWindow_SeqKindsFieldsDoNotReachTheDigest(t *testing.T) {
+	_, base := poll(t, "1h", pollBody(ownedRow(7, "h1", ownedExtras)))
+	for name, extras := range map[string]string{
+		"seq":    `"seq":99,"kinds":["comment","label"],"fields":[{"name":"labels","before":["a"],"after":["a","b"]}]`,
+		"kinds":  `"seq":41,"kinds":["review"],"fields":[{"name":"labels","before":["a"],"after":["a","b"]}]`,
+		"fields": `"seq":41,"kinds":["comment","label"],"fields":[]`,
+		"none":   `"seq":null`,
+	} {
+		_, got := poll(t, "1h", pollBody(ownedRow(7, "h1", extras)))
+		if got[0].ID != base[0].ID {
+			t.Errorf("%s changed: id %q != base %q, an extra reached the digest", name, got[0].ID, base[0].ID)
+		}
+	}
+	// The digest recipe for an owning backend's row is pinned: {change, source,
+	// entity_id, head_sha, version}, version a raw JSON number.
+	id := entityIdentity{ID: "o/r#1", HeadSHA: []byte(`"h1"`), Version: []byte(`7`)}
+	sum := func(c changesEntry) string {
+		d, err := changeDigest(c, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	plain := sum(changesEntry{Change: "changed", Source: "gh"})
+	withExtras := sum(changesEntry{
+		Change: "changed", Source: "gh",
+		Seq: []byte(`41`), Kinds: []byte(`["x"]`), Fields: []byte(`[]`),
+	})
+	if plain != withExtras {
+		t.Fatalf("digest %q with extras vs %q without", withExtras, plain)
+	}
+	want := sha256.Sum256([]byte(`{"change":"changed","source":"gh","entity_id":"o/r#1","head_sha":"h1","version":7}`))
+	if plain != hex.EncodeToString(want[:])[:retryIDHexLen] {
+		t.Fatalf("digest = %q, want sha256 of the canonical identity", plain)
+	}
+}
+
+// A row carrying none of the new fields prints exactly as before, with and
+// without a window, even inside an answer that carries next_seq and
+// sources_freshness.
+func TestChanges_RowsWithoutExtras_ByteIdenticalToTodaysOutput(t *testing.T) {
+	const body = `{"sources":[{"backend":"b1","status":"succeeded","version":1,"truncated":false}],"changes":[` +
+		`{"change":"added","source":"b1","entity":{"id":"e1","title":"Entity One"}}]}`
+	const want = `[{"id":"e1","type":"pr","title":"Entity One","metadata":{"change":"added","degraded_sources":[],"entity_id":"e1","source":"b1"}}]` + "\n"
+	for _, window := range []string{"", "0", "0s"} {
+		if stdout, _ := poll(t, window, body); stdout != want {
+			t.Fatalf("window %q: stdout =\n%s\nwant\n%s", window, stdout, want)
+		}
+	}
+	// The extended answer envelope alone (no per-row extras) changes nothing.
+	extended := strings.Replace(body, `"truncated":false}`, `"truncated":false,"next_seq":4}`, 1)
+	extended = strings.TrimSuffix(extended, "}") + `,"sources_freshness":[]}`
+	if stdout, _ := poll(t, "", extended); stdout != want {
+		t.Fatalf("extended envelope: stdout =\n%s\nwant\n%s", stdout, want)
+	}
+	// With a window, a row without extras gains only the id suffix and at/expiresAt.
+	stdout, items := poll(t, "1h", body)
+	for _, key := range []string{"seq", "kinds", "fields"} {
+		if _, ok := items[0].Metadata[key]; ok || strings.Contains(stdout, `"`+key+`"`) {
+			t.Fatalf("metadata gained %q for a row without it: %s", key, stdout)
+		}
+	}
+}
+
+// A malformed seq, kinds or fields is a failure that prints nothing on stdout.
+func TestChanges_MalformedExtras_FailWithNothingOnStdout(t *testing.T) {
+	for name, extras := range map[string]string{
+		"seq string":       `"seq":"41"`,
+		"seq object":       `"seq":{}`,
+		"kinds string":     `"kinds":"comment"`,
+		"kinds object":     `"kinds":{}`,
+		"kinds number el":  `"kinds":["a",2]`,
+		"fields object":    `"fields":{"name":"x"}`,
+		"fields string":    `"fields":"x"`,
+		"good then broken": `"seq":1,"kinds":["a"],"fields":7`,
+	} {
+		for _, window := range []string{"", "1h"} {
+			pinEmitTime(t)
+			withFactory(t, "changes_body_env", "GO_HELPER_BODY="+pollBody(ownedRow(7, "h1", `"seq":1`), ownedRow(8, "h1", extras)))
+			args := []string{"changes", "pr", "q", "--consumer", "c1"}
+			if window != "" {
+				args = append(args, "--retry-window", window)
+			}
+			stdout, stderr, code := runCLI(t, args...)
+			if code == 0 || stdout != "" || stderr == "" {
+				t.Errorf("%s (window %q): code=%d stdout=%q stderr=%q, want non-zero, empty stdout, a diagnostic", name, window, code, stdout, stderr)
+			}
+		}
 	}
 }
 

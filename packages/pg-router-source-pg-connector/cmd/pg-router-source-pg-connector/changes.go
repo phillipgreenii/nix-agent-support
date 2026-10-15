@@ -49,10 +49,60 @@ type changesSource struct {
 
 // changesEntry is one row of the "changes" wire response's changes[]
 // array.
+//
+// Seq, Kinds and Fields are the extended wire of a backend that owns its
+// changes: a sequence number, the change kinds (array of strings) and the
+// changed fields (array of {name, before, after} objects). Each is kept raw
+// and validated by decodeChangeExtras; absent or JSON null means "not
+// present". A row from a backend that does not own its changes carries none
+// of them. NONE of the three ever reaches the event-id digest (changeIdentity).
 type changesEntry struct {
 	Change string          `json:"change"`
 	Source string          `json:"source"`
 	Entity json.RawMessage `json:"entity"`
+	Seq    json.RawMessage `json:"seq"`
+	Kinds  json.RawMessage `json:"kinds"`
+	Fields json.RawMessage `json:"fields"`
+}
+
+// isAbsentRaw reports whether raw is missing or the JSON null.
+func isAbsentRaw(raw json.RawMessage) bool {
+	return len(raw) == 0 || string(bytes.TrimSpace(raw)) == "null"
+}
+
+// decodeChangeExtras validates and returns the optional seq, kinds and fields
+// of one change row, as the values printed under metadata.seq, metadata.kinds
+// and metadata.fields. Each is independent: an absent or null one is omitted
+// from the result. A seq that is not a number, a kinds that is not an array of
+// strings, or a fields that is not an array is an error. The elements of
+// fields are not inspected and fields is kept as raw JSON, never re-encoded.
+func decodeChangeExtras(c changesEntry) (map[string]any, error) {
+	extras := make(map[string]any, 3)
+	if !isAbsentRaw(c.Seq) {
+		var n float64
+		if err := json.Unmarshal(c.Seq, &n); err != nil {
+			return nil, fmt.Errorf("change %q: seq is not a number: %w", c.Change, err)
+		}
+		extras["seq"] = compactRaw(c.Seq)
+	}
+	if !isAbsentRaw(c.Kinds) {
+		var kinds []string
+		if err := json.Unmarshal(c.Kinds, &kinds); err != nil {
+			return nil, fmt.Errorf("change %q: kinds is not an array of strings: %w", c.Change, err)
+		}
+		if kinds == nil {
+			kinds = []string{}
+		}
+		extras["kinds"] = kinds
+	}
+	if !isAbsentRaw(c.Fields) {
+		var fields []json.RawMessage
+		if err := json.Unmarshal(c.Fields, &fields); err != nil {
+			return nil, fmt.Errorf("change %q: fields is not an array: %w", c.Change, err)
+		}
+		extras["fields"] = compactRaw(c.Fields)
+	}
+	return extras, nil
 }
 
 // entityIdentity decodes the subset of an entity's own wire shape
@@ -207,6 +257,17 @@ func newChangesCmd() *cobra.Command {
 			}
 			if len(degradedReasons) > 0 {
 				metadata["degraded_reasons"] = degradedReasons
+			}
+			// The extended wire of a backend that owns its changes (seq,
+			// kinds, fields), additive under the same keys and only when
+			// the row carries them; never part of the digest below.
+			extras, err := decodeChangeExtras(c)
+			if err != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), err)
+				return errFailed
+			}
+			for k, v := range extras {
+				metadata[k] = v
 			}
 			item := rawItem{
 				ID:       id.ID,

@@ -149,6 +149,12 @@ func helperMain() {
 		})
 		_, _ = os.Stdout.Write(body)
 		os.Exit(0)
+	case "changes_body_env":
+		// The whole "changes" wire answer comes from GO_HELPER_BODY, so a
+		// test can drive the extended wire of a backend that owns its
+		// changes and give each invocation (poll) its own canned answer.
+		_, _ = fmt.Fprint(os.Stdout, os.Getenv("GO_HELPER_BODY"))
+		os.Exit(0)
 	case "changes_ok_empty":
 		_, _ = fmt.Fprint(os.Stdout, `{"sources":[],"changes":[]}`)
 		os.Exit(0)

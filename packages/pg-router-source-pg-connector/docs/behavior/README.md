@@ -55,18 +55,23 @@ flowchart LR
     (INV-EVT-3).
 
   For a backend that owns its changes (ADR 0090), each reported change also carries a sequence
-  number `seq`, the change `kinds` and the changed `fields`, and the adapter decodes all three. The
-  event id stays stable because each row carries its own `version` and `head_sha`: a row that is
-  redelivered keeps its id even after a newer change to the same entity, and two rows for one
-  entity in one poll get two ids.
+  number `seq`, the change `kinds` and the changed `fields`, and the adapter decodes all three and
+  prints each, when the row carries it, on the item's `metadata` under the keys `seq`, `kinds` and
+  `fields` (`fields` exactly as sent, never re-encoded). Each is independent: one that is absent or
+  `null` is printed as nothing, and a row that carries none of them (a row from a backend that does
+  not own its changes) prints exactly as it always did. A `seq` that is not a number, a `kinds` that
+  is not an array of strings, or a `fields` that is not an array makes the call fail and print
+  nothing on stdout. None of the three reaches the digest above. The event id stays stable because
+  each row carries its own `version` and `head_sha`: a row that is redelivered keeps its id even
+  after a newer change to the same entity, and two rows for one entity in one poll get two ids.
 
   The suffix exists only on `changes` items. Every other query, and every consumer that uses
   `Item.ID` as a bead or entity id (the escalation and triager roles, `RefreshItem`, the ccpool
   handler), keeps bare ids; a handler that needs the real entity id behind a suffixed event reads
   `metadata.entity_id`. A negative window is a usage error.
 
-  Known trade-offs of the digest, accepted with the retry window (bead `pg2-1ldvy`); they hold for
-  backends that do not own their changes:
+  Known trade-offs of the digest, accepted with the retry window (bead `pg2-1ldvy`); they hold only
+  for backends that do not own their changes:
   - **A -> B -> A flip.** If a PR's head goes A, then B, then back to A inside one window, the third
     report hashes to the first report's id and is deduped while that event is still retained: a
     rare lost update, caught by the next sweep. The emit time is deliberately NOT part of the
@@ -79,6 +84,13 @@ flowchart LR
     `{"id": ...}`: no `head_sha`, so its digest is over `{change, source, entity_id}` alone and two
     such rows for one PR coalesce inside the window whatever their heads. Rows classified by the
     same call's own refresh carry the full entity and are unaffected.
+
+  Event volume for a backend that owns its changes. Its rows carry a per-entity `version`, which is
+  part of the digest, so every content change (a comment, a label, a review) is its own `pr.changed`
+  event rather than coalescing into the first event on that head. This is intended: a desk-pr run is
+  now a set of local reads, so per-change events are cheap and the periodic sweep is no longer
+  needed to catch what the window would have absorbed. The shadow run measures the resulting event
+  rate.
 
 - **`sweep <type> <query>... [--since <bound>] [--beads-dir <path>]`** — runs
   `pg-connector <type> list --query <query> --ids-only [--since <bound>] --output json` once per
@@ -138,11 +150,9 @@ This set's **realization-gap register** (the method's realization-gap rule): int
 built yet, one row per gap. This README states behavior in sections rather than in id-bearing
 elements, so the first column names the section the gap is against.
 
-| Element                                    | Intended                                                                                                                                                                                      | Where the implementation stands                                                                                                            | Tracked by                 |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- |
-| `changes` (What it does)                   | for a backend that owns its changes the adapter decodes `seq`, `kinds` and `fields` from each change, and the event id stays stable because each row carries its own `version` and `head_sha` | the adapter decodes only `change`, `source` and `entity`; no backend yet reports `seq`, `kinds`, `fields` or a per-row `version`           | `pg2-z5fax` (later phases) |
-| `changes` (known trade-offs of the digest) | the trade-offs paragraph holds for backends that do not own their changes, and a later change replaces it with a note covering a backend that does                                            | the paragraph is unscoped in the build and no replacement note exists; the replacement is planned for Phase 3c of program epic `pg2-z5fax` | `pg2-z5fax` (later phases) |
-| `sweep`                                    | for a backend that owns its changes the narrowed periodic sweep is retired and the unnarrowed sweep stays as the longer-period backstop                                                       | no backend owns its changes yet, so both sweeps are still configured                                                                       | `pg2-z5fax` (later phases) |
+| Element | Intended                                                                                                                                | Where the implementation stands                                      | Tracked by                 |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------- |
+| `sweep` | for a backend that owns its changes the narrowed periodic sweep is retired and the unnarrowed sweep stays as the longer-period backstop | no backend owns its changes yet, so both sweeps are still configured | `pg2-z5fax` (later phases) |
 
 ## External references
 
