@@ -1414,6 +1414,14 @@ const (
 	// SourceFailureUnavailable: the backend reported scriptout "unavailable"
 	// for any reason other than a rate limit.
 	SourceFailureUnavailable = "unavailable"
+	// SourceFailureNetwork: the host could not reach the upstream at all (no
+	// link, DNS "no such host", "network is unreachable", gh's "error connecting
+	// to <host>"), as opposed to an upstream that answered badly. Split out of
+	// "unavailable" by bead pg2-sot3t: the 2026-10-11 awake Wi-Fi outage was 48.9%
+	// of 7 days of reason=unavailable, so a persistent-failure view could not
+	// tell "this host had no network" from "the upstream is broken". Retries
+	// cannot help with no link, so nothing about retry behaviour keys on it.
+	SourceFailureNetwork = "network"
 	// SourceFailureTimeout: the attempt ran out its time budget and the child
 	// was killed (the backend's 30s scriptout timeout, a SIGKILL, or a deadline
 	// exceeded). Split out of "interrupted" by bead pg2-zdowv (DEC-OBS-8): it is
@@ -1438,7 +1446,9 @@ const (
 // because a rate-limit breach also carries the generic "scriptout: unavailable"
 // wrapper. A kill or deadline (SourceFailureTimeout) is checked before the
 // generic "unavailable" wrapper too, so a backend that reports its own timeout
-// as unavailable is still named a timeout. A nil error classifies as
+// as unavailable is still named a timeout. A host-side reachability failure
+// (isNetworkFailure) is checked after those and before the generic
+// "unavailable" wrapper, so it is named SourceFailureNetwork. A nil error classifies as
 // SourceFailureError.
 //
 // A router-shutdown cancellation never reaches here: discover.runAndEnqueue
@@ -1459,12 +1469,37 @@ func ClassifySourceFailure(err error) string {
 		return SourceFailureUnauthenticated
 	case errors.Is(err, context.DeadlineExceeded) || strings.Contains(msg, "signal: killed") || strings.Contains(msg, "deadline exceeded"):
 		return SourceFailureTimeout
+	case isNetworkFailure(msg):
+		return SourceFailureNetwork
 	case strings.Contains(msg, "scriptout: unavailable"):
 		return SourceFailureUnavailable
 	case errors.Is(err, context.Canceled) || strings.Contains(msg, "context canceled"):
 		return SourceFailureInterrupted
 	}
 	return SourceFailureError
+}
+
+// isNetworkFailure reports whether the lowercased error text says the host
+// could not reach the upstream (pg2-sot3t). The markers are deliberately the
+// narrow, unambiguous ones seen in the router's own stderr: a DNS miss ("no such
+// host", "temporary failure in name resolution"), a routing failure ("network
+// is unreachable", "no route to host") and gh's two-line "error connecting to
+// <host>" + "check your internet connection". "connection refused" and
+// "i/o timeout" are NOT markers: an upstream that is down or slow produces
+// them too, and "error connecting to" alone is not enough because a local
+// backend can say it about its own server.
+func isNetworkFailure(msg string) bool {
+	for _, marker := range []string{
+		"no such host",
+		"temporary failure in name resolution",
+		"network is unreachable",
+		"no route to host",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return strings.Contains(msg, "error connecting to") && strings.Contains(msg, "check your internet connection")
 }
 
 // registerSourceGauges seeds srcLastSuccess with start for every source whose

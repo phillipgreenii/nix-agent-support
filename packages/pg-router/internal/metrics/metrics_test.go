@@ -327,6 +327,44 @@ const rateLimitReserveErr = "produce pr-mine: command query [/nix/store/x-pg-rou
 // (pg2-ezwut decodes the stdout envelope into the error; pg2-cslzd).
 const claudeSpendLimitErr = "produce thread-me: command query [/nix/store/x-pg-router-source-pg-connector/bin/pg-router-source-pg-connector changes thread involving-me --consumer pg-router]: exit status 1: pg-connector-thread-slack: scriptout: unavailable: claude -p: claude -p --output-format json: exit status 1: ; claude stdout: subtype=success result=You've hit your individual spend limit · run /usage-credits to ask your admin for a higher limit · your session limit resets 7:10pm (America/New_York)"
 
+// Real error shapes from the router's launchd-stderr.log during the 2026-10-11
+// awake Wi-Fi outage (bead pg2-sot3t), with hosts replaced by generic ones.
+const (
+	ghConnectErr = "produce pr-mine: command query [/nix/store/x-pg-router-source-pg-connector/bin/pg-router-source-pg-connector changes pr mine --consumer pg-router --retry-window 10m]: exit status 1: pg-connector-pr-github: scriptout: unavailable: pg-connector-pr-github: retry of transient gh failure abandoned: gh api graphql -f query={ rateLimit { remaining resetAt } }: exit status 1: error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com [gave up after 3 attempts; earlier: error connecting to api.github.com check your internet connection or https://githubstatus.com]"
+	dnsMissErr   = "produce issue-mine: command query [/nix/store/x-pg-router-source-pg-connector/bin/pg-router-source-pg-connector changes issue mine --consumer pg-router --backend pg-connector-issue-jira]: exit status 1: pg-connector-issue-jira: scriptout: unavailable: pg-connector-issue-jira: scriptout: unavailable: pjira search --jql (assignee = currentUser()) --all: exit status 1: pjira: search: Post \"https://tracker.example.test/rest/api/3/search/jql\": dial tcp: lookup tracker.example.test: no such host"
+)
+
+// TestClassifySourceFailureNetwork pins the split of host-side reachability
+// failures out of reason=unavailable (bead pg2-sot3t). The negative controls
+// are unavailable errors that are NOT a missing network and must stay put.
+func TestClassifySourceFailureNetwork(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  string
+		want string
+	}{
+		{"gh error connecting (real 2026-10-11 shape)", ghConnectErr, SourceFailureNetwork},
+		{"dns no such host (real 2026-10-11 shape)", dnsMissErr, SourceFailureNetwork},
+		{"network unreachable", "scriptout: unavailable: dial tcp 192.0.2.1:443: connect: network is unreachable", SourceFailureNetwork},
+		{"no route to host", "scriptout: unavailable: dial tcp 192.0.2.1:443: connect: no route to host", SourceFailureNetwork},
+		{"resolver temporary failure", "scriptout: unavailable: Temporary failure in name resolution", SourceFailureNetwork},
+		// Negative controls.
+		{"upstream refused is not a missing network", "scriptout: unavailable: dial tcp 192.0.2.1:443: connect: connection refused", SourceFailureUnavailable},
+		{"upstream i/o timeout is not a missing network", "scriptout: unavailable: dial tcp 192.0.2.1:443: i/o timeout", SourceFailureUnavailable},
+		{"local backend connecting to its own server", "scriptout: unavailable: error connecting to local store", SourceFailureUnavailable},
+		{"upstream 502 stays unavailable", "scriptout: unavailable: gh api: HTTP 502 Bad Gateway", SourceFailureUnavailable},
+		{"rate limit wins over network text", "scriptout: unavailable: GraphQL rate limit remaining (3) is below the configured reserve (50): no such host", SourceFailureRateLimited},
+		{"kill wins over network text", "scriptout: unavailable: no such host: signal: killed", SourceFailureTimeout},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ClassifySourceFailure(errors.New(tc.msg)); got != tc.want {
+				t.Fatalf("ClassifySourceFailure = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestClassifySourceFailure pins the closed reason taxonomy (bead pg2-hsla6).
 // The rate-limit case MUST win over the generic "scriptout: unavailable"
 // wrapper it arrives in.
@@ -376,6 +414,26 @@ func TestOnSourceFailureCarriesReason(t *testing.T) {
 	}
 	if got := sumForBoth(m, "source", "pr-mine", "reason", SourceFailureError); got != 1 {
 		t.Fatalf("source_failures{pr-mine,error} = %d, want 1", got)
+	}
+}
+
+// A no-network failure lands on its own reason="network" series, an upstream
+// 502 for the same source stays on reason="unavailable", and the per-source
+// total (what the alert's `sum by (source)` reads) still counts both (pg2-sot3t).
+func TestOnSourceFailureNetworkSeries(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnSourceFailure("pr-mine", errors.New(ghConnectErr))
+	h.emitter.OnSourceFailure("pr-mine", errors.New(dnsMissErr))
+	h.emitter.OnSourceFailure("pr-mine", errors.New("scriptout: unavailable: gh api: HTTP 502 Bad Gateway"))
+	m := findMetric(t, h.collect(t), MetricSourceFailures)
+	if got := sumForBoth(m, "source", "pr-mine", "reason", SourceFailureNetwork); got != 2 {
+		t.Fatalf("source_failures{pr-mine,network} = %d, want 2", got)
+	}
+	if got := sumForBoth(m, "source", "pr-mine", "reason", SourceFailureUnavailable); got != 1 {
+		t.Fatalf("source_failures{pr-mine,unavailable} = %d, want 1 (negative control)", got)
+	}
+	if got := sumFor(m, "source", "pr-mine"); got != 3 {
+		t.Fatalf("source_failures[pr-mine] total = %d, want 3", got)
 	}
 }
 
