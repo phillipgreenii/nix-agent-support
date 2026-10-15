@@ -70,6 +70,22 @@ func TestRestartServesEveryFreshReadWithZeroOriginCalls(t *testing.T) {
 }
 
 func TestRestartAfterALongDowntimeStaysInsideTheBudget(t *testing.T) {
+	restartAfterALongDowntime(t, 0)
+}
+
+// TestRestartAfterALongDowntimeStaysInsideTheBudgetOnASlowOrigin is the same
+// catch-up with every origin answer held back, the way a host under load holds
+// the daemon back: the REST runs requests then follow the last GraphQL call by
+// longer than any quiet period, and the test must still wait for them (pg2-xa71k).
+func TestRestartAfterALongDowntimeStaysInsideTheBudgetOnASlowOrigin(t *testing.T) {
+	restartAfterALongDowntime(t, 2)
+}
+
+// restartAfterALongDowntime fills the store, stops the daemon, ages everything,
+// restarts it under a cap with little headroom (answering every origin call
+// after originDelay seconds) and checks the catch-up stays inside the cap.
+func restartAfterALongDowntime(t *testing.T, originDelay int) {
+	t.Helper()
 	// One summary and one detail per call (batch_size 1) so the demand is many
 	// small calls, and a generous cap for the fill.
 	d := servetest.NewDaemon(t, servetest.Options{
@@ -124,8 +140,22 @@ func TestRestartAfterALongDowntimeStaysInsideTheBudget(t *testing.T) {
 	// Restart under a cap that leaves only a little headroom. The hour's spend is
 	// replayed from the budget table, so the catch-up can use only what is left.
 	d.Rewrite(map[string]any{"batch_size": 1, "rate_reserve_points": 0, "graphql_points_per_hour": cap})
+	d.Shim.Delay(originDelay)
+	restartedAt := time.Now().UnixMilli()
 	d.Start(t)
+	// The catch-up is done when the daemon has stored what it is going to fetch:
+	// the runs of every pull request are the last thing it fetches (they follow
+	// the summaries, and the REST calls are not governed by the cap). Silence in
+	// the call log cannot say that: a starved daemon leaves a gap between its
+	// last GraphQL call and the runs request longer than any quiet period.
+	awaitRunsRefetched(t, d, restartedAt, 3)
 	d.Shim.WaitQuiet(t, 1500*time.Millisecond, 30*time.Second, workKinds...)
+	// A call is booked in the budget table when its answer arrives, after the
+	// shim logged it: let the daemon book every call it made.
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline) &&
+		graphqlSpent(t, d) != int64(graphqlCalls(d.Shim.OriginCalls())); {
+		time.Sleep(25 * time.Millisecond)
+	}
 	total := len(d.Shim.OriginCalls())
 
 	newGraphQL := graphqlCalls(d.Shim.OriginCalls()[filled:])
@@ -158,11 +188,24 @@ func TestRestartAfterALongDowntimeStaysInsideTheBudget(t *testing.T) {
 	if got := len(d.Shim.OriginCalls()); got != total {
 		t.Errorf("the daemon kept calling after the cap: %d more calls: %v", got-total, kinds(d.Shim.OriginCalls()[total:]))
 	}
+	d.Shim.Delay(0)
 	// Reads are still answered (stale content inside expiry), not refused.
 	if resp, _ := list(t, d, servetest.QueryMine, 20*time.Second, nil); resp.Error != nil {
 		t.Errorf("a read after the catch-up: %+v", resp.Error)
 	}
 	callOK(t, d, "pr", "show", map[string]any{"id": prA.Ref()})
+}
+
+// awaitRunsRefetched waits until the daemon has stored a fresh runs group for
+// prs pull requests since the unix-millisecond time since.
+func awaitRunsRefetched(t *testing.T, d *servetest.Daemon, since int64, prs int) {
+	t.Helper()
+	db := d.OpenStore(t)
+	until(t, 60*time.Second, "the runs group of every fixture pull request to be fetched again", func() bool {
+		var n int
+		err := db.QueryRow(`SELECT COUNT(*) FROM entity_group WHERE kind = 'pr' AND group_name = 'runs' AND fetched_at >= ?`, since).Scan(&n)
+		return err == nil && n >= prs
+	})
 }
 
 // countRows is the number of rows of a store table.
