@@ -110,6 +110,12 @@ func TestResolveTrustedExecutable_MarketplaceNegativeControls(t *testing.T) {
 		{"dot-dot spelling that stays inside the derivation", func(t *testing.T, f marketplaceFixture) string {
 			return f.installed + "/plan-decompose/hooks/../scripts/create-packet.sh"
 		}},
+		{"redundant dot-dot spelling of the very same script", func(t *testing.T, f marketplaceFixture) string {
+			// Resolves to the trusted file, yet is rejected: only canonical
+			// spellings are an identity, so a path that merely routes through
+			// ".." never gets the benefit of the prefix.
+			return f.installed + "/plan-decompose/scripts/../scripts/create-packet.sh"
+		}},
 		{"real directory planted under the install root", func(t *testing.T, f marketplaceFixture) string {
 			p := filepath.Join(f.home, marketplaceInstallRel, "planted-marketplace-local", "plan-decompose", "scripts", "create-packet.sh")
 			mustWrite(t, p, "#!/bin/sh\n")
