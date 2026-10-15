@@ -394,6 +394,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			}
 			continue
 		}
+		// plan-decompose packet scripts by verified absolute marketplace path
+		// (pg2-zp3fl): see marketplace_packet_scripts.go. Gated on the executable's
+		// IDENTITY, not its basename, so an unverified spelling falls through to
+		// the checks below exactly as before.
+		if spec, ok := marketplacePacketScript(pc.Executable); ok {
+			if issue, cat := marketplacePacketScriptIssue(spec, pc.Args, pc.ArgLiveExpansion, pe, vars); issue != "" {
+				return r.refuseCategorized(cat, "safe-commands: "+basename+" "+issue+" (deferred to claude-code)")
+			}
+			continue
+		}
 		if browsingCmds[basename] {
 			if issue := browsingPathIssue(pc.Args, pe); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")

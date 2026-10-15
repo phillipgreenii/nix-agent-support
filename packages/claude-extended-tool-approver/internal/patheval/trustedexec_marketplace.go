@@ -121,3 +121,14 @@ func isMarketplacePluginScript(argv0 string) (realpath string, ok bool) {
 	}
 	return real, true
 }
+
+// IsMarketplacePluginScript is isMarketplacePluginScript for callers outside
+// this package that need only the yes/no identity answer. The live hook's
+// legacy rule chain (internal/rules/safecmds) uses it to recognize an absolute
+// marketplace plugin script call by the SAME three conditions the effect
+// engine trusts (pg2-zp3fl), so the two engines cannot drift on what counts as
+// a trusted marketplace script.
+func IsMarketplacePluginScript(argv0 string) bool {
+	_, ok := isMarketplacePluginScript(argv0)
+	return ok
+}

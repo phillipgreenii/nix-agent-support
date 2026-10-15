@@ -52,3 +52,24 @@ auto-approved) makes that a defect, not a design.
 - A change to the builder's store-name convention (`claude-marketplace-`) or to the install root
   fails closed (scripts abstain again) until `trustedexec_marketplace.go` follows it.
 - The change takes effect when the rebuilt approver is applied to the machine.
+
+## Amendment (`pg2-zp3fl`, 2026-10-15): the live hook needs the same identity
+
+The decision above landed only in the effect engine. `evaluate --corpus` replays through that
+engine, but the live PreToolUse hook still decides through `internal/setup.RuleChain` until
+production cutover, so the applied approver replayed the corpus rows as approve while the same
+command abstained in hook mode (measured on the applied binary, 2026-10-15). The identity function
+was never the cause.
+
+- `internal/rules/safecmds` gets an argument-aware branch for the three packet scripts
+  (`create-packet.sh`, `assemble-packet.sh`, `update-packet.sh`), gated on
+  `patheval.IsMarketplacePluginScript` (the SAME three conditions as decision 1) and on the script's
+  closed flag surface. Path-valued flags are held to the ordinary read zones (`--body-file`,
+  `--acceptance-file`, `--design`, `--in`) or write zones (`--out`); a live shell expansion in any
+  value, an `@file` `--metadata`, an unknown flag, a positional, or a missing value is refused.
+- A variable argv0 (`S=<dir>; $S/create-packet.sh ...`) still does not approve, in the live chain as
+  in the effect engine.
+- The branch is a stopgap in the old engine, in the same style as `handoff-create`; the effect-engine
+  rule stays the design of record and the branch goes away with the old engine at cutover.
+- Regression guard: `TestLiveHook_MarketplacePlanDecomposeScripts` in `internal/setup`, which drives
+  the factory-built engine over a hermetic copy of the install layout.

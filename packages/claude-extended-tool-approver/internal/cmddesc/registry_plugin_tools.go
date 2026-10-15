@@ -772,10 +772,12 @@ var cetaSchema = CommandSchema{
 // engine looks such a command up by basename and does NOT apply the P4
 // absolute-path identity check to it (effectgraph/build.go) — so these
 // schemas are registry entries by script name. An ABSOLUTE path to the same
-// script fails the P4 identity check and abstains, by design (measured
-// 2026-10-14, pg2-3gizb: an absolute-path create-packet.sh / assemble-packet.sh
-// / update-packet.sh INVOCATION abstains in both the live rules chain and
-// `evaluate --corpus` ("untrusted executable identity"). What IS allowed:
+// script is judged by the identity check: as measured 2026-10-14 (pg2-3gizb)
+// it abstained in both the live rules chain and `evaluate --corpus`
+// ("untrusted executable identity"); since pg2-yr90y (ADR 0099) an absolute
+// path under the installed marketplace approves in the effect engine, and
+// since pg2-zp3fl in the live chain too (safecmds'
+// marketplace_packet_scripts.go). What was ALREADY allowed:
 // historically, sed/ls/cat READS of the script and bare `create-packet.sh
 // --help` calls (asks.db); the `--help` allow is generic code, not a script
 // schema: internal/rules/safecmds/safecmds.go isHelpRequest (~778) approves
