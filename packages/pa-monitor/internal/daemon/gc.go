@@ -4,9 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
+	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 )
@@ -15,8 +15,9 @@ import (
 // orphaned rows, and hard-deletes rows that have been soft-deleted past the
 // retention cutoff. It also drives orphan cleanup for blocks and weeks.
 type GCSweeper struct {
-	// SessionsDir is the directory where Claude Code writes .json session files.
-	// The sweeper lists this directory to determine which sessions are still alive.
+	// SessionsDir is the directory where Claude Code writes <pid>.json registry
+	// files. The sweeper reads each file's sessionId field to determine which
+	// sessions are still alive.
 	SessionsDir string
 	// WriteService receives all mutations.
 	WriteService *service.WriteService
@@ -110,10 +111,19 @@ func (g *GCSweeper) Run(ctx context.Context) {
 	}
 }
 
-// listSessionFiles lists g.SessionsDir and returns the session IDs of all
-// .json files found (extension stripped). Returns an empty slice (not error)
-// when the directory is empty. Returns os.ErrNotExist if the directory is
-// missing so the caller can distinguish "no sessions" from "dir gone".
+// listSessionFiles lists dir and returns the session IDs named by the
+// sessionId field inside each Claude Code registry file. Registry files are
+// named <pid>.json (not <sessionId>.json), so the filename MUST NOT be used as
+// the session id: doing so soft-deleted every row on every sweep (pg2-4g02s).
+//
+// It mirrors session.Discoverer.Discover: only *.json files are read, via
+// ct.ReadSessionFile; malformed files and files without a sessionId are
+// skipped. Status-line / session-mode / compaction siblings
+// (session.IsStatusSiblingFile, ADR 0021 §2) are skipped even though they may
+// be valid JSON, and <pid>.<hash>.key sidecars are ignored by extension.
+// Returns an empty slice (not error) when the directory holds no registry
+// files. Returns the os.ReadDir error (os.ErrNotExist if the directory is
+// missing) so the caller can distinguish "no sessions" from "dir gone".
 func listSessionFiles(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -125,17 +135,14 @@ func listSessionFiles(dir string) ([]string, error) {
 			continue
 		}
 		name := e.Name()
-		// Skip status-line rate_limits siblings (<id>.status.jsonl and the
-		// <id>.status.last hash sidecar) so they never derive a phantom session
-		// ID — ADR 0021 §2. Genuine <id>.json session records still pass.
-		if session.IsStatusSiblingFile(name) {
+		if session.IsStatusSiblingFile(name) || filepath.Ext(name) != ".json" {
 			continue
 		}
-		ext := filepath.Ext(name)
-		if ext != ".json" && ext != ".jsonl" {
+		r, err := ct.ReadSessionFile(filepath.Join(dir, name))
+		if err != nil || r.SessionID == "" {
 			continue
 		}
-		ids = append(ids, strings.TrimSuffix(name, ext))
+		ids = append(ids, r.SessionID)
 	}
 	return ids, nil
 }

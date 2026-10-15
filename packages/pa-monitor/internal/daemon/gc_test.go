@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -43,16 +45,27 @@ func openTestWriteService(t *testing.T) (*service.WriteService, *sqlite.SessionS
 	return ws, sqlite.NewSessionStore(db)
 }
 
-// TestGCSweeper_ReconcilesFiles verifies that RunOnce soft-deletes sessions
-// whose files are absent on disk and leaves sessions with a file untouched.
-func TestGCSweeper_ReconcilesFiles(t *testing.T) {
+// writeRegistryFile lays out one session the way Claude Code does under
+// ~/.claude/sessions: a <pid>.json registry file whose sessionId field names
+// the session, plus a <pid>.<hash>.key sidecar. The filename carries the PID,
+// never the session id (bead pg2-4g02s).
+func writeRegistryFile(t *testing.T, dir string, pid int, sessionID string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"cwd":"/tmp","kind":"interactive"}`, pid, sessionID)
+	if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d.json", pid)), []byte(body), 0o600); err != nil {
+		t.Fatalf("write registry file: %v", err)
+	}
+	sidecar := fmt.Sprintf("%d.0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.key", pid)
+	if err := os.WriteFile(filepath.Join(dir, sidecar), []byte("key-material"), 0o600); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+}
+
+func upsertTestSessions(t *testing.T, ws *service.WriteService, ids ...string) {
+	t.Helper()
 	ctx := context.Background()
-
-	ws, sessionStore := openTestWriteService(t)
-
-	// Insert three sessions (a, b, c).
 	now := time.Now().UTC()
-	for _, id := range []string{"a", "b", "c"} {
+	for _, id := range ids {
 		if err := ws.UpsertSession(ctx, store.Session{
 			SessionID:       id,
 			LastProcessedAt: now,
@@ -65,15 +78,13 @@ func TestGCSweeper_ReconcilesFiles(t *testing.T) {
 	if err := ws.Sync(ctx); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
+}
 
-	// Filesystem only has a.json.
-	sessionsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sessionsDir, "a.json"), []byte("{}"), 0o600); err != nil {
-		t.Fatalf("create a.json: %v", err)
-	}
-
+func runSweep(t *testing.T, ws *service.WriteService, dir string) {
+	t.Helper()
+	ctx := context.Background()
 	sweeper := &GCSweeper{
-		SessionsDir:     sessionsDir,
+		SessionsDir:     dir,
 		WriteService:    ws,
 		Interval:        time.Hour,
 		HardDeleteAfter: 24 * time.Hour,
@@ -84,26 +95,77 @@ func TestGCSweeper_ReconcilesFiles(t *testing.T) {
 	if err := ws.Sync(ctx); err != nil {
 		t.Fatalf("Sync after GC: %v", err)
 	}
+}
 
-	// Session a must still be alive (file present).
-	fresh := store.FreshnessWindow{Sessions: 24 * time.Hour}
-	if got, err := sessionStore.GetByID(ctx, "a", fresh); err != nil {
-		t.Fatalf("GetByID(a): %v", err)
-	} else if got == nil {
-		t.Error("session a: want alive, got nil")
+// alive reports whether the session row is visible (not soft-deleted).
+func alive(t *testing.T, ss *sqlite.SessionStore, id string) bool {
+	t.Helper()
+	got, err := ss.GetByID(context.Background(), id, store.FreshnessWindow{Sessions: 24 * time.Hour})
+	if err != nil {
+		t.Fatalf("GetByID(%s): %v", id, err)
+	}
+	return got != nil
+}
+
+// TestGCSweeper_LiveRegistryFileKeepsRow: with the real <pid>.json layout, a
+// session whose registry file is present MUST NOT be soft-deleted, and a
+// session whose registry file is gone MUST be.
+func TestGCSweeper_LiveRegistryFileKeepsRow(t *testing.T) {
+	ws, ss := openTestWriteService(t)
+	upsertTestSessions(t, ws, "sess-live", "sess-gone")
+
+	dir := t.TempDir()
+	writeRegistryFile(t, dir, 4242, "sess-live")
+
+	runSweep(t, ws, dir)
+
+	if !alive(t, ss, "sess-live") {
+		t.Error("sess-live: registry file 4242.json present, want row alive, got soft-deleted")
+	}
+	if alive(t, ss, "sess-gone") {
+		t.Error("sess-gone: no registry file, want soft-deleted, got alive")
+	}
+}
+
+// TestGCSweeper_RevivesWhenRegistryFileReappears: a soft-deleted row whose
+// registry file reappears MUST have deleted_at cleared.
+func TestGCSweeper_RevivesWhenRegistryFileReappears(t *testing.T) {
+	ws, ss := openTestWriteService(t)
+	upsertTestSessions(t, ws, "sess-back")
+
+	dir := t.TempDir()
+	// An unrelated session keeps the dir non-empty; sess-back has no file yet.
+	writeRegistryFile(t, dir, 1, "sess-other")
+	runSweep(t, ws, dir)
+	if alive(t, ss, "sess-back") {
+		t.Fatal("precondition: sess-back should be soft-deleted while its registry file is absent")
 	}
 
-	// Sessions b and c must be soft-deleted (no file on disk).
-	// GetByID filters out soft-deleted rows, so nil means deleted.
-	if got, err := sessionStore.GetByID(ctx, "b", fresh); err != nil {
-		t.Fatalf("GetByID(b): %v", err)
-	} else if got != nil {
-		t.Errorf("session b: want soft-deleted (nil), got %+v", got)
+	writeRegistryFile(t, dir, 9001, "sess-back")
+	runSweep(t, ws, dir)
+	if !alive(t, ss, "sess-back") {
+		t.Error("sess-back: registry file reappeared, want revived (deleted_at cleared), got soft-deleted")
 	}
-	if got, err := sessionStore.GetByID(ctx, "c", fresh); err != nil {
-		t.Fatalf("GetByID(c): %v", err)
-	} else if got != nil {
-		t.Errorf("session c: want soft-deleted (nil), got %+v", got)
+}
+
+// TestGCSweeper_FilenameStemIsNotASessionID is the negative case for the old
+// stem-as-id behaviour: a <pid>.json file must NOT keep alive a row whose
+// session id equals the filename stem when the file's sessionId names a
+// different session.
+func TestGCSweeper_FilenameStemIsNotASessionID(t *testing.T) {
+	ws, ss := openTestWriteService(t)
+	upsertTestSessions(t, ws, "4242", "sess-real")
+
+	dir := t.TempDir()
+	writeRegistryFile(t, dir, 4242, "sess-real")
+
+	runSweep(t, ws, dir)
+
+	if !alive(t, ss, "sess-real") {
+		t.Error("sess-real: want alive")
+	}
+	if alive(t, ss, "4242") {
+		t.Error(`row "4242" (the pid): want soft-deleted, got alive; filenames must not be treated as session ids`)
 	}
 }
 
@@ -123,57 +185,28 @@ func TestGCSweeper_MissingDirIsNoop(t *testing.T) {
 	}
 }
 
-// TestListSessionFiles verifies extension stripping and filtering.
-func TestListSessionFiles(t *testing.T) {
+// TestListSessionFiles_ReturnsSessionIDsNotPIDs verifies the keep set is
+// derived from the sessionId field inside each <pid>.json, not the filename,
+// and that sidecars, non-registry files, empty/malformed registry files and
+// directories contribute nothing.
+func TestListSessionFiles_ReturnsSessionIDsNotPIDs(t *testing.T) {
 	dir := t.TempDir()
-	// Create files of various types.
-	for _, name := range []string{"abc123.json", "def456.jsonl", "ignored.txt", "sub"} {
-		p := filepath.Join(dir, name)
-		if name == "sub" {
-			_ = os.Mkdir(p, 0o755)
-		} else {
-			_ = os.WriteFile(p, []byte("{}"), 0o600)
-		}
-	}
-
-	ids, err := listSessionFiles(dir)
-	if err != nil {
-		t.Fatalf("listSessionFiles: %v", err)
-	}
-	want := map[string]bool{"abc123": true, "def456": true}
-	got := map[string]bool{}
-	for _, id := range ids {
-		got[id] = true
-	}
-	for k := range want {
-		if !got[k] {
-			t.Errorf("missing expected id %q in result %v", k, ids)
-		}
-	}
-	for k := range got {
-		if !want[k] {
-			t.Errorf("unexpected id %q in result %v", k, ids)
-		}
-	}
-}
-
-// TestListSessionFiles_IgnoresStatusSiblings proves a status-line rate_limits
-// sibling never derives a phantom session id (ADR 0021 §2), extended by bead
-// pg2-gzrn2 to cover the session-mode CLI's sibling too. A <id>.status.jsonl
-// (the <id>.status.last hash sidecar, and now <id>.session-mode.json) must be
-// skipped; a genuine <id>.json / <id>.jsonl still yields its id. Without this
-// case, a future accidental revert of the session-mode exclusion in
-// IsStatusSiblingFile would go uncaught.
-func TestListSessionFiles_IgnoresStatusSiblings(t *testing.T) {
-	dir := t.TempDir()
-	for _, name := range []string{
-		"real-1.json",
-		"real-2.jsonl",
-		"sess-1.status.jsonl",      // rate_limits sibling — must NOT become "sess-1.status"
-		"sess-1.status.last",       // hash sidecar — must NOT become "sess-1.status"
-		"sess-1.session-mode.json", // session-mode record — must NOT become "sess-1.session-mode"
+	writeRegistryFile(t, dir, 111, "sess-a")
+	writeRegistryFile(t, dir, 222, "sess-b")
+	for name, body := range map[string]string{
+		"333.json":    `not json`,              // malformed: skipped like Discover
+		"444.json":    `{"pid":444}`,           // no sessionId: nothing to keep
+		"ignored.txt": `{"sessionId":"txt"}`,   // not a registry file
+		"555.jsonl":   `{"sessionId":"jsonl"}`, // not a registry file
+		"sub.json":    "",                      // replaced by a directory below
 	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0o600); err != nil {
+		if name == "sub.json" {
+			if err := os.Mkdir(filepath.Join(dir, name), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -182,19 +215,36 @@ func TestListSessionFiles_IgnoresStatusSiblings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listSessionFiles: %v", err)
 	}
-	got := map[string]bool{}
-	for _, id := range ids {
-		got[id] = true
+	sort.Strings(ids)
+	want := []string{"sess-a", "sess-b"}
+	if fmt.Sprint(ids) != fmt.Sprint(want) {
+		t.Errorf("listSessionFiles = %v, want %v", ids, want)
 	}
-	want := map[string]bool{"real-1": true, "real-2": true}
-	for k := range want {
-		if !got[k] {
-			t.Errorf("missing expected id %q in %v", k, ids)
+}
+
+// TestListSessionFiles_IgnoresStatusSiblings proves session-adjacent siblings
+// (ADR 0021 §2; pg2-gzrn2; pg2-thkh0.5) never contribute ids, even when they
+// are valid JSON carrying a sessionId. A genuine <pid>.json still yields its
+// session id.
+func TestListSessionFiles_IgnoresStatusSiblings(t *testing.T) {
+	dir := t.TempDir()
+	writeRegistryFile(t, dir, 777, "real-1")
+	for _, name := range []string{
+		"sess-1.status.jsonl",      // rate_limits sibling
+		"sess-1.status.last",       // hash sidecar
+		"sess-1.session-mode.json", // session-mode record
+		"sess-1.compaction.json",   // compaction marker
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(`{"sessionId":"phantom"}`), 0o600); err != nil {
+			t.Fatal(err)
 		}
 	}
-	for k := range got {
-		if !want[k] {
-			t.Errorf("unexpected (phantom) id %q in %v", k, ids)
-		}
+
+	ids, err := listSessionFiles(dir)
+	if err != nil {
+		t.Fatalf("listSessionFiles: %v", err)
+	}
+	if fmt.Sprint(ids) != fmt.Sprint([]string{"real-1"}) {
+		t.Errorf("listSessionFiles = %v, want [real-1]", ids)
 	}
 }
