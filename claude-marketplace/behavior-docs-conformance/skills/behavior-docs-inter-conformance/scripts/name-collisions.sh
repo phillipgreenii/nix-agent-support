@@ -64,6 +64,21 @@
 #      the CITATION resolved: `INTF-CLI` is real and its UUID matches. Only the
 #      NAME beside it was wrong.
 #
+# WHAT CLASS 2 DOES NOT FLAG (bead pg2-9lhwb). It over-reported on three shapes that
+# are not an affordance asserted against the owner, and bead pg2-ksssh had to split
+# real docs to get round them:
+#   - a TABLE ROW is its own block, so a row is judged on its own citation and not
+#     on the rest of the table;
+#   - a name the asserting set ALSO uses in a block that cites nothing of the owner
+#     is that set's OWN vocabulary (a decline reason, a state), not a claim about the
+#     owner. A name that appears only beside the citation is still reported, and the
+#     match is on whole tokens so `owner-emit-all` is not a use of `owner-emit`;
+#   - a bead id (`pg2-gidpd`) is a tracker reference, not an affordance name.
+# Residual: a name used ONLY inside the one block that also cites the owner (the
+# set's own decline reason named once, in the bullet that cites the owner's
+# capacity rule) is indistinguishable from a claim and is still reported; the fix is
+# to name it in its own sub-bullet or paragraph, not an exclude.
+#
 # Class 2 is reported as a CANDIDATE list, not a failure, because a set
 # legitimately names its OWN affordances on a line that cites an owner element,
 # and no grep distinguishes "the name I use for my thing" from "the name I claim
@@ -366,11 +381,43 @@ for a in "${SETS[@]}"; do
         for (i = 1; i <= n; i++) out = out tmp[i] " "
         return out
       }
+      # has_word(text, tok) — does TOK occur in TEXT as a whole kebab/underscore
+      # token, not as a fragment of a longer one (`owner-emit` is not "used" by
+      # `owner-emit-all`)? Used for the own-vocabulary test, where a loose substring
+      # match would let an unrelated longer name hide a real violation.
+      function has_word(text, tok,   pos, before, after, rest, off) {
+        off = 0
+        rest = text
+        while ((pos = index(rest, tok)) > 0) {
+          before = (off + pos > 1) ? substr(text, off + pos - 1, 1) : " "
+          after = substr(text, off + pos + length(tok), 1)
+          if (before !~ /[A-Za-z0-9_-]/ && after !~ /[A-Za-z0-9_-]/) return 1
+          off += pos
+          rest = substr(text, off + 1)
+        }
+        return 0
+      }
+      # flush() only RECORDS the block just read. Whether a token is the asserting
+      # set OWN vocabulary depends on the OTHER blocks, which are not all
+      # read yet, so the findings are decided in END (see report()).
       function flush() {
         if (blk == "") return
-        cited = cited_list(blk)
-        if (cited != "") {
-          s = blk
+        N++
+        BT_TEXT[N] = blk
+        BT_LINE[N] = blkline
+        BT_FILE[N] = fname
+        BT_CITED[N] = cited_list(blk)
+        # A block that cites NOTHING of the cited set is an INDEPENDENT use of every
+        # name in it: the asserting set is using its own words there, with no claim
+        # about the other set beside them.
+        if (BT_CITED[N] == "") INDEP = INDEP "\n" blk
+        blk = ""
+      }
+      function report(   k, s, tok, cited) {
+        for (k = 1; k <= N; k++) {
+          cited = BT_CITED[k]
+          if (cited == "") continue
+          s = BT_TEXT[k]
           while (match(s, TOKPAT) > 0) {
             tok = substr(s, RSTART + 1, RLENGTH - 2)  # strip the leading ` and the terminator
             s = substr(s, RSTART + RLENGTH)
@@ -380,29 +427,48 @@ for a in "${SETS[@]}"; do
             # positive -- every correctly written citation reports one.
             # Recognised by what FOLLOWS it inside the span: the separator.
             if (s ~ /^[ ]*·/) continue
+            # NOT an affordance name: a bead id (`pg2-gidpd`): a prefix that ends in
+            # a digit and ONE short suffix segment. It is kebab-shaped, so it
+            # satisfied TOKPAT, but it is a tracker reference and never an
+            # affordance of the cited set. A real tool name (`pg-pr`, `push-inject`)
+            # has no digit-ended prefix and is unaffected.
+            if (tok ~ /^[a-z]+[0-9]+-[a-z0-9]+$/) continue
             # Present anywhere in the cited set => the two sets agree on the name.
             if (index(BT, tok) > 0) continue
+            # Used in a block of the asserting set that cites nothing of the cited
+            # set => the asserting set OWN vocabulary (`command-busy`,
+            # `needs_input`): not a claim about the owner. A name that appears ONLY
+            # beside the citation is still the claim this check exists to catch.
+            if (has_word(INDEP, tok)) continue
             if (!((tok SUBSEP cited) in SEEN)) {
               SEEN[tok SUBSEP cited] = 1
               printf "  CANDIDATE %s asserts `%s` beside its citation of %s(%s:%d) — that name appears nowhere in %s\n", \
-                aname, tok, cited, fname, blkline, bdir
+                aname, tok, cited, BT_FILE[k], BT_LINE[k], bdir
             }
           }
         }
-        blk = ""
       }
       FNR == 1 {
         flush()
         fname = FILENAME
         sub(/.*\//, "", fname)
+        intable = 0
       }
-      /^[ \t]*$/ { flush(); next }
+      /^[ \t]*$/ { flush(); intable = 0; next }
+      # EACH TABLE ROW IS ITS OWN BLOCK (bead pg2-9lhwb). A markdown table has no
+      # blank line and no bullet marker between rows, so it used to read as ONE
+      # block: the affordance names of every row were charged against the citation of every OTHER
+      # row. A row is the unit a table asserts in (a gap register keys one
+      # element per row), and a line that follows a table without a blank line is
+      # not part of its last row.
+      /^[ \t]*\|/ { flush(); intable = 1 }
+      !/^[ \t]*\|/ && intable { flush(); intable = 0 }
       /^[ \t]*[-*+][ \t]/ || /^#+[ \t]/ { flush() }
       {
         if (blk == "") blkline = FNR
         blk = blk " " $0
       }
-      END { flush() }
+      END { flush(); report() }
     ' "$a"/*.md >>"$out"
   done
 done

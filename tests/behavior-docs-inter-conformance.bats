@@ -828,6 +828,285 @@ MD
   ! echo "$output" | grep -q 'some-long-repo-name'
 }
 
+# --- Class-2 refinements: table rows, own vocabulary, bead ids (bead pg2-9lhwb) ---
+# Class 2 over-reported on three shapes that are NOT an affordance asserted against
+# the owner: (1) a whole markdown table was ONE block, so a row's names were charged
+# against another row's citation; (2) a name the asserting set uses for ITS OWN thing
+# (a decline reason, a state) was flagged merely for sitting in a block that also
+# cites an owner element; (3) a bead id (`pg2-gidpd`) is kebab-shaped. pg2-ksssh
+# cleared 19 such hits by splitting the docs; these tests pin the evaluator instead.
+# Every "MUST pass" test below is paired with a "MUST still fail" planted violation,
+# and the mutation tests prove the planted violation is what keeps the check honest.
+
+# c2_owner <dir> — an owner set that has `INTF-CLI` and never mentions `owner-emit`.
+c2_owner() {
+  mkdir -p "$1"
+  cat >"$1/interfaces.md" <<'MD'
+# Owner
+- **`INTF-CLI`** — operator commands. The push affordance is `source-push <json>`.
+- **`INV-EVT-2`** — listeners are idempotent.
+MD
+}
+
+@test "class 2 (table): rows are separate blocks, so a row's own vocabulary is not charged to another row's citation" {
+  A="$BATS_TEST_TMPDIR/t1a"
+  Bd="$BATS_TEST_TMPDIR/t1b"
+  c2_owner "$Bd"
+  mkdir -p "$A"
+  # Row 1 cites the owner and names nothing; rows 2 and 3 name only the set's OWN
+  # vocabulary (`command-busy`, `needs_input`) and cite no owner element. As one
+  # block they read as `command-busy` and `needs_input` asserted beside `INTF-CLI`.
+  cat >"$A/README.md" <<'MD'
+# Implementer
+
+| Element       | Intended                                  |
+| ------------- | ----------------------------------------- |
+| `INTF-CLI`    | this module realizes `INTF-CLI`           |
+| `INV-OWN-1`   | a busy command declines as `command-busy` |
+| `INV-OWN-2`   | a session left in `needs_input` is spared |
+MD
+  run name-collisions --strict "$A" "$Bd"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '  none'
+}
+
+@test "class 2 (table): a planted violation inside one table row still FAILs under --strict" {
+  A="$BATS_TEST_TMPDIR/t2a"
+  Bd="$BATS_TEST_TMPDIR/t2b"
+  c2_owner "$Bd"
+  mkdir -p "$A"
+  cat >"$A/README.md" <<'MD'
+# Implementer
+
+| Element       | Intended                                              |
+| ------------- | ----------------------------------------------------- |
+| `INV-OWN-1`   | a busy command declines as `command-busy`            |
+| `INV-OWN-2`   | operators push with `owner-emit <json>` (`INTF-CLI`) |
+MD
+  run name-collisions --strict "$A" "$Bd"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'CANDIDATE .* asserts `owner-emit` beside its citation of INTF-CLI'
+  # the neighbouring row's own vocabulary is NOT reported
+  ! echo "$output" | grep -q 'command-busy'
+}
+
+@test "class 2 (table): a line after a table with no blank line is not part of its last row" {
+  A="$BATS_TEST_TMPDIR/t3a"
+  Bd="$BATS_TEST_TMPDIR/t3b"
+  c2_owner "$Bd"
+  mkdir -p "$A"
+  # `owner-emit` follows the table directly, beside no citation of its own: with
+  # the trailing line glued to the last row it would sit beside that row's INTF-CLI.
+  cat >"$A/README.md" <<'MD'
+# Implementer
+
+| Element       | Intended                                |
+| ------------- | --------------------------------------- |
+| `INTF-CLI`    | this module realizes `INTF-CLI`         |
+the set also ships `owner-emit <json>` for its own operators.
+MD
+  run name-collisions --strict "$A" "$Bd"
+  [ "$status" -eq 0 ]
+}
+
+@test "class 2 (own vocabulary): a name also used where no owner element is cited is not a candidate" {
+  A="$BATS_TEST_TMPDIR/v1a"
+  Bd="$BATS_TEST_TMPDIR/v1b"
+  c2_owner "$Bd"
+  mkdir -p "$A"
+  cat >"$A/invariants.md" <<'MD'
+# Implementer
+- **`INV-OWN-1`** — a busy command is declined with reason `command-busy`, as `INTF-CLI` requires.
+- **`INV-OWN-2`** — the decline reason `command-busy` is a bounded label.
+MD
+  run name-collisions --strict "$A" "$Bd"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '  none'
+}
+
+@test "class 2 (own vocabulary): a name that appears ONLY beside the citation is still a candidate" {
+  A="$BATS_TEST_TMPDIR/v2a"
+  Bd="$BATS_TEST_TMPDIR/v2b"
+  c2_owner "$Bd"
+  mkdir -p "$A"
+  cat >"$A/invariants.md" <<'MD'
+# Implementer
+- **`INV-OWN-1`** — the push path is `owner-emit <json>`, an `INTF-CLI` subcommand.
+- **`INV-OWN-2`** — an unrelated rule that mentions no affordance.
+MD
+  run name-collisions --strict "$A" "$Bd"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'CANDIDATE .* asserts `owner-emit` beside its citation of INTF-CLI'
+}
+
+@test "class 2 (own vocabulary): a name repeated only beside citations is not independent and still FAILs" {
+  A="$BATS_TEST_TMPDIR/v3a"
+  Bd="$BATS_TEST_TMPDIR/v3b"
+  c2_owner "$Bd"
+  mkdir -p "$A"
+  cat >"$A/invariants.md" <<'MD'
+# Implementer
+- **`INV-OWN-1`** — the push path is `owner-emit <json>`, an `INTF-CLI` subcommand.
+- **`INV-OWN-2`** — `owner-emit` is also how `INV-EVT-2` events are injected.
+MD
+  run name-collisions --strict "$A" "$Bd"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'CANDIDATE .* asserts `owner-emit`'
+}
+
+@test "class 2 (own vocabulary): a longer name that merely CONTAINS the asserted one is not an independent use" {
+  A="$BATS_TEST_TMPDIR/v4a"
+  Bd="$BATS_TEST_TMPDIR/v4b"
+  c2_owner "$Bd"
+  mkdir -p "$A"
+  cat >"$A/invariants.md" <<'MD'
+# Implementer
+- **`INV-OWN-1`** — the push path is `owner-emit <json>`, an `INTF-CLI` subcommand.
+- **`INV-OWN-2`** — the batch form is `owner-emit-all <json>` and `pre-owner-emit` runs first.
+MD
+  run name-collisions --strict "$A" "$Bd"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'CANDIDATE .* asserts `owner-emit` beside'
+}
+
+@test "class 2 (bead id): a bead id beside a citation is not an affordance name" {
+  A="$BATS_TEST_TMPDIR/b1a"
+  Bd="$BATS_TEST_TMPDIR/b1b"
+  c2_owner "$Bd"
+  mkdir -p "$A"
+  cat >"$A/invariants.md" <<'MD'
+# Implementer
+- **`INV-OWN-1`** — satisfies `INTF-CLI`; tracked by `pg2-gidpd` and `pg2-oju6w` (operator ruling).
+MD
+  run name-collisions --strict "$A" "$Bd"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '  none'
+}
+
+@test "class 2 (bead id): a real kebab affordance name is not mistaken for a bead id" {
+  A="$BATS_TEST_TMPDIR/b2a"
+  Bd="$BATS_TEST_TMPDIR/b2b"
+  c2_owner "$Bd"
+  mkdir -p "$A"
+  cat >"$A/invariants.md" <<'MD'
+# Implementer
+- **`INV-OWN-1`** — satisfies `INTF-CLI` through `pg-pr <id>` and `owner-emit <json>`.
+MD
+  run name-collisions --strict "$A" "$Bd"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'asserts `pg-pr` beside'
+  echo "$output" | grep -q 'asserts `owner-emit` beside'
+}
+
+# --- Mutation check: the refinements must not over-relax ------------------------
+# Each test copies the REAL script, applies ONE over-relaxing mutation, and shows the
+# planted violation is then MISSED (a --strict pass) while the real script catches it.
+# A mutation that changes nothing fails the test: a vacuous mutation proves nothing.
+
+real_name_collisions() {
+  if [ -n "${NAME_COLLISIONS_SCRIPT:-}" ]; then
+    printf '%s\n' "$NAME_COLLISIONS_SCRIPT"
+    return
+  fi
+  # The PATH entry is a one-line wrapper: `exec <script> "$@"`.
+  local w
+  w=$(command -v name-collisions)
+  sed -n 's/^exec \(.*\) "\$@"$/\1/p' "$w"
+}
+
+# mutate_script <old> <new> — write a mutated copy of name-collisions.sh whose lib
+# dir is reachable, and print its path. Fails if <old> is not in the script.
+mutate_script() {
+  local real dir content mutated
+  real=$(real_name_collisions)
+  [ -f "$real" ] || {
+    echo "cannot locate name-collisions.sh (got '$real')" >&2
+    return 1
+  }
+  content=$(<"$real")
+  case "$content" in *"$1"*) ;; *)
+    echo "mutation target not found in the script: $1" >&2
+    return 1
+    ;;
+  esac
+  mutated="${content/"$1"/"$2"}"
+  [ "$mutated" != "$content" ] || return 1
+  dir="$BATS_TEST_TMPDIR/mut.$RANDOM"
+  mkdir -p "$dir/skills/inter/scripts"
+  ln -s "$(cd "$(dirname "$real")/../../../lib" && pwd)" "$dir/lib"
+  printf '%s\n' "$mutated" >"$dir/skills/inter/scripts/name-collisions.sh"
+  printf '%s\n' "$dir/skills/inter/scripts/name-collisions.sh"
+}
+
+# planted_violation <dir-a> <dir-b> — the canonical planted violation.
+planted_violation() {
+  c2_owner "$2"
+  mkdir -p "$1"
+  cat >"$1/invariants.md" <<'MD'
+# Implementer
+- **`INV-OWN-1`** — the push path is `owner-emit <json>`, an `INTF-CLI` subcommand.
+- **`INV-OWN-2`** — `owner-emit` is also how `INV-EVT-2` events are injected.
+- **`INV-OWN-3`** — the batch form is `owner-emit-all <json>`.
+MD
+}
+
+@test "mutation: the unmutated script catches the planted violation (control)" {
+  planted_violation "$BATS_TEST_TMPDIR/m0a" "$BATS_TEST_TMPDIR/m0b"
+  run name-collisions --strict "$BATS_TEST_TMPDIR/m0a" "$BATS_TEST_TMPDIR/m0b"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'asserts `owner-emit` beside'
+}
+
+@test "mutation: treating EVERY block as an independent use hides the planted violation" {
+  planted_violation "$BATS_TEST_TMPDIR/m1a" "$BATS_TEST_TMPDIR/m1b"
+  m=$(mutate_script 'if (BT_CITED[N] == "") INDEP = INDEP "\n" blk' 'INDEP = INDEP "\n" blk')
+  run bash "$m" --strict "$BATS_TEST_TMPDIR/m1a" "$BATS_TEST_TMPDIR/m1b"
+  # the over-relaxed evaluator PASSES the planted violation, which is exactly the
+  # regression the real-script tests above (v2/v3) exist to catch.
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q 'CANDIDATE'
+}
+
+@test "mutation: a substring own-vocabulary match hides the planted violation" {
+  planted_violation "$BATS_TEST_TMPDIR/m2a" "$BATS_TEST_TMPDIR/m2b"
+  # Only the `owner-emit-all` block is independent here, so only a substring match
+  # can mistake it for use of `owner-emit`.
+  printf '# Implementer\n- **`INV-OWN-1`** — the push path is `owner-emit <json>`, an `INTF-CLI` subcommand.\n- **`INV-OWN-3`** — the batch form is `owner-emit-all <json>`.\n' >"$BATS_TEST_TMPDIR/m2a/invariants.md"
+  run name-collisions --strict "$BATS_TEST_TMPDIR/m2a" "$BATS_TEST_TMPDIR/m2b"
+  [ "$status" -ne 0 ]
+  m=$(mutate_script 'if (has_word(INDEP, tok)) continue' 'if (index(INDEP, tok) > 0) continue')
+  run bash "$m" --strict "$BATS_TEST_TMPDIR/m2a" "$BATS_TEST_TMPDIR/m2b"
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q 'CANDIDATE'
+}
+
+@test "mutation: a bead-id pattern that matches every token hides the planted violation" {
+  planted_violation "$BATS_TEST_TMPDIR/m3a" "$BATS_TEST_TMPDIR/m3b"
+  m=$(mutate_script 'if (tok ~ /^[a-z]+[0-9]+-[a-z0-9]+$/) continue' 'if (tok ~ /^[a-z]/) continue')
+  run bash "$m" --strict "$BATS_TEST_TMPDIR/m3a" "$BATS_TEST_TMPDIR/m3b"
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q 'CANDIDATE'
+}
+
+@test "mutation: dropping the own-vocabulary exemption makes the own-vocabulary table fail" {
+  # The converse: the refinement is load-bearing for the PASSING case too, so a
+  # revert of it is caught by the "table with own-vocabulary rows MUST pass" test.
+  A="$BATS_TEST_TMPDIR/m4a"
+  Bd="$BATS_TEST_TMPDIR/m4b"
+  c2_owner "$Bd"
+  mkdir -p "$A"
+  cat >"$A/invariants.md" <<'MD'
+# Implementer
+- **`INV-OWN-1`** — a busy command is declined with reason `command-busy`, as `INTF-CLI` requires.
+- **`INV-OWN-2`** — the decline reason `command-busy` is a bounded label.
+MD
+  run name-collisions --strict "$A" "$Bd"
+  [ "$status" -eq 0 ]
+  m=$(mutate_script 'if (has_word(INDEP, tok)) continue' 'if (0) continue')
+  run bash "$m" --strict "$A" "$Bd"
+  [ "$status" -ne 0 ]
+}
+
 # --- Citable id families in name-collisions (bead pg2-fbxdw) -------------------
 # `name-collisions.sh` carried the OLD eight-family list, so a `DEC-`/`IMPL-` name never
 # entered `defined_ids` and the class-1 ambiguity this script exists to catch went

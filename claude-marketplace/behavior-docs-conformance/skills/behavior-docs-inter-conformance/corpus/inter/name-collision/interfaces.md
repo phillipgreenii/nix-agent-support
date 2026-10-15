@@ -13,6 +13,7 @@ the name matches — so every UUID-matching check reports this fixture as aligne
 | ------------- | --------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `INTF-SOURCE` | the owner's event-source contract | `owner/docs/behavior` | [11111111-1111-4111-8111-111111111111](https://example.invalid/owner/blob/main/docs/behavior/interfaces.md) |
 
-INTER expectation: `name-collisions.sh` reports `owner-emit` as a class-2 candidate — the owner set
-calls that affordance `source-push` and has no `owner-emit`. This is the shape of the shipped
+INTER expectation: `name-collisions.sh` reports the push name above as a class-2 candidate — the owner set
+calls that affordance `source-push` and has no such name. (This note deliberately does not repeat the name in a
+code span: a name the set also uses OUTSIDE the block that cites the owner is the set's own vocabulary, not a claim.) This is the shape of the shipped
 `push-inject` vs. `pr-pool-emit` defect.

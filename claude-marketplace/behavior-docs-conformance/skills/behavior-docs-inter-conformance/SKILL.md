@@ -100,7 +100,9 @@ Run **`scripts/name-collisions.sh <set> <set> [<set>…]`**. Two classes:
   reference each other**. A bare name cited across that seam then resolves to two elements.
 - **class 2 — asserted affordance (`CANDIDATE`)** — a set names a concrete affordance beside a
   citation of another set, and the cited set never uses that name. Judgment, not a failure;
-  `--strict` promotes it.
+  `--strict` promotes it. Each table row is its own block; a name the asserting set also uses in a
+  block that cites nothing of the other set is that set's own vocabulary; a bead id (`pg2-xxxxx`)
+  is not an affordance name.
 
 **The reference edge is part of class 1's rule, not an escape from it.** `INV-3` makes a name "a
 mutable, human-readable label that need only be consistent **within its own set**", and conditions
