@@ -14,29 +14,32 @@ import (
 )
 
 // hermeticEnviron is the environment the CODE UNDER TEST (Client's own git calls,
-// via hermeticCLIRunner) runs with: the git hook-inherited variables (GIT_DIR,
-// GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX, GIT_OBJECT_DIRECTORY,
-// GIT_COMMON_DIR) are removed so a hook's own repo state cannot redirect it, and
-// GIT_CONFIG_NOSYSTEM=1 / GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM=/dev/null skip
-// machine-wide config (e.g. a global core.hooksPath dispatcher). The test
-// fixtures themselves are built by x/gittest and need none of this.
+// via hermeticCLIRunner) runs with. It is an ALLOWLIST over the process
+// environment (bead pg2-rxs4j), never a scrub: only PATH, scratch/locale/user
+// names and HOME survive, so no variable of an outer git hook (GIT_DIR,
+// GIT_INDEX_FILE, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_PREFIX,
+// GIT_OBJECT_DIRECTORY, GIT_CEILING_DIRECTORIES, ...) can redirect it, however
+// it is spelled. GIT_CONFIG_NOSYSTEM=1 / GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM=/dev/null
+// skip machine-wide config (e.g. a global core.hooksPath dispatcher); they are
+// not passed through, so they appear exactly once. The test fixtures themselves
+// are built by x/gittest and need none of this.
 func hermeticEnviron() []string {
-	skipVars := map[string]bool{
-		"GIT_DIR": true, "GIT_INDEX_FILE": true, "GIT_WORK_TREE": true,
-		"GIT_PREFIX": true, "GIT_OBJECT_DIRECTORY": true, "GIT_COMMON_DIR": true,
-		// Also skipped so an ambient value (e.g. inherited from an outer `git commit`
-		// hook's own environment) cannot override the pinned values below — exec.Cmd
-		// resolves duplicate keys by taking the LAST occurrence in Env, so these three
-		// must never appear twice.
-		"GIT_CONFIG_NOSYSTEM": true, "GIT_CONFIG_GLOBAL": true, "GIT_CONFIG_SYSTEM": true,
-	}
 	env := []string{"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null"}
 	for _, kv := range os.Environ() {
-		if k := strings.SplitN(kv, "=", 2)[0]; !skipVars[k] {
+		k, _, _ := strings.Cut(kv, "=")
+		if hermeticPassthrough[k] || strings.HasPrefix(k, "LC_") {
 			env = append(env, kv)
 		}
 	}
 	return env
+}
+
+// hermeticPassthrough is the complete list of parent-environment names the code
+// under test may inherit. Adding a name is a deliberate decision; it MUST NOT be
+// a name that selects a git repository.
+var hermeticPassthrough = map[string]bool{
+	"PATH": true, "TMPDIR": true, "HOME": true, "USER": true, "LOGNAME": true,
+	"LANG": true, "TZ": true, "TERM": true,
 }
 
 // Equivalent mutants in this package, and why nothing below kills them.
