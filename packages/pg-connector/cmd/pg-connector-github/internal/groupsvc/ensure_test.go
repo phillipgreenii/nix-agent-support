@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groups"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groupsvc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groupsvc/groupsvctest"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 )
 
@@ -218,6 +219,32 @@ func TestTheSummaryComesFirstAndLaterGroupsUseItsRefreshedHead(t *testing.T) {
 	}
 	if res.Summary.HeadRefOid != "head-2" {
 		t.Errorf("Summary = %+v", res.Summary)
+	}
+}
+
+// A summary this very call fetched is current for the call, however late its
+// answer arrives. The hook moves the clock past summary_ttl right after the
+// summary is stored, as a host too loaded to run the caller for a while would
+// (bead pg2-42ykm: a daemon test's 1-second summary_ttl was outlasted between
+// the store and the check, and every dependent group came back unavailable).
+func TestASummaryFetchedByTheCallIsCurrentEvenIfTheClockPassesItsTTLBeforeTheAnswerIsUsed(t *testing.T) {
+	var r *groupsvctest.Rig
+	r = groupsvctest.NewRig(t, groupsvctest.RigOptions{
+		OnSummaryRefreshed: func(*summary.Summary, summary.Stored) {
+			r.Clock.Advance(r.Settings.SummaryTTL.Std() + time.Second)
+		},
+	})
+	r.Start()
+	f := register(r, groups.Files, groups.Detail)
+
+	res := ensure(t, r, node, []string{groups.Summary, groups.Files, groups.Detail}, groupsvc.EnsureOptions{})
+	for _, g := range res.Groups {
+		if g.Status != groupsvc.Fresh || !g.FromOrigin || g.Err != nil {
+			t.Errorf("%s = %+v, want fresh from origin: the summary it was judged against was this call's own", g.Group, g)
+		}
+	}
+	if f[groups.Files].CallCount() != 1 || f[groups.Detail].CallCount() != 1 {
+		t.Errorf("files fetched %d times and detail %d, want once each", f[groups.Files].CallCount(), f[groups.Detail].CallCount())
 	}
 }
 

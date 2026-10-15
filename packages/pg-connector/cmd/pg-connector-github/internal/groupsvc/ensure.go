@@ -142,7 +142,10 @@ func (s *Service) Ensure(ctx context.Context, id string, want []string, opt Ensu
 	if haveSum {
 		sumGenBefore = sumRow.Generation
 	}
-	if opt.Fresh || !haveSum || !sumRow.FreshUntil.After(s.now()) {
+	// The clock is read once for the summary, here: the stored row either is
+	// inside fresh_until now, or this call fetches it below (see sumOK).
+	sumFreshAtRead := haveSum && !opt.Fresh && sumRow.FreshUntil.After(s.now())
+	if !sumFreshAtRead {
 		atts := s.fetchRound(ctx, node, ent.LastAccess, []string{summary.GroupName}, func(string) bool {
 			_, row, ok, _ := s.loadSummary(sc, node)
 			return ok && row.FreshUntil.After(s.now())
@@ -163,7 +166,13 @@ func (s *Service) Ensure(ctx context.Context, id string, want []string, opt Ensu
 	}
 
 	now := s.now()
-	sumOK := haveSum && sumRow.FreshUntil.After(now) && (sumAtt == nil || sumAtt.succeeded())
+	// The summary is current when it was inside fresh_until at the read above, or
+	// when this very call fetched it (its generation moved): a row this call
+	// stored is Fresh however long the answer took to arrive, so the clock is not
+	// read again. Judging fresh_until a second time let a host slow enough to
+	// outlast summary_ttl between the store and this line age the summary out
+	// under the caller, and every dependent group was then refused as unrefreshed.
+	sumOK := haveSum && (sumAtt == nil || (sumAtt.succeeded() && sumRow.Generation != sumAtt.genBefore))
 	if sumAtt != nil && sumAtt.succeeded() && !sumOK {
 		sumAtt.err = errNotRefreshed
 	}
