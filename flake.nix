@@ -4946,6 +4946,29 @@
                     touch "$out"
                   '';
 
+              # pg-connector-github metric catalog vs the Metric* constants of the daemon's
+              # telemetry package: the catalog checks, then the script's own mutant self-tests.
+              test-pg-connector-github-metrics-catalog =
+                pkgs.runCommand "test-pg-connector-github-metrics-catalog"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.gawk
+                      pkgs.diffutils
+                    ];
+                  }
+                  ''
+                    script=${./packages/pg-connector/grafana/check-metrics-catalog.sh}
+                    catalog=${./packages/pg-connector/grafana/pg-connector-github-metrics.txt}
+                    gofile=${./packages/pg-connector/cmd/pg-connector-github/internal/telemetry/telemetry.go}
+                    bash "$script" "$catalog" "$gofile"
+                    bash "$script" --self-test "$catalog" "$gofile"
+                    touch "$out"
+                  '';
+
               # darwin/modules/beads-exporter: evaluated standalone against stubs of the
               # launchd and observability surfaces (declared in other flakes), with
               # synthetic databases alpha and beta. Proves the gate (observability off,
