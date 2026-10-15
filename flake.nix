@@ -11597,6 +11597,81 @@
                     touch $out
                   '';
 
+              # pg-keep-awake keeper HM module (docket pg2-8bgxg.2, packet 17a): the HM
+              # module renders ${XDG_CONFIG_HOME:-~/.config}/pg-keep-awake/config.toml,
+              # validates it at build time with `pg-keep-awake config check`, asserts
+              # watchdog_timeout >= 6 * heartbeat_interval and release_pct <= hold_pct,
+              # and registers the keeper through the HM launchd registry (keep-alive,
+              # AbandonProcessGroup = true, a hash of the rendered config in the job
+              # definition so a changed config restarts the keeper). Like
+              # test-pg-connector-github-hm-launchd above (this flake has NO input on
+              # personal) the registry option is a STUB (tests/launchd-registry-stub.nix).
+              # The eval cases live in tests/pg-keep-awake-hm-launchd.nix; this check then
+              # BUILDS the rendered configs (the module's own build-time `config check`
+              # runs on them), rejects invalid ones with the same command, and exposes the
+              # rendered entry as `passthru.wrapper`. The sandbox cannot run `caffeinate`
+              # or `pmset`, so the live run of that wrapper is a separate command (see the
+              # test file's header); nothing is applied (no launchctl).
+              test-pg-keep-awake-hm-launchd =
+                let
+                  r = import ./tests/pg-keep-awake-hm-launchd.nix { inherit lib pkgs; };
+                in
+                pkgs.runCommand "pg-keep-awake-hm-launchd"
+                  {
+                    nativeBuildInputs = [
+                      r.live.package
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                    ];
+                    passthru.wrapper = r.live.wrapper;
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "pg-keep-awake launchd eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                      exit 1
+                    ''}
+
+                    # Building the checked files already ran `config check` on them. Run it
+                    # again by hand, and read the rendered TOML back.
+                    pg-keep-awake config check --config ${r.live.configFile} >/dev/null
+                    yq -p toml -o json ${r.live.configFile} > with-otel.json
+                    jq -e '
+                      .heartbeat_interval == "10s" and .watchdog_timeout == "600s" and .linger == "30s"
+                      and .battery.hold_pct == 30 and .battery.release_pct == 20 and .battery.hysteresis_pct == 5
+                      and .otel.endpoint == "http://collector.example:4317"
+                    ' with-otel.json >/dev/null || { echo "unexpected rendered config:" >&2; cat with-otel.json >&2; exit 1; }
+
+                    # No observability endpoint: no [otel] table at all.
+                    pg-keep-awake config check --config ${r.live.configFileNoOs} >/dev/null
+                    yq -p toml -o json ${r.live.configFileNoOs} > without-otel.json
+                    jq -e 'has("otel") | not' without-otel.json >/dev/null \
+                      || { echo "[otel] rendered without an endpoint:" >&2; cat without-otel.json >&2; exit 1; }
+
+                    # The negative controls: the same validation REJECTS what the two
+                    # assertions reject, and a file that is not a config at all (so the
+                    # build-time validation above cannot be vacuous).
+                    printf 'heartbeat_interval = "ten seconds"\n' > invalid.toml
+                    printf 'unknown_key = 1\n' > unknown-key.toml
+                    for bad in ${r.live.uncheckedBadWatchdog} ${r.live.uncheckedBadRelease} "$PWD/invalid.toml" "$PWD/unknown-key.toml"; do
+                      rc=0
+                      pg-keep-awake config check --config "$bad" >out.txt 2>&1 || rc=$?
+                      [ "$rc" = 4 ] || { echo "FAIL: config check on $bad exited $rc, want 4:" >&2; cat out.txt >&2; exit 1; }
+                    done
+
+                    # The hash is a function of the rendered config: it differs between two
+                    # configs, and the entry that carries it is the one in the wrapper.
+                    [ "${r.live.hash}" != "${r.live.hashOtherHeartbeat}" ] \
+                      || { echo "FAIL: a changed config did not change the hash" >&2; exit 1; }
+                    bash -n ${r.live.wrapper}
+                    grep -q '^export PG_KEEP_AWAKE_CONFIG_HASH=${r.live.hash}$' ${r.live.wrapper} \
+                      || { echo "FAIL: the wrapper does not carry the config hash" >&2; cat ${r.live.wrapper} >&2; exit 1; }
+                    grep -q '^exec ${r.live.package}/bin/pg-keep-awake keeper$' ${r.live.wrapper} \
+                      || { echo "FAIL: the wrapper does not exec the keeper" >&2; cat ${r.live.wrapper} >&2; exit 1; }
+                    touch $out
+                  '';
+
               # pg2-klusl: every `*-go-tests` check goes through the load-bounded mkGoTest
               # wrapper in the overlay (`loadBoundedMkGoTest`). Pure eval guard that the
               # wrapper's bounds are really on a built check and are additive to the

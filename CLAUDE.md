@@ -142,6 +142,22 @@ cases (an assertion, not a silent no-op), then runs the rendered command under `
 `pkgs.stdenv.hostPlatform.isDarwin`: `pkgs` can be a `_module.args` value, and choosing attribute
 names from it is infinite recursion; the platform gates the entry's VALUE (`mkIf`) and the assertion.
 
+### pg-keep-awake keeper (`phillipgreenii.programs.pg-keep-awake`)
+
+The fourth HM-scoped launchd agent (docket `pg2-8bgxg.2`): `home/programs/pg-keep-awake` renders
+`${XDG_CONFIG_HOME:-~/.config}/pg-keep-awake/config.toml` through `xdg.configFile` (validated at
+build time by `pg-keep-awake config check`; `[otel]` only when the system observability option
+supplies an endpoint), asserts `watchdog_timeout >= 6 * heartbeat_interval` and
+`release_pct <= hold_pct`, and registers the keeper (`exec <pkg>/bin/pg-keep-awake keeper`, no config
+flag) as a keep-alive agent with `AbandonProcessGroup = true`, so a keeper restart never group-kills
+the `caffeinate` anchor. A hash of the rendered config rides in the job's `EnvironmentVariables`
+(`PG_KEEP_AWAKE_CONFIG_HASH`), because nothing restarts an agent for a changed file it reads at
+startup. The launchd log files live in `$XDG_STATE_HOME/pg-keep-awake-launchd`, never inside the keeper's
+state directory (the keeper refuses a state directory that is not mode 0700). Same stubbing rules
+as the agents above; the check is `test-pg-keep-awake-hm-launchd`
+(`tests/pg-keep-awake-hm-launchd.nix`), whose `passthru.wrapper` is the rendered entry for a live run
+(the sandbox cannot run `caffeinate`).
+
 ## Status Line (`home/programs/claude-status-line`)
 
 Full contract (part-script protocol, ordering convention, glyph/width/locale mechanics) moved to

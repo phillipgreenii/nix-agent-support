@@ -37,6 +37,7 @@
     ./programs/pg-connector
     ./programs/pg-rescue
     ./programs/pg-task-focus
+    ./programs/pg-keep-awake
     ./programs/pg-ccaudit
     ./programs/integrate-branch-support
     ./programs/pnwf
