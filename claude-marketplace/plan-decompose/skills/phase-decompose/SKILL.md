@@ -19,9 +19,8 @@ description: >-
 
 `phase-decompose` VERIFIES one phase bead's design text against the ACTUAL landed state of the
 phases it depends on, and otherwise defers entirely to `plan-decompose`: it never curates work
-packets itself. Design of record for this skill:
-`docs/superpowers/specs/2026-09-04-plan-decompose-phasing-design.md` in
-`phillipgreenii-nix-agent-support` (provenance only — this skill stands alone).
+packets itself. Design of record for this skill: the plan-decompose phasing design spec
+dated 2026-09-04 (provenance only — this skill stands alone).
 
 **Invocation id**: this skill lives in the existing `plan-decompose` plugin (per the design's
 Decision 2), matching the convention `plan-decomposer.md` already uses for

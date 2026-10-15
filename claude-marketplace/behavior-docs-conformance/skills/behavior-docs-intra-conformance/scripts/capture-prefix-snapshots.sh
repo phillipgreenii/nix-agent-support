@@ -19,21 +19,22 @@
 # Usage:
 #   capture-prefix-snapshots.sh <out-dir>
 # Env overrides (defaults are the pg2-hvlyj pre-fix revs):
-#   AGENT_SUPPORT_REPO   path to the phillipgreenii-nix-agent-support clone
-#   ZR_REPO              path to the phillipg-nix-ziprecruiter clone
+#   AGENT_SUPPORT_REPO   path to the clone holding the method + pr-pool sets
+#   EXTRA_REPO           path to the clone holding the one further set (optional)
 #   AGENT_SUPPORT_REV    pre-fix rev for the method + pr-pool sets (default d5395cf9)
-#   ZR_REV               pre-fix rev for the ZR set (default 3dc2e47)
+#   EXTRA_REV            pre-fix rev for the further set (default 3dc2e47)
+#   EXTRA_SET            path of the further set inside EXTRA_REPO (default docs/behavior)
 #
 # The pre-fix revs are the PARENTS of this session's first edit commit per repo:
-#   agent-support: d5395cf9  (parent of f20cc87a "method behavior-docs: Cluster 1")
-#   ZR:            3dc2e47   (parent of a92dc64  "ZR pr-pool-components: Cluster 4")
+#   method + pr-pool clone: d5395cf9  (parent of f20cc87a "method behavior-docs: Cluster 1")
+#   further-set clone:      3dc2e47   (parent of a92dc64  "pr-pool-components: Cluster 4")
 set -euo pipefail
 
 out="${1:?usage: capture-prefix-snapshots.sh <out-dir>}"
 AGENT_SUPPORT_REPO="${AGENT_SUPPORT_REPO:-.}"
-ZR_REPO="${ZR_REPO:-}"
+EXTRA_REPO="${EXTRA_REPO:-}"
 AGENT_SUPPORT_REV="${AGENT_SUPPORT_REV:-d5395cf9}"
-ZR_REV="${ZR_REV:-3dc2e47}"
+EXTRA_REV="${EXTRA_REV:-3dc2e47}"
 
 mkdir -p "$out"
 
@@ -57,9 +58,9 @@ capture() {
 
 capture "$AGENT_SUPPORT_REPO" "$AGENT_SUPPORT_REV" "behavior-docs/docs/behavior" "method-prefix"
 capture "$AGENT_SUPPORT_REPO" "$AGENT_SUPPORT_REV" "packages/pr-pool/docs/behavior" "pr-pool-prefix"
-if [ -n "$ZR_REPO" ]; then
-  # The ZR set path is resolved in the ZR repo; adjust ZR_SET if it differs.
-  capture "$ZR_REPO" "$ZR_REV" "${ZR_SET:-docs/behavior}" "zr-prefix"
+if [ -n "$EXTRA_REPO" ]; then
+  # The further set's path is resolved inside EXTRA_REPO; adjust EXTRA_SET if it differs.
+  capture "$EXTRA_REPO" "$EXTRA_REV" "${EXTRA_SET:-docs/behavior}" "extra-prefix"
 fi
 
 echo "pre-fix snapshots under: $out"

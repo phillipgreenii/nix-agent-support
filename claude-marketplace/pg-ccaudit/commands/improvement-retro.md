@@ -15,17 +15,19 @@ an operator decision round, and durable recording.
 ## Step 0 — home tracker, resume check, window, estimate, preflight
 
 **Home tracker.** Every lifecycle `bd` call in this command (run records, rulings)
-MUST target the pg2 tracker via `bd -C /Users/phillipg/phillipg_mbp …` — cwd silently
-decides which tracker a bead lands in, and continuity breaks if run records scatter.
+MUST target the pg2 tracker via `bd -C ROOT …` — cwd silently decides which tracker a
+bead lands in, and continuity breaks if run records scatter. **ROOT** is
+`$PN_WORKSPACE_ROOT` if set, otherwise the nearest ancestor of the cwd containing
+`pn-workspace.toml`; this command never hardcodes a path.
 Item beads for accepted fixes MAY live in other trackers; run records MUST NOT. The
 `improvement-retro` label is RESERVED for run records: item beads and carry beads
 MUST NOT carry it, and any bead filed with `--parent <run-record>` MUST pass
 `--no-inherit-labels`.
 
 **Resume.** Check for an open run record:
-`bd -C /Users/phillipg/phillipg_mbp list --label improvement-retro --sort created -n 1 --json`
+`bd -C ROOT list --label improvement-retro --sort created -n 1 --json`
 (the default filter excludes closed rows only; this query only establishes the id —
-read checkpoints from `bd -C /Users/phillipg/phillipg_mbp show <id> --json`). If one
+read checkpoints from `bd -C ROOT show <id> --json`). If one
 exists and its latest checkpoint came from THIS effort's prior attempt, this run is a
 resume: reuse its requested window verbatim (MUST NOT recompute), skip the phases
 whose checkpointed tables are already in its notes, and count cost cumulatively
@@ -41,13 +43,13 @@ otherwise STOP and report it. If the open record's latest checkpoint or activity
 from a DIFFERENT session that is still recent, STOP and report the conflict — MUST
 NOT resume it or open a second record. A record whose latest activity is from a
 different session and is NOT recent is abandoned: close it
-(`bd -C /Users/phillipg/phillipg_mbp close <id> --reason 'abandoned, consumed no window'`)
+(`bd -C ROOT close <id> --reason 'abandoned, consumed no window'`)
 before proceeding.
 
 **Window.** Normalize `$ARGUMENTS` to `--since YYYY-MM-DD --until YYYY-MM-DD`
 (`--until` exclusive, matching the canned queries) before invoking anything. Reject
 `--since >= --until`. If empty: read the most recent CLOSED run record —
-`bd -C /Users/phillipg/phillipg_mbp list --label improvement-retro --status closed --sort closed -n 1 --json`
+`bd -C ROOT list --label improvement-retro --status closed --sort closed -n 1 --json`
 (`--sort closed` is newest-first already; adding `--reverse` returns the OLDEST
 record and silently re-censuses all history; plain `bd list` excludes closed rows no
 matter the `-n`; `bd search` ranks by title/ID and hides closed rows unless
@@ -76,8 +78,8 @@ multiplication. MUST STOP for approval if the estimate exceeds $15 or the window
 exceeds 30 days; if the operator declines, create nothing — no bead, no window
 consumed. Once clear, create and claim the run record in one chained Bash call
 (`bd create` has no `--status` flag, so it is two `bd` calls):
-`bd -C /Users/phillipg/phillipg_mbp create "Improvement retro <start> → <end>" --labels improvement-retro …`
-then `bd -C /Users/phillipg/phillipg_mbp update <id> --claim --actor "<this session's id>"`, body holding the
+`bd -C ROOT create "Improvement retro <start> → <end>" --labels improvement-retro …`
+then `bd -C ROOT update <id> --claim --actor "<this session's id>"`, body holding the
 requested window AND this session's id (the adopt-or-STOP test above reads it).
 Then print ONE screen and proceed without asking:
 
@@ -122,13 +124,13 @@ raw-transcript access:
   over every candidate theme (one `--desc-contains` probe per theme — cheap, and all
   inside this one subagent), plus the rulings recorded in prior run-record bodies
   (resolve ids via the closed-record query above, read bodies with
-  `bd -C /Users/phillipg/phillipg_mbp show <id> --json`).
+  `bd -C ROOT show <id> --json`).
 
 Raw query output, per-session drill-downs, and classifier item lists stay in the
 subagents; only their summary tables reach the main loop. As each phase returns:
 print one progress line (`[phase] done — <elapsed>, $<spent so far>, strongest
 signal so far: <one clause>`) and append a checkpoint via
-`bd -C /Users/phillipg/phillipg_mbp update <id> --append-notes '<checkpoint>'`
+`bd -C ROOT update <id> --append-notes '<checkpoint>'`
 (notes is the only append-safe field; `-d` overwrites the body) — the phase's
 returned summary table verbatim plus its calls/$ subtotal, stamped with session id
 and timestamp. A checkpoint recording only "done" is not a checkpoint: the resume
@@ -224,8 +226,8 @@ DOES wait across turns here.)
   labelled `human` (never `improvement-retro`); recorded in the run record as
   carried.
 - **Close the run record**: write the final body with
-  `bd -C /Users/phillipg/phillipg_mbp update <id> --body-file -`, then
-  `bd -C /Users/phillipg/phillipg_mbp close <id> --reason 'retro complete; next_since=<date>'`.
+  `bd -C ROOT update <id> --body-file -`, then
+  `bd -C ROOT close <id> --reason 'retro complete; next_since=<date>'`.
   The body holds: requested window, covered window,
   `next_since = <covered window's exclusive end>` — i.e.
   `min(requested --until, the DATE of the index high-water timestamp)`, never the

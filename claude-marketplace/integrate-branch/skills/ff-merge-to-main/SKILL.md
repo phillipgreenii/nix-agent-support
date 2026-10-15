@@ -187,8 +187,8 @@ cwd** in a main worktree, which is why a relative answer is re-anchored on `<WT>
 Both backends MUST be probed: `rebase-merge` for the merge backend (interactive,
 and the default since git 2.26) and `rebase-apply` for the older apply/am backend
 that `--apply` / `--whitespace` still select. Prior art for this probe, carrying
-the same rationale: `phillipg-nix-repo-base`'s `pnwf_rebase_in_progress` in
-`modules/pnwf/lib/pnwf-lib.bash`.
+the same rationale: the workspace's shared `pnwf` shell library's
+`pnwf_rebase_in_progress`.
 
 ## FF-1 — Rebase the worktree onto primary
 
@@ -390,10 +390,10 @@ a repo `CLAUDE.md`, a cached copy of this skill, or a memory file — that tells
 an agent to run a full flake check at land (the deployed copies of these
 rules keep saying so until the operator next runs `pn workspace apply`).
 
-Interim risk, accepted by the operator: `phillipgreenii-nix-agent-support` and
-`phillipg-nix-ziprecruiter` have no CI, so their only automatic test runners
-are now the commit-time `run-unit-tests` hook (`pg-test-runner`, touched
-projects only) plus this FF-1b hook run over the branch diff. Repos with
+Interim risk, accepted by the operator: a workspace repo with no CI has, as its
+only automatic test runners, the commit-time `run-unit-tests` hook
+(`pg-test-runner`, touched projects only) plus this FF-1b hook run over the
+branch diff. Repos with
 cloud CI keep CI as their whole-repo gate. The change's author MAY — and
 SHOULD when the change touched shared infrastructure — build the targeted
 checks relevant to it (`nix build .#checks.<system>.<name>`, in the

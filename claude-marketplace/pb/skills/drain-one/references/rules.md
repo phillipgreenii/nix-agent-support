@@ -93,7 +93,7 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   (`pg-router gate list`), is a migration state that retrying cannot clear, and a loop
   that retries it spins forever. STOP the loop (do not start or restart dolt), report that
   the operator must run the schema migration, and leave claims released per B-1/B-2.
-  Runbook: `docs/beads-1-3-1-schema-migration.md` in the `phillipg-nix-ziprecruiter` repo.
+  Runbook: the operator's own bd schema-migration runbook (ask the operator where it lives).
 - A `bd` claim lease (the `Lease:` line of `bd show`, a TTL of about 5 minutes that nothing
   renews) is ADVISORY for drain and pool claims: an expired lease MUST NOT be read as proof the
   holder is dead, and nothing here heartbeats it (pool budgets run up to 2 hours per bead). Nobody

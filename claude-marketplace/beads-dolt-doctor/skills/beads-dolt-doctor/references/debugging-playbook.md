@@ -7,8 +7,8 @@ confirmed. None of these steps start a server.
 legitimately runs a second `dolt sql-server` on an alternate port (25253) while the shared
 agent is booted out; steps 1, 2, 6 and 7 would classify it as rogue and tell you to
 `pkill` or `bootout` it. First run `pg-router gate list`: if a `BEAD_SERVER_DOWN` gate is
-set, stop, change nothing, and tell the operator. Runbook: `docs/beads-1-3-1-schema-migration.md`
-in the `phillipg-nix-ziprecruiter` repo (named by repo and path; this repo is standalone).
+set, stop, change nothing, and tell the operator. The runbook is the operator's own bd
+schema-migration runbook (this skill is standalone; ask the operator where it lives).
 
 If instead `bd` WRITES fail with "refusing to auto-apply N pending schema migrations" while
 reads work, see "bd writes refuse: pending schema migrations" in `SKILL.md`: the server is

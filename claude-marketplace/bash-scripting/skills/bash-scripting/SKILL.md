@@ -5,7 +5,7 @@ description: Use when creating, modifying, reviewing, or deleting bash scripts (
 
 # Bash Scripting in This Workspace
 
-All bash scripts use the **mkBashBuilders framework** at `phillipgreenii-nix-personal/lib/bash-builders.nix`. This skill is the authoritative reference.
+All bash scripts use the **mkBashBuilders framework** (`lib/bash-builders.nix` in the flake that exports `lib.mkBashBuilders`; locate it with `rg -l mkBashBuilders` under the workspace root). This skill is the authoritative reference.
 
 ## Contents
 
@@ -36,7 +36,7 @@ Three composable builders:
 Instantiate at the flake level (where `self` is available):
 
 ```nix
-bashBuilders = phillipgreenii-nix-personal.lib.mkBashBuilders {
+bashBuilders = <bash-builders-flake>.lib.mkBashBuilders {
   inherit pkgs lib self;
 };
 ```
@@ -135,7 +135,7 @@ done
 ## Help and Version
 
 - **`--help`/`-h`**: Write a `show_help()` function in `.sh`. `help2man` reads this to generate the man page, so format matters.
-- **`--version`/`-v`**: NEVER write version handling. The builder injects a handler that runs before user code. Version format: `YY.MM.DD.SSSSS+<srcDigest>`, where the date is computed at build time and `<srcDigest>` is an 8-char content digest of the script's own source (its `src` plus the composed-lib paths of any `libraries` it sources). The digest is the repo-rev-**independent** identity: it changes iff the script's own source changes (committed or dirty), and an unrelated commit elsewhere in the repo does NOT change it (so the build stays cached). This is the cross-language convention from `phillipg-nix-repo-base` ADR 0006 — do NOT reintroduce a repo-`gitHash`-based version (that rebuilds every stamped artifact on every commit). The repo's own git rev lives only in the repo-meta install-metadata module.
+- **`--version`/`-v`**: NEVER write version handling. The builder injects a handler that runs before user code. Version format: `YY.MM.DD.SSSSS+<srcDigest>`, where the date is computed at build time and `<srcDigest>` is an 8-char content digest of the script's own source (its `src` plus the composed-lib paths of any `libraries` it sources). The digest is the repo-rev-**independent** identity: it changes iff the script's own source changes (committed or dirty), and an unrelated commit elsewhere in the repo does NOT change it (so the build stays cached). This is the cross-language per-source-digest versioning convention (the workspace base-library flake's ADR 0006) — do NOT reintroduce a repo-`gitHash`-based version (that rebuilds every stamped artifact on every commit). The repo's own git rev lives only in the repo-meta install-metadata module.
 
 ## Error Handling
 
@@ -339,7 +339,7 @@ Trips SC2207 and breaks on filenames with spaces. Use `mapfile -t COMPREPLY < <(
 
 ## Workflow: Adding a New Script
 
-1. Choose the right module: public CLI → support-apps; personal tool → phillipgreenii-nix-personal; work-specific → your-private-flake.
+1. Choose the right module: public CLI → the shared public-tools flake; personal tool → the personal-config flake; work-specific → your private flake.
 2. Create the directory structure per the templates above.
 3. Write `<name>.sh` with `# shellcheck shell=bash`, `show_help()`, case-based arg parsing, no shebang/set flags.
 4. Create the tldr page (`<name>.md`) if public — start from [`assets/tldr.md`](assets/tldr.md).
@@ -376,8 +376,8 @@ Trips SC2207 and breaks on filenames with spaces. Use `mapfile -t COMPREPLY < <(
 
 ## Implementation references
 
-- **Framework implementation**: `phillipgreenii-nix-personal/lib/bash-builders.nix`
-- **Framework design spec**: `phillipgreenii-nix-personal/docs/superpowers/specs/2026-04-02-mkbashbuilders-framework-design.md`
-- **Framework test fixtures**: `phillipgreenii-nix-personal/lib/bash-builders-tests/`
+- **Framework implementation**: `lib/bash-builders.nix` in the flake that exports `lib.mkBashBuilders`
+- **Framework design spec**: `docs/superpowers/specs/2026-04-02-mkbashbuilders-framework-design.md` in that same flake
+- **Framework test fixtures**: `lib/bash-builders-tests/` in that same flake
 - Nix-wrapped `.sh` format: no shebang, no set flags, shellcheck directive at top
 - Tldr pages: place inside the module directory alongside the script

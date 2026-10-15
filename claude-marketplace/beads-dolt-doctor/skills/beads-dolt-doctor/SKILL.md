@@ -36,9 +36,8 @@ the rogue this skill hunts, and following the playbook (enumerate, then `pkill` 
   and tell the operator.
 - A dolt server on port 25253 (any port other than 25252) started with a `--config`
   outside the data dir during a window is the operator's migrator, not a rogue.
-- The migration runbook is `docs/beads-1-3-1-schema-migration.md` in the
-  `phillipg-nix-ziprecruiter` repo (named by repo and path, because this repo is
-  standalone).
+- The migration runbook is the operator's own bd schema-migration runbook for this `bd`
+  version; this skill is standalone and does not know where it lives, so ask the operator.
 
 ## The invariant (what "healthy" looks like)
 
@@ -109,8 +108,8 @@ while reads (`bd stats`, `bd --readonly sql`) still work. This is NOT a rogue se
 NOT a crash-loop: the server is healthy. `bd doctor` hints "run any bd command" or
 "restart the Dolt server", and neither fixes a shared-server database; plain `bd`
 commands refuse to migrate and a restart changes nothing. The fix is the operator-run
-`bd migrate schema`, run once by one designated migrator. See
-`docs/beads-1-3-1-schema-migration.md` in the `phillipg-nix-ziprecruiter` repo.
+`bd migrate schema`, run once by one designated migrator. See the operator's bd
+schema-migration runbook.
 
 An agent MUST NOT start or restart dolt, run the rogue-hunting playbook, or run
 `bd migrate schema` itself; stop and tell the operator.

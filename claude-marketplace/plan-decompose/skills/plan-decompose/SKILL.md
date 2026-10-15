@@ -23,9 +23,8 @@ description: >-
 
 The decomposer SPLITS and CURATES an approved design; it NEVER authors design content. The
 output is a **docket** (parent issue holding the design of record) plus **work packets**
-(children an implementer can execute from one read). Design of record for this skill:
-`docs/superpowers/specs/2026-08-27-plan-decompose-design.md` in `phillipgreenii-nix-agent-support`
-(provenance only — this skill stands alone). The wait contract, by-reference sub-dispatch,
+(children an implementer can execute from one read). Design of record for this skill: the
+plan-decompose design spec dated 2026-08-27 (provenance only — this skill stands alone). The wait contract, by-reference sub-dispatch,
 excerpt and acceptance rules, and the skill split are recorded in ADR 0098
 (`docs/adr/0098-plan-decompose-waits-by-ending-the-turn-and-hands-sub-agents-files-not-text.md`).
 

@@ -28,8 +28,9 @@ skipping a question on the assumption that "the default is probably fine" is exa
 mode this checklist exists to catch: the 2026-09-24 disk-full incident (`pg2-jw8ji`) traced back to
 question 3 being skipped on a continuously-logging service.
 
-**The canonical, load-bearing version of this checklist lives in `phillipgreenii-nix-personal`'s
-`docs/service-daemon-checklist.md`.** Read that file directly for the exact option names, file
+**The canonical, load-bearing version of this checklist lives in `docs/service-daemon-checklist.md`
+of the flake that declares `phillipgreenii.system.launchdServices` (the "launchd-services flake";
+find it with `rg -l launchdServices` under the workspace root).** Read that file directly for the exact option names, file
 paths, and worked reference examples (`ollama-probe`, `zr-local-proxy-probe`, `ccpool-reap`) — this
 skill is a trigger + summary, not a fork of that content. If the underlying mechanisms change,
 update the canonical doc, not this skill's body.
@@ -38,19 +39,19 @@ update the canonical doc, not this skill's body.
 
 1. **Does the process show its own name, not `bash`?** Register through
    `phillipgreenii.system.launchdServices.{daemons,userAgents}`
-   (`phillipgreenii-nix-personal`'s `lib/options/launchd-services.nix`,
+   (the launchd-services flake's `lib/options/launchd-services.nix`,
    `darwin/system/launchd-services.nix`). The default `script` wrapper is a shell script, so the
    FIRST loaded Mach-O image is `bash` — fine for most services, but macOS TCC's
    responsible-identity resolution for a personal-information consent prompt (Calendar/Contacts/
    etc.) keys on that first image, not on whatever the script later `exec`s. If this service will
    ever request such a permission, set `execPath = "${pkg}/bin/<name>";` instead of `script`
-   (`phillipgreenii-nix-personal` ADR 0054) — mutually exclusive with `script`. An `execPath` USER
+   (the launchd-services flake's ADR 0054) — mutually exclusive with `script`. An `execPath` USER
    AGENT may still set `manageLogs.enable = true` (hourly rotation only, no startup rotation;
-   personal ADR 0056); an `execPath` DAEMON that has log files MUST set `manageLogs.enable = false` (it gets
+   launchd-services flake ADR 0056); an `execPath` DAEMON that has log files MUST set `manageLogs.enable = false` (it gets
    neither rotation path, so the now-default-on option is an evaluation error).
 
 2. **Will its logs be collected by otel?** Declare a
-   `phillipgreenii.observability.logSources.<name>` entry (`phillipgreenii-nix-support-apps` ADR
+   `phillipgreenii.observability.logSources.<name>` entry (the observability flake's ADR
    0038, `darwin/modules/observability/registration.nix`) if this service emits a structured
    JSONL log worth shipping to Loki. This is a SEPARATE, manually declared registration from
    `launchdServices` — nothing wires it automatically, so you must add it yourself. A service with
@@ -58,7 +59,7 @@ update the canonical doc, not this skill's body.
    deliberate decision, not an oversight.
 
 3. **Do its logs rotate?** Automatic: `manageLogs.enable` defaults to `true` on every
-   `launchdServices` entry (personal ADR 0056, pg2-27nja), so do nothing unless the tool cannot
+   `launchdServices` entry (launchd-services flake ADR 0056, pg2-27nja), so do nothing unless the tool cannot
    tolerate copy-truncate rotation. Bounds `StandardOutPath`/`StandardErrorPath` at a size threshold with a
    retained archive count, both at startup and — for user agents — via an hourly shared rotator.
    A service with no log files is a no-op. Opt out with `manageLogs.enable = false;` plus a one-line
@@ -66,7 +67,7 @@ update the canonical doc, not this skill's body.
    `exec >file`, tails it by byte offset, or a `logSources` glob would match the `<file>.<n>`
    archives.
    `execPath` user agents and Home-Manager-scoped agents (primary user) get the hourly pass only,
-   with no startup rotation (personal ADR 0056). Requires the log path to be STATIC at nix eval time. **This is the mechanism the 2026-09-24
+   with no startup rotation (launchd-services flake ADR 0056). Requires the log path to be STATIC at nix eval time. **This is the mechanism the 2026-09-24
    disk-full incident (`pg2-jw8ji`) existed to close** — a service that skips this and logs
    continuously WILL eventually fill the disk.
 
@@ -79,7 +80,7 @@ update the canonical doc, not this skill's body.
 
 5. **Does it alert when it isn't running?** For anything registered via `launchdServices`, the
    watch-list is automatic — `phillipgreenii.observability.launchdHealthCheck`
-   (`phillipgreenii-nix-support-apps`'s `darwin/modules/observability/launchd-health.nix`) derives
+   (the observability flake's `darwin/modules/observability/launchd-health.nix`) derives
    it, exports Prometheus metrics, and renders Grafana alert rules. Getting INTO that watch-list
    correctly still needs two things: classify periodic jobs correctly (a `StartInterval`-triggered
    job that exits between runs needs `checkMode = "periodic"`, or the activation-time check
@@ -100,7 +101,7 @@ update the canonical doc, not this skill's body.
 
 ## When this doesn't fully apply
 
-- A NEW otel-stack service currently inherits log rotation from `phillipgreenii-nix-support-apps`'
+- A NEW otel-stack service currently inherits log rotation from the observability flake's
   `mkServiceWrapper.nix` startup-rotation preamble instead of `manageLogs`, because the migration
   of the otel-stack services themselves onto `launchdServices` hit a recursion bug and hasn't
   landed yet. Questions 1, 2, 4, and 6 still apply to such a service normally; see the canonical
@@ -112,8 +113,8 @@ update the canonical doc, not this skill's body.
 
 ## References
 
-- `phillipgreenii-nix-personal`'s `docs/service-daemon-checklist.md` — the full checklist, kept
+- The launchd-services flake's `docs/service-daemon-checklist.md` — the full checklist, kept
   current; read it for anything this summary abbreviates.
-- `phillipgreenii-nix-personal` ADRs 0049, 0051, 0054 — stable-path indirection, off-PATH
+- The launchd-services flake's ADRs 0049, 0051, 0054 — stable-path indirection, off-PATH
   wrappers, `execPath` native-exec mode.
-- `phillipgreenii-nix-support-apps` ADR 0038 — observability app registration and JSONL logging.
+- The observability flake's ADR 0038 — observability app registration and JSONL logging.

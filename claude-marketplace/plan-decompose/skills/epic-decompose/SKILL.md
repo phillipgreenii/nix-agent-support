@@ -22,9 +22,8 @@ description: >-
 large for one `plan-decompose` pass; it NEVER authors phase content beyond what the design
 specifies, and it never itself curates work packets — that happens later, once a person (or an
 explicit override) approves the boundaries, via `phase-decompose` and `plan-decompose`
-themselves. Design of record for this skill:
-`docs/superpowers/specs/2026-09-04-plan-decompose-phasing-design.md` in
-`phillipgreenii-nix-agent-support` (provenance only — this skill stands alone).
+themselves. Design of record for this skill: the plan-decompose phasing design spec
+dated 2026-09-04 (provenance only — this skill stands alone).
 
 **Invocation id**: this skill lives in the existing `plan-decompose` plugin (per the design's
 Decision 2), matching the convention `plan-decomposer.md` already uses for

@@ -26,8 +26,9 @@ NOT assume a particular tracker or the drain loop.
 
 ## Definition (minimal)
 
-A **handoff bead** is a bead of type `handoff` (registered per database; see
-`docs/runbooks/beads-custom-issue-types.md` in `phillipgreenii-nix-agent-support`). It is a
+A **handoff bead** is a bead of type `handoff` (registered per database; see the
+"custom issue types" runbook that ships with the agent tooling that installed this skill).
+It is a
 POINTER to the work of a previous session, not work itself:
 
 - Its title starts `Handoff:`.

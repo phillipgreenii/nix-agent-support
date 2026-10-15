@@ -34,8 +34,8 @@ preconditions, and premise freshness (whose heaviest reference material lives in
 
 ## `bd --json` Output Shape
 
-> Two `bd` 1.3.1 builds coexist on this machine. The ZR recipe build prints
-> `bd version 1.3.1 (nix:phillipg-nix-ziprecruiter)` and is what the machine wrapper
+> Two `bd` 1.3.1 builds coexist on this machine. The machine's own recipe build prints
+> `bd version 1.3.1 (nix:<machine-flake>)` and is what the machine wrapper
 > (`/etc/profiles/per-user/$USER/bin/bd`) resolves to; the llm-agents prebuilt prints
 > `bd version 1.3.1 (dev)`. Since 1.3.1 they no longer
 > disagree by build: both emit the same `--json` envelope, selected by the `BD_JSON_ENVELOPE`

@@ -1369,7 +1369,7 @@ Freshness` rules (F-3) —
   (`pg-router gate list`), is a migration state that retrying cannot clear, and a loop
   that retries it spins forever. STOP the loop (do not start or restart dolt), report that
   the operator must run the schema migration, and leave claims released per B-1/B-2.
-  Runbook: `docs/beads-1-3-1-schema-migration.md` in the `phillipg-nix-ziprecruiter` repo.
+  Runbook: the operator's own bd schema-migration runbook (ask the operator where it lives).
 
 ## Loop overview
 
