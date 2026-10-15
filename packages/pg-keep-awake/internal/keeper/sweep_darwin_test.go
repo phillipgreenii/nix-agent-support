@@ -292,8 +292,14 @@ func TestSweepsKeepAssertionProcessesAndFiles(t *testing.T) {
 	}
 	s := realSweeper(d)
 
-	for name, run := range map[string]func() (*Result, error){"startup": s.Startup, "shutdown": s.Shutdown} {
-		res, err := run()
+	// Ordered, not a map: Shutdown removes keeper.heartbeat, so startup MUST run
+	// first for the heartbeat assertions below to hold (map order is random).
+	for _, step := range []struct {
+		name string
+		run  func() (*Result, error)
+	}{{"startup", s.Startup}, {"shutdown", s.Shutdown}} {
+		name := step.name
+		res, err := step.run()
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
