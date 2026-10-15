@@ -5021,6 +5021,31 @@
                     touch "$out"
                   '';
 
+              # pg-connector-github dashboard: rules D1-D7 over the dashboard JSON and the metric
+              # catalog (uid and title, catalogued names, counters inside rate/increase, the eight
+              # topics, descriptions, Prometheus datasource, every expr parses under promtool),
+              # then the script's own mutant self-tests.
+              test-pg-connector-github-dashboard =
+                pkgs.runCommand "test-pg-connector-github-dashboard"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.prometheus.cli
+                    ];
+                  }
+                  ''
+                    script=${./packages/pg-connector/grafana/check-dashboard.sh}
+                    dashboard=${./packages/pg-connector/grafana/pg-connector-github.json}
+                    catalog=${./packages/pg-connector/grafana/pg-connector-github-metrics.txt}
+                    bash "$script" "$dashboard" "$catalog"
+                    bash "$script" --self-test "$dashboard" "$catalog"
+                    touch "$out"
+                  '';
+
               # darwin/modules/beads-exporter: evaluated standalone against stubs of the
               # launchd and observability surfaces (declared in other flakes), with
               # synthetic databases alpha and beta. Proves the gate (observability off,
