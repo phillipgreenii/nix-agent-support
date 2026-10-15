@@ -77,6 +77,17 @@ func ProcStartMatches(reg RegistrySession) bool {
 	return procStartMatches(reg, ProcessStartTime)
 }
 
+// ProcStartMatchesWith is ProcStartMatches with the live-start-time reader
+// injected, so a caller's tests do not depend on a real `ps` being runnable (it
+// is absent or blocked inside the nix build sandbox, which makes the real reader
+// fail open). A nil startTime uses ProcessStartTime.
+func ProcStartMatchesWith(reg RegistrySession, startTime func(int) (time.Time, error)) bool {
+	if startTime == nil {
+		startTime = ProcessStartTime
+	}
+	return procStartMatches(reg, startTime)
+}
+
 func procStartMatches(reg RegistrySession, startTime func(int) (time.Time, error)) bool {
 	if reg.ProcStart.IsZero() {
 		return true

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 )
 
 func writeFile(path, body string) error {
@@ -132,18 +133,30 @@ func TestDiscover_EmptyEnvOnReaderFailure(t *testing.T) {
 	}
 }
 
+// TestDiscoverRejectsReusedPidWithMismatchingProcStart pins the PID-reuse guard
+// with an injected live-start-time reader. It used to call the real `ps`, which
+// is not on PATH in the nix build sandbox (pa-monitor-go-tests carries only git),
+// so the guard failed open there and the reused row stayed alive (pg2-w0j0t).
 func TestDiscoverRejectsReusedPidWithMismatchingProcStart(t *testing.T) {
 	dir := t.TempDir()
-	// The test process's own PID is alive, but a row whose procStart is years
-	// off belongs to a dead session whose PID was recycled.
-	pid := os.Getpid()
+	// The PID is "alive", but a row whose procStart is years off the live
+	// process's start time belongs to a dead session whose PID was recycled.
+	const pid = 4242
+	live := time.Date(2026, time.October, 14, 7, 51, 50, 0, time.UTC)
 	mustWrite(t, dir, "reused.json", fmt.Sprintf(`{"pid":%d,"sessionId":"reused","cwd":"/p","procStart":"Mon Jan  1 00:00:00 2001"}`, pid))
+	mustWrite(t, dir, "match.json", fmt.Sprintf(`{"pid":%d,"sessionId":"match","cwd":"/p","procStart":"Wed Oct 14 07:51:51 2026"}`, pid))
 	mustWrite(t, dir, "legacy.json", fmt.Sprintf(`{"pid":%d,"sessionId":"legacy","cwd":"/p"}`, pid))
 
 	d := Discoverer{
 		SessionsDir: dir,
-		PidAlive:    DefaultPidAlive,
+		PidAlive:    func(int) bool { return true },
 		ReadEnv:     func(string, int) (map[string]string, error) { return nil, nil },
+		ProcStart: func(p int) (time.Time, error) {
+			if p != pid {
+				t.Errorf("ProcStart called with pid %d, want %d", p, pid)
+			}
+			return live, nil
+		},
 	}
 	out, err := d.Discover()
 	if err != nil {
@@ -156,7 +169,30 @@ func TestDiscoverRejectsReusedPidWithMismatchingProcStart(t *testing.T) {
 	if byID["reused"] == nil || byID["reused"].PidAlive {
 		t.Errorf("reused: want present with PidAlive=false, got %+v", byID["reused"])
 	}
+	if byID["match"] == nil || !byID["match"].PidAlive {
+		t.Errorf("match (procStart within tolerance of live start): want PidAlive=true, got %+v", byID["match"])
+	}
 	if byID["legacy"] == nil || !byID["legacy"].PidAlive {
 		t.Errorf("legacy (no procStart): want PidAlive=true (PID-only fallback), got %+v", byID["legacy"])
+	}
+}
+
+// A reader that cannot determine the live start time fails open: the row keeps
+// the PidAlive hook's verdict rather than being declared dead.
+func TestDiscoverProcStartReaderErrorFailsOpen(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, dir, "r.json", `{"pid":7,"sessionId":"r","cwd":"/p","procStart":"Mon Jan  1 00:00:00 2001"}`)
+	d := Discoverer{
+		SessionsDir: dir,
+		PidAlive:    func(int) bool { return true },
+		ReadEnv:     func(string, int) (map[string]string, error) { return nil, nil },
+		ProcStart:   func(int) (time.Time, error) { return time.Time{}, os.ErrNotExist },
+	}
+	out, err := d.Discover()
+	if err != nil || len(out) != 1 {
+		t.Fatalf("Discover: out=%v err=%v", out, err)
+	}
+	if !out[0].PidAlive {
+		t.Errorf("unreadable live start time must fail open, got PidAlive=false")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	ct "github.com/phillipgreenii/claude-transcript"
 )
@@ -16,6 +17,11 @@ type Discoverer struct {
 	// key WhilePIDAlive env by session-id (reuse-safe). Tests inject a
 	// deterministic implementation.
 	ReadEnv func(sessionID string, pid int) (map[string]string, error)
+	// ProcStart returns the live start time of pid for the PID-reuse guard. Nil
+	// falls back to ct.ProcessStartTime (`ps -o lstart=`), which fails open when
+	// `ps` cannot run (e.g. inside the nix build sandbox); tests inject a
+	// deterministic reader instead of depending on the host's `ps`.
+	ProcStart func(pid int) (time.Time, error)
 }
 
 // DefaultPidAlive returns true when the pid is alive (kill -0 semantic).
@@ -63,7 +69,7 @@ func (d *Discoverer) Discover() ([]*Session, error) {
 		// PID-reuse guard: a live PID whose process started at a different time
 		// than the row's procStart is an unrelated process, not this session.
 		// Fails open for rows without procStart / unreadable start times.
-		if alive && !ct.ProcStartMatches(r) {
+		if alive && !ct.ProcStartMatchesWith(r, d.ProcStart) {
 			alive = false
 		}
 		readEnv := d.ReadEnv
