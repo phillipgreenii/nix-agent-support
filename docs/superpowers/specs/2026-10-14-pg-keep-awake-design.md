@@ -1,7 +1,7 @@
 # pg-keep-awake: one holder for the keep-awake assertion
 
-**Status**: Proposed (design reviewed twice by independent read-only reviewers; the operator's open
-decisions are listed under "Open decisions")
+**Status**: Proposed (design reviewed twice by independent read-only reviewers; decisions O1 to O9
+were confirmed as proposed by the operator on 2026-10-15, see section 17)
 **Date**: 2026-10-14
 **Deciders**: Phillip Green II
 **Decision record**: ADR 0100
@@ -71,8 +71,8 @@ Non-goals (out of scope):
 | R10 | The CLI is the only contract. pa-monitor enables and disables itself through the CLI. `status --check` is in v1.  |
 | R11 | Logging and metrics go to OTel, following the existing pattern.                                                   |
 
-Rulings R1 to R11 are not reopened here. Items marked "proposed" in "Open decisions" were not
-explicitly confirmed.
+Rulings R1 to R11 are not reopened here. Items marked "proposed" in the body are decisions O1 to O9
+(section 17), which the operator confirmed as proposed on 2026-10-15.
 
 ## 4. Architecture
 
@@ -682,7 +682,10 @@ Not verified: that Claude Code resolves `caffeinate` through `PATH` at spawn (th
 name); whether the real tool counts `-t` across sleep; pa-monitor's launchd `PATH`; a write to the state
 directory from inside a live pool session.
 
-## 17. Open decisions (proposed defaults, awaiting the operator)
+## 17. Decisions O1-O9 (confirmed as proposed)
+
+Confirmed as proposed, with no amendments, by Phillip on 2026-10-15 (bead pg2-8bgxg.1, session
+584a0993-5327-4abe-9795-41a78cedaf91). The table keeps the original ids.
 
 | #   | Decision                                                                                                                                                                                         |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

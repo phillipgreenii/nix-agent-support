@@ -1,6 +1,6 @@
 # pg-keep-awake is the single holder of the keep-awake assertion
 
-**Status**: Proposed (extends ADR 0095 and ADR 0024; the open decisions are listed in the spec)
+**Status**: Proposed (extends ADR 0095 and ADR 0024; decisions O1 to O9 in the spec were confirmed as proposed on 2026-10-15)
 **Date**: 2026-10-14
 **Deciders**: Phillip Green II
 
