@@ -49,12 +49,42 @@ set -euo pipefail
 # is compared.
 export LC_ALL=C
 
+LIST_ONLY=0
+if [ "${1:-}" = "--list-sets" ]; then
+  LIST_ONLY=1
+  shift
+fi
+
 ROOT="${1:-.}"
 cd "$ROOT" || {
   echo "not a directory: $ROOT" >&2
   exit 2
 }
 ROOT=$(pwd)
+
+# discover_sets — every in-repo behavior-docs set, one repo-relative path per line,
+# byte-ordered. A set is a `docs/behavior/` directory that carries a README.md.
+#
+# DISCOVERY, NOT A LIST (bead pg2-ksssh). The runner used to hard-code five sets, so
+# four sets that were authored after it (pg-connector, pg-router-ccpool-handler,
+# pg-router-source-pg-connector, work-report) sat outside every automated gate, and
+# the next new set would have joined them silently. A set now enters the gate by
+# existing, which is the only way a new one cannot be missed.
+#
+# Dot-directories are pruned: `.worktrees/` and `.git/` hold COPIES of the tree, and
+# the pre-commit hook runs this over a working tree that may contain them. That is a
+# statement about where sets can live, not a finding exclude: no set path is ever
+# skipped by name.
+discover_sets() {
+  find . -name '.?*' -prune -o -type f -path '*/docs/behavior/README.md' -print |
+    sed -e 's|^\./||' -e 's|/README\.md$||' |
+    sort
+}
+
+if [ "$LIST_ONLY" -eq 1 ]; then
+  discover_sets
+  exit 0
+fi
 BASELINE="${BASELINE:-$ROOT/tests/behavior-docs-real-corpus.baseline}"
 
 SKILLS="claude-marketplace/behavior-docs-conformance/skills"
@@ -67,11 +97,6 @@ NAME_COLLISIONS="$SKILLS/behavior-docs-inter-conformance/scripts/name-collisions
 IMPL_TRACES="$SKILLS/behavior-docs-impl-conformance/scripts/impl-traces.sh"
 
 METHOD_SET="behavior-docs/docs/behavior"
-PGROUTER_SET="packages/pg-router/docs/behavior"
-PGROUTER_IMPL="packages/pg-router"
-PAMONITOR_SET="packages/pa-monitor/docs/behavior"
-CCPOOL_SET="packages/ccpool/docs/behavior"
-PGPR_SET="packages/pg-pr/docs/behavior"
 
 for f in "$SELF_CHECKS" "$TRACE_EXTRACT" "$RELOCATION_CHECK" "$RESOLVE_IMPORTS" "$RECONCILE_IMPORTS" "$NAME_COLLISIONS" "$IMPL_TRACES"; do
   [ -f "$f" ] || {
@@ -80,8 +105,41 @@ for f in "$SELF_CHECKS" "$TRACE_EXTRACT" "$RELOCATION_CHECK" "$RESOLVE_IMPORTS" 
     exit 2
   }
 done
-for d in "$METHOD_SET" "$PGROUTER_SET" "$PGROUTER_IMPL" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET"; do
-  [ -d "$d" ] || {
+
+SETS=()
+while IFS= read -r s; do
+  SETS+=("$s")
+done < <(discover_sets)
+# A vacuous gate is the failure this runner exists to prevent: finding no set at
+# all (a changed root, a find that matched nothing) MUST be loud, and so MUST the
+# method set going missing, because every inter seam below hangs off it.
+if [ "${#SETS[@]}" -eq 0 ]; then
+  echo "no behavior-docs set discovered under $ROOT (looked for */docs/behavior/README.md)" >&2
+  exit 2
+fi
+printf '%s\n' "${SETS[@]}" | grep -Fx -- "$METHOD_SET" >/dev/null || {
+  echo "missing real corpus path: $ROOT/$METHOD_SET (the method set is the root of every seam)" >&2
+  exit 2
+}
+
+# impl_root <set> — the implementation tree the IMPL evaluator reconciles a set
+# against, or empty when this runner has no implementation path for the set.
+#
+# Only pg-router has one. That is what the runner applied before discovery (bead
+# pg2-wr6lm.4) and discovery does not change it: pointing impl-traces.sh at every
+# `packages/<name>` tree is a separate widening that surfaces code-side citation
+# findings in ccpool, pa-monitor, pg-pr, pg-connector and the ccpool handler, each of
+# which needs a CODE edit (bead pg2-ksssh records the count). A set gains an
+# implementation path by gaining a line here, once its code citations resolve.
+impl_root() {
+  case "$1" in
+  packages/pg-router/docs/behavior) printf '%s\n' "packages/pg-router" ;;
+  *) ;;
+  esac
+}
+for set in "${SETS[@]}"; do
+  d=$(impl_root "$set")
+  [ -z "$d" ] || [ -d "$d" ] || {
     echo "missing real corpus path: $ROOT/$d" >&2
     exit 2
   }
@@ -121,12 +179,14 @@ strip_heuristic_sections() {
   ' "$1"
 }
 
-# require_clean <set> <section-name> <expected-marker> <output-file>
+# require_clean <set> <section-name> <expected-marker> <output-file> [<alt-marker>]
+# The section is clean when it contains <expected-marker> or, if given, <alt-marker>.
 require_clean() {
-  local set="$1" name="$2" marker="$3" out="$4" body
+  local set="$1" name="$2" marker="$3" out="$4" alt="${5:-}" body
   body=$(section "$name" "$out")
   # no grep -q: pipefail + early exit = SIGPIPE false negative (pg2-g9vji)
   if printf '%s\n' "$body" | grep -F -- "$marker" >/dev/null; then return 0; fi
+  if [ -n "$alt" ] && printf '%s\n' "$body" | grep -F -- "$alt" >/dev/null; then return 0; fi
   echo "REAL-CORPUS FAIL [$set] self-checks section '$name' is not clean (expected to contain '$marker'):" >&2
   printf '%s\n' "$body" >&2
   hard_fail=1
@@ -134,7 +194,10 @@ require_clean() {
 
 echo "=== behavior-docs real corpus: $ROOT ==="
 
-for set in "$METHOD_SET" "$PGROUTER_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET"; do
+echo "discovered ${#SETS[@]} set(s):"
+printf '  %s\n' "${SETS[@]}"
+
+for set in "${SETS[@]}"; do
   echo
   echo "--- intra: self-checks.sh $set ---"
   out="$tmp/self-checks.$(printf '%s' "$set" | tr / _)"
@@ -149,7 +212,17 @@ for set in "$METHOD_SET" "$PGROUTER_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_S
   # QUOTES a below-floor line ("retry 3x with a 30s backoff") as a counter-example
   # of what must not appear in a behavior doc. Asserting a heuristic would force
   # either a false failure or an allowlist.
-  require_clean "$set" "UUID carriers" "clean (" "$out"
+  # A set must carry UUIDs (`clean (N carrier(s)...`). The one exception is a set
+  # that is a README ALONE: it has no invariants, journeys or interfaces register,
+  # so it defines no id-bearing element, and self-checks.sh reports `none present`.
+  # The exception is keyed on the set's SHAPE, never on its path, so a register-
+  # carrying set that loses its UUIDs still fails here.
+  set_files=("$set"/*.md)
+  uuid_alt=""
+  if [ "${#set_files[@]}" -eq 1 ]; then
+    uuid_alt="none present"
+  fi
+  require_clean "$set" "UUID carriers" "clean (" "$out" "$uuid_alt"
   require_clean "$set" "Status headers" "clean" "$out"
   require_clean "$set" "Inline status framing" "clean" "$out"
   require_clean "$set" "Cross-set relative links" "none" "$out"
@@ -185,103 +258,132 @@ for set in "$METHOD_SET" "$PGROUTER_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_S
   sed -n '/^--- /,$p' "$out" | grep -E '^[[:space:]]*(FAIL|clean)' | sed 's/^/  /' || true
 done
 
+# declared_owners <set> — the owner set-paths <set>'s `## External references`
+# tables declare, one per line. Each row's `<repo> · <set-path>` cell names the
+# owner; the seam to check is then (owner, <set>). Deriving the seams from the
+# tables means a set that starts importing from another is checked against it with
+# no edit here — the hard-coded list this replaced could not do that, and the
+# same omission is what it did to the four sets this runner once missed.
+declared_owners() {
+  awk '
+    FNR == 1 { insec = 0 }
+    toupper($0) ~ /^##[[:space:]]+EXTERNAL REFERENCES/ { insec = 1; next }
+    /^##[[:space:]]/ && insec { insec = 0 }
+    insec && /^\|/ { print }
+  ' "$1"/*.md 2>/dev/null |
+    { grep -oE '`[^`|]*·[[:space:]]*[^`|]+`' || true; } |
+    sed -E 's/^.*·[[:space:]]*//; s/`$//' |
+    sort -u
+}
+
+# SEAMS — "<owner-dir>|<implementer-set>" for every declared owner that lives in
+# this repo. An owner is a set OR any other directory of ID-carrying docs (a
+# `docs/decisions` area is an owner too); an owner outside this repo (the ZR
+# deployment set) cannot be read from here and is reported, not checked.
+SEAMS=()
 echo
-echo "--- inter: resolve-imports.sh (method -> pg-router) ---"
-out="$tmp/resolve"
-bash "$RESOLVE_IMPORTS" "$METHOD_SET" "$PGROUTER_SET" >"$out" 2>&1 || {
-  echo "REAL-CORPUS FAIL resolve-imports.sh did not resolve the real seam:" >&2
-  cat "$out" >&2
-  hard_fail=1
-}
-record "inter/resolve-imports" "$out"
-grep -E '^[[:space:]]*(ok|WARN|FAIL|external)' "$out" | sed 's/^/  /' || true
+echo "--- inter: seams derived from the sets' External references tables ---"
+for set in "${SETS[@]}"; do
+  while IFS= read -r owner; do
+    [ -n "$owner" ] || continue
+    [ "$owner" != "$set" ] || continue
+    if [ -d "$owner" ]; then
+      SEAMS+=("$owner|$set")
+    else
+      echo "  external owner not in this repo, not checked: $owner (declared by $set)"
+    fi
+  done < <(declared_owners "$set")
+done
+if [ "${#SEAMS[@]}" -eq 0 ]; then
+  echo "  (no set declares an in-repo owner)"
+else
+  SEAM_LIST=$(printf '%s\n' "${SEAMS[@]}" | sort -u)
+  SEAMS=()
+  while IFS= read -r seam; do
+    SEAMS+=("$seam")
+  done <<<"$SEAM_LIST"
+  printf '  %s\n' "${SEAMS[@]}"
+fi
 
-echo "--- inter: reconcile-imports.sh (method <-> pg-router) ---"
-out="$tmp/reconcile"
-bash "$RECONCILE_IMPORTS" "$METHOD_SET" "$PGROUTER_SET" >"$out" 2>&1 || true
-record "inter/reconcile-imports" "$out"
-grep -E '^[[:space:]]*(FAIL|WARN|clean)' "$out" | sed 's/^/  /' || true
+for seam in "${SEAMS[@]}"; do
+  owner="${seam%%|*}"
+  impl="${seam#*|}"
+  tag=$(printf '%s__%s' "$owner" "$impl" | tr / _)
 
-echo "--- inter: resolve-imports.sh (method -> pa-monitor) ---"
-out="$tmp/resolve-pamonitor"
-bash "$RESOLVE_IMPORTS" "$METHOD_SET" "$PAMONITOR_SET" >"$out" 2>&1 || {
-  echo "REAL-CORPUS FAIL resolve-imports.sh did not resolve the real seam:" >&2
-  cat "$out" >&2
-  hard_fail=1
-}
-record "inter/resolve-imports" "$out"
-grep -E '^[[:space:]]*(ok|WARN|FAIL|external)' "$out" | sed 's/^/  /' || true
+  echo
+  echo "--- inter: resolve-imports.sh ($owner -> $impl) ---"
+  out="$tmp/resolve.$tag"
+  bash "$RESOLVE_IMPORTS" "$owner" "$impl" >"$out" 2>&1 || {
+    echo "REAL-CORPUS FAIL resolve-imports.sh did not resolve the real seam $owner -> $impl:" >&2
+    cat "$out" >&2
+    hard_fail=1
+  }
+  record "inter/resolve-imports $owner -> $impl" "$out"
+  grep -E '^[[:space:]]*(ok|WARN|FAIL|external)' "$out" | sed 's/^/  /' || true
 
-echo "--- inter: reconcile-imports.sh (method <-> pa-monitor) ---"
-out="$tmp/reconcile-pamonitor"
-bash "$RECONCILE_IMPORTS" "$METHOD_SET" "$PAMONITOR_SET" >"$out" 2>&1 || true
-record "inter/reconcile-imports" "$out"
-grep -E '^[[:space:]]*(FAIL|WARN|clean)' "$out" | sed 's/^/  /' || true
+  echo "--- inter: reconcile-imports.sh ($owner <-> $impl) ---"
+  out="$tmp/reconcile.$tag"
+  bash "$RECONCILE_IMPORTS" "$owner" "$impl" >"$out" 2>&1 || true
+  record "inter/reconcile-imports $owner <-> $impl" "$out"
+  grep -E '^[[:space:]]*(FAIL|WARN|clean)' "$out" | sed 's/^/  /' || true
+done
 
-echo "--- inter: resolve-imports.sh (method -> ccpool) ---"
-out="$tmp/resolve-ccpool"
-bash "$RESOLVE_IMPORTS" "$METHOD_SET" "$CCPOOL_SET" >"$out" 2>&1 || {
-  echo "REAL-CORPUS FAIL resolve-imports.sh did not resolve the real seam:" >&2
-  cat "$out" >&2
-  hard_fail=1
-}
-record "inter/resolve-imports" "$out"
-grep -E '^[[:space:]]*(ok|WARN|FAIL|external)' "$out" | sed 's/^/  /' || true
+echo
+echo "--- inter: name-collisions.sh (once per declared seam between two discovered sets) ---"
+# ONE INVOCATION PER REFERENCE EDGE, not one over every set. Class 1 only ever fails
+# across a reference edge, so running it per edge loses nothing. Class 2 asks whether
+# a set asserts a name beside its citation of ANOTHER set's element, which has no
+# meaning for two sets that never cite each other: handed every set at once it reads
+# a set's citation of its OWN `INV-STATE-1` as a citation of an unrelated set's
+# same-named `INV-STATE-1` and reports ~60 candidates, none about a real seam. INV-20
+# says the same of class 1: vocabulary consistency across unrelated sets is not
+# required. An owner that is not itself a discovered set (a `docs/decisions` area) is
+# not a name-collisions operand.
+PAIRS=()
+for seam in "${SEAMS[@]+"${SEAMS[@]}"}"; do
+  owner="${seam%%|*}"
+  impl="${seam#*|}"
+  printf '%s\n' "${SETS[@]}" | grep -Fx -- "$owner" >/dev/null || continue
+  if [[ $owner < $impl ]]; then
+    PAIRS+=("$owner|$impl")
+  else
+    PAIRS+=("$impl|$owner")
+  fi
+done
+if [ "${#PAIRS[@]}" -gt 0 ]; then
+  PAIR_LIST=$(printf '%s\n' "${PAIRS[@]}" | sort -u)
+  PAIRS=()
+  while IFS= read -r pair; do
+    PAIRS+=("$pair")
+  done <<<"$PAIR_LIST"
+fi
+for pair in "${PAIRS[@]+"${PAIRS[@]}"}"; do
+  a="${pair%%|*}"
+  b="${pair#*|}"
+  echo "  ($a, $b)"
+  out="$tmp/collisions.$(printf '%s__%s' "$a" "$b" | tr / _)"
+  bash "$NAME_COLLISIONS" "$a" "$b" >"$out" 2>&1 || true
+  record "inter/name-collisions $a, $b" "$out"
+  # `note` is echoed but deliberately NOT recorded (see `record`, which greps only
+  # FAIL/WARN/CANDIDATE). Class 1 emits one per ID name reused across two sets with NO
+  # reference edge — INV-20 does not require distinct names there, so it is not a
+  # finding and must not consume a baseline line. Echoing it keeps the narrowing
+  # VISIBLE in the gate log rather than silent (bead pg2-pffnw).
+  grep -E '^[[:space:]]*(FAIL|CANDIDATE|note|clean|none)' "$out" | sed 's/^/    /' || true
+done
 
-echo "--- inter: reconcile-imports.sh (method <-> ccpool) ---"
-out="$tmp/reconcile-ccpool"
-bash "$RECONCILE_IMPORTS" "$METHOD_SET" "$CCPOOL_SET" >"$out" 2>&1 || true
-record "inter/reconcile-imports" "$out"
-grep -E '^[[:space:]]*(FAIL|WARN|clean)' "$out" | sed 's/^/  /' || true
-
-echo "--- inter: resolve-imports.sh (pa-monitor -> ccpool) ---"
-out="$tmp/resolve-pamonitor-ccpool"
-bash "$RESOLVE_IMPORTS" "$PAMONITOR_SET" "$CCPOOL_SET" >"$out" 2>&1 || {
-  echo "REAL-CORPUS FAIL resolve-imports.sh did not resolve the real seam:" >&2
-  cat "$out" >&2
-  hard_fail=1
-}
-record "inter/resolve-imports" "$out"
-grep -E '^[[:space:]]*(ok|WARN|FAIL|external)' "$out" | sed 's/^/  /' || true
-
-echo "--- inter: reconcile-imports.sh (pa-monitor <-> ccpool) ---"
-out="$tmp/reconcile-pamonitor-ccpool"
-bash "$RECONCILE_IMPORTS" "$PAMONITOR_SET" "$CCPOOL_SET" >"$out" 2>&1 || true
-record "inter/reconcile-imports" "$out"
-grep -E '^[[:space:]]*(FAIL|WARN|clean)' "$out" | sed 's/^/  /' || true
-
-echo "--- inter: resolve-imports.sh (method -> pg-pr) ---"
-out="$tmp/resolve-pgpr"
-bash "$RESOLVE_IMPORTS" "$METHOD_SET" "$PGPR_SET" >"$out" 2>&1 || {
-  echo "REAL-CORPUS FAIL resolve-imports.sh did not resolve the real seam:" >&2
-  cat "$out" >&2
-  hard_fail=1
-}
-record "inter/resolve-imports" "$out"
-grep -E '^[[:space:]]*(ok|WARN|FAIL|external)' "$out" | sed 's/^/  /' || true
-
-echo "--- inter: reconcile-imports.sh (method <-> pg-pr) ---"
-out="$tmp/reconcile-pgpr"
-bash "$RECONCILE_IMPORTS" "$METHOD_SET" "$PGPR_SET" >"$out" 2>&1 || true
-record "inter/reconcile-imports" "$out"
-grep -E '^[[:space:]]*(FAIL|WARN|clean)' "$out" | sed 's/^/  /' || true
-
-echo "--- inter: name-collisions.sh (method, pg-router, pa-monitor, ccpool, pg-pr) ---"
-out="$tmp/collisions"
-bash "$NAME_COLLISIONS" "$METHOD_SET" "$PGROUTER_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET" >"$out" 2>&1 || true
-record "inter/name-collisions" "$out"
-# `note` is echoed but deliberately NOT recorded (see `record`, which greps only
-# FAIL/WARN/CANDIDATE). Class 1 emits one per ID name reused across two sets with NO
-# reference edge — INV-20 does not require distinct names there, so it is not a
-# finding and must not consume a baseline line. Echoing it keeps the narrowing
-# VISIBLE in the gate log rather than silent (bead pg2-pffnw).
-grep -E '^[[:space:]]*(FAIL|CANDIDATE|note|clean|none)' "$out" | sed 's/^/  /' || true
-
-echo "--- impl: impl-traces.sh (pg-router code <-> pg-router set) ---"
-out="$tmp/impl"
-bash "$IMPL_TRACES" "$PGROUTER_SET" "$PGROUTER_IMPL" >"$out" 2>&1 || true
-record "impl/impl-traces" "$out"
-grep -E '^[[:space:]]*(FAIL|NOTICE)' "$out" | sed 's/^/  /' || true
+# impl-traces runs wherever a set has an implementation tree in this repo
+# (`impl_root`): the code's citations of the set's IDs, reconciled against it.
+for set in "${SETS[@]}"; do
+  d=$(impl_root "$set")
+  [ -n "$d" ] || continue
+  echo
+  echo "--- impl: impl-traces.sh ($d code <-> $set) ---"
+  out="$tmp/impl.$(printf '%s' "$set" | tr / _)"
+  bash "$IMPL_TRACES" "$set" "$d" >"$out" 2>&1 || true
+  record "impl/impl-traces $set" "$out"
+  grep -E '^[[:space:]]*(FAIL|NOTICE)' "$out" | sed 's/^/  /' || true
+done
 
 echo
 echo "--- baseline comparison ---"

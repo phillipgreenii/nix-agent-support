@@ -17,6 +17,10 @@ together, commit `c6b016fb`) built this module's implementation against the cont
   `packages/pg-router/docs/behavior/interfaces.md`'s `INTF-HANDLER` section
   (uuid `10939663-7a48-4d44-8c4a-9a2df8ae4654`); not restated here.
 
+Both ride pg-router's default CLI transport (`DEC-WIRE-1`). Where this module reaches back into the
+core, it does so over the core's socket through the callback commands the core hands it with their
+address and token already baked in (`DEC-WIRE-2`), which are part of `INTF-CLI`.
+
 This module's own obligations under both — tolerating a duplicate event, supporting the deferred
 ack form, reporting `unavailable`/`busy` pre-accept declines, never leaking a post-accept failure
 class back to the core as anything but an opaque outcome string — are exactly the obligations

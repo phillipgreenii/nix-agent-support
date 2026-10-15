@@ -1,8 +1,8 @@
 # Glossary — work-report
 
-Vocabulary for work-report, grouped by its two conceptual halves. See
-[actors](actors.md) for who uses these terms and [interfaces](interfaces.md) for where they cross
-a boundary.
+Vocabulary for work-report, grouped by its two conceptual halves; each term here is used in at
+least two other places in this set (`INV-14`). See [actors](actors.md) for who uses these terms and
+[interfaces](interfaces.md) for where they cross a boundary.
 
 ## Ingestion
 

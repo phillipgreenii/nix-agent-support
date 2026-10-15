@@ -7,13 +7,15 @@ here — see `packages/pg-router/docs/behavior/invariants.md`. These are the rul
 module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
 
 - **`INV-CCH-1`** — this module's Go module MUST import `packages/pg-router` (its wire schemas and
-  `conformance` package) and `packages/pg-router` MUST NOT import this module back. The dependency
+  the `conformance` package, the suite `INV-INTF-2` requires of every implementer) and
+  `packages/pg-router` MUST NOT import this module back. The dependency
   is one-way (`phillipgreenii-nix-agent-support` ADR 0065's "New module" decision); a reverse
   import would put concrete participant behavior back inside the generic core it was extracted
-  out of.
+  out of, against `GOAL-MIN-1`.
 - **`INV-CCH-2`** — a handler session MUST tolerate a duplicate event and MUST support the
   deferred-ack reply form, matching `INTF-HANDLER`'s obligations on every implementer; this module
-  states no exception of its own. Tolerating a duplicate never means adopting a finished session:
+  states no exception of its own. The core's own de-duplication by event id (`INV-EVT-3`) is bounded
+  by its retention and does not lift the obligation. Tolerating a duplicate never means adopting a finished session:
   only the same event's turn still in progress is absorbed, and every other dispatch either runs
   in a fresh session of its own or, while another attempt is in flight, declines (`INV-CCH-30`).
 - **`INV-CCH-3`** — a handler session's post-accept outcome (`retryable`, `resource-limit`,
@@ -32,8 +34,9 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   business, per the Floor stated in both this set's and pg-router's own `## Scope`.
 - **`INV-CCH-6`** — a handler MUST query pool capacity before preparing isolation or
   launching a session and MUST NOT launch when the pool reports no free slot or cannot be
-  read. It signals this ONLY through the transport's pre-accept busy decline
-  (`conformance.ExitBusy`), so the core re-offers the event with backoff; it mutates no bead
+  read; capacity is the handler's own to enforce (`INV-CONC-1`). It signals this ONLY through the
+  transport's pre-accept busy decline (`conformance.ExitBusy`, exit `9` on the default CLI
+  transport of `DEC-WIRE-1`), so the core re-offers the event with backoff; it mutates no bead
   and creates no worktree. This is consistent with `INV-CCH-3`: busy is a pre-accept signal,
   not a post-accept outcome. A pool that reports its account usage window at its limit
   (`packages/ccpool/docs/behavior · INV-POOL-4`) has no free slot by construction, so it takes this

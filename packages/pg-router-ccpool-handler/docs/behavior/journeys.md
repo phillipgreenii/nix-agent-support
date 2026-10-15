@@ -36,6 +36,8 @@ _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backin
    command-backed role execs its configured argv.
    2n. A ccpool-backed role starts with the handler-wide tool grants plus its own extra grants, if
    it sets any, and no other role gets them (`INV-CCH-25`).
+   2e. A ccpool-backed role that sets its own effort level starts its sessions at that level, and a
+   role that sets none starts them at the handler-wide level (`INV-CCH-31`).
    2l. A ccpool-backed session that runs under `permissionMode=dontAsk` is sent a code-owned notice
    ahead of the role's own task text: writes to the agent runtime's protected paths (the `.claude/`
    directory, except `.claude/worktrees`) are denied automatically in that mode and no allow-list

@@ -2,7 +2,7 @@
 
 Vocabulary for this module's realization of `INTF-HANDLER`/`INTF-SOURCE`
 (`packages/pg-router/docs/behavior/interfaces.md`). Terms the core itself defines — event, binding,
-handler session, role, wiring — are not restated here; see
+handler session, role, wiring (`INV-WORKFLOW-1`) — are not restated here; see
 `packages/pg-router/docs/behavior/glossary.md`. Task 5.2/5.3 (folded together, commit `c6b016fb`)
 built every term below into real code (`internal/budget`, `internal/watchdog`, `internal/prompt`,
 `internal/complete`, the `internal/executor` ccpool/command split); see [README](README.md)'s

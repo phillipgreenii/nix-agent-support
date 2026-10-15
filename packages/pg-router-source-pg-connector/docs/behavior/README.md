@@ -144,6 +144,16 @@ elements, so the first column names the section the gap is against.
 | `changes` (known trade-offs of the digest) | the trade-offs paragraph holds for backends that do not own their changes, and a later change replaces it with a note covering a backend that does                                            | the paragraph is unscoped in the build and no replacement note exists; the replacement is planned for Phase 3c of program epic `pg2-z5fax` | `pg2-z5fax` (later phases) |
 | `sweep`                                    | for a backend that owns its changes the narrowed periodic sweep is retired and the unnarrowed sweep stays as the longer-period backstop                                                       | no backend owns its changes yet, so both sweeps are still configured                                                                       | `pg2-z5fax` (later phases) |
 
+## External references
+
+This adapter cites two invariants that the pg-router set owns, because pg-router's event queue is
+the consumer of what it prints.
+
+| Name        | What it is                                                                                                                 | Owner set-path                                                        | Owner UUID                                                                                                                                           |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INV-EVT-3` | the core de-duplicates by event `id` across the retained id set                                                            | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior` | [d54ad229-ed48-4862-aa27-bc2181b4d6c4](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/invariants.md) |
+| `INV-EVT-4` | retry is bounded by the event's expiry, evaluated at attempt time: an attempt made after it expired is that handler's last | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior` | [840afb74-2159-447f-985b-33b27dfc35da](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/invariants.md) |
+
 ## Out of scope
 
 - The delta-ledger engine and the `changes`/`ledger show`/`ledger clear` CLI verbs this adapter's
