@@ -111,10 +111,14 @@ func TestEvaluateHook_GitLsFilesPathspecsAreNotSecretReads(t *testing.T) {
 		}
 	}
 
-	attended := eng.EvaluateHook(unattendedBashInput("git ls-files -X .envrc", "default"))
-	unattended := eng.EvaluateHook(unattendedBashInput("git ls-files -X .envrc", "dontAsk"))
-	if attended.Decision != hookio.Ask || unattended.Decision != hookio.Reject {
-		t.Errorf("git ls-files -X reads .envrc: attended = %v, unattended = %v, want Ask and Reject", attended.Decision, unattended.Decision)
+	// The glued short-flag spelling is the same read as the separated one and must get
+	// the same verdict (it used to be skipped as a flag and abstain).
+	for _, cmd := range []string{"git ls-files -X .envrc", "git ls-files -X.envrc", "git ls-files -oX.envrc"} {
+		attended := eng.EvaluateHook(unattendedBashInput(cmd, "default"))
+		unattended := eng.EvaluateHook(unattendedBashInput(cmd, "dontAsk"))
+		if attended.Decision != hookio.Ask || unattended.Decision != hookio.Reject {
+			t.Errorf("%s reads .envrc: attended = %v, unattended = %v, want Ask and Reject", cmd, attended.Decision, unattended.Decision)
+		}
 	}
 }
 

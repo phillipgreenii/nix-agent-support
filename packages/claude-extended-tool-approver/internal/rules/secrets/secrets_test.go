@@ -191,6 +191,19 @@ func TestRule(t *testing.T) {
 		// Options that make git OPEN a named file keep every operand screened, in
 		// every spelling git accepts, including unambiguous abbreviations.
 		{"git ls-files -X reads the file as exclude patterns", bashInput("git ls-files -X .envrc"), hookio.Ask},
+		// The glued short-flag spelling is ONE argv token (`-X.envrc`), which the
+		// operand loop used to skip as a flag; it must get the SAME verdict as the
+		// separated form, in a cluster too (`-oX.envrc`, and `-oX .envrc` whose file
+		// operand is the next token), and with its shell quoting resolved.
+		{"git ls-files -X<file> glued reads the file", bashInput("git ls-files -X.envrc"), hookio.Ask},
+		{"git ls-files -X<file> glued after -C reads the file", bashInput("git -C /repo ls-files -X.envrc"), hookio.Ask},
+		{"git ls-files -oX<file> cluster reads the file", bashInput("git ls-files -oX.envrc"), hookio.Ask},
+		{"git ls-files -oX <file> cluster reads the next operand", bashInput("git ls-files -oX .envrc"), hookio.Ask},
+		{"git ls-files -X'<file>' glued and quoted reads the file", bashInput("git ls-files -X'.envrc'"), hookio.Ask},
+		{"git ls-files -X<secret path> glued reads the file", bashInput("git ls-files -X$HOME/.ssh/id_rsa"), hookio.Ask},
+		// Control: a glued -X file that is NOT secret stays unscreened, so the fix does
+		// not turn every -X into a prompt.
+		{"git ls-files -X<non-secret file> glued is not a secret read", bashInput("git ls-files -X.gitignore"), hookio.NoOpinion},
 		{"git ls-files --exclude-from reads the file", bashInput("git ls-files --exclude-from=.envrc"), hookio.Ask},
 		{"git ls-files abbreviated --exclude-fr reads the file", bashInput("git ls-files --exclude-fr .envrc"), hookio.Ask},
 		{"git ls-files --exclude-per-directory reads files by name", bashInput("git ls-files --exclude-per-directory=.envrc"), hookio.Ask},

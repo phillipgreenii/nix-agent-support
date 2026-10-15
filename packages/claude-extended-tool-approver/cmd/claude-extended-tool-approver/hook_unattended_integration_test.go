@@ -142,6 +142,7 @@ func TestUnattendedHook_SecretPathReadIsADeterministicDeny(t *testing.T) {
 		"cat .envrc":                   bashPayload(secretCWD, "dontAsk", envrcRead),
 		"cat .env.yarn":                bashPayload(secretCWD, "dontAsk", "cat /srv/work/project/.env.yarn"),
 		"git ls-files -X reads a file": bashPayload(secretCWD, "dontAsk", "git ls-files -X .envrc"),
+		"git ls-files -X<file> glued":  bashPayload(secretCWD, "dontAsk", "git ls-files -X.envrc"),
 		"Read tool on .envrc":          readToolPayload(secretCWD, "dontAsk", "/srv/work/project/.envrc"),
 	}
 	for name, payload := range cases {
@@ -175,6 +176,40 @@ func TestUnattendedHook_GitPathspecIsNotASecretRead(t *testing.T) {
 		if got := run.decision(); got != "allow" {
 			t.Errorf("mode=%s: permissionDecision = %q, want allow (stdout: %s)", mode, got, run.stdout)
 		}
+	}
+}
+
+// TestUnattendedHook_GitLsFilesExcludeFromSpellingsGetOneVerdict: `-X` makes git
+// OPEN the named file, so the file operand is a read however the flag is spelled. The
+// glued `-X.envrc` is one argv token and used to be skipped as "a flag", so it measured
+// no opinion while `-X .envrc` asked. Every spelling must get the SAME verdict in both
+// kinds of session: ask when attended, an actionable deny when unattended.
+func TestUnattendedHook_GitLsFilesExcludeFromSpellingsGetOneVerdict(t *testing.T) {
+	for _, cmd := range []string{
+		"git ls-files -X .envrc",
+		"git ls-files -X.envrc",
+		"git ls-files -oX.envrc",
+		"git ls-files -oX .envrc",
+		"git -C /srv/work/project ls-files -X.envrc",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			attended := runPreToolUse(t, bashPayload(secretCWD, "default", cmd))
+			if got := attended.decision(); got != "ask" {
+				t.Fatalf("attended permissionDecision = %q, want ask (stdout: %s)", got, attended.stdout)
+			}
+			if !strings.Contains(attended.reason(), "references credential/secret path") {
+				t.Errorf("attended reason lost the rule's own words:\n%s", attended.reason())
+			}
+			unattended := runPreToolUse(t, bashPayload(secretCWD, "dontAsk", cmd))
+			if got := unattended.decision(); got != "deny" {
+				t.Fatalf("unattended permissionDecision = %q, want deny (stdout: %s)", got, unattended.stdout)
+			}
+			for _, want := range []string{denyReasonHead, "credential/secret path", "Do not read credential or environment files"} {
+				if !strings.Contains(unattended.reason(), want) {
+					t.Errorf("unattended reason missing %q:\n%s", want, unattended.reason())
+				}
+			}
+		})
 	}
 }
 

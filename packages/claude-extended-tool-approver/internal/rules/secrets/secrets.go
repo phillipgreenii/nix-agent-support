@@ -908,6 +908,16 @@ func secretCandidateArgs(pc cmdparse.ParsedCommand) (args []string, malformed bo
 			if dirs, ok := gitLsFilesDirs(pc.Args); ok {
 				return dirs, false
 			}
+			// pg2-1bzov: the carve-out is off here (some option may OPEN a file),
+			// so every operand is screened as before — but `-X.envrc` is ONE token
+			// that firstSecretRefIn skips as a flag, so its glued file value is
+			// surfaced as an operand too, giving it the same verdict as the
+			// separated `-X .envrc`.
+			if files, malformed := gitLsFilesGluedExcludeFiles(pc.Args); malformed {
+				return nil, true
+			} else if len(files) > 0 {
+				return append(cmdparse.SkipMessageArgs(exe, pc.Args), files...), false
+			}
 		}
 		return cmdparse.SkipMessageArgs(exe, pc.Args), false
 	case "bb":
@@ -992,23 +1002,79 @@ func gitGrepArgs(args []string) (grepArgs []string, ok bool) {
 // `git ls-tree` also list names only, but no false positive has been measured for
 // them, so they are left alone on purpose.
 func gitLsFilesDirs(args []string) (dirs []string, ok bool) {
+	dirs, rest, ok := gitLsFilesOperands(args)
+	if !ok {
+		return nil, false
+	}
+	for _, a := range rest {
+		if (isShortFlagCluster(a) && strings.Contains(a, "X")) || strings.HasPrefix(a, "--e") {
+			return nil, false
+		}
+	}
+	return dirs, true
+}
+
+// gitLsFilesOperands recognizes a `git [-C <dir>]... ls-files ...` invocation and
+// returns the `-C` directory operands plus every argument after the `ls-files` token.
+// ok is false for any other shape (including a trailing bare `-C`).
+func gitLsFilesOperands(args []string) (dirs, rest []string, ok bool) {
 	i := 0
 	for i < len(args) && args[i] == "-C" {
 		if i+1 >= len(args) {
-			return nil, false // trailing bare -C, no operand: not a recognizable ls-files call
+			return nil, nil, false // trailing bare -C, no operand: not a recognizable ls-files call
 		}
 		dirs = append(dirs, args[i+1])
 		i += 2
 	}
 	if i >= len(args) || args[i] != "ls-files" {
+		return nil, nil, false
+	}
+	return dirs, args[i+1:], true
+}
+
+// isShortFlagCluster reports whether arg is a single-dash short-option token
+// (`-X.envrc`, `-oX.envrc`, `-o`), as opposed to a `--long` option, a bare `-` or a
+// non-flag.
+func isShortFlagCluster(arg string) bool {
+	return len(arg) >= 2 && arg[0] == '-' && arg[1] != '-'
+}
+
+// gitLsFilesGluedExcludeFiles returns the FILE operands that a `git ls-files` call
+// names through a short-option cluster that GLUES the value to `-X`: `-X.envrc`, or
+// `-oX.envrc`, where git reads `.envrc` as exclude patterns exactly as it does for the
+// separated `-X .envrc`. The separated form's file is its own argv token, which the
+// operand loop already screens (the carve-out is off whenever a `-X` is present, see
+// gitLsFilesDirs); the glued form is ONE token that the loop would skip as a flag, so
+// the value half is surfaced here as a candidate. A `-X` that ends its cluster has no
+// glued value and yields nothing (its file is the next token).
+//
+// The value is the text after the FIRST `X` of the cluster, matching how git's option
+// parser treats a cluster (an option that takes a value consumes the rest of the
+// token). A lowercase `-x<pattern>` carries a pattern, not a file, and is not matched.
+// Where `-x` precedes an `X` inside one cluster the "value" is really part of that
+// pattern; screening it anyway is the fail-safe direction (an extra prompt, never a
+// missed read). malformed is the cmdparse.GluedFlagValue-style decline for a value
+// whose shell quoting could not be resolved: the caller must fail closed.
+func gitLsFilesGluedExcludeFiles(args []string) (files []string, malformed bool) {
+	_, rest, ok := gitLsFilesOperands(args)
+	if !ok {
 		return nil, false
 	}
-	for _, a := range args[i+1:] {
-		if strings.HasPrefix(a, "-X") || strings.HasPrefix(a, "--e") {
-			return nil, false
+	for _, a := range rest {
+		if !isShortFlagCluster(a) {
+			continue
 		}
+		_, value, found := strings.Cut(a, "X")
+		if !found || value == "" {
+			continue
+		}
+		unwrapped := cmdparse.UnwrapGluedQuotes(value)
+		if unwrapped == value && (value[0] == '\'' || value[0] == '"') {
+			return nil, true
+		}
+		files = append(files, unwrapped)
 	}
-	return dirs, true
+	return files, false
 }
 
 // jqFilterFromFile reports whether the jq filter is supplied via -f/--from-file
