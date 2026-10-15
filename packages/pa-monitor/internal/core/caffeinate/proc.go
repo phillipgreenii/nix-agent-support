@@ -8,6 +8,12 @@ import (
 	"syscall"
 )
 
+// caffeinatePath is the absolute path of the macOS system caffeinate. It is
+// pinned (never resolved through PATH) so that pa-monitor does not become a
+// client of a caffeinate shim installed earlier on PATH, and so Proc.Kill()
+// never signals a shim.
+const caffeinatePath = "/usr/bin/caffeinate"
+
 type Proc struct {
 	mu  sync.Mutex
 	cmd *exec.Cmd
@@ -22,7 +28,7 @@ func (p *Proc) Spawn(tuiPID int) error {
 	if p.cmd != nil {
 		return nil
 	}
-	cmd := exec.Command("caffeinate", "-w", fmt.Sprintf("%d", tuiPID))
+	cmd := exec.Command(caffeinatePath, "-w", fmt.Sprintf("%d", tuiPID))
 	if err := cmd.Start(); err != nil {
 		return err
 	}
