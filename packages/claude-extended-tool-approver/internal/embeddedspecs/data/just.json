@@ -10,7 +10,7 @@
         "source": "just --help: \"🤖 Just a command runner - https://github.com/casey/just\""
       },
       "stdin": {
-        "source": "just --help: \"Use \\u003cJUSTFILE\\u003e as justfile or `-` to read from standard input [env: JUST_JUSTFILE=]\""
+        "source": "just --help: \"Use <JUSTFILE> as justfile or `-` to read from standard input [env: JUST_JUSTFILE=]\""
       },
       "stdout": {
         "source": "just --help: \"Usage: just [OPTIONS] [ARGUMENTS]...\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "just --help: \"--alias-style \\u003cALIAS_STYLE\\u003e Set list command alias display style [env: JUST_ALIAS_STYLE=] [default: right] [possible\""
+          "source": "just --help: \"--alias-style <ALIAS_STYLE> Set list command alias display style [env: JUST_ALIAS_STYLE=] [default: right] [possible\""
         }
       },
       "--allow-missing": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "just --help: \"--color \\u003cCOLOR\\u003e Print colorful output [env: JUST_COLOR=] [default: auto] [possible values: always, auto,\""
+          "source": "just --help: \"--color <COLOR> Print colorful output [env: JUST_COLOR=] [default: auto] [possible values: always, auto,\""
         }
       },
       "--command-color": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "just --help: \"--command-color \\u003cCOMMAND_COLOR\\u003e Echo recipe lines in \\u003cCOMMAND-COLOR\\u003e [env: JUST_COMMAND_COLOR=] [possible values: black,\""
+          "source": "just --help: \"--command-color <COMMAND_COLOR> Echo recipe lines in <COMMAND-COLOR> [env: JUST_COMMAND_COLOR=] [possible values: black,\""
         }
       },
       "--dry-run": {
@@ -193,7 +193,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "just --help: \"--set \\u003cVARIABLE\\u003e \\u003cVALUE\\u003e Override \\u003cVARIABLE\\u003e with \\u003cVALUE\\u003e\""
+          "source": "just --help: \"--set <VARIABLE> <VALUE> Override <VARIABLE> with <VALUE>\""
         }
       },
       "--unstable": {

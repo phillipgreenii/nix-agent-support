@@ -1450,10 +1450,10 @@
             "source": "kubectl cp --help: \"Copy files and directories to and from containers.\""
           },
           "stdin": {
-            "source": "kubectl cp --help: \"kubectl cp \\u003cfile-spec-src\\u003e \\u003cfile-spec-dest\\u003e [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "kubectl cp --help: \"kubectl cp <file-spec-src> <file-spec-dest> [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "kubectl cp --help: \"kubectl cp \\u003cfile-spec-src\\u003e \\u003cfile-spec-dest\\u003e [options]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+            "source": "kubectl cp --help: \"kubectl cp <file-spec-src> <file-spec-dest> [options]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "kubectl cp --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -1519,7 +1519,7 @@
             }
           },
           "citation": {
-            "source": "kubectl cp --help: \"kubectl cp \\u003cfile-spec-src\\u003e \\u003cfile-spec-dest\\u003e [options]\""
+            "source": "kubectl cp --help: \"kubectl cp <file-spec-src> <file-spec-dest> [options]\""
           }
         },
         "stdin": "never",

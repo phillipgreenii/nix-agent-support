@@ -22,7 +22,7 @@
         "source": "jq --help: \"jq - commandline JSON processor [version 1.8.2]\""
       },
       "stdin": {
-        "source": "jq --help: \"Usage: jq [options] \\u003cjq filter\\u003e [file...] jq [options] --args \\u003cjq filter\\u003e [strings...] jq [options] --jsonargs \\u003cjq filter\\u003e [JSON_TEXTS...]\" (no explicit stdin wording in the reviewed text; classified \"when-no-path-operands\" from the documented operand/argument shape in this same synopsis)"
+        "source": "jq --help: \"Usage: jq [options] <jq filter> [file...] jq [options] --args <jq filter> [strings...] jq [options] --jsonargs <jq filter> [JSON_TEXTS...]\" (no explicit stdin wording in the reviewed text; classified \"when-no-path-operands\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
         "source": "jq --help: \"standard output.\""
@@ -610,7 +610,7 @@
         }
       },
       "citation": {
-        "source": "jq --help: \"Usage: jq [options] \\u003cjq filter\\u003e [file...] jq [options] --args \\u003cjq filter\\u003e [strings...] jq [options] --jsonargs \\u003cjq filter\\u003e [JSON_TEXTS...]\""
+        "source": "jq --help: \"Usage: jq [options] <jq filter> [file...] jq [options] --args <jq filter> [strings...] jq [options] --jsonargs <jq filter> [JSON_TEXTS...]\""
       }
     },
     "stdin": "when-no-path-operands",

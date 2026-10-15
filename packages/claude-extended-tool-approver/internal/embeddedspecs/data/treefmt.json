@@ -13,7 +13,7 @@
         "source": "treefmt --help: \"--stdin Format the context passed in via stdin.\""
       },
       "stdout": {
-        "source": "treefmt --help: \"treefmt \\u003cpaths...\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+        "source": "treefmt --help: \"treefmt <paths...> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "treefmt --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "treefmt --help: \"-u, --on-unmatched string Log paths that did not match any formatters at the specified log level. Possible values are \\u003cdebug|info|warn|error|fatal\\u003e. (env $TREEFMT_ON_UNMATCHED) (default \\\"info\\\")\""
+          "source": "treefmt --help: \"-u, --on-unmatched string Log paths that did not match any formatters at the specified log level. Possible values are <debug|info|warn|error|fatal>. (env $TREEFMT_ON_UNMATCHED) (default \\\"info\\\")\""
         }
       },
       "--quiet": {
@@ -221,7 +221,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "treefmt --help: \"--walk string The method used to traverse the files within the tree root. Currently supports \\u003cauto|git|jujutsu|filesystem\\u003e. (env $TREEFMT_WALK) (default \\\"auto\\\")\""
+          "source": "treefmt --help: \"--walk string The method used to traverse the files within the tree root. Currently supports <auto|git|jujutsu|filesystem>. (env $TREEFMT_WALK) (default \\\"auto\\\")\""
         }
       },
       "-f": {
@@ -281,7 +281,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "treefmt --help: \"-u, --on-unmatched string Log paths that did not match any formatters at the specified log level. Possible values are \\u003cdebug|info|warn|error|fatal\\u003e. (env $TREEFMT_ON_UNMATCHED) (default \\\"info\\\")\""
+          "source": "treefmt --help: \"-u, --on-unmatched string Log paths that did not match any formatters at the specified log level. Possible values are <debug|info|warn|error|fatal>. (env $TREEFMT_ON_UNMATCHED) (default \\\"info\\\")\""
         }
       },
       "-v": {
@@ -308,7 +308,7 @@
         }
       },
       "citation": {
-        "source": "treefmt --help: \"treefmt \\u003cpaths...\\u003e [flags]\""
+        "source": "treefmt --help: \"treefmt <paths...> [flags]\""
       }
     },
     "implicitEffects": [
@@ -319,7 +319,7 @@
         "target": ".",
         "whenNoPositionals": true,
         "citation": {
-          "source": "treefmt --help: \"treefmt \\u003cpaths...\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-modify\") is derived from"
+          "source": "treefmt --help: \"treefmt <paths...> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-modify\") is derived from"
         }
       },
       {

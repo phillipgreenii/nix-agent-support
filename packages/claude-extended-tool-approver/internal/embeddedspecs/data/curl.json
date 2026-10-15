@@ -10,16 +10,16 @@
         "source": "curl --help all: \"-f, --fail Fail fast with no output on HTTP errors\" — a boolean error-handling toggle, not a force/overwrite effect (tc-6v2dm)."
       },
       "interpreter": {
-        "source": "curl --help: \"Usage: curl [options...] \\u003curl\\u003e\" -- documents curl's own program/command-invocation shape (interpreter \"curl\")"
+        "source": "curl --help: \"Usage: curl [options...] <url>\" -- documents curl's own program/command-invocation shape (interpreter \"curl\")"
       },
       "provenance": {
-        "source": "curl --help: \"Usage: curl [options...] \\u003curl\\u003e\""
+        "source": "curl --help: \"Usage: curl [options...] <url>\""
       },
       "stdin": {
-        "source": "curl --help: \"Usage: curl [options...] \\u003curl\\u003e -d, --data \\u003cdata\\u003e Post data -f, --fail Fail fast with no output on HTTP errors -I, --head Show document info only\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "curl --help: \"Usage: curl [options...] <url> -d, --data <data> Post data -f, --fail Fail fast with no output on HTTP errors -I, --head Show document info only\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "curl --help: \"-o, --output \\u003cfile\\u003e Write to file instead of stdout\""
+        "source": "curl --help: \"-o, --output <file> Write to file instead of stdout\""
       },
       "unknownFlag": {
         "source": "curl --help all: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -59,7 +59,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"--connect-timeout \\u003cseconds\\u003e Maximum time allowed to connect\""
+          "source": "curl --help all: \"--connect-timeout <seconds> Maximum time allowed to connect\""
         }
       },
       "--data": {
@@ -71,7 +71,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-d, --data \\u003cdata\\u003e Post data\""
+          "source": "curl --help all: \"-d, --data <data> Post data\""
         }
       },
       "--data-binary": {
@@ -83,7 +83,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"--data-binary \\u003cdata\\u003e HTTP POST binary data\""
+          "source": "curl --help all: \"--data-binary <data> HTTP POST binary data\""
         }
       },
       "--data-raw": {
@@ -95,7 +95,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"--data-raw \\u003cdata\\u003e HTTP POST data, '@' allowed\""
+          "source": "curl --help all: \"--data-raw <data> HTTP POST data, '@' allowed\""
         }
       },
       "--data-urlencode": {
@@ -107,7 +107,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"--data-urlencode \\u003cdata\\u003e HTTP POST data URL encoded\""
+          "source": "curl --help all: \"--data-urlencode <data> HTTP POST data URL encoded\""
         }
       },
       "--fail": {
@@ -131,7 +131,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-F, --form \\u003cname=content\\u003e Specify multipart MIME data\""
+          "source": "curl --help all: \"-F, --form <name=content> Specify multipart MIME data\""
         }
       },
       "--get": {
@@ -167,7 +167,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-H, --header \\u003cheader/@file\\u003e Pass custom header(s) to server\""
+          "source": "curl --help all: \"-H, --header <header/@file> Pass custom header(s) to server\""
         }
       },
       "--include": {
@@ -203,7 +203,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-m, --max-time \\u003cseconds\\u003e Maximum time allowed for transfer\""
+          "source": "curl --help all: \"-m, --max-time <seconds> Maximum time allowed for transfer\""
         }
       },
       "--no-buffer": {
@@ -227,7 +227,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-o, --output \\u003cfile\\u003e Write to file instead of stdout\""
+          "source": "curl --help all: \"-o, --output <file> Write to file instead of stdout\""
         }
       },
       "--request": {
@@ -239,7 +239,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-X, --request \\u003cmethod\\u003e Specify request method to use\""
+          "source": "curl --help all: \"-X, --request <method> Specify request method to use\""
         }
       },
       "--retry": {
@@ -251,7 +251,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"--retry \\u003cnum\\u003e Retry request if transient problems occur\""
+          "source": "curl --help all: \"--retry <num> Retry request if transient problems occur\""
         }
       },
       "--show-error": {
@@ -299,7 +299,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-T, --upload-file \\u003cfile\\u003e Transfer local FILE to destination\""
+          "source": "curl --help all: \"-T, --upload-file <file> Transfer local FILE to destination\""
         }
       },
       "--url": {
@@ -311,7 +311,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"--url \\u003curl/file\\u003e URL(s) to work with\""
+          "source": "curl --help all: \"--url <url/file> URL(s) to work with\""
         }
       },
       "--user-agent": {
@@ -323,7 +323,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-A, --user-agent \\u003cname\\u003e Send User-Agent \\u003cname\\u003e to server\""
+          "source": "curl --help all: \"-A, --user-agent <name> Send User-Agent <name> to server\""
         }
       },
       "--verbose": {
@@ -347,7 +347,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-w, --write-out \\u003cformat\\u003e Output FORMAT after completion\""
+          "source": "curl --help all: \"-w, --write-out <format> Output FORMAT after completion\""
         }
       },
       "-A": {
@@ -359,7 +359,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-A, --user-agent \\u003cname\\u003e Send User-Agent \\u003cname\\u003e to server\""
+          "source": "curl --help all: \"-A, --user-agent <name> Send User-Agent <name> to server\""
         }
       },
       "-F": {
@@ -371,7 +371,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-F, --form \\u003cname=content\\u003e Specify multipart MIME data\""
+          "source": "curl --help all: \"-F, --form <name=content> Specify multipart MIME data\""
         }
       },
       "-G": {
@@ -395,7 +395,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-H, --header \\u003cheader/@file\\u003e Pass custom header(s) to server\""
+          "source": "curl --help all: \"-H, --header <header/@file> Pass custom header(s) to server\""
         }
       },
       "-I": {
@@ -467,7 +467,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-T, --upload-file \\u003cfile\\u003e Transfer local FILE to destination\""
+          "source": "curl --help all: \"-T, --upload-file <file> Transfer local FILE to destination\""
         }
       },
       "-X": {
@@ -479,7 +479,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-X, --request \\u003cmethod\\u003e Specify request method to use\""
+          "source": "curl --help all: \"-X, --request <method> Specify request method to use\""
         }
       },
       "-d": {
@@ -491,7 +491,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-d, --data \\u003cdata\\u003e Post data\""
+          "source": "curl --help all: \"-d, --data <data> Post data\""
         }
       },
       "-f": {
@@ -527,7 +527,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-m, --max-time \\u003cseconds\\u003e Maximum time allowed for transfer\""
+          "source": "curl --help all: \"-m, --max-time <seconds> Maximum time allowed for transfer\""
         }
       },
       "-o": {
@@ -539,7 +539,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-o, --output \\u003cfile\\u003e Write to file instead of stdout\""
+          "source": "curl --help all: \"-o, --output <file> Write to file instead of stdout\""
         }
       },
       "-s": {
@@ -575,7 +575,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-w, --write-out \\u003cformat\\u003e Output FORMAT after completion\""
+          "source": "curl --help all: \"-w, --write-out <format> Output FORMAT after completion\""
         }
       }
     },
@@ -589,7 +589,7 @@
         }
       },
       "citation": {
-        "source": "curl --help: \"Usage: curl [options...] \\u003curl\\u003e -d, --data \\u003cdata\\u003e Post data -f, --fail Fail fast with no output on HTTP errors -I, --head Show document info only\""
+        "source": "curl --help: \"Usage: curl [options...] <url> -d, --data <data> Post data -f, --fail Fail fast with no output on HTTP errors -I, --head Show document info only\""
       }
     },
     "stdin": "never",

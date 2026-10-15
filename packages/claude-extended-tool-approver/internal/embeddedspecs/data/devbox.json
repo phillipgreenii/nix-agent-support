@@ -45,10 +45,10 @@
             "source": "devbox run --help: \"Start a new shell and runs your script or command in it, exiting when done.\""
           },
           "stdin": {
-            "source": "devbox run --help: \"devbox run [\\u003cscript\\u003e | \\u003ccmd\\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "devbox run --help: \"devbox run [<script> | <cmd>] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "devbox run --help: \"devbox run [\\u003cscript\\u003e | \\u003ccmd\\u003e] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "devbox run --help: \"devbox run [<script> | <cmd>] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "devbox run --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -90,7 +90,7 @@
             }
           },
           "citation": {
-            "source": "devbox run --help: \"devbox run [\\u003cscript\\u003e | \\u003ccmd\\u003e] [flags]\""
+            "source": "devbox run --help: \"devbox run [<script> | <cmd>] [flags]\""
           }
         },
         "stdin": "never",

@@ -239,10 +239,10 @@
             "source": "bd assign --help: \"Assign an issue to someone.\""
           },
           "stdin": {
-            "source": "bd assign --help: \"bd assign \\u003cid\\u003e \\u003cname\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd assign --help: \"bd assign <id> <name> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd assign --help: \"bd assign \\u003cid\\u003e \\u003cname\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd assign --help: \"bd assign <id> <name> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd assign --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -284,7 +284,7 @@
             }
           },
           "citation": {
-            "source": "bd assign --help: \"bd assign \\u003cid\\u003e \\u003cname\\u003e [flags]\""
+            "source": "bd assign --help: \"bd assign <id> <name> [flags]\""
           }
         },
         "implicitEffects": [
@@ -295,7 +295,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd assign --help: \"bd assign \\u003cid\\u003e \\u003cname\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd assign --help: \"bd assign <id> <name> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -604,10 +604,10 @@
             "source": "bd children --help: \"List all beads that are children of the specified parent bead.\""
           },
           "stdin": {
-            "source": "bd children --help: \"bd children \\u003cparent-id\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd children --help: \"bd children <parent-id> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd children --help: \"bd children \\u003cparent-id\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd children --help: \"bd children <parent-id> [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd children --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -649,7 +649,7 @@
             }
           },
           "citation": {
-            "source": "bd children --help: \"bd children \\u003cparent-id\\u003e [flags]\""
+            "source": "bd children --help: \"bd children <parent-id> [flags]\""
           }
         },
         "implicitEffects": [
@@ -660,7 +660,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd children --help: \"bd children \\u003cparent-id\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd children --help: \"bd children <parent-id> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -765,7 +765,7 @@
             "source": "bd comment --help: \"echo \\\"comment from pipe\\\" | bd comment bd-123 --stdin\""
           },
           "stdout": {
-            "source": "bd comment --help: \"bd comment \\u003cid\\u003e [text...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd comment --help: \"bd comment <id> [text...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd comment --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -819,7 +819,7 @@
             }
           },
           "citation": {
-            "source": "bd comment --help: \"bd comment \\u003cid\\u003e [text...] [flags]\""
+            "source": "bd comment --help: \"bd comment <id> [text...] [flags]\""
           }
         },
         "implicitEffects": [
@@ -1591,10 +1591,10 @@
             "source": "bd delete --help: \"Delete one or more issues and clean up all references to them.\""
           },
           "stdin": {
-            "source": "bd delete --help: \"bd delete \\u003cissue-id\\u003e [issue-id...] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd delete --help: \"bd delete <issue-id> [issue-id...] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd delete --help: \"bd delete \\u003cissue-id\\u003e [issue-id...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd delete --help: \"bd delete <issue-id> [issue-id...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd delete --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -1636,7 +1636,7 @@
             }
           },
           "citation": {
-            "source": "bd delete --help: \"bd delete \\u003cissue-id\\u003e [issue-id...] [flags]\""
+            "source": "bd delete --help: \"bd delete <issue-id> [issue-id...] [flags]\""
           }
         },
         "implicitEffects": [
@@ -1647,7 +1647,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd delete --help: \"bd delete \\u003cissue-id\\u003e [issue-id...] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd delete --help: \"bd delete <issue-id> [issue-id...] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -1956,10 +1956,10 @@
                 "source": "bd dep relate --help: \"Create a loose 'see also' relationship between two issues.\""
               },
               "stdin": {
-                "source": "bd dep relate --help: \"bd dep relate \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+                "source": "bd dep relate --help: \"bd dep relate <id1> <id2> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "bd dep relate --help: \"bd dep relate \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+                "source": "bd dep relate --help: \"bd dep relate <id1> <id2> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
                 "source": "bd dep relate --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -2001,7 +2001,7 @@
                 }
               },
               "citation": {
-                "source": "bd dep relate --help: \"bd dep relate \\u003cid1\\u003e \\u003cid2\\u003e [flags]\""
+                "source": "bd dep relate --help: \"bd dep relate <id1> <id2> [flags]\""
               }
             },
             "implicitEffects": [
@@ -2012,7 +2012,7 @@
                 },
                 "target": "beads",
                 "citation": {
-                  "source": "bd dep relate --help: \"bd dep relate \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+                  "source": "bd dep relate --help: \"bd dep relate <id1> <id2> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -2175,10 +2175,10 @@
                 "source": "bd dep unrelate --help: \"Remove a relates_to relationship between two issues.\""
               },
               "stdin": {
-                "source": "bd dep unrelate --help: \"bd dep unrelate \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+                "source": "bd dep unrelate --help: \"bd dep unrelate <id1> <id2> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "bd dep unrelate --help: \"bd dep unrelate \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+                "source": "bd dep unrelate --help: \"bd dep unrelate <id1> <id2> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
                 "source": "bd dep unrelate --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -2220,7 +2220,7 @@
                 }
               },
               "citation": {
-                "source": "bd dep unrelate --help: \"bd dep unrelate \\u003cid1\\u003e \\u003cid2\\u003e [flags]\""
+                "source": "bd dep unrelate --help: \"bd dep unrelate <id1> <id2> [flags]\""
               }
             },
             "implicitEffects": [
@@ -2231,7 +2231,7 @@
                 },
                 "target": "beads",
                 "citation": {
-                  "source": "bd dep unrelate --help: \"bd dep unrelate \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+                  "source": "bd dep unrelate --help: \"bd dep unrelate <id1> <id2> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -2822,10 +2822,10 @@
                 "source": "bd dolt set --help: \"Set a Dolt configuration value in metadata.json.\""
               },
               "stdin": {
-                "source": "bd dolt set --help: \"bd dolt set \\u003ckey\\u003e \\u003cvalue\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+                "source": "bd dolt set --help: \"bd dolt set <key> <value> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "bd dolt set --help: \"bd dolt set \\u003ckey\\u003e \\u003cvalue\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+                "source": "bd dolt set --help: \"bd dolt set <key> <value> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
                 "source": "bd dolt set --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -2867,7 +2867,7 @@
                 }
               },
               "citation": {
-                "source": "bd dolt set --help: \"bd dolt set \\u003ckey\\u003e \\u003cvalue\\u003e [flags]\""
+                "source": "bd dolt set --help: \"bd dolt set <key> <value> [flags]\""
               }
             },
             "implicitEffects": [
@@ -2878,7 +2878,7 @@
                 },
                 "target": "beads",
                 "citation": {
-                  "source": "bd dolt set --help: \"bd dolt set \\u003ckey\\u003e \\u003cvalue\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+                  "source": "bd dolt set --help: \"bd dolt set <key> <value> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -3262,10 +3262,10 @@
             "source": "bd duplicate --help: \"Mark an issue as a duplicate of a canonical issue.\""
           },
           "stdin": {
-            "source": "bd duplicate --help: \"bd duplicate \\u003cid\\u003e --of \\u003ccanonical\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd duplicate --help: \"bd duplicate <id> --of <canonical> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd duplicate --help: \"bd duplicate \\u003cid\\u003e --of \\u003ccanonical\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd duplicate --help: \"bd duplicate <id> --of <canonical> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd duplicate --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -3307,7 +3307,7 @@
             }
           },
           "citation": {
-            "source": "bd duplicate --help: \"bd duplicate \\u003cid\\u003e --of \\u003ccanonical\\u003e [flags]\""
+            "source": "bd duplicate --help: \"bd duplicate <id> --of <canonical> [flags]\""
           }
         },
         "implicitEffects": [
@@ -3318,7 +3318,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd duplicate --help: \"bd duplicate \\u003cid\\u003e --of \\u003ccanonical\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd duplicate --help: \"bd duplicate <id> --of <canonical> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -3797,10 +3797,10 @@
             "source": "bd forget --help: \"Remove a memory by its key.\""
           },
           "stdin": {
-            "source": "bd forget --help: \"bd forget \\u003ckey\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd forget --help: \"bd forget <key> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd forget --help: \"bd forget \\u003ckey\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd forget --help: \"bd forget <key> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd forget --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -3842,7 +3842,7 @@
             }
           },
           "citation": {
-            "source": "bd forget --help: \"bd forget \\u003ckey\\u003e [flags]\""
+            "source": "bd forget --help: \"bd forget <key> [flags]\""
           }
         },
         "implicitEffects": [
@@ -3853,7 +3853,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd forget --help: \"bd forget \\u003ckey\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd forget --help: \"bd forget <key> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -4089,10 +4089,10 @@
             "source": "bd history --help: \"Show the complete version history of an issue, including all commits\""
           },
           "stdin": {
-            "source": "bd history --help: \"bd history \\u003cid\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd history --help: \"bd history <id> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd history --help: \"bd history \\u003cid\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd history --help: \"bd history <id> [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd history --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -4134,7 +4134,7 @@
             }
           },
           "citation": {
-            "source": "bd history --help: \"bd history \\u003cid\\u003e [flags]\""
+            "source": "bd history --help: \"bd history <id> [flags]\""
           }
         },
         "implicitEffects": [
@@ -4145,7 +4145,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd history --help: \"bd history \\u003cid\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd history --help: \"bd history <id> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -5311,10 +5311,10 @@
             "source": "bd link --help: \"Link two issues with a dependency.\""
           },
           "stdin": {
-            "source": "bd link --help: \"bd link \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd link --help: \"bd link <id1> <id2> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd link --help: \"bd link \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd link --help: \"bd link <id1> <id2> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd link --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -5356,7 +5356,7 @@
             }
           },
           "citation": {
-            "source": "bd link --help: \"bd link \\u003cid1\\u003e \\u003cid2\\u003e [flags]\""
+            "source": "bd link --help: \"bd link <id1> <id2> [flags]\""
           }
         },
         "implicitEffects": [
@@ -5367,7 +5367,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd link --help: \"bd link \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd link --help: \"bd link <id1> <id2> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -5679,7 +5679,7 @@
             "source": "bd note --help: \"echo \\\"note from pipe\\\" | bd note gt-abc --stdin\""
           },
           "stdout": {
-            "source": "bd note --help: \"bd note \\u003cid\\u003e [text...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd note --help: \"bd note <id> [text...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd note --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -5721,7 +5721,7 @@
             }
           },
           "citation": {
-            "source": "bd note --help: \"bd note \\u003cid\\u003e [text...] [flags]\""
+            "source": "bd note --help: \"bd note <id> [text...] [flags]\""
           }
         },
         "implicitEffects": [
@@ -5732,7 +5732,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd note --help: \"bd note \\u003cid\\u003e [text...] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd note --help: \"bd note <id> [text...] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -5895,10 +5895,10 @@
             "source": "bd priority --help: \"Set the priority of an issue.\""
           },
           "stdin": {
-            "source": "bd priority --help: \"bd priority \\u003cid\\u003e \\u003cn\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd priority --help: \"bd priority <id> <n> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd priority --help: \"bd priority \\u003cid\\u003e \\u003cn\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd priority --help: \"bd priority <id> <n> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd priority --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -5940,7 +5940,7 @@
             }
           },
           "citation": {
-            "source": "bd priority --help: \"bd priority \\u003cid\\u003e \\u003cn\\u003e [flags]\""
+            "source": "bd priority --help: \"bd priority <id> <n> [flags]\""
           }
         },
         "implicitEffects": [
@@ -5951,7 +5951,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd priority --help: \"bd priority \\u003cid\\u003e \\u003cn\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd priority --help: \"bd priority <id> <n> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -5968,10 +5968,10 @@
             "source": "bd promote --help: \"Promote a wisp (ephemeral issue) to a permanent bead.\""
           },
           "stdin": {
-            "source": "bd promote --help: \"bd promote \\u003cwisp-id\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd promote --help: \"bd promote <wisp-id> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd promote --help: \"bd promote \\u003cwisp-id\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd promote --help: \"bd promote <wisp-id> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd promote --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -6013,7 +6013,7 @@
             }
           },
           "citation": {
-            "source": "bd promote --help: \"bd promote \\u003cwisp-id\\u003e [flags]\""
+            "source": "bd promote --help: \"bd promote <wisp-id> [flags]\""
           }
         },
         "implicitEffects": [
@@ -6024,7 +6024,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd promote --help: \"bd promote \\u003cwisp-id\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd promote --help: \"bd promote <wisp-id> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -6333,10 +6333,10 @@
             "source": "bd recall --help: \"Retrieve the full content of a memory by its key.\""
           },
           "stdin": {
-            "source": "bd recall --help: \"bd recall \\u003ckey\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd recall --help: \"bd recall <key> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd recall --help: \"bd recall \\u003ckey\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd recall --help: \"bd recall <key> [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd recall --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -6378,7 +6378,7 @@
             }
           },
           "citation": {
-            "source": "bd recall --help: \"bd recall \\u003ckey\\u003e [flags]\""
+            "source": "bd recall --help: \"bd recall <key> [flags]\""
           }
         },
         "implicitEffects": [
@@ -6389,7 +6389,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd recall --help: \"bd recall \\u003ckey\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd recall --help: \"bd recall <key> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -6406,10 +6406,10 @@
             "source": "bd remember --help: \"Store a memory that persists across sessions and account rotations.\""
           },
           "stdin": {
-            "source": "bd remember --help: \"bd remember \\\"\\u003cinsight\\u003e\\\" [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd remember --help: \"bd remember \\\"<insight>\\\" [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd remember --help: \"bd remember \\\"\\u003cinsight\\u003e\\\" [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd remember --help: \"bd remember \\\"<insight>\\\" [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd remember --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -6451,7 +6451,7 @@
             }
           },
           "citation": {
-            "source": "bd remember --help: \"bd remember \\\"\\u003cinsight\\u003e\\\" [flags]\""
+            "source": "bd remember --help: \"bd remember \\\"<insight>\\\" [flags]\""
           }
         },
         "implicitEffects": [
@@ -6462,7 +6462,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd remember --help: \"bd remember \\\"\\u003cinsight\\u003e\\\" [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd remember --help: \"bd remember \\\"<insight>\\\" [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -6552,10 +6552,10 @@
             "source": "bd restore --help: \"Restore the pre-compaction content of a compacted issue.\""
           },
           "stdin": {
-            "source": "bd restore --help: \"bd restore \\u003cissue-id\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd restore --help: \"bd restore <issue-id> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd restore --help: \"bd restore \\u003cissue-id\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd restore --help: \"bd restore <issue-id> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd restore --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -6597,7 +6597,7 @@
             }
           },
           "citation": {
-            "source": "bd restore --help: \"bd restore \\u003cissue-id\\u003e [flags]\""
+            "source": "bd restore --help: \"bd restore <issue-id> [flags]\""
           }
         },
         "implicitEffects": [
@@ -6608,7 +6608,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd restore --help: \"bd restore \\u003cissue-id\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd restore --help: \"bd restore <issue-id> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -6698,10 +6698,10 @@
             "source": "bd set-state --help: \"Atomically set operational state on an issue.\""
           },
           "stdin": {
-            "source": "bd set-state --help: \"bd set-state \\u003cissue-id\\u003e \\u003cdimension\\u003e=\\u003cvalue\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd set-state --help: \"bd set-state <issue-id> <dimension>=<value> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd set-state --help: \"bd set-state \\u003cissue-id\\u003e \\u003cdimension\\u003e=\\u003cvalue\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd set-state --help: \"bd set-state <issue-id> <dimension>=<value> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd set-state --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -6743,7 +6743,7 @@
             }
           },
           "citation": {
-            "source": "bd set-state --help: \"bd set-state \\u003cissue-id\\u003e \\u003cdimension\\u003e=\\u003cvalue\\u003e [flags]\""
+            "source": "bd set-state --help: \"bd set-state <issue-id> <dimension>=<value> [flags]\""
           }
         },
         "implicitEffects": [
@@ -6754,7 +6754,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd set-state --help: \"bd set-state \\u003cissue-id\\u003e \\u003cdimension\\u003e=\\u003cvalue\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd set-state --help: \"bd set-state <issue-id> <dimension>=<value> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -6844,10 +6844,10 @@
             "source": "bd show --help: \"Show issue details\""
           },
           "stdin": {
-            "source": "bd show --help: \"bd show [id...] [--id=\\u003cid\\u003e...] [--current] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd show --help: \"bd show [id...] [--id=<id>...] [--current] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd show --help: \"bd show [id...] [--id=\\u003cid\\u003e...] [--current] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd show --help: \"bd show [id...] [--id=<id>...] [--current] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd show --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -6889,7 +6889,7 @@
             }
           },
           "citation": {
-            "source": "bd show --help: \"bd show [id...] [--id=\\u003cid\\u003e...] [--current] [flags]\""
+            "source": "bd show --help: \"bd show [id...] [--id=<id>...] [--current] [flags]\""
           }
         },
         "implicitEffects": [
@@ -6900,7 +6900,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd show --help: \"bd show [id...] [--id=\\u003cid\\u003e...] [--current] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd show --help: \"bd show [id...] [--id=<id>...] [--current] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -6990,10 +6990,10 @@
             "source": "bd state --help: \"Query the current value of a state dimension from an issue's labels.\""
           },
           "stdin": {
-            "source": "bd state --help: \"bd state \\u003cissue-id\\u003e \\u003cdimension\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd state --help: \"bd state <issue-id> <dimension> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd state --help: \"bd state \\u003cissue-id\\u003e \\u003cdimension\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd state --help: \"bd state <issue-id> <dimension> [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd state --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -7035,7 +7035,7 @@
             }
           },
           "citation": {
-            "source": "bd state --help: \"bd state \\u003cissue-id\\u003e \\u003cdimension\\u003e [flags]\""
+            "source": "bd state --help: \"bd state <issue-id> <dimension> [flags]\""
           }
         },
         "implicitEffects": [
@@ -7046,7 +7046,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd state --help: \"bd state \\u003cissue-id\\u003e \\u003cdimension\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd state --help: \"bd state <issue-id> <dimension> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -7282,10 +7282,10 @@
             "source": "bd supersede --help: \"Mark an issue as superseded by a newer version.\""
           },
           "stdin": {
-            "source": "bd supersede --help: \"bd supersede \\u003cid\\u003e --with \\u003cnew\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd supersede --help: \"bd supersede <id> --with <new> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd supersede --help: \"bd supersede \\u003cid\\u003e --with \\u003cnew\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd supersede --help: \"bd supersede <id> --with <new> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd supersede --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -7327,7 +7327,7 @@
             }
           },
           "citation": {
-            "source": "bd supersede --help: \"bd supersede \\u003cid\\u003e --with \\u003cnew\\u003e [flags]\""
+            "source": "bd supersede --help: \"bd supersede <id> --with <new> [flags]\""
           }
         },
         "implicitEffects": [
@@ -7338,7 +7338,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd supersede --help: \"bd supersede \\u003cid\\u003e --with \\u003cnew\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd supersede --help: \"bd supersede <id> --with <new> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],
@@ -7428,10 +7428,10 @@
             "source": "bd tag --help: \"Add a label to an issue.\""
           },
           "stdin": {
-            "source": "bd tag --help: \"bd tag \\u003cid\\u003e \\u003clabel\\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd tag --help: \"bd tag <id> <label> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "bd tag --help: \"bd tag \\u003cid\\u003e \\u003clabel\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "bd tag --help: \"bd tag <id> <label> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "bd tag --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
@@ -7473,7 +7473,7 @@
             }
           },
           "citation": {
-            "source": "bd tag --help: \"bd tag \\u003cid\\u003e \\u003clabel\\u003e [flags]\""
+            "source": "bd tag --help: \"bd tag <id> <label> [flags]\""
           }
         },
         "implicitEffects": [
@@ -7484,7 +7484,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd tag --help: \"bd tag \\u003cid\\u003e \\u003clabel\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd tag --help: \"bd tag <id> <label> [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
             }
           }
         ],

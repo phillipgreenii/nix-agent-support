@@ -10,10 +10,10 @@
         "source": "go help: \"Go is a tool for managing Go source code.\""
       },
       "stdin": {
-        "source": "go help: \"go \\u003ccommand\\u003e [arguments]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "go help: \"go <command> [arguments]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "go help: \"go \\u003ccommand\\u003e [arguments]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+        "source": "go help: \"go <command> [arguments]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "go help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "go help: \"go \\u003ccommand\\u003e [arguments]\""
+        "source": "go help: \"go <command> [arguments]\""
       }
     },
     "stdin": "never",
@@ -2202,10 +2202,10 @@
             "source": "go help mod: \"Go mod provides access to operations on modules.\""
           },
           "stdin": {
-            "source": "go help mod: \"go mod \\u003ccommand\\u003e [arguments]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "go help mod: \"go mod <command> [arguments]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "go help mod: \"go mod \\u003ccommand\\u003e [arguments]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+            "source": "go help mod: \"go mod <command> [arguments]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "go help mod: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -2221,7 +2221,7 @@
             }
           },
           "citation": {
-            "source": "go help mod: \"go mod \\u003ccommand\\u003e [arguments]\""
+            "source": "go help mod: \"go mod <command> [arguments]\""
           }
         },
         "stdin": "never",
@@ -3378,10 +3378,10 @@
         "provenance": "go help testflag, go help test (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags \\u0026 test binary flags]\""
+            "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags & test binary flags]\""
           },
           "stdin": {
-            "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags \\u0026 test binary flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags & test binary flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
             "source": "go help test: \"standard output, even if the test printed them to its own standard\""
@@ -3882,7 +3882,7 @@
             }
           },
           "citation": {
-            "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags \\u0026 test binary flags]\""
+            "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags & test binary flags]\""
           }
         },
         "implicitEffects": [
@@ -3892,7 +3892,7 @@
             },
             "target": "go test",
             "citation": {
-              "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags \\u0026 test binary flags]\" -- documents the optional/omittable operand shape this implicit default (target \"go test\", role \"exec\") is derived from"
+              "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags & test binary flags]\" -- documents the optional/omittable operand shape this implicit default (target \"go test\", role \"exec\") is derived from"
             }
           }
         ],

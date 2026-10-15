@@ -449,7 +449,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "yq --help: \"--xml-directive-name string name for xml directives (e.g. \\u003c!DOCTYPE thing cat\\u003e) (default \\\"+directive\\\")\""
+          "source": "yq --help: \"--xml-directive-name string name for xml directives (e.g. <!DOCTYPE thing cat>) (default \\\"+directive\\\")\""
         }
       },
       "--xml-keep-namespace": {
@@ -473,7 +473,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "yq --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e) (default \\\"+p_\\\")\""
+          "source": "yq --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. <?xml version=\\\"1\\\"?>) (default \\\"+p_\\\")\""
         }
       },
       "--xml-raw-token": {
@@ -497,7 +497,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "yq --help: \"--xml-skip-directives skip over directives (e.g. \\u003c!DOCTYPE thing cat\\u003e)\""
+          "source": "yq --help: \"--xml-skip-directives skip over directives (e.g. <!DOCTYPE thing cat>)\""
         }
       },
       "--xml-skip-proc-inst": {
@@ -509,7 +509,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "yq --help: \"--xml-skip-proc-inst skip over process instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e)\""
+          "source": "yq --help: \"--xml-skip-proc-inst skip over process instructions (e.g. <?xml version=\\\"1\\\"?>)\""
         }
       },
       "--xml-strict-mode": {
@@ -1221,7 +1221,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq e --help: \"--xml-directive-name string name for xml directives (e.g. \\u003c!DOCTYPE thing cat\\u003e) (default \\\"+directive\\\")\""
+              "source": "yq e --help: \"--xml-directive-name string name for xml directives (e.g. <!DOCTYPE thing cat>) (default \\\"+directive\\\")\""
             }
           },
           "--xml-keep-namespace": {
@@ -1245,7 +1245,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq e --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e) (default \\\"+p_\\\")\""
+              "source": "yq e --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. <?xml version=\\\"1\\\"?>) (default \\\"+p_\\\")\""
             }
           },
           "--xml-raw-token": {
@@ -1269,7 +1269,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq e --help: \"--xml-skip-directives skip over directives (e.g. \\u003c!DOCTYPE thing cat\\u003e)\""
+              "source": "yq e --help: \"--xml-skip-directives skip over directives (e.g. <!DOCTYPE thing cat>)\""
             }
           },
           "--xml-skip-proc-inst": {
@@ -1281,7 +1281,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq e --help: \"--xml-skip-proc-inst skip over process instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e)\""
+              "source": "yq e --help: \"--xml-skip-proc-inst skip over process instructions (e.g. <?xml version=\\\"1\\\"?>)\""
             }
           },
           "--xml-strict-mode": {
@@ -2000,7 +2000,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq ea --help: \"--xml-directive-name string name for xml directives (e.g. \\u003c!DOCTYPE thing cat\\u003e) (default \\\"+directive\\\")\""
+              "source": "yq ea --help: \"--xml-directive-name string name for xml directives (e.g. <!DOCTYPE thing cat>) (default \\\"+directive\\\")\""
             }
           },
           "--xml-keep-namespace": {
@@ -2024,7 +2024,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq ea --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e) (default \\\"+p_\\\")\""
+              "source": "yq ea --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. <?xml version=\\\"1\\\"?>) (default \\\"+p_\\\")\""
             }
           },
           "--xml-raw-token": {
@@ -2048,7 +2048,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq ea --help: \"--xml-skip-directives skip over directives (e.g. \\u003c!DOCTYPE thing cat\\u003e)\""
+              "source": "yq ea --help: \"--xml-skip-directives skip over directives (e.g. <!DOCTYPE thing cat>)\""
             }
           },
           "--xml-skip-proc-inst": {
@@ -2060,7 +2060,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq ea --help: \"--xml-skip-proc-inst skip over process instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e)\""
+              "source": "yq ea --help: \"--xml-skip-proc-inst skip over process instructions (e.g. <?xml version=\\\"1\\\"?>)\""
             }
           },
           "--xml-strict-mode": {
@@ -2779,7 +2779,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq eval --help: \"--xml-directive-name string name for xml directives (e.g. \\u003c!DOCTYPE thing cat\\u003e) (default \\\"+directive\\\")\""
+              "source": "yq eval --help: \"--xml-directive-name string name for xml directives (e.g. <!DOCTYPE thing cat>) (default \\\"+directive\\\")\""
             }
           },
           "--xml-keep-namespace": {
@@ -2803,7 +2803,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq eval --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e) (default \\\"+p_\\\")\""
+              "source": "yq eval --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. <?xml version=\\\"1\\\"?>) (default \\\"+p_\\\")\""
             }
           },
           "--xml-raw-token": {
@@ -2827,7 +2827,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq eval --help: \"--xml-skip-directives skip over directives (e.g. \\u003c!DOCTYPE thing cat\\u003e)\""
+              "source": "yq eval --help: \"--xml-skip-directives skip over directives (e.g. <!DOCTYPE thing cat>)\""
             }
           },
           "--xml-skip-proc-inst": {
@@ -2839,7 +2839,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq eval --help: \"--xml-skip-proc-inst skip over process instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e)\""
+              "source": "yq eval --help: \"--xml-skip-proc-inst skip over process instructions (e.g. <?xml version=\\\"1\\\"?>)\""
             }
           },
           "--xml-strict-mode": {
@@ -3558,7 +3558,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq eval-all --help: \"--xml-directive-name string name for xml directives (e.g. \\u003c!DOCTYPE thing cat\\u003e) (default \\\"+directive\\\")\""
+              "source": "yq eval-all --help: \"--xml-directive-name string name for xml directives (e.g. <!DOCTYPE thing cat>) (default \\\"+directive\\\")\""
             }
           },
           "--xml-keep-namespace": {
@@ -3582,7 +3582,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq eval-all --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e) (default \\\"+p_\\\")\""
+              "source": "yq eval-all --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. <?xml version=\\\"1\\\"?>) (default \\\"+p_\\\")\""
             }
           },
           "--xml-raw-token": {
@@ -3606,7 +3606,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq eval-all --help: \"--xml-skip-directives skip over directives (e.g. \\u003c!DOCTYPE thing cat\\u003e)\""
+              "source": "yq eval-all --help: \"--xml-skip-directives skip over directives (e.g. <!DOCTYPE thing cat>)\""
             }
           },
           "--xml-skip-proc-inst": {
@@ -3618,7 +3618,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "yq eval-all --help: \"--xml-skip-proc-inst skip over process instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e)\""
+              "source": "yq eval-all --help: \"--xml-skip-proc-inst skip over process instructions (e.g. <?xml version=\\\"1\\\"?>)\""
             }
           },
           "--xml-strict-mode": {

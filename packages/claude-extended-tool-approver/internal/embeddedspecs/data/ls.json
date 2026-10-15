@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "ls --help: \"-F, --classify[=WHEN] append indicator (one of */=\\u003e@|) to entries WHEN\""
+          "source": "ls --help: \"-F, --classify[=WHEN] append indicator (one of */=>@|) to entries WHEN\""
         }
       },
       "--color": {
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "ls --help: \"-F, --classify[=WHEN] append indicator (one of */=\\u003e@|) to entries WHEN\""
+          "source": "ls --help: \"-F, --classify[=WHEN] append indicator (one of */=>@|) to entries WHEN\""
         }
       },
       "-G": {

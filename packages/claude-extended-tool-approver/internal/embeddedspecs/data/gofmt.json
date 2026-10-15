@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "gofmt -h: \"-r string rewrite rule (e.g., 'a[b:len(a)] -\\u003e a[b:]')\""
+          "source": "gofmt -h: \"-r string rewrite rule (e.g., 'a[b:len(a)] -> a[b:]')\""
         }
       },
       "-s": {

@@ -13,7 +13,7 @@
         "source": "rtk --help: \"pipe Read stdin, apply filter, print filtered output (Unix pipe mode)\""
       },
       "stdout": {
-        "source": "rtk --help: \"Usage: rtk [OPTIONS] \\u003cCOMMAND\\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+        "source": "rtk --help: \"Usage: rtk [OPTIONS] <COMMAND>\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "rtk --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "rtk --help: \"Usage: rtk [OPTIONS] \\u003cCOMMAND\\u003e\""
+        "source": "rtk --help: \"Usage: rtk [OPTIONS] <COMMAND>\""
       }
     },
     "stdin": "never",

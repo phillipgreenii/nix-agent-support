@@ -7,7 +7,7 @@
     "provenance": "npm 11.17.0 (this host, npm --version / npm help run), 2026-09-08",
     "citations": {
       "provenance": {
-        "source": "npm --help: \"npm \\u003ccommand\\u003e\""
+        "source": "npm --help: \"npm <command>\""
       },
       "stdin": {
         "source": "npm --help: \"npm install install all the dependencies in your project\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
@@ -45,10 +45,10 @@
             "source": "npm help run: \"NPM-RUN(1) NPM-RUN(1)\""
           },
           "stdin": {
-            "source": "npm help run: \"npm run \\u003ccommand\\u003e [-- \\u003cargs\\u003e]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "npm help run: \"npm run <command> [-- <args>]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "npm help run: \"npm run \\u003ccommand\\u003e [-- \\u003cargs\\u003e]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "npm help run: \"npm run <command> [-- <args>]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "npm help run: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -150,7 +150,7 @@
             }
           },
           "citation": {
-            "source": "npm help run: \"npm run \\u003ccommand\\u003e [-- \\u003cargs\\u003e]\""
+            "source": "npm help run: \"npm run <command> [-- <args>]\""
           }
         },
         "stdin": "never",
