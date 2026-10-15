@@ -207,10 +207,12 @@ func TestEachRowOfTheRoutingTableIsAdmittedToItsBucketAndBooked(t *testing.T) {
 			wantBody: searchBody, bucket: governor.BucketRESTSearch, spent: 1, remaining: 29,
 		},
 		{
-			name:   "gh search prs --limit 250 admits three search requests",
+			// Admitted at the upper bound (3) but booked at the pages fetched: a
+			// one-result answer is one page.
+			name:   "gh search prs --limit 250 with a short answer books one search request",
 			args:   []string{"search", "prs", "--json", "number", "--limit", "250", "--", "is:open"},
 			answer: []byte(searchJSON), wantRun: "search prs --json number --limit 250 -- is:open",
-			wantBody: searchJSON, bucket: governor.BucketRESTSearch, spent: 3, remaining: -1,
+			wantBody: searchJSON, bucket: governor.BucketRESTSearch, spent: 1, remaining: -1,
 		},
 		{
 			name:   "gh search prs without a limit is one request",
@@ -722,5 +724,78 @@ func TestARunnerWithoutItsPartsFailsInsteadOfPanicking(t *testing.T) {
 	}
 	if h.inner.count() != 0 {
 		t.Error("gh ran for a Runner that was not whole")
+	}
+}
+
+// searchOf is the JSON array a `gh search prs` prints for n results.
+func searchOf(n int) string {
+	items := make([]string, n)
+	for i := range items {
+		items[i] = fmt.Sprintf(`{"number":%d}`, i+1)
+	}
+	return "[" + strings.Join(items, ",") + "]"
+}
+
+// A `gh search prs` is admitted at its upper bound, ceil(limit / 100), and booked
+// at the pages its answer shows were fetched: one for a result under 100, the
+// full bound for a result that fills the limit, and never more than the bound.
+func TestASearchBooksThePagesActuallyFetchedNeverMoreThanItsAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		limit   string
+		results int
+		want    int64
+	}{
+		{"an empty answer is one page", "1000", 0, 1},
+		{"a short answer is one page", "1000", 7, 1},
+		{"99 results are one page", "1000", 99, 1},
+		{"a full first page needs the page that ends the listing", "1000", 100, 2},
+		{"250 results are three pages", "1000", 250, 3},
+		{"1000 results still book ten pages", "1000", 1000, 10},
+		{"more results than the limit never book past the admission", "250", 1000, 3},
+		{"a limit of 100 never books past one request", "100", 100, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, func(innerCall) ([]byte, error) { return []byte(searchOf(tc.results)), nil })
+			if _, err := h.runner.Run(context.Background(), "search", "prs", "--json", "number", "--limit", tc.limit, "--", "is:pr"); err != nil {
+				t.Fatal(err)
+			}
+			bs := h.bucket(governor.BucketRESTSearch)
+			if bs.Spent != tc.want || bs.InFlight != 0 {
+				t.Errorf("rest_search = %+v, want %d spent and nothing reserved", bs, tc.want)
+			}
+			if len(h.events) != 1 || h.events[0].Cost != tc.want {
+				t.Errorf("spend events = %+v, want one of cost %d", h.events, tc.want)
+			}
+		})
+	}
+}
+
+// An answer that is not a JSON array of results cannot be counted, so the
+// admission estimate is what is booked.
+func TestASearchWhoseAnswerCannotBeCountedBooksItsEstimate(t *testing.T) {
+	h := newHarness(t, func(innerCall) ([]byte, error) { return []byte("not json"), nil })
+	if _, err := h.runner.Run(context.Background(), "search", "prs", "--limit", "300", "--", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if bs := h.bucket(governor.BucketRESTSearch); bs.Spent != 3 || bs.InFlight != 0 {
+		t.Errorf("rest_search = %+v, want the estimate of 3 spent", bs)
+	}
+}
+
+// Admission is still at the upper bound: a limit whose bound does not fit under
+// the cap is refused before gh runs, whatever the answer would have been.
+func TestASearchIsStillAdmittedAtItsUpperBound(t *testing.T) {
+	h := newHarness(t, func(innerCall) ([]byte, error) { return []byte("[]"), nil })
+	cap := config.Defaults().Settings.RESTSearchPerMinute
+	// Leave 5 of the window: below the ten pages a limit of 1000 is admitted at.
+	if err := h.gov.Record(governor.Spend{Bucket: governor.BucketRESTSearch, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Cost: int64(cap) - 5}); err != nil {
+		t.Fatal(err)
+	}
+	h.events = nil
+	_, err := h.runner.Run(context.Background(), "search", "prs", "--limit", "1000", "--", "x")
+	var refusal *governor.Refusal
+	if !errors.As(err, &refusal) || h.inner.count() != 0 {
+		t.Fatalf("err = %v after %d gh calls, want a refusal with nothing run", err, h.inner.count())
 	}
 }

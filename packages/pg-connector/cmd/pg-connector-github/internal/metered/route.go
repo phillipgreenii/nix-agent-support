@@ -1,6 +1,7 @@
 package metered
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -29,8 +30,12 @@ type route struct {
 	kind   kind
 	bucket governor.Bucket
 	// cost is the admission estimate in the bucket's unit (1 for everything but
-	// `gh search prs`).
+	// `gh search prs`, whose estimate is the upper bound ceil(limit / 100)).
 	cost int64
+	// settleToPages marks `gh search prs`: its estimate is only an upper bound, so
+	// once the call has answered it is settled to the pages actually fetched
+	// (searchPagesFetched), never more than cost.
+	settleToPages bool
 	// restArgs are the arguments after `api` that ratefeed.Feed gets (kindREST).
 	restArgs []string
 }
@@ -43,7 +48,9 @@ type route struct {
 //	gh api ... --paginate         the endpoint's  run as given: --paginate prints several
 //	                              bucket          responses back to back, which the Feed
 //	                              cannot split, and the Provider never pages this way
-//	gh search prs ... --limit N   REST search     ceil(N / 100) requests, run as given
+//	gh search prs ... --limit N   REST search     admitted at ceil(N / 100) requests, run
+//	                              as given, then booked at the pages actually fetched
+//	                              (ceil(N / 100) at most, one page at least)
 //	any other gh command          REST core       cost 1, run as given
 func routeFor(args []string) route {
 	if len(args) > 0 && args[0] == "api" {
@@ -61,7 +68,7 @@ func routeFor(args []string) route {
 		}
 	}
 	if len(args) >= 2 && args[0] == "search" && args[1] == "prs" {
-		return route{kind: kindCLI, bucket: governor.BucketRESTSearch, cost: searchRequests(args[2:])}
+		return route{kind: kindCLI, bucket: governor.BucketRESTSearch, cost: searchRequests(args[2:]), settleToPages: true}
 	}
 	return route{kind: kindCLI, bucket: governor.BucketRESTCore, cost: 1}
 }
@@ -121,11 +128,13 @@ const (
 	maxSearchResults = 1000
 )
 
-// searchRequests is the REST search requests one `gh search prs` makes:
-// ceil(limit / 100), gh paging by 100, for the --limit it was given (30 when it
-// was given none, at least one request, at most what GitHub's 1000-result cap
-// allows). args are the arguments after `search prs`; anything after `--` is the
-// query, never a flag.
+// searchRequests is the most REST search requests one `gh search prs` can make,
+// and so its admission estimate: ceil(limit / 100), gh paging by 100, for the
+// --limit it was given (30 when it was given none, at least one request, at most
+// what GitHub's 1000-result cap allows). It is an upper bound, not the spend: a
+// search whose answer is short stops after fewer pages, and the runner books
+// searchPagesFetched instead. args are the arguments after `search prs`; anything
+// after `--` is the query, never a flag.
 func searchRequests(args []string) int64 {
 	limit := defaultSearchLimit
 	for i := 0; i < len(args); i++ {
@@ -157,4 +166,20 @@ func searchRequests(args []string) int64 {
 		return 1
 	}
 	return int64((limit + searchPageSize - 1) / searchPageSize)
+}
+
+// searchPagesFetched is the REST search requests a `gh search prs` that answered
+// out made: one per full page of results plus the page that ended the listing, so
+// a short answer (under 100 results, an empty one included) is one page and a
+// 1000-result answer is ten. It is never more than admitted, the upper bound the
+// call was admitted at, and never less than one. A body that is not a JSON array
+// of results (gh printed something else) cannot be counted, so the admitted
+// estimate stands: the governor's rule is to estimate high rather than low.
+func searchPagesFetched(out []byte, admitted int64) int64 {
+	var results []json.RawMessage
+	if err := json.Unmarshal(out, &results); err != nil {
+		return admitted
+	}
+	pages := int64(len(results)/searchPageSize) + 1
+	return max(1, min(pages, admitted))
 }

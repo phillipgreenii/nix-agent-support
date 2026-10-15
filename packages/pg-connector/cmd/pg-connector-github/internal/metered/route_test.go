@@ -118,3 +118,39 @@ func TestSearchRequestsIsCeilOfTheLimitOverOneHundred(t *testing.T) {
 		})
 	}
 }
+
+func TestSearchPagesFetched(t *testing.T) {
+	items := func(n int) []byte {
+		b := []byte("[")
+		for i := 0; i < n; i++ {
+			if i > 0 {
+				b = append(b, ',')
+			}
+			b = append(b, `{"number":1}`...)
+		}
+		return append(b, ']')
+	}
+	cases := []struct {
+		name     string
+		out      []byte
+		admitted int64
+		want     int64
+	}{
+		{"empty array", []byte(`[]`), 10, 1},
+		{"empty output", nil, 10, 10},
+		{"short", items(99), 10, 1},
+		{"one full page", items(100), 10, 2},
+		{"a thousand", items(1000), 10, 10},
+		{"capped by the admission", items(1000), 3, 3},
+		{"not an array", []byte(`{"message":"x"}`), 4, 4},
+		{"not json", []byte(`gh: error`), 4, 4},
+		{"never below one", items(0), 1, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := searchPagesFetched(tc.out, tc.admitted); got != tc.want {
+				t.Errorf("searchPagesFetched = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

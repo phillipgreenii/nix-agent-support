@@ -295,7 +295,7 @@ Every op the two old backends answer, and the new ones. Sources: `pkg/provider/p
 | pr       | `review_pending`        | Store, read-through                           | GraphQL                | `pending`                           |                  |
 | pr       | `review_submit` (write) | Origin, through the daemon                    | GraphQL, write class   | Origin reads for its preconditions  | `pending`        |
 | pr       | `search`                | Metered pass-through, not cached              | REST search or GraphQL |                                     |                  |
-| pr       | `list_activity`         | Metered pass-through, not cached              | GraphQL                |                                     |                  |
+| pr       | `list_activity`         | Metered pass-through, not cached              | REST search            |                                     |                  |
 | ci       | `list_runs`             | Store, read-through                           | REST                   | `runs`                              |                  |
 | ci       | `get_logs`              | Metered pass-through, not cached              | REST                   |                                     |                  |
 | ci       | `rerun_failed` (write)  | Origin, through the daemon                    | REST, write class      |                                     | `runs`           |
@@ -310,7 +310,12 @@ Every op the two old backends answer, and the new ones. Sources: `pkg/provider/p
 | both     | `refresh` (new)         | Queues interactive refresh, returns at once   | per the queued groups  |                                     | the named groups |
 
 "Metered pass-through" means the daemon performs the call itself, so the governor sees and limits its
-spend, but stores nothing.
+spend, but stores nothing. `list_activity` draws mainly on REST search (five capped `gh search prs`
+queries; `gh search prs` is REST), plus a viewer read (GraphQL) and per-PR reads (REST core). The
+metered runner admits each `gh search prs --limit N` at the upper bound of ceil(N / 100) requests,
+then books the pages its answer shows were fetched: one for a result under 100, ten for 1000, never
+more than the admitted bound. A search that finds little therefore does not hold ten requests of the
+`rest_search_per_minute` window.
 
 ### Client mode contract
 

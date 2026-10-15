@@ -16,10 +16,15 @@
 //	gh api <endpoint> ...        REST core       through ratefeed.Feed (gh api --include):
 //	                             admitted at 1, the body returned without headers
 //	gh api search/...            REST search     the same
-//	gh search prs ... --limit N  REST search     ceil(N / 100) requests, run as given
+//	gh search prs ... --limit N  REST search     admitted at ceil(N / 100) requests, run as
+//	                             given, booked at the pages actually fetched
 //	any other gh command         REST core       1 request, run as given
 //
-// A porcelain command shows no rate headers, so its estimate is what is booked.
+// A porcelain command shows no rate headers, so its estimate is what is booked,
+// with one exception: `gh search prs` is admitted at the upper bound its --limit
+// allows (ceil(N / 100) pages) but settled to the pages its answer shows were
+// fetched (one for a result under 100, ten for 1000), so a search that finds
+// little does not hold ten requests of a small per-minute cap.
 // The same rules apply to RunStdin: a GraphQL mutation (`api graphql --input -`)
 // passes through, and a REST write with a JSON body (`api repos/o/r/pulls/1/reviews
 // --method POST --input -`) goes through ratefeed.Feed.RESTStdin.
@@ -192,7 +197,10 @@ func (r *Runner) rest(ctx context.Context, call ratefeed.Meta, rt route, stdin [
 }
 
 // cli admits one porcelain call at its estimate and runs it as given. Its
-// headers are invisible, so the estimate is what is booked. A call that never
+// headers are invisible, so the estimate is what is booked, except for `gh search
+// prs`, whose estimate is an upper bound and which is booked at the pages its
+// successful answer shows were fetched (never more than the estimate). A failed
+// search books the estimate: how far it got is unknown. A call that never
 // reached GitHub (gh refused to start without a credential) releases its
 // reservation instead.
 func (r *Runner) cli(ctx context.Context, call ratefeed.Meta, rt route, invoke invoker, args []string) ([]byte, error) {
@@ -202,8 +210,12 @@ func (r *Runner) cli(ctx context.Context, call ratefeed.Meta, rt route, invoke i
 	}
 	out, runErr := invoke(ctx, args...)
 	outcome := ratefeed.OutcomeOK
+	cost := rt.cost
 	switch {
 	case runErr == nil:
+		if rt.settleToPages {
+			cost = searchPagesFetched(out, rt.cost)
+		}
 	case IsRateLimit(runErr):
 		outcome = ratefeed.OutcomeRateLimited
 	case len(out) == 0 && errors.Is(runErr, github.ErrGHAuthInvalid):
@@ -214,7 +226,7 @@ func (r *Runner) cli(ctx context.Context, call ratefeed.Meta, rt route, invoke i
 	}
 	_ = tk.Settle(governor.Spend{
 		Purpose: call.Purpose, Group: call.Group, BatchSize: call.BatchSize,
-		Cost: rt.cost, Outcome: outcome,
+		Cost: cost, Outcome: outcome,
 	})
 	return out, runErr
 }

@@ -140,18 +140,20 @@ func TestMetering_SearchBooksOneRESTSearchRequest(t *testing.T) {
 	}
 }
 
-// list_activity books ceil(1000 / 100) = 10 search requests for each of its five
-// capped queries, plus the viewer read (GraphQL) and the per-PR reads (the merged
-// PR, the reviewed PR's reviews, the commenter candidate's two conversation pages).
+// list_activity makes five capped searches (limit 1000, admitted at ceil(1000 / 100)
+// = 10 requests each) and books the pages each actually fetched: one for a result
+// under 100, so five in all here, plus the viewer read (GraphQL) and the per-PR
+// reads (the merged PR, the reviewed PR's reviews, the commenter candidate's two
+// conversation pages).
 func TestMetering_ListActivityBooksEveryOriginCallAsClassOnePassthrough(t *testing.T) {
 	h := newHarness(t, 100, cannedReply(true))
 	if _, err := h.handlers()[OpListActivity].Handle(context.Background(), json.RawMessage(activityArgs)); err != nil {
 		t.Fatal(err)
 	}
 	got := h.booked()
-	const queries, perQuery = 5, (1000 + 99) / 100
+	const queries, perQuery = 5, 1
 	if got[governor.BucketRESTSearch] != queries*perQuery {
-		t.Errorf("rest_search = %d requests, want %d queries x %d", got[governor.BucketRESTSearch], queries, perQuery)
+		t.Errorf("rest_search = %d requests, want %d queries x %d page", got[governor.BucketRESTSearch], queries, perQuery)
 	}
 	// Viewer (1 point) and the commenter candidate's two conversation pages (1 point each).
 	if got[governor.BucketGraphQL] != 3 {
@@ -163,6 +165,55 @@ func TestMetering_ListActivityBooksEveryOriginCallAsClassOnePassthrough(t *testi
 	}
 	if h.inner.count() != 5+1+2+2 {
 		t.Errorf("%d gh calls: %q", h.inner.count(), h.inner.calls)
+	}
+}
+
+// Under the DEFAULT config (rest_search_per_minute 20, not a raised cap) a
+// list_activity over result sets under 100 per search completes. Each search is
+// still ADMITTED at its upper bound of ten requests, so it needs ten free in the
+// window, but it is booked at the one page it fetched: two back-to-back calls
+// (five searches each) fit, and the third is refused once the window holds eleven.
+// (Booking the upper bound, ten per search, refused the third search of the very
+// first call: bead pg2-rgbco.)
+func TestMetering_ListActivityCompletesUnderTheDefaultSearchCap(t *testing.T) {
+	cap := config.Defaults().Settings.RESTSearchPerMinute
+	if cap != 20 {
+		t.Fatalf("the default rest_search_per_minute is %d, this test pins the shipped default of 20", cap)
+	}
+	h := newHarness(t, cap, cannedReply(true))
+	for call := 1; call <= 2; call++ {
+		if _, err := h.handlers()[OpListActivity].Handle(context.Background(), json.RawMessage(activityArgs)); err != nil {
+			t.Fatalf("call %d under the default cap: %v", call, err)
+		}
+	}
+	if got := h.booked()[governor.BucketRESTSearch]; got != 10 {
+		t.Errorf("rest_search = %d after two calls, want 2 x 5 searches x 1 page = 10", got)
+	}
+	_, err := h.handlers()[OpListActivity].Handle(context.Background(), json.RawMessage(activityArgs))
+	if !errors.Is(err, scriptout.ErrUnavailable) || !strings.Contains(err.Error(), "cap") {
+		t.Errorf("third call: err = %v, want unavailable naming the cap once the window is past its headroom", err)
+	}
+}
+
+// A search that really returns 1000 results still books its ten pages.
+func TestMetering_ListActivityBooksTenPagesForAThousandResultSearch(t *testing.T) {
+	var thousand []string
+	for i := 0; i < 1000; i++ {
+		thousand = append(thousand, prJSON(1000+i, "Bulk", "teammate", "2026-09-05T10:00:00Z", ""))
+	}
+	canned := cannedReply(false)
+	h := newHarness(t, 100, func(args []string) (string, error) {
+		if len(args) >= 2 && args[0] == "search" && strings.Contains(strings.Join(args, " "), "created:") {
+			return "[" + strings.Join(thousand, ",") + "]", nil
+		}
+		return canned(args)
+	})
+	if _, err := h.handlers()[OpListActivity].Handle(context.Background(), json.RawMessage(activityArgs)); err != nil {
+		t.Fatal(err)
+	}
+	// The created search: ten pages. The other four are short: one page each.
+	if got := h.booked()[governor.BucketRESTSearch]; got != 10+4 {
+		t.Errorf("rest_search = %d requests, want 10 (the 1000-result search) + 4 (four short ones)", got)
 	}
 }
 
