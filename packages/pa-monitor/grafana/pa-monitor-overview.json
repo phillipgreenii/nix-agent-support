@@ -1451,7 +1451,7 @@
       "id": 206,
       "title": "Subprocess spawns (rate, by kind)",
       "type": "timeseries",
-      "description": "Subprocess spawn rate per kind. Emitted by the providers in the producer goroutine (off the emit tick) after Phase 3; spawns_total falls as they cache. Account-global metric — not filtered by $scope/$plan_tier.",
+      "description": "Subprocess spawn rate per kind. kind=git_branch is excluded: it is a filesystem read of .git/HEAD, not a spawned subprocess (pg2-ph81c). Emitted by the providers in the producer goroutine (off the emit tick) after Phase 3; spawns_total falls as they cache. Account-global metric — not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1464,7 +1464,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (kind) (rate(pa_monitor_subprocess_spawns_total[5m]))",
+          "expr": "sum by (kind) (rate(pa_monitor_subprocess_spawns_total{kind!=\"git_branch\"}[5m]))",
           "legendFormat": "{{kind}}",
           "refId": "A"
         }
