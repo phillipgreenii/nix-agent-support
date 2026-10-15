@@ -10,10 +10,10 @@
         "source": "resolve-imports.sh --help: \"resolve-imports.sh — the mechanical core of the INTER evaluator (bead\""
       },
       "stdin": {
-        "source": "resolve-imports.sh --help: \"Usage: resolve-imports.sh \u003cowner-set-dir\u003e \u003cimplementer-set-dir\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "resolve-imports.sh --help: \"Usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "resolve-imports.sh --help: \"Usage: resolve-imports.sh \u003cowner-set-dir\u003e \u003cimplementer-set-dir\u003e\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+        "source": "resolve-imports.sh --help: \"Usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "resolve-imports.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -37,7 +37,7 @@
         }
       },
       "citation": {
-        "source": "resolve-imports.sh --help: \"Usage: resolve-imports.sh \u003cowner-set-dir\u003e \u003cimplementer-set-dir\u003e\""
+        "source": "resolve-imports.sh --help: \"Usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>\""
       }
     },
     "stdin": "never",

@@ -10,10 +10,10 @@
         "source": "integrate-branch-support --help: \"integrate-branch-support: Advisory: report a repo's integration facts + recommended strategy\""
       },
       "stdin": {
-        "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh \u003cold-sha\u003e]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh <old-sha>]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh \u003cold-sha\u003e]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+        "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh <old-sha>]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "integrate-branch-support --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh \u003cold-sha\u003e]\""
+          "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh <old-sha>]\""
         }
       },
       "--facts": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh \u003cold-sha\u003e]\""
+          "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh <old-sha>]\""
         }
       },
       "--help": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh \u003cold-sha\u003e]\""
+          "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh <old-sha>]\""
         }
       },
       "--version": {
@@ -115,7 +115,7 @@
         }
       },
       "citation": {
-        "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh \u003cold-sha\u003e]\""
+        "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh <old-sha>]\""
       }
     },
     "implicitEffects": [
@@ -125,7 +125,7 @@
         },
         "target": ".",
         "citation": {
-          "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh \u003cold-sha\u003e]\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
+          "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh <old-sha>]\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
         }
       },
       {
@@ -135,7 +135,7 @@
         "target": "integrate-branch-support",
         "whenFlags": ["--prek-branch-diff", "--bundle-refresh"],
         "citation": {
-          "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh \u003cold-sha\u003e]\" -- documents the command whose implicit effect (target \"integrate-branch-support\", role \"exec\") is derived from this synopsis"
+          "source": "integrate-branch-support --help: \"Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh <old-sha>]\" -- documents the command whose implicit effect (target \"integrate-branch-support\", role \"exec\") is derived from this synopsis"
         }
       }
     ],

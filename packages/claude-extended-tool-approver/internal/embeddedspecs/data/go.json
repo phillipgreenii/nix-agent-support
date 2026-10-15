@@ -4,7 +4,7 @@
   "name": "go",
   "command": {
     "name": "go",
-    "provenance": "go version go1.26.6 linux/amd64 (`go version`), go help / go help \u003ccommand\u003e, this host 2026-09-07",
+    "provenance": "go version go1.26.6 linux/amd64 (`go version`), go help / go help <command>, this host 2026-09-07",
     "citations": {
       "provenance": {
         "source": "go help: \"Go is a tool for managing Go source code.\""

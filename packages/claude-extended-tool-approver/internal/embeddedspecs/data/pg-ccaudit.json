@@ -10,10 +10,10 @@
         "source": "pg-ccaudit --help: \"pg-ccaudit — index Claude Code transcripts into SQLite and query them\""
       },
       "stdin": {
-        "source": "pg-ccaudit --help: \"USAGE pg-ccaudit \u003ccommand\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "pg-ccaudit --help: \"USAGE pg-ccaudit <command> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "pg-ccaudit --help: \"USAGE pg-ccaudit \u003ccommand\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+        "source": "pg-ccaudit --help: \"USAGE pg-ccaudit <command> [flags]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "pg-ccaudit --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "pg-ccaudit --help: \"USAGE pg-ccaudit \u003ccommand\u003e [flags]\""
+        "source": "pg-ccaudit --help: \"USAGE pg-ccaudit <command> [flags]\""
       }
     },
     "stdin": "never",
@@ -910,13 +910,13 @@
         "provenance": "pg-ccaudit gold -h, this host 2026-10-05",
         "citations": {
           "provenance": {
-            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold \u003cseed|sample|status\u003e — maintain the Tier 2 evaluation set\""
+            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold <seed|sample|status> — maintain the Tier 2 evaluation set\""
           },
           "stdin": {
-            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold \u003cseed|sample|status\u003e — maintain the Tier 2 evaluation set\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold <seed|sample|status> — maintain the Tier 2 evaluation set\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold \u003cseed|sample|status\u003e — maintain the Tier 2 evaluation set\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold <seed|sample|status> — maintain the Tier 2 evaluation set\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "pg-ccaudit gold --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -1174,7 +1174,7 @@
             }
           },
           "citation": {
-            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold \u003cseed|sample|status\u003e — maintain the Tier 2 evaluation set\""
+            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold <seed|sample|status> — maintain the Tier 2 evaluation set\""
           }
         },
         "stdin": "never",
@@ -1248,13 +1248,13 @@
         "provenance": "pg-ccaudit query -h, this host 2026-10-05",
         "citations": {
           "provenance": {
-            "source": "pg-ccaudit query --help: \"pg-ccaudit query \u003cname\u003e [args…] — run a named, versioned canned query\""
+            "source": "pg-ccaudit query --help: \"pg-ccaudit query <name> [args…] — run a named, versioned canned query\""
           },
           "stdin": {
-            "source": "pg-ccaudit query --help: \"pg-ccaudit query \u003cname\u003e [args…] — run a named, versioned canned query\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "pg-ccaudit query --help: \"pg-ccaudit query <name> [args…] — run a named, versioned canned query\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "pg-ccaudit query --help: \"pg-ccaudit query \u003cname\u003e [args…] — run a named, versioned canned query\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "pg-ccaudit query --help: \"pg-ccaudit query <name> [args…] — run a named, versioned canned query\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "pg-ccaudit query --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -1368,7 +1368,7 @@
             }
           },
           "citation": {
-            "source": "pg-ccaudit query --help: \"pg-ccaudit query \u003cname\u003e [args…] — run a named, versioned canned query\""
+            "source": "pg-ccaudit query --help: \"pg-ccaudit query <name> [args…] — run a named, versioned canned query\""
           }
         },
         "stdin": "never",

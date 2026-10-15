@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "grep --help + man grep: reviewed in full; neither documents a --decompress option, and live invocation confirms this ugrep 7.8.4 build rejects it (`grep --decompress` -\u003e \"grep: unrecognized option '--decompress'\", exit 2) -- FACT MISMATCH discovered during citation backfill (flag/role structure left unchanged per Binding decisions; recorded via bd comment)"
+          "source": "grep --help + man grep: reviewed in full; neither documents a --decompress option, and live invocation confirms this ugrep 7.8.4 build rejects it (`grep --decompress` -> \"grep: unrecognized option '--decompress'\", exit 2) -- FACT MISMATCH discovered during citation backfill (flag/role structure left unchanged per Binding decisions; recorded via bd comment)"
         }
       },
       "--dereference-recursive": {
@@ -293,7 +293,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "grep --help + man grep: reviewed in full; neither documents a --min-count option, and live invocation confirms this ugrep 7.8.4 build rejects it (`grep --min-count=1` -\u003e \"grep: unrecognized option '--min-count=1'\", exit 2) -- FACT MISMATCH discovered during citation backfill (flag/role structure left unchanged per Binding decisions; recorded via bd comment)"
+          "source": "grep --help + man grep: reviewed in full; neither documents a --min-count option, and live invocation confirms this ugrep 7.8.4 build rejects it (`grep --min-count=1` -> \"grep: unrecognized option '--min-count=1'\", exit 2) -- FACT MISMATCH discovered during citation backfill (flag/role structure left unchanged per Binding decisions; recorded via bd comment)"
         }
       },
       "--no-filename": {

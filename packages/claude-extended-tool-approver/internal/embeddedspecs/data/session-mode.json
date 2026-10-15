@@ -10,10 +10,10 @@
         "source": "session-mode --help: \"session-mode: Track which named \"mode\" (drain-beads, unblock-human-beads,\""
       },
       "stdin": {
-        "source": "session-mode --help: \"Usage: session-mode \u003cSUBCOMMAND\u003e [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "session-mode --help: \"Usage: session-mode <SUBCOMMAND> [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "session-mode --help: \"Usage: session-mode \u003cSUBCOMMAND\u003e [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+        "source": "session-mode --help: \"Usage: session-mode <SUBCOMMAND> [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "session-mode --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -79,7 +79,7 @@
         }
       },
       "citation": {
-        "source": "session-mode --help: \"Usage: session-mode \u003cSUBCOMMAND\u003e [ARGS...]\""
+        "source": "session-mode --help: \"Usage: session-mode <SUBCOMMAND> [ARGS...]\""
       }
     },
     "stdin": "never",

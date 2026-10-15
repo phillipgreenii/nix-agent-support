@@ -10,10 +10,10 @@
         "source": "gh --help: \"Work seamlessly with GitHub from the command line.\""
       },
       "stdin": {
-        "source": "gh --help: \"USAGE gh \u003ccommand\u003e \u003csubcommand\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "gh --help: \"USAGE gh <command> <subcommand> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "gh --help: \"USAGE gh \u003ccommand\u003e \u003csubcommand\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+        "source": "gh --help: \"USAGE gh <command> <subcommand> [flags]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "gh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "gh --help: \"USAGE gh \u003ccommand\u003e \u003csubcommand\u003e [flags]\""
+        "source": "gh --help: \"USAGE gh <command> <subcommand> [flags]\""
       }
     },
     "stdin": "never",
@@ -45,7 +45,7 @@
             "source": "gh auth --help: \"Authenticate gh and git with GitHub\""
           },
           "stdin": {
-            "source": "gh auth --help: \"Usage: gh auth \u003ccommand\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+            "source": "gh auth --help: \"Usage: gh auth <command> [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
           },
           "stdout": {
             "source": "gh auth --help: \"Authenticate gh and git with GitHub\" (stdout classification taken from this description of what the command prints)"
@@ -64,7 +64,7 @@
             }
           },
           "citation": {
-            "source": "gh auth --help: \"Usage: gh auth \u003ccommand\u003e [flags]\""
+            "source": "gh auth --help: \"Usage: gh auth <command> [flags]\""
           }
         },
         "stdin": "never",
@@ -287,10 +287,10 @@
             "source": "gh pr --help: \"Work with GitHub pull requests.\""
           },
           "stdin": {
-            "source": "gh pr --help: \"USAGE gh pr \u003ccommand\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "gh pr --help: \"USAGE gh pr <command> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "gh pr --help: \"USAGE gh pr \u003ccommand\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+            "source": "gh pr --help: \"USAGE gh pr <command> [flags]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "gh pr --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -344,7 +344,7 @@
             }
           },
           "citation": {
-            "source": "gh pr --help: \"USAGE gh pr \u003ccommand\u003e [flags]\""
+            "source": "gh pr --help: \"USAGE gh pr <command> [flags]\""
           }
         },
         "stdin": "never",
@@ -360,10 +360,10 @@
                 "source": "gh pr checks --help: \"Show CI status for a single pull request.\""
               },
               "stdin": {
-                "source": "gh pr checks --help: \"USAGE gh pr checks [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+                "source": "gh pr checks --help: \"USAGE gh pr checks [<number> | <url> | <branch>] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "gh pr checks --help: \"USAGE gh pr checks [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+                "source": "gh pr checks --help: \"USAGE gh pr checks [<number> | <url> | <branch>] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
                 "source": "gh pr checks --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -489,7 +489,7 @@
                 }
               },
               "citation": {
-                "source": "gh pr checks --help: \"USAGE gh pr checks [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\""
+                "source": "gh pr checks --help: \"USAGE gh pr checks [<number> | <url> | <branch>] [flags]\""
               }
             },
             "implicitEffects": [
@@ -500,111 +500,12 @@
                 },
                 "target": "github",
                 "citation": {
-                  "source": "gh pr checks --help: \"USAGE gh pr checks [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
+                  "source": "gh pr checks --help: \"USAGE gh pr checks [<number> | <url> | <branch>] [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
                 }
               }
             ],
             "stdin": "never",
             "stdout": "content",
-            "unknownFlag": "insufficient",
-            "endOfOptions": true
-          },
-          "ready": {
-            "name": "ready",
-            "provenance": "gh pr ready --help, this host 2026-10-05",
-            "citations": {
-              "provenance": {
-                "source": "gh pr ready --help: \"Mark a pull request as ready for review.\""
-              },
-              "stdin": {
-                "source": "gh pr ready --help: \"USAGE gh pr ready [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
-              },
-              "stdout": {
-                "source": "gh pr ready --help: \"USAGE gh pr ready [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
-              },
-              "unknownFlag": {
-                "source": "gh pr ready --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
-              }
-            },
-            "flags": {
-              "--help": {
-                "arity": "none",
-                "operand": {
-                  "kind": "literal"
-                },
-                "transform": {
-                  "kind": "none"
-                },
-                "citation": {
-                  "source": "gh pr ready --help: \"INHERITED FLAGS --help Show help for command\""
-                }
-              },
-              "--repo": {
-                "arity": "one",
-                "operand": {
-                  "kind": "literal"
-                },
-                "transform": {
-                  "kind": "none"
-                },
-                "citation": {
-                  "source": "gh pr ready --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
-                }
-              },
-              "--undo": {
-                "arity": "none",
-                "operand": {
-                  "kind": "literal"
-                },
-                "transform": {
-                  "kind": "retarget-remote",
-                  "from": "mutate",
-                  "to": "pr-ready-undo"
-                },
-                "citation": {
-                  "source": "gh pr ready --help: \"--undo Convert a pull request to \\\"draft\\\"\""
-                }
-              },
-              "-R": {
-                "arity": "one",
-                "operand": {
-                  "kind": "literal"
-                },
-                "transform": {
-                  "kind": "none"
-                },
-                "citation": {
-                  "source": "gh pr ready --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
-                }
-              }
-            },
-            "positionals": {
-              "rest": {
-                "kind": "literal"
-              },
-              "restOverride": {
-                "role": {
-                  "kind": "literal"
-                }
-              },
-              "citation": {
-                "source": "gh pr ready --help: \"USAGE gh pr ready [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\""
-              }
-            },
-            "implicitEffects": [
-              {
-                "role": {
-                  "kind": "remote",
-                  "operation": "mutate"
-                },
-                "target": "github",
-                "citation": {
-                  "source": "gh pr ready --help: \"Mark a pull request as ready for review.\" -- documents the command whose implicit effect (target \"github\", role \"remote:mutate\") is derived from this description"
-                }
-              }
-            ],
-            "stdin": "never",
-            "stdout": "metadata",
             "unknownFlag": "insufficient",
             "endOfOptions": true
           },
@@ -1029,10 +930,10 @@
                 "source": "gh pr diff --help: \"View changes in a pull request.\""
               },
               "stdin": {
-                "source": "gh pr diff --help: \"USAGE gh pr diff [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+                "source": "gh pr diff --help: \"USAGE gh pr diff [<number> | <url> | <branch>] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "gh pr diff --help: \"USAGE gh pr diff [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+                "source": "gh pr diff --help: \"USAGE gh pr diff [<number> | <url> | <branch>] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
                 "source": "gh pr diff --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -1146,7 +1047,7 @@
                 }
               },
               "citation": {
-                "source": "gh pr diff --help: \"USAGE gh pr diff [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\""
+                "source": "gh pr diff --help: \"USAGE gh pr diff [<number> | <url> | <branch>] [flags]\""
               }
             },
             "implicitEffects": [
@@ -1157,7 +1058,7 @@
                 },
                 "target": "github",
                 "citation": {
-                  "source": "gh pr diff --help: \"USAGE gh pr diff [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
+                  "source": "gh pr diff --help: \"USAGE gh pr diff [<number> | <url> | <branch>] [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
                 }
               }
             ],
@@ -1174,7 +1075,7 @@
                 "source": "gh pr edit --help: \"Edit a pull request.\" (the help text embedded in the gh 2.102.0 binary; a live gh pr edit --help is denied to an unattended session, so it was read from the binary)"
               },
               "stdin": {
-                "source": "gh pr edit --help: \"Usage: gh pr edit [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording for the modeled flags; the only flag that reads standard input, --body-file -, is not modeled; classified \"never\" from the documented operand/argument shape in this synopsis)"
+                "source": "gh pr edit --help: \"Usage: gh pr edit [<number> | <url> | <branch>] [flags]\" (no explicit stdin wording for the modeled flags; the only flag that reads standard input, --body-file -, is not modeled; classified \"never\" from the documented operand/argument shape in this synopsis)"
               },
               "stdout": {
                 "source": "gh pr edit --help: \"Edit a pull request.\" and \"the pull request's URL is still printed to stdout\" (stdout classification taken from this description of what the command prints)"
@@ -1267,7 +1168,7 @@
                 }
               },
               "citation": {
-                "source": "gh pr edit --help: \"Usage: gh pr edit [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" and \"Without an argument, the pull request that belongs to the current branch is selected.\""
+                "source": "gh pr edit --help: \"Usage: gh pr edit [<number> | <url> | <branch>] [flags]\" and \"Without an argument, the pull request that belongs to the current branch is selected.\""
               }
             },
             "implicitEffects": [
@@ -1374,7 +1275,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "gh pr list --help: \"-H, --head string Filter by head branch (\"\u003cowner\u003e:\u003cbranch\u003e\" syntax not supported)\""
+                  "source": "gh pr list --help: \"-H, --head string Filter by head branch (\"<owner>:<branch>\" syntax not supported)\""
                 }
               },
               "--help": {
@@ -1518,7 +1419,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "gh pr list --help: \"-H, --head string Filter by head branch (\"\u003cowner\u003e:\u003cbranch\u003e\" syntax not supported)\""
+                  "source": "gh pr list --help: \"-H, --head string Filter by head branch (\"<owner>:<branch>\" syntax not supported)\""
                 }
               },
               "-L": {
@@ -1657,6 +1558,105 @@
             ],
             "stdin": "never",
             "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "ready": {
+            "name": "ready",
+            "provenance": "gh pr ready --help, this host 2026-10-05",
+            "citations": {
+              "provenance": {
+                "source": "gh pr ready --help: \"Mark a pull request as ready for review.\""
+              },
+              "stdin": {
+                "source": "gh pr ready --help: \"USAGE gh pr ready [<number> | <url> | <branch>] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "gh pr ready --help: \"USAGE gh pr ready [<number> | <url> | <branch>] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "gh pr ready --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr ready --help: \"INHERITED FLAGS --help Show help for command\""
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr ready --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "--undo": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "retarget-remote",
+                  "from": "mutate",
+                  "to": "pr-ready-undo"
+                },
+                "citation": {
+                  "source": "gh pr ready --help: \"--undo Convert a pull request to \\\"draft\\\"\""
+                }
+              },
+              "-R": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr ready --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh pr ready --help: \"USAGE gh pr ready [<number> | <url> | <branch>] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutate"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh pr ready --help: \"Mark a pull request as ready for review.\" -- documents the command whose implicit effect (target \"github\", role \"remote:mutate\") is derived from this description"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
             "unknownFlag": "insufficient",
             "endOfOptions": true
           },
@@ -1837,10 +1837,10 @@
                 "source": "gh pr view --help: \"Display the title, body, and other information about a pull request.\""
               },
               "stdin": {
-                "source": "gh pr view --help: \"USAGE gh pr view [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+                "source": "gh pr view --help: \"USAGE gh pr view [<number> | <url> | <branch>] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "gh pr view --help: \"USAGE gh pr view [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+                "source": "gh pr view --help: \"USAGE gh pr view [<number> | <url> | <branch>] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
                 "source": "gh pr view --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -1978,7 +1978,7 @@
                 }
               },
               "citation": {
-                "source": "gh pr view --help: \"USAGE gh pr view [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\""
+                "source": "gh pr view --help: \"USAGE gh pr view [<number> | <url> | <branch>] [flags]\""
               }
             },
             "implicitEffects": [
@@ -1989,7 +1989,7 @@
                 },
                 "target": "github",
                 "citation": {
-                  "source": "gh pr view --help: \"USAGE gh pr view [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
+                  "source": "gh pr view --help: \"USAGE gh pr view [<number> | <url> | <branch>] [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
                 }
               }
             ],
@@ -2303,7 +2303,7 @@
                 "source": "gh stack checkout --help: \"Check out a stack by stack number, pull request number, PR URL, or branch name.\""
               },
               "stdin": {
-                "source": "gh stack checkout --help: \"Usage: gh stack checkout [\u003cstack-number\u003e | \u003cpr-number\u003e | \u003cpr-url\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+                "source": "gh stack checkout --help: \"Usage: gh stack checkout [<stack-number> | <pr-number> | <pr-url> | <branch>] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
               },
               "stdout": {
                 "source": "gh stack checkout --help: \"Check out a stack by stack number, pull request number, PR URL, or branch name.\" (stdout classification taken from this description of what the command prints)"
@@ -2348,7 +2348,7 @@
                 }
               },
               "citation": {
-                "source": "gh stack checkout --help: \"Usage: gh stack checkout [\u003cstack-number\u003e | \u003cpr-number\u003e | \u003cpr-url\u003e | \u003cbranch\u003e] [flags]\""
+                "source": "gh stack checkout --help: \"Usage: gh stack checkout [<stack-number> | <pr-number> | <pr-url> | <branch>] [flags]\""
               }
             },
             "implicitEffects": [
@@ -2580,10 +2580,10 @@
                 "source": "gh stack link --help: \"Create or update a stack on GitHub from branch names, PR numbers, or PR URLs.\" (the help text embedded in the gh-stack 0.1.0 binary; a live gh stack link --help is denied to an unattended session, so it was read from the binary)"
               },
               "stdin": {
-                "source": "gh stack link --help: \"Usage: gh stack link [flags] \u003cstack-number | branch-or-pr\u003e \u003cbranch-or-pr\u003e [...]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+                "source": "gh stack link --help: \"Usage: gh stack link [flags] <stack-number | branch-or-pr> <branch-or-pr> [...]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
               },
               "stdout": {
-                "source": "gh stack link --help: \"Create or update a stack on GitHub from branch names, PR numbers, or PR URLs.\" (stdout classification taken from this description of what the command prints: progress lines such as \"Created PR #N for \u003cbranch\u003e (base: \u003cbase\u003e)\" per the extension's skill doc)"
+                "source": "gh stack link --help: \"Create or update a stack on GitHub from branch names, PR numbers, or PR URLs.\" (stdout classification taken from this description of what the command prints: progress lines such as \"Created PR #N for <branch> (base: <base>)\" per the extension's skill doc)"
               },
               "unknownFlag": {
                 "source": "gh stack link --help: full option listing reviewed (--base, --open, --remote); the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies, and --open (\"Mark new and existing PRs as ready for review\"; a class C collision with the gh pr ready Abstain ruling) is deliberately not modeled"
@@ -2658,7 +2658,7 @@
                 }
               },
               "citation": {
-                "source": "gh stack link --help: \"Usage: gh stack link [flags] \u003cstack-number | branch-or-pr\u003e \u003cbranch-or-pr\u003e [...]\" and, in the extension's skill doc, \"Provide at least two branches/PRs to create or update a stack, or a stack number followed by the new branches/PRs to append them to the top of an existing stack\""
+                "source": "gh stack link --help: \"Usage: gh stack link [flags] <stack-number | branch-or-pr> <branch-or-pr> [...]\" and, in the extension's skill doc, \"Provide at least two branches/PRs to create or update a stack, or a stack number followed by the new branches/PRs to append them to the top of an existing stack\""
               }
             },
             "implicitEffects": [
@@ -2667,7 +2667,7 @@
                   "kind": "remote",
                   "operation": "push"
                 },
-                "target": "\u003cdefault-remote\u003e",
+                "target": "<default-remote>",
                 "dynamic": true,
                 "citation": {
                   "source": "gh stack link --help: \"Branch arguments are automatically pushed to the remote before creating or looking up PRs.\" (the effect declared here is what this command does, per this description); upstream github/gh-stack cmd/link.go pushBranchArgs calls git.Push(remote, branches, false, true), i.e. force=false, atomic=true: a plain atomic push, no --force and no --force-with-lease"
@@ -2794,7 +2794,7 @@
                   "kind": "remote",
                   "operation": "push-lease"
                 },
-                "target": "\u003cdefault-remote\u003e",
+                "target": "<default-remote>",
                 "dynamic": true,
                 "citation": {
                   "source": "gh stack push --help: \"Uses explicit per-branch --force-with-lease checks.\" (the effect declared here is what this command does, per this description)"
@@ -3082,7 +3082,7 @@
                   "kind": "remote",
                   "operation": "push-lease"
                 },
-                "target": "\u003cdefault-remote\u003e",
+                "target": "<default-remote>",
                 "dynamic": true,
                 "citation": {
                   "source": "gh stack submit --help: \"1. Pushes all branches to the remote\" (the effect declared here is what this command does, per this description)"
@@ -3191,7 +3191,7 @@
                   "kind": "remote",
                   "operation": "push-lease"
                 },
-                "target": "\u003cdefault-remote\u003e",
+                "target": "<default-remote>",
                 "dynamic": true,
                 "citation": {
                   "source": "gh stack sync --help: \"5. Pushes all branches atomically (using --force-with-lease --atomic)\" (the effect declared here is what this command does, per this description)"
@@ -3401,7 +3401,7 @@
                 "source": "gh stack unstack --help: \"Remove a stack from local tracking and unstack it on GitHub.\""
               },
               "stdin": {
-                "source": "gh stack unstack --help: \"Usage: gh stack unstack [\u003cstack-number\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+                "source": "gh stack unstack --help: \"Usage: gh stack unstack [<stack-number>] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
               },
               "stdout": {
                 "source": "gh stack unstack --help: \"Remove a stack from local tracking and unstack it on GitHub.\" (stdout classification taken from this description of what the command prints)"
@@ -3460,7 +3460,7 @@
                 }
               },
               "citation": {
-                "source": "gh stack unstack --help: \"Usage: gh stack unstack [\u003cstack-number\u003e] [flags]\""
+                "source": "gh stack unstack --help: \"Usage: gh stack unstack [<stack-number>] [flags]\""
               }
             },
             "implicitEffects": [

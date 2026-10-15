@@ -245,7 +245,7 @@
             "source": "bd assign --help: \"bd assign \\u003cid\\u003e \\u003cname\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd assign --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd assign --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -318,7 +318,7 @@
             "source": "bd backup --help: \"bd backup [command]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd backup --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd backup --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -391,7 +391,7 @@
             "source": "bd batch --help: \"bd batch [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd batch --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd batch --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -464,7 +464,7 @@
             "source": "bd bootstrap --help: \"bd bootstrap [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd bootstrap --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd bootstrap --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -537,7 +537,7 @@
             "source": "bd branch --help: \"bd branch [name] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd branch --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd branch --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -610,7 +610,7 @@
             "source": "bd children --help: \"bd children \\u003cparent-id\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd children --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd children --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -683,7 +683,7 @@
             "source": "bd close --help: \"bd close [id...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd close --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd close --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -768,7 +768,7 @@
             "source": "bd comment --help: \"bd comment \\u003cid\\u003e [text...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd comment --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd comment --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -830,7 +830,7 @@
             },
             "target": "beads",
             "citation": {
-              "source": "bd comment --help: \"Usage: bd comment \u003cid\u003e [text...] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+              "source": "bd comment --help: \"Usage: bd comment <id> [text...] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
             }
           }
         ],
@@ -853,7 +853,7 @@
             "source": "bd comments --help: \"bd comments [issue-id] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd comments --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd comments --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1002,7 +1002,7 @@
             "provenance": "bd list --help",
             "citations": {
               "provenance": {
-                "source": "bd comments list --help: \"Invalid — use bd comments \u003cissue-id\u003e to list comments\""
+                "source": "bd comments list --help: \"Invalid — use bd comments <issue-id> to list comments\""
               },
               "stdin": {
                 "source": "bd comments list --help: \"Usage: bd comments list [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
@@ -1087,7 +1087,7 @@
             "source": "bd compact --help: \"bd compact [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd compact --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd compact --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1160,7 +1160,7 @@
             "source": "bd context --help: \"bd context [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd context --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd context --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1233,7 +1233,7 @@
             "source": "bd count --help: \"bd count [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd count --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd count --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1306,7 +1306,7 @@
             "source": "bd create --help: \"bd create [title] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd create --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd create --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1451,7 +1451,7 @@
             "source": "bd create-form --help: \"bd create-form [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd create-form --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd create-form --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1597,7 +1597,7 @@
             "source": "bd delete --help: \"bd delete \\u003cissue-id\\u003e [issue-id...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd delete --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd delete --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1731,7 +1731,7 @@
                 "source": "bd dep add --help: \"bd dep add [issue-id] [depends-on-id] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dep add --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dep add --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -1816,7 +1816,7 @@
                 "source": "bd dep cycles --help: \"bd dep cycles [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dep cycles --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dep cycles --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -1889,7 +1889,7 @@
                 "source": "bd dep list --help: \"bd dep list [issue-id...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dep list --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dep list --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -1962,7 +1962,7 @@
                 "source": "bd dep relate --help: \"bd dep relate \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dep relate --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dep relate --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2035,7 +2035,7 @@
                 "source": "bd dep remove --help: \"bd dep remove [issue-id] [depends-on-id] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dep remove --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dep remove --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2108,7 +2108,7 @@
                 "source": "bd dep tree --help: \"bd dep tree [issue-id] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dep tree --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dep tree --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2181,7 +2181,7 @@
                 "source": "bd dep unrelate --help: \"bd dep unrelate \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dep unrelate --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dep unrelate --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2256,7 +2256,7 @@
             "source": "bd doctor --help: \"bd doctor [path] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd doctor --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd doctor --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -2390,7 +2390,7 @@
                 "source": "bd dolt clean-databases --help: \"bd dolt clean-databases [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt clean-databases --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt clean-databases --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2463,7 +2463,7 @@
                 "source": "bd dolt commit --help: \"bd dolt commit [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt commit --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt commit --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2536,7 +2536,7 @@
                 "source": "bd dolt killall --help: \"bd dolt killall [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt killall --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt killall --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2609,7 +2609,7 @@
                 "source": "bd dolt pull --help: \"bd dolt pull [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt pull --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt pull --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2682,7 +2682,7 @@
                 "source": "bd dolt push --help: \"bd dolt push [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt push --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt push --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2755,7 +2755,7 @@
                 "source": "bd dolt remote --help: \"bd dolt remote [command]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt remote --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt remote --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2828,7 +2828,7 @@
                 "source": "bd dolt set --help: \"bd dolt set \\u003ckey\\u003e \\u003cvalue\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt set --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt set --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2901,7 +2901,7 @@
                 "source": "bd dolt show --help: \"bd dolt show [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt show --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt show --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -2974,7 +2974,7 @@
                 "source": "bd dolt start --help: \"bd dolt start [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt start --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt start --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -3047,7 +3047,7 @@
                 "source": "bd dolt status --help: \"bd dolt status [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt status --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt status --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -3120,7 +3120,7 @@
                 "source": "bd dolt stop --help: \"bd dolt stop [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt stop --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt stop --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -3193,7 +3193,7 @@
                 "source": "bd dolt test --help: \"bd dolt test [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd dolt test --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd dolt test --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -3268,7 +3268,7 @@
             "source": "bd duplicate --help: \"bd duplicate \\u003cid\\u003e --of \\u003ccanonical\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd duplicate --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd duplicate --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -3341,7 +3341,7 @@
             "source": "bd duplicates --help: \"bd duplicates [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd duplicates --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd duplicates --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -3414,7 +3414,7 @@
             "source": "bd edit --help: \"bd edit [id] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd edit --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd edit --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -3487,7 +3487,7 @@
             "source": "bd epic --help: \"bd epic [command]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd epic --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd epic --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -3560,7 +3560,7 @@
             "source": "bd export --help: \"bd export # Export issues to stdout\""
           },
           "unknownFlag": {
-            "source": "bd export --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd export --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -3657,7 +3657,7 @@
             "source": "bd federation --help: \"bd federation [command]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd federation --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd federation --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -3730,7 +3730,7 @@
             "source": "bd flatten --help: \"bd flatten [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd flatten --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd flatten --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -3803,7 +3803,7 @@
             "source": "bd forget --help: \"bd forget \\u003ckey\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd forget --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd forget --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -3876,7 +3876,7 @@
             "source": "bd gate --help: \"bd gate [command]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd gate --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd gate --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -3949,7 +3949,7 @@
             "source": "bd gc --help: \"bd gc [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd gc --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd gc --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -4022,7 +4022,7 @@
             "source": "bd graph --help: \"bd graph [issue-id] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd graph --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd graph --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -4095,7 +4095,7 @@
             "source": "bd history --help: \"bd history \\u003cid\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd history --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd history --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -4168,7 +4168,7 @@
             "source": "bd hooks --help: \"bd hooks [command]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd hooks --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd hooks --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -4241,7 +4241,7 @@
             "source": "bd human --help: \"bd human [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd human --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd human --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -4296,10 +4296,10 @@
                 "source": "bd human dismiss --help: \"Dismiss a human-needed bead permanently without responding.\""
               },
               "stdin": {
-                "source": "bd human dismiss --help: \"Usage: bd human dismiss \u003cissue-id\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+                "source": "bd human dismiss --help: \"Usage: bd human dismiss <issue-id> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "bd human dismiss --help: \"Usage: bd human dismiss \u003cissue-id\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+                "source": "bd human dismiss --help: \"Usage: bd human dismiss <issue-id> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
                 "source": "bd human dismiss --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
@@ -4341,7 +4341,7 @@
                 }
               },
               "citation": {
-                "source": "bd human dismiss --help: \"Usage: bd human dismiss \u003cissue-id\u003e [flags]\""
+                "source": "bd human dismiss --help: \"Usage: bd human dismiss <issue-id> [flags]\""
               }
             },
             "implicitEffects": [
@@ -4352,7 +4352,7 @@
                 },
                 "target": "beads",
                 "citation": {
-                  "source": "bd human dismiss --help: \"Usage: bd human dismiss \u003cissue-id\u003e [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:mutate\") is derived from this synopsis"
+                  "source": "bd human dismiss --help: \"Usage: bd human dismiss <issue-id> [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:mutate\") is derived from this synopsis"
                 }
               }
             ],
@@ -4442,10 +4442,10 @@
                 "source": "bd human respond --help: \"Respond to a human-needed bead by adding a comment and closing it.\""
               },
               "stdin": {
-                "source": "bd human respond --help: \"Usage: bd human respond \u003cissue-id\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+                "source": "bd human respond --help: \"Usage: bd human respond <issue-id> [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "bd human respond --help: \"Usage: bd human respond \u003cissue-id\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+                "source": "bd human respond --help: \"Usage: bd human respond <issue-id> [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
                 "source": "bd human respond --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
@@ -4487,7 +4487,7 @@
                 }
               },
               "citation": {
-                "source": "bd human respond --help: \"Usage: bd human respond \u003cissue-id\u003e [flags]\""
+                "source": "bd human respond --help: \"Usage: bd human respond <issue-id> [flags]\""
               }
             },
             "implicitEffects": [
@@ -4498,7 +4498,7 @@
                 },
                 "target": "beads",
                 "citation": {
-                  "source": "bd human respond --help: \"Usage: bd human respond \u003cissue-id\u003e [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:mutate\") is derived from this synopsis"
+                  "source": "bd human respond --help: \"Usage: bd human respond <issue-id> [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:mutate\") is derived from this synopsis"
                 }
               }
             ],
@@ -4597,7 +4597,7 @@
             "source": "bd import --help: \"bd import [file|-] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd import --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd import --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -4670,7 +4670,7 @@
             "source": "bd info --help: \"bd info [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd info --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd info --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -4743,7 +4743,7 @@
             "source": "bd init --help: \"bd init [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd init --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd init --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -4816,7 +4816,7 @@
             "source": "bd kv --help: \"bd kv [command]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd kv --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd kv --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -4950,7 +4950,7 @@
                 "source": "bd label add --help: \"bd label add [issue-id...] [label[,label...]] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd label add --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd label add --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -5023,7 +5023,7 @@
                 "source": "bd label list --help: \"bd label list [issue-id] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd label list --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd label list --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -5096,7 +5096,7 @@
                 "source": "bd label list-all --help: \"bd label list-all [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd label list-all --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd label list-all --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -5169,7 +5169,7 @@
                 "source": "bd label propagate --help: \"bd label propagate [parent-id] [label] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd label propagate --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd label propagate --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -5242,7 +5242,7 @@
                 "source": "bd label remove --help: \"bd label remove [issue-id...] [label[,label...]] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "bd label remove --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "bd label remove --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "flags": {
@@ -5317,7 +5317,7 @@
             "source": "bd link --help: \"bd link \\u003cid1\\u003e \\u003cid2\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd link --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd link --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -5390,7 +5390,7 @@
             "source": "bd lint --help: \"bd lint [issue-id...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd lint --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd lint --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -5463,7 +5463,7 @@
             "source": "bd list --help: \"bd list [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd list --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd list --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -5536,7 +5536,7 @@
             "source": "bd memories --help: \"bd memories [search] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd memories --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd memories --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -5609,7 +5609,7 @@
             "source": "bd merge-slot --help: \"bd merge-slot [command]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd merge-slot --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd merge-slot --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -5682,7 +5682,7 @@
             "source": "bd note --help: \"bd note \\u003cid\\u003e [text...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd note --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd note --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -5755,7 +5755,7 @@
             "source": "bd onboard --help: \"bd onboard [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd onboard --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd onboard --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -5828,7 +5828,7 @@
             "source": "bd prime --help: \"bd prime [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd prime --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd prime --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -5901,7 +5901,7 @@
             "source": "bd priority --help: \"bd priority \\u003cid\\u003e \\u003cn\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd priority --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd priority --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -5974,7 +5974,7 @@
             "source": "bd promote --help: \"bd promote \\u003cwisp-id\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd promote --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd promote --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6047,7 +6047,7 @@
             "source": "bd q --help: \"bd q [title] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd q --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd q --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6120,7 +6120,7 @@
             "source": "bd query --help: \"bd query [expression] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd query --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd query --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6193,7 +6193,7 @@
             "source": "bd quickstart --help: \"bd quickstart [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd quickstart --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd quickstart --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6266,7 +6266,7 @@
             "source": "bd ready --help: \"bd ready [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd ready --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd ready --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6339,7 +6339,7 @@
             "source": "bd recall --help: \"bd recall \\u003ckey\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd recall --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd recall --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6412,7 +6412,7 @@
             "source": "bd remember --help: \"bd remember \\\"\\u003cinsight\\u003e\\\" [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd remember --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd remember --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6485,7 +6485,7 @@
             "source": "bd reopen --help: \"bd reopen [id...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd reopen --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd reopen --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6558,7 +6558,7 @@
             "source": "bd restore --help: \"bd restore \\u003cissue-id\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd restore --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd restore --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6631,7 +6631,7 @@
             "source": "bd search --help: \"bd search [query] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd search --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd search --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6704,7 +6704,7 @@
             "source": "bd set-state --help: \"bd set-state \\u003cissue-id\\u003e \\u003cdimension\\u003e=\\u003cvalue\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd set-state --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd set-state --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6777,7 +6777,7 @@
             "source": "bd setup --help: \"bd setup --print # Print the template to stdout\""
           },
           "unknownFlag": {
-            "source": "bd setup --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd setup --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6850,7 +6850,7 @@
             "source": "bd show --help: \"bd show [id...] [--id=\\u003cid\\u003e...] [--current] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd show --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd show --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6923,7 +6923,7 @@
             "source": "bd stale --help: \"bd stale [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd stale --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd stale --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -6996,7 +6996,7 @@
             "source": "bd state --help: \"bd state \\u003cissue-id\\u003e \\u003cdimension\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd state --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd state --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -7142,7 +7142,7 @@
             "source": "bd status --help: \"bd status [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd status --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd status --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -7215,7 +7215,7 @@
             "source": "bd statuses --help: \"bd statuses [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd statuses --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd statuses --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -7288,7 +7288,7 @@
             "source": "bd supersede --help: \"bd supersede \\u003cid\\u003e --with \\u003cnew\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd supersede --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd supersede --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -7361,7 +7361,7 @@
             "source": "bd swarm --help: \"bd swarm [command]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd swarm --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd swarm --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -7434,7 +7434,7 @@
             "source": "bd tag --help: \"bd tag \\u003cid\\u003e \\u003clabel\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd tag --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd tag --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -7507,7 +7507,7 @@
             "source": "bd todo --help: \"bd todo [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd todo --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd todo --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -7580,7 +7580,7 @@
             "source": "bd types --help: \"bd types [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd types --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd types --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -7726,7 +7726,7 @@
             "source": "bd update --help: \"bd update [id...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd update --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd update --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -7835,7 +7835,7 @@
             "source": "bd vc --help: \"bd vc [command]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd vc --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd vc --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -7981,7 +7981,7 @@
             "source": "bd where --help: \"bd where [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "bd where --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "bd where --help: `bd create --this-is-not-a-real-flag` -> \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {

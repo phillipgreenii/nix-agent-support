@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"--changed-before \u003cdate|dur\u003e\""
+          "source": "fd --help: \"--changed-before <date|dur>\""
         }
       },
       "--changed-within": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"--changed-within \u003cdate|dur\u003e\""
+          "source": "fd --help: \"--changed-within <date|dur>\""
         }
       },
       "--color": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-c, --color \u003cwhen\u003e\""
+          "source": "fd --help: \"-c, --color <when>\""
         }
       },
       "--exclude": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-E, --exclude \u003cpattern\u003e\""
+          "source": "fd --help: \"-E, --exclude <pattern>\""
         }
       },
       "--extension": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-e, --extension \u003cext\u003e\""
+          "source": "fd --help: \"-e, --extension <ext>\""
         }
       },
       "--fixed-strings": {
@@ -197,7 +197,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-d, --max-depth \u003cdepth\u003e\""
+          "source": "fd --help: \"-d, --max-depth <depth>\""
         }
       },
       "--min-depth": {
@@ -209,7 +209,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"--min-depth \u003cdepth\u003e\""
+          "source": "fd --help: \"--min-depth <depth>\""
         }
       },
       "--no-ignore": {
@@ -245,7 +245,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-S, --size \u003csize\u003e\""
+          "source": "fd --help: \"-S, --size <size>\""
         }
       },
       "--type": {
@@ -257,7 +257,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-t, --type \u003cfiletype\u003e\""
+          "source": "fd --help: \"-t, --type <filetype>\""
         }
       },
       "--unrestricted": {
@@ -317,7 +317,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-E, --exclude \u003cpattern\u003e\""
+          "source": "fd --help: \"-E, --exclude <pattern>\""
         }
       },
       "-F": {
@@ -377,7 +377,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-S, --size \u003csize\u003e\""
+          "source": "fd --help: \"-S, --size <size>\""
         }
       },
       "-V": {
@@ -413,7 +413,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-c, --color \u003cwhen\u003e\""
+          "source": "fd --help: \"-c, --color <when>\""
         }
       },
       "-d": {
@@ -425,7 +425,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-d, --max-depth \u003cdepth\u003e\""
+          "source": "fd --help: \"-d, --max-depth <depth>\""
         }
       },
       "-e": {
@@ -437,7 +437,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-e, --extension \u003cext\u003e\""
+          "source": "fd --help: \"-e, --extension <ext>\""
         }
       },
       "-g": {
@@ -509,7 +509,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "fd --help: \"-t, --type \u003cfiletype\u003e\""
+          "source": "fd --help: \"-t, --type <filetype>\""
         }
       },
       "-u": {

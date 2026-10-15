@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "pg-go-mutate --help: \"--tags \u003clist\u003e Comma-separated build tags to enable, e.g. contract,smoke.\""
+          "source": "pg-go-mutate --help: \"--tags <list> Comma-separated build tags to enable, e.g. contract,smoke.\""
         }
       },
       "--timeout": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "pg-go-mutate --help: \"--timeout \u003csec\u003e Per-mutant TEST timeout. Default 60. Does NOT bound the\""
+          "source": "pg-go-mutate --help: \"--timeout <sec> Per-mutant TEST timeout. Default 60. Does NOT bound the\""
         }
       },
       "--workers": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "pg-go-mutate --help: \"--workers \u003cn\u003e IGNORED. Still validated (must be \u003e= 1), but every gomu\""
+          "source": "pg-go-mutate --help: \"--workers <n> IGNORED. Still validated (must be >= 1), but every gomu\""
         }
       },
       "-h": {

@@ -10,10 +10,10 @@
         "source": "create-packet.sh --help: \"create-packet.sh\""
       },
       "stdin": {
-        "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e (--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent <docket-id> --title <title> --body-file <file> (--acceptance <text> | --acceptance-file <file>)\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e (--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+        "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent <docket-id> --title <title> --body-file <file> (--acceptance <text> | --acceptance-file <file>)\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "create-packet.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "create-packet.sh --help: \"(--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\""
+          "source": "create-packet.sh --help: \"(--acceptance <text> | --acceptance-file <file>)\""
         }
       },
       "--acceptance-file": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "create-packet.sh --help: \"(--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\""
+          "source": "create-packet.sh --help: \"(--acceptance <text> | --acceptance-file <file>)\""
         }
       },
       "--actor": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "create-packet.sh --help: \"[--allow-inherit-labels] [--actor \u003cid\u003e]\""
+          "source": "create-packet.sh --help: \"[--allow-inherit-labels] [--actor <id>]\""
         }
       },
       "--allow-inherit-labels": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "create-packet.sh --help: \"[--allow-inherit-labels] [--actor \u003cid\u003e]\""
+          "source": "create-packet.sh --help: \"[--allow-inherit-labels] [--actor <id>]\""
         }
       },
       "--body-file": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "create-packet.sh --help: \"create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e\""
+          "source": "create-packet.sh --help: \"create-packet.sh --parent <docket-id> --title <title> --body-file <file>\""
         }
       },
       "--help": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "create-packet.sh --help: \"[--metadata \u003cjson\u003e] [--label \u003clabels\u003e]\""
+          "source": "create-packet.sh --help: \"[--metadata <json>] [--label <labels>]\""
         }
       },
       "--metadata": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "create-packet.sh --help: \"[--metadata \u003cjson\u003e] [--label \u003clabels\u003e]\""
+          "source": "create-packet.sh --help: \"[--metadata <json>] [--label <labels>]\""
         }
       },
       "--parent": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "create-packet.sh --help: \"create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e\""
+          "source": "create-packet.sh --help: \"create-packet.sh --parent <docket-id> --title <title> --body-file <file>\""
         }
       },
       "-h": {
@@ -163,7 +163,7 @@
         }
       },
       "citation": {
-        "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e (--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\""
+        "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent <docket-id> --title <title> --body-file <file> (--acceptance <text> | --acceptance-file <file>)\""
       }
     },
     "implicitEffects": [
@@ -174,7 +174,7 @@
         },
         "target": "beads",
         "citation": {
-          "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e (--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+          "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent <docket-id> --title <title> --body-file <file> (--acceptance <text> | --acceptance-file <file>)\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
         }
       }
     ],

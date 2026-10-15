@@ -47,7 +47,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-K, --config \u003cfile\u003e Read config from a file\""
+          "source": "curl --help all: \"-K, --config <file> Read config from a file\""
         }
       },
       "--connect-timeout": {
@@ -419,7 +419,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "curl --help all: \"-K, --config \u003cfile\u003e Read config from a file\""
+          "source": "curl --help all: \"-K, --config <file> Read config from a file\""
         }
       },
       "-L": {

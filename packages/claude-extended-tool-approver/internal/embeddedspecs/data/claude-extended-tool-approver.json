@@ -102,7 +102,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "claude-extended-tool-approver evaluate --help: \"--corpus \u003cpath\u003e switches evaluate to an entirely different grading source: the\""
+              "source": "claude-extended-tool-approver evaluate --help: \"--corpus <path> switches evaluate to an entirely different grading source: the\""
             }
           },
           "--days": {

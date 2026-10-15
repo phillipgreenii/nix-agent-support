@@ -198,7 +198,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"-C, --cd \u003cDIR\u003e Change to directory before running\""
+              "source": "prek run --help: \"-C, --cd <DIR> Change to directory before running\""
             }
           },
           "--color": {
@@ -210,7 +210,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"--color \u003cCOLOR\u003e Whether to use color in output [env: PREK_COLOR=] [default: auto]\""
+              "source": "prek run --help: \"--color <COLOR> Whether to use color in output [env: PREK_COLOR=] [default: auto]\""
             }
           },
           "--directory": {
@@ -222,7 +222,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"-d, --directory \u003cDIR\u003e Run hooks on all files in the specified directories\""
+              "source": "prek run --help: \"-d, --directory <DIR> Run hooks on all files in the specified directories\""
             }
           },
           "--dry-run": {
@@ -258,7 +258,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"--files [\u003cFILES\u003e...] Specific filenames to run hooks on\""
+              "source": "prek run --help: \"--files [<FILES>...] Specific filenames to run hooks on\""
             }
           },
           "--from-ref": {
@@ -270,7 +270,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"-s, --from-ref \u003cFROM_REF\u003e The original ref in a `\u003cfrom_ref\u003e...\u003cto_ref\u003e` diff expression. Files\""
+              "source": "prek run --help: \"-s, --from-ref <FROM_REF> The original ref in a `<from_ref>...<to_ref>` diff expression. Files\""
             }
           },
           "--help": {
@@ -354,7 +354,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"--skip \u003cHOOK|PROJECT\u003e Skip the specified hooks or projects\""
+              "source": "prek run --help: \"--skip <HOOK|PROJECT> Skip the specified hooks or projects\""
             }
           },
           "--stage": {
@@ -366,7 +366,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"--stage \u003cSTAGE\u003e The stage during which the hook is fired [possible values: manual,\""
+              "source": "prek run --help: \"--stage <STAGE> The stage during which the hook is fired [possible values: manual,\""
             }
           },
           "--to-ref": {
@@ -378,7 +378,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"-o, --to-ref \u003cTO_REF\u003e The destination ref in a `from_ref...to_ref` diff expression. Defaults\""
+              "source": "prek run --help: \"-o, --to-ref <TO_REF> The destination ref in a `from_ref...to_ref` diff expression. Defaults\""
             }
           },
           "--verbose": {
@@ -402,7 +402,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"-C, --cd \u003cDIR\u003e Change to directory before running\""
+              "source": "prek run --help: \"-C, --cd <DIR> Change to directory before running\""
             }
           },
           "-a": {
@@ -426,7 +426,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"-d, --directory \u003cDIR\u003e Run hooks on all files in the specified directories\""
+              "source": "prek run --help: \"-d, --directory <DIR> Run hooks on all files in the specified directories\""
             }
           },
           "-h": {
@@ -450,7 +450,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"-o, --to-ref \u003cTO_REF\u003e The destination ref in a `from_ref...to_ref` diff expression. Defaults\""
+              "source": "prek run --help: \"-o, --to-ref <TO_REF> The destination ref in a `from_ref...to_ref` diff expression. Defaults\""
             }
           },
           "-q": {
@@ -474,7 +474,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "prek run --help: \"-s, --from-ref \u003cFROM_REF\u003e The original ref in a `\u003cfrom_ref\u003e...\u003cto_ref\u003e` diff expression. Files\""
+              "source": "prek run --help: \"-s, --from-ref <FROM_REF> The original ref in a `<from_ref>...<to_ref>` diff expression. Files\""
             }
           },
           "-v": {

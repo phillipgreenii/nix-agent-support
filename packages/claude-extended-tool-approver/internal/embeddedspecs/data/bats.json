@@ -10,10 +10,10 @@
         "source": "bats --help: \"Bats 1.12.0\""
       },
       "stdin": {
-        "source": "bats --help: \"Usage: bats [OPTIONS] \u003ctests\u003e bats [-h | -v]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "bats --help: \"Usage: bats [OPTIONS] <tests> bats [-h | -v]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "bats --help: \"Usage: bats [OPTIONS] \u003ctests\u003e bats [-h | -v]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+        "source": "bats --help: \"Usage: bats [OPTIONS] <tests> bats [-h | -v]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "bats --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "bats --help: \"-f, --filter \u003cregex\u003e Only run tests that match the regular expression\""
+          "source": "bats --help: \"-f, --filter <regex> Only run tests that match the regular expression\""
         }
       },
       "--help": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "bats --help: \"-j, --jobs \u003cjobs\u003e Number of parallel jobs (requires GNU parallel or shenwei356/rush)\""
+          "source": "bats --help: \"-j, --jobs <jobs> Number of parallel jobs (requires GNU parallel or shenwei356/rush)\""
         }
       },
       "--no-parallelize-across-files": {
@@ -185,7 +185,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "bats --help: \"-f, --filter \u003cregex\u003e Only run tests that match the regular expression\""
+          "source": "bats --help: \"-f, --filter <regex> Only run tests that match the regular expression\""
         }
       },
       "-h": {
@@ -209,7 +209,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "bats --help: \"-j, --jobs \u003cjobs\u003e Number of parallel jobs (requires GNU parallel or shenwei356/rush)\""
+          "source": "bats --help: \"-j, --jobs <jobs> Number of parallel jobs (requires GNU parallel or shenwei356/rush)\""
         }
       },
       "-r": {
@@ -259,7 +259,7 @@
         }
       },
       "citation": {
-        "source": "bats --help: \"Usage: bats [OPTIONS] \u003ctests\u003e bats [-h | -v]\""
+        "source": "bats --help: \"Usage: bats [OPTIONS] <tests> bats [-h | -v]\""
       }
     },
     "implicitEffects": [
@@ -269,7 +269,7 @@
         },
         "target": "bats",
         "citation": {
-          "source": "bats --help: \"Usage: bats [OPTIONS] \u003ctests\u003e bats [-h | -v]\" -- documents the command whose implicit effect (target \"bats\", role \"exec\") is derived from this synopsis"
+          "source": "bats --help: \"Usage: bats [OPTIONS] <tests> bats [-h | -v]\" -- documents the command whose implicit effect (target \"bats\", role \"exec\") is derived from this synopsis"
         }
       }
     ],

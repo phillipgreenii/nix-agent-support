@@ -4,16 +4,16 @@
   "name": "impl-traces.sh",
   "command": {
     "name": "impl-traces.sh",
-    "provenance": "impl-traces.sh --help / header comment (behavior-docs IMPL evaluator: read-only doc\u003c-\u003ecode ID reconciliation), this repo 2026-10-05",
+    "provenance": "impl-traces.sh --help / header comment (behavior-docs IMPL evaluator: read-only doc<->code ID reconciliation), this repo 2026-10-05",
     "citations": {
       "provenance": {
         "source": "impl-traces.sh --help: \"impl-traces.sh — the mechanical core of the IMPL evaluator (bead pg2-wr6lm.4):\""
       },
       "stdin": {
-        "source": "impl-traces.sh --help: \"Usage: impl-traces.sh [--strict] \u003cbehavior-docs-set-dir\u003e \u003cimpl-root\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "impl-traces.sh --help: \"Usage: impl-traces.sh [--strict] <behavior-docs-set-dir> <impl-root>\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "impl-traces.sh --help: \"Usage: impl-traces.sh [--strict] \u003cbehavior-docs-set-dir\u003e \u003cimpl-root\u003e\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+        "source": "impl-traces.sh --help: \"Usage: impl-traces.sh [--strict] <behavior-docs-set-dir> <impl-root>\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "impl-traces.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "impl-traces.sh --help: \"Usage: impl-traces.sh [--strict] \u003cbehavior-docs-set-dir\u003e \u003cimpl-root\u003e\""
+          "source": "impl-traces.sh --help: \"Usage: impl-traces.sh [--strict] <behavior-docs-set-dir> <impl-root>\""
         }
       },
       "-h": {
@@ -75,7 +75,7 @@
         }
       },
       "citation": {
-        "source": "impl-traces.sh --help: \"Usage: impl-traces.sh [--strict] \u003cbehavior-docs-set-dir\u003e \u003cimpl-root\u003e\""
+        "source": "impl-traces.sh --help: \"Usage: impl-traces.sh [--strict] <behavior-docs-set-dir> <impl-root>\""
       }
     },
     "stdin": "never",

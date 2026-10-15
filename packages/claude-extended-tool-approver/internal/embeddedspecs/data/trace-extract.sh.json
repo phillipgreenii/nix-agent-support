@@ -10,10 +10,10 @@
         "source": "trace-extract.sh --help: \"trace-extract.sh — the mechanical INV-22 traceability extractor for ONE\""
       },
       "stdin": {
-        "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] \u003cbehavior-docs-set-dir\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] <behavior-docs-set-dir>\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] \u003cbehavior-docs-set-dir\u003e\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+        "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] <behavior-docs-set-dir>\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "trace-extract.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] \u003cbehavior-docs-set-dir\u003e\""
+          "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] <behavior-docs-set-dir>\""
         }
       },
       "-h": {
@@ -72,7 +72,7 @@
         }
       },
       "citation": {
-        "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] \u003cbehavior-docs-set-dir\u003e\""
+        "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] <behavior-docs-set-dir>\""
       }
     },
     "stdin": "never",

@@ -30,7 +30,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "git --help: \"[--config-env=\u003cname\u003e=\u003cenvvar\u003e]\""
+          "source": "git --help: \"[--config-env=<name>=<envvar>]\""
         }
       },
       "--exec-path": {
@@ -42,7 +42,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "git --help: \"[--exec-path[=\u003cpath\u003e]]\""
+          "source": "git --help: \"[--exec-path[=<path>]]\""
         }
       },
       "--glob-pathspecs": {
@@ -66,7 +66,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C \u003cpath\u003e] [-c \u003cname\u003e=\u003cvalue\u003e]\""
+          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]\""
         }
       },
       "--icase-pathspecs": {
@@ -162,7 +162,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C \u003cpath\u003e] [-c \u003cname\u003e=\u003cvalue\u003e]\""
+          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]\""
         }
       },
       "-C": {
@@ -174,7 +174,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C \u003cpath\u003e] [-c \u003cname\u003e=\u003cvalue\u003e]\""
+          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]\""
         }
       },
       "-P": {
@@ -199,7 +199,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C \u003cpath\u003e] [-c \u003cname\u003e=\u003cvalue\u003e]\""
+          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]\""
         }
       },
       "-p": {
@@ -620,7 +620,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git branch --help: \"or: git branch [\u003coptions\u003e] [-r] (-d | -D) \u003cbranch-name\u003e...\""
+              "source": "git branch --help: \"or: git branch [<options>] [-r] (-d | -D) <branch-name>...\""
             }
           },
           "-l": {
@@ -682,7 +682,7 @@
             "target": ".git",
             "whenFlags": ["-d", "--delete", "-D"],
             "citation": {
-              "source": "git branch --help: \"usage: git branch [\u003coptions\u003e] [-r | -a] [--merged] [--no-merged] or: git branch [\u003coptions\u003e] [-f] [--recurse-submodules] \u003cbranch-name\u003e [\u003cstart-point\u003e] or: git branch [\u003coptions\u003e] [-l] [\u003cpattern\u003e...]\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\") is derived from this synopsis"
+              "source": "git branch --help: \"usage: git branch [<options>] [-r | -a] [--merged] [--no-merged] or: git branch [<options>] [-f] [--recurse-submodules] <branch-name> [<start-point>] or: git branch [<options>] [-l] [<pattern>...]\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\") is derived from this synopsis"
             }
           }
         ],
@@ -696,13 +696,13 @@
         "provenance": "git version 2.54.0, git help checkout",
         "citations": {
           "provenance": {
-            "source": "git checkout --help: \"usage: git checkout [\u003coptions\u003e] \u003cbranch\u003e\""
+            "source": "git checkout --help: \"usage: git checkout [<options>] <branch>\""
           },
           "stdin": {
-            "source": "git checkout --help: \"usage: git checkout [\u003coptions\u003e] \u003cbranch\u003e or: git checkout [\u003coptions\u003e] [\u003cbranch\u003e] -- \u003cfile\u003e...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git checkout --help: \"usage: git checkout [<options>] <branch> or: git checkout [<options>] [<branch>] -- <file>...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git checkout --help: \"usage: git checkout [\u003coptions\u003e] \u003cbranch\u003e or: git checkout [\u003coptions\u003e] [\u003cbranch\u003e] -- \u003cfile\u003e...\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git checkout --help: \"usage: git checkout [<options>] <branch> or: git checkout [<options>] [<branch>] -- <file>...\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git checkout --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -718,7 +718,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git checkout --help: \"or: git checkout [\u003coptions\u003e] [\u003cbranch\u003e] -- \u003cfile\u003e...\""
+              "source": "git checkout --help: \"or: git checkout [<options>] [<branch>] -- <file>...\""
             }
           },
           "--ours": {
@@ -757,7 +757,7 @@
             }
           },
           "citation": {
-            "source": "git checkout --help: \"usage: git checkout [\u003coptions\u003e] \u003cbranch\u003e or: git checkout [\u003coptions\u003e] [\u003cbranch\u003e] -- \u003cfile\u003e...\""
+            "source": "git checkout --help: \"usage: git checkout [<options>] <branch> or: git checkout [<options>] [<branch>] -- <file>...\""
           }
         },
         "stdin": "never",
@@ -769,13 +769,13 @@
         "provenance": "git version 2.54.0, git help cherry",
         "citations": {
           "provenance": {
-            "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\""
+            "source": "git cherry --help: \"usage: git cherry [-v] [<upstream> [<head> [<limit>]]]\""
           },
           "stdin": {
-            "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git cherry --help: \"usage: git cherry [-v] [<upstream> [<head> [<limit>]]]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git cherry --help: \"usage: git cherry [-v] [<upstream> [<head> [<limit>]]]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git cherry --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -791,7 +791,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\""
+              "source": "git cherry --help: \"usage: git cherry [-v] [<upstream> [<head> [<limit>]]]\""
             }
           }
         },
@@ -805,7 +805,7 @@
             }
           },
           "citation": {
-            "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\""
+            "source": "git cherry --help: \"usage: git cherry [-v] [<upstream> [<head> [<limit>]]]\""
           }
         },
         "implicitEffects": [
@@ -815,7 +815,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+              "source": "git cherry --help: \"usage: git cherry [-v] [<upstream> [<head> [<limit>]]]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
             }
           }
         ],
@@ -1238,7 +1238,7 @@
         "provenance": "git version 2.54.0, git config -h",
         "citations": {
           "interpreter": {
-            "source": "git config set -h: \"usage: git config set [\u003cfile-option\u003e] [--type=\u003ctype\u003e] [--comment=\u003cmessage\u003e] [--all] [--value=\u003cpattern\u003e] [--fixed-value] \u003cname\u003e \u003cvalue\u003e\" (the write form git-config interpretation keys on: two or three positionals)"
+            "source": "git config set -h: \"usage: git config set [<file-option>] [--type=<type>] [--comment=<message>] [--all] [--value=<pattern>] [--fixed-value] <name> <value>\" (the write form git-config interpretation keys on: two or three positionals)"
           },
           "provenance": {
             "source": "git config -h: \"usage: git config list [\\u003cfile-option\\u003e] [\\u003cdisplay-option\\u003e] [--includes]\""
@@ -1263,7 +1263,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git config set -h: \"-f, --[no-]file \u003cfile\u003e use given config file\" (the file is written to, so the operand is a path modify judged by P5)"
+              "source": "git config set -h: \"-f, --[no-]file <file> use given config file\" (the file is written to, so the operand is a path modify judged by P5)"
             }
           },
           "--get": {
@@ -1383,7 +1383,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git config set -h: \"-f, --[no-]file \u003cfile\u003e use given config file\" (the file is written to, so the operand is a path modify judged by P5)"
+              "source": "git config set -h: \"-f, --[no-]file <file> use given config file\" (the file is written to, so the operand is a path modify judged by P5)"
             }
           },
           "-l": {
@@ -1541,7 +1541,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git diff --help: \"or: git diff [\u003coptions\u003e] --no-index [--] \u003cpath\u003e \u003cpath\u003e [\u003cpathspec\u003e...]\""
+              "source": "git diff --help: \"or: git diff [<options>] --no-index [--] <path> <path> [<pathspec>...]\""
             }
           },
           "--no-renames": {
@@ -1712,13 +1712,13 @@
         "provenance": "git version 2.54.0, git help fetch",
         "citations": {
           "provenance": {
-            "source": "git fetch --help: \"usage: git fetch [\u003coptions\u003e] [\u003crepository\u003e [\u003crefspec\u003e...]]\""
+            "source": "git fetch --help: \"usage: git fetch [<options>] [<repository> [<refspec>...]]\""
           },
           "stdin": {
-            "source": "git fetch --help: \"usage: git fetch [\u003coptions\u003e] [\u003crepository\u003e [\u003crefspec\u003e...]] or: git fetch [\u003coptions\u003e] \u003cgroup\u003e or: git fetch --multiple [\u003coptions\u003e] [(\u003crepository\u003e|\u003cgroup\u003e)...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git fetch --help: \"usage: git fetch [<options>] [<repository> [<refspec>...]] or: git fetch [<options>] <group> or: git fetch --multiple [<options>] [(<repository>|<group>)...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git fetch --help: \"usage: git fetch [\u003coptions\u003e] [\u003crepository\u003e [\u003crefspec\u003e...]] or: git fetch [\u003coptions\u003e] \u003cgroup\u003e or: git fetch --multiple [\u003coptions\u003e] [(\u003crepository\u003e|\u003cgroup\u003e)...]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git fetch --help: \"usage: git fetch [<options>] [<repository> [<refspec>...]] or: git fetch [<options>] <group> or: git fetch --multiple [<options>] [(<repository>|<group>)...]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git fetch --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -1734,7 +1734,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git fetch --help: \"or: git fetch --all [\u003coptions\u003e]\""
+              "source": "git fetch --help: \"or: git fetch --all [<options>]\""
             }
           },
           "--append": {
@@ -1770,7 +1770,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git fetch --help: \"--depth=\u003cdepth\u003e\""
+              "source": "git fetch --help: \"--depth=<depth>\""
             }
           },
           "--no-tags": {
@@ -1923,7 +1923,7 @@
             }
           },
           "citation": {
-            "source": "git fetch --help: \"usage: git fetch [\u003coptions\u003e] [\u003crepository\u003e [\u003crefspec\u003e...]] or: git fetch [\u003coptions\u003e] \u003cgroup\u003e or: git fetch --multiple [\u003coptions\u003e] [(\u003crepository\u003e|\u003cgroup\u003e)...]\""
+            "source": "git fetch --help: \"usage: git fetch [<options>] [<repository> [<refspec>...]] or: git fetch [<options>] <group> or: git fetch --multiple [<options>] [(<repository>|<group>)...]\""
           }
         },
         "implicitEffects": [
@@ -1932,11 +1932,11 @@
               "kind": "remote",
               "operation": "fetch"
             },
-            "target": "\u003cdefault-remote\u003e",
+            "target": "<default-remote>",
             "dynamic": true,
             "whenNoPositionals": true,
             "citation": {
-              "source": "git fetch --help: \"usage: git fetch [\u003coptions\u003e] [\u003crepository\u003e [\u003crefspec\u003e...]] or: git fetch [\u003coptions\u003e] \u003cgroup\u003e or: git fetch --multiple [\u003coptions\u003e] [(\u003crepository\u003e|\u003cgroup\u003e)...]\" -- documents the command whose implicit effect (target \"\u003cdefault-remote\u003e\", role \"remote:fetch\") is derived from this synopsis"
+              "source": "git fetch --help: \"usage: git fetch [<options>] [<repository> [<refspec>...]] or: git fetch [<options>] <group> or: git fetch --multiple [<options>] [(<repository>|<group>)...]\" -- documents the command whose implicit effect (target \"<default-remote>\", role \"remote:fetch\") is derived from this synopsis"
             }
           }
         ],
@@ -1950,13 +1950,13 @@
         "provenance": "git version 2.54.0, git help grep",
         "citations": {
           "provenance": {
-            "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\""
+            "source": "git grep --help: \"usage: git grep [<options>] [-e] <pattern> [<rev>...] [[--] <path>...]\""
           },
           "stdin": {
-            "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git grep --help: \"usage: git grep [<options>] [-e] <pattern> [<rev>...] [[--] <path>...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git grep --help: \"usage: git grep [<options>] [-e] <pattern> [<rev>...] [[--] <path>...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git grep --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -1984,7 +1984,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git grep --help: \"[ [--[no-]exclude-standard] [--cached | --untracked | --no-index] | \u003ctree\u003e...]\""
+              "source": "git grep --help: \"[ [--[no-]exclude-standard] [--cached | --untracked | --no-index] | <tree>...]\""
             }
           },
           "--count": {
@@ -2092,7 +2092,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git grep --help: \"[(-m | --max-count) \u003cnum\u003e]\""
+              "source": "git grep --help: \"[(-m | --max-count) <num>]\""
             }
           },
           "--name-only": {
@@ -2116,7 +2116,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git grep --help: \"[--color[=\u003cwhen\u003e] | --no-color]\""
+              "source": "git grep --help: \"[--color[=<when>] | --no-color]\""
             }
           },
           "--null": {
@@ -2176,7 +2176,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git grep --help: \"[ [--[no-]exclude-standard] [--cached | --untracked | --no-index] | \u003ctree\u003e...]\""
+              "source": "git grep --help: \"[ [--[no-]exclude-standard] [--cached | --untracked | --no-index] | <tree>...]\""
             }
           },
           "--word-regexp": {
@@ -2200,7 +2200,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git grep --help: \"-A, --after-context \u003cn\u003e\""
+              "source": "git grep --help: \"-A, --after-context <n>\""
             }
           },
           "-B": {
@@ -2212,7 +2212,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git grep --help: \"-B, --before-context \u003cn\u003e\""
+              "source": "git grep --help: \"-B, --before-context <n>\""
             }
           },
           "-C": {
@@ -2224,7 +2224,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git grep --help: \"-C, --[no-]context \u003cn\u003e\""
+              "source": "git grep --help: \"-C, --[no-]context <n>\""
             }
           },
           "-E": {
@@ -2344,7 +2344,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\""
+              "source": "git grep --help: \"usage: git grep [<options>] [-e] <pattern> [<rev>...] [[--] <path>...]\""
             }
           },
           "-h": {
@@ -2392,7 +2392,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git grep --help: \"-m, --[no-]max-count \u003cn\u003e\""
+              "source": "git grep --help: \"-m, --[no-]max-count <n>\""
             }
           },
           "-n": {
@@ -2466,7 +2466,7 @@
             }
           },
           "citation": {
-            "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\""
+            "source": "git grep --help: \"usage: git grep [<options>] [-e] <pattern> [<rev>...] [[--] <path>...]\""
           }
         },
         "implicitEffects": [
@@ -2476,7 +2476,7 @@
             },
             "target": ".",
             "citation": {
-              "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
+              "source": "git grep --help: \"usage: git grep [<options>] [-e] <pattern> [<rev>...] [[--] <path>...]\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
             }
           }
         ],
@@ -2754,13 +2754,13 @@
         "provenance": "git version 2.54.0, git help ls-files",
         "citations": {
           "provenance": {
-            "source": "git ls-files --help: \"usage: git ls-files [\u003coptions\u003e] [\u003cfile\u003e...]\""
+            "source": "git ls-files --help: \"usage: git ls-files [<options>] [<file>...]\""
           },
           "stdin": {
-            "source": "git ls-files --help: \"usage: git ls-files [\u003coptions\u003e] [\u003cfile\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git ls-files --help: \"usage: git ls-files [<options>] [<file>...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git ls-files --help: \"usage: git ls-files [\u003coptions\u003e] [\u003cfile\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git ls-files --help: \"usage: git ls-files [<options>] [<file>...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git ls-files --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -2800,7 +2800,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git ls-files --help: \"[--error-unmatch] [--with-tree=\u003ctree-ish\u003e]\""
+              "source": "git ls-files --help: \"[--error-unmatch] [--with-tree=<tree-ish>]\""
             }
           },
           "--exclude-standard": {
@@ -2946,7 +2946,7 @@
             }
           },
           "citation": {
-            "source": "git ls-files --help: \"usage: git ls-files [\u003coptions\u003e] [\u003cfile\u003e...]\""
+            "source": "git ls-files --help: \"usage: git ls-files [<options>] [<file>...]\""
           }
         },
         "implicitEffects": [
@@ -2956,7 +2956,7 @@
             },
             "target": ".",
             "citation": {
-              "source": "git ls-files --help: \"usage: git ls-files [\u003coptions\u003e] [\u003cfile\u003e...]\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
+              "source": "git ls-files --help: \"usage: git ls-files [<options>] [<file>...]\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
             }
           }
         ],
@@ -2970,13 +2970,13 @@
         "provenance": "git version 2.54.0, git help ls-tree",
         "citations": {
           "provenance": {
-            "source": "git ls-tree --help: \"usage: git ls-tree [\u003coptions\u003e] \u003ctree-ish\u003e [\u003cpath\u003e...]\""
+            "source": "git ls-tree --help: \"usage: git ls-tree [<options>] <tree-ish> [<path>...]\""
           },
           "stdin": {
-            "source": "git ls-tree --help: \"usage: git ls-tree [\u003coptions\u003e] \u003ctree-ish\u003e [\u003cpath\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git ls-tree --help: \"usage: git ls-tree [<options>] <tree-ish> [<path>...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git ls-tree --help: \"usage: git ls-tree [\u003coptions\u003e] \u003ctree-ish\u003e [\u003cpath\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git ls-tree --help: \"usage: git ls-tree [<options>] <tree-ish> [<path>...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git ls-tree --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -2992,7 +2992,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git ls-tree --help: \"[--name-only] [--name-status] [--object-only] [--full-name] [--full-tree] [--abbrev[=\u003cn\u003e]] [--format=\u003cformat\u003e]\""
+              "source": "git ls-tree --help: \"[--name-only] [--name-status] [--object-only] [--full-name] [--full-tree] [--abbrev[=<n>]] [--format=<format>]\""
             }
           },
           "--full-name": {
@@ -3016,7 +3016,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git ls-tree --help: \"[--name-only] [--name-status] [--object-only] [--full-name] [--full-tree] [--abbrev[=\u003cn\u003e]] [--format=\u003cformat\u003e]\""
+              "source": "git ls-tree --help: \"[--name-only] [--name-status] [--object-only] [--full-name] [--full-tree] [--abbrev[=<n>]] [--format=<format>]\""
             }
           },
           "--long": {
@@ -3126,7 +3126,7 @@
             }
           },
           "citation": {
-            "source": "git ls-tree --help: \"usage: git ls-tree [\u003coptions\u003e] \u003ctree-ish\u003e [\u003cpath\u003e...]\""
+            "source": "git ls-tree --help: \"usage: git ls-tree [<options>] <tree-ish> [<path>...]\""
           }
         },
         "implicitEffects": [
@@ -3136,7 +3136,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "git ls-tree --help: \"usage: git ls-tree [\u003coptions\u003e] \u003ctree-ish\u003e [\u003cpath\u003e...]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+              "source": "git ls-tree --help: \"usage: git ls-tree [<options>] <tree-ish> [<path>...]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
             }
           }
         ],
@@ -3150,13 +3150,13 @@
         "provenance": "git version 2.54.0, git help merge",
         "citations": {
           "provenance": {
-            "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...]\""
+            "source": "git merge --help: \"usage: git merge [<options>] [<commit>...]\""
           },
           "stdin": {
-            "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...] or: git merge --abort or: git merge --continue\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git merge --help: \"usage: git merge [<options>] [<commit>...] or: git merge --abort or: git merge --continue\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...] or: git merge --abort or: git merge --continue\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git merge --help: \"usage: git merge [<options>] [<commit>...] or: git merge --abort or: git merge --continue\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git merge --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -3247,7 +3247,7 @@
             }
           },
           "citation": {
-            "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...] or: git merge --abort or: git merge --continue\""
+            "source": "git merge --help: \"usage: git merge [<options>] [<commit>...] or: git merge --abort or: git merge --continue\""
           }
         },
         "implicitEffects": [
@@ -3257,7 +3257,7 @@
             },
             "target": ".",
             "citation": {
-              "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...] or: git merge --abort or: git merge --continue\" -- documents the command whose implicit effect (target \".\", role \"path-modify\") is derived from this synopsis"
+              "source": "git merge --help: \"usage: git merge [<options>] [<commit>...] or: git merge --abort or: git merge --continue\" -- documents the command whose implicit effect (target \".\", role \"path-modify\") is derived from this synopsis"
             }
           },
           {
@@ -3266,7 +3266,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...] or: git merge --abort or: git merge --continue\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\") is derived from this synopsis"
+              "source": "git merge --help: \"usage: git merge [<options>] [<commit>...] or: git merge --abort or: git merge --continue\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\") is derived from this synopsis"
             }
           }
         ],
@@ -3280,13 +3280,13 @@
         "provenance": "git version 2.54.0, git help merge-base",
         "citations": {
           "provenance": {
-            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e...\""
+            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] <commit> <commit>...\""
           },
           "stdin": {
-            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e... or: git merge-base [-a | --all] --octopus \u003ccommit\u003e... or: git merge-base --is-ancestor \u003ccommit\u003e \u003ccommit\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] <commit> <commit>... or: git merge-base [-a | --all] --octopus <commit>... or: git merge-base --is-ancestor <commit> <commit>\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e... or: git merge-base [-a | --all] --octopus \u003ccommit\u003e... or: git merge-base --is-ancestor \u003ccommit\u003e \u003ccommit\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] <commit> <commit>... or: git merge-base [-a | --all] --octopus <commit>... or: git merge-base --is-ancestor <commit> <commit>\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git merge-base --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -3302,7 +3302,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e...\""
+              "source": "git merge-base --help: \"usage: git merge-base [-a | --all] <commit> <commit>...\""
             }
           },
           "--fork-point": {
@@ -3314,7 +3314,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git merge-base --help: \"or: git merge-base --fork-point \u003cref\u003e [\u003ccommit\u003e]\""
+              "source": "git merge-base --help: \"or: git merge-base --fork-point <ref> [<commit>]\""
             }
           },
           "--independent": {
@@ -3326,7 +3326,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git merge-base --help: \"or: git merge-base --independent \u003ccommit\u003e...\""
+              "source": "git merge-base --help: \"or: git merge-base --independent <commit>...\""
             }
           },
           "--is-ancestor": {
@@ -3338,7 +3338,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git merge-base --help: \"or: git merge-base --is-ancestor \u003ccommit\u003e \u003ccommit\u003e\""
+              "source": "git merge-base --help: \"or: git merge-base --is-ancestor <commit> <commit>\""
             }
           },
           "--octopus": {
@@ -3350,7 +3350,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git merge-base --help: \"or: git merge-base [-a | --all] --octopus \u003ccommit\u003e...\""
+              "source": "git merge-base --help: \"or: git merge-base [-a | --all] --octopus <commit>...\""
             }
           },
           "-a": {
@@ -3362,7 +3362,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e...\""
+              "source": "git merge-base --help: \"usage: git merge-base [-a | --all] <commit> <commit>...\""
             }
           }
         },
@@ -3376,7 +3376,7 @@
             }
           },
           "citation": {
-            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e... or: git merge-base [-a | --all] --octopus \u003ccommit\u003e... or: git merge-base --is-ancestor \u003ccommit\u003e \u003ccommit\u003e\""
+            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] <commit> <commit>... or: git merge-base [-a | --all] --octopus <commit>... or: git merge-base --is-ancestor <commit> <commit>\""
           }
         },
         "implicitEffects": [
@@ -3386,7 +3386,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e... or: git merge-base [-a | --all] --octopus \u003ccommit\u003e... or: git merge-base --is-ancestor \u003ccommit\u003e \u003ccommit\u003e\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+              "source": "git merge-base --help: \"usage: git merge-base [-a | --all] <commit> <commit>... or: git merge-base [-a | --all] --octopus <commit>... or: git merge-base --is-ancestor <commit> <commit>\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
             }
           }
         ],
@@ -3624,7 +3624,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git help push (git 2.54.0): \"--receive-pack=\u003cgit-receive-pack\u003e, --exec=\u003cgit-receive-pack\u003e: Path to the git-receive-pack program on the remote end\" -- a program the caller chooses to run on the remote end (or locally for a path remote)"
+              "source": "git help push (git 2.54.0): \"--receive-pack=<git-receive-pack>, --exec=<git-receive-pack>: Path to the git-receive-pack program on the remote end\" -- a program the caller chooses to run on the remote end (or locally for a path remote)"
             }
           },
           "--follow-tags": {
@@ -3784,7 +3784,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git help push (git 2.54.0): \"--receive-pack=\u003cgit-receive-pack\u003e, --exec=\u003cgit-receive-pack\u003e: Path to the git-receive-pack program on the remote end\" -- a program the caller chooses to run on the remote end (or locally for a path remote)"
+              "source": "git help push (git 2.54.0): \"--receive-pack=<git-receive-pack>, --exec=<git-receive-pack>: Path to the git-receive-pack program on the remote end\" -- a program the caller chooses to run on the remote end (or locally for a path remote)"
             }
           },
           "--set-upstream": {
@@ -3949,11 +3949,11 @@
               "kind": "remote",
               "operation": "push"
             },
-            "target": "\u003cdefault-remote\u003e",
+            "target": "<default-remote>",
             "dynamic": true,
             "whenNoPositionals": true,
             "citation": {
-              "source": "git push -h: \"usage: git push [\\u003coptions\\u003e] [\\u003crepository\\u003e [\\u003crefspec\\u003e...]]\" -- documents the optional/omittable operand shape this implicit default (target \"\u003cdefault-remote\u003e\", role \"remote\") is derived from"
+              "source": "git push -h: \"usage: git push [\\u003coptions\\u003e] [\\u003crepository\\u003e [\\u003crefspec\\u003e...]]\" -- documents the optional/omittable operand shape this implicit default (target \"<default-remote>\", role \"remote\") is derived from"
             }
           }
         ],
@@ -3967,13 +3967,13 @@
         "provenance": "git version 2.54.0, git help range-diff",
         "citations": {
           "provenance": {
-            "source": "git range-diff --help: \"usage: git range-diff [\u003coptions\u003e] \u003cold-base\u003e..\u003cold-tip\u003e \u003cnew-base\u003e..\u003cnew-tip\u003e\""
+            "source": "git range-diff --help: \"usage: git range-diff [<options>] <old-base>..<old-tip> <new-base>..<new-tip>\""
           },
           "stdin": {
-            "source": "git range-diff --help: \"usage: git range-diff [\u003coptions\u003e] \u003cold-base\u003e..\u003cold-tip\u003e \u003cnew-base\u003e..\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cold-tip\u003e...\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cbase\u003e \u003cold-tip\u003e \u003cnew-tip\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git range-diff --help: \"usage: git range-diff [<options>] <old-base>..<old-tip> <new-base>..<new-tip> or: git range-diff [<options>] <old-tip>...<new-tip> or: git range-diff [<options>] <base> <old-tip> <new-tip>\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git range-diff --help: \"usage: git range-diff [\u003coptions\u003e] \u003cold-base\u003e..\u003cold-tip\u003e \u003cnew-base\u003e..\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cold-tip\u003e...\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cbase\u003e \u003cold-tip\u003e \u003cnew-tip\u003e\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git range-diff --help: \"usage: git range-diff [<options>] <old-base>..<old-tip> <new-base>..<new-tip> or: git range-diff [<options>] <old-tip>...<new-tip> or: git range-diff [<options>] <base> <old-tip> <new-tip>\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git range-diff --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -3989,7 +3989,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git range-diff --help: \"[--no-dual-color] [--creation-factor=\u003cfactor\u003e]\""
+              "source": "git range-diff --help: \"[--no-dual-color] [--creation-factor=<factor>]\""
             }
           },
           "--no-color": {
@@ -4001,7 +4001,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git range-diff --help: \"git range-diff [--color=[\u003cwhen\u003e]] [--no-color] [\u003cdiff-options\u003e]\""
+              "source": "git range-diff --help: \"git range-diff [--color=[<when>]] [--no-color] [<diff-options>]\""
             }
           },
           "--stat": {
@@ -4027,7 +4027,7 @@
             }
           },
           "citation": {
-            "source": "git range-diff --help: \"usage: git range-diff [\u003coptions\u003e] \u003cold-base\u003e..\u003cold-tip\u003e \u003cnew-base\u003e..\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cold-tip\u003e...\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cbase\u003e \u003cold-tip\u003e \u003cnew-tip\u003e\""
+            "source": "git range-diff --help: \"usage: git range-diff [<options>] <old-base>..<old-tip> <new-base>..<new-tip> or: git range-diff [<options>] <old-tip>...<new-tip> or: git range-diff [<options>] <base> <old-tip> <new-tip>\""
           }
         },
         "implicitEffects": [
@@ -4037,7 +4037,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "git range-diff --help: \"usage: git range-diff [\u003coptions\u003e] \u003cold-base\u003e..\u003cold-tip\u003e \u003cnew-base\u003e..\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cold-tip\u003e...\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cbase\u003e \u003cold-tip\u003e \u003cnew-tip\u003e\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+              "source": "git range-diff --help: \"usage: git range-diff [<options>] <old-base>..<old-tip> <new-base>..<new-tip> or: git range-diff [<options>] <old-tip>...<new-tip> or: git range-diff [<options>] <base> <old-tip> <new-tip>\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
             }
           }
         ],
@@ -4051,13 +4051,13 @@
         "provenance": "git version 2.54.0, git help rebase",
         "citations": {
           "provenance": {
-            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]]\""
+            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase> | --keep-base] [<upstream> [<branch>]]\""
           },
           "stdin": {
-            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]] or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e] or: git rebase --continue | --abort | --skip | --edit-todo\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase> | --keep-base] [<upstream> [<branch>]] or: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase>] --root [<branch>] or: git rebase --continue | --abort | --skip | --edit-todo\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]] or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e] or: git rebase --continue | --abort | --skip | --edit-todo\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase> | --keep-base] [<upstream> [<branch>]] or: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase>] --root [<branch>] or: git rebase --continue | --abort | --skip | --edit-todo\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git rebase --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -4109,7 +4109,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]]\""
+              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase> | --keep-base] [<upstream> [<branch>]]\""
             }
           },
           "--no-autostash": {
@@ -4145,7 +4145,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]]\""
+              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase> | --keep-base] [<upstream> [<branch>]]\""
             }
           },
           "--quiet": {
@@ -4193,7 +4193,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git rebase --help: \"or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e]\""
+              "source": "git rebase --help: \"or: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase>] --root [<branch>]\""
             }
           },
           "--skip": {
@@ -4255,7 +4255,7 @@
             }
           },
           "citation": {
-            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]] or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e] or: git rebase --continue | --abort | --skip | --edit-todo\""
+            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase> | --keep-base] [<upstream> [<branch>]] or: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase>] --root [<branch>] or: git rebase --continue | --abort | --skip | --edit-todo\""
           }
         },
         "implicitEffects": [
@@ -4265,7 +4265,7 @@
             },
             "target": ".",
             "citation": {
-              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]] or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e] or: git rebase --continue | --abort | --skip | --edit-todo\" -- documents the command whose implicit effect (target \".\", role \"path-modify\") is derived from this synopsis"
+              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase> | --keep-base] [<upstream> [<branch>]] or: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase>] --root [<branch>] or: git rebase --continue | --abort | --skip | --edit-todo\" -- documents the command whose implicit effect (target \".\", role \"path-modify\") is derived from this synopsis"
             }
           },
           {
@@ -4274,7 +4274,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]] or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e] or: git rebase --continue | --abort | --skip | --edit-todo\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\") is derived from this synopsis"
+              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase> | --keep-base] [<upstream> [<branch>]] or: git rebase [-i] [options] [--exec <cmd>] [--onto <newbase>] --root [<branch>] or: git rebase --continue | --abort | --skip | --edit-todo\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\") is derived from this synopsis"
             }
           }
         ],
@@ -4291,10 +4291,10 @@
             "source": "git remote --help: \"usage: git remote [-v | --verbose]\""
           },
           "stdin": {
-            "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t \u003cbranch\u003e] [-m \u003cmaster\u003e] [-f] [--tags | --no-tags] [--mirror=\u003cfetch|push\u003e] \u003cname\u003e \u003curl\u003e or: git remote rename [--[no-]progress] \u003cold\u003e \u003cnew\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t <branch>] [-m <master>] [-f] [--tags | --no-tags] [--mirror=<fetch|push>] <name> <url> or: git remote rename [--[no-]progress] <old> <new>\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t \u003cbranch\u003e] [-m \u003cmaster\u003e] [-f] [--tags | --no-tags] [--mirror=\u003cfetch|push\u003e] \u003cname\u003e \u003curl\u003e or: git remote rename [--[no-]progress] \u003cold\u003e \u003cnew\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t <branch>] [-m <master>] [-f] [--tags | --no-tags] [--mirror=<fetch|push>] <name> <url> or: git remote rename [--[no-]progress] <old> <new>\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git remote --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -4336,7 +4336,7 @@
             }
           },
           "citation": {
-            "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t \u003cbranch\u003e] [-m \u003cmaster\u003e] [-f] [--tags | --no-tags] [--mirror=\u003cfetch|push\u003e] \u003cname\u003e \u003curl\u003e or: git remote rename [--[no-]progress] \u003cold\u003e \u003cnew\u003e\""
+            "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t <branch>] [-m <master>] [-f] [--tags | --no-tags] [--mirror=<fetch|push>] <name> <url> or: git remote rename [--[no-]progress] <old> <new>\""
           }
         },
         "implicitEffects": [
@@ -4346,7 +4346,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t \u003cbranch\u003e] [-m \u003cmaster\u003e] [-f] [--tags | --no-tags] [--mirror=\u003cfetch|push\u003e] \u003cname\u003e \u003curl\u003e or: git remote rename [--[no-]progress] \u003cold\u003e \u003cnew\u003e\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+              "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t <branch>] [-m <master>] [-f] [--tags | --no-tags] [--mirror=<fetch|push>] <name> <url> or: git remote rename [--[no-]progress] <old> <new>\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
             }
           }
         ],
@@ -4634,7 +4634,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git rev-parse --help: \"--git-path \u003cpath\u003e\""
+              "source": "git rev-parse --help: \"--git-path <path>\""
             }
           },
           "--is-bare-repository": {
@@ -5080,13 +5080,13 @@
         "provenance": "git version 2.54.0, git help stash",
         "citations": {
           "provenance": {
-            "source": "git stash --help: \"usage: git stash list [\u003clog-options\u003e]\""
+            "source": "git stash --help: \"usage: git stash list [<log-options>]\""
           },
           "stdin": {
-            "source": "git stash --help: \"usage: git stash list [\u003clog-options\u003e] or: git stash show [-u | --include-untracked | --only-untracked] [\u003cdiff-options\u003e] [\u003cstash\u003e] or: git stash drop [-q | --quiet] [\u003cstash\u003e]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git stash --help: \"usage: git stash list [<log-options>] or: git stash show [-u | --include-untracked | --only-untracked] [<diff-options>] [<stash>] or: git stash drop [-q | --quiet] [<stash>]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git stash --help: \"usage: git stash list [\u003clog-options\u003e] or: git stash show [-u | --include-untracked | --only-untracked] [\u003cdiff-options\u003e] [\u003cstash\u003e] or: git stash drop [-q | --quiet] [\u003cstash\u003e]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git stash --help: \"usage: git stash list [<log-options>] or: git stash show [-u | --include-untracked | --only-untracked] [<diff-options>] [<stash>] or: git stash drop [-q | --quiet] [<stash>]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git stash --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -5102,7 +5102,7 @@
             }
           },
           "citation": {
-            "source": "git stash --help: \"usage: git stash list [\u003clog-options\u003e] or: git stash show [-u | --include-untracked | --only-untracked] [\u003cdiff-options\u003e] [\u003cstash\u003e] or: git stash drop [-q | --quiet] [\u003cstash\u003e]\""
+            "source": "git stash --help: \"usage: git stash list [<log-options>] or: git stash show [-u | --include-untracked | --only-untracked] [<diff-options>] [<stash>] or: git stash drop [-q | --quiet] [<stash>]\""
           }
         },
         "stdin": "never",
@@ -5115,13 +5115,13 @@
             "provenance": "git version 2.54.0, git help stash",
             "citations": {
               "provenance": {
-                "source": "git stash list --help: \"usage: git stash list [\u003clog-options\u003e]\""
+                "source": "git stash list --help: \"usage: git stash list [<log-options>]\""
               },
               "stdin": {
-                "source": "git stash list --help: \"usage: git stash list [\u003clog-options\u003e]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+                "source": "git stash list --help: \"usage: git stash list [<log-options>]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "git stash list --help: \"usage: git stash list [\u003clog-options\u003e]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+                "source": "git stash list --help: \"usage: git stash list [<log-options>]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
                 "source": "git stash list --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -5137,7 +5137,7 @@
                 }
               },
               "citation": {
-                "source": "git stash list --help: \"usage: git stash list [\u003clog-options\u003e]\""
+                "source": "git stash list --help: \"usage: git stash list [<log-options>]\""
               }
             },
             "implicitEffects": [
@@ -5147,7 +5147,7 @@
                 },
                 "target": ".git",
                 "citation": {
-                  "source": "git stash list --help: \"usage: git stash list [\u003clog-options\u003e]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+                  "source": "git stash list --help: \"usage: git stash list [<log-options>]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
                 }
               }
             ],
@@ -5161,13 +5161,13 @@
             "provenance": "git version 2.54.0, git help stash",
             "citations": {
               "provenance": {
-                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\""
+                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) <message>] [--pathspec-from-file=<file> [--pathspec-file-nul]] [--] [<pathspec>...]\""
               },
               "stdin": {
-                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) <message>] [--pathspec-from-file=<file> [--pathspec-file-nul]] [--] [<pathspec>...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) <message>] [--pathspec-from-file=<file> [--pathspec-file-nul]] [--] [<pathspec>...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
                 "source": "git stash --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -5196,7 +5196,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "git stash --help: \"[(-m | --message) \u003cmessage\u003e]\" -- the message is only a label on the stash commit; the operand is restricted to a closed literal shape (git-stash-message)"
+                  "source": "git stash --help: \"[(-m | --message) <message>]\" -- the message is only a label on the stash commit; the operand is restricted to a closed literal shape (git-stash-message)"
                 }
               },
               "-m": {
@@ -5209,7 +5209,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "git stash --help: \"[(-m | --message) \u003cmessage\u003e]\" -- the message is only a label on the stash commit; the operand is restricted to a closed literal shape (git-stash-message)"
+                  "source": "git stash --help: \"[(-m | --message) <message>]\" -- the message is only a label on the stash commit; the operand is restricted to a closed literal shape (git-stash-message)"
                 }
               },
               "-u": {
@@ -5235,7 +5235,7 @@
                 }
               },
               "citation": {
-                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\" -- every \u003cpathspec\u003e positional is left unmodeled (a pathspec limits what is stashed; ADR 0075 R5)"
+                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) <message>] [--pathspec-from-file=<file> [--pathspec-file-nul]] [--] [<pathspec>...]\" -- every <pathspec> positional is left unmodeled (a pathspec limits what is stashed; ADR 0075 R5)"
               }
             },
             "implicitEffects": [
@@ -5245,7 +5245,7 @@
                 },
                 "target": ".",
                 "citation": {
-                  "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\" -- documents the command whose implicit effect (target \".\", role \"path-modify\": the working tree is reset to HEAD) is derived from this synopsis"
+                  "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) <message>] [--pathspec-from-file=<file> [--pathspec-file-nul]] [--] [<pathspec>...]\" -- documents the command whose implicit effect (target \".\", role \"path-modify\": the working tree is reset to HEAD) is derived from this synopsis"
                 }
               },
               {
@@ -5254,7 +5254,7 @@
                 },
                 "target": ".git",
                 "citation": {
-                  "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\": the stash ref and objects are written) is derived from this synopsis"
+                  "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) <message>] [--pathspec-from-file=<file> [--pathspec-file-nul]] [--] [<pathspec>...]\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\": the stash ref and objects are written) is derived from this synopsis"
                 }
               }
             ],
@@ -5388,7 +5388,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git help status (full) + git(1): reviewed in full; neither documents a --lock-index/--no-lock-index option for git-status, and live invocation confirms git 2.54.0 rejects it (`git status --no-lock-index` -\u003e \"error: unknown option `no-lock-index'\", exit 129) -- FACT MISMATCH discovered during citation backfill (this repo's flag/role structure is left unchanged per this packet's own Binding decisions; recorded via bd comment, not silently corrected)"
+              "source": "git help status (full) + git(1): reviewed in full; neither documents a --lock-index/--no-lock-index option for git-status, and live invocation confirms git 2.54.0 rejects it (`git status --no-lock-index` -> \"error: unknown option `no-lock-index'\", exit 129) -- FACT MISMATCH discovered during citation backfill (this repo's flag/role structure is left unchanged per this packet's own Binding decisions; recorded via bd comment, not silently corrected)"
             }
           },
           "--no-renames": {
@@ -5570,13 +5570,13 @@
         "provenance": "git version 2.54.0, git help symbolic-ref",
         "citations": {
           "provenance": {
-            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m \u003creason\u003e] \u003cname\u003e \u003cref\u003e\""
+            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m <reason>] <name> <ref>\""
           },
           "stdin": {
-            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m \u003creason\u003e] \u003cname\u003e \u003cref\u003e or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e or: git symbolic-ref --delete [-q] \u003cname\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m <reason>] <name> <ref> or: git symbolic-ref [-q] [--short] [--no-recurse] <name> or: git symbolic-ref --delete [-q] <name>\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m \u003creason\u003e] \u003cname\u003e \u003cref\u003e or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e or: git symbolic-ref --delete [-q] \u003cname\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m <reason>] <name> <ref> or: git symbolic-ref [-q] [--short] [--no-recurse] <name> or: git symbolic-ref --delete [-q] <name>\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "git symbolic-ref --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -5592,7 +5592,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git symbolic-ref --help: \"or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e\""
+              "source": "git symbolic-ref --help: \"or: git symbolic-ref [-q] [--short] [--no-recurse] <name>\""
             }
           },
           "--quiet": {
@@ -5616,7 +5616,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git symbolic-ref --help: \"or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e\""
+              "source": "git symbolic-ref --help: \"or: git symbolic-ref [-q] [--short] [--no-recurse] <name>\""
             }
           },
           "-q": {
@@ -5628,7 +5628,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "git symbolic-ref --help: \"or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e\""
+              "source": "git symbolic-ref --help: \"or: git symbolic-ref [-q] [--short] [--no-recurse] <name>\""
             }
           }
         },
@@ -5647,7 +5647,7 @@
             }
           },
           "citation": {
-            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m \u003creason\u003e] \u003cname\u003e \u003cref\u003e or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e or: git symbolic-ref --delete [-q] \u003cname\u003e\""
+            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m <reason>] <name> <ref> or: git symbolic-ref [-q] [--short] [--no-recurse] <name> or: git symbolic-ref --delete [-q] <name>\""
           }
         },
         "implicitEffects": [
@@ -5657,7 +5657,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m \u003creason\u003e] \u003cname\u003e \u003cref\u003e or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e or: git symbolic-ref --delete [-q] \u003cname\u003e\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+              "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m <reason>] <name> <ref> or: git symbolic-ref [-q] [--short] [--no-recurse] <name> or: git symbolic-ref --delete [-q] <name>\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
             }
           }
         ],

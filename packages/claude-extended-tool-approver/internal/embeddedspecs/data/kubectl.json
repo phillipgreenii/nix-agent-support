@@ -4,7 +4,7 @@
   "name": "kubectl",
   "command": {
     "name": "kubectl",
-    "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+    "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
     "citations": {
       "dangerFlagInert:--output": {
         "source": "kubectl get --help: -o/--output selects an OUTPUT FORMAT string (e.g. json/yaml/wide), never a file-write destination (tc-6v2dm)."
@@ -267,7 +267,7 @@
     "subcommands": {
       "annotate": {
         "name": "annotate",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl annotate --help: \"Update the annotations on one or more resources.\""
@@ -279,7 +279,7 @@
             "source": "kubectl annotate --help: \"kubectl annotate [--overwrite] (-f FILENAME | TYPE NAME) KEY_1=VAL_1 ... KEY_N=VAL_N [--resource-version=version] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl annotate --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl annotate --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -314,7 +314,7 @@
       },
       "api-resources": {
         "name": "api-resources",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl api-resources --help: \"Print the supported API resources on the server.\""
@@ -326,7 +326,7 @@
             "source": "kubectl api-resources --help: \"kubectl api-resources [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl api-resources --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl api-resources --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -361,7 +361,7 @@
       },
       "api-versions": {
         "name": "api-versions",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl api-versions --help: \"Print the supported API versions on the server, in the form of \\\"group/version\\\".\""
@@ -373,7 +373,7 @@
             "source": "kubectl api-versions --help: \"kubectl api-versions [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl api-versions --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl api-versions --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -408,7 +408,7 @@
       },
       "apply": {
         "name": "apply",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
             "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
@@ -423,7 +423,7 @@
             "source": "kubectl apply --help: \"kubectl apply (-f FILENAME | -k DIRECTORY) [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl apply --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl apply --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -545,7 +545,7 @@
       },
       "attach": {
         "name": "attach",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl attach --help: \"Attach to a process that is already running inside an existing container.\""
@@ -557,7 +557,7 @@
             "source": "kubectl attach --help: \"# and sends stdout/stderr from 'bash' back to the client\""
           },
           "unknownFlag": {
-            "source": "kubectl attach --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl attach --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -602,7 +602,7 @@
       },
       "cluster-info": {
         "name": "cluster-info",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl cluster-info --help: \"Display addresses of the control plane and services with label kubernetes.io/cluster-service=true. To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.\""
@@ -614,7 +614,7 @@
             "source": "kubectl cluster-info --help: \"kubectl cluster-info [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl cluster-info --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl cluster-info --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -649,7 +649,7 @@
       },
       "config": {
         "name": "config",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl config --help: \"Modify kubeconfig files using subcommands like \\\"kubectl config set current-context my-context\\\".\""
@@ -684,7 +684,7 @@
         "subcommands": {
           "current-context": {
             "name": "current-context",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config current-context --help: \"Display the current-context.\""
@@ -696,7 +696,7 @@
                 "source": "kubectl config current-context --help: \"kubectl config current-context [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config current-context --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config current-context --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -731,7 +731,7 @@
           },
           "delete-cluster": {
             "name": "delete-cluster",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config delete-cluster --help: \"Delete the specified cluster from the kubeconfig.\""
@@ -743,7 +743,7 @@
                 "source": "kubectl config delete-cluster --help: \"kubectl config delete-cluster NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config delete-cluster --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config delete-cluster --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -778,7 +778,7 @@
           },
           "delete-context": {
             "name": "delete-context",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config delete-context --help: \"Delete the specified context from the kubeconfig.\""
@@ -790,7 +790,7 @@
                 "source": "kubectl config delete-context --help: \"kubectl config delete-context NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config delete-context --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config delete-context --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -825,7 +825,7 @@
           },
           "delete-user": {
             "name": "delete-user",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config delete-user --help: \"Delete the specified user from the kubeconfig.\""
@@ -837,7 +837,7 @@
                 "source": "kubectl config delete-user --help: \"kubectl config delete-user NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config delete-user --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config delete-user --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -872,7 +872,7 @@
           },
           "get-clusters": {
             "name": "get-clusters",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config get-clusters --help: \"Display clusters defined in the kubeconfig.\""
@@ -884,7 +884,7 @@
                 "source": "kubectl config get-clusters --help: \"kubectl config get-clusters [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config get-clusters --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config get-clusters --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -919,7 +919,7 @@
           },
           "get-contexts": {
             "name": "get-contexts",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config get-contexts --help: \"Display one or many contexts from the kubeconfig file.\""
@@ -931,7 +931,7 @@
                 "source": "kubectl config get-contexts --help: \"kubectl config get-contexts [(-o|--output=)name)] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config get-contexts --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config get-contexts --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -966,7 +966,7 @@
           },
           "get-users": {
             "name": "get-users",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config get-users --help: \"Display users defined in the kubeconfig.\""
@@ -978,7 +978,7 @@
                 "source": "kubectl config get-users --help: \"kubectl config get-users [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config get-users --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config get-users --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1013,7 +1013,7 @@
           },
           "rename-context": {
             "name": "rename-context",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config rename-context --help: \"Renames a context from the kubeconfig file.\""
@@ -1025,7 +1025,7 @@
                 "source": "kubectl config rename-context --help: \"kubectl config rename-context CONTEXT_NAME NEW_NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config rename-context --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config rename-context --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1060,7 +1060,7 @@
           },
           "set": {
             "name": "set",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config set --help: \"Set an individual value in a kubeconfig file.\""
@@ -1072,7 +1072,7 @@
                 "source": "kubectl config set --help: \"kubectl config set PROPERTY_NAME PROPERTY_VALUE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config set --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config set --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1107,7 +1107,7 @@
           },
           "set-cluster": {
             "name": "set-cluster",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config set-cluster --help: \"Set a cluster entry in kubeconfig.\""
@@ -1119,7 +1119,7 @@
                 "source": "kubectl config set-cluster --help: \"kubectl config set-cluster NAME [--server=server] [--certificate-authority=path/to/certificate/authority] [--insecure-skip-tls-verify=true] [--tls-server-name=example.com] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config set-cluster --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config set-cluster --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1154,7 +1154,7 @@
           },
           "set-context": {
             "name": "set-context",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config set-context --help: \"Set a context entry in kubeconfig.\""
@@ -1166,7 +1166,7 @@
                 "source": "kubectl config set-context --help: \"kubectl config set-context [NAME | --current] [--cluster=cluster_nickname] [--user=user_nickname] [--namespace=namespace] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config set-context --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config set-context --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1201,7 +1201,7 @@
           },
           "set-credentials": {
             "name": "set-credentials",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config set-credentials --help: \"Set a user entry in kubeconfig.\""
@@ -1213,7 +1213,7 @@
                 "source": "kubectl config set-credentials --help: \"kubectl config set-credentials NAME [--client-certificate=path/to/certfile] [--client-key=path/to/keyfile] [--token=bearer_token] [--username=basic_user] [--password=basic_password] [--auth-provider=provider_name] [--auth-provider-arg=key=value] [--exec-command=exec_command] [--exec-api-version=exec_api_version] [--exec-arg=arg] [--exec-env=key=value] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config set-credentials --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config set-credentials --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1248,7 +1248,7 @@
           },
           "unset": {
             "name": "unset",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config unset --help: \"Unset an individual value in a kubeconfig file.\""
@@ -1260,7 +1260,7 @@
                 "source": "kubectl config unset --help: \"kubectl config unset PROPERTY_NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config unset --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config unset --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1295,7 +1295,7 @@
           },
           "use-context": {
             "name": "use-context",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config use-context --help: \"Set the current-context in a kubeconfig file.\""
@@ -1307,7 +1307,7 @@
                 "source": "kubectl config use-context --help: \"kubectl config use-context CONTEXT_NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config use-context --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config use-context --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1342,7 +1342,7 @@
           },
           "view": {
             "name": "view",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl config view --help: \"Display merged kubeconfig settings or a specified kubeconfig file.\""
@@ -1354,7 +1354,7 @@
                 "source": "kubectl config view --help: \"kubectl config view [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl config view --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl config view --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1391,7 +1391,7 @@
       },
       "cordon": {
         "name": "cordon",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl cordon --help: \"Mark node as unschedulable.\""
@@ -1403,7 +1403,7 @@
             "source": "kubectl cordon --help: \"kubectl cordon NODE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl cordon --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl cordon --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -1438,7 +1438,7 @@
       },
       "cp": {
         "name": "cp",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "dangerFlagInert:-c": {
             "source": "kubectl cp --help: -c/--container names the CONTAINER within the pod to copy to/from, not a config-file effect (tc-6v2dm)."
@@ -1530,7 +1530,7 @@
       },
       "create": {
         "name": "create",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
             "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
@@ -1545,7 +1545,7 @@
             "source": "kubectl create --help: \"kubectl create -f FILENAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl create --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl create --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1667,7 +1667,7 @@
       },
       "debug": {
         "name": "debug",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl debug --help: \"Debug cluster resources using interactive debugging containers.\""
@@ -1679,7 +1679,7 @@
             "source": "kubectl debug --help: \"kubectl debug (POD | TYPE[[.VERSION].GROUP]/NAME) [ -- COMMAND [args...] ] [options]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl debug --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl debug --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -1723,7 +1723,7 @@
       },
       "delete": {
         "name": "delete",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
             "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
@@ -1738,7 +1738,7 @@
             "source": "kubectl delete --help: \"kubectl delete ([-f FILENAME] | [-k DIRECTORY] | TYPE [(NAME | -l label | --all)]) [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl delete --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl delete --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1860,7 +1860,7 @@
       },
       "describe": {
         "name": "describe",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl describe --help: \"Show details of a specific resource or group of resources.\""
@@ -1872,7 +1872,7 @@
             "source": "kubectl describe --help: \"kubectl describe (-f FILENAME | TYPE [NAME_PREFIX | -l label] | TYPE/NAME) [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl describe --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl describe --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -1907,7 +1907,7 @@
       },
       "diff": {
         "name": "diff",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
             "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
@@ -1922,7 +1922,7 @@
             "source": "kubectl diff --help: \"kubectl diff -f FILENAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl diff --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl diff --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -2008,7 +2008,7 @@
       },
       "drain": {
         "name": "drain",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl drain --help: \"Drain node in preparation for maintenance.\""
@@ -2020,7 +2020,7 @@
             "source": "kubectl drain --help: \"kubectl drain NODE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl drain --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl drain --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2055,7 +2055,7 @@
       },
       "edit": {
         "name": "edit",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl edit --help: \"Edit a resource from the default editor.\""
@@ -2067,7 +2067,7 @@
             "source": "kubectl edit --help: \"kubectl edit (RESOURCE/NAME | -f FILENAME) [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl edit --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl edit --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2102,7 +2102,7 @@
       },
       "exec": {
         "name": "exec",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl exec --help: \"Execute a command in a container.\""
@@ -2114,7 +2114,7 @@
             "source": "kubectl exec --help: \"# and sends stdout/stderr from 'bash' back to the client\""
           },
           "unknownFlag": {
-            "source": "kubectl exec --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl exec --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2159,7 +2159,7 @@
       },
       "explain": {
         "name": "explain",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl explain --help: \"Describe fields and structure of various resources.\""
@@ -2171,7 +2171,7 @@
             "source": "kubectl explain --help: \"kubectl explain TYPE [--recursive=FALSE|TRUE] [--api-version=api-version-group] [-o|--output=plaintext|plaintext-openapiv2] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl explain --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl explain --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2206,7 +2206,7 @@
       },
       "expose": {
         "name": "expose",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl expose --help: \"Expose a resource as a new Kubernetes service.\""
@@ -2218,7 +2218,7 @@
             "source": "kubectl expose --help: \"kubectl expose (-f FILENAME | TYPE NAME) [--port=port] [--protocol=TCP|UDP|SCTP] [--target-port=number-or-name] [--name=name] [--external-ip=external-ip-of-service] [--type=type] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl expose --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl expose --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2253,7 +2253,7 @@
       },
       "get": {
         "name": "get",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl get --help: \"Display one or many resources.\""
@@ -2265,7 +2265,7 @@
             "source": "kubectl get --help: \"kubectl get [(-o|--output=)json|yaml|kyaml|name|go-template|go-template-file|template|templatefile|jsonpath|jsonpath-as-json|jsonpath-file|custom-columns|custom-columns-file|wide] (TYPE[.VERSION][.GROUP] [NAME | -l label] | TYPE[.VERSION][.GROUP]/NAME ...) [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl get --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl get --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2300,7 +2300,7 @@
       },
       "label": {
         "name": "label",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl label --help: \"Update the labels on a resource.\""
@@ -2312,7 +2312,7 @@
             "source": "kubectl label --help: \"kubectl label [--overwrite] (-f FILENAME | TYPE NAME) KEY_1=VAL_1 ... KEY_N=VAL_N [--resource-version=version] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl label --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl label --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2347,7 +2347,7 @@
       },
       "logs": {
         "name": "logs",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl logs --help: \"Print the logs for a container in a pod or specified resource. If the pod has only one container, the container name is optional.\""
@@ -2359,7 +2359,7 @@
             "source": "kubectl logs --help: \"kubectl logs [-f] [-p] (POD | TYPE/NAME) [-c CONTAINER] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl logs --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl logs --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2394,7 +2394,7 @@
       },
       "patch": {
         "name": "patch",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
             "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
@@ -2409,7 +2409,7 @@
             "source": "kubectl patch --help: \"kubectl patch (-f FILENAME | TYPE NAME) [-p PATCH|--patch-file FILE] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl patch --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl patch --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -2531,7 +2531,7 @@
       },
       "port-forward": {
         "name": "port-forward",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl port-forward --help: \"Forward one or more local ports to a pod.\""
@@ -2543,7 +2543,7 @@
             "source": "kubectl port-forward --help: \"kubectl port-forward TYPE/NAME [options] [LOCAL_PORT:]REMOTE_PORT [...[LOCAL_PORT_N:]REMOTE_PORT_N]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl port-forward --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl port-forward --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2587,7 +2587,7 @@
       },
       "proxy": {
         "name": "proxy",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl proxy --help: \"Creates a proxy server or application-level gateway between localhost and the Kubernetes API server. It also allows serving static content over specified HTTP path. All incoming data enters through one port and gets forwarded to the remote Kubernetes API server port, except for the path matching the static content path.\""
@@ -2599,7 +2599,7 @@
             "source": "kubectl proxy --help: \"# The chosen port for the server will be output to stdout\""
           },
           "unknownFlag": {
-            "source": "kubectl proxy --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl proxy --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2643,7 +2643,7 @@
       },
       "replace": {
         "name": "replace",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
             "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
@@ -2658,7 +2658,7 @@
             "source": "kubectl replace --help: \"kubectl replace -f FILENAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl replace --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl replace --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -2780,7 +2780,7 @@
       },
       "rollout": {
         "name": "rollout",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl rollout --help: \"Manage the rollout of one or many resources.\""
@@ -2815,7 +2815,7 @@
         "subcommands": {
           "history": {
             "name": "history",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl rollout history --help: \"View previous rollout revisions and configurations.\""
@@ -2827,7 +2827,7 @@
                 "source": "kubectl rollout history --help: \"kubectl rollout history (TYPE NAME | TYPE/NAME) [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl rollout history --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl rollout history --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -2862,7 +2862,7 @@
           },
           "pause": {
             "name": "pause",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl rollout pause --help: \"Mark the provided resource as paused.\""
@@ -2874,7 +2874,7 @@
                 "source": "kubectl rollout pause --help: \"kubectl rollout pause RESOURCE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl rollout pause --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl rollout pause --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -2909,7 +2909,7 @@
           },
           "restart": {
             "name": "restart",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl rollout restart --help: \"Restart a resource.\""
@@ -2921,7 +2921,7 @@
                 "source": "kubectl rollout restart --help: \"kubectl rollout restart RESOURCE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl rollout restart --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl rollout restart --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -2956,7 +2956,7 @@
           },
           "resume": {
             "name": "resume",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl rollout resume --help: \"Resume a paused resource.\""
@@ -2968,7 +2968,7 @@
                 "source": "kubectl rollout resume --help: \"kubectl rollout resume RESOURCE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl rollout resume --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl rollout resume --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -3003,7 +3003,7 @@
           },
           "status": {
             "name": "status",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl rollout status --help: \"Show the status of the rollout.\""
@@ -3015,7 +3015,7 @@
                 "source": "kubectl rollout status --help: \"kubectl rollout status (TYPE NAME | TYPE/NAME) [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl rollout status --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl rollout status --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -3050,7 +3050,7 @@
           },
           "undo": {
             "name": "undo",
-            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
                 "source": "kubectl rollout undo --help: \"Roll back to a previous rollout.\""
@@ -3062,7 +3062,7 @@
                 "source": "kubectl rollout undo --help: \"kubectl rollout undo (TYPE NAME | TYPE/NAME) [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "kubectl rollout undo --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+                "source": "kubectl rollout undo --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -3099,7 +3099,7 @@
       },
       "run": {
         "name": "run",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl run --help: \"Create and run a particular image in a pod.\""
@@ -3111,7 +3111,7 @@
             "source": "kubectl run --help: \"kubectl run NAME --image=image [--env=\\\"key=value\\\"] [--port=port] [--dry-run=server|client] [--overrides=inline-json] [--command] -- [COMMAND] [args...] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl run --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl run --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3146,7 +3146,7 @@
       },
       "scale": {
         "name": "scale",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl scale --help: \"Set a new size for a deployment, replica set, replication controller, or stateful set.\""
@@ -3158,7 +3158,7 @@
             "source": "kubectl scale --help: \"kubectl scale [--resource-version=version] [--current-replicas=count] --replicas=COUNT (-f FILENAME | TYPE NAME) [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl scale --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl scale --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3193,7 +3193,7 @@
       },
       "set": {
         "name": "set",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl set --help: \"Configure application resources.\""
@@ -3205,7 +3205,7 @@
             "source": "kubectl set --help: \"kubectl set SUBCOMMAND [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl set --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl set --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3240,7 +3240,7 @@
       },
       "taint": {
         "name": "taint",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl taint --help: \"Update the taints on one or more nodes.\""
@@ -3252,7 +3252,7 @@
             "source": "kubectl taint --help: \"kubectl taint NODE NAME KEY_1=VAL_1:TAINT_EFFECT_1 ... KEY_N=VAL_N:TAINT_EFFECT_N [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl taint --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl taint --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3287,7 +3287,7 @@
       },
       "top": {
         "name": "top",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl top --help: \"Display resource (CPU/memory) usage.\""
@@ -3299,7 +3299,7 @@
             "source": "kubectl top --help: \"kubectl top [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl top --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl top --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3334,7 +3334,7 @@
       },
       "uncordon": {
         "name": "uncordon",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl uncordon --help: \"Mark node as schedulable.\""
@@ -3346,7 +3346,7 @@
             "source": "kubectl uncordon --help: \"kubectl uncordon NODE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl uncordon --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl uncordon --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3381,7 +3381,7 @@
       },
       "version": {
         "name": "version",
-        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
             "source": "kubectl version --help: \"Print the client and server version information for the current context.\""
@@ -3393,7 +3393,7 @@
             "source": "kubectl version --help: \"kubectl version [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "kubectl version --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+            "source": "kubectl version --help: `kubectl get --this-is-not-a-real-flag` -> \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {

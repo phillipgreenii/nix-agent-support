@@ -347,7 +347,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "pnwf repos --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+              "source": "pnwf repos --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard — exit\""
             }
           },
           "-h": {
@@ -420,7 +420,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "pnwf residue --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+              "source": "pnwf residue --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard — exit\""
             }
           },
           "-h": {
@@ -493,7 +493,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "pnwf resolve --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+              "source": "pnwf resolve --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard — exit\""
             }
           },
           "-h": {
@@ -566,7 +566,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "pnwf stage --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+              "source": "pnwf stage --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard — exit\""
             }
           },
           "-h": {
@@ -705,7 +705,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "pnwf sync-fetch --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+              "source": "pnwf sync-fetch --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard — exit\""
             }
           },
           "-h": {
@@ -789,7 +789,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "pnwf update-relock --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+              "source": "pnwf update-relock --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard — exit\""
             }
           },
           "-h": {

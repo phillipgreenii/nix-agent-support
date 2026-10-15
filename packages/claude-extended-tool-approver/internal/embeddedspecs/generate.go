@@ -1,6 +1,7 @@
 package embeddedspecs
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -204,6 +205,22 @@ func filenameFor(name string) string {
 	return name + ".json"
 }
 
+// marshalSpec renders one spec as indented JSON with a trailing newline and
+// WITHOUT json's default HTML escaping: the committed data files carry literal
+// "<", ">" and "&" in their citation text (usage synopses such as
+// "<id>"), and json.MarshalIndent would rewrite each as \u003c/\u003e/\u0026,
+// a byte-level diff the repo formatter does not normalise (pg2-jk8bc).
+func marshalSpec(spec specfmt.Spec) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(spec); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // WriteSpecs (re)writes dir with one indented JSON file per spec, removing
 // any STALE SPEC file first (a command spec file whose name is no longer in
 // specs) so a future DefaultRegistry() rename or removal does not leave an
@@ -232,11 +249,10 @@ func WriteSpecs(dir string, specs map[string]specfmt.Spec) error {
 		return fmt.Errorf("embeddedspecs: creating %s: %w", dir, err)
 	}
 	for name, spec := range specs {
-		data, err := json.MarshalIndent(spec, "", "  ")
+		data, err := marshalSpec(spec)
 		if err != nil {
 			return fmt.Errorf("embeddedspecs: marshal %q: %w", name, err)
 		}
-		data = append(data, '\n')
 		path := filepath.Join(dir, filenameFor(name))
 		if err := os.WriteFile(path, data, 0o644); err != nil {
 			return fmt.Errorf("embeddedspecs: write %s: %w", path, err)

@@ -10,10 +10,10 @@
         "source": "self-checks.sh --help: \"Deterministic self-checks for a single behavior-docs set.\""
       },
       "stdin": {
-        "source": "self-checks.sh --help: \"Usage: self-checks.sh \u003cset-dir\u003e (a directory of .md files, usually .../docs/behavior)\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "self-checks.sh --help: \"Usage: self-checks.sh <set-dir> (a directory of .md files, usually .../docs/behavior)\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "self-checks.sh --help: \"Usage: self-checks.sh \u003cset-dir\u003e (a directory of .md files, usually .../docs/behavior)\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+        "source": "self-checks.sh --help: \"Usage: self-checks.sh <set-dir> (a directory of .md files, usually .../docs/behavior)\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "self-checks.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -34,7 +34,7 @@
         }
       },
       "citation": {
-        "source": "self-checks.sh --help: \"Usage: self-checks.sh \u003cset-dir\u003e (a directory of .md files, usually .../docs/behavior)\""
+        "source": "self-checks.sh --help: \"Usage: self-checks.sh <set-dir> (a directory of .md files, usually .../docs/behavior)\""
       }
     },
     "stdin": "never",

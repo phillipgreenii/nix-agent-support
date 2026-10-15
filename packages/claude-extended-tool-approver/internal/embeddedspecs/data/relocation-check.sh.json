@@ -10,10 +10,10 @@
         "source": "relocation-check.sh --help: \"relocation-check.sh — the DECIDABLE half of USECASE-5 (D10)'s five-step\""
       },
       "stdin": {
-        "source": "relocation-check.sh --help: \"Usage: relocation-check.sh \u003cbehavior-docs-set-dir\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "relocation-check.sh --help: \"Usage: relocation-check.sh <behavior-docs-set-dir>\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "relocation-check.sh --help: \"Usage: relocation-check.sh \u003cbehavior-docs-set-dir\u003e\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+        "source": "relocation-check.sh --help: \"Usage: relocation-check.sh <behavior-docs-set-dir>\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "relocation-check.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -34,7 +34,7 @@
         }
       },
       "citation": {
-        "source": "relocation-check.sh --help: \"Usage: relocation-check.sh \u003cbehavior-docs-set-dir\u003e\""
+        "source": "relocation-check.sh --help: \"Usage: relocation-check.sh <behavior-docs-set-dir>\""
       }
     },
     "stdin": "never",

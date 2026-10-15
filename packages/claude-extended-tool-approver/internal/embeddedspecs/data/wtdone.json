@@ -10,10 +10,10 @@
         "source": "wtdone --help: \"wtdone: Guarded worktree teardown -- the paired counterpart to wtnew\""
       },
       "stdin": {
-        "source": "wtdone --help: \"Usage: wtdone \u003cbead-or-branch\u003e [OPTIONS]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "wtdone --help: \"Usage: wtdone <bead-or-branch> [OPTIONS]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "wtdone --help: \"Usage: wtdone \u003cbead-or-branch\u003e [OPTIONS]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+        "source": "wtdone --help: \"Usage: wtdone <bead-or-branch> [OPTIONS]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "wtdone --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "wtdone --help: \"--cc \u003ccanonical-dir\u003e The canonical clone to operate against. Default: the\""
+          "source": "wtdone --help: \"--cc <canonical-dir> The canonical clone to operate against. Default: the\""
         }
       },
       "--help": {
@@ -96,7 +96,7 @@
         }
       },
       "citation": {
-        "source": "wtdone --help: \"Usage: wtdone \u003cbead-or-branch\u003e [OPTIONS]\""
+        "source": "wtdone --help: \"Usage: wtdone <bead-or-branch> [OPTIONS]\""
       }
     },
     "stdin": "never",

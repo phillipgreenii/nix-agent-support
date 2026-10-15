@@ -2,9 +2,11 @@ package embeddedspecs
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/specfmt"
 )
 
 // dataDir is this package's own data/ directory, relative to this package's
@@ -139,6 +141,37 @@ func TestWriteSpecsNeverRemovesHelpHashes(t *testing.T) {
 	}
 	if _, err := os.Stat(dir + "/cat.json"); !os.IsNotExist(err) {
 		t.Errorf("stale cat.json still present (err=%v)", err)
+	}
+}
+
+// TestWriteSpecsDoesNotHTMLEscape: committed data files carry literal "<", ">"
+// and "&" in citation text; WriteSpecs must not re-emit them as \u003c etc.
+// (pg2-jk8bc: that escaping made every genspecs run rewrite ~28 files).
+func TestWriteSpecsDoesNotHTMLEscape(t *testing.T) {
+	dir := t.TempDir()
+	specs, err := BuildSpecs(subsetRegistry(t, "jq"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := specs["jq"]
+	spec.Command.Citations["provenance"] = specfmt.Citation{Source: `jq --help: "Usage: jq <filter> [files] && more"`}
+	specs["jq"] = spec
+	if err := WriteSpecs(dir, specs); err != nil {
+		t.Fatalf("WriteSpecs: %v", err)
+	}
+	data, err := os.ReadFile(dir + "/jq.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, `\u003c`) || strings.Contains(got, `\u003e`) || strings.Contains(got, `\u0026`) {
+		t.Errorf("WriteSpecs HTML-escaped its output:\n%s", got)
+	}
+	if !strings.Contains(got, "<filter> [files] && more") {
+		t.Errorf("literal <filter> [files] && more missing from output:\n%s", got)
+	}
+	if !strings.HasSuffix(got, "}\n") {
+		t.Errorf("output must end with a single newline")
 	}
 }
 

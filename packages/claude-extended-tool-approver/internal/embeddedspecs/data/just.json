@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "just --help: \"-f, --justfile \u003cJUSTFILE\u003e Use \u003cJUSTFILE\u003e as justfile or `-` to read from standard input\""
+          "source": "just --help: \"-f, --justfile <JUSTFILE> Use <JUSTFILE> as justfile or `-` to read from standard input\""
         }
       },
       "--no-deps": {
@@ -241,7 +241,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "just --help: \"-d, --working-directory \u003cWORKING-DIRECTORY\u003e Use \u003cWORKING-DIRECTORY\u003e as working directory. --justfile must also be set\""
+          "source": "just --help: \"-d, --working-directory <WORKING-DIRECTORY> Use <WORKING-DIRECTORY> as working directory. --justfile must also be set\""
         }
       },
       "--yes": {
@@ -277,7 +277,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "just --help: \"-d, --working-directory \u003cWORKING-DIRECTORY\u003e Use \u003cWORKING-DIRECTORY\u003e as working directory. --justfile must also be set\""
+          "source": "just --help: \"-d, --working-directory <WORKING-DIRECTORY> Use <WORKING-DIRECTORY> as working directory. --justfile must also be set\""
         }
       },
       "-f": {
@@ -289,7 +289,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "just --help: \"-f, --justfile \u003cJUSTFILE\u003e Use \u003cJUSTFILE\u003e as justfile or `-` to read from standard input\""
+          "source": "just --help: \"-f, --justfile <JUSTFILE> Use <JUSTFILE> as justfile or `-` to read from standard input\""
         }
       },
       "-h": {

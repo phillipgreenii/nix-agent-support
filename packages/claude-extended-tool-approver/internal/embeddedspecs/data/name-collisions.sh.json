@@ -10,10 +10,10 @@
         "source": "name-collisions.sh --help: \"name-collisions.sh — cross-set NAME collision check (the INTER evaluator; bead\""
       },
       "stdin": {
-        "source": "name-collisions.sh --help: \"Usage: name-collisions.sh [--strict] \u003cset-dir\u003e \u003cset-dir\u003e [\u003cset-dir\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "name-collisions.sh --help: \"Usage: name-collisions.sh [--strict] <set-dir> <set-dir> [<set-dir>...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "name-collisions.sh --help: \"Usage: name-collisions.sh [--strict] \u003cset-dir\u003e \u003cset-dir\u003e [\u003cset-dir\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+        "source": "name-collisions.sh --help: \"Usage: name-collisions.sh [--strict] <set-dir> <set-dir> [<set-dir>...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "name-collisions.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -68,7 +68,7 @@
       },
       "minRest": 1,
       "citation": {
-        "source": "name-collisions.sh --help: \"Usage: name-collisions.sh [--strict] \u003cset-dir\u003e \u003cset-dir\u003e [\u003cset-dir\u003e...]\""
+        "source": "name-collisions.sh --help: \"Usage: name-collisions.sh [--strict] <set-dir> <set-dir> [<set-dir>...]\""
       }
     },
     "stdin": "never",

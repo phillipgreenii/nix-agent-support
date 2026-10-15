@@ -1981,13 +1981,13 @@
             "provenance": "pn workspace update --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
             "citations": {
               "provenance": {
-                "source": "pn workspace update --help: \"Relock each workspace repo, local-only \u2014 never pushes (worktree-isolated; --in-place for direct-on-main, --siblings-only to relock just sibling inputs)\""
+                "source": "pn workspace update --help: \"Relock each workspace repo, local-only — never pushes (worktree-isolated; --in-place for direct-on-main, --siblings-only to relock just sibling inputs)\""
               },
               "stdin": {
                 "source": "pn workspace update --help: usage \"pn workspace update [flags]\" documents no stdin consumption; classified \"never\""
               },
               "stdout": {
-                "source": "pn workspace update --help: usage \"pn workspace update [flags]\" and description \"Relock each workspace repo, local-only \u2014 never pushes (worktree-isolated; --in-place for direct-on-main, --siblings-only\" describe terminal output only; classified by the schema's stdout kind"
+                "source": "pn workspace update --help: usage \"pn workspace update [flags]\" and description \"Relock each workspace repo, local-only — never pushes (worktree-isolated; --in-place for direct-on-main, --siblings-only\" describe terminal output only; classified by the schema's stdout kind"
               },
               "unknownFlag": {
                 "source": "pn workspace update --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"

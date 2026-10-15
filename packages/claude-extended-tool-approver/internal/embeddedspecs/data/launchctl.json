@@ -7,13 +7,13 @@
     "provenance": "launchctl help, this host 2026-10-05",
     "citations": {
       "provenance": {
-        "source": "launchctl --help: \"Usage: launchctl \u003csubcommand\u003e ... | help [subcommand]\""
+        "source": "launchctl --help: \"Usage: launchctl <subcommand> ... | help [subcommand]\""
       },
       "stdin": {
-        "source": "launchctl --help: \"Usage: launchctl \u003csubcommand\u003e ... | help [subcommand]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+        "source": "launchctl --help: \"Usage: launchctl <subcommand> ... | help [subcommand]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "launchctl --help: \"Usage: launchctl \u003csubcommand\u003e ... | help [subcommand]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+        "source": "launchctl --help: \"Usage: launchctl <subcommand> ... | help [subcommand]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
         "source": "launchctl --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "launchctl --help: \"Usage: launchctl \u003csubcommand\u003e ... | help [subcommand]\""
+        "source": "launchctl --help: \"Usage: launchctl <subcommand> ... | help [subcommand]\""
       }
     },
     "stdin": "never",
@@ -42,13 +42,13 @@
         "provenance": "launchctl help blame, this host 2026-10-05",
         "citations": {
           "provenance": {
-            "source": "launchctl blame --help: \"Usage: launchctl blame \u003cpid|service-target\u003e\""
+            "source": "launchctl blame --help: \"Usage: launchctl blame <pid|service-target>\""
           },
           "stdin": {
-            "source": "launchctl blame --help: \"Usage: launchctl blame \u003cpid|service-target\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "launchctl blame --help: \"Usage: launchctl blame <pid|service-target>\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "launchctl blame --help: \"Usage: launchctl blame \u003cpid|service-target\u003e\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "launchctl blame --help: \"Usage: launchctl blame <pid|service-target>\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "launchctl blame --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -64,7 +64,7 @@
             }
           },
           "citation": {
-            "source": "launchctl blame --help: \"Usage: launchctl blame \u003cpid|service-target\u003e\""
+            "source": "launchctl blame --help: \"Usage: launchctl blame <pid|service-target>\""
           }
         },
         "stdin": "never",
@@ -112,13 +112,13 @@
         "provenance": "launchctl help print, this host 2026-10-05",
         "citations": {
           "provenance": {
-            "source": "launchctl print --help: \"Usage: launchctl print \u003cdomain-target\u003e | \u003cservice-target\u003e\""
+            "source": "launchctl print --help: \"Usage: launchctl print <domain-target> | <service-target>\""
           },
           "stdin": {
-            "source": "launchctl print --help: \"Usage: launchctl print \u003cdomain-target\u003e | \u003cservice-target\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "launchctl print --help: \"Usage: launchctl print <domain-target> | <service-target>\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "launchctl print --help: \"Usage: launchctl print \u003cdomain-target\u003e | \u003cservice-target\u003e\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "launchctl print --help: \"Usage: launchctl print <domain-target> | <service-target>\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "launchctl print --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -134,7 +134,7 @@
             }
           },
           "citation": {
-            "source": "launchctl print --help: \"Usage: launchctl print \u003cdomain-target\u003e | \u003cservice-target\u003e\""
+            "source": "launchctl print --help: \"Usage: launchctl print <domain-target> | <service-target>\""
           }
         },
         "stdin": "never",
@@ -147,13 +147,13 @@
         "provenance": "launchctl help print-disabled, this host 2026-10-05",
         "citations": {
           "provenance": {
-            "source": "launchctl print-disabled --help: \"Usage: launchctl print-disabled \u003cdomain-specifier\u003e\""
+            "source": "launchctl print-disabled --help: \"Usage: launchctl print-disabled <domain-specifier>\""
           },
           "stdin": {
-            "source": "launchctl print-disabled --help: \"Usage: launchctl print-disabled \u003cdomain-specifier\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+            "source": "launchctl print-disabled --help: \"Usage: launchctl print-disabled <domain-specifier>\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "launchctl print-disabled --help: \"Usage: launchctl print-disabled \u003cdomain-specifier\u003e\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+            "source": "launchctl print-disabled --help: \"Usage: launchctl print-disabled <domain-specifier>\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
             "source": "launchctl print-disabled --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
@@ -169,7 +169,7 @@
             }
           },
           "citation": {
-            "source": "launchctl print-disabled --help: \"Usage: launchctl print-disabled \u003cdomain-specifier\u003e\""
+            "source": "launchctl print-disabled --help: \"Usage: launchctl print-disabled <domain-specifier>\""
           }
         },
         "stdin": "never",

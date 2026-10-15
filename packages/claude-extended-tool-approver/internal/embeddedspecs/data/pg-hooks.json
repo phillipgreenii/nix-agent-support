@@ -271,7 +271,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "pg-hooks run --help: \"run \u003cstage\u003e [files...|--all-files] [-- prek-args]\""
+              "source": "pg-hooks run --help: \"run <stage> [files...|--all-files] [-- prek-args]\""
             }
           }
         },
