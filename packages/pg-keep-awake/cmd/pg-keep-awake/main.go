@@ -39,6 +39,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runPause(args[1:], stdout, stderr)
 	case "resume":
 		return runResume(args[1:], stdout, stderr)
+	case "anchor":
+		return runAnchor(args[1:], stdout, stderr)
 	case "status":
 		return runStatus(args[1:], stdout, stderr)
 	case "--help", "-h", "help":
