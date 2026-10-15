@@ -29,6 +29,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "config":
 		return runConfig(args[1:], stdout, stderr)
+	case "acquire":
+		return runAcquire(args[1:], stdout, stderr)
+	case "release":
+		return runRelease(args[1:], stdout, stderr)
+	case "run":
+		return runCommand(args[1:], stdout, stderr)
+	case "pause":
+		return runPause(args[1:], stdout, stderr)
+	case "resume":
+		return runResume(args[1:], stdout, stderr)
 	case "--help", "-h", "help":
 		fmt.Fprintln(stdout, "pg-keep-awake: the single holder of the Mac keep-awake assertion")
 		fmt.Fprintln(stdout, "usage: pg-keep-awake <command> [args]")
