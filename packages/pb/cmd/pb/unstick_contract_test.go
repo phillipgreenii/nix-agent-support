@@ -24,7 +24,7 @@ func pbBin(t *testing.T) string {
 	skipNoBin(t, "go")
 	bin := filepath.Join(t.TempDir(), "pb")
 	cmd := exec.Command("go", "build", "-o", bin, ".")
-	cmd.Env = hermeticEnviron()
+	cmd.Env = goBuildEnviron()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build pb: %v\n%s", err, out)
 	}
@@ -90,6 +90,13 @@ func readIDList(t *testing.T, path string) []string {
 // throwaway embedded Dolt database (never a server, never the real tracker):
 // shape facts over real export/ready output, prepare, marker + close, report.
 func TestContract_UnstickSweep(t *testing.T) {
+	unstickSweep(t)
+}
+
+// unstickSweep is the body of the test above, shared with the
+// foreign-git-environment guard (hermetic_env_contract_test.go).
+func unstickSweep(t *testing.T) {
+	t.Helper()
 	skipNoBin(t, "bd")
 	bin := pbBin(t) // before isolate(): the Go caches must not land in the temp HOME
 	isolate(t)

@@ -46,27 +46,71 @@ func skipNoBin(t *testing.T, names ...string) {
 	}
 }
 
-// hermeticEnviron returns os.Environ() with the git-hook-injected vars
-// (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX, GIT_OBJECT_DIRECTORY,
-// GIT_COMMON_DIR) removed. Those vars repoint a test's own tmpdir git/bd
-// subprocesses at the REAL repo when the test binary itself runs from inside
-// a git commit hook (e.g. this repo's own pre-commit/pre-push test gate) --
-// the same hermeticity leak packages/pb/internal/patchid/patchid_test.go had
-// before 98f8c95d. Duplicated per-package rather than shared/exported:
-// patchid_test.go's copy of this helper is unexported and test-only, so it
-// cannot be imported from another package.
-func hermeticEnviron() []string {
-	skipVars := map[string]bool{
-		"GIT_DIR": true, "GIT_INDEX_FILE": true, "GIT_WORK_TREE": true,
-		"GIT_PREFIX": true, "GIT_OBJECT_DIRECTORY": true, "GIT_COMMON_DIR": true,
+// hermeticEnviron is the environment every real bd/git/pn/pb child of these
+// tests runs with (beads pg2-rxs4j). It is an ALLOWLIST over the process
+// environment (hermeticEnvFrom), never a scrub: an enumerated deny-list of
+// GIT_* names is only as complete as its author's memory, and the code-file
+// standards forbid it. Anything that selects a git repository (GIT_DIR,
+// GIT_WORK_TREE, GIT_INDEX_FILE, GIT_COMMON_DIR, ...) or a beads workspace
+// (BEADS_*, WORKSPACE_ROOT, ...) is dropped by construction, so a test binary
+// run from inside a git commit hook cannot repoint its tmpdir git/bd children at
+// the REAL repository (the leak packages/pb/internal/patchid/patchid_test.go
+// had before 98f8c95d). Duplicated per-package rather than shared/exported:
+// the helper is unexported and test-only, so it cannot be imported.
+func hermeticEnviron() []string { return hermeticEnvFrom(os.Environ()) }
+
+// hermeticEnvFrom builds the child environment from parent: only the names in
+// hermeticPassthrough (and the LC_*/NIX_* families) survive, plus
+// GIT_CONFIG_NOSYSTEM=1 and BEADS_DOLT_AUTO_START=0 (bd must never spawn its own
+// dolt server). The names that survive are the ones isolate() deliberately sets
+// for the child: the temp HOME/XDG_*, BD_JSON_ENVELOPE, the git identity and
+// editors.
+func hermeticEnvFrom(parent []string) []string {
+	var out []string
+	for _, kv := range parent {
+		k, _, _ := strings.Cut(kv, "=")
+		if hermeticPassthrough[k] || strings.HasPrefix(k, "LC_") || strings.HasPrefix(k, "NIX_") {
+			out = append(out, kv)
+		}
 	}
-	var env []string
+	return append(out, "GIT_CONFIG_NOSYSTEM=1", "BEADS_DOLT_AUTO_START=0")
+}
+
+// hermeticPassthrough is the complete list of parent-environment names a child
+// may inherit. Adding a name is a deliberate decision; it MUST NOT be a name that
+// selects a git repository or a beads workspace.
+var hermeticPassthrough = map[string]bool{
+	// executables, scratch, locale, user
+	"PATH": true, "TMPDIR": true, "USER": true, "LOGNAME": true,
+	"LANG": true, "TZ": true, "TERM": true, "SSL_CERT_FILE": true,
+	// set by isolate() for the child
+	"HOME": true, "XDG_DATA_HOME": true, "XDG_STATE_HOME": true, "XDG_CONFIG_HOME": true,
+	"BD_JSON_ENVELOPE": true, "BD_NON_INTERACTIVE": true,
+	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true,
+	"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true,
+	"GIT_EDITOR": true, "GIT_SEQUENCE_EDITOR": true,
+}
+
+// goBuildEnviron is the environment for the one child that needs the toolchain
+// state of the parent (go build): the hermetic base plus the Go variables. It
+// still carries no GIT_* repo selector, so Go's VCS stamping cannot be
+// redirected at an outer repository. Call it before isolate() so HOME is the
+// real one (GOCACHE and GOPATH default under it).
+func goBuildEnviron() []string {
+	env := hermeticEnvFrom(os.Environ())
 	for _, kv := range os.Environ() {
-		if k := strings.SplitN(kv, "=", 2)[0]; !skipVars[k] {
+		if k, _, _ := strings.Cut(kv, "="); goBuildPassthrough[k] {
 			env = append(env, kv)
 		}
 	}
 	return env
+}
+
+var goBuildPassthrough = map[string]bool{
+	"GOCACHE": true, "GOMODCACHE": true, "GOPATH": true, "GOFLAGS": true,
+	"GOPROXY": true, "GONOPROXY": true, "GOSUMDB": true, "GONOSUMDB": true,
+	"GOPRIVATE": true, "GOTOOLCHAIN": true, "GOROOT": true, "GOENV": true,
+	"GOWORK": true, "GOOS": true, "GOARCH": true, "CGO_ENABLED": true,
 }
 
 // hermeticCLIRunner wraps run.CLIRunner, filling in hermeticEnviron() whenever
@@ -181,6 +225,13 @@ func readyIDs(t *testing.T, dir string) map[string]bool {
 // ---------------------------------------------------------------------------
 
 func TestContract_BDGateSurface(t *testing.T) {
+	bdGateSurface(t)
+}
+
+// bdGateSurface is the body of the test above, shared with the
+// foreign-git-environment guard (hermetic_env_contract_test.go).
+func bdGateSurface(t *testing.T) {
+	t.Helper()
 	skipNoBin(t, "bd")
 	isolate(t)
 	if v, err := shellTry("", "bd", "version"); err == nil {
