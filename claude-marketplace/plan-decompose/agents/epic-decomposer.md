@@ -53,8 +53,16 @@ live, and the fixed sub-dispatch templates for `phase-split-reviewer`.
 The Skill tool's result for `plan-decompose:epic-decompose` names that skill's own base
 directory (ending `.../plan-decompose/skills/epic-decompose`). This plugin's helper scripts
 live at `<that base directory>/../../scripts/` — the plugin root's `scripts/` sibling of
-`agents/` and `skills/`. Resolve the path once from the reported base directory and reuse it
-for the rest of the run; never `find` or `glob` the filesystem for a script by name.
+`agents/` and `skills/`. Resolve the path once from the reported base directory; never `find`
+or `glob` the filesystem for a script by name.
+
+Invoke a script by a literal inline absolute path, never through a shell variable (`$S/…`,
+`"$CP"/…`) and never inside a heredoc: the approver approves only argv0 spelled out as
+`<home>/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/plan-decompose/scripts/<script>`
+(`<home>` written as the real absolute home directory; ADR 0099), and a variable argv0 or a
+heredoc body abstains. Use that `pgii-marketplaces` path even when the Skill tool reports a base
+directory elsewhere (for example a plugin cache copy). The bare `scripts/<script>` names below
+stand for it.
 
 - `scripts/chunk-for-bd-field.sh <input-file> <output-prefix>` — splits a file into
   line-safe, byte-capped chunks (default 65000 bytes, safely under bd's 65,535-byte field cap)

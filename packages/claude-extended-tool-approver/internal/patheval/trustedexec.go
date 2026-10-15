@@ -30,6 +30,16 @@ import (
 // of whether the operator's PATH was ever configured to trust it), so it is
 // rejected before the realpath comparison even runs.
 //
+// # The marketplace plugin-script identity (pg2-yr90y)
+//
+// Besides the trusted-PATH comparison, an argv0 spelled
+// <HOME>/.local/share/pgii-marketplaces/<marketplace>/<plugin>/scripts/<file>
+// is trusted when its marketplace entry and its own realpath both resolve into
+// the same nix-store marketplace derivation (isMarketplacePluginScript's doc
+// comment lists the exact conditions; the literal "/nix/store/" carve-out
+// above still applies first). docs/adr/0099 records why this is code, not a
+// TrustedExecPath config entry.
+//
 // # Relative argv0 is out of scope (R2), not "unknown"
 //
 // Callers MUST route a relative argv0 (one not starting with "/", e.g.
@@ -71,6 +81,13 @@ func ResolveTrustedExecutable(argv0 string) (realpath string, trusted bool, err 
 		if candidateReal != "" && candidateReal == realpath {
 			return realpath, true, nil
 		}
+	}
+
+	// pg2-yr90y: a plugin script served from the nix-store-backed
+	// pgii-marketplaces install is a second, narrower trusted identity (see
+	// trustedexec_marketplace.go).
+	if real, ok := isMarketplacePluginScript(argv0); ok {
+		return real, true, nil
 	}
 	return realpath, false, nil
 }

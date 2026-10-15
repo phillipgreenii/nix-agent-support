@@ -499,6 +499,17 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 		// an in-checkout file" under R2 — a different trust boundary this
 		// identity check does not adjudicate (see
 		// patheval.ResolveTrustedExecutable's doc comment).
+		if strings.ContainsAny(leaf.Executable, "$`") {
+			// pg2-yr90y: an argv0 carrying a live expansion ($S/create-packet.sh,
+			// "$CP"/x.sh) is a RUNTIME value this engine does not resolve, so
+			// neither the absolute-path identity check below nor the relative
+			// in-checkout rule can vouch for it; without this guard its basename
+			// alone would select a schema and approve whatever $S names.
+			detail := "unverifiable executable (live expansion in argv0) " + leaf.Executable
+			effects = append(effects, cmddesc.Effect{Kind: cmddesc.EffectOpaque, Detail: detail})
+			insufficient(detail)
+			break
+		}
 		if strings.HasPrefix(leaf.Executable, "/") {
 			if _, trusted, err := patheval.ResolveTrustedExecutable(leaf.Executable); err != nil || !trusted {
 				detail := "untrusted executable identity for " + leaf.Executable

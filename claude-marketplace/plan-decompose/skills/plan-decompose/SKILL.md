@@ -456,10 +456,29 @@ The Skill tool's result for `plan-decompose:plan-decompose` names this skill's o
 (ending `.../plan-decompose/skills/plan-decompose`); a caller that runs `decompose` inline via
 the Skill tool (`phase-decomposer`) gets the same result. This plugin's helper scripts live at
 `<that base directory>/../../scripts/` — the plugin root's `scripts/` sibling of `agents/` and
-`skills/`. Resolve the path once from the reported base directory and reuse it for the rest of
-the run; never `find` or `glob` the filesystem for a script by name — the base directory the
-Skill tool just reported is a full, working answer to "where is my own plugin," and re-deriving
-it by searching disk is both slower and redundant.
+`skills/`. Resolve the path once from the reported base directory; never `find` or `glob` the
+filesystem for a script by name — the base directory the Skill tool just reported is a full,
+working answer to "where is my own plugin," and re-deriving it by searching disk is both slower
+and redundant.
+
+**Invoke a script by a literal inline absolute path.** The approver (CETA) approves a helper
+script only when argv0 is spelled out as the installed marketplace path,
+`<home>/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/plan-decompose/scripts/<script>`
+(ADR 0099), with `<home>` written out as the real absolute home directory. So type that whole
+path, character for character, as the first word of the Bash command, every time:
+
+- NO shell variable for the directory or the script (`$S/…`, `"$CP"/…`, `${SCRIPTS}/…`): a
+  variable argv0 is a runtime value the approver cannot verify, so the call abstains.
+- NO heredoc around the call (`bash <<EOF … EOF`): a heredoc body is not evaluable and abstains.
+  Write long text to a file with the Write tool and pass it with `--body-file`/`--in`.
+- NO `cd` into the plugin directory and NO repo-relative `claude-marketplace/plan-decompose/…`
+  spelling: that exists only inside the agent-support checkout, and running from the plugin
+  directory breaks `assemble-packet.sh`'s `@@file` resolution (it refuses paths outside the git
+  toplevel).
+- If the Skill tool reports a base directory that is not under that
+  `~/.local/share/pgii-marketplaces/…` tree (for example a plugin cache copy), still use the
+  `pgii-marketplaces` path above for every script call; the bare `scripts/<script>` names in the
+  bullets below stand for it.
 
 - `scripts/chunk-for-bd-field.sh <input-file> <output-prefix>` — splits a file into
   line-safe, byte-capped chunks (default 65000 bytes, safely under bd's 65,535-byte field cap)

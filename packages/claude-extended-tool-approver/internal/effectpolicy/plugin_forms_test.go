@@ -185,9 +185,9 @@ var pluginForms = []pluginForm{
 	{"plan-decompose", "claude-marketplace/plan-decompose/scripts/create-packet.sh --parent pg2-epic1 --title \"title\" --body-file /tmp/body.md --acceptance \"criteria\" --metadata '{}' --actor sess-1", evalcontract.Approve, ""},
 	{"plan-decompose", "claude-marketplace/plan-decompose/scripts/assemble-packet.sh --design /tmp/design.md --in /tmp/draft.md --out /tmp/body.md", evalcontract.Approve, ""},
 	{"plan-decompose", "claude-marketplace/plan-decompose/scripts/update-packet.sh --id pg2-pk1 --body-file /tmp/body.md --acceptance-file /tmp/acc.md --actor sess-1", evalcontract.Approve, ""},
-	{"plan-decompose", "/Users/phillipg/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/plan-decompose/scripts/create-packet.sh --parent pg2-epic1 --title \"title\" --body-file /tmp/body.md --acceptance \"criteria\" --metadata '{}' --actor sess-1", evalcontract.Abstain, "absolute-path call: fails the P4 executable-identity check by design (pg2-3gizb: measured identical for all three packet scripts)"},
-	{"plan-decompose", "/Users/phillipg/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/plan-decompose/scripts/assemble-packet.sh --design /tmp/design.md --in /tmp/draft.md --out /tmp/body.md", evalcontract.Abstain, "absolute-path call: fails the P4 executable-identity check by design (pg2-3gizb: measured identical for all three packet scripts)"},
-	{"plan-decompose", "/Users/phillipg/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/plan-decompose/scripts/update-packet.sh --id pg2-pk1 --body-file /tmp/body.md --acceptance-file /tmp/acc.md --actor sess-1", evalcontract.Abstain, "absolute-path call: fails the P4 executable-identity check by design (pg2-3gizb: measured identical for all three packet scripts)"},
+	// The absolute marketplace-path form of the three packet scripts is NOT a row here: its verdict
+	// depends on a real nix-store-backed marketplace install under HOME, so it is pinned hermetically
+	// by TestMarketplacePluginScriptAbsolutePath (marketplace_plugin_script_test.go; pg2-yr90y).
 	{"plan-decompose", "claude-marketplace/plan-decompose/scripts/chunk-for-bd-field.sh /tmp/in.md /tmp/out-prefix", evalcontract.Approve, ""},
 	{"plan-decompose", "claude-marketplace/plan-decompose/scripts/audit-docket-label-leak.sh", evalcontract.Approve, ""},
 	{"plan-decompose", "git apply --unidiff-zero /tmp/diff.patch", evalcontract.Abstain, "paths written are inside the patch: not statically modelable"},
