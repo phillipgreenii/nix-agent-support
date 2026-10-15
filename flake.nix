@@ -2946,6 +2946,177 @@
                     touch $out
                   '';
 
+              # darwin/modules/pg-connector-github (bead pg2-z5fax.6.5, docket
+              # pg2-z5fax.6): registers the pg-connector-github daemon's three log
+              # files, its alert rules file and its dashboard with the observability
+              # stack. Same technique as test-pg-connector-pr-github-darwin-module
+              # above: evaluate the module against a stub of the observability
+              # surface that mirrors the REAL logSources submodule's defaults (and
+              # dashboardProviders), once enabled and once disabled, then check the
+              # evaluated values. The runCommand expands each entry's glob the way
+              # the collector would (bash globbing, against a state directory holding
+              # every live file plus its rotated archive and rotation lock) and pins
+              # the file names against the Go constants and the alert group's folder.
+              test-pg-connector-github-darwin-module =
+                let
+                  logSourceSubmodule =
+                    { name, config, ... }:
+                    {
+                      options = {
+                        path = lib.mkOption {
+                          type = lib.types.str;
+                          default = "\${env:XDG_STATE_HOME}/${name}/*.jsonl";
+                        };
+                        serviceName = lib.mkOption {
+                          type = lib.types.str;
+                          default = name;
+                        };
+                        format = lib.mkOption {
+                          type = lib.types.enum [
+                            "jsonl"
+                            "raw"
+                          ];
+                          default = "jsonl";
+                        };
+                        errorAlert.enable = lib.mkOption { type = lib.types.bool; };
+                      };
+                      config.errorAlert.enable = lib.mkDefault (config.format == "jsonl");
+                    };
+                  dashboardProviderSubmodule = {
+                    options = {
+                      folder = lib.mkOption { type = lib.types.str; };
+                      dashboards = lib.mkOption { type = lib.types.listOf lib.types.path; };
+                    };
+                  };
+                  evalDarwin =
+                    obsEnable:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-connector-github/default.nix
+                        {
+                          options.phillipgreenii.observability = {
+                            enable = lib.mkOption {
+                              type = lib.types.bool;
+                              default = false;
+                            };
+                            logSources = lib.mkOption {
+                              type = lib.types.attrsOf (lib.types.submodule logSourceSubmodule);
+                              default = { };
+                            };
+                            alertRuleFiles = lib.mkOption {
+                              type = lib.types.listOf lib.types.path;
+                              default = [ ];
+                            };
+                            dashboardProviders = lib.mkOption {
+                              type = lib.types.attrsOf (lib.types.submodule dashboardProviderSubmodule);
+                              default = { };
+                            };
+                          };
+                          config.phillipgreenii.observability.enable = obsEnable;
+                        }
+                      ];
+                    }).config.phillipgreenii.observability;
+                  enabled = evalDarwin true;
+                  disabled = evalDarwin false;
+                  alertsFile = ./packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml;
+                  dashboardFile = ./packages/pg-connector/grafana/pg-connector-github.json;
+                  alertingServiceNames = lib.mapAttrsToList (_: s: s.serviceName) (
+                    lib.filterAttrs (_: s: s.errorAlert.enable) enabled.logSources
+                  );
+                in
+                assert disabled.logSources == { };
+                assert disabled.alertRuleFiles == [ ];
+                assert disabled.dashboardProviders == { };
+                assert enabled.logSources ? pg-connector-github;
+                assert enabled.logSources.pg-connector-github.serviceName == "pg-connector-github";
+                assert lib.length (lib.attrNames enabled.logSources) == 3;
+                # No two entries generate the same generic "Daemon Health" rule
+                # for one serviceName.
+                assert lib.length alertingServiceNames == lib.length (lib.unique alertingServiceNames);
+                # The generic alert is off for the pg-connector-github service
+                # (store_refused is an error-level line the dedicated Loki rule
+                # already pages).
+                assert !(lib.elem "pg-connector-github" alertingServiceNames);
+                assert enabled.alertRuleFiles == [ alertsFile ];
+                assert lib.attrNames enabled.dashboardProviders == [ "pg-connector-github" ];
+                assert enabled.dashboardProviders.pg-connector-github.dashboards == [ dashboardFile ];
+                assert enabled.dashboardProviders.pg-connector-github.folder == "pg-connector";
+                pkgs.runCommand "test-pg-connector-github-darwin-module-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.yq-go
+                      pkgs.gnugrep
+                    ];
+                    # One line per entry: name TAB serviceName TAB glob.
+                    entries = lib.concatStringsSep "\n" (
+                      lib.mapAttrsToList (n: s: "${n}\t${s.serviceName}\t${s.path}") enabled.logSources
+                    );
+                    folder = enabled.dashboardProviders.pg-connector-github.folder;
+                    alerts = alertsFile;
+                    defaultsGo = ./packages/pg-connector/cmd/pg-connector-github/internal/config/defaults.go;
+                    darwinDefault = ./darwin/default.nix;
+                  }
+                  ''
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+                    shopt -s nullglob
+
+                    # Every live file is matched by exactly one entry's glob (and the
+                    # entry carries the right service_name); no archive or lock is
+                    # matched; no entry's glob matches a file of another entry.
+                    state="$TMPDIR/state/pg-connector-github"
+                    mkdir -p "$state"
+                    for f in events.jsonl daemon.log.jsonl client.log.jsonl; do
+                      touch "$state/$f" "$state/$f.1" "$state/$f.lock"
+                    done
+                    declare -A owner svc
+                    nentries=0
+                    while IFS=$'\t' read -r name service glob; do
+                      [ -n "$name" ] || fail "empty entry line"
+                      nentries=$((nentries + 1))
+                      svc[$name]="$service"
+                      pattern="''${glob/\$\{env:XDG_STATE_HOME\}/$TMPDIR/state}"
+                      # shellcheck disable=SC2206 # the glob must expand
+                      files=( $pattern )
+                      [ "''${#files[@]}" -ge 1 ] || fail "entry $name glob '$glob' matches nothing"
+                      for f in "''${files[@]}"; do
+                        b="$(basename "$f")"
+                        [ "$(dirname "$f")" = "$state" ] || fail "entry $name matches outside the state dir: $f"
+                        case "$b" in
+                          events.jsonl|daemon.log.jsonl|client.log.jsonl) ;;
+                          *) fail "entry $name glob '$glob' matches non-live file $b" ;;
+                        esac
+                        [ -z "''${owner[$b]:-}" ] || fail "$b is matched by both ''${owner[$b]} and $name"
+                        owner[$b]="$name"
+                      done
+                    done <<<"$entries"
+                    [ "$nentries" = 3 ] || fail "want 3 entries, have $nentries"
+                    [ "''${svc[pg-connector-github]:-}" = pg-connector-github ] \
+                      || fail "no entry keyed pg-connector-github with that serviceName"
+                    want() { # file serviceName
+                      [ -n "''${owner[$1]:-}" ] || fail "$1 is matched by no entry"
+                      [ "''${svc[''${owner[$1]}]}" = "$2" ] \
+                        || fail "$1 is stamped ''${svc[''${owner[$1]}]}, want $2"
+                    }
+                    want events.jsonl pg-connector-github
+                    want daemon.log.jsonl pg-connector-github
+                    want client.log.jsonl pg-connector-github-client
+
+                    # The file names are pinned against the daemon's Go constants.
+                    grep -q 'EventLogFileName *= *"events.jsonl"' "$defaultsGo" || fail "EventLogFileName drifted"
+                    grep -q 'DaemonLogFileName *= *"daemon.log.jsonl"' "$defaultsGo" || fail "DaemonLogFileName drifted"
+                    grep -q 'ClientLogFileName *= *"client.log.jsonl"' "$defaultsGo" || fail "ClientLogFileName drifted"
+
+                    # The dashboard folder converges with the alert group's folder by title.
+                    [ "$(yq '.groups[0].folder' "$alerts")" = "$folder" ] \
+                      || fail "dashboard folder '$folder' is not the alert group's folder"
+
+                    # darwin/default.nix imports the module (and still the old one).
+                    grep -q '\./modules/pg-connector-github$' "$darwinDefault" || fail "darwin/default.nix does not import the module"
+                    grep -q '\./modules/pg-connector-pr-github$' "$darwinDefault" || fail "darwin/default.nix lost the pr-github module"
+                    touch $out
+                  '';
+
               # darwin/modules/pg-connector-thread-slack (bead pg2-kjdfi): the Slack
               # sibling of test-pg-connector-pr-github-darwin-module above --
               # registers the backend's own event log as a Loki log source and its
