@@ -27,6 +27,9 @@ import (
 //	show-<id>.json the raw wire response for show of <id>; absent means not_found
 //	show-error     when present, every show answers this error code instead
 //	delay          seconds to sleep inside a show (to hold a call in flight)
+//	write-error    when present, every write op (comment, transition, update,
+//	               close, review_submit) answers this error code
+//	after-<id>.json  copied over show-<id>.json when a write op succeeds
 //	calls.log      one "<op> <id-or-empty>" line per call, appended
 type scriptedBackend struct {
 	dir  string
@@ -78,6 +81,20 @@ show)
   ;;
 list)
   if printf '%s' "$req" | grep -q '"ids_only":true'; then cat "$D/list-ids.json"; else cat "$D/list-full.json"; fi
+  ;;
+comment|transition|update|close|review_submit)
+  # A write op: write-error makes it fail; otherwise it succeeds and, when
+  # after-<id>.json exists, swaps that in as the entity the next show reports.
+  if [ -f "$D/write-error" ]; then
+    printf '{"protocolVersion":1,"schemaVersion":1,"error":{"code":"%s","message":"scripted"}}\n' "$(cat "$D/write-error")"
+  else
+    [ -f "$D/after-$id.json" ] && cp "$D/after-$id.json" "$D/show-$id.json"
+    if [ "$op" = review_submit ]; then
+      printf '{"protocolVersion":1,"schemaVersion":1,"result":{"status":"posted","review_id":"r1","state":"pending","head_sha":"abc","as_of":"2026-01-01T00:00:00Z"}}\n'
+    else
+      printf '{"protocolVersion":1,"schemaVersion":1,"result":{"id":"%s","state":"open","as_of":"2026-01-01T00:00:00Z"}}\n' "$id"
+    fi
+  fi
   ;;
 *)
   printf '{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unknown_op","message":"no"}}\n'

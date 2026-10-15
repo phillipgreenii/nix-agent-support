@@ -1,7 +1,8 @@
 // cache_policy.go: the entity cache as a READ POLICY for pr and issue show —
 // detail-level read-through within read_ttl, a per-entity single-flight lock,
 // and the served_from / age_seconds provenance fields (INV-CACHE-2..5,
-// INV-CACHE-8). cache_dispatch.go keeps the unavailable fallback and the
+// INV-CACHE-8) and the invalidate-on-write rule (INV-CACHE-10, dispatchWrite).
+// cache_dispatch.go keeps the unavailable fallback and the
 // live-success write; changes_refresher.go carries the changes-side half
 // (INV-CACHE-6, INV-CACHE-7).
 //
@@ -290,6 +291,55 @@ func dispatchShow(ctx context.Context, reg *Registry, entityType, id, pinned str
 	out := *resp
 	out.Result = annotateServed(resp.Result, servedFromOrigin, 0)
 	return &out, nil
+}
+
+// invalidateEntity drops id's cached entity, at whatever level it is held, from
+// every backend cache a write to it could have reached: the pinned backend, or
+// every backend registered for entityType (INV-CACHE-10). It takes the same
+// per-entity single-flight lock a show holds while it fetches, so a reader
+// that fetched the entity before the write landed has finished storing it
+// before the drop runs, and cannot re-seat the pre-write entity afterwards.
+// Best-effort and fail-open like every other cache operation: a cache problem
+// never turns a completed write into a failure, and a file is saved only when
+// an entry was actually dropped. It does not consult the cache opt-outs,
+// because an opted-out pair holds no entry to drop. The ledger is untouched
+// (see INV-CACHE-10: a write changes no membership fact the ledger records).
+func invalidateEntity(reg *Registry, entityType, id, pinned string) {
+	if id == "" {
+		return
+	}
+	backends := candidateShowBackends(reg, entityType, pinned)
+	if len(backends) == 0 {
+		return
+	}
+	if err := ensureCacheDirExists(); err != nil {
+		return
+	}
+	release, _ := acquireShowFlight(context.Background(), entityType, id)
+	defer release()
+	for _, b := range backends {
+		key := CacheKey{Type: entityType, Backend: b}
+		c, err := loadCache(key)
+		if err != nil {
+			continue
+		}
+		if c.Drop(id) {
+			_ = saveCache(key, c)
+		}
+	}
+}
+
+// dispatchWrite is the pr/issue write entry point: DispatchTargeted for an
+// id-keyed write op, then, only when the backend answered success, the
+// invalidation of that entity's cached copy (INV-CACHE-10). A write that
+// failed in any way leaves the cache alone, because nothing is known to have
+// changed. The caller gets DispatchTargeted's answer unchanged.
+func dispatchWrite(ctx context.Context, reg *Registry, entityType, op, id string, args any, pinned string) (*scriptout.Response, error) {
+	resp, err := DispatchTargeted(ctx, reg, entityType, op, args, pinned)
+	if err == nil {
+		invalidateEntity(reg, entityType, id, pinned)
+	}
+	return resp, err
 }
 
 // entityAgeSeconds is the age of a raw entity from its own as_of; 0 when the

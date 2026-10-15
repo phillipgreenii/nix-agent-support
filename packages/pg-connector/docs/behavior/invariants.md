@@ -138,7 +138,9 @@ distinction come from the behavior-docs method
   turn a read into a failure. `read_ttl` defaults to 120 seconds; a configured value of `0` or
   `off` disables the read-through. An `unavailable` answer from the origin MUST still fall back to a
   stale `detail` entry marked `stale` (`INV-CACHE-1`). A type or backend opted out of the cache
-  (`INV-CACHE-1`) MUST be neither read-through nor written.
+  (`INV-CACHE-1`) MUST be neither read-through nor written. An entry dropped by a write to its
+  entity (`INV-CACHE-10`) is no longer a live entry, so the next `show` of that entity reads the
+  origin.
 - **`INV-CACHE-5`** <!-- uuid: e96e5e10-0fb8-4ff4-b301-aac0b73da791 --> — A `show` answered by the
   umbrella MUST carry two additive fields beside the entity: `served_from`, `origin` when the
   answer was fetched from the origin by this call or `cache` when it came from a cache entry
@@ -186,7 +188,8 @@ distinction come from the behavior-docs method
   MUST NOT change the `capabilities`-flag and `state:` opt-outs, the fail-open rule, the
   `unavailable` stale fallback, or the existing `0`/`2`/`3`/`4` exit codes of `show`, `list` and
   `changes`. A consumer that has just detected a change and needs the current entity MUST pass
-  `--fresh` to `show`, because a `detail` entry younger than `read_ttl` is otherwise served. This
+  `--fresh` to `show`, because a `detail` entry younger than `read_ttl` is otherwise served; a
+  caller that changed the entity through this umbrella needs no `--fresh` (`INV-CACHE-10`). This
   rule is scoped like the cache policy it constrains: it binds the umbrella-owned cache, so it
   applies to backends that do not own their cache and changes (`INV-CACHE-9`). For a backend that
   does, `--fresh` is forwarded to the backend as `fresh: true` and it is the backend that decides
@@ -202,6 +205,25 @@ distinction come from the behavior-docs method
   or cache tombstones for it. It MUST still stamp the ledger for such a backend
   (`INV-LEDGER-FRESH-5`). A backend that declares neither keeps every rule of this section
   (`INV-CACHE-1`).
+
+- **`INV-CACHE-10`** <!-- uuid: b3b847bf-e445-4a13-a566-2918029907f8 --> — A write verb of the
+  `pr` or `issue` type that the backend accepted MUST drop the written entity's entry from the
+  umbrella-owned cache (`INV-CACHE-1`), whatever level the entry holds (`summary` or `detail`,
+  `INV-CACHE-2`) and from every backend cache the write could have reached (the pinned backend, or
+  every backend registered for the type), so that the next `show` of that entity reads the origin
+  instead of serving the pre-write entity until `read_ttl` expires. The write verbs are `issue
+comment`, `issue transition`, `issue update`, `issue close` and `pr review submit`. The drop MUST
+  happen after the backend answered success and MUST NOT happen for a write that failed in any way
+  (a failed write is not known to have changed anything). The drop deletes the entry; it MUST NOT
+  leave a tombstone, because the entity has not left any query. It MUST be serialized with an
+  in-flight `show` of the same entity (the single-flight lock of `INV-CACHE-4`), so a read that
+  fetched the pre-write entity cannot store it after the drop. It MUST fail open like every other
+  cache operation: a cache problem never turns a completed write into a failure. It MUST NOT touch
+  the ledger: the ledger records query membership and a content hash, and the next `list` or
+  `changes` poll re-derives both from the origin, so a write is reported as a change by that poll
+  as for any other change. `issue create` holds nothing to drop (the new id has no entry) and is
+  not a write verb for this rule. A backend that owns its cache (`INV-CACHE-9`) leaves the umbrella
+  no entry to drop; read-after-write for such a backend is that backend's own rule.
 
 ## Ledger freshness
 

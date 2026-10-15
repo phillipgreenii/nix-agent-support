@@ -515,7 +515,7 @@ holds no cache entry to fall back to, so an `unavailable` answer stays `unavaila
 ### Read-through, provenance and the refresher — the cache as a policy, not only a fallback
 
 Bead `pg2-cw6b3.2` turns the entity cache from a failure fallback into a read policy for `pr` and
-`issue` (`INV-CACHE-2`..`INV-CACHE-8`). It applies to a backend that does not own its cache; a
+`issue` (`INV-CACHE-2`..`INV-CACHE-8`, `INV-CACHE-10`). It applies to a backend that does not own its cache; a
 backend that declares `cache_opt_out` and `owns_changes` is outside it (`INV-CACHE-9`). Two `state:`
 keys, in the same registry file and with the same duration syntax (`<N>d` or a Go duration) as
 `cache_max_age`, tune it:
@@ -533,6 +533,12 @@ keys, in the same registry file and with the same duration syntax (`<N>d` or a G
   always asks the origin; it keeps the `unavailable` stale fallback, which reports
   `served_from: cache` with `stale: true`. A consumer that has just detected a change and must see
   the current entity (for example a hydration after a detected delta) MUST pass `--fresh`.
+- **Write verbs** (`issue comment`, `issue transition`, `issue update`, `issue close`, `pr review
+submit`). After the backend answers success, the umbrella deletes that entity's cache entry (at
+  either level) from the pinned backend's cache, or from every registered backend's cache for the
+  type, so a `show` right after the write reads the origin and reflects it, with no `--fresh`
+  needed (`INV-CACHE-10`). A write that fails leaves the cache and the ledger as they were.
+  `issue create` and every read verb never drop an entry.
 - **`list`** keeps asking the origin every call (it is the membership and change-detection read),
   and writes each returned entity to the cache at `summary` level. A `summary` never replaces a
   `detail` entry's content.

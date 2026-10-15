@@ -235,6 +235,9 @@ list`/`search` accept no such flag — see "Cross-cutting capabilities" above) t
   call fetched from the `origin` or served a `cache` entry, and the seconds since the entity's
   own `as_of` (`INV-CACHE-5`).
 - **`--fresh`** — the `show` flag that skips `read_ttl` and asks the origin (`INV-CACHE-5`).
+- **Invalidate on write** — dropping an entity's entry from the entity cache once a write verb on
+  it succeeded, so the next `show` reads the origin (operator ruling on `pg2-tseur`,
+  `INV-CACHE-10`).
 - **Refresher** — `changes` run with `cache_refresh_after` set: it reads membership cheaply,
   re-fetches only new or aged entities (in batches of at most 74 with `show_many` where the backend
   has it, one `show` each otherwise), confirms removals, and writes `detail` entries for what

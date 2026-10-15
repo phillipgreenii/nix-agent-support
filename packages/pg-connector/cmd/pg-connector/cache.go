@@ -445,6 +445,19 @@ func (c *Cache) Remove(id string, now time.Time) {
 	c.Entries[id] = entry
 }
 
+// Drop deletes id's entry outright, whatever its level and whether or not it
+// is tombstoned, and reports whether an entry was held. Unlike Remove it
+// leaves no tombstone: it is for an entry whose content is known to be out of
+// date (a write to the entity just landed, INV-CACHE-10), not for an entity
+// that has left a query, so nothing later reports it as removed.
+func (c *Cache) Drop(id string) bool {
+	if _, ok := c.Entries[id]; !ok {
+		return false
+	}
+	delete(c.Entries, id)
+	return true
+}
+
 // Evict enforces both cache-retention rules in one pass:
 //  1. LRU size cap: while len(non-tombstoned entries) > sizeCap, drop the
 //     LIVE (RemovedAt == nil) entry with the oldest LastAccess. Tombstones

@@ -154,7 +154,7 @@ func newIssueCommentCmd() *cobra.Command {
 		if err != nil {
 			return reportIssueTargetedOutcome(cmd, nil, err, humanize)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "comment", map[string]string{
+		resp, dispatchErr := dispatchWrite(cmd.Context(), reg, "issue", "comment", args[0], map[string]string{
 			"id":   args[0],
 			"body": body,
 		}, *backendFlag)
@@ -181,7 +181,7 @@ func newIssueTransitionCmd() *cobra.Command {
 		if err != nil {
 			return reportIssueTargetedOutcome(cmd, nil, err, humanize)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "transition", map[string]string{
+		resp, dispatchErr := dispatchWrite(cmd.Context(), reg, "issue", "transition", args[0], map[string]string{
 			"id":           args[0],
 			"target_state": state,
 		}, *backendFlag)
@@ -215,7 +215,7 @@ func newIssueUpdateCmd() *cobra.Command {
 		if err != nil {
 			return reportIssueTargetedOutcome(cmd, nil, err, humanizeIssueUpdate)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "update", map[string]any{
+		resp, dispatchErr := dispatchWrite(cmd.Context(), reg, "issue", "update", args[0], map[string]any{
 			"id": args[0],
 			"fields": map[string]any{
 				"metadata":       metadata,
@@ -273,7 +273,7 @@ func newIssueCloseCmd() *cobra.Command {
 		if force {
 			closeArgs["force"] = true
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "close", closeArgs, *backendFlag)
+		resp, dispatchErr := dispatchWrite(cmd.Context(), reg, "issue", "close", args[0], closeArgs, *backendFlag)
 		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanize)
 	}
 	cmd.Flags().StringVar(&reason, "reason", "", "reason for closing (required)")

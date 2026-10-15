@@ -65,7 +65,7 @@ func newPrReviewSubmitCmd() *cobra.Command {
 		if err != nil {
 			return reportPrTargetedOutcome(cmd, nil, err, humanizeReviewSubmit)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "review_submit", wireArgs, *backendFlag)
+		resp, dispatchErr := dispatchWrite(cmd.Context(), reg, "pr", "review_submit", args[0], wireArgs, *backendFlag)
 		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizeReviewSubmit)
 	}
 	return cmd
