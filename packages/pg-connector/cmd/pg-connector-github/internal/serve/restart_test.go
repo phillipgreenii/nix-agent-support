@@ -156,7 +156,7 @@ func TestRestartAfterALongDowntimeStaysInsideTheBudget(t *testing.T) {
 	// The cap held: the catch-up stopped on its own and nothing more comes.
 	time.Sleep(2500 * time.Millisecond)
 	if got := len(d.Shim.OriginCalls()); got != total {
-		t.Errorf("the daemon kept calling after the cap: %d more calls", got-total)
+		t.Errorf("the daemon kept calling after the cap: %d more calls: %v", got-total, kinds(d.Shim.OriginCalls()[total:]))
 	}
 	// Reads are still answered (stale content inside expiry), not refused.
 	if resp, _ := list(t, d, servetest.QueryMine, 20*time.Second, nil); resp.Error != nil {
