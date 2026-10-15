@@ -151,3 +151,33 @@ func TestScan_PrunesVanishedSessionState(t *testing.T) {
 		t.Fatalf("vanished session sb still in SessionSnapshot projection")
 	}
 }
+
+// TestScan_WatchPathsIncludeRegistryFiles pins that the fast-tier watch set
+// carries each discovered session's registry file and the registry directory (so
+// a registry-only state change or a newly-created registry file is seen fast).
+func TestScan_WatchPathsIncludeRegistryFiles(t *testing.T) {
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	home := filepath.Join(root, "claude-home")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := projectDir(t, home, "/tmp/w")
+	writeSessionRecord(t, sessionsDir, 111, "sw", "/tmp/w", "")
+	main := writeTranscript(t, dir, "sw.jsonl", time.Unix(1000, 0), assistantLine("m", 1, 1))
+
+	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	m, _, _ := newMonitorWithObservers(home, disc)
+	if _, err := m.Scan(time.Unix(2000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, p := range m.WatchPaths() {
+		got[p] = true
+	}
+	for _, want := range []string{main, filepath.Join(sessionsDir, "111.json"), sessionsDir} {
+		if !got[want] {
+			t.Errorf("WatchPaths missing %q; got %v", want, m.WatchPaths())
+		}
+	}
+}

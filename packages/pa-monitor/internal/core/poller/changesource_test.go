@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 )
 
 // TestTwoTierChangeSource_FastDetectsSizeChange: the fast tier returns as soon as
@@ -63,5 +66,50 @@ func TestTwoTierChangeSource_CtxDoneReturnsFalse(t *testing.T) {
 	cancel()
 	if cs.WaitForChange(ctx) {
 		t.Error("WaitForChange must return false when ctx is already done")
+	}
+}
+
+// TestTwoTierChangeSource_RegistryOnlyChangeFiresFastTier: a registry-only
+// change (busy -> waiting written to ~/.claude/sessions/<pid>.json with no
+// transcript write) is detected by the FAST tier through the Monitor's real
+// WatchPaths, long before the (here hour-long) slow tier.
+func TestTwoTierChangeSource_RegistryOnlyChangeFiresFastTier(t *testing.T) {
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	home := filepath.Join(root, "claude-home")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reg := filepath.Join(sessionsDir, "111.json")
+	busy := `{"pid":111,"sessionId":"s1","cwd":"/tmp/p","kind":"interactive","status":"busy"}`
+	if err := os.WriteFile(reg, []byte(busy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	disc := &session.Discoverer{
+		SessionsDir: sessionsDir,
+		PidAlive:    func(int) bool { return true },
+		ReadEnv:     func(string, int) (map[string]string, error) { return nil, nil },
+	}
+	m := corpus.New(home, disc)
+	if _, err := m.Scan(time.Now()); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+
+	cs := newTwoTierChangeSource(2*time.Millisecond, time.Hour, time.Now)
+	cs.SetWatch(m.WatchPaths())
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		// Same-length status rewrite is not enough on its own to rely on size, so
+		// the longer "waiting" payload changes size; mtime moves too.
+		waiting := `{"pid":111,"sessionId":"s1","cwd":"/tmp/p","kind":"interactive","status":"waiting","waitingFor":"permission"}`
+		_ = os.WriteFile(reg, []byte(waiting), 0o600)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if !cs.WaitForChange(ctx) {
+		t.Fatal("fast tier did not detect a registry-only change before ctx timeout")
 	}
 }

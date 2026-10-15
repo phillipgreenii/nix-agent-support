@@ -51,7 +51,8 @@ func (d *Discoverer) Discover() ([]*Session, error) {
 		// Parse the registry row via the shared library so status/waitingFor/
 		// statusUpdatedAt are decoded alongside the existing fields. Malformed
 		// files are silently skipped (mirrors prior behavior).
-		r, err := ct.ReadSessionFile(filepath.Join(d.SessionsDir, e.Name()))
+		regPath := filepath.Join(d.SessionsDir, e.Name())
+		r, err := ct.ReadSessionFile(regPath)
 		if err != nil {
 			continue
 		}
@@ -82,6 +83,7 @@ func (d *Discoverer) Discover() ([]*Session, error) {
 			RegistryStatus:  r.Status,
 			WaitingFor:      r.WaitingFor,
 			StatusUpdatedAt: r.StatusUpdatedAt,
+			RegistryPath:    regPath,
 			Env:             env,
 			PidAlive:        alive,
 		})

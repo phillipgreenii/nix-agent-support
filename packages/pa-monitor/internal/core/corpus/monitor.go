@@ -38,7 +38,8 @@ type Monitor struct {
 	topo map[string]sessionTopology
 
 	// watch is the fast-tier ChangeSource watch set from the last Scan: the active
-	// sessions' resolved transcript paths + all status-sibling paths. The producer
+	// sessions' resolved transcript paths + all status-sibling paths + the session
+	// registry files and directory. The producer
 	// hands this to the ChangeSource so its ≤1s poll stats the low-latency set
 	// (active transcripts + status) for size/mtime changes (design §6).
 	watch []string
@@ -217,8 +218,20 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 	}
 
 	// Build the fast-tier watch set: active sessions' resolved transcripts + all
-	// status siblings. Order is irrelevant (the ChangeSource stats into a map).
-	watch := make([]string, 0, len(newTopo)+len(activeStatusPaths))
+	// status siblings + the session registry files (and their directory, so a
+	// newly-created registry file is seen too). A registry-only state change
+	// (e.g. busy -> waiting at a permission prompt) writes no transcript line, so
+	// without these it would wait for the slow-tier rescan. Order is irrelevant
+	// (the ChangeSource stats into a map).
+	watch := make([]string, 0, 2*len(newTopo)+len(activeStatusPaths)+1)
+	if m.disc.SessionsDir != "" {
+		watch = append(watch, m.disc.SessionsDir)
+	}
+	for _, s := range sessions {
+		if s.RegistryPath != "" {
+			watch = append(watch, s.RegistryPath)
+		}
+	}
 	for _, tp := range newTopo {
 		if tp.resolvedPath != "" {
 			watch = append(watch, tp.resolvedPath)
@@ -240,7 +253,8 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 }
 
 // WatchPaths returns the fast-tier ChangeSource watch set from the last Scan:
-// the active sessions' resolved transcript paths plus all status-sibling paths.
+// the active sessions' resolved transcript paths, all status-sibling paths, and
+// the session registry files (plus the registry directory).
 // The producer feeds it to the ChangeSource after each Assemble.
 func (m *Monitor) WatchPaths() []string { return m.watch }
 

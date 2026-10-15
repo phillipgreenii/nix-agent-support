@@ -168,6 +168,12 @@ type Session struct {
 	WaitingFor      string
 	StatusUpdatedAt time.Time
 
+	// RegistryPath is the absolute path of the registry file this session was
+	// decoded from (<SessionsDir>/<name>.json). The corpus Monitor adds it to the
+	// fast-tier watch set so a registry-only change is seen within the fast
+	// interval.
+	RegistryPath string
+
 	// Env is the process environment of the agent process, populated by the
 	// poller via per-OS readers. Empty when the env could not be read (dead
 	// pid, permission denied, unsupported OS). Detectors must tolerate
