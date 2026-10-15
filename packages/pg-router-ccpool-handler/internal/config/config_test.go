@@ -221,6 +221,81 @@ func TestMergeAllowedTools_defaultNeverGainsGitPush(t *testing.T) {
 	}
 }
 
+// bashPermits reports whether an --allowed-tools list grants the Bash command
+// line cmd under dontAsk deny-by-default: some `Bash(<prefix>:*)` grant whose
+// prefix is the command itself or a leading word-boundary prefix of it. It
+// models only that one grant shape (the only one the code-executing toolchain
+// verbs use), not claude's full matcher.
+func bashPermits(allowed, cmd string) bool {
+	for _, g := range SplitAllowedTools(allowed) {
+		prefix, ok := strings.CutPrefix(g, "Bash(")
+		if !ok {
+			continue
+		}
+		prefix, ok = strings.CutSuffix(prefix, ":*)")
+		if !ok {
+			continue
+		}
+		if cmd == prefix || strings.HasPrefix(cmd, prefix+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+// goToolchainCmds are the code-executing Go toolchain command lines the
+// handler-wide default MUST deny (bead pg2-cwn44): each runs code from the
+// tree it is pointed at, which for an untrusted PR checkout is
+// attacker-controlled (agent-support ADR 0035).
+var goToolchainCmds = []string{
+	"go test ./...", "go build ./...", "go vet ./...", "go mod tidy",
+	"go generate ./...", "gofmt -l .", "gofumpt -l .",
+}
+
+// TestDefault_allowedToolsDeniesGoToolchain (bead pg2-cwn44): the handler-wide
+// default grants NO Go toolchain command, so a role that declares no go tool
+// set (review, feedback, triager) is denied `go test` by the allowlist. The
+// positive control proves the helper can see a grant at all, so the denial
+// is not vacuous.
+func TestDefault_allowedToolsDeniesGoToolchain(t *testing.T) {
+	def := Default().AllowedTools
+	for _, cmd := range goToolchainCmds {
+		if bashPermits(def, cmd) {
+			t.Errorf("default AllowedTools permits %q; go toolchain grants belong to the go tool set only", cmd)
+		}
+	}
+	if !bashPermits(def, "git status") {
+		t.Fatal("positive control failed: bashPermits cannot see the default git status grant")
+	}
+	// With a prTool configured the default still carries no go grant.
+	for _, cmd := range goToolchainCmds {
+		if bashPermits(defaultAllowedTools("some-pr-tool"), cmd) {
+			t.Errorf("defaultAllowedTools(prTool) permits %q", cmd)
+		}
+	}
+}
+
+// TestMergeAllowedTools_goSetGrantsOnlyTheDeclaringRole (bead pg2-cwn44): a
+// role whose extraAllowedTools carry the go set (what the nix module renders
+// for a role declaring toolSets = [ "go" ]) is permitted `go test`, while the
+// default and a role with no extras are not.
+func TestMergeAllowedTools_goSetGrantsOnlyTheDeclaringRole(t *testing.T) {
+	goSet := []string{"Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(go mod:*)", "Bash(gofmt:*)", "Bash(gofumpt:*)"}
+	def := Default().AllowedTools
+	declares := MergeAllowedTools(def, goSet)
+	for _, cmd := range []string{"go test ./...", "go vet ./...", "gofmt -l .", "gofumpt -l ."} {
+		if !bashPermits(declares, cmd) {
+			t.Errorf("role declaring the go set is denied %q", cmd)
+		}
+	}
+	if bashPermits(declares, "go generate ./...") {
+		t.Error("go set must not grant go generate")
+	}
+	if got := MergeAllowedTools(def, nil); bashPermits(got, "go test ./...") {
+		t.Errorf("role declaring no set is permitted go test: %q", got)
+	}
+}
+
 func TestSplitAllowedTools(t *testing.T) {
 	got := SplitAllowedTools(" Read, Bash(a,b:*) ,,Edit ")
 	want := []string{"Read", "Bash(a,b:*)", "Edit"}

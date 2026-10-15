@@ -247,6 +247,45 @@ func TestBuildDeps_mergesRoleExtraAllowedTools(t *testing.T) {
 	}
 }
 
+// TestBuildDeps_goToolSetReachesOnlyTheDeclaringRole (bead pg2-cwn44): through
+// the real buildDeps merge, a role whose role file carries the go tool set in
+// extraAllowedTools (what the nix module renders for toolSets = [ "go" ]) runs
+// with `go test` permitted, while a sibling that declares no set (review,
+// feedback, triager shaped) is denied it by the handler-wide default.
+func TestBuildDeps_goToolSetReachesOnlyTheDeclaringRole(t *testing.T) {
+	cfg := config.Default()
+	drain := roles.Role{Name: "drain-zr", CCPool: &roles.CCPoolConfig{
+		ExtraAllowedTools: []string{"Skill", "Bash(go test:*)", "Bash(go build:*)", "Bash(gofmt:*)"},
+	}}
+	review := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{ExtraAllowedTools: []string{"Bash(pg-pr review:*)"}}}
+	bare := roles.Role{Name: "feedback", CCPool: &roles.CCPoolConfig{}}
+
+	allowed := func(r roles.Role) string { return buildDeps(cfg, r).CC.(*ccpool.CLIRunner).AllowedTools }
+	permits := func(list, cmd string) bool {
+		for _, g := range config.SplitAllowedTools(list) {
+			p, ok := strings.CutPrefix(g, "Bash(")
+			if !ok {
+				continue
+			}
+			if p, ok = strings.CutSuffix(p, ":*)"); ok && (cmd == p || strings.HasPrefix(cmd, p+" ")) {
+				return true
+			}
+		}
+		return false
+	}
+	if !permits(allowed(drain), "go test ./...") {
+		t.Errorf("role declaring the go set is denied go test: %q", allowed(drain))
+	}
+	for _, r := range []roles.Role{review, bare} {
+		if permits(allowed(r), "go test ./...") {
+			t.Errorf("role %q declares no go set but is permitted go test: %q", r.Name, allowed(r))
+		}
+		if permits(allowed(r), "gofmt -l .") {
+			t.Errorf("role %q declares no go set but is permitted gofmt", r.Name)
+		}
+	}
+}
+
 // TestBuildDeps_roleEffortOverridesHandlerEffort (bead pg2-svkob, INV-CCH-31)
 // proves buildDeps replaces the handler-wide launch-config Effort with a
 // ccpool role's own Effort for that role's runner (and its Deps.Cfg) only: a

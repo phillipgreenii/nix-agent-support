@@ -6689,6 +6689,24 @@
                       pool.enable = true;
                     }).phillipgreenii.programs.pg-router-ccpool-handler.pool.dir;
 
+                  # unknownToolSetHandlerDir (bead pg2-cwn44): a role declaring a tool set
+                  # the module does not define; forcing its rendered dir must fail.
+                  unknownToolSetHandlerDir =
+                    (evalHM {
+                      enable = true;
+                      roles.typo = {
+                        type = "ccpool";
+                        ccpool = {
+                          actor = "typo-actor";
+                          completion = "close-only";
+                          onFailure = "unclaim";
+                          onDispatchFail = "leave";
+                          promptBody = "typo prompt";
+                          toolSets = [ "gp" ];
+                        };
+                      };
+                    }).phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir;
+
                   # roleWithOwnPool (bead pg2-mr0sl): a ccpool role opting
                   # into its OWN dedicated pool, plus poolMetrics enabled --
                   # proves (a) roleFileFor renders `poolDir` into that
@@ -6741,6 +6759,18 @@
                           # effort (bead pg2-svkob): a per-role claude --effort
                           # override renders into this role's own JSON only.
                           effort = "high";
+                          # toolSets (bead pg2-cwn44): declares the built-in "go" set
+                          # and a consumer-defined "hooks" set; the role's own
+                          # extraAllowedTools repeats one go grant to prove the
+                          # rendered list is de-duplicated, first occurrence wins.
+                          toolSets = [
+                            "go"
+                            "hooks"
+                          ];
+                          extraAllowedTools = [
+                            "Skill"
+                            "Bash(gofumpt:*)"
+                          ];
                         };
                       };
                       # triage (bead pg2-p9lcg): the close-or-triage completion
@@ -6758,6 +6788,9 @@
                         };
                       };
                     };
+                    # A consumer-defined set (bead pg2-cwn44): defining one must not
+                    # drop the module's built-in "go" set (mkDefault priority).
+                    toolSets.hooks = [ "Bash(pg-hooks:*)" ];
                     # Handler-wide pool (bead pg2-h5vno): the pool every role
                     # WITHOUT its own pool dispatches into (the production
                     # escalation-triager roles) -- poolMetrics must report it
@@ -7214,6 +7247,27 @@
                         [ "$(jq -c .ccpool.extraAllowedTools "$roleWithOwnPoolHandlerDir/review.json")" = '["Skill","Bash(gh pr create:*)"]' ]
                         jq -e '.ccpool | has("extraAllowedTools") | not' "$handlerCommandDir/feedback.json" >/dev/null
 
+                        # toolSets (bead pg2-cwn44): a role that declares the "go" set
+                        # gets its grants (and a consumer-defined set's) rendered
+                        # into ITS OWN extraAllowedTools, after the role's own list,
+                        # de-duplicated. A role that declares none (review, feedback)
+                        # carries no go grant anywhere in its role file, and the
+                        # handler-wide launch-config allowlist carries none either:
+                        # this is the negative that keeps go test off every other role.
+                        [ "$(jq -c .ccpool.extraAllowedTools "$roleWithOwnPoolHandlerDir/drain.json")" = '["Skill","Bash(gofumpt:*)","Bash(go build:*)","Bash(go test:*)","Bash(go vet:*)","Bash(go mod:*)","Bash(gofmt:*)","Bash(pg-hooks:*)"]' ]
+                        for f in "$roleWithOwnPoolHandlerDir/review.json" "$roleWithOwnPoolHandlerDir/triage.json" "$handlerCommandDir/feedback.json" "$handlerCommandDir/worker.json"; do
+                          if jq -r '(.ccpool.extraAllowedTools // [])[]' "$f" | grep -Eq '^Bash\(go (build|test|vet|mod):|^Bash\(gofmt:|^Bash\(gofumpt:'; then
+                            echo "role file $f carries a go grant but declares no go tool set" >&2
+                            exit 1
+                          fi
+                        done
+                        for lc in "$launchConfigFile" "$defaultLaunchConfigFile"; do
+                          if jq -r .allowedTools "$lc" | tr ',' '\n' | grep -Eq '^Bash\(go (build|test|vet|mod):|^Bash\(gofmt:|^Bash\(gofumpt:'; then
+                            echo "handler-wide allowedTools in $lc carries a go grant" >&2
+                            exit 1
+                          fi
+                        done
+
                         # effort (bead pg2-svkob, INV-CCH-31): a role that sets it
                         # renders it into its own JSON; a role that never sets it
                         # carries no such key, and the launch config's effort is
@@ -7318,6 +7372,9 @@
                   poolEnabled.phillipgreenii.programs.pg-router-ccpool-handler.pool.settings.pool.max_sessions == 50;
                 # pool.dir's default resolves under home.homeDirectory.
                 assert poolDefaultDir == "/home/tester/.local/state/pg-router-ccpool";
+                # toolSets (bead pg2-cwn44): a role declaring a set the module does
+                # not define fails at eval time (never a silent empty grant).
+                assert !(builtins.tryEval unknownToolSetHandlerDir.outPath).success;
                 # roleWithOwnPool (bead pg2-mr0sl): the per-role bootstrap
                 # activation entry exists, keyed by role name, and mirrors
                 # the whole-process pool.enable activation's own ordering

@@ -315,17 +315,25 @@ func (c Config) WorkerBudget() budget.Budget {
 // touch.
 //
 // pg-connector issue */ccpool * (bead pg2-s9zh5): every dispatched role
-// shares this ONE process-wide allowlist — there is no per-role override
-// mechanism today (roles.CCPoolConfig and the nix module's roleFileFor carry
-// no allowedTools field of their own) — so a triager-shaped role's own
+// shares this ONE process-wide allowlist, so a triager-shaped role's own
 // dispatch prompt instructing it to read/mutate the escalated bead
 // (`pg-connector issue show/comment/update/close`) and inspect/reply to
 // stuck sessions (`ccpool list/state/reply/tail`) had no path to those verbs
 // under PermissionMode=dontAsk (auto-deny, no prompt possible). Widening the
-// shared base list (rather than adding role-scoped plumbing) is the
-// deliberately narrower of the two fixes the bead allows, since the
-// role-scoped mechanism does not exist yet.
-const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)"
+// shared base list was the deliberately narrower fix at the time.
+//
+// Code-executing toolchain grants are NOT in this list (bead pg2-cwn44,
+// operator ruling on pg2-mh0kd, 2026-10-14): `go build|test|vet|mod`, `gofmt`
+// and `gofumpt` run attacker-controlled code (`_test.go`, `//go:generate`)
+// when pointed at an untrusted PR checkout (agent-support ADR 0035), so only a
+// role that declares the nix-defined "go" tool set gets them. A role's own
+// grants ride in its role file's extraAllowedTools (RoleConfig.ExtraAllowedTools,
+// bead pg2-nk6th.5, merged by buildDeps via MergeAllowedTools); the named tool
+// sets are defined in the nix module (home/programs/pg-router-ccpool-handler,
+// option toolSets) and render into that field, so this package carries no tool
+// set of its own. prek and pre-commit are the same exposure class and stay
+// here for now (pg2-cwn44 decision: out of scope, see that bead).
+const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)"
 
 // defaultAllowedTools builds the AllowedTools default: baseAllowedTools plus,
 // when prTool is configured, a Bash(<prTool>:*) grant — mirrors

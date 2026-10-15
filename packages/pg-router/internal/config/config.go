@@ -305,7 +305,14 @@ func (c Config) locator() CommandLocator {
 // REQUIRED — see plan). Minimum verbs an autonomous worker needs; deliberately
 // NOT blanket Bash. Per-entry rationale is in
 // docs/superpowers/plans/2026-06-23-pg-router-deny-by-default-allowlist.md.
-const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)"
+//
+// The go build|test|vet|mod and gofmt grants are NOT here (bead pg2-cwn44):
+// they execute attacker-controlled code on an untrusted PR checkout (ADR 0035),
+// so a role gets them only by declaring the "go" tool set, which the
+// ccpool-handler's nix module renders into that role's own extraAllowedTools.
+// Keep this list in step with packages/pg-router-ccpool-handler/internal/config
+// baseAllowedTools (which has since gained its own pg-connector/ccpool verbs).
+const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)"
 
 // defaultAllowedTools builds the SECURITY-SENSITIVE AllowedTools default:
 // baseAllowedTools plus, when prTool is configured, a Bash(<prTool>:*) grant.

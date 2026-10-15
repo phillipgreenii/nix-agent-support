@@ -371,6 +371,23 @@ let
       exec ${cfg.package}/bin/pg-router-ccpool-handler pool-capacity${poolArgs}
     '';
 
+  # toolSetGrants (bead pg2-cwn44): the grants of one NAMED tool set from
+  # `cfg.toolSets`. An undeclared name is an eval-time error rather than a
+  # silently empty grant, so a typo in a role's `toolSets` can never leave the
+  # role without the tools it believes it has (nor, the other way round, hide a
+  # set that was removed).
+  toolSetGrants =
+    name:
+    cfg.toolSets.${name}
+      or (throw "phillipgreenii.programs.pg-router-ccpool-handler: unknown tool set \"${name}\" (declared: ${lib.concatStringsSep ", " (lib.attrNames cfg.toolSets)})");
+
+  # roleExtraAllowedTools (bead pg2-cwn44): what a role's rendered role file
+  # carries as `extraAllowedTools` -- the role's own list plus its declared tool
+  # sets, in that order, first occurrence wins.
+  roleExtraAllowedTools =
+    ccpoolCfg:
+    lib.unique (ccpoolCfg.extraAllowedTools ++ lib.concatMap toolSetGrants ccpoolCfg.toolSets);
+
   # roleFileFor renders one role's `roles` entry into the on-disk JSON shape
   # cmd/pg-router-ccpool-handler/roleconfig.go's `loadRole` decodes
   # (`--role-config <dir>/<role.Name>.json`, this bead pg2-pteab, wiring the
@@ -453,11 +470,15 @@ let
             # silently dropped.
             inherit (roleCfg.ccpool) precheck;
           }
-          // lib.optionalAttrs (roleCfg.ccpool.extraAllowedTools != [ ]) {
+          // lib.optionalAttrs (roleExtraAllowedTools roleCfg.ccpool != [ ]) {
             # extraAllowedTools (bead pg2-nk6th.5): omitted when empty, so a role
             # that never sets it decodes to "no extra grants" (the handler-wide
-            # allowedTools applies unchanged).
-            inherit (roleCfg.ccpool) extraAllowedTools;
+            # allowedTools applies unchanged). Carries the role's own
+            # `extraAllowedTools` followed by the grants of every named tool set
+            # the role declares in `toolSets` (bead pg2-cwn44), de-duplicated;
+            # the handler merges them onto the handler-wide list for THIS role
+            # only, so a role that declares no set never gains its grants.
+            extraAllowedTools = roleExtraAllowedTools roleCfg.ccpool;
           }
           // lib.optionalAttrs (roleCfg.ccpool.beadsDir != "") {
             # beadsDir (bead pg2-2grpj): omitted when unset, like poolDir.
@@ -510,12 +531,16 @@ let
   # packages/pg-router-ccpool-handler/internal/config.go's own
   # baseAllowedTools (see that constant's doc comment for the full
   # rationale) -- every dispatched role shares this ONE process-wide
-  # allowlist (no per-role override mechanism exists in `roles`/
-  # `roleFileFor` below), so a triager-shaped role's own dispatch prompt
+  # allowlist (a per-role extraAllowedTools has existed since pg2-nk6th.5, but
+  # was not used for this fix), so a triager-shaped role's own dispatch prompt
   # instructing it to use `pg-connector issue show/comment/update/close` and
   # `ccpool list/state/reply/tail` had no path to those verbs under
   # PermissionMode=dontAsk (auto-deny, no prompt possible).
-  defaultAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)";
+  #
+  # Code-executing toolchain grants (go build|test|vet|mod, gofmt) are NOT here
+  # (bead pg2-cwn44): they live in the named `toolSets.go` set, which a role
+  # opts into with `roles.<name>.ccpool.toolSets` (see that option).
+  defaultAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)";
 
   # launchConfigFile (this bead, pg2-qsred: home-manager module has no
   # launch-config surface, so real dispatch fails on empty WorktreeDir).
@@ -699,6 +724,23 @@ let
                   `Bash(gh pr:*)` also permits `gh pr merge`/`edit`, so prefer
                   narrow grants such as `Bash(gh pr create:*)`; a "no push / no
                   merge" rule for a prefix grant stays prompt-enforced only.
+                '';
+              };
+              toolSets = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+                example = [ "go" ];
+                description = ''
+                  Named tool sets this role declares (bead pg2-cwn44), each a key
+                  of the module-level `toolSets` option. The grants of every
+                  declared set are appended to this role's rendered
+                  `extraAllowedTools`, so they reach THIS role's
+                  `ccpool new --allowed-tools` only. Default `[ ]` declares none:
+                  the role then holds the handler-wide list alone, which carries
+                  no code-executing toolchain grant (no `go test`, no `gofmt`).
+                  Declare a set only on a role that works trusted trees with that
+                  toolchain; a role that handles untrusted PR content MUST NOT
+                  (agent-support ADR 0035). An undeclared name is an eval error.
                 '';
               };
               onFailure = lib.mkOption {
@@ -1098,6 +1140,28 @@ in
         differentiate dispatch per role instead of every role sharing the
         identical handler command (`PG_ROUTER_HANDLER_COMMAND_DIR`; closes the
         gap bead `pg2-ymb3v` fixed at the Go level).
+      '';
+    };
+
+    # toolSets (bead pg2-cwn44, operator ruling on pg2-mh0kd, 2026-10-14): named
+    # sets of tool grants a role opts into with `roles.<name>.ccpool.toolSets`,
+    # rather than the handler-wide `launchConfig.allowedTools` every role shares.
+    # Nix-only by design: a set renders into the role's own `extraAllowedTools`
+    # (bead pg2-nk6th.5), which the handler already merges per role, so no Go
+    # config mechanism backs it.
+    toolSets = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      default = { };
+      description = ''
+        Named tool sets, keyed by set name, each a list of grants in the same
+        syntax `launchConfig.allowedTools` uses. A role opts into a set by name
+        in `roles.<name>.ccpool.toolSets`; the set's grants are then rendered into
+        that role's `extraAllowedTools`. The module defines the `go` set (at
+        `mkDefault` priority, so a consumer may define further sets without
+        losing it, or replace it): the Go toolchain's code-executing verbs (go
+        build/test/vet/mod, gofmt, gofumpt), which are deliberately NOT in the
+        handler-wide list. Granting a command does not put it on PATH; the
+        binaries come from the primary user's home-manager profile.
       '';
     };
 
@@ -1601,6 +1665,19 @@ in
       # ccpool-handler` binding (rather than three separately dotted
       # top-level assignments) per statix's repeated-keys lint.
       phillipgreenii.programs.pg-router-ccpool-handler = {
+        # toolSets.go (bead pg2-cwn44): the Go toolchain. Every grant here runs
+        # code from the tree it is pointed at (`_test.go`, `//go:generate`,
+        # `go.mod` toolchain fetches), so it is held back from the handler-wide
+        # list and only a role that works trusted trees declares it. mkDefault
+        # so a consumer may replace it, and defining another set never drops it.
+        toolSets.go = lib.mkDefault [
+          "Bash(go build:*)"
+          "Bash(go test:*)"
+          "Bash(go vet:*)"
+          "Bash(go mod:*)"
+          "Bash(gofmt:*)"
+          "Bash(gofumpt:*)"
+        ];
         # handlerCommandDir: this bead, pg2-pteab.
         inherit handlerCommandDir;
         # launchConfigFile: this bead, pg2-qsred. `null` when disabled --

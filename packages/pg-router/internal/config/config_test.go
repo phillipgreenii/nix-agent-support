@@ -528,6 +528,23 @@ func TestDefaultAllowedTools_prToolGrant(t *testing.T) {
 	}
 }
 
+// TestBaseAllowedTools_deniesGoToolchain (bead pg2-cwn44): pg-router's own
+// compiled-in default carries no code-executing Go toolchain grant (they ride
+// in a role's own extraAllowedTools via the nix "go" tool set), keeping this
+// mirror in step with packages/pg-router-ccpool-handler/internal/config.
+func TestBaseAllowedTools_deniesGoToolchain(t *testing.T) {
+	for _, list := range []string{baseAllowedTools, defaultAllowedTools(""), defaultAllowedTools("review-tool"), Default().AllowedTools} {
+		for _, bad := range []string{"Bash(go ", "Bash(gofmt", "Bash(gofumpt"} {
+			if strings.Contains(list, bad) {
+				t.Errorf("AllowedTools %q contains %q; go toolchain grants belong to the go tool set only", list, bad)
+			}
+		}
+	}
+	if !strings.Contains(baseAllowedTools, "Bash(git status:*)") {
+		t.Fatal("positive control failed: base allowlist lost its git status grant")
+	}
+}
+
 func TestLoad_allowedToolsEnvOverride(t *testing.T) {
 	absentConfig(t)
 	t.Setenv("PG_ROUTER_ALLOWED_TOOLS", "Read,Edit")
