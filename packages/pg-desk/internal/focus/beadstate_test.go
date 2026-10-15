@@ -26,6 +26,20 @@ func TestClassifyBeadOneCasePerTableRow(t *testing.T) {
 		{"no bead yet, hidden", StatePendingHidden, LinkedBead{}, SourceFlags{Hidden: true}, "pending (hidden)"},
 		{"no bead yet, suppressed", StatePendingSuppress, LinkedBead{}, SourceFlags{SuppressedFocusKind: true}, "pending (suppressed)"},
 		{"no bead yet, source done", StateSourceDoneNoBead, LinkedBead{}, SourceFlags{Terminal: true}, "source done (no bead)"},
+		{"bead exists, source hidden, open", StateBeadHidden, LinkedBead{Present: true, Status: "open"}, SourceFlags{Hidden: true}, "open (source hidden)"},
+		{"bead exists, source hidden, claimed", StateBeadHidden, LinkedBead{Present: true, Status: "in_progress", Assignee: "worker-1"}, SourceFlags{Hidden: true}, "claimed (source hidden)"},
+		{"bead exists, source hidden, held", StateBeadHidden, LinkedBead{Present: true, Status: "deferred", FocusHold: "struck"}, SourceFlags{Hidden: true}, "held (source hidden)"},
+		{"bead exists, source hidden, deferred by someone else", StateBeadHidden, LinkedBead{Present: true, Status: "deferred"}, SourceFlags{Hidden: true}, "deferred by someone else (source hidden)"},
+		{"bead exists, source hidden, blocked", StateBeadHidden, LinkedBead{Present: true, Status: "blocked"}, SourceFlags{Hidden: true}, "blocked (source hidden)"},
+		{"bead exists, source hidden, closed", StateBeadHidden, LinkedBead{Present: true, Status: "closed"}, SourceFlags{Hidden: true}, "closed (source hidden)"},
+		{"bead exists, source hidden and terminal", StateBeadHidden, LinkedBead{Present: true, Status: "open"}, SourceFlags{Hidden: true, Terminal: true}, "open (source hidden)"},
+		{"bead exists, source hidden, open with children and stale marker", StateBeadHidden, LinkedBead{Present: true, Status: "open", OpenChildren: true, FocusHold: "struck"}, SourceFlags{Hidden: true}, "open (source hidden)"},
+		{"bead exists, source hidden, hold stale", StateBeadHidden, LinkedBead{Present: true, Status: "open"}, SourceFlags{Hidden: true, HoldStale: true}, "open (source hidden)"},
+		{"bead exists, source hidden, unwatched", StateBeadHidden, LinkedBead{Present: true, Status: "open"}, SourceFlags{Hidden: true, Unwatched: true}, "open (source hidden) unwatched"},
+		{"bead exists, kind suppressed, open", StateBeadSuppress, LinkedBead{Present: true, Status: "open"}, SourceFlags{SuppressedFocusKind: true}, "open (source suppressed)"},
+		{"bead exists, kind suppressed, claimed", StateBeadSuppress, LinkedBead{Present: true, Status: "in_progress"}, SourceFlags{SuppressedFocusKind: true}, "claimed (source suppressed)"},
+		{"bead exists, kind suppressed, held", StateBeadSuppress, LinkedBead{Present: true, Status: "deferred", FocusHold: "struck"}, SourceFlags{SuppressedFocusKind: true}, "held (source suppressed)"},
+		{"bead exists, kind suppressed and source done", StateBeadSuppress, LinkedBead{Present: true, Status: "open"}, SourceFlags{SuppressedFocusKind: true, Terminal: true}, "open (source suppressed)"},
 		{"source is a bead", StateNotApplicable, LinkedBead{Present: true, Status: "open"}, SourceFlags{IsBeadItself: true}, "n/a (epic or bead)"},
 		{"open", StateOpen, LinkedBead{Present: true, Status: "open"}, SourceFlags{}, "open"},
 		{"open, marker released", StateOpen, LinkedBead{Present: true, Status: "open", FocusHold: "released"}, SourceFlags{}, "open"},
@@ -99,6 +113,20 @@ func TestClassifyBeadPrecedence(t *testing.T) {
 	if got := ClassifyBead(LinkedBead{}, SourceFlags{SuppressedFocusKind: true, Terminal: true}); got != StatePendingSuppress {
 		t.Errorf("suppressed before terminal = %q", got)
 	}
+	// With a bead, hidden still wins over suppressed, and both win over the
+	// bead's own status (pg2-o1lq9); an escalation still wins over both.
+	if got := ClassifyBead(open, SourceFlags{Hidden: true, SuppressedFocusKind: true}); got != StateBeadHidden {
+		t.Errorf("bead + hidden + suppressed = %q, want bead_hidden", got)
+	}
+	if got := ClassifyBead(claimed, SourceFlags{SuppressedFocusKind: true}); got != StateBeadSuppress {
+		t.Errorf("claimed bead + suppressed = %q, want bead_suppressed", got)
+	}
+	if got := ClassifyBead(open, SourceFlags{Hidden: true, Escalated: true}); got != StateEscalated {
+		t.Errorf("escalated + hidden = %q, want escalated", got)
+	}
+	if got := ClassifyBead(LinkedBead{Present: true, Status: "open"}, SourceFlags{IsBeadItself: true, Hidden: true}); got != StateNotApplicable {
+		t.Errorf("bead itself + hidden = %q, want n/a", got)
+	}
 	// A terminal source with an open unclaimed bead is source done even with children.
 	if got := ClassifyBead(LinkedBead{Present: true, Status: "open", OpenChildren: true}, SourceFlags{Terminal: true}); got != StateSourceDone {
 		t.Errorf("terminal with children = %q", got)
@@ -106,8 +134,8 @@ func TestClassifyBeadPrecedence(t *testing.T) {
 }
 
 func TestBeadStateTableShape(t *testing.T) {
-	if len(BeadStates) != 17 {
-		t.Fatalf("BeadStates has %d rows, want the 17 rows of the spec table", len(BeadStates))
+	if len(BeadStates) != 19 {
+		t.Fatalf("BeadStates has %d rows, want the 19 rows of the spec table", len(BeadStates))
 	}
 	seen := map[BeadState]bool{}
 	for _, r := range BeadStates {

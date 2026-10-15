@@ -27,6 +27,8 @@ const (
 	StatePendingSuppress  BeadState = "pending_suppressed"
 	StateSourceDoneNoBead BeadState = "source_done_no_bead"
 	StateNotApplicable    BeadState = "not_applicable"
+	StateBeadHidden       BeadState = "bead_hidden"
+	StateBeadSuppress     BeadState = "bead_suppressed"
 	StateOpen             BeadState = "open"
 	StateOpenChildren     BeadState = "open_has_children"
 	StateOpenMarkerStale  BeadState = "open_marker_stale"
@@ -111,6 +113,8 @@ var BeadStates = []BeadStateRow{
 	{StatePendingSuppress, "pending (suppressed)", skipSuppressed, "none", "", "none", "suppressed", "nothing to do", "no change (suppressed)", "No bead yet, kind suppressed"},
 	{StateSourceDoneNoBead, "source done (no bead)", skipNotMatched, "none", "", "none", "source finished", "nothing to do", "no change (source finished)", "No bead yet, source terminal (finished)"},
 	{StateNotApplicable, "n/a (epic or bead)", skipNA, "none", "no bead", "none", "no bead", "no bead", "no bead", "Source is an epic or a bd task (its id is a bead id)"},
+	{StateBeadHidden, "the bead word (source hidden)", skipHidden, "none", "source hidden", "none", "source hidden", "no change (source hidden)", "no change (source hidden)", "A bead exists (any bead state), source hidden"},
+	{StateBeadSuppress, "the bead word (source suppressed)", skipSuppressed, "none", "source suppressed", "none", "source suppressed", "no change (source suppressed)", "no change (source suppressed)", "A bead exists (any bead state), kind suppressed"},
 	{StateOpen, "open", skipAlreadyHandled, "hold", "", "none", "bead open", "will hold", "bead open, no change", "open, unclaimed, no marker or marker released"},
 	{StateOpenChildren, "open (has children)", skipAlreadyHandled, "none", "has open children", "none", "bead open", "no change (has open children)", "bead open, no change", "open, unclaimed, no marker or marker released, with open children"},
 	{StateOpenMarkerStale, "open (marker stale)", skipAlreadyHandled, "hold", "", "none", "will rewrite the marker", "will hold", "will rewrite the marker", "open, unclaimed, marker struck (undeferred by hand)"},
@@ -148,7 +152,10 @@ const unwatchedWord = "unwatched"
 // claimed whatever else is true; a deferred bead is held (marker struck and
 // unassigned) or deferred by someone else; blocked, pinned and hooked read as
 // their status word; an open unclaimed bead is source done when the source
-// is terminal, else has-children, marker-stale or plain open. Unwatched is
+// is terminal, else has-children, marker-stale or plain open. A hidden or
+// kind-suppressed source with a bead is its own row (the decider skips every
+// rule for it and leaves the bead as it was), whatever the bead's state, so
+// the check follows the escalation and precedes the bead's status. Unwatched is
 // not a state of its own here: ShownAs appends it to whichever row applies.
 func ClassifyBead(link LinkedBead, src SourceFlags) BeadState {
 	if src.IsBeadItself {
@@ -168,9 +175,22 @@ func ClassifyBead(link LinkedBead, src SourceFlags) BeadState {
 		}
 		return StatePending
 	}
+	if src.Hidden {
+		return StateBeadHidden
+	}
+	if src.SuppressedFocusKind {
+		return StateBeadSuppress
+	}
 	if src.HoldStale {
 		return StateHoldStale
 	}
+	return classifyByStatus(link, src)
+}
+
+// classifyByStatus classifies a PRESENT bead by its own status, marker and
+// the source's terminal state: the rows that do not depend on the source
+// being hidden or suppressed.
+func classifyByStatus(link LinkedBead, src SourceFlags) BeadState {
 	status := strings.ToLower(strings.TrimSpace(link.Status))
 	claimed := status == statusInProg || strings.TrimSpace(link.Assignee) != ""
 	switch {
@@ -198,6 +218,22 @@ func ClassifyBead(link LinkedBead, src SourceFlags) BeadState {
 	return StateOpen
 }
 
+// beadWord is the bead's own status word, as the bead column names it when
+// the source is hidden or suppressed: "open (source hidden)", "claimed
+// (source hidden)", "held (source hidden)". It is the word of the row the
+// bead would be in were the source visible, without the qualifiers (children,
+// stale marker, source done, the claimant), because the marker already says
+// why nothing will change.
+func beadWord(link LinkedBead, src SourceFlags) string {
+	switch st := classifyByStatus(link, src); st {
+	case StateStatusWord:
+		return strings.ToLower(strings.TrimSpace(link.Status))
+	case StateClosed, StateClaimed, StateHeld, StateDeferredOther:
+		return RowOf(st).Shown
+	}
+	return "open"
+}
+
 // ShownAs is the text of the bead column for one row: the "Shown as" word of
 // state, with the pending age ("pending 12m") and the claimant of a claimed
 // bead filled in, the status word of a blocked, pinned or hooked bead, and
@@ -209,6 +245,10 @@ func ShownAs(state BeadState, link LinkedBead, src SourceFlags) string {
 		if link.PendingAge >= time.Minute {
 			word = "pending " + shortAge(link.PendingAge)
 		}
+	case StateBeadHidden:
+		word = beadWord(link, src) + " (source hidden)"
+	case StateBeadSuppress:
+		word = beadWord(link, src) + " (source suppressed)"
 	case StateStatusWord:
 		word = strings.ToLower(strings.TrimSpace(link.Status))
 	case StateClaimed:

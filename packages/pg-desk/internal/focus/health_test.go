@@ -274,7 +274,7 @@ func TestPendingReasonsAndTheirAges(t *testing.T) {
 	w.cfg.Focus.SuppressedKind = "kind-x"
 	w.cfg.Watch.PR.Queries = []string{"mine"}
 	// Every PR but "1" is listed by the watch query; the PR "1" is outside it.
-	if err := w.st.SetMeta("change_flow.watchset.pr.mine", `["2","3","4","5","8","9"]`); err != nil {
+	if err := w.st.SetMeta("change_flow.watchset.pr.mine", `["2","3","4","5","8","9","10","11"]`); err != nil {
 		t.Fatal(err)
 	}
 	unminted := w.pr("9", prSpec{ownership: "mine"})
@@ -289,6 +289,20 @@ func TestPendingReasonsAndTheirAges(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// A hidden and a suppressed source whose bead already exists are not
+	// pending: they read "open (source hidden)" and "open (source suppressed)"
+	// (pg2-o1lq9), so the gate reports neither pending reason for them.
+	hiddenBead := w.pr("10", prSpec{ownership: "mine"})
+	w.hide(hiddenBead)
+	w.bead("bd-10", hiddenBead, beadSpec{state: "open"})
+	suppressedBead := w.pr("11", prSpec{ownership: "mine"})
+	if err := w.st.SetAnnotation(store.KVAnnotation{
+		Repo: testRepo, EntityType: "pr", EntityID: "11", Key: store.KeySuppress("kind-x"),
+		Value: "true", Origin: "pg-desk", SetBy: "operator", SetAt: fixtureAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.bead("bd-11", suppressedBead, beadSpec{state: "open"})
 	byDesign := w.issue("bd-77", issueSpec{state: "open"})
 	terminal := w.pr("4", prSpec{ownership: "mine", state: "closed", merged: true})
 	bead := w.pr("5", prSpec{ownership: "mine"})
@@ -304,6 +318,8 @@ func TestPendingReasonsAndTheirAges(t *testing.T) {
 	w.row(today, byDesign, 6, at(3*time.Minute))
 	w.row(today, terminal, 7, at(4*time.Minute))
 	w.row(today, bead, 8, at(5*time.Minute))
+	w.row(today, hiddenBead, 9, at(6*time.Minute))
+	w.row(today, suppressedBead, 10, at(7*time.Minute))
 
 	h := w.health()
 	want := map[string]int{
@@ -322,7 +338,7 @@ func TestPendingReasonsAndTheirAges(t *testing.T) {
 	if h.UnwatchedSelected != 1 {
 		t.Errorf("UnwatchedSelected = %d, want 1", h.UnwatchedSelected)
 	}
-	if h.Selected != 8 {
+	if h.Selected != 10 {
 		t.Errorf("Selected = %d", h.Selected)
 	}
 }

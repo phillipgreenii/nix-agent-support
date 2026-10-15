@@ -282,25 +282,35 @@ bare "pending". `focus.suppressed_kind` names the work kind a source's `suppress
 is read for: the deployment, not pg-desk code, names it, and an empty value means suppression is
 never reported.
 
-| Bead state                                                        | Shown as                   | On strike                        | On select                           | Skip reason     |
-| ----------------------------------------------------------------- | -------------------------- | -------------------------------- | ----------------------------------- | --------------- |
-| No bead yet, decider not run                                      | pending                    | nothing to do                    | will mint                           | not matched     |
-| No bead yet, source hidden                                        | pending (hidden)           | nothing to do                    | no change (source hidden)           | hidden          |
-| No bead yet, kind suppressed                                      | pending (suppressed)       | nothing to do                    | no change (suppressed)              | suppressed      |
-| No bead yet, source terminal (finished)                           | source done (no bead)      | nothing to do                    | no change (source finished)         | not matched     |
-| Source is an epic or a bd task (its id is a bead id)              | n/a (epic or bead)         | no bead                          | no bead                             | n/a             |
-| open, unclaimed, no marker or marker released                     | open                       | will hold                        | bead open, no change                | already handled |
-| open, unclaimed, no marker or marker released, with open children | open (has children)        | no change (has open children)    | bead open, no change                | already handled |
-| open, unclaimed, marker struck (undeferred by hand)               | open (marker stale)        | will hold                        | will rewrite the marker             | already handled |
-| in_progress or assigned                                           | claimed                    | claimed by <actor>, left running | claimed by <actor>, no change       | already handled |
-| deferred, marker struck, unassigned (held)                        | held                       | no change (already held)         | held, will release                  | already handled |
-| deferred, no marker (parked by someone else)                      | deferred by someone else   | no change                        | deferred by someone else, no change | already handled |
-| blocked, pinned or hooked                                         | the status word            | no change                        | no change                           | already handled |
-| closed                                                            | closed                     | no change                        | worker-closed, no change            | already handled |
-| Source terminal (merged or closed PR, done issue), bead unclaimed | source done                | will hold                        | will hold (source done)             | already handled |
-| A hold failed or was abandoned after the live re-read             | hold stale                 | no change (changed since read)   | no change (changed since read)      | skipped-stale   |
-| An escalated human sibling exists (INV-DECIDER-18)                | escalated                  | unchanged                        | unchanged                           | n/a             |
-| Source outside every watch query                                  | unwatched (added to above) | unchanged                        | unchanged                           | n/a             |
+| Bead state                                                        | Shown as                          | On strike                        | On select                           | Skip reason     |
+| ----------------------------------------------------------------- | --------------------------------- | -------------------------------- | ----------------------------------- | --------------- |
+| No bead yet, decider not run                                      | pending                           | nothing to do                    | will mint                           | not matched     |
+| No bead yet, source hidden                                        | pending (hidden)                  | nothing to do                    | no change (source hidden)           | hidden          |
+| No bead yet, kind suppressed                                      | pending (suppressed)              | nothing to do                    | no change (suppressed)              | suppressed      |
+| No bead yet, source terminal (finished)                           | source done (no bead)             | nothing to do                    | no change (source finished)         | not matched     |
+| Source is an epic or a bd task (its id is a bead id)              | n/a (epic or bead)                | no bead                          | no bead                             | n/a             |
+| A bead exists (any bead state), source hidden                     | the bead word (source hidden)     | no change (source hidden)        | no change (source hidden)           | hidden          |
+| A bead exists (any bead state), kind suppressed                   | the bead word (source suppressed) | no change (source suppressed)    | no change (source suppressed)       | suppressed      |
+| open, unclaimed, no marker or marker released                     | open                              | will hold                        | bead open, no change                | already handled |
+| open, unclaimed, no marker or marker released, with open children | open (has children)               | no change (has open children)    | bead open, no change                | already handled |
+| open, unclaimed, marker struck (undeferred by hand)               | open (marker stale)               | will hold                        | will rewrite the marker             | already handled |
+| in_progress or assigned                                           | claimed                           | claimed by <actor>, left running | claimed by <actor>, no change       | already handled |
+| deferred, marker struck, unassigned (held)                        | held                              | no change (already held)         | held, will release                  | already handled |
+| deferred, no marker (parked by someone else)                      | deferred by someone else          | no change                        | deferred by someone else, no change | already handled |
+| blocked, pinned or hooked                                         | the status word                   | no change                        | no change                           | already handled |
+| closed                                                            | closed                            | no change                        | worker-closed, no change            | already handled |
+| Source terminal (merged or closed PR, done issue), bead unclaimed | source done                       | will hold                        | will hold (source done)             | already handled |
+| A hold failed or was abandoned after the live re-read             | hold stale                        | no change (changed since read)   | no change (changed since read)      | skipped-stale   |
+| An escalated human sibling exists (INV-DECIDER-18)                | escalated                         | unchanged                        | unchanged                           | n/a             |
+| Source outside every watch query                                  | unwatched (added to above)        | unchanged                        | unchanged                           | n/a             |
+
+A hidden or kind-suppressed source whose bead already exists keeps the bead's own word (`open`,
+`claimed`, `held`, `deferred by someone else`, `closed` or the status word of a blocked, pinned or hooked bead) and
+appends the marker: `open (source hidden)`, `claimed (source hidden)`, `held (source hidden)` and,
+for a suppressed kind, `open (source suppressed)`. Both echoes print `no change (source hidden)` or
+`no change (source suppressed)`, because the decider skips every rule for such a source and leaves the
+bead as it was; this holds for every bead state, and `pending` stays "no bead yet" only. `doctor`
+therefore reports no pending reason for such a source.
 
 A bead closed as stale or moot by a sweep reads `closed` too, because the decider does not read who
 closed it, and the word does not claim the work was done. A source that is terminal holds an
