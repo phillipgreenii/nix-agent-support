@@ -371,16 +371,35 @@ func (s *Service) members(ctx context.Context) (map[string]bool, error) {
 		return nil, err
 	}
 	set := map[string]bool{}
+	// References are resolved together, in one alias read: the alias lookup by
+	// reference scans the table, so a canonical() per member would cost one scan
+	// each on every call. A reference that does not parse or is not known names
+	// no entity and is left out, as canonical reports it.
+	var refs []entity.Ref
+	seen := map[string]bool{}
 	for _, q := range qs {
 		for _, id := range q.IDs {
-			key, known, err := s.canonical(ctx, id)
-			if err != nil {
-				return nil, err
+			if !strings.Contains(id, "#") {
+				set[id] = true
+				continue
 			}
-			if known {
-				set[key] = true
+			ref, perr := entity.ParseRef(id)
+			if perr != nil || seen[ref.Key()] {
+				continue
 			}
+			seen[ref.Key()] = true
+			refs = append(refs, ref)
 		}
+	}
+	if len(refs) == 0 {
+		return set, nil
+	}
+	known, err := s.cfg.Aliases.NodeIDs(ctx, refs)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range known {
+		set[k.NodeID] = true
 	}
 	return set, nil
 }

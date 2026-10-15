@@ -138,55 +138,6 @@ func (g *latencyGate) setLatency(d time.Duration) {
 	g.mu.Unlock()
 }
 
-// cachedAliases is the alias table read through a memo. The daemon reads the
-// alias of every query member on every group call (and AliasByRefFold scans the
-// table), about two million reads in a scenario, which costs minutes of real
-// time and is not what this test measures. The memo is written through, so the
-// store stays the truth; the scenario never renames a PR, so a lookup the memo
-// holds cannot be stale.
-type cachedAliases struct {
-	inner *store.Store
-
-	mu     sync.Mutex
-	byNode map[string]store.AliasRow
-	byRef  map[string]store.AliasRow
-}
-
-func newCachedAliases(st *store.Store) *cachedAliases {
-	return &cachedAliases{inner: st, byNode: map[string]store.AliasRow{}, byRef: map[string]store.AliasRow{}}
-}
-
-func (c *cachedAliases) PutAlias(ctx context.Context, a store.AliasRow) error {
-	if err := c.inner.PutAlias(ctx, a); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	c.byNode[a.NodeID] = a
-	c.byRef[strings.ToLower(a.Ref)] = a
-	c.mu.Unlock()
-	return nil
-}
-
-func (c *cachedAliases) AliasByNodeID(ctx context.Context, nodeID string) (store.AliasRow, bool, error) {
-	c.mu.Lock()
-	a, ok := c.byNode[nodeID]
-	c.mu.Unlock()
-	if ok {
-		return a, true, nil
-	}
-	return c.inner.AliasByNodeID(ctx, nodeID)
-}
-
-func (c *cachedAliases) AliasByRefFold(ctx context.Context, ref string) (store.AliasRow, bool, error) {
-	c.mu.Lock()
-	a, ok := c.byRef[strings.ToLower(ref)]
-	c.mu.Unlock()
-	if ok {
-		return a, true, nil
-	}
-	return c.inner.AliasByRefFold(ctx, ref)
-}
-
 // ---- the world ---------------------------------------------------------------
 
 func nodeOf(i int) string { return fmt.Sprintf("PR_%03d", i) }
@@ -615,7 +566,6 @@ func newHarness(t *testing.T, o scenarioOpts) *harness {
 	h.rig = groupsvctest.NewRig(t, groupsvctest.RigOptions{
 		Gov: h.gov, Clock: h.clk, Workers: 1, Settings: &h.cfg.Settings,
 		Store:              st,
-		AliasStore:         newCachedAliases(st),
 		OnGroupStoring:     h.onGroupStoring,
 		OnGone:             h.chg.DetectGone,
 		OnSummaryRefreshed: func(prev *summary.Summary, next summary.Stored) { h.reval.OnSummaryRefreshed(prev, next) },

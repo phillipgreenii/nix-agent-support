@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -510,5 +511,61 @@ func TestTouchAndEnsureEntityChangeOnlyTheirOwnColumns(t *testing.T) {
 	}
 	if e, _, _ := s.GetEntity(ctx, "pr", "N2"); e.Version != 5 || e.LastKnownMergeable != "CONFLICTING" || !e.KeepAlive {
 		t.Errorf("EnsureEntity changed an existing row: %+v", e)
+	}
+}
+
+func TestAliasesByRefFold(t *testing.T) {
+	ctx := context.Background()
+	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	for _, a := range []AliasRow{
+		{NodeID: "N1", Ref: "Org/Repo#7", SeenAt: time.UnixMilli(100)},
+		{NodeID: "N2", Ref: "org/repo#7", SeenAt: time.UnixMilli(200)}, // newer: wins
+		{NodeID: "N3", Ref: "org/other#7", SeenAt: time.UnixMilli(50)},
+	} {
+		if err := s.PutAlias(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.AliasesByRefFold(ctx, []string{"ORG/REPO#7", "org/repo#7", "Org/Other#7", "org/repo#8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d aliases %+v, want 2 (the unknown reference is absent, a repeated one is one entry)", len(got), got)
+	}
+	for in, want := range map[string]string{"org/repo#7": "N2", "org/other#7": "N3"} {
+		one, ok, err := s.AliasByRefFold(ctx, in)
+		if err != nil || !ok {
+			t.Fatalf("AliasByRefFold(%q) = %v %v", in, ok, err)
+		}
+		if got[in].NodeID != want || got[in] != one {
+			t.Errorf("AliasesByRefFold[%q] = %+v, want the row AliasByRefFold answers (%+v, node %s)", in, got[in], one, want)
+		}
+	}
+	if none, err := s.AliasesByRefFold(ctx, nil); err != nil || len(none) != 0 {
+		t.Errorf("AliasesByRefFold(nil) = %v, %v, want empty", none, err)
+	}
+}
+
+// More references than one statement binds are answered in several chunks and
+// the answers are the same.
+func TestAliasesByRefFoldChunks(t *testing.T) {
+	ctx := context.Background()
+	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	n := 2*aliasFoldChunk + 7
+	refs := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		ref := fmt.Sprintf("Org/Repo#%d", i+1)
+		if err := s.PutAlias(ctx, AliasRow{NodeID: fmt.Sprintf("N%d", i), Ref: ref, SeenAt: time.UnixMilli(int64(i))}); err != nil {
+			t.Fatal(err)
+		}
+		refs = append(refs, strings.ToUpper(ref))
+	}
+	got, err := s.AliasesByRefFold(ctx, refs)
+	if err != nil || len(got) != n {
+		t.Fatalf("got %d aliases, err %v, want %d", len(got), err, n)
+	}
+	if got["org/repo#1001"].NodeID != "N1000" {
+		t.Errorf("a reference in the last chunk resolved to %+v", got["org/repo#1001"])
 	}
 }

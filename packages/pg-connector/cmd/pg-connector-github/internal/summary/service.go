@@ -157,17 +157,36 @@ func (s *Service) members(ctx context.Context) (map[string]bool, error) {
 		return nil, err
 	}
 	set := map[string]bool{}
+	// References are resolved together, in one alias read: the alias lookup by
+	// reference scans the table, so a lookup per member would cost one scan each
+	// on every call.
+	var refs []entity.Ref
+	seen := map[string]bool{}
 	for _, q := range qs {
 		for _, id := range q.IDs {
-			node, err := s.nodeID(ctx, id)
-			if errors.Is(err, ErrUnknownEntity) {
+			if !strings.Contains(id, "#") {
+				set[id] = true
 				continue
 			}
+			ref, err := entity.ParseRef(id)
 			if err != nil {
 				return nil, err
 			}
-			set[node] = true
+			if !seen[ref.Key()] {
+				seen[ref.Key()] = true
+				refs = append(refs, ref)
+			}
 		}
+	}
+	if len(refs) == 0 {
+		return set, nil
+	}
+	known, err := s.cfg.Identity.NodeIDs(ctx, refs)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range known {
+		set[k.NodeID] = true
 	}
 	return set, nil
 }

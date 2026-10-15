@@ -34,8 +34,8 @@ type RigOptions struct {
 	// Expiry overrides the settings' expiry.
 	Expiry time.Duration
 	// AliasStore, when set, is what the alias table is read and written through
-	// (a memo over Store, for a test that makes millions of lookups); nil means
-	// the store itself.
+	// (a wrapper over Store, for a test that counts the lookups); nil means the
+	// store itself.
 	AliasStore entity.AliasStore
 	// Store and Clock reuse an existing store and clock (a simulated restart).
 	Store *store.Store

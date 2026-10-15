@@ -15,6 +15,10 @@ type AliasStore interface {
 	PutAlias(ctx context.Context, a store.AliasRow) error
 	AliasByNodeID(ctx context.Context, nodeID string) (store.AliasRow, bool, error)
 	AliasByRefFold(ctx context.Context, ref string) (store.AliasRow, bool, error)
+	// AliasesByRefFold answers many references in one read (keyed by the
+	// lower-cased reference); a caller with a list uses it, never a loop of
+	// AliasByRefFold, which scans the table once per call.
+	AliasesByRefFold(ctx context.Context, refs []string) (map[string]store.AliasRow, error)
 }
 
 var _ AliasStore = (*store.Store)(nil)
@@ -74,6 +78,37 @@ func (i *Identity) NodeID(ctx context.Context, ref Ref) (nodeID string, canonica
 		return "", Ref{}, false, fmt.Errorf("entity: alias %q holds an unparsable reference: %w", row.NodeID, err)
 	}
 	return row.NodeID, canonical, true, nil
+}
+
+// KnownAlias is the alias of one reference NodeIDs found: the node id and the
+// reference as recorded.
+type KnownAlias struct {
+	NodeID    string
+	Canonical Ref
+}
+
+// NodeIDs is NodeID for many references at once, in one batched read of the
+// alias table instead of one scan per reference. The result is keyed by
+// Ref.Key (the case-folded reference); a reference the table does not know is
+// absent.
+func (i *Identity) NodeIDs(ctx context.Context, refs []Ref) (map[string]KnownAlias, error) {
+	strs := make([]string, len(refs))
+	for n, r := range refs {
+		strs[n] = r.String()
+	}
+	rows, err := i.store.AliasesByRefFold(ctx, strs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]KnownAlias, len(rows))
+	for k, row := range rows {
+		canonical, err := ParseRef(row.Ref)
+		if err != nil {
+			return nil, fmt.Errorf("entity: alias %q holds an unparsable reference: %w", row.NodeID, err)
+		}
+		out[k] = KnownAlias{NodeID: row.NodeID, Canonical: canonical}
+	}
+	return out, nil
 }
 
 // Put records that nodeID is ref. When nodeID already had a different

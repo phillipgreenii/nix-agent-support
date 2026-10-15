@@ -42,9 +42,7 @@
 //   - the scheduler has ONE worker whose calls take a quarter of a second, which
 //     is the throughput of the daemon's four workers at a second each, and every
 //     origin call parks until the driver has advanced the clock, so the run is
-//     deterministic;
-//   - the alias table is read through a memo (see cachedAliases), because the
-//     daemon looks up every query member's alias on every group call.
+//     deterministic.
 //
 // # Properties asserted
 //

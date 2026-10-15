@@ -222,6 +222,63 @@ func (s *Store) AliasByRefFold(ctx context.Context, ref string) (AliasRow, bool,
 	return s.getAlias(ctx, "lower(ref)", strings.ToLower(ref))
 }
 
+// aliasFoldChunk bounds the references one AliasesByRefFold statement binds, to
+// stay well under SQLite's bound-variable limit.
+const aliasFoldChunk = 500
+
+// AliasesByRefFold is AliasByRefFold for many references at once: it answers
+// them with one table scan per aliasFoldChunk references instead of one scan per
+// reference. The result is keyed by the ASCII-lower-cased reference; a reference
+// with no alias is absent, and one carried by several node ids maps to the most
+// recently seen row, exactly as AliasByRefFold would answer it.
+func (s *Store) AliasesByRefFold(ctx context.Context, refs []string) (map[string]AliasRow, error) {
+	out := make(map[string]AliasRow, len(refs))
+	want := make([]string, 0, len(refs))
+	seen := make(map[string]bool, len(refs))
+	for _, r := range refs {
+		k := strings.ToLower(r)
+		if !seen[k] {
+			seen[k] = true
+			want = append(want, k)
+		}
+	}
+	for len(want) > 0 {
+		n := min(len(want), aliasFoldChunk)
+		if err := s.aliasesByFoldedRefs(ctx, want[:n], out); err != nil {
+			return nil, err
+		}
+		want = want[n:]
+	}
+	return out, nil
+}
+
+func (s *Store) aliasesByFoldedRefs(ctx context.Context, folded []string, out map[string]AliasRow) error {
+	args := make([]any, len(folded))
+	for i, f := range folded {
+		args[i] = f
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT node_id, ref, seen_at FROM alias WHERE lower(ref) IN (?`+strings.Repeat(",?", len(folded)-1)+`)
+ORDER BY seen_at DESC`, args...)
+	if err != nil {
+		return fmt.Errorf("store: get aliases by folded refs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var a AliasRow
+		var seenMS int64
+		if err := rows.Scan(&a.NodeID, &a.Ref, &seenMS); err != nil {
+			return fmt.Errorf("store: get aliases by folded refs: %w", err)
+		}
+		a.SeenAt = time.UnixMilli(seenMS).UTC()
+		k := strings.ToLower(a.Ref)
+		if _, ok := out[k]; !ok { // newest first: the first row per reference wins
+			out[k] = a
+		}
+	}
+	return rows.Err()
+}
+
 // DeleteAlias removes the row for nodeID (no error when absent).
 func (s *Store) DeleteAlias(ctx context.Context, nodeID string) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM alias WHERE node_id = ?`, nodeID); err != nil {
