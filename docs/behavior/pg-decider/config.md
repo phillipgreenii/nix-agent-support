@@ -126,14 +126,14 @@ configuration.
 
 ## Invariants
 
-- **INV-DECIDER-21.** The decider MUST read its configuration from the single JSON file named by
+- **INV-DECIDER-21.** <!-- uuid: 16cd9bca-3488-474e-95b9-626a8f2b8906 --> The decider MUST read its configuration from the single JSON file named by
   `PG_DECIDER_CONFIG` and MUST NOT read pg-desk's configuration.
-- **INV-DECIDER-22.** A configuration file that is named but unreadable, unparseable or holds an
+- **INV-DECIDER-22.** <!-- uuid: 53e48f57-a9b9-46c0-b669-6a92b3bf7cd8 --> A configuration file that is named but unreadable, unparseable or holds an
   invalid value MUST make `apply` exit `1` before any write.
-- **INV-DECIDER-23.** An absent `escalate_after` MUST mean `3`, an absent `actor` MUST mean
+- **INV-DECIDER-23.** <!-- uuid: a836f6ad-d69a-4a6d-b50d-b181ce1aa26a --> An absent `escalate_after` MUST mean `3`, an absent `actor` MUST mean
   `pg-decider`, and an absent `agent_tracker_backend` or `beads_dir` MUST pass nothing to the
   connector rather than an empty value.
-- **INV-DECIDER-24.** The decider MUST add the labels of `area_labels` rules only to the anchor and
+- **INV-DECIDER-24.** <!-- uuid: 993cfa74-ece8-4f42-97e2-c078c3bed09f --> The decider MUST add the labels of `area_labels` rules only to the anchor and
   to `review-pr` and `process-feedback` items, MUST NOT remove a label for this reason, MUST NOT
   create a write whose only purpose is to add one, and with no `area_labels` configured MUST emit
   exactly the plan it would emit without the key.

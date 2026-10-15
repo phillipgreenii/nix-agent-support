@@ -33,7 +33,7 @@ faithfully and about failing visibly.
 
 **Primary actor:** `ACTOR-CLIENT` (the connector's consumer, for example a work tracker).
 **Other actors:** `ACTOR-OPERATOR`. _Requires:_ `INV-CONN-2`, `INV-CONN-3`, `INV-CONN-4`,
-`INV-CONN-5`, `INV-CONN-6`. _Includes:_ none.
+`INV-CONN-5`, `INV-CONN-6`, `INV-CONN-12`. _Includes:_ none.
 
 1. The operator ran a deep-work cycle from 09:00 to 10:00, paused it until 13:00 and ran it to 13:30,
    with two ticket pairs and a note.
@@ -53,6 +53,9 @@ Extensions:
   appending (`INV-CONN-6`).
 - 2b. The consumer asks for a calendar by a name other than the fixed one. The answer is a successful
   empty list (`INV-CONN-5`).
+- 2c. The consumer asks for a named look-ahead query. It resolves from the backend's configuration,
+  because the backend is registered as a calendar backend with at least one named calendar query,
+  and, independently of that, as an attention source (`INV-CONN-12`).
 
 ### `JOURNEY-CONN-ATTENTION` — the feed follows the state <!-- uuid: acc4af9b-6eca-4e7c-a26e-06642d2f82ca -->
 
@@ -68,7 +71,7 @@ _Includes:_ none.
 ### `JOURNEY-CONN-DOWN` — the service is not there, or cannot write <!-- uuid: 155c09bc-33cf-4194-b063-24dfe6c971f0 -->
 
 **Primary actor:** `ACTOR-CLIENT`. **Other actors:** `ACTOR-OPERATOR`, `ACTOR-HOST`. _Requires:_
-`INV-CONN-1`, `INV-CONN-8`, `INV-CONN-9`, `INV-CONN-10`. _Includes:_ none.
+`INV-CONN-1`, `INV-CONN-8`, `INV-CONN-9`, `INV-CONN-10`, `INV-CONN-11`. _Includes:_ none.
 
 1. The service is stopped. The consumer asks for the attention list. The backend answers that the
    source is unavailable and says the service may not be running; the consumer reports a degraded
@@ -79,6 +82,13 @@ _Includes:_ none.
    high-severity item that says the service is read-only and that restarting it is the recovery
    (`INV-CONN-9`).
 4. The operator restarts the service; the next read has no such item (`INV-CONN-9`).
+
+Extensions:
+
+- 1a. The backend's configuration names an address that is neither an HTTP(S) URL nor a host and port.
+  The backend answers an invalid-argument error rather than guessing another address; with no address
+  configured it looks at the one the command-line client reads from its environment, and then at the
+  service's documented default loopback address (`INV-CONN-11`).
 
 ## The connector interface
 

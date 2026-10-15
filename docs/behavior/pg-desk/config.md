@@ -45,16 +45,16 @@ hydration". A non-boolean value is a load error naming the key.
 
 ## Invariants
 
-- **INV-CONFIG-1.** Every focus key and `bead_id_pattern` MUST be optional: a configuration that sets
+- **INV-CONFIG-1.** <!-- uuid: c4514292-856c-4d28-ad15-21a9a1229732 --> Every focus key and `bead_id_pattern` MUST be optional: a configuration that sets
   none of them MUST load and MUST yield the defaults in the table.
-- **INV-CONFIG-2.** An invalid focus value (unknown zone, non-positive backlog bound, non-positive or
+- **INV-CONFIG-2.** <!-- uuid: a5ba91fb-c06b-4307-8d13-ec0346fbb52a --> An invalid focus value (unknown zone, non-positive backlog bound, non-positive or
   unparseable gate age, an empty identity entry, a priority-map value outside `P0`-`P4` or a blank or
   case-duplicate priority-map key, an uncompilable or blank `bead_id_pattern`) MUST
   fail the load with an error naming the key.
-- **INV-CONFIG-3.** An empty or absent `focus.operator_identities` MUST NOT fail the load.
-- **INV-CONFIG-4.** The home module MUST omit each of these keys from the rendered `config.yaml`
+- **INV-CONFIG-3.** <!-- uuid: b5b9f78b-e71c-4250-8232-598cf61c2e10 --> An empty or absent `focus.operator_identities` MUST NOT fail the load.
+- **INV-CONFIG-4.** <!-- uuid: c7758e1f-8152-433a-a16e-a782257ee276 --> The home module MUST omit each of these keys from the rendered `config.yaml`
   when its option is null.
-- **INV-CONFIG-5.** `focus.priority_map` MUST default to the standard Atlassian names, MUST replace
+- **INV-CONFIG-5.** <!-- uuid: 3a42c2aa-e067-4cfb-a635-0749869da460 --> `focus.priority_map` MUST default to the standard Atlassian names, MUST replace
   that default entirely when non-empty, and MUST match a tracker value case-insensitively.
 
 ## Telemetry and logs

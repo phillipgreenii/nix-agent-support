@@ -170,7 +170,7 @@ links: bd-1 (work, open)  C1/1.5 (references)
 The second line is `relationship  state` followed, for a PR, by `ready|draft`, `head=` and `ci=`,
 then `as_of=` with `(fresh)` or `(stale)`. Each link reads `id (relation[, state])`.
 
-The `review:` line appears for a PR only. It reads, by state:
+The `review:` line appears for a PR only. It reads as follows for each state of the PR:
 
 ```text
 review: pending=no
@@ -202,23 +202,23 @@ If the entity's own hydration fails or degrades, the stored view is still printe
 
 ## Invariants
 
-- **INV-SHOW-1.** Without `--refresh` the verb MUST NOT write to the store or call the network.
-- **INV-SHOW-2.** A link MUST appear in the view of both of its entities, with every origin that
+- **INV-SHOW-1.** <!-- uuid: 269f3062-9fec-4142-85d0-26ee2e17b058 --> Without `--refresh` the verb MUST NOT write to the store or call the network.
+- **INV-SHOW-2.** <!-- uuid: 1aaa925d-1c1f-4626-93da-93605ad545b8 --> A link MUST appear in the view of both of its entities, with every origin that
   claims it.
-- **INV-SHOW-3.** The contract MUST NOT carry `closed_by`.
-- **INV-SHOW-4.** A failed or degraded `--refresh` of the entity MUST still print the stored view,
+- **INV-SHOW-3.** <!-- uuid: bc7cfd61-257a-4609-97de-e7448fcdecb3 --> The contract MUST NOT carry `closed_by`.
+- **INV-SHOW-4.** <!-- uuid: 605d26e3-d883-422a-9f1f-c48476a4f381 --> A failed or degraded `--refresh` of the entity MUST still print the stored view,
   marked stale, before exiting non-zero.
-- **INV-SHOW-5.** The `review` object MUST NOT report a failed or missing lookup as "no pending
+- **INV-SHOW-5.** <!-- uuid: bb696c0d-8e71-46ab-af9d-7e6c1022b1e2 --> The `review` object MUST NOT report a failed or missing lookup as "no pending
   review": it MUST be `unknown`. Displaying it MUST NOT post, delete or submit a review, create,
   update, comment on or close a bead, or send a notification; it is read from stored facts, and
   `--refresh` hydrates through the same read-only lookups.
 
-- **INV-SHOW-6.** The `ci` section MUST be read-only stored data: it MUST NOT carry a computed
+- **INV-SHOW-6.** <!-- uuid: b18f58bc-e569-4847-aef3-a19910a952ba --> The `ci` section MUST be read-only stored data: it MUST NOT carry a computed
   verdict (such as a list of failing builds), and building it MUST NOT call the network or write to
   the store. For a PR it is always present (`runs` empty when there is no CI data); for `issue` and
   `thread` it is absent.
 
-- **INV-SHOW-7.** `links[].title`, `links[].priority`, `annotations.ready_to_land` and `annotations.focus_selected` MUST be read-only stored data:
+- **INV-SHOW-7.** <!-- uuid: aa1213f6-10f1-4b59-a9cc-d8facc20ac7a --> `links[].title`, `links[].priority`, `annotations.ready_to_land` and `annotations.focus_selected` MUST be read-only stored data:
   they are copied from the linked entity's stored snapshot and the stored annotation, building them
   MUST NOT call the network or write to the store, and they MUST NOT carry a computed value.
 

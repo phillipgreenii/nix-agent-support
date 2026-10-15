@@ -7,12 +7,13 @@
 # whatsoever about the docs that actually ship — and two known defects reached
 # main for exactly that reason. This is the gate that reads the real sets.
 #
-# ONE RUNNER, TWO CALLERS. `checks.test-behavior-docs-real-corpus` invokes it with
-# the flake source as its root; the `behavior-docs-real-corpus` pre-commit hook
-# invokes it with the WORKING TREE as its root. Everything — sets, evaluator
-# scripts, baseline — is resolved under that one root, so each caller is
-# internally consistent and neither can accidentally check the store copy of one
-# thing against the working copy of another.
+# ONE RUNNER, ONE CALLER. `checks.test-behavior-docs-real-corpus` invokes it with
+# the flake source as its root. There is no pre-commit hook for it (an earlier
+# version of this header claimed one; bead pg2-nz2f0 found none in the repo), so the
+# nix check is the only automatic caller. It can also be run by hand with a working
+# tree as its root. Everything — sets, evaluator scripts, baseline — is resolved
+# under that one root, so a caller is internally consistent and cannot accidentally
+# check the store copy of one thing against the working copy of another.
 #
 # Usage: behavior-docs-real-corpus.sh [<repo-root>]
 # Env:   BASELINE  path to the recorded-findings file (default
@@ -63,21 +64,31 @@ cd "$ROOT" || {
 ROOT=$(pwd)
 
 # discover_sets — every in-repo behavior-docs set, one repo-relative path per line,
-# byte-ordered. A set is a `docs/behavior/` directory that carries a README.md.
+# byte-ordered. A set is a directory that carries a README.md and is EITHER a
+# `docs/behavior` directory OR a directory directly under one (`docs/behavior/<name>`).
 #
-# DISCOVERY, NOT A LIST (bead pg2-ksssh). The runner used to hard-code five sets, so
-# four sets that were authored after it (pg-connector, pg-router-ccpool-handler,
-# pg-router-source-pg-connector, work-report) sat outside every automated gate, and
-# the next new set would have joined them silently. A set now enters the gate by
-# existing, which is the only way a new one cannot be missed.
+# DISCOVERY, NOT A LIST (beads pg2-ksssh, pg2-nz2f0). The runner used to hard-code five
+# sets, so four sets authored after it sat outside every automated gate, and the next
+# new set would have joined them silently. A set now enters the gate by existing, which
+# is the only way a new one cannot be missed. The first discovery rule matched only
+# `*/docs/behavior/README.md`, which still missed every set that lives one level
+# BELOW `docs/behavior` (pg-decider, pg-desk and pg-task-focus under the repo-root
+# `docs/behavior/`, and pg-connector's `github` set beside the pg-connector set).
+#
+# ONE LEVEL, NOT ANY DEPTH. A README two or more levels below `docs/behavior` is a
+# sub-document of the set above it, not a set, so a fixture tree under a set cannot
+# become a gate operand by accident. The self-checks read a set's own `*.md`
+# non-recursively, so a set and its child set never read each other's files.
 #
 # Dot-directories are pruned: `.worktrees/` and `.git/` hold COPIES of the tree, and
 # the pre-commit hook runs this over a working tree that may contain them. That is a
 # statement about where sets can live, not a finding exclude: no set path is ever
 # skipped by name.
 discover_sets() {
-  find . -name '.?*' -prune -o -type f -path '*/docs/behavior/README.md' -print |
-    sed -e 's|^\./||' -e 's|/README\.md$||' |
+  find . -name '.?*' -prune -o -type f -name README.md -print |
+    sed -e 's|^\./||' |
+    { grep -E '(^|/)docs/behavior(/[^/]+)?/README\.md$' || true; } |
+    sed -e 's|/README\.md$||' |
     sort
 }
 

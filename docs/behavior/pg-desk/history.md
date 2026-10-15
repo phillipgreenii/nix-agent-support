@@ -34,7 +34,7 @@ top-level verbs, `serve`, `status` and `doctor` keep working on the old schema u
 
 ## Exit codes
 
-`0` on success (including no records); `1` on any error. Exit codes `2` (partial) and `3` (total
+`0` on success (including no records); `1` on any error. Exit codes `2` (a partial result) and `3` (total
 failure) are reserved for typed verbs that consult watched queries or hydrate (`changes`,
 `refresh`); `history` does not use them. pg-desk keeps its own exit-code scheme and does not bind
 it to pg-router's.

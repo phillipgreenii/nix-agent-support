@@ -282,17 +282,17 @@ evaluation is reported (`attention` is `null` with an `attention_error`, never `
 
 ## Invariants
 
-- **INV-ATTNEVAL-1.** The evaluator MUST be pure: no store write, no exec, no network, and time
+- **INV-ATTNEVAL-1.** <!-- uuid: 33945d76-5ac6-4249-a051-e8892ee028b3 --> The evaluator MUST be pure: no store write, no exec, no network, and time
   only through the injected clock. A fixed store and a fixed clock MUST give byte-identical output.
-- **INV-ATTNEVAL-2.** The menu bar plugin and the dashboard MUST obtain attention from the same
+- **INV-ATTNEVAL-2.** <!-- uuid: 1e177ada-142d-469e-a0af-ffa6ed792725 --> The menu bar plugin and the dashboard MUST obtain attention from the same
   `Evaluate` function, and MUST NOT carry a second copy of any rule.
-- **INV-ATTNEVAL-3.** An entity MUST yield at most one item per evaluation.
-- **INV-ATTNEVAL-4.** A suppressed candidate MUST be explainable: the result MUST retain the
+- **INV-ATTNEVAL-3.** <!-- uuid: 8822ff89-eaa1-4fd2-8bff-924533882714 --> An entity MUST yield at most one item per evaluation.
+- **INV-ATTNEVAL-4.** <!-- uuid: ffadf115-633d-4cb8-86f6-a1e3c265251f --> A suppressed candidate MUST be explainable: the result MUST retain the
   suppressing rule or annotation so that `pg-desk attention explain` can print it.
-- **INV-ATTNEVAL-5.** On an unmigrated store the evaluator MUST still run, honoring the old
+- **INV-ATTNEVAL-5.** <!-- uuid: 2a9a8daf-d263-4fd0-bc89-8ac57458ee13 --> On an unmigrated store the evaluator MUST still run, honoring the old
   `hidden` and `wip` annotations, and MUST report that `suppress.*` overrides are unavailable
   (`degraded: true` in `attention list --json`, and in the `explain` output).
-- **INV-ATTNEVAL-6.** A rule that cannot be evaluated because its facts are missing or degraded
+- **INV-ATTNEVAL-6.** <!-- uuid: c4697087-ef2a-4d07-8d80-dcc24cc58ce8 --> A rule that cannot be evaluated because its facts are missing or degraded
   MUST NOT raise a candidate. An unreadable store MUST be an error, never an empty list that reads
   as "all clear".
 

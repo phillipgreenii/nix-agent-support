@@ -42,11 +42,11 @@ flowchart LR
 
 ## Invariants
 
-- **INV-CONSUMER-1.** `forget` MUST delete only the `(name, type)` row it names: a consumer of the
+- **INV-CONSUMER-1.** <!-- uuid: 3c6de8dc-dd2f-4239-a83f-3125bfabecd3 --> `forget` MUST delete only the `(name, type)` row it names: a consumer of the
   same name under another type, and every other consumer, MUST be untouched.
-- **INV-CONSUMER-2.** After `forget`, change-log pruning MUST NOT wait for that consumer.
-- **INV-CONSUMER-3.** `list` and `forget` MUST NOT register a consumer or stamp `seen_at`.
-- **INV-CONSUMER-4.** For `pr` and `ci`, pg-desk MUST NOT hold a consumer's cursor: the backend that
+- **INV-CONSUMER-2.** <!-- uuid: cf3da6a0-904b-4071-ad06-db5039c8bf6e --> After `forget`, change-log pruning MUST NOT wait for that consumer.
+- **INV-CONSUMER-3.** <!-- uuid: 3a3afd38-0838-4d8d-96a1-66c6d6b01f8d --> `list` and `forget` MUST NOT register a consumer or stamp `seen_at`.
+- **INV-CONSUMER-4.** <!-- uuid: ddb69252-819c-4dfe-93d0-1ee5bcacf22c --> For `pr` and `ci`, pg-desk MUST NOT hold a consumer's cursor: the backend that
   owns those changes holds it.
 
 ## Old-schema refusal

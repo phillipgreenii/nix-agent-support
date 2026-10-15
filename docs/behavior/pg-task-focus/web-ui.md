@@ -90,7 +90,7 @@ Extensions:
 ### `JOURNEY-WEB-INTERRUPT` — an interruption and the way back <!-- uuid: 1127ac1a-3753-4c59-a134-9dd80b58bbf8 -->
 
 **Primary actor:** `ACTOR-OPERATOR`. **Other actors:** `ACTOR-CLIENT`. _Requires:_ `INV-WEB-12`, `INV-WEB-13`,
-`INV-WEB-14`. _Includes:_ none.
+`INV-WEB-14`, `INV-WEB-15`. _Includes:_ none.
 
 1. A cycle runs; its timer, Pause, Stop and Boost are at the top of the page, and the tab's title shows the
    timer (`INV-WEB-12`).

@@ -62,12 +62,12 @@ error, which says to run `pg-desk migrate --cutover`, and exits `1`.
 
 ## Invariants
 
-- **INV-REFRESH-1.** A refresh MUST NOT write to the entity or the change log when the read failed,
+- **INV-REFRESH-1.** <!-- uuid: 3f84f75b-bbe3-4b6a-8b65-4319e31971b1 --> A refresh MUST NOT write to the entity or the change log when the read failed,
   was degraded, or found the entity absent.
-- **INV-REFRESH-2.** A refresh of an absent entity MUST fail with exit `3` and MUST NOT make the
+- **INV-REFRESH-2.** <!-- uuid: b9258358-e299-4bcd-baea-ad4cea63e571 --> A refresh of an absent entity MUST fail with exit `3` and MUST NOT make the
   entity inactive.
-- **INV-REFRESH-3.** The only binary this verb execs is `pg-connector`, through the gather layer.
-- **INV-REFRESH-4.** `refresh` MUST remain the only verb that classifies a change once pg-desk's own PR
+- **INV-REFRESH-3.** <!-- uuid: 55825ba6-51ec-4be3-b4bf-457d29b3cd0c --> The only binary this verb execs is `pg-connector`, through the gather layer.
+- **INV-REFRESH-4.** <!-- uuid: 180bb785-8c1e-4706-a78d-3e13cc58cc99 --> `refresh` MUST remain the only verb that classifies a change once pg-desk's own PR
   change flow is retired, and it MUST NOT depend on the backend's change feed.
 
 ## Telemetry and logs

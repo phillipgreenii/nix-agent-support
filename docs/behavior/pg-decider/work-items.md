@@ -263,21 +263,21 @@ not absent: it means unset.
 
 ## Invariants
 
-- **INV-DECIDER-1.** Every work item the decider creates MUST carry a `dedup_key` of the form
+- **INV-DECIDER-1.** <!-- uuid: 39ef94c7-3460-4eea-9eef-9c44ebb1eb35 --> Every work item the decider creates MUST carry a `dedup_key` of the form
   `<type>:<id>:<kind>` plus the kind's context suffix, and the key MUST live in the work item.
-- **INV-DECIDER-2.** A work item that exists for the current context, open or closed, MUST NOT be
+- **INV-DECIDER-2.** <!-- uuid: 8edd097b-af2f-4e03-8627-50d4bad061fc --> A work item that exists for the current context, open or closed, MUST NOT be
   recreated; a decider MAY only reopen or refresh it where its rule says a new context warrants it.
   The one other write is the `focus.item` rule's hold and release of an existing focus bead (a
   status and metadata `update`, never a `reopen` or a `close`), which is a change of the bead's
   availability and not a new item.
-- **INV-DECIDER-3.** The `id` form and the `node_id` form of a dedup key MUST be treated as the
+- **INV-DECIDER-3.** <!-- uuid: 58a96e9f-9cc5-4cc2-a21d-07d952d6c61d --> The `id` form and the `node_id` form of a dedup key MUST be treated as the
   same identity, so that a rename or transfer does not orphan an existing work item.
-- **INV-DECIDER-4.** An open work item labeled `human` MUST count as existing work: the decider
+- **INV-DECIDER-4.** <!-- uuid: e38962f6-138c-494a-86f8-43c2083d4556 --> An open work item labeled `human` MUST count as existing work: the decider
   MUST NOT recreate it or change its labels.
-- **INV-DECIDER-5.** No decider behavior MAY depend on who closed a work item or how it was closed;
+- **INV-DECIDER-5.** <!-- uuid: 0c9fbe41-d1b9-4285-a549-c737e2f4991d --> No decider behavior MAY depend on who closed a work item or how it was closed;
   the decider MUST read only whether the item is open or closed. The `focus.item` rule additionally
   reads a focus bead's other status (`in_progress`, `deferred`, `blocked`, `pinned`, `hooked`), its
   assignee and its `focus_hold` marker, and nothing about a closure: a bead closed for any reason
   reads `closed`.
-- **INV-DECIDER-6.** A new feedback cycle MUST be raised only for comments no earlier cycle
+- **INV-DECIDER-6.** <!-- uuid: 8b061ac1-370d-4d98-85a6-c65f93a76729 --> A new feedback cycle MUST be raised only for comments no earlier cycle
   covers; a changed digest alone MUST NOT raise or reopen a cycle.

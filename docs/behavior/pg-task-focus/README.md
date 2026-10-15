@@ -184,6 +184,16 @@ segments, alerts and refusal codes. It never names a package, a function, a data
 storage layout below the log's own line format, and it never fixes the way a client lays out or words
 anything beyond the strings it quotes.
 
+## External references
+
+Every element this set cites from outside it is declared here. The owner UUID is the authority;
+the link is a convenience.
+
+| Name        | What it is                                                                                           | Owner set-path                                                           | Owner UUID                                                                                                                                              |
+| ----------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INV-CAL-2` | a calendar backend reports each event in its attention result at a severity set by where now falls   | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior` | [a75011e5-d5f9-4ef1-b501-33231f795c9a](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/invariants.md) |
+| `INV-CAL-6` | a calendar backend never reports an event the user has declined in its attention result, in any tier | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior` | [4180c936-1c67-412c-98bd-45ba8019f298](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/invariants.md) |
+
 ## Realization gaps
 
 This set's **realization-gap register**: intended behavior that the product does not yet deliver, one

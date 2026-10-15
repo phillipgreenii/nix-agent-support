@@ -109,27 +109,27 @@ The words the run statistics derive from the exit code are `ok`, `partial`, `tot
 
 ## Invariants
 
-- **INV-FOCUS-1.** A focus verb MUST address exactly one period, `--date` or else today in
+- **INV-FOCUS-1.** <!-- uuid: 9718d824-b9d5-4ce3-a4b4-416ed9d1acda --> A focus verb MUST address exactly one period, `--date` or else today in
   `focus.time_zone`, and MUST NOT take it from a stored draft.
-- **INV-FOCUS-2.** `--period` MUST accept `day` and reject every other value as a usage error, and
+- **INV-FOCUS-2.** <!-- uuid: d14de951-d14e-43ac-856f-8c907eaee79e --> `--period` MUST accept `day` and reject every other value as a usage error, and
   MUST be hidden from help until a second value is implemented.
-- **INV-FOCUS-3.** A focus verb MUST exit with `0`, `1`, `2`, `3` or `6` only, and MUST NOT use `4`,
+- **INV-FOCUS-3.** <!-- uuid: 6d0ad0d4-9991-43b3-982b-9a01f76241bd --> A focus verb MUST exit with `0`, `1`, `2`, `3` or `6` only, and MUST NOT use `4`,
   `5` or `7`.
-- **INV-FOCUS-4.** Every non-zero exit MUST print one line on stderr naming the problem and the way
+- **INV-FOCUS-4.** <!-- uuid: dacb232e-6a48-4648-b12e-d75700101a11 --> Every non-zero exit MUST print one line on stderr naming the problem and the way
   out.
-- **INV-FOCUS-5.** A focus verb MUST refuse a store that is not migrated for the focus tables with exit
+- **INV-FOCUS-5.** <!-- uuid: fafebdc0-9aab-402f-84e8-d9f4857627b3 --> A focus verb MUST refuse a store that is not migrated for the focus tables with exit
   `1`, name the problem and apply nothing.
-- **INV-FOCUS-6.** A verb that writes and addresses a day other than today MUST print
+- **INV-FOCUS-6.** <!-- uuid: e6541cf4-346b-4947-aa18-3e063a6410ff --> A verb that writes and addresses a day other than today MUST print
   `NOTE: writing into period <date>, not today`.
-- **INV-FOCUS-7.** Every `--json` output MUST carry `contract` `pg-desk.focus/v1`, and the output of a
+- **INV-FOCUS-7.** <!-- uuid: b95807f4-ed98-4bb2-971c-81989e40102d --> Every `--json` output MUST carry `contract` `pg-desk.focus/v1`, and the output of a
   verb that writes MUST carry `run_id`.
-- **INV-FOCUS-8.** Every non-dry-run `select`, `pull`, `close` and `select --repair` MUST write one run
+- **INV-FOCUS-8.** <!-- uuid: 14966f20-fc89-4ae0-8399-1dbef3bbe143 --> Every non-dry-run `select`, `pull`, `close` and `select --repair` MUST write one run
   record row and print the same record as one `pg-desk.focus-select/v1` stderr line, and a dry run
   MUST print the line with `dry_run` true and write no row.
-- **INV-FOCUS-9.** The run record row MUST be finalized last; a row whose exit code is missing MUST be
+- **INV-FOCUS-9.** <!-- uuid: 88270298-3ba4-40be-8cb4-e99843181397 --> The run record row MUST be finalized last; a row whose exit code is missing MUST be
   counted as a total failure.
-- **INV-FOCUS-10.** The run identifier MUST be a ULID.
-- **INV-FOCUS-11.** `show`, `replan` and `explain` MUST read only the store: no network call and no
+- **INV-FOCUS-10.** <!-- uuid: a1b6825c-585a-4a8c-8d11-ea6386b876d9 --> The run identifier MUST be a ULID.
+- **INV-FOCUS-11.** <!-- uuid: 3a5b1a42-404f-4e55-a92f-3c0b51ac0330 --> `show`, `replan` and `explain` MUST read only the store: no network call and no
   tracker call. The rank MUST be a deterministic computation with no language model.
 
 ## The draft, the plan view and the cap line
@@ -175,13 +175,13 @@ rows in the plan, `B` is `N - A` and is never negative, and the finished clause 
 is finished. A finished row is shown once, inside the plan, and its slot is free. For an initial draft
 the cap line counts the proposed (`+`) rows as the rows in plan.
 
-- **INV-FOCUS-12.** A draft MUST be stored singly, as one row that holds the order, tiers, proposals and
+- **INV-FOCUS-12.** <!-- uuid: b138fe08-90c4-4511-b710-4cd1d7c28b55 --> A draft MUST be stored singly, as one row that holds the order, tiers, proposals and
   marks and neither a plan row nor a fact, and it MUST end at lock: a lock deletes it, a `replan`
   replaces it, and a draft is never kept per period or per caller.
-- **INV-FOCUS-13.** Rank drift MUST NEVER move or remove a row: a stored draft renders in its own order,
+- **INV-FOCUS-13.** <!-- uuid: 8cf9ac95-16a6-4ab6-833f-38426db9cced --> Rank drift MUST NEVER move or remove a row: a stored draft renders in its own order,
   a locked plan renders in its recorded order and tier, and a fresh rank is used only to count and name
   drift.
-- **INV-FOCUS-14.** Only the current plan MUST exist: the plan is the `focus_selection` rows of one
+- **INV-FOCUS-14.** <!-- uuid: d72708a5-042b-4a0d-99df-35c3ca3c94c0 --> Only the current plan MUST exist: the plan is the `focus_selection` rows of one
   period, it is always read live (never copied into the draft), and a first lock of a later period
   replaces it.
 
@@ -225,7 +225,7 @@ again over the locked plan. Both read only the store, never prompt and write no 
 new ones included (marked `new`), ranked afresh below it. It proposes nothing. It replaces the stored
 draft (whatever its period) only when the addressed period is today and not closed; for any other
 `--date` it prints and stores nothing with the same `period <date> is not today` notice. The store is
-a transaction that re-checks the plan state: when a lock changed it between the compute and the
+a transaction that re-checks the plan state; when a lock changed it between the compute and the
 store, `replan` recomputes for the state it now finds (a plan-mode replan proposes nothing). On a
 closed period `replan` prints the plan (mode `plan`, `period closed`), stores nothing and exits `0`.
 On a period with no plan it prints what `show` prints (the first plan is the degenerate replan).
@@ -322,17 +322,17 @@ reports it. The skip-reason column is the decider's closed vocabulary plus the a
 `skipped-stale`; `already handled` covers several states on purpose, and the "Shown as" column is
 what separates them for a human.
 
-- **INV-FOCUS-15.** A lock MUST write the draft's order: the order the operator saw in a stored draft
+- **INV-FOCUS-15.** <!-- uuid: b7c74808-3adc-4033-93de-1d55e4b5bd84 --> A lock MUST write the draft's order: the order the operator saw in a stored draft
   is the order `select` locks, so a second bare `show` MUST re-render the stored draft instead of
   recomputing, and only `replan` recomputes.
-- **INV-FOCUS-16.** `show` MUST store a draft only when no `--no-store` is given, the addressed
+- **INV-FOCUS-16.** <!-- uuid: 41734153-50a7-450b-bf93-5fabb706c20d --> `show` MUST store a draft only when no `--no-store` is given, the addressed
   period is today and not closed and has no plan, and the draft row is empty, stale or unreadable,
   inside a transaction that re-checks that the period has no plan rows; `replan` MUST write only the
   single draft row.
-- **INV-FOCUS-17.** `show` and `replan` MUST exit `0` for complete coverage (an empty candidate set
+- **INV-FOCUS-17.** <!-- uuid: 13de1564-59de-4dfb-b6c5-50e2faf0e858 --> `show` and `replan` MUST exit `0` for complete coverage (an empty candidate set
   and an empty identity list included), `2` for incomplete coverage, `3` for no computable
   candidates and `1` for a usage error or an unmigrated store, and MUST NOT exit `6`.
-- **INV-FOCUS-18.** The bead column MUST use only the "Shown as" words of the state-by-outcome table,
+- **INV-FOCUS-18.** <!-- uuid: 60cf3c5e-6bad-43d8-b2ef-cef67ce171c1 --> The bead column MUST use only the "Shown as" words of the state-by-outcome table,
   defined once in code.
 
 ## The reply grammar and the final set
@@ -418,14 +418,14 @@ earlier period's plan), the routine skips (`finished`, `no-longer-candidate`, `a
 `not-a-candidate`), the effective cap, the cap to persist and the merges to record or reverse. It
 assigns no `rank_position`, performs no store write and takes no transaction.
 
-- **INV-FOCUS-19.** A reply MUST be parsed completely before any selection state is applied: a
+- **INV-FOCUS-19.** <!-- uuid: 54f7a46e-93b6-465f-af4d-07d28f1c7873 --> A reply MUST be parsed completely before any selection state is applied: a
   malformed, empty or conflicting reply MUST be a usage error (exit 1) that changes no state.
-- **INV-FOCUS-20.** The final set MUST be computed from the draft's order and MUST NOT recompute the
+- **INV-FOCUS-20.** <!-- uuid: e3879433-aa3d-4f6f-9ac8-4a657d63019c --> The final set MUST be computed from the draft's order and MUST NOT recompute the
   rank; a bare `ok` over a plan MUST NOT remove or add by rank.
-- **INV-FOCUS-21.** A reply `cap=N` MUST delete rows only when `N` is below the persisted period cap and
+- **INV-FOCUS-21.** <!-- uuid: 7776c56b-efdb-423c-8170-3653202f91cc --> A reply `cap=N` MUST delete rows only when `N` is below the persisted period cap and
   only among the unfinished rows already in the plan, highest `rank_position` first; a finished row,
   and a row the same reply adds, MUST NOT be removed by it.
-- **INV-FOCUS-22.** A row MUST be deleted only with cause `operator`, `cap`, `dropped` or `new_period`,
+- **INV-FOCUS-22.** <!-- uuid: a0b4409f-22cb-4383-aa1f-82ddeb5c128a --> A row MUST be deleted only with cause `operator`, `cap`, `dropped` or `new_period`,
   and a claim, a defer, a reassignment, a slot, a group or a merge MUST NOT remove one.
 
 ## `select`: the lock, repair and merge
@@ -539,26 +539,26 @@ separate fields over the closed vocabularies (`effect` is one of `mint`, `hold`,
 `never_closed`, `fresh_order` and, for a preview, the `draft`. `run_id` is present when the run wrote a
 record. Both forms read one table, so `show` and the echo cannot drift.
 
-- **INV-FOCUS-23.** A lock MUST reconcile the plan rows, delete the stored draft, write the period row
+- **INV-FOCUS-23.** <!-- uuid: bea4cc9b-766f-4e76-a68c-dd2173bdfeeb --> A lock MUST reconcile the plan rows, delete the stored draft, write the period row
   and write the run record row in ONE store transaction, MUST choose its first-lock or plan-exists
   branch by re-reading the period's rows inside that transaction, and MUST write the annotations and
   finalize the run record's exit code only after it commits.
-- **INV-FOCUS-24.** A first lock MUST replace the plan (delete every row of every other period) only
+- **INV-FOCUS-24.** <!-- uuid: 882e96a5-61eb-4405-955c-50a87265b10c --> A first lock MUST replace the plan (delete every row of every other period) only
   when the final set is non-empty, the period key is greater than every other period's key that holds
   rows and the period is not later than today in `focus.time_zone`; otherwise an earlier or a future
   first lock MUST be exit `1` and an empty one MUST replace nothing.
-- **INV-FOCUS-25.** A strike (`-key`) MUST delete the entity's rows in every period, and the
+- **INV-FOCUS-25.** <!-- uuid: 4456bff2-e818-4b4f-80fe-e4294ae11762 --> A strike (`-key`) MUST delete the entity's rows in every period, and the
   `focus_selected` annotation of every affected entity MUST be the maximum period key over its rows,
   else `none`.
-- **INV-FOCUS-26.** A preview, a dry run and `--repair --dry-run` MUST write nothing in any table and
+- **INV-FOCUS-26.** <!-- uuid: 885c3856-065f-4c2c-9eb9-ef08eaa2997c --> A preview, a dry run and `--repair --dry-run` MUST write nothing in any table and
   MUST leave the stored draft.
-- **INV-FOCUS-27.** `--repair` MUST read no reply, MUST ignore the period-closed check and MUST rewrite
+- **INV-FOCUS-27.** <!-- uuid: 25483fe6-8535-4533-b511-d8895c6dbb42 --> `--repair` MUST read no reply, MUST ignore the period-closed check and MUST rewrite
   an annotation that has no row to `none`.
-- **INV-FOCUS-28.** `--merge` MUST record only an external `focus:merge` link and MUST NOT write a row,
+- **INV-FOCUS-28.** <!-- uuid: bf33c5cc-6a37-459d-88f6-9860a2e6a9f6 --> `--merge` MUST record only an external `focus:merge` link and MUST NOT write a row,
   an annotation or a change record; `+<absorbedKey>` MUST remove the link.
-- **INV-FOCUS-29.** Hand-add hydration MUST run only after every earlier check has passed and MUST
+- **INV-FOCUS-29.** <!-- uuid: 289e29a9-8ae6-485e-be14-798930e5c8ef --> Hand-add hydration MUST run only after every earlier check has passed and MUST
   NOT run under a preview.
-- **INV-FOCUS-30.** A select MUST print every row it newly selects or removes in the CHANGES block with
+- **INV-FOCUS-30.** <!-- uuid: 522c55d2-82aa-48d6-976a-26184a9e938f --> A select MUST print every row it newly selects or removes in the CHANGES block with
   its cause before anything takes a bead out of play, MUST name the resolved entity and title of every
   applied token in the echo table with an effect, a because clause and a cause as separate fields read
   from the one state-by-outcome table, and a dry run's echo MUST equal the apply's.
@@ -613,19 +613,19 @@ selected[], skipped[], annotations[]}`: `selected` members carry `key`, `title`,
 annotated, writing nothing to any table, and does not create the period row, so a no-op preview never
 leaves even an empty period behind. A non-dry-run `pull` writes one run record row, verb `pull`.
 
-- **INV-FOCUS-31.** A `pull` MUST be additive: it MUST NOT delete, re-sort or re-cap a plan row, MUST
+- **INV-FOCUS-31.** <!-- uuid: 824d3b8c-f9d7-4501-a21c-dd8615e03781 --> A `pull` MUST be additive: it MUST NOT delete, re-sort or re-cap a plan row, MUST
   NOT delete or change the stored draft, and MUST give each row it adds the `rank_position` of the
   maximum plus one in rank order and the tier of its run.
-- **INV-FOCUS-32.** A `pull` MUST write each added row's `focus_selected` annotation exactly as
+- **INV-FOCUS-32.** <!-- uuid: 802d9b9e-1412-4ace-a89d-8fad06ad4f4d --> A `pull` MUST write each added row's `focus_selected` annotation exactly as
   `select` does, and a re-run MUST add no row and append no change record.
-- **INV-FOCUS-33.** A positional argument of `pull` MUST be a key; a count MUST be `--top K` only, and
+- **INV-FOCUS-33.** <!-- uuid: 7d9d3282-cd3e-46f3-937b-efed670eb7ed --> A positional argument of `pull` MUST be a key; a count MUST be `--top K` only, and
   `--top` together with a key MUST be a usage error; a bare invocation MUST write nothing.
-- **INV-FOCUS-34.** A `pull` into a period with no rows while another period holds rows, and a `pull`
+- **INV-FOCUS-34.** <!-- uuid: 960ac684-72b0-446e-906f-0ea8e1027f8d --> A `pull` into a period with no rows while another period holds rows, and a `pull`
   into a future period, MUST be exit `1`, checked inside the pull's transaction; a `pull` into a closed
   period MUST be exit `6`.
-- **INV-FOCUS-35.** A named key that is already selected or is no longer a candidate MUST be a routine
+- **INV-FOCUS-35.** <!-- uuid: 321bbe26-14df-44e7-a00b-fd46135411ba --> A named key that is already selected or is no longer a candidate MUST be a routine
   skip (exit `0`); only a request in which no named key has an entity row MUST be exit `3`.
-- **INV-FOCUS-36.** A `pull --dry-run` MUST write nothing in any table, including the period row.
+- **INV-FOCUS-36.** <!-- uuid: b64bcc27-1b0c-4f30-8d6f-19602d3e44a3 --> A `pull --dry-run` MUST write nothing in any table, including the period row.
 
 ## `close`: end the day
 
@@ -672,17 +672,17 @@ summary quoted, so it stays one line), its `--json` has `run_id` empty, `dry_run
 `already_closed` false (the would-be `closed_at` is the run's clock). A dry run of a day that is
 already closed reports what the real run would: exit `0` for the same summary, `6` for another.
 
-- **INV-FOCUS-37.** A `close` MUST, in one transaction, write `closed_at` and `close_note` onto the
+- **INV-FOCUS-37.** <!-- uuid: a8f183fd-68b2-4c31-82c9-4e591e6e5582 --> A `close` MUST, in one transaction, write `closed_at` and `close_note` onto the
   period row (creating it when absent), delete the stored draft only when it is the draft of the
   period being closed, and write one run record row; a failure MUST leave every one of them unwritten.
-- **INV-FOCUS-38.** Closing an already-closed period MUST change nothing: with an identical summary
+- **INV-FOCUS-38.** <!-- uuid: b3a2a3bc-f5c4-4b2a-bfdc-cd99013d4488 --> Closing an already-closed period MUST change nothing: with an identical summary
   it MUST be exit `0` (`already closed`), with a different summary exit `6` naming the recorded close
   time and keeping the recorded summary. A closed period MUST NOT be reopened or amended.
-- **INV-FOCUS-39.** `close` MUST read the summary as a string member of ONE JSON object on stdin;
+- **INV-FOCUS-39.** <!-- uuid: 40aad5ff-ea2a-4af2-a179-c4a22ba3de79 --> `close` MUST read the summary as a string member of ONE JSON object on stdin;
   a malformed stdin or a `--date` later than today MUST be exit `1`.
-- **INV-FOCUS-40.** `close` MUST NOT execute a tracker write verb; the per-bead progress notes MUST
+- **INV-FOCUS-40.** <!-- uuid: 000ca2b7-6e42-4332-90c2-7abd437399a5 --> `close` MUST NOT execute a tracker write verb; the per-bead progress notes MUST
   be written by the caller before it calls `close`.
-- **INV-FOCUS-41.** A `close --dry-run` MUST write nothing in any table, including the period row.
+- **INV-FOCUS-41.** <!-- uuid: 9a3d4f9b-2de9-4779-9bca-574b355cc4d5 --> A `close --dry-run` MUST write nothing in any table, including the period row.
 
 ## `explain`: why is this entity here, or not
 
@@ -739,11 +739,11 @@ is always null.
 **Telemetry.** The verb emits no OpenTelemetry and no Prometheus signal, writes no run record and logs
 nothing; its output is the whole of what it leaves behind.
 
-- **INV-FOCUS-42.** `explain` MUST be a pure read: it MUST NOT write any table (no period row, no
+- **INV-FOCUS-42.** <!-- uuid: e19a117c-8c38-409a-be68-e2f437722065 --> `explain` MUST be a pure read: it MUST NOT write any table (no period row, no
   draft, no run record, no change record), call the tracker or the network, or use a language model.
-- **INV-FOCUS-43.** `explain` MUST compute from the live rows only, MUST carry no flip-history member
+- **INV-FOCUS-43.** <!-- uuid: 4a963197-7c76-4297-a218-5a999134e3c0 --> `explain` MUST compute from the live rows only, MUST carry no flip-history member
   in text or `--json`, and MUST label the decider's skip reasons as recomputed now.
-- **INV-FOCUS-44.** `explain` MUST accept the key forms `select` accepts; an unknown key MUST print
+- **INV-FOCUS-44.** <!-- uuid: c517a931-b234-46ad-998d-c46ad260c4c3 --> `explain` MUST accept the key forms `select` accepts; an unknown key MUST print
   that it is not held and exit `0`, and an unmigrated store MUST exit `1`.
 
 ## Help, the tldr page and shell completions
@@ -784,14 +784,14 @@ promised: the candidates come in the candidate order (PRs, Jira issues, beads, t
 **Telemetry.** Help text and completions emit no OpenTelemetry and no Prometheus signal and log
 nothing; a completion writes no run record.
 
-- **INV-FOCUS-45.** `focus --help` MUST link the verbs `show`, `replan`, `select`, `pull`, `close` and
+- **INV-FOCUS-45.** <!-- uuid: f0a05a68-ae5c-4cee-add1-ad6d28b0741c --> `focus --help` MUST link the verbs `show`, `replan`, `select`, `pull`, `close` and
   `explain`, and MUST name the label `pg-focus-planable` with
   `bd update <id> --add-label pg-focus-planable` as the only bead marker.
-- **INV-FOCUS-46.** Wherever the help mentions `focus.operator_identities` it MUST describe it as a
+- **INV-FOCUS-46.** <!-- uuid: f18fbe09-941f-44d9-9e3e-ef8982f22dae --> Wherever the help mentions `focus.operator_identities` it MUST describe it as a
   Jira-only key.
-- **INV-FOCUS-47.** `focus select --help` MUST document the reply grammar with examples, the exit codes
+- **INV-FOCUS-47.** <!-- uuid: 9246dde4-73c3-4e5c-a6b6-edbe9212fc97 --> `focus select --help` MUST document the reply grammar with examples, the exit codes
   `0`, `1`, `2`, `3` and `6`, and `--dry-run`.
-- **INV-FOCUS-48.** The key completion of `explain` and `pull` MUST read the store read-only, MUST NOT
+- **INV-FOCUS-48.** <!-- uuid: 04dcd0f1-6658-4dcd-a9b7-28d9c0b52142 --> The key completion of `explain` and `pull` MUST read the store read-only, MUST NOT
   write, call the tracker or the network, MUST give up after a short time limit, and MUST print
   nothing on any error.
 
@@ -854,14 +854,14 @@ cap. The cap never changes the order.
 `unparseable_due`, `unmapped_priority`, `age_fallback`, `unblocks_unavailable` and
 `status_category_absent`.
 
-- **INV-RANK-1.** The rank MUST be a strict weak order and MUST be total: the same inputs MUST rank
+- **INV-RANK-1.** <!-- uuid: a47dc018-c51e-4990-8976-652176d6ddb8 --> The rank MUST be a strict weak order and MUST be total: the same inputs MUST rank
   identically whatever order the candidates arrive in.
-- **INV-RANK-2.** The rank MUST read time only from the injected clock and MUST write nothing, call no
+- **INV-RANK-2.** <!-- uuid: ac1847be-ec4c-488e-a01d-33063d244246 --> The rank MUST read time only from the injected clock and MUST write nothing, call no
   tracker and use no language model.
-- **INV-RANK-3.** A candidate reached only through a link MUST NOT be in the started tier.
-- **INV-RANK-4.** A due date beyond the 7-day horizon MUST rank as no due date, and an unparseable due
+- **INV-RANK-3.** <!-- uuid: 1b535455-182b-4107-821f-218e73b9cf3b --> A candidate reached only through a link MUST NOT be in the started tier.
+- **INV-RANK-4.** <!-- uuid: c3e04b66-00fd-4ebb-ac84-055d1ada5607 --> A due date beyond the 7-day horizon MUST rank as no due date, and an unparseable due
   date MUST rank as no due date without failing the verb.
-- **INV-RANK-5.** Every silent degradation MUST be counted in `rank_inputs`.
+- **INV-RANK-5.** <!-- uuid: 01f2d30f-e14e-49b3-893c-db9d637fedff --> Every silent degradation MUST be counted in `rank_inputs`.
 
 ## Telemetry and logs
 

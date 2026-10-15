@@ -128,6 +128,19 @@ interpret-only re-run) are implemented at `packages/pg-desk`. `daemon.enable`, t
 signal (deferred with `pg2-jpfw.5`), and the ZR-side query/role wiring are this docket's remaining
 packets.
 
+## External references
+
+Every element this set cites from outside it is declared here. The owner UUID is the authority;
+the link is a convenience.
+
+| Name                 | What it is                                                                                                         | Owner set-path                                                           | Owner UUID                                                                                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INV-CACHE-8`        | a consumer that has just detected a change passes the fresh flag only where the backend does not own its freshness | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior` | [eab5289c-7cb4-437c-abf4-42b2ee6b9889](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/invariants.md) |
+| `INV-LEDGER-FRESH-1` | the umbrella records the outcome of each completed origin fetch on the ledger key                                  | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior` | [d6ace83f-a679-4ea8-9cf6-05d637d209f7](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/invariants.md) |
+| `INV-LEDGER-FRESH-2` | an answer served from the ledger or the cache advances no freshness and records no failure                         | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior` | [872fc219-5a0a-4d44-9fd3-03466805a948](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/invariants.md) |
+| `INV-LEDGER-FRESH-3` | a fetch is a success only when the origin answered for the whole query; a partial answer is a recorded error       | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior` | [74bc6e39-0f55-443d-88bc-c9b31c3889f3](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/invariants.md) |
+| `INV-DECIDER-18`     | a rule that fails on consecutive runs escalates to a human sibling bead                                            | `phillipgreenii-nix-agent-support · docs/behavior/pg-decider`            | [eec3f550-fab4-4f41-89e0-d117cb504999](https://github.com/phillipgreenii/nix-agent-support/blob/main/docs/behavior/pg-decider/plan-and-apply.md)        |
+
 ## Realization gaps
 
 This set's **realization-gap register**: intended behavior this set's

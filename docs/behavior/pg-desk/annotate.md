@@ -60,13 +60,13 @@ fourth disposition the feedback verbs accept) as `disposition.<comment>` too.
 
 ## Invariants
 
-- **INV-ANNOTATE-1.** Every successful write or removal MUST append exactly one
+- **INV-ANNOTATE-1.** <!-- uuid: 5c655ee1-c779-4352-9f43-045b5f89b6c5 --> Every successful write or removal MUST append exactly one
   `annotation_changed` record in the same transaction as the row change; a failed write MUST leave
   neither.
-- **INV-ANNOTATE-2.** A reserved key MUST be written only in its documented shape; for
+- **INV-ANNOTATE-2.** <!-- uuid: 0205b2a7-eaff-4e2a-a174-bdf9df4c7daf --> A reserved key MUST be written only in its documented shape; for
   `focus_selected` that is a calendar date written exactly as `YYYY-MM-DD` (a period key) or the
   word `none`, and anything else (including the empty string) MUST be rejected with nothing written.
-- **INV-ANNOTATE-3.** The set path of `force-review` MUST NOT consume or clear a flag; the clear
+- **INV-ANNOTATE-3.** <!-- uuid: b53b9bbd-87fc-4118-9429-ae3324d3326d --> The set path of `force-review` MUST NOT consume or clear a flag; the clear
   path (`force-review --clear`) is the only consumer of `force_review`.
 
 ## Old-schema refusal

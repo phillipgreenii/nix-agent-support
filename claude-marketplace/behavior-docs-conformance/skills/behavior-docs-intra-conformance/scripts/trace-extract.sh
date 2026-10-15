@@ -240,6 +240,12 @@ records=$(
         # lines sit in the same block and MUST NOT be read as requirements.
         if (cur != "") {
           if (match(line, /_Requires:_|_Includes:_|\(→/) > 0) {
+            # A wrapped listing continues on this line, ahead of the marker that
+            # starts the NEXT part (`_Requires:_` ends one line, its names open
+            # the next and are followed by `_Includes:_ none.`). The names before
+            # the marker belong to the open listing; only the text after the
+            # marker is read for a listing that is not yet open (bead pg2-nz2f0).
+            if (inlist) emit_listing(substr(line, 1, RSTART - 1))
             inlist = 1
             emit_listing(substr(line, RSTART + RLENGTH))
           } else if (inlist) {

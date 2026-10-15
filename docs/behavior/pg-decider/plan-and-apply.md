@@ -361,48 +361,48 @@ idle runs included; a log pipeline MUST expect that rate.
 
 ## Invariants
 
-- **INV-DECIDER-7.** `plan` MUST write nothing: no work-item write, no annotation and no comment.
-- **INV-DECIDER-8.** Deciding MUST be a pure function of the view alone and MUST NOT depend on why
+- **INV-DECIDER-7.** <!-- uuid: 12284826-d903-4a8c-a30f-5324aaa7f474 --> `plan` MUST write nothing: no work-item write, no annotation and no comment.
+- **INV-DECIDER-8.** <!-- uuid: 9ef3afe4-d71a-4e94-9134-1cd24ac0654b --> Deciding MUST be a pure function of the view alone and MUST NOT depend on why
   the item was routed; re-running on an unchanged view MUST write nothing. The one declared second
   input is `apply`'s live read of a focus bead before a hold or release: `apply` MAY read that work
   item live to ABANDON a write, and MUST NOT use the read to choose a different write.
-- **INV-DECIDER-9.** `apply` MUST re-read the view on every run. `--from-item` MUST only identify
+- **INV-DECIDER-9.** <!-- uuid: 612fea48-b15b-4b09-8d37-40da82918dad --> `apply` MUST re-read the view on every run. `--from-item` MUST only identify
   the trigger and MUST NOT decide what is applied. The live read of a focus bead (INV-DECIDER-8) MAY
   only abandon a planned write; it MUST NOT add, change or substitute one.
-- **INV-DECIDER-10.** A hidden entity MUST skip every rule, and a suppressed kind MUST skip only the
+- **INV-DECIDER-10.** <!-- uuid: 2af98d94-8a46-49fe-bdca-88b377e58e9c --> A hidden entity MUST skip every rule, and a suppressed kind MUST skip only the
   rules of that kind. Both stops MUST be evaluated before any rule runs.
-- **INV-DECIDER-11.** A skipped rule MUST carry exactly one of the five reasons `hidden`,
+- **INV-DECIDER-11.** <!-- uuid: 1357d784-c31f-438d-b275-7761bf12e4f9 --> A skipped rule MUST carry exactly one of the five reasons `hidden`,
   `suppressed`, `already handled`, `review-pending` and `not matched`.
-- **INV-DECIDER-12.** A `create` that carries a `dedup_key` MUST look the key up in the tracker
+- **INV-DECIDER-12.** <!-- uuid: 9c2466e3-de47-4a24-ad29-1ca0622776ca --> A `create` that carries a `dedup_key` MUST look the key up in the tracker
   before creating, and MUST NOT create when the lookup hits or cannot be trusted. The lookup for a
   focus bead MUST list every status, closed included, through `focus_beads_query`, and MUST fail
   closed when that key is unset.
-- **INV-DECIDER-13.** Actions MUST apply in order and best effort: a failure MUST NOT stop
+- **INV-DECIDER-13.** <!-- uuid: 8b490340-7a6d-407d-a1f0-d5981fb0cec4 --> Actions MUST apply in order and best effort: a failure MUST NOT stop
   independent actions, and an action that depends on a failed one MUST be reported as
   `skipped-dependency` rather than attempted. A focus hold or release whose live re-read shows the
   bead changed, or cannot be trusted, MUST NOT be written and MUST be reported as `skipped-stale`.
-- **INV-DECIDER-14.** `apply` MUST NOT roll back an applied tracker write.
-- **INV-DECIDER-15.** After an external work-item write, and after an abandoned focus hold or
+- **INV-DECIDER-14.** <!-- uuid: e8eb50b9-b9ad-4c6a-b9c7-1fec00a3c62c --> `apply` MUST NOT roll back an applied tracker write.
+- **INV-DECIDER-15.** <!-- uuid: a7b65bbd-f07c-4414-b92f-1922e7b3ec34 --> After an external work-item write, and after an abandoned focus hold or
   release (`skipped-stale`), `apply` MUST refresh the work item in pg-desk; a failed refresh MUST
   NOT make the run fail.
-- **INV-DECIDER-16.** Every applied external action MUST append exactly one audit comment on the
+- **INV-DECIDER-16.** <!-- uuid: 06870b48-69c3-407b-8e7e-1836faa1adc7 --> Every applied external action MUST append exactly one audit comment on the
   work item it wrote, carrying the rule id, the facts, the routed `seq` and a timestamp. No other
   outcome MAY write one, `skipped-stale` included.
-- **INV-DECIDER-17.** The exit code MUST be `0` when all actions applied (or were deduped or
+- **INV-DECIDER-17.** <!-- uuid: c19408e0-7f51-4dfb-865e-52a8bf6bcab2 --> The exit code MUST be `0` when all actions applied (or were deduped or
   `skipped-stale`) or none were needed, `2`
   when some failed, were skipped for a dependency or a hook failed, and `3` when the view was
   unreadable and nothing was applied.
-- **INV-DECIDER-18.** A rule that fails on K consecutive runs, counted once per routed `seq`, MUST be
+- **INV-DECIDER-18.** <!-- uuid: eec3f550-fab4-4f41-89e0-d117cb504999 --> A rule that fails on K consecutive runs, counted once per routed `seq`, MUST be
   escalated as one `human`-labeled work item naming the rule and the error, and a streak MUST NOT be
   escalated twice.
-- **INV-DECIDER-19.** The force-review flag MUST be cleared only after the review item actions and
+- **INV-DECIDER-19.** <!-- uuid: 19bfb95e-3339-477b-a079-34893520b47c --> The force-review flag MUST be cleared only after the review item actions and
   the consumption record have succeeded; otherwise the flag MUST stay set.
-- **INV-DECIDER-20.** Each `apply` run that reaches its action list MUST write exactly one run
+- **INV-DECIDER-20.** <!-- uuid: 5ff29325-920f-41a4-8449-8853a1348856 --> Each `apply` run that reaches its action list MUST write exactly one run
   counters line to stderr whose counts satisfy `planned = applied + deduped + failed + skipped` for
   every rule. The outcome set is `applied`, `deduped`, `failed`, `skipped-dependency` and
   `skipped-stale`; the last two are counted under `skipped`. The additive members `transitions`,
   `skips`, `seq`, `from_item` and `failures` MUST NOT change what any existing member means.
-- **INV-DECIDER-25.** For a merged or closed PR, the rules that keep the anchor in step with the PR
+- **INV-DECIDER-25.** <!-- uuid: 6f0cdfcc-c665-4a73-bf75-28f3c34042c3 --> For a merged or closed PR, the rules that keep the anchor in step with the PR
   and close its open work are the only ones that MAY act, with one deliberate exception: the
   `focus.item` rule MAY hold (one `update` of status and marker, never a `create`, `reopen` or
   `close`) an unclaimed focus bead whose source is the terminal PR. Every other rule MUST skip it,

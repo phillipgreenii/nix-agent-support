@@ -12,7 +12,7 @@ describes, and a behavior change to the decider MUST edit these docs in the same
 
 Three tools cooperate, and each owns one concern:
 
-- **pg-desk** holds state: the entity snapshot, the annotations and the decorations. It decides
+- **pg-desk** holds the state (the entity snapshot, the annotations and the decorations). It decides
   nothing about what work should exist.
 - **pg-router** delivers: it routes a changed entity to the decider as an item. It stays generic
   and names no concrete tool or entity rule.
@@ -96,5 +96,5 @@ Out of scope for the whole set:
 - The conditions of individual rules (the design's PR rule table).
 - The pg-desk `sync` stage that the decider replaces; its retirement belongs to the cutover phase.
 - The pg-desk annotation verbs and the composite view contract; see
-  [`../pg-desk/annotate.md`](../pg-desk/annotate.md) and [`../pg-desk/show.md`](../pg-desk/show.md).
+  `annotate.md` and `show.md` of the set `phillipgreenii-nix-agent-support · docs/behavior/pg-desk`.
 - The deployment wiring that binds pg-router to the decider and renders its configuration file.

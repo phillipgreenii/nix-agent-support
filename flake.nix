@@ -9544,8 +9544,8 @@
               #
               # `${./.}` is the flake source, already realised in the store — so
               # the sets, the evaluator scripts and the runner all come from ONE
-              # consistent tree. The identical runner backs the pre-commit hook,
-              # invoked with the WORKING TREE as its root instead.
+              # consistent tree. This nix check is the runner's only automatic
+              # caller: no pre-commit hook runs it (bead pg2-nz2f0).
               #
               # The ZR deployment set (your-private-flake) is the third real
               # set and is deliberately NOT here: it lives in another repo, so it
@@ -9570,11 +9570,12 @@
                   '';
 
               # Set DISCOVERY of the runner above (bead pg2-ksssh): the runner finds
-              # every `*/docs/behavior/README.md` instead of listing sets, so a new
-              # set cannot be missed. This drives the real runner's `--list-sets`
-              # mode over fixture trees (dot-directory pruning, byte order, the loud
-              # no-set and no-method-set exits) and over the flake source (the four
-              # sets that were once left out are discovered).
+              # every `docs/behavior` directory, and every directory directly under
+              # one, that carries a README.md instead of listing sets, so a new
+              # set cannot be missed (beads pg2-ksssh, pg2-nz2f0). This drives the real runner's `--list-sets`
+              # mode over fixture trees (dot-directory pruning, byte order, the one-level
+              # depth rule, the loud no-set and no-method-set exits) and over the flake
+              # source (the sets that were once left out are discovered).
               test-behavior-docs-real-corpus-discovery =
                 pkgs.runCommand "test-behavior-docs-real-corpus-discovery"
                   {

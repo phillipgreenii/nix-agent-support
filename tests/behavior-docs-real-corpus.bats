@@ -67,7 +67,7 @@ mkset() {
   [ "$output" = "$expected" ]
 }
 
-@test "every set the repo holds is discovered, including the four once left out" {
+@test "every set the repo holds is discovered, including those once left out" {
   run bash "$CORPUS_RUNNER" --list-sets "$CORPUS_REPO_ROOT"
   [ "$status" -eq 0 ]
   for s in \
@@ -78,9 +78,46 @@ mkset() {
     packages/pg-connector/docs/behavior \
     packages/pg-router-ccpool-handler/docs/behavior \
     packages/pg-router-source-pg-connector/docs/behavior \
-    packages/work-report/docs/behavior; do
+    packages/work-report/docs/behavior \
+    docs/behavior/pg-decider \
+    docs/behavior/pg-desk \
+    docs/behavior/pg-task-focus \
+    packages/pg-connector/docs/behavior/github; do
     printf '%s\n' "$output" | grep -Fx -- "$s"
   done
+}
+
+@test "a directory directly under docs/behavior with a README.md is a set too" {
+  # pg-decider, pg-desk and pg-task-focus live at docs/behavior/<name>, and
+  # pg-connector's github set at packages/pg-connector/docs/behavior/github, beside
+  # (not instead of) the set at its parent (bead pg2-nz2f0).
+  mkset "behavior-docs/docs/behavior"
+  mkset "docs/behavior/alpha"
+  mkset "docs/behavior/beta"
+  mkset "packages/pkg/docs/behavior"
+  mkset "packages/pkg/docs/behavior/sub"
+  run bash "$CORPUS_RUNNER" --list-sets "$FIX"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'behavior-docs/docs/behavior\ndocs/behavior/alpha\ndocs/behavior/beta\npackages/pkg/docs/behavior\npackages/pkg/docs/behavior/sub' ]
+}
+
+@test "a set nested deeper than one level under docs/behavior is not discovered" {
+  # The rule is one level: a README two levels down is a sub-document of the set
+  # above it, not a set, so a fixture tree under a set cannot become a gate operand.
+  mkset "packages/pkg/docs/behavior"
+  mkset "packages/pkg/docs/behavior/sub/deeper"
+  mkset "docs/other/behavior/x"
+  run bash "$CORPUS_RUNNER" --list-sets "$FIX"
+  [ "$status" -eq 0 ]
+  [ "$output" = "packages/pkg/docs/behavior" ]
+}
+
+@test "dot-directories are pruned for the one-level sets as well" {
+  mkset "docs/behavior/real"
+  mkset ".worktrees/some-bead/docs/behavior/real"
+  run bash "$CORPUS_RUNNER" --list-sets "$FIX"
+  [ "$status" -eq 0 ]
+  [ "$output" = "docs/behavior/real" ]
 }
 
 @test "discovery finding no set at all is loud, never a vacuous pass" {

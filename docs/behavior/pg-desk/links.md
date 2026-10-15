@@ -109,15 +109,15 @@ of the registered entity types (`pr`, `issue`, `thread`); any other value, or a 
 
 ## Invariants
 
-- **INV-LINKS-1.** The verb MUST be read-only and offline: it MUST NOT hydrate, MUST NOT call the
+- **INV-LINKS-1.** <!-- uuid: 72323241-1b09-4531-9854-efaa47adb31e --> The verb MUST be read-only and offline: it MUST NOT hydrate, MUST NOT call the
   network, and MUST NOT write the store (including creating or migrating it).
-- **INV-LINKS-2.** An unknown ref MUST NOT be an error: it is `known: false` with empty `links`, and
+- **INV-LINKS-2.** <!-- uuid: 3a301e67-73bf-42d6-aa25-2fb3b6240348 --> An unknown ref MUST NOT be an error: it is `known: false` with empty `links`, and
   the exit code is `0`. This covers a ref with no stored entity and no links, a type the verb does
   not support, and a ref that is not shaped `<type>:<id>`.
-- **INV-LINKS-3.** A link MUST have a URL or be omitted. A link whose URL cannot be determined — no
+- **INV-LINKS-3.** <!-- uuid: 56e2f196-bc71-404e-93a3-17e6c00cd923 --> A link MUST have a URL or be omitted. A link whose URL cannot be determined — no
   stored snapshot URL and no template — MUST NOT be emitted empty. Only plain `http(s)` URLs
   without whitespace or control characters are emitted.
-- **INV-LINKS-4.** Build links MUST honor the same check exclusions as the CI rollup the dashboard
+- **INV-LINKS-4.** <!-- uuid: cc737ed5-1224-44eb-9624-e5bb4bf4fc21 --> Build links MUST honor the same check exclusions as the CI rollup the dashboard
   shows, so a menu and the dashboard never disagree about whether a build is failing. A `build` link
   is emitted for exactly the CI runs the rollup counts as failed, and for no others.
 

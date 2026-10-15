@@ -9,7 +9,7 @@ authorization (2026-10-07): run the new detection beside the live flow, on a cop
 real read-only GitHub calls at the production 60s cadence.
 
 This document states the intended behavior of the tooling (bead `pg2-nu7h0`). The operator steps are
-in [`docs/runbooks/pg-desk-shadow-compare.md`](../../runbooks/pg-desk-shadow-compare.md). The tool
+in `docs/runbooks/pg-desk-shadow-compare.md`. The tool
 lives in `packages/pg-desk-shadow`, a separate Go module, so a one-off measurement does not ship in
 the `pg-desk` binary. It is generic and config-driven: it reads whatever `pg-desk` and `pg-connector`
 configuration the operator already has and MUST NOT contain organization identifiers.
@@ -59,23 +59,23 @@ For `pr` and `ci` the next shadow run measures the daemon-backed GitHub backend 
 change flow. The harness named in this document stays the measuring instrument; what it runs
 beside the live flow changes.
 
-- **INV-SHADOW-11.** The shadow run MUST start the daemon as `pg-desk-shadow`'s own child, with its
+- **INV-SHADOW-11.** <!-- uuid: 1abfcd2d-1173-49a1-9d8a-54cfc298bf99 --> The shadow run MUST start the daemon as `pg-desk-shadow`'s own child, with its
   own socket, its own state directory and its own configuration (the `PG_CONNECTOR_GITHUB_*`
   variables), and the existing read-only `gh` shim. It MUST NOT share the live daemon's socket,
   state or configuration, because the shadow run is a measurement beside the live flow and MUST NOT
   write to or perturb it. The daemon's GraphQL spend under the shadow run is capped by default at
   1,500 points per hour, because it runs alongside the live flow on the same token; the operator MAY
   raise that cap.
-- **INV-SHADOW-12.** The collector MUST read the daemon's change feed by calling the connector's
+- **INV-SHADOW-12.** <!-- uuid: fbea552a-fe0f-4bf8-9113-12899b586316 --> The collector MUST read the daemon's change feed by calling the connector's
   client directly, and MUST compare it with the live events. The comparison MUST cover: feed misses,
   detection delay, sweep-caught events, shadow-only detections, cost, and CI-driven categorization
   changes (a PR moving between blocked and reviewable) as seen by each side. Those measurements
   keep the definitions of "Definitions" and "Metrics" below, with the daemon's feed in the place of
   the fingerprint change detection.
-- **INV-SHADOW-13.** The DEFAULT cutover criteria are four: zero unexplained misses; detection
+- **INV-SHADOW-13.** <!-- uuid: 8b54e7ad-2fc8-4331-9163-0d554b8dddbf --> The DEFAULT cutover criteria are four: zero unexplained misses; detection
   delay p90 no worse than live; GraphQL points per hour inside the cap for the whole run; daemon
   uptime at least 95 percent. The shadow report MUST state each criterion as met or not met.
-- **INV-SHADOW-14.** The operator MAY cut over with criteria unmet when the run shows the daemon
+- **INV-SHADOW-14.** <!-- uuid: fefa3cdf-3951-47cd-905a-0cb0d973ed4a --> The operator MAY cut over with criteria unmet when the run shows the daemon
   working. The cutover bead MUST then record the operator's decision and every unmet criterion, and
   each unmet criterion MUST get its own follow-up bead.
 
@@ -384,25 +384,25 @@ reboot and router applies WILL occur: they are recorded and excluded from misses
 
 ## Invariants
 
-- **INV-SHADOW-1.** The collector MUST refuse to start, and every tick MUST re-verify, that
+- **INV-SHADOW-1.** <!-- uuid: 94f1cae1-ae4d-49c0-8c2b-1691ee7070b4 --> The collector MUST refuse to start, and every tick MUST re-verify, that
   `XDG_STATE_HOME`, `XDG_RUNTIME_DIR` and `TMPDIR` are under the scratch directory and not the live
   state, that `PG_DESK_CONFIG` and `PG_PR_CONFIG` equal the scratch copies, and that `BEADS_DIR` and
   `PG_CONNECTOR_ISSUE_BEADS_DIR` equal the configured read-only beads directory, and that every `--beads-dir` word in a registered
   command of the scratch `PG_PR_CONFIG` names that same directory (under the scratch directory in
   hermetic bd mode).
-- **INV-SHADOW-2.** No child process MAY write outside the scratch directory: the child tree runs
+- **INV-SHADOW-2.** <!-- uuid: f937c8b8-aee4-4906-8bbe-7bfc3c6229e2 --> No child process MAY write outside the scratch directory: the child tree runs
   under the sandbox, and a failed start-up probe or any denial stops the run.
-- **INV-SHADOW-3.** The `gh` and `bd` shims MUST reject every write verb and every verb not known to
+- **INV-SHADOW-3.** <!-- uuid: c2d716d0-b7f0-43ef-a03a-33696f161962 --> The `gh` and `bd` shims MUST reject every write verb and every verb not known to
   be a read; the smoke and the run MUST treat a rejected write as a safety failure.
-- **INV-SHADOW-4.** No dolt server is started (`BEADS_DOLT_AUTO_START=0`) and no GitHub write is made.
-- **INV-SHADOW-5.** Ticks never overlap and each is bracketed by a start row and an end row.
-- **INV-SHADOW-6.** A resumed run uses the same scratch directory and the same consumer cursor and its
+- **INV-SHADOW-4.** <!-- uuid: 89e1b65c-be9c-4068-8d60-504a8efc8cbd --> No dolt server is started (`BEADS_DOLT_AUTO_START=0`) and no GitHub write is made.
+- **INV-SHADOW-5.** <!-- uuid: 14fa63ae-ca00-4581-b1b9-7d2b0c8c7f55 --> Ticks never overlap and each is bracketed by a start row and an end row.
+- **INV-SHADOW-6.** <!-- uuid: fbb8ed23-d29b-4908-b19d-fbd76aa365f1 --> A resumed run uses the same scratch directory and the same consumer cursor and its
   appends are idempotent.
-- **INV-SHADOW-7.** The budget guard MUST skip a tick below the floor and MUST NOT deadlock when the
+- **INV-SHADOW-7.** <!-- uuid: 948471d1-3be4-4933-80a8-2f3fbf193e3b --> The budget guard MUST skip a tick below the floor and MUST NOT deadlock when the
   scratch log is empty or the reading's reset window has passed.
-- **INV-SHADOW-8.** An identifier that leaves the scratch directory MUST be an HMAC label.
-- **INV-SHADOW-9.** Only `unexplained` misses count as failure, and every miss has exactly one class.
-- **INV-SHADOW-10.** `content_hash` MUST NOT be used as a change signal.
+- **INV-SHADOW-8.** <!-- uuid: af05db5f-c1c2-4372-a8a6-2634351f8ffb --> An identifier that leaves the scratch directory MUST be an HMAC label.
+- **INV-SHADOW-9.** <!-- uuid: 383cc907-7b8d-4856-a4b8-00d519c282c1 --> Only `unexplained` misses count as failure, and every miss has exactly one class.
+- **INV-SHADOW-10.** <!-- uuid: 46a1f756-9cf1-482c-8927-3136e3ea4562 --> `content_hash` MUST NOT be used as a change signal.
 
 ## Recorded baselines (verified 2026-10-07; the report recomputes them)
 

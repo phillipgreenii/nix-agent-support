@@ -634,6 +634,49 @@ MD
   echo "$output" | grep -qE '^  USECASE-1 +lists: INV-1 INV-2'
 }
 
+@test "traceability: a Requires listing that wraps onto the line carrying _Includes:_ keeps its names (pg2-nz2f0)" {
+  # The listing wraps: `_Requires:_` ends one line and its names open the next, which
+  # also carries the `_Includes:_` marker. The marker match used to win on that line and
+  # the names BEFORE it were dropped, so the element read as carrying no listing and
+  # every invariant it required read as untraced.
+  trace_set
+  cat >"$T/journeys.md" <<'MD'
+# Journeys
+
+- **`STORY-1`** — as an operator, I want delivery. _(→ `USECASE-1`; `INV-1`, `INV-2`.)_
+
+### `USECASE-1` — Submit an event
+
+_Primary actor:_ the operator. _Other actors:_ the host. _Requires:_
+`INV-1`, `INV-2`. _Includes:_ none.
+
+Submit and observe.
+MD
+  run trace-extract "$T"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^  USECASE-1 +lists: INV-1 INV-2'
+}
+
+@test "traceability: a name written before the first listing marker is not part of the listing (pg2-nz2f0)" {
+  # The companion of the wrapped-listing test: names on a line BEFORE a marker belong to
+  # the listing only when a listing is already open. Here none is, so `INV-2` is prose.
+  trace_set
+  cat >"$T/journeys.md" <<'MD'
+# Journeys
+
+- **`STORY-1`** — as an operator, I want delivery. _(→ `USECASE-1`; `INV-1`.)_
+
+### `USECASE-1` — Submit an event
+
+_Primary actor:_ the operator, bound by `INV-2`. _Requires:_ `INV-1`.
+
+Submit and observe.
+MD
+  run trace-extract "$T"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL untraced: INV-2'
+}
+
 @test "traceability: a family glob reference resolves against the family it names" {
   trace_set
   cat >"$T/families.md" <<'MD'

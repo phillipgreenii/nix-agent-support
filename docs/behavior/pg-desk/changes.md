@@ -172,7 +172,7 @@ replayed by `--reset`.
   set and it is found again on the next call. An entity another query still lists stays active. A
   removal for an entity the store does not hold, or that is already inactive, reads and writes
   nothing.
-  `removed` says nothing about the source state: a removed entity's own state is unknown until a
+  `removed` says nothing about the source state, because a removed entity's own state is unknown until a
   watched query lists it again, when it is added and becomes active with a `reconcile` record
   (first observation after a gap). The same absence in a targeted `refresh <id>` fails loudly
   instead (that half belongs to `refresh`).
@@ -370,44 +370,44 @@ itself, which serves the types whose backend does not own its changes (`issue`);
 to `pr`, whose flow is retired.
 INV-CHANGES-13 to INV-CHANGES-15 govern `pr` and `ci`.
 
-- **INV-CHANGES-1.** The consumer's cursor MUST advance only after the envelope was written, and
+- **INV-CHANGES-1.** <!-- uuid: 73013e4b-a478-4964-a474-803f9749a719 --> The consumer's cursor MUST advance only after the envelope was written, and
   never on `--cached`.
-- **INV-CHANGES-2.** A total failure MUST log nothing and leave the cursor where it was.
-- **INV-CHANGES-3.** A degraded or failed source or hydration MUST NOT produce a `removed` or
+- **INV-CHANGES-2.** <!-- uuid: 83204e57-b303-4df7-bedb-7a6b3f231053 --> A total failure MUST log nothing and leave the cursor where it was.
+- **INV-CHANGES-3.** <!-- uuid: 37b33d52-a383-4891-91ff-762f9606c96a --> A degraded or failed source or hydration MUST NOT produce a `removed` or
   `closed` record.
-- **INV-CHANGES-4.** The first observation of an entity MUST yield only `reconcile`.
-- **INV-CHANGES-5.** The only binary this verb execs is `pg-connector`, through the gather
+- **INV-CHANGES-4.** <!-- uuid: 49df2f1a-e74a-4837-b49f-2d7138d615c2 --> The first observation of an entity MUST yield only `reconcile`.
+- **INV-CHANGES-5.** <!-- uuid: 32593ca1-19ba-4795-b890-cfd7920230ce --> The only binary this verb execs is `pg-connector`, through the gather
   package's single exec chokepoint; it calls `<type> list --fingerprints` and never `<type>
 changes`.
-- **INV-CHANGES-6.** A `removed` record MUST be logged only when no configured watched query still
+- **INV-CHANGES-6.** <!-- uuid: e76e6662-4538-4ed0-9876-034c97381266 --> A `removed` record MUST be logged only when no configured watched query still
   holds the entity: every configured query's persisted set is consulted, and only a complete
   (succeeded, non-truncated) listing may take an id out of its query's set.
-- **INV-CHANGES-7.** An inactive entity MUST NOT be swept (either tier) or replayed by `--reset`.
-- **INV-CHANGES-8.** A call MUST NOT start more than `hydration.max_per_poll` added/changed plus
+- **INV-CHANGES-7.** <!-- uuid: 9d0e0556-37f8-4fe5-b5eb-dc757b2444df --> An inactive entity MUST NOT be swept (either tier) or replayed by `--reset`.
+- **INV-CHANGES-8.** <!-- uuid: 122ffa2b-3aa3-4fc7-a577-7b9da8a16016 --> A call MUST NOT start more than `hydration.max_per_poll` added/changed plus
   sweep hydrations (a `--reset` replay is exempt); changed/added work MUST be served before sweep
   work.
-- **INV-CHANGES-9.** An entity's stored list fingerprint MUST be written only in the transaction
+- **INV-CHANGES-9.** <!-- uuid: 62c190c8-189e-4476-904f-86a6271c5a50 --> An entity's stored list fingerprint MUST be written only in the transaction
   that writes its snapshot, MUST be the fingerprint observed in the listing that triggered the
   hydration, and MUST be left unchanged by every failed, degraded or lost hydration.
-- **INV-CHANGES-10.** pg-desk MUST NOT keep a retry counter, a deferral queue or a timer for the
+- **INV-CHANGES-10.** <!-- uuid: 256c917b-8696-4f05-a22c-82b089654006 --> pg-desk MUST NOT keep a retry counter, a deferral queue or a timer for the
   list-and-diff flow; the next scheduled call is the only retry.
-- **INV-CHANGES-11.** A removal candidate MUST be confirmed by exactly one `show` read before it is
+- **INV-CHANGES-11.** <!-- uuid: 6f841a8a-ea31-422d-bd18-d2b8feda4d3b --> A removal candidate MUST be confirmed by exactly one `show` read before it is
   deactivated, with a nil list fingerprint; a failed or degraded read MUST leave the entity active
   and its membership untouched, and a degraded, truncated or failed listing MUST NOT cause a read.
-- **INV-CHANGES-12.** The local reconcile tier MUST make no remote call and no hydration, and the
+- **INV-CHANGES-12.** <!-- uuid: 55ac4d95-84e0-438f-878a-d6d8e36e80b9 --> The local reconcile tier MUST make no remote call and no hydration, and the
   record it appends MUST leave the entity's `hydrated_at`, active flag and list fingerprint unchanged.
-- **INV-CHANGES-13.** For `pr` and `ci`, pg-desk MUST NOT own change detection: it MUST NOT keep a
+- **INV-CHANGES-13.** <!-- uuid: 6c271805-3abc-49a8-b4c0-0ce3358d7433 --> For `pr` and `ci`, pg-desk MUST NOT own change detection: it MUST NOT keep a
   detection baseline, run an age sweep or hydrate entities in order to find a change, and the
   backend that owns those changes, not pg-desk, MUST own the consumers' cursors.
-- **INV-CHANGES-14.** A CI change behind an unchanged rollup MUST re-trigger categorization of the
+- **INV-CHANGES-14.** <!-- uuid: bc6b61da-1a7b-4c42-b93d-98b89366cd8d --> A CI change behind an unchanged rollup MUST re-trigger categorization of the
   PR it belongs to, once per change and not once per feed.
-- **INV-CHANGES-15.** A desk run that did not complete for a PR MUST still be recovered with no
+- **INV-CHANGES-15.** <!-- uuid: fffa7fca-0a84-4f3b-9815-24a3928e7379 --> A desk run that did not complete for a PR MUST still be recovered with no
   decider acknowledgement protocol and with no local reconcile tier in pg-desk, through the
   backend's redelivery of unacknowledged feed rows and the periodic reconcile lanes.
-- **INV-CHANGES-16.** With `hydration.read_issue_deps` false an issue hydration MUST NOT call
+- **INV-CHANGES-16.** <!-- uuid: 935902e9-8d86-4af6-9b97-947100dea37d --> With `hydration.read_issue_deps` false an issue hydration MUST NOT call
   `issue deps`, and with it true MUST store its `--full` result as `issue_deps` or fail the
   hydration; the direct `issue_show.deps` edges MUST be stored either way.
-- **INV-CHANGES-17.** The issue reverse-edge index MUST count DIRECT, `blocks`-typed edges only,
+- **INV-CHANGES-17.** <!-- uuid: 6962bf00-e1eb-475f-b5f6-ea3ce09423e8 --> The issue reverse-edge index MUST count DIRECT, `blocks`-typed edges only,
   MUST exclude inactive and (by the caller's predicate) terminal dependents, and MUST report an
   issue without stored `issue_deps` as unavailable rather than as having no dependents.
 

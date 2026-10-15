@@ -133,32 +133,32 @@ anything.
 
 ## Invariants
 
-- **INV-FRESH-1.** Freshness MUST be the time of the last successful fetch from the origin system,
+- **INV-FRESH-1.** <!-- uuid: 3d775137-e691-41a4-9038-de71cac12955 --> Freshness MUST be the time of the last successful fetch from the origin system,
   never a per-row `as_of`.
-- **INV-FRESH-2.** An answer served from a cache MUST NOT advance a source's freshness. This is
+- **INV-FRESH-2.** <!-- uuid: 9e33381c-fa46-46d5-8e0a-5dad9ced6a54 --> An answer served from a cache MUST NOT advance a source's freshness. This is
   upheld at the connector, which stamps the ledger only for a completed origin fetch (see the
   connector's `INV-LEDGER-FRESH-2`); `pg-desk` only copies what the ledger holds and MUST NOT
   stamp a success of its own.
-- **INV-FRESH-3.** A fetch counts as successful only when the origin answered for the whole query
+- **INV-FRESH-3.** <!-- uuid: 8fc320ae-3f55-4de5-b671-cfe39616c373 --> A fetch counts as successful only when the origin answered for the whole query
   (no `unavailable`, no truncation, no partial page). Also upheld at the connector (see
   `INV-LEDGER-FRESH-1` and `INV-LEDGER-FRESH-3`): a partial answer is recorded as a last error,
   never as a success.
-- **INV-FRESH-4.** A source with no recorded success MUST be reported with `age_seconds: null` and
+- **INV-FRESH-4.** <!-- uuid: 48ed36de-e258-453a-b4c3-6f9133e03301 --> A source with no recorded success MUST be reported with `age_seconds: null` and
   `stale: true` (fail closed), on the verb and on the dashboard, and MUST export no
   `pg_desk_source_age_seconds` series. A backend one of whose queries has no recorded success is
   reported the same way. This holds for a row something still polls; an abandoned row is handled
   by INV-FRESH-6.
-- **INV-FRESH-5.** `pg_desk_dashboard_stale` and `pg_desk_dashboard_age_seconds` keep their meaning
+- **INV-FRESH-5.** <!-- uuid: c990ebee-3399-4b8d-b25b-c4ceccfa1ada --> `pg_desk_dashboard_stale` and `pg_desk_dashboard_age_seconds` keep their meaning
   (pipeline liveness, from `meta.last_heartbeat`) and their polarity (`0` fresh, `1` stale). Their
   descriptions and [`serve.md`](serve.md) MUST say that they are liveness and not data age.
 
-- **INV-FRESH-6.** A ledger row that no consumer has polled for longer than 7 days (an abandoned
+- **INV-FRESH-6.** <!-- uuid: 90272b5e-7baf-41b4-b378-629716c030f0 --> A ledger row that no consumer has polled for longer than 7 days (an abandoned
   row) MUST NOT make its backend stale or unknown while the backend has any row that is not
   abandoned, whether or not the abandoned row ever succeeded. A row polled within that window that
   has no recorded success MUST still read unknown and stale (INV-FRESH-4). When every row of a
   backend is abandoned they MUST all count. Applying the rule MUST NOT delete a ledger file or a
   store row.
-- **INV-FRESH-7.** For a backend that owns its changes, the ledger times pg-desk reads MUST come from
+- **INV-FRESH-7.** <!-- uuid: b616cca2-721e-4807-8052-5d5479bba656 --> For a backend that owns its changes, the ledger times pg-desk reads MUST come from
   that backend's own record of its last whole-query origin answer and last error, and a cache
   answer MUST NOT advance them.
 
