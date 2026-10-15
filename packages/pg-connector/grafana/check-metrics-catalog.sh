@@ -140,8 +140,8 @@ fail=0
 mutant() {
   local rule="$1" desc="$2" csed="$3" gsed="$4" dir ids
   dir="$(mktemp -d "$work/m.XXXXXX")"
-  cp "$catalog" "$dir/catalog.txt"
-  cp "$gofile" "$dir/telemetry.go"
+  cat "$catalog" >"$dir/catalog.txt" # not cp: a store input is read-only and cp keeps the mode
+  cat "$gofile" >"$dir/telemetry.go"
   if [ -n "$csed" ]; then
     sed -E "$csed" "$catalog" >"$dir/catalog.txt"
     if cmp -s "$catalog" "$dir/catalog.txt"; then
