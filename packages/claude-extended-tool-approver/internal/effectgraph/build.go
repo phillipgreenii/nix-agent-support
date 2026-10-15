@@ -39,7 +39,7 @@ func BuildInterpreted(sp cmdparse.ShellParse, reg cmddesc.Registry, ctx cmddesc.
 	b := newBuilder()
 	b.baseCWD = ctx.CWD
 	b.leaves(sp.Leaves, "")
-	b.interpretRange(0, len(b.g.Nodes), reg, ctx, nil)
+	b.interpretRange(0, len(b.g.Nodes), reg, ctx, nil, execDirs{dirs: []string{ctx.CWD}})
 	b.deriveFlows()
 	return b.g
 }
@@ -91,6 +91,35 @@ type cwdState struct {
 	cwd     string
 	unknown bool
 	reason  string
+	// exec is the SET of directories an EffectExec produced by the leaf may
+	// run in (see execTracker); it is judged by effectpolicy.TrustedCheckoutExec.
+	exec execDirs
+}
+
+// execDirs is the set of working directories a leaf may run in, as the
+// builder tracked them: each entry is the base CWD with the preceding cd
+// targets applied (absolute, `~`-prefixed, or relative when the request's cwd
+// was empty). unknown means a preceding cd's target is a runtime value, a
+// loop re-applies a relative cd, or the set outgrew maxExecDirs.
+type execDirs struct {
+	dirs    []string
+	unknown bool
+	reason  string
+}
+
+// maxExecDirs bounds how many alternative working directories one leaf may
+// have (each non-guaranteed cd can double the set); beyond it the leaf's
+// directory is treated as unknown.
+const maxExecDirs = 8
+
+// cdEvent is one cd the builder saw, for execTracker.
+type cdEvent struct {
+	idx     int   // index of the cd's Command node
+	sub     []int // the cd leaf's SubshellScope
+	chain   int   // the cd leaf's AndChainID
+	target  string
+	dynamic bool
+	inLoop  bool
 }
 
 func newBuilder() *builder {
@@ -342,8 +371,9 @@ func substitutionLabel(s cmdparse.Substitution) string {
 // limitation: leaves inside a command substitution ($(...)) are a separate
 // scope keyed independently and start from the LIST's base CWD, not from
 // the CWD at the substitution's position.
-func (b *builder) interpretRange(start, end int, reg cmddesc.Registry, ctx cmddesc.Context, chain []string) {
+func (b *builder) interpretRange(start, end int, reg cmddesc.Registry, ctx cmddesc.Context, chain []string, base execDirs) {
 	states := map[string]cwdState{}
+	tracker := newExecTracker(b, start, end, base)
 	stages := map[string]int{} // scope + "\x00" + PipelineID -> stage count
 	for i := start; i < end; i++ {
 		n := b.g.Nodes[i]
@@ -360,6 +390,7 @@ func (b *builder) interpretRange(start, end int, reg cmddesc.Registry, ctx cmdde
 		state := lookupCWD(states, n.Scope, n.Leaf.SubshellScope, ctx.CWD)
 		nodeCtx := ctx
 		nodeCtx.CWD = state.cwd
+		state.exec = tracker.at(i)
 		chdir := b.interpret(i, reg, nodeCtx, chain, state)
 		if chdir == nil {
 			continue
@@ -367,6 +398,7 @@ func (b *builder) interpretRange(start, end int, reg cmddesc.Registry, ctx cmdde
 		if n.Leaf.PipelineID >= 0 && stages[n.Scope+"\x00"+fmt.Sprint(n.Leaf.PipelineID)] > 1 {
 			continue // a pipeline stage's cd is confined to that stage's subshell
 		}
+		tracker.record(i, *chdir)
 		if state.unknown {
 			continue // still unknown; a cd cannot recover a lost base
 		}
@@ -380,6 +412,156 @@ func (b *builder) interpretRange(start, end int, reg cmddesc.Registry, ctx cmdde
 		}
 		states[key] = cwdState{cwd: rebase(state.cwd, chdir.Path)}
 	}
+}
+
+// EXEC WORKING DIRECTORY (bead pg2-xj975). states above re-bases PATH effects
+// against one tracked directory per (scope, subshell); that is right for a
+// path under a cd that ran, but an EffectExec is judged by whether the
+// directory it runs in is a trusted checkout, so it needs the directory the
+// leaf REALLY runs in, with every way the tracking can be wrong made explicit.
+// execTracker therefore keeps the cd events and, for each Command node,
+// computes the SET of directories it may run in, so a cd that may not have
+// taken effect leaves BOTH the old and the new directory in the set and the
+// policy requires every member to be trusted:
+//
+//   - `cd X && leaf` (the leaf shares the cd's && chain, or sits anywhere
+//     inside the right-hand side of it: ParsedCommand.AndChainID/AndGuardChains):
+//     the cd ran and succeeded, so the set is just {X applied to the old set}.
+//   - `cd X; leaf`, `cd X || leaf`, a cd in an if/while/case body or a block:
+//     the cd may have failed or not run, so the set is {old set} U {new set}.
+//   - a cd inside `( ... )` or a pipeline stage never reaches later leaves
+//     outside it (confined); an enclosing list's earlier cd reaches into a
+//     later subshell.
+//   - a dynamic target (`cd "$D"`, `cd -`) makes every later leaf in that
+//     position unknown, sticky, exactly like the path tracking.
+//   - a relative cd inside a loop is unknown (each iteration re-applies it).
+//   - a leaf inside a command substitution starts from the set in force at its
+//     parent leaf (cds BEFORE the containing leaf), not the list's base: unlike
+//     the path tracking, which documents that as a known limitation.
+//   - a `bash -c`/xargs child starts from its parent leaf's set.
+//   - pushd/popd have no schema (a directory stack is runtime state), so a leaf
+//     using them is opaque and the whole command abstains.
+//   - more than maxExecDirs alternatives is unknown.
+//
+// NOT modeled here (pre-existing, unchanged): a per-command directory option
+// that moves where the command runs without a shell cd (`prek run -C DIR`,
+// KindCommandDir). Its Exec fact is still judged against the tracked shell
+// directory, not DIR.
+type execTracker struct {
+	base   execDirs
+	events map[string][]cdEvent // scope -> cd events in node order
+	parent map[string]int       // substitution-scope Command node ID -> parent leaf node index
+	nodes  *[]Node
+}
+
+func newExecTracker(b *builder, start, end int, base execDirs) *execTracker {
+	t := &execTracker{base: base, events: map[string][]cdEvent{}, parent: map[string]int{}, nodes: &b.g.Nodes}
+	idx := map[string]int{}
+	for i := start; i < end; i++ {
+		idx[b.g.Nodes[i].ID] = i
+	}
+	for _, e := range b.g.Edges {
+		if e.Kind != EdgeSubstitution {
+			continue
+		}
+		child, cok := idx[e.From]
+		par, pok := idx[e.To]
+		if cok && pok {
+			t.parent[b.g.Nodes[child].ID] = par
+		}
+	}
+	return t
+}
+
+// record notes the cd the Command node i emitted.
+func (t *execTracker) record(i int, chdir cmddesc.Effect) {
+	n := (*t.nodes)[i]
+	t.events[n.Scope] = append(t.events[n.Scope], cdEvent{
+		idx: i, sub: n.Leaf.SubshellScope, chain: n.Leaf.AndChainID,
+		target: chdir.Path, dynamic: chdir.Dynamic, inLoop: n.Leaf.InLoop,
+	})
+}
+
+// at returns the set of directories Command node i may run in.
+func (t *execTracker) at(i int) execDirs {
+	n := (*t.nodes)[i]
+	cur := t.base
+	if p, ok := t.parent[n.ID]; ok {
+		cur = t.at(p)
+	}
+	if n.Leaf == nil {
+		return cur
+	}
+	for _, e := range t.events[n.Scope] {
+		if e.idx >= i {
+			break
+		}
+		if cur.unknown || !subshellEncloses(e.sub, n.Leaf.SubshellScope) {
+			continue
+		}
+		switch {
+		case e.dynamic:
+			cur = execDirs{unknown: true, reason: "a preceding cd's target is a runtime value"}
+		case e.inLoop && rebase("<cwd>", e.target) != e.target:
+			cur = execDirs{unknown: true, reason: "a relative cd inside a loop is re-applied on every iteration"}
+		default:
+			next := make([]string, 0, len(cur.dirs))
+			for _, d := range cur.dirs {
+				next = append(next, rebase(d, e.target))
+			}
+			if !cdGuaranteed(e, n.Leaf) {
+				next = append(append([]string(nil), cur.dirs...), next...)
+			}
+			cur = execDirs{dirs: dedupe(next)}
+			if len(cur.dirs) > maxExecDirs {
+				cur = execDirs{unknown: true, reason: "too many possible working directories"}
+			}
+		}
+	}
+	return cur
+}
+
+// cdGuaranteed reports whether leaf running implies the cd of e ran and
+// exited zero.
+func cdGuaranteed(e cdEvent, leaf *cmdparse.ParsedCommand) bool {
+	if e.chain == 0 {
+		return false
+	}
+	if e.chain == leaf.AndChainID {
+		return true
+	}
+	for _, g := range leaf.AndGuardChains {
+		if g == e.chain {
+			return true
+		}
+	}
+	return false
+}
+
+// subshellEncloses reports whether a cd at subshell path cd reaches a leaf at
+// subshell path leaf: the cd's own subshell, or one enclosing the leaf.
+func subshellEncloses(cd, leaf []int) bool {
+	if len(cd) > len(leaf) {
+		return false
+	}
+	for i, v := range cd {
+		if leaf[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func dedupe(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // subshellKey renders a cmdparse.SubshellScope path as a map key ("" for a
@@ -581,6 +763,13 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 			c := *e
 			chdir = &c
 		}
+		if e.Kind == cmddesc.EffectExec {
+			// See execTracker: an Exec effect is judged against every
+			// directory its leaf may run in, not the request's.
+			e.SetCWDs(cwd.exec.dirs)
+			e.CWDUnknown = cwd.exec.unknown
+			continue
+		}
 		if e.Kind != cmddesc.EffectPath || e.Dynamic {
 			continue
 		}
@@ -618,7 +807,7 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 	// nodes the verdict fold iterates. Only a child the builder cannot turn
 	// into nodes (unparseable, too deep, cyclic) reflects on the parent.
 	for _, c := range children {
-		if reason := b.child(id, scope, c, reg, ctx, chain); reason != "" {
+		if reason := b.child(id, scope, c, reg, ctx, chain, cwd.exec); reason != "" {
 			insufficient(reason)
 		}
 	}
@@ -632,7 +821,7 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 // Source, wires each of its Command nodes to the parent with an Executes
 // edge, and interprets them recursively. It returns a non-empty reason when
 // the child cannot be modeled, for the parent to record.
-func (b *builder) child(parentID, parentScope string, c cmddesc.ChildInvocation, reg cmddesc.Registry, ctx cmddesc.Context, chain []string) string {
+func (b *builder) child(parentID, parentScope string, c cmddesc.ChildInvocation, reg cmddesc.Registry, ctx cmddesc.Context, chain []string, dirs execDirs) string {
 	var leaves []cmdparse.ParsedCommand
 	var text string
 	switch c.Dialect {
@@ -688,7 +877,7 @@ func (b *builder) child(parentID, parentScope string, c cmddesc.ChildInvocation,
 	}
 	next := make([]string, 0, len(chain)+1)
 	next = append(append(next, chain...), text)
-	b.interpretRange(start, end, reg, ctx, next)
+	b.interpretRange(start, end, reg, ctx, next, dirs)
 	return ""
 }
 

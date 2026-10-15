@@ -2341,6 +2341,23 @@ type ParsedCommand struct {
 	// primarycommit.go's shell-alias-body recursion, which re-parses the alias body on
 	// its own).
 	AndChainID int
+	// AndGuardChains (bead pg2-xj975) extends AndChainID's guarantee across the
+	// boundaries AndChainID deliberately restarts at. For every id g in this
+	// list, this leaf running GUARANTEES every EARLIER leaf whose AndChainID is
+	// g ran and exited zero. A leaf is guarded by the chain of each enclosing
+	// `X && Y` in whose Y it sits, at any depth: `cd d && go test | tail`
+	// (the go test stage has a fresh AndChainID of its own, but is guarded by
+	// the chain it shares with `cd d`), `cd d && ( go test )`, `cd d && { ...; }`.
+	// A leaf directly on the right of the && is guarded by its own AndChainID
+	// too; the first leaf of a chain is not guarded by it. Nil for a leaf under
+	// no "&&" right-hand side, and for every leaf of an "||"-bearing statement
+	// (chain 0 is never pushed). Same per-Parse-call id caveat as AndChainID.
+	AndGuardChains []int
+	// InLoop (bead pg2-xj975) is true when the leaf was lowered inside a
+	// while/until condition or body or a for/select body, i.e. it may run more
+	// than once. A relative `cd` there is not idempotent (each iteration
+	// re-applies it), which the effective-cwd tracking treats as unknown.
+	InLoop bool
 
 	// Data classifies a command-less DATA leaf (pg2-dbrsg): which construct the
 	// lowering reduced to "Raw text that may hold a substitution, but no command".

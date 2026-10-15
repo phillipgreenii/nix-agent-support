@@ -104,11 +104,9 @@ func TestPnPnwfExecFactMarkerWorkspace(t *testing.T) {
 		})
 	}
 
-	// Not pinned here: a `cd <dir> && ...` prefix. TrustedCheckoutExec judges
-	// the REQUEST cwd, not a cd-tracked one (pre-existing; `cd <elsewhere> &&
-	// go test` behaves the same inside a git checkout), so the verdict for a
-	// cd form follows the session's own cwd, which is why every form above is
-	// evaluated with cwd set to the directory under test.
+	// A `cd <dir> && ...` prefix is judged against the cd-tracked directory,
+	// not the request cwd (bead pg2-xj975): see
+	// trusted_checkout_exec_cwd_test.go, which pins both directions.
 
 	// Read-only introspection declares no Exec fact: approved from anywhere,
 	// exactly as before this change.

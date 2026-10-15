@@ -10,6 +10,7 @@ package effectpolicy
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
@@ -1825,24 +1826,79 @@ var trustedExecMarkerKinds = []string{"git", "go", "pn"}
 func (TrustedCheckoutExec) Name() string { return "trusted-checkout-exec" }
 
 // Judge implements Policy.
+//
+// # Effective working directory (bead pg2-xj975)
+//
+// An Exec fact is judged against the directory its command RUNS in, not the
+// request's: effectgraph's builder stamps every EffectExec with the
+// cd-tracked set of directories its leaf may run in (Effect.CWDs; see the
+// builder's "EXEC WORKING DIRECTORY" comment for how `cd X && leaf` differs
+// from `cd X; leaf`, subshells, substitutions and loops), and EVERY directory
+// in that set must be trusted. So `cd <marker dir> && pn workspace build`
+// from an unmarked request cwd is now Permitted, and `cd /tmp/elsewhere &&
+// go test ./...` from a git checkout is no longer Permitted on the strength
+// of the request cwd. The shapes this cannot track soundly all fail closed
+// (Unknown): a cd to a runtime value (`$D`, `cd -`, any `$`), `~user` or a
+// `~` path when no PathEvaluator can expand it, a relative target with no
+// absolute base, a relative cd inside a loop, and a directory that does not
+// resolve. An effect with no stamp (built outside the graph builder) is
+// judged against the request cwd, as before.
 func (TrustedCheckoutExec) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 	if e.Kind != cmddesc.EffectExec {
 		return Finding{}, false
 	}
-	if ctx.CWD == "" {
-		return Finding{Verdict: Unknown, Reason: "no working directory to locate a checkout from"}, true
+	if e.CWDUnknown {
+		return Finding{Verdict: Unknown, Reason: "the working directory is unknown (a preceding cd targets a runtime value, or is re-applied in a loop)"}, true
 	}
-	abs := patheval.ResolveRealPath(ctx.CWD)
+	dirs := e.CWDList()
+	stamped := len(dirs) > 0
+	if !stamped {
+		dirs = []string{ctx.CWD}
+	}
+	var permitted Finding
+	for _, dir := range dirs {
+		f := judgeExecDir(e, dir, stamped, ctx)
+		if f.Verdict != Permitted {
+			return f, true
+		}
+		permitted = f
+	}
+	return permitted, true
+}
+
+// judgeExecDir judges e against ONE candidate working directory. stamped says
+// dir came from the builder's cd tracking (so it must be absolute or
+// `~`-prefixed) rather than from the request's own cwd.
+func judgeExecDir(e cmddesc.Effect, dir string, stamped bool, ctx PolicyContext) Finding {
+	if dir == "" {
+		return Finding{Verdict: Unknown, Reason: "no working directory to locate a checkout from"}
+	}
+	if stamped {
+		if strings.ContainsAny(dir, "$`") {
+			return Finding{Verdict: Unknown, Reason: "the working directory holds an expansion: " + dir}
+		}
+		if strings.HasPrefix(dir, "~") {
+			if ctx.PathEval == nil {
+				return Finding{Verdict: Unknown, Reason: "cannot expand the ~ in the working directory " + dir}
+			}
+			dir = ctx.PathEval.CleanPath(dir)
+		}
+		if !filepath.IsAbs(dir) {
+			return Finding{Verdict: Unknown, Reason: "the working directory is not an absolute path: " + dir}
+		}
+	}
+	abs := patheval.ResolveRealPath(dir)
 	if abs == "" {
-		return Finding{Verdict: Unknown, Reason: "working directory does not resolve"}, true
+		return Finding{Verdict: Unknown, Reason: "working directory does not resolve"}
 	}
 	if e.Family != "" {
-		return judgeBuildToolVerb(e, abs, ctx)
+		f, _ := judgeBuildToolVerb(e, abs, ctx)
+		return f
 	}
 	if pathspec.InsideMarkerWorkspace(pathspec.DefaultKinds(), trustedExecMarkerKinds, abs) {
-		return Finding{Verdict: Permitted, Reason: "CWD is inside a recognised git/go/pn workspace (ADR 0053's \"executing trusted checkout code\")"}, true
+		return Finding{Verdict: Permitted, Reason: "CWD is inside a recognised git/go/pn workspace (ADR 0053's \"executing trusted checkout code\")"}
 	}
-	return Finding{Verdict: Unknown, Reason: "CWD is not inside any recognised git/go/pn workspace"}, true
+	return Finding{Verdict: Unknown, Reason: "CWD is not inside any recognised git/go/pn workspace"}
 }
 
 // judgeBuildToolVerb judges a build-tool-family EffectExec — see

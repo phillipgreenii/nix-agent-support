@@ -742,3 +742,301 @@ func GeneratePnWorkspaceMarkerP15(base string) (*P15Report, error) {
 	}
 	return rep, nil
 }
+
+// requestCWDExec is TrustedCheckoutExec exactly as it behaved BEFORE bead
+// pg2-xj975: it ignores the effective (cd-tracked) directories the graph
+// builder stamps on an Exec effect and judges the request's cwd instead. It
+// exists only so the effective-cwd P15 report can compute the "before" verdict
+// through the same engine, rather than from a hand-written oracle.
+type requestCWDExec struct{ TrustedCheckoutExec }
+
+// Judge implements Policy.
+func (p requestCWDExec) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	e.CWDs, e.CWDUnknown = "", false
+	return p.TrustedCheckoutExec.Judge(e, ctx)
+}
+
+// requestCWDPolicies is DefaultPolicies with TrustedCheckoutExec replaced by
+// its pre-pg2-xj975 behavior.
+func requestCWDPolicies() []Policy {
+	ps := DefaultPolicies()
+	for i, p := range ps {
+		if _, ok := p.(TrustedCheckoutExec); ok {
+			ps[i] = requestCWDExec{}
+		}
+	}
+	return ps
+}
+
+// P15CWDShape is one compound shape of the effective-cwd report. Command
+// builds the probe from the producer command and the cd target.
+type P15CWDShape struct {
+	Name    string
+	Command func(producer, target string) string
+}
+
+// P15CWDShapes are the compound shapes the effective-cwd report covers; each
+// is one row of effectgraph's "EXEC WORKING DIRECTORY" table. Order is the
+// report order.
+var P15CWDShapes = []P15CWDShape{
+	{"`cd D && P`", func(p, d string) string { return "cd " + d + " && " + p }},
+	{"`cd D && P | tail`", func(p, d string) string { return "cd " + d + " && " + p + " 2>&1 | tail -5" }},
+	{"`cd D && (P)`", func(p, d string) string { return "cd " + d + " && (" + p + ")" }},
+	{"`(cd D && P)`", func(p, d string) string { return "(cd " + d + " && " + p + ")" }},
+	{"`cd D && echo $(P)`", func(p, d string) string { return "cd " + d + " && echo $(" + p + ")" }},
+	{"`for ...; do cd D && P; done`", func(p, d string) string { return "for i in 1 2; do cd " + d + " && " + p + "; done" }},
+	{"`cd D; P`", func(p, d string) string { return "cd " + d + "; " + p }},
+	{"`cd D || P`", func(p, d string) string { return "cd " + d + " || " + p }},
+	{"`(cd D); P`", func(p, d string) string { return "(cd " + d + "); " + p }},
+	{"`cd D | cat; P`", func(p, d string) string { return "cd " + d + " | cat; " + p }},
+	{"`P && cd D`", func(p, d string) string { return p + " && cd " + d }},
+}
+
+// P15CWDCell is one (shape, request cwd, cd target) cell: every Exec producer
+// probed once under the new and once under the previous behavior.
+type P15CWDCell struct {
+	Shape, Request, Target string
+	// Producers is the number of Exec producers probed in the cell.
+	Producers int
+	// NewApprove and OldApprove count the producers approved after / before.
+	NewApprove, OldApprove int
+	// NewlyApproved counts producers approved now and not before; NewlyWithheld
+	// those approved before and not now.
+	NewlyApproved, NewlyWithheld int
+	// Uniform is true when every producer got the same (new, old) pair.
+	Uniform bool
+}
+
+// P15CWDControl is one non-Exec probe evaluated in a cell of the first shape.
+type P15CWDControl struct {
+	Probe, Request, Target string
+	New, Old               evalcontract.Decision
+}
+
+// P15CWDReport is the P15 report for bead pg2-xj975.
+type P15CWDReport struct {
+	Producers []string
+	Cells     []P15CWDCell
+	Controls  []P15CWDControl
+	Requests  []string // request cwd labels, report order
+	Targets   []string // cd target labels, report order
+}
+
+// cwdFixtureDirs builds the three directory kinds under base and returns them
+// keyed by the label used in the report.
+func cwdFixtureDirs(base string) (map[string]string, error) {
+	dirs := map[string]string{
+		"marker dir":   filepath.Join(base, "ws", ".workforests", "feat"),
+		"git checkout": filepath.Join(base, "repo"),
+		"no marker":    filepath.Join(base, "bare"),
+	}
+	for _, d := range []string{dirs["marker dir"], filepath.Join(dirs["git checkout"], ".git"), filepath.Join(dirs["git checkout"], "sub"), dirs["no marker"]} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return nil, err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(base, "ws", "pn-workspace.toml"), nil, 0o644); err != nil {
+		return nil, err
+	}
+	return dirs, nil
+}
+
+// GenerateEffectiveCWDP15 builds the P15 report for bead pg2-xj975: the
+// Exec-fact working directory changed from the request cwd to the cd-tracked
+// one, which both GRANTS approvals (a cd into a trusted directory from an
+// untrusted request cwd) and WITHHOLDS them (a cd out of a trusted request
+// cwd). Every Exec producer (ExecProducerPaths, via markerExecProbes) is
+// probed under every compound shape for every (request cwd, cd target) pair
+// through the real engine, once with the new policy and once with the
+// previous one (requestCWDPolicies). base is an existing empty directory.
+func GenerateEffectiveCWDP15(base string) (*P15CWDReport, error) {
+	dirs, err := cwdFixtureDirs(base)
+	if err != nil {
+		return nil, err
+	}
+	reg := cmddesc.DefaultRegistry()
+	rep := &P15CWDReport{
+		Requests: []string{"marker dir", "git checkout", "no marker"},
+		// "no cd" is the control: the request cwd decides, unchanged.
+		Targets: []string{"marker dir", "git checkout", "no marker", "$D (runtime value)", "- (previous dir)", "sub (relative, in a checkout)", ".. (relative, leaves a checkout)"},
+	}
+	for _, p := range markerExecProbes {
+		rep.Producers = append(rep.Producers, p.path)
+	}
+	target := func(label string) string {
+		switch label {
+		case "$D (runtime value)":
+			return `"$D"`
+		case "- (previous dir)":
+			return "-"
+		case "sub (relative, in a checkout)":
+			return "sub"
+		case ".. (relative, leaves a checkout)":
+			return ".."
+		}
+		return dirs[label]
+	}
+	eval := func(policies []Policy, cwd, command string) evalcontract.Decision {
+		return Evaluate(evalcontract.Request{Command: command, CWD: cwd, ProjectRoot: cwd}, reg, policies, DefaultGraphPolicies()).Decision
+	}
+	oldPolicies, newPolicies := requestCWDPolicies(), DefaultPolicies()
+	for _, shape := range P15CWDShapes {
+		for _, req := range rep.Requests {
+			for _, tgt := range rep.Targets {
+				// The runtime and relative targets are probed under the first
+				// shape only; every shape is probed with the three directories.
+				if _, isDir := dirs[tgt]; !isDir && shape.Name != P15CWDShapes[0].Name {
+					continue
+				}
+				cell := P15CWDCell{Shape: shape.Name, Request: req, Target: tgt, Uniform: true}
+				var first [2]evalcontract.Decision
+				for i, p := range markerExecProbes {
+					cmd := shape.Command(p.probe, target(tgt))
+					n, o := eval(newPolicies, dirs[req], cmd), eval(oldPolicies, dirs[req], cmd)
+					if i == 0 {
+						first = [2]evalcontract.Decision{n, o}
+					} else if first != [2]evalcontract.Decision{n, o} {
+						cell.Uniform = false
+					}
+					cell.Producers++
+					if n == evalcontract.Approve {
+						cell.NewApprove++
+					}
+					if o == evalcontract.Approve {
+						cell.OldApprove++
+					}
+					if n == evalcontract.Approve && o != evalcontract.Approve {
+						cell.NewlyApproved++
+					}
+					if o == evalcontract.Approve && n != evalcontract.Approve {
+						cell.NewlyWithheld++
+					}
+				}
+				rep.Cells = append(rep.Cells, cell)
+			}
+		}
+	}
+	for _, c := range markerControlProbes {
+		for _, req := range rep.Requests {
+			for _, tgt := range []string{"marker dir", "git checkout", "no marker"} {
+				cmd := "cd " + dirs[tgt] + " && " + c
+				rep.Controls = append(rep.Controls, P15CWDControl{Probe: c, Request: req, Target: tgt, New: eval(newPolicies, dirs[req], cmd), Old: eval(oldPolicies, dirs[req], cmd)})
+			}
+		}
+	}
+	return rep, nil
+}
+
+// Totals returns the number of cells and the producer facts newly approved and
+// newly withheld across all of them.
+func (r *P15CWDReport) Totals() (cells, approved, withheld int) {
+	for _, c := range r.Cells {
+		cells++
+		approved += c.NewlyApproved
+		withheld += c.NewlyWithheld
+	}
+	return
+}
+
+// Markdown renders the report deterministically.
+func (r *P15CWDReport) Markdown() string {
+	var b strings.Builder
+	n := len(r.Producers)
+	cells, approved, withheld := r.Totals()
+	b.WriteString("# P15 approve-reachability report: Exec facts judged against the effective (cd-tracked) working directory (TrustedCheckoutExec)\n\n")
+	b.WriteString("Generated by `GenerateEffectiveCWDP15` (internal/effectpolicy/p15report.go) and pinned by\n")
+	b.WriteString("`TestP15ReportEffectiveCWD`; regenerate with `go test ./internal/effectpolicy -run TestP15ReportEffectiveCWD -update`.\n")
+	b.WriteString("Every cell below evaluates real commands through the real engine (default registry and graph policies), once with the new\n")
+	b.WriteString("`TrustedCheckoutExec` and once with the previous one (`requestCWDPolicies`, which judges the request cwd).\n\n")
+	b.WriteString("Change under review: an Exec fact (a `go test`, `pn workspace build`, `nix build`, ... node) used to be judged against the REQUEST cwd; it is now judged against the directory\n")
+	b.WriteString("its command runs in after the `cd`s before it, and EVERY directory it may run in must be trusted (a git checkout, a go module, or at/under a `pn-workspace.toml`).\n")
+	b.WriteString("So an approval is GRANTED when a `cd` moves an untrusted request cwd into a trusted directory, and WITHHELD when a `cd` moves a trusted request cwd out of trusted ground.\n\n")
+	fmt.Fprintf(&b, "Producers: %d Exec producers (`ExecProducerPaths`; one representative valid invocation each), listed under \"Producers probed\" below.\n", n)
+	b.WriteString("Directories: `marker dir` is a workforest set under a `pn-workspace.toml` (no git/go marker), `git checkout` is a directory with `.git`, `no marker` has no marker above it.\n\n")
+	b.WriteString("## Summary\n\n")
+	fmt.Fprintf(&b, "- Cells evaluated: %d (compound shape x request cwd x cd target).\n", cells)
+	fmt.Fprintf(&b, "- Exec facts newly APPROVED: %d = the sum over cells of (producers approved now and not before).\n", approved)
+	fmt.Fprintf(&b, "- Exec facts newly WITHHELD: %d = the sum over cells of (producers approved before and not now).\n", withheld)
+	var grantCells, withholdCells, nonUniform int
+	for _, c := range r.Cells {
+		if c.NewlyApproved > 0 {
+			grantCells++
+		}
+		if c.NewlyWithheld > 0 {
+			withholdCells++
+		}
+		if !c.Uniform {
+			nonUniform++
+		}
+	}
+	fmt.Fprintf(&b, "- Calculation: %d cells that newly approve x %d producers = %d; %d cells that newly withhold x %d producers = %d.\n", grantCells, n, approved, withholdCells, n, withheld)
+	fmt.Fprintf(&b, "- Cells where the %d producers do not all agree: %d (every producer is the same exec class, so a mixed cell would be a finding).\n", n, nonUniform)
+	var moved int
+	for _, c := range r.Controls {
+		if c.New != c.Old {
+			moved++
+		}
+	}
+	fmt.Fprintf(&b, "- Control facts (no Exec fact, or one the check never reaches) whose verdict moved: %d of %d probes.\n\n", moved, len(r.Controls))
+
+	b.WriteString("## Per shape: producers newly approved (+) or withheld (-), per request cwd (rows) and cd target (columns)\n\n")
+	fmt.Fprintf(&b, "Each cell reads `change (verdict now)`. `=` means no producer changed; `**+N**`/`**-N**` is how many of the %d producers are newly approved / newly withheld; ", n)
+	b.WriteString("the verdict now is `approved` when every producer approves and `not approved` when none does. A runtime or relative target is probed under the first shape only.\n\n")
+	for _, shape := range P15CWDShapes {
+		fmt.Fprintf(&b, "### %s\n\n", shape.Name)
+		var targets []string
+		for _, t := range r.Targets {
+			for _, c := range r.Cells {
+				if c.Shape == shape.Name && c.Target == t {
+					targets = append(targets, t)
+					break
+				}
+			}
+		}
+		for _, req := range r.Requests {
+			fmt.Fprintf(&b, "- request cwd **%s**\n", req)
+			for _, t := range targets {
+				for _, c := range r.Cells {
+					if c.Shape != shape.Name || c.Request != req || c.Target != t {
+						continue
+					}
+					verdict := "not approved"
+					if c.NewApprove == c.Producers {
+						verdict = "approved"
+					} else if c.NewApprove > 0 {
+						verdict = fmt.Sprintf("%d/%d approved", c.NewApprove, c.Producers)
+					}
+					delta := "="
+					switch {
+					case c.NewlyApproved > 0 && c.NewlyWithheld > 0:
+						delta = fmt.Sprintf("+%d/-%d", c.NewlyApproved, c.NewlyWithheld)
+					case c.NewlyApproved > 0:
+						delta = fmt.Sprintf("**+%d**", c.NewlyApproved)
+					case c.NewlyWithheld > 0:
+						delta = fmt.Sprintf("**-%d**", c.NewlyWithheld)
+					}
+					fmt.Fprintf(&b, "  - cd to %s: %s (%s)\n", t, delta, verdict)
+				}
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("## Controls: facts with no reachable Exec fact\n\n")
+	b.WriteString("Each probe is `cd <dir> && <probe>`; the verdict must be identical new and before in every request cwd and target. Moved controls:\n\n")
+	any := false
+	for _, c := range r.Controls {
+		if c.New != c.Old {
+			any = true
+			fmt.Fprintf(&b, "- `%s` from %s after cd to %s: before **%s**, now **%s**\n", c.Probe, c.Request, c.Target, c.Old, c.New)
+		}
+	}
+	if !any {
+		b.WriteString("- none\n")
+	}
+	b.WriteString("\n## Producers probed\n\n")
+	for _, p := range r.Producers {
+		fmt.Fprintf(&b, "- %s\n", p)
+	}
+	return b.String()
+}

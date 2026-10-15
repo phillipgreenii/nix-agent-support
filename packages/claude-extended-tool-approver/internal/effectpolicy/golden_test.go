@@ -1852,6 +1852,23 @@ var goldenCases = []goldenCase{
 	{"pnwf_sync_fetch_exec", "pnwf sync-fetch --set", evalcontract.Approve, nil},
 	{"pnwf_resolve_inert", "pnwf resolve --set", evalcontract.Approve, nil},
 	{"pnwf_cleanup_force_abstains", "pnwf cleanup my-branch --force-dirty-worktree-removal", evalcontract.Abstain, nil},
+
+	// Effective working directory (bead pg2-xj975): an Exec fact is judged
+	// against the cd-tracked directory its command runs in, not the request
+	// cwd (this fixture root, which is a git checkout, a go module and a pn
+	// workspace). The other direction (a cd INTO a marker directory from an
+	// unmarked request cwd) cannot be written here, since a golden's cwd is
+	// always the fixture root; trusted_checkout_exec_cwd_test.go and the
+	// effcwd_* corpus rows pin it.
+	{"cd_sub_go_test_approves", "cd sub && go test ./...", evalcontract.Approve, nil},
+	{"cd_workforest_set_pn_build_approves", "cd .workforests/clean && pn workspace build", evalcontract.Approve, nil},
+	{"cd_nix_store_go_test_abstains", "cd /nix/store && go test ./...", evalcontract.Abstain, nil},
+	{"cd_nix_store_pn_build_abstains", "cd /nix/store && pn workspace build", evalcontract.Abstain, nil},
+	{"cd_nix_store_semicolon_go_test_abstains", "cd /nix/store; go test ./...", evalcontract.Abstain, nil},
+	{"cd_nix_store_pipeline_go_test_abstains", "cd /nix/store && go test ./... | tail -5", evalcontract.Abstain, nil},
+	{"cd_dynamic_go_test_abstains", `cd "$D" && go test ./...`, evalcontract.Abstain, nil},
+	{"go_test_then_cd_nix_store_approves", "go test ./... && cd /nix/store", evalcontract.Approve, nil},
+	{"cd_nix_store_subshell_then_go_test_approves", "(cd /nix/store) && go test ./...", evalcontract.Approve, nil},
 }
 
 func TestGolden(t *testing.T) {

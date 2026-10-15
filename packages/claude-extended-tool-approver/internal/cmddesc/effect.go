@@ -256,6 +256,22 @@ type Effect struct {
 	// remotePathGuard, the ONE place that reads this field.
 	Remote string
 
+	// CWDs and CWDUnknown are the EFFECTIVE working directories of the leaf
+	// that produced an EffectExec (bead pg2-xj975), so TrustedCheckoutExec
+	// judges the directory the command really runs in, not the request's.
+	// The one producer is effectgraph's builder, which threads the cd-tracked
+	// directories per list and subshell (build.go, "EXEC WORKING DIRECTORY").
+	// CWDs holds EVERY directory the leaf may run in, NUL-joined so Effect
+	// stays a comparable type (use SetCWDs/CWDList): more than one when a
+	// preceding cd may not have taken effect (after `;` or `||`, inside an if
+	// body). Each is as tracked: absolute, `~`-prefixed, or relative when the
+	// request cwd was empty. CWDUnknown is true when a preceding cd's target is
+	// a runtime value (`cd "$D"`, `cd -`). Empty CWDs with CWDUnknown false
+	// means "not stamped" (an effect built outside the graph builder): the
+	// reader falls back to the request cwd. Only EffectExec carries these.
+	CWDs       string
+	CWDUnknown bool
+
 	// EffectProgram fields.
 	Program string
 	Dialect string
@@ -569,4 +585,15 @@ func (e Effect) String() string {
 		fmt.Fprintf(&b, " (%s)", e.Detail)
 	}
 	return b.String()
+}
+
+// SetCWDs records dirs as the working directories e may run in (see Effect.CWDs).
+func (e *Effect) SetCWDs(dirs []string) { e.CWDs = strings.Join(dirs, "\x00") }
+
+// CWDList returns the working directories recorded by SetCWDs, nil when none.
+func (e Effect) CWDList() []string {
+	if e.CWDs == "" {
+		return nil
+	}
+	return strings.Split(e.CWDs, "\x00")
 }

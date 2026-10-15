@@ -1,0 +1,7 @@
+flowchart LR
+    n0["command: cd #quot;$D#quot;<br/>- path:read $D (dynamic) [arg 0]<br/>- chdir $D (dynamic) [arg 0]<br/>mark=insufficient: path:read $D (dynamic) [arg 0]: path-access (path is a runtime expansion)"]
+    n1["command: go test ./...<br/>- path:read ./... (dynamic) [arg 0] (working directory unknown)<br/>- exec: go test (trusted checkout code)<br/>- stdio:stdout metadata<br/>mark=insufficient: working directory unknown after cd #quot;$D#quot;"]
+    n2[/"file: $D (dynamic)"/]
+    n3[/"file: ./... (dynamic)"/]
+    n0 -->|"reads: read"| n2
+    n1 -->|"reads: read"| n3

@@ -137,11 +137,13 @@ func compareRow(row goldencorpus.Row, reg cmddesc.Registry, policies []effectpol
 	}
 	// A row naming workspace_markers is replayed from a real marker directory
 	// (the synthetic cwd can never be a trusted exec location).
-	rowCWD, rowRoot, cleanup, err := row.CWDPathState.Materialize()
+	tree, err := row.CWDPathState.MaterializeTree()
 	if err != nil {
 		return rowOutcome{err: fmt.Errorf("legacyextract: %s: %w", row.Case, err)}
 	}
-	defer cleanup()
+	defer tree.Cleanup()
+	rowCWD, rowRoot := tree.CWD, tree.ProjectRoot
+	raw = []byte(tree.Expand(string(raw)))
 	input := &hookio.HookInput{
 		ToolName:  toolName,
 		ToolInput: raw,

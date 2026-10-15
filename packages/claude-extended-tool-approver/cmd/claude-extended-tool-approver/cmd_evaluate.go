@@ -567,11 +567,13 @@ func runEvaluateCorpus(corpusPaths []string, format string) {
 			fmt.Fprintf(os.Stderr, "error: marshalling tool_input for case %s: %v\n", row.Case, err)
 			os.Exit(1)
 		}
-		rowCWD, rowRoot, cleanupCWD, err := row.CWDPathState.Materialize()
+		tree, err := row.CWDPathState.MaterializeTree()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: case %s: %v\n", row.Case, err)
 			os.Exit(1)
 		}
+		rowCWD, rowRoot, cleanupCWD := tree.CWD, tree.ProjectRoot, tree.Cleanup
+		raw = []byte(tree.Expand(string(raw)))
 		input := &hookio.HookInput{
 			ToolName:  row.ToolInput.ToolName,
 			ToolInput: raw,

@@ -338,3 +338,81 @@ func TestP15ReportPnWorkspaceMarker(t *testing.T) {
 	}
 	compareGolden(t, filepath.Join("testdata", "p15", "pn-workspace-marker.md"), md)
 }
+
+// TestP15ReportEffectiveCWD pins the P15 report for bead pg2-xj975 (Exec facts
+// judged against the effective, cd-tracked directory) and fails if the change
+// does anything beyond what it is meant to: the new verdict of every cell must
+// equal an INDEPENDENT oracle derived from the shape's semantics (a hand-written
+// table below, not the engine), the previous verdict must be the request cwd's
+// trust, every Exec producer must agree within a cell, and no control fact may
+// move.
+func TestP15ReportEffectiveCWD(t *testing.T) {
+	rep, err := GenerateEffectiveCWDP15(tempDirUnderRealTmp(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := cmddesc.DefaultRegistry()
+	if got, want := len(rep.Producers), len(ExecProducerPaths(reg)); got != want {
+		t.Errorf("report covers %d producers, the registry declares %d", got, want)
+	}
+
+	trusted := map[string]bool{"marker dir": true, "git checkout": true, "no marker": false}
+	// where says which directories a shape's producer may run in, given the
+	// request cwd and the cd target; ok is false when the position is unknown.
+	where := func(shape, req, tgt string) (dirs []string, ok bool) {
+		switch tgt {
+		case "$D (runtime value)", "- (previous dir)":
+			return nil, false
+		case "sub (relative, in a checkout)", ".. (relative, leaves a checkout)":
+			// Only probed under the first shape (`cd D && P`). From a marker dir
+			// both stay under the marker; from a git checkout `sub` stays inside
+			// and `..` leaves it; from an unmarked directory neither reaches one.
+			switch {
+			case req == "no marker":
+				return []string{"no marker"}, true
+			case tgt == ".. (relative, leaves a checkout)" && req == "git checkout":
+				return []string{"no marker"}, true
+			default:
+				return []string{req}, true
+			}
+		}
+		switch shape {
+		case "`cd D && P`", "`cd D && P | tail`", "`cd D && (P)`", "`(cd D && P)`", "`cd D && echo $(P)`", "`for ...; do cd D && P; done`":
+			return []string{tgt}, true // the cd provably ran
+		case "`cd D; P`", "`cd D || P`":
+			return []string{req, tgt}, true // the cd may not have taken effect
+		default: // `(cd D); P`, `cd D | cat; P`, `P && cd D`: the cd never reaches P
+			return []string{req}, true
+		}
+	}
+	for _, c := range rep.Cells {
+		dirs, ok := where(c.Shape, c.Request, c.Target)
+		wantNew := ok
+		for _, d := range dirs {
+			wantNew = wantNew && trusted[d]
+		}
+		// Before the change the request cwd decided; a runtime cd target
+		// abstained at the cd node itself (a runtime path read), then as now.
+		wantOld := trusted[c.Request] && ok
+		if !c.Uniform {
+			t.Errorf("%s from %s, cd %s: producers disagree", c.Shape, c.Request, c.Target)
+			continue
+		}
+		if gotNew := c.NewApprove == c.Producers; gotNew != wantNew || c.NewApprove != 0 && !wantNew {
+			t.Errorf("%s from %s, cd %s: %d/%d approved now, oracle says approve=%v", c.Shape, c.Request, c.Target, c.NewApprove, c.Producers, wantNew)
+		}
+		if gotOld := c.OldApprove == c.Producers; gotOld != wantOld || c.OldApprove != 0 && !wantOld {
+			t.Errorf("%s from %s, cd %s: %d/%d approved before, oracle says approve=%v", c.Shape, c.Request, c.Target, c.OldApprove, c.Producers, wantOld)
+		}
+	}
+	for _, c := range rep.Controls {
+		if c.New != c.Old {
+			t.Errorf("control %q from %s after cd to %s moved: before %s, now %s", c.Probe, c.Request, c.Target, c.Old, c.New)
+		}
+	}
+	md := rep.Markdown()
+	if strings.Contains(md, "/tmp/") {
+		t.Error("report leaks a fixture path")
+	}
+	compareGolden(t, filepath.Join("testdata", "p15", "effective-cwd.md"), md)
+}

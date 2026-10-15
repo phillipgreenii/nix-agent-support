@@ -1674,13 +1674,14 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "cd /tmp/set && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace build"
+        "command": "cd {{WORKSPACE_SET}} && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace build"
       }
     },
     "cwd_path_state": {
       "cwd": "/repo",
       "project_root": "/repo",
-      "workspace_markers": ["pn-workspace.toml"]
+      "workspace_markers": ["pn-workspace.toml"],
+      "workspace_cwd": "bare"
     },
     "mode": "default",
     "settings": {},
@@ -1694,13 +1695,14 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "cd /tmp/set && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace doctor"
+        "command": "cd {{WORKSPACE_SET}} && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace doctor"
       }
     },
     "cwd_path_state": {
       "cwd": "/repo",
       "project_root": "/repo",
-      "workspace_markers": ["pn-workspace.toml"]
+      "workspace_markers": ["pn-workspace.toml"],
+      "workspace_cwd": "bare"
     },
     "mode": "default",
     "settings": {},
@@ -1714,13 +1716,14 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "cd /tmp/set && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace rebase main"
+        "command": "cd {{WORKSPACE_SET}} && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace rebase main"
       }
     },
     "cwd_path_state": {
       "cwd": "/repo",
       "project_root": "/repo",
-      "workspace_markers": ["pn-workspace.toml"]
+      "workspace_markers": ["pn-workspace.toml"],
+      "workspace_cwd": "bare"
     },
     "mode": "default",
     "settings": {},
@@ -1734,13 +1737,14 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "cd /tmp/ws && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace doctor --json | jq -r '.findings[] | select(.check == \"branch-synced\") | \"\\(.repo)\\t\\(.message)\"'"
+        "command": "cd {{WORKSPACE_SET}} && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace doctor --json | jq -r '.findings[] | select(.check == \"branch-synced\") | \"\\(.repo)\\t\\(.message)\"'"
       }
     },
     "cwd_path_state": {
       "cwd": "/repo",
       "project_root": "/repo",
-      "workspace_markers": ["pn-workspace.toml"]
+      "workspace_markers": ["pn-workspace.toml"],
+      "workspace_cwd": "bare"
     },
     "mode": "default",
     "settings": {},
@@ -12506,5 +12510,278 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "pg2-qy5u8 (operator ruling, Phillip, 2026-10-12: the pn-workspace.toml marker route): go run is deliberately never judged (ruling 2026-09-07), marker or not."
+  },
+  {
+    "case": "effcwd_cd_marker_set_pn_build_from_unmarked",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd {{WORKSPACE_SET}} && pn workspace build"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"],
+      "workspace_cwd": "bare"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. From a request cwd with no marker, `cd <marker set> && pn workspace build` approves (the marker is on the effective directory)."
+  },
+  {
+    "case": "effcwd_cd_marker_set_pn_build_pipe_tail_from_unmarked",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd {{WORKSPACE_SET}} && pn workspace build 2>&1 | tail -5"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"],
+      "workspace_cwd": "bare"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. A pipeline stage on the right of the && keeps the guarantee that the cd ran."
+  },
+  {
+    "case": "effcwd_cd_marker_set_pnwf_sync_fetch_from_unmarked",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd {{WORKSPACE_SET}} && pnwf sync-fetch --set"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"],
+      "workspace_cwd": "bare"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. Same for pnwf."
+  },
+  {
+    "case": "effcwd_cd_marker_set_semicolon_pn_build_from_unmarked",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd {{WORKSPACE_SET}}; pn workspace build"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"],
+      "workspace_cwd": "bare"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. After `;` the cd may have failed, so the command may run in the unmarked request cwd: every possible directory must be trusted."
+  },
+  {
+    "case": "effcwd_subshell_cd_marker_then_pn_build_from_unmarked",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "(cd {{WORKSPACE_SET}}) && pn workspace build"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"],
+      "workspace_cwd": "bare"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. A cd inside ( ) is confined to the subshell, so pn runs in the unmarked request cwd."
+  },
+  {
+    "case": "effcwd_cd_dynamic_then_pn_build_from_unmarked",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd \"$D\" && pn workspace build"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"],
+      "workspace_cwd": "bare"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. A runtime cd target leaves the directory unknown: fail closed."
+  },
+  {
+    "case": "effcwd_cd_unmarked_then_pn_build_from_unmarked",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd {{WORKSPACE_BARE}} && pn workspace build"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"],
+      "workspace_cwd": "bare"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. A cd to a directory with no marker stays not approved."
+  },
+  {
+    "case": "effcwd_cd_unmarked_go_test_from_checkout",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd {{WORKSPACE_BARE}} && go test ./..."
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. From a trusted request cwd, a cd to a directory with no marker is no longer approved on the strength of the request cwd (before this change it approved)."
+  },
+  {
+    "case": "effcwd_cd_unmarked_semicolon_go_test_from_checkout",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd {{WORKSPACE_BARE}}; go test ./..."
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. After `;` the cd may have taken effect: the unmarked directory is a possible cwd, so not approved."
+  },
+  {
+    "case": "effcwd_cd_previous_dir_go_test_from_checkout",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd - && go test ./..."
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. `cd -` is a runtime value: the directory is unknown, fail closed."
+  },
+  {
+    "case": "effcwd_cd_unmarked_then_back_go_test_from_checkout",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd {{WORKSPACE_BARE}} && cd {{WORKSPACE_SET}} && go test ./..."
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. A later cd back into the trusted directory makes the effective directory trusted again."
+  },
+  {
+    "case": "effcwd_subshell_cd_unmarked_then_go_test_from_checkout",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "(cd {{WORKSPACE_BARE}}) && go test ./..."
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. A cd inside ( ) never reaches the later go test, which runs in the trusted request cwd."
+  },
+  {
+    "case": "effcwd_cd_same_dir_go_test_from_checkout",
+    "tags": ["effective-cwd", "pg2-xj975"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd {{WORKSPACE_SET}} && go test ./..."
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. A cd to the same trusted directory keeps the approval."
   }
 ]

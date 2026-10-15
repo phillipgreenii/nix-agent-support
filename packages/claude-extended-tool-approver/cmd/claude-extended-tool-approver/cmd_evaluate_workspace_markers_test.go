@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -218,5 +220,85 @@ func TestLegacyCorpusFakeWorkspaceRootRowsGradeCorrect(t *testing.T) {
 	}
 	if rooted < 5 || walks < 1 {
 		t.Fatalf("rooted=%d walks=%d; the guard would be vacuous", rooted, walks)
+	}
+}
+
+// TestMaterializeTree_BareCWDAndTokens pins the effective-cwd (bead pg2-xj975)
+// extension of the marker fixture: workspace_cwd "bare" evaluates from a
+// sibling directory with no marker above it, and the {{WORKSPACE_SET}} /
+// {{WORKSPACE_BARE}} tokens in a command expand to the two real directories, so
+// a row can `cd` into (or out of) the marker workspace.
+func TestMaterializeTree_BareCWDAndTokens(t *testing.T) {
+	fx := goldencorpus.PathStateFixture{CWD: "/repo", WorkspaceMarkers: []string{"pn-workspace.toml"}, WorkspaceCWD: "bare"}
+	d, err := fx.MaterializeTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Cleanup()
+	if d.CWD != d.Bare || d.ProjectRoot != d.Bare || d.CWD == d.Set {
+		t.Errorf("cwd=%q projectRoot=%q set=%q bare=%q, want the request cwd to be bare", d.CWD, d.ProjectRoot, d.Set, d.Bare)
+	}
+	for dir := d.Bare; dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, "pn-workspace.toml")); err == nil {
+			t.Errorf("a marker sits at or above the bare directory (%s)", dir)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(d.Set)), "pn-workspace.toml")); err != nil {
+		t.Errorf("marker missing above the set directory: %v", err)
+	}
+	if got, want := d.Expand("cd {{WORKSPACE_SET}} && cd {{WORKSPACE_BARE}}"), "cd "+d.Set+" && cd "+d.Bare; got != want {
+		t.Errorf("expand = %q, want %q", got, want)
+	}
+
+	plain, err := goldencorpus.PathStateFixture{CWD: "/repo", ProjectRoot: "/repo"}.MaterializeTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plain.Expand("cd {{WORKSPACE_SET}}"); got != "cd {{WORKSPACE_SET}}" {
+		t.Errorf("a row without markers must not expand tokens, got %q", got)
+	}
+	if _, err := (goldencorpus.PathStateFixture{CWD: "/repo", WorkspaceMarkers: []string{"pn-workspace.toml"}, WorkspaceCWD: "elsewhere"}).MaterializeTree(); err == nil {
+		t.Error("an unknown workspace_cwd must be refused")
+	}
+}
+
+// TestMaterializeTree_EffectiveCWDDecidesExecVerdict is the end-to-end pin through
+// the real engine: from the unmarked sibling, `cd <set> && pn workspace build`
+// approves while the bare form and `cd <bare> && ...` do not; from the marked
+// set directory, `cd <bare> && go test` stops approving.
+func TestMaterializeTree_EffectiveCWDDecidesExecVerdict(t *testing.T) {
+	eval := func(t *testing.T, cwdKind, command string) evalcontract.Decision {
+		t.Helper()
+		d, err := goldencorpus.PathStateFixture{CWD: "/repo", WorkspaceMarkers: []string{"pn-workspace.toml"}, WorkspaceCWD: cwdKind}.MaterializeTree()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer d.Cleanup()
+		raw, err := json.Marshal(hookio.BashToolInput{Command: d.Expand(command)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := claudecodeadapter.Evaluate(&hookio.HookInput{CWD: d.CWD, ToolName: "Bash", ToolInput: raw},
+			claudecodeadapter.RequestConfig{ProjectRoot: d.ProjectRoot}, cmddesc.DefaultRegistry(), effectpolicy.DefaultPolicies(), effectpolicy.DefaultGraphPolicies())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.Decision
+	}
+	for _, tc := range []struct {
+		from, cmd string
+		want      evalcontract.Decision
+	}{
+		{"bare", "pn workspace build", evalcontract.Abstain},
+		{"bare", "cd {{WORKSPACE_SET}} && pn workspace build", evalcontract.Approve},
+		{"bare", "cd {{WORKSPACE_BARE}} && pn workspace build", evalcontract.Abstain},
+		{"set", "pn workspace build", evalcontract.Approve},
+		{"set", "cd {{WORKSPACE_BARE}} && pn workspace build", evalcontract.Abstain},
+		{"set", "cd {{WORKSPACE_BARE}} && go test ./...", evalcontract.Abstain},
+		{"set", "cd {{WORKSPACE_BARE}}; go test ./...", evalcontract.Abstain},
+	} {
+		if got := eval(t, tc.from, tc.cmd); got != tc.want {
+			t.Errorf("from %s: %q = %s, want %s", tc.from, tc.cmd, got, tc.want)
+		}
 	}
 }

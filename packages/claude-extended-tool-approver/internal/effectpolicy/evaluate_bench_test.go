@@ -87,11 +87,13 @@ func loadBashCorpusRows(tb testing.TB) []benchCorpusRow {
 		if cmd == "" {
 			tb.Fatalf("case %q: Bash row has empty/missing tool_input.command", r.Case)
 		}
-		cwd, root, cleanup, err := r.CWDPathState.Materialize()
+		tree, err := r.CWDPathState.MaterializeTree()
 		if err != nil {
 			tb.Fatalf("case %q: %v", r.Case, err)
 		}
-		tb.Cleanup(cleanup)
+		tb.Cleanup(tree.Cleanup)
+		cwd, root := tree.CWD, tree.ProjectRoot
+		cmd = tree.Expand(cmd)
 		out = append(out, benchCorpusRow{
 			name:     r.Case,
 			expected: r.ExpectedVerdict,

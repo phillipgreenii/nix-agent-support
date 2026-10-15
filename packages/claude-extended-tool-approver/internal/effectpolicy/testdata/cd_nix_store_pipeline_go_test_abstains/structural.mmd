@@ -1,0 +1,5 @@
+flowchart LR
+    n0["command: cd /nix/store"]
+    n1["command: go test ./..."]
+    n2["command: tail -5"]
+    n1 -->|"pipe"| n2

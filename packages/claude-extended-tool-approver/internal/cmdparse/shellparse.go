@@ -387,6 +387,19 @@ type lowering struct {
 	// IMMUTABLE COPY of this slice, for the identical aliasing reason
 	// scopePath's own doc gives.
 	loopVarStack []LoopVarBinding
+	// guardStack is the walk's CURRENT list of "&&"-chain ids whose EARLIER
+	// members are guaranteed to have run and exited zero for any leaf lowered
+	// right now (bead pg2-xj975): the chain id of every enclosing
+	// `X && Y` is pushed while Y is lowered, so a leaf anywhere inside Y (a
+	// pipeline stage, a subshell or block body, an if/while/for body)
+	// inherits the guarantee that the chain's members in X ran. appendLeaf
+	// stamps an immutable copy as ParsedCommand.AndGuardChains. Never pushed
+	// for chain 0, and never for an "||" tree (startChain already zeroed it).
+	guardStack []int
+	// loopDepth is the number of while/until/for bodies (and while conditions)
+	// the walk is inside right now; appendLeaf stamps ParsedCommand.InLoop from
+	// it (bead pg2-xj975).
+	loopDepth int
 }
 
 // sourceSpan is a half-open byte range [lo, hi) into the lowering's source.
@@ -423,6 +436,10 @@ func (lw *lowering) spanOf(from, to syntax.Pos) sourceSpan {
 // empty (a top-level leaf), matching SubshellScope's documented zero value.
 func (lw *lowering) appendLeaf(leaf ParsedCommand, span sourceSpan) {
 	leaf.SubshellScope = append([]int(nil), lw.scopePath...)
+	leaf.InLoop = lw.loopDepth > 0
+	if len(lw.guardStack) > 0 {
+		leaf.AndGuardChains = append([]int(nil), lw.guardStack...)
+	}
 	if len(lw.loopVarStack) > 0 {
 		leaf.LoopVars = append([]LoopVarBinding(nil), lw.loopVarStack...)
 	}
@@ -805,7 +822,16 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx, chain int) {
 			lw.emitCompoundRedirs(st, pid, idx, chain)
 		default: // && and ||
 			lw.lowerStmt(cmd.X, pid, idx, chain)
+			// Everything lowered from Y runs only after X's chain members
+			// succeeded (cmd.Op is && whenever chain != 0; see startChain).
+			pushed := chain != 0 && cmd.Op == syntax.AndStmt
+			if pushed {
+				lw.guardStack = append(lw.guardStack, chain)
+			}
 			lw.lowerStmt(cmd.Y, lw.nextPipelineID(), 0, chain)
+			if pushed {
+				lw.guardStack = lw.guardStack[:len(lw.guardStack)-1]
+			}
 			lw.emitCompoundRedirs(st, pid, idx, chain)
 		}
 
@@ -846,8 +872,10 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx, chain int) {
 		// The condition keeps the header's pipeline coordinates: in
 		// `cat .git/config | while read l; do …; done` the `read` IS the stage
 		// downstream of the cat, and losing that would lose the relation.
+		lw.loopDepth++
 		lw.lowerStmtList(cmd.Cond, pid, idx)
 		lw.lowerStmtsFresh(cmd.Do)
+		lw.loopDepth--
 		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.ForClause:
@@ -862,7 +890,9 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx, chain int) {
 		if ok {
 			lw.loopVarStack = append(lw.loopVarStack, LoopVarBinding{Name: name, Values: values})
 		}
+		lw.loopDepth++
 		lw.lowerStmtList(cmd.Do, pid, idx)
+		lw.loopDepth--
 		if ok {
 			lw.loopVarStack = lw.loopVarStack[:len(lw.loopVarStack)-1]
 		}

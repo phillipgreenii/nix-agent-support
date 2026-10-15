@@ -1,0 +1,7 @@
+flowchart LR
+    n0["command: cd sub<br/>- path:read sub [arg 0]<br/>- chdir sub [arg 0]<br/>mark=permitted"]
+    n1["command: go test ./...<br/>- path:read <ROOT>/sub/... [arg 0]<br/>- exec: go test (trusted checkout code)<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n2[/"file: sub"/]
+    n3[/"file: <ROOT>/sub/..."/]
+    n0 -->|"reads: read"| n2
+    n1 -->|"reads: read"| n3

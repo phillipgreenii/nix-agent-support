@@ -158,6 +158,14 @@ type PathStateFixture struct {
 	// markers keeps its synthetic cwd untouched, which is also how a
 	// "directory without the marker still abstains" row is written.
 	WorkspaceMarkers []string `json:"workspace_markers,omitempty"`
+	// WorkspaceCWD says which directory of the materialized tree is the
+	// request's cwd: "set" (the default; the workforest-set directory under the
+	// marker) or "bare" (a sibling directory with NO marker above it). A row
+	// uses "bare" with a `cd {{WORKSPACE_SET}} && ...` command to pin that the
+	// effective (cd-tracked) directory, not the request's, decides an Exec fact
+	// (bead pg2-xj975); the tokens {{WORKSPACE_SET}} and {{WORKSPACE_BARE}} in a
+	// row's command expand to the two directories. Ignored without markers.
+	WorkspaceCWD string `json:"workspace_cwd,omitempty"`
 }
 
 // SettingsFixture is the "settings fixture" field: the operator's Claude
