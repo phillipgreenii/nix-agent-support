@@ -68,6 +68,39 @@ func TestPgConnector_BackendFlag_StillApprove(t *testing.T) {
 	}
 }
 
+// TestPgConnector_EscalationTriagerCommandForms_Approve pins, verbatim, every
+// `pg-connector issue` command shape the two escalation-triager prompts
+// instruct (one prompt per tracker instance; {{.BeadID}} replaced by a concrete
+// id), including the multi-label `update` forms (bead pg2-3i7on). The
+// plugin-conformance flake check never evaluates these lines (the prompts hold
+// no fenced shell blocks), so this table is the only permanent guard that a
+// triager dispatch under permissionMode=dontAsk is not auto-denied.
+func TestPgConnector_EscalationTriagerCommandForms_Approve(t *testing.T) {
+	for _, backend := range []string{
+		"pg-connector-issue-beads-pg2",
+		"pg-connector-issue-beads-zr",
+	} {
+		cmds := []string{
+			"pg-connector issue show pg2-abc12 --backend " + backend,
+			`pg-connector issue close pg2-abc12 --backend ` + backend + ` --reason "<what you did>"`,
+			`pg-connector issue comment pg2-abc12 --backend ` + backend + ` --body "<finding>"`,
+			"pg-connector issue update pg2-abc12 --backend " + backend + " --add-label human",
+			"pg-connector issue update pg2-abc12 --backend " + backend + " --add-label needs-split-review --remove-label escalated",
+			"pg-connector issue update pg2-abc12 --backend " + backend + " --add-label human --remove-label escalated",
+			"pg-connector issue update pg2-abc12 --backend " + backend + " --remove-label escalated",
+		}
+		for _, cmd := range cmds {
+			got := evalPgConnector(t, cmd)
+			if got.Decision != hookio.Approve {
+				t.Errorf("cmd %q: got %s (%s), want Approve", cmd, got.Decision, got.Reason)
+			}
+			if got.Module != "pg-connector" {
+				t.Errorf("cmd %q: approved by module %q, want pg-connector", cmd, got.Module)
+			}
+		}
+	}
+}
+
 // TestPgConnector_EnvVarPrefix_StillApprove is the bead pg2-r848s regression
 // case: the escalation-triager's prompt instructs it to prefix EVERY
 // pg-connector invocation with PG_CONNECTOR_ISSUE_BEADS_DIR=<dir> (per
