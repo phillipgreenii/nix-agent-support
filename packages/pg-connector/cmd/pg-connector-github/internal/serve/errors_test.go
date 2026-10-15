@@ -174,11 +174,23 @@ func TestErrorTable_SecondaryLimit_PausesTheBackgroundAndServesInteractiveReadsS
 	d.Shim.WaitQuiet(t, 300*time.Millisecond, 30*time.Second)
 
 	d.Shim.Mode("secondary") // Retry-After: 3600
-	until(t, 20*time.Second, "the background refresh to meet the secondary limit and pause the bucket", func() bool {
-		return graphqlBucket(t, statusReport(t, d)).Paused
+	// The pause is not one event. A group fetch still in flight when the mode
+	// flips (the Provider and the runs fetcher call gh without --include, so they
+	// cannot see Retry-After) pauses the background for the 60 s fallback
+	// (metered.DefaultFallbackPause) when it meets the limit first. That pause holds
+	// the query refresh, whose origin call does read the header, until it expires;
+	// only then does the pause grow to the stated hour (a pause only ever grows).
+	// Waiting for "paused" alone can land in the fallback window, so wait for the
+	// stated hour itself, allowing the fallback window to pass. The bound compares
+	// against a pause set seconds ago, so ten minutes of slack make it timing-free.
+	hourPause := func(b status.Bucket) bool {
+		return b.Paused && b.PausedUntil != nil && time.Until(*b.PausedUntil) >= 50*time.Minute
+	}
+	until(t, 100*time.Second, "the background refresh to meet the secondary limit and pause the bucket for the stated Retry-After", func() bool {
+		return hourPause(graphqlBucket(t, statusReport(t, d)))
 	})
 	b := graphqlBucket(t, statusReport(t, d))
-	if !strings.Contains(b.PauseReason, "secondary") || b.PausedUntil == nil || time.Until(*b.PausedUntil) < 50*time.Minute {
+	if !strings.Contains(b.PauseReason, "secondary") || !hourPause(b) {
 		t.Errorf("the pause must be the stated Retry-After (an hour): %+v", b)
 	}
 	if !servetest.HasChange(d.DaemonLog(t), "budget_paused") {
