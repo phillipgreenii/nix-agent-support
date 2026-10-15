@@ -39,9 +39,17 @@ func buildPgDesk(t *testing.T) string {
 		}
 		t.Skip("go toolchain missing")
 	}
+	return goBuildPgDesk(t, src, goBuildEnv(os.Environ()))
+}
+
+// goBuildPgDesk compiles the pg-desk module at src with exactly env as the
+// child environment.
+func goBuildPgDesk(t *testing.T, src string, env []string) string {
+	t.Helper()
 	out := filepath.Join(t.TempDir(), "pg-desk")
 	cmd := exec.Command("go", "build", "-o", out, "./cmd/pg-desk")
 	cmd.Dir = src
+	cmd.Env = env
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build pg-desk: %v\n%s", err, b)
 	}
@@ -163,7 +171,9 @@ func TestSeedingTurnsTheRemoteTierOffOnARealMigratedStore(t *testing.T) {
 
 	// With the warm-up: prime from the fake connector's listing, seed, poll.
 	w := newWorld(t, pgDesk)
-	res, err := exec.Command(filepath.Join(w.bin, "pg-connector"), "pr", "list", "--query", "mine", "--fingerprints", "--output", "json").Output()
+	listCmd := exec.Command(filepath.Join(w.bin, "pg-connector"), "pr", "list", "--query", "mine", "--fingerprints", "--output", "json")
+	listCmd.Env = w.env
+	res, err := listCmd.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
