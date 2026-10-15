@@ -10,10 +10,13 @@ Realization gaps for the build's one remaining residual.
 
 ## Handler-side vocabulary
 
-- **Handler executor** — the concrete code path this module runs when the core dispatches an
-  event to one of this module's handler sessions. Exactly one of **ccpool-backed** (drives the
-  `ccpool` CLI) or **command-backed** (execs an operator-configured argv); which one backs a given
-  role is this module's own configuration, never the core's concern (`INTF-HANDLER`).
+- **Handler executor** — what a handler session of this module does for one dispatched event,
+  according to its role's **backing kind**; exactly one kind backs a given role. A
+  **ccpool-backed** handler session drives an agent session through `ccpool` (`INTF-CCH-CCPOOL`):
+  it starts the session, supervises it, and settles it when it ends. A **command-backed** handler
+  session runs the role's operator-configured command and reports the outcome of that run. Which kind
+  backs a given role is this module's own configuration, never the core's concern
+  (`INTF-HANDLER`).
 - **Watchdog** — this module's own policy for noticing a handler session that has stalled, distinct
   from the core's delivery bookkeeping (`INTF-HANDLER`'s "a handler's run status is not part of
   this contract").
