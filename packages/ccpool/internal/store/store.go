@@ -115,6 +115,14 @@ func Open(dbPath string, c clock.Clock, opts ...Option) (*Store, error) {
 		}
 	}
 	dsn := dbPath + "?" + url.Values{
+		// Every write transaction here reads before it writes (Transition,
+		// ResolveOldestPendingTurn: SELECT then UPDATE). Begun DEFERRED, the upgrade
+		// from reader to writer fails at once with SQLITE_BUSY_SNAPSHOT (517,
+		// "database is locked") if another connection commits in between, and
+		// busy_timeout cannot retry it (pg2-gdpwt). BEGIN IMMEDIATE takes the write
+		// lock first, where busy_timeout does apply. Reads use db.Query, not a
+		// transaction, so they are unaffected.
+		"_txlock": []string{"immediate"},
 		"_pragma": []string{
 			"journal_mode(WAL)",
 			"busy_timeout(5000)",
