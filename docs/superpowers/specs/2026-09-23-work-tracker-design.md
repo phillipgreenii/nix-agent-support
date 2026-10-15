@@ -588,6 +588,11 @@ on COMMITTER date, so the implementation deviates from a literal `--since=<since
   shapes: a committer date earlier than its in-range author date, and a commit reachable only
   through a descendant with an older committer date (out-of-order dates). Skew beyond the margin is
   the accepted loss.
+- The same floor bounds the branch-label read of the enrichment step (one
+  `rev-list --parents --branches --since=<floor>`, no common-ancestor read), and enrichment runs under
+  the op deadline minus a 5 s reserve: if that budget is spent, the commits already read are
+  returned with `truncated: true`, without `branch:` labels and with `fields.enriched = false`
+  instead of `insertions`/`deletions` (`pg2-p5asw`).
 - The backend then keeps exactly the commits whose parsed author date is in `[since, before)` and
   whose author email exactly matches an `author_emails` entry (`--author` is a substring match).
 - An omitted `since` passes no floor and walks the whole history, the caller's explicit choice. A

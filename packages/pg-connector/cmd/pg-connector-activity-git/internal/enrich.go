@@ -20,6 +20,18 @@
 //     candidate descends from the ancestor, so nothing outside the region can
 //     matter.
 //
+// Region bound (pg2-p5asw). With a committer-date floor (the same --since the
+// base log read walked under, see sinceFloorArg) the branch labelling does not
+// derive its region from the candidates' common ancestor at all: it reads
+// `rev-list --parents --branches --since=<floor>`, the very walk the log read
+// already did, minus the author filter. Every candidate was found by that walk,
+// so every candidate is in the region; its size is the window plus the margin,
+// whatever the age of the candidates' fork points. The common-ancestor region
+// reached back to the OLDEST fork point of any candidate (one commit on a
+// month-old branch widened it to a month of history on every branch) and
+// cost one extra merge-base spawn. Without a floor (an open-ended since) the
+// common-ancestor region stays.
+//
 // The old per-commit read (enrichCommit: for-each-ref --contains plus
 // diff-tree, two spawns per commit under one shared deadline) stays as the
 // reference the tests pin the batch against, and as the fallback when a batch
@@ -105,6 +117,15 @@ func countsOf(ctx context.Context, r Runner, repo, sha string) (lineCounts, erro
 // for that half (branches or counts); a cancelled or expired ctx is returned
 // as the error, never retried.
 func enrichCommits(ctx context.Context, r Runner, repo string, shas []string) (map[string]commitDetails, error) {
+	return enrichCommitsSince(ctx, r, repo, shas, "")
+}
+
+// enrichCommitsSince is enrichCommits with the branch region bounded by
+// sinceFloor, a `--since=<date>` argument (see sinceFloorArg), when it is not
+// empty. The caller MUST pass only shas that a walk under the same floor
+// found (collectRepoCommits does); a sha outside the walk simply gets no
+// branch label, never a wrong one.
+func enrichCommitsSince(ctx context.Context, r Runner, repo string, shas []string, sinceFloor string) (map[string]commitDetails, error) {
 	out := make(map[string]commitDetails, len(shas))
 	if len(shas) == 0 {
 		return out, nil
@@ -120,7 +141,7 @@ func enrichCommits(ctx context.Context, r Runner, repo string, shas []string) (m
 			return nil, err
 		}
 	}
-	branches, err := batchBranches(ctx, r, repo, shas)
+	branches, err := batchBranches(ctx, r, repo, shas, sinceFloor)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, err
@@ -238,9 +259,10 @@ func batchLineCounts(ctx context.Context, r Runner, repo string, shas []string) 
 var errRegionTooLarge = errors.New("commit graph region too large to label branches in memory")
 
 // batchBranches returns, per sha, the single local head containing it ("" for
-// zero or several), decided in memory over one rev-list of the heads' history
-// down to the shas' common ancestor.
-func batchBranches(ctx context.Context, r Runner, repo string, shas []string) (map[string]string, error) {
+// zero or several), decided in memory over one rev-list of the heads' history:
+// down to the committer-date floor when sinceFloor is set, else down to the
+// shas' common ancestor.
+func batchBranches(ctx context.Context, r Runner, repo string, shas []string, sinceFloor string) (map[string]string, error) {
 	refsText, err := r.Run(ctx, repo, "for-each-ref", "--format=%(objectname) %(refname)", "refs/heads")
 	if err != nil {
 		return nil, fmt.Errorf("local heads: %w", err)
@@ -254,18 +276,10 @@ func batchBranches(ctx context.Context, r Runner, repo string, shas []string) (m
 		}
 	}
 
-	bases, err := commonAncestors(ctx, r, repo, shas)
+	args, err := regionArgs(ctx, r, repo, shas, sinceFloor)
 	if err != nil {
 		return nil, err
 	}
-	// ^<base>^@ excludes everything at or below each base's parents. Every
-	// candidate descends from every base, so none is excluded, and no path
-	// from a head to a candidate leaves the region.
-	args := []string{"rev-list", "--parents", "--max-count=" + strconv.Itoa(maxRegionCommits+1), "--branches", "--not"}
-	for _, b := range bases {
-		args = append(args, b+"^@")
-	}
-	args = append(args, "--")
 	regionText, err := r.Run(ctx, repo, args...)
 	if err != nil {
 		return nil, fmt.Errorf("commit graph of %s: %w", repo, err)
@@ -299,7 +313,7 @@ func batchBranches(ctx context.Context, r Runner, repo string, shas []string) (m
 	for k, h := range heads {
 		start, ok := index[h.tip]
 		if !ok {
-			continue // tip is at or below the base: it holds no candidate
+			continue // tip is outside the region (below the floor or the base): it holds no candidate
 		}
 		stack := []int{start}
 		for len(stack) > 0 {
@@ -327,6 +341,28 @@ func batchBranches(ctx context.Context, r Runner, repo string, shas []string) (m
 		}
 	}
 	return out, nil
+}
+
+// regionArgs returns the rev-list command that reads the commit graph the
+// branch labelling decides containment in. With sinceFloor it is bounded by
+// committer date alone (no merge-base spawn, size independent of where the
+// candidates forked). Otherwise ^<base>^@ excludes everything at or below each
+// common ancestor's parents: every candidate descends from every base, so
+// none is excluded, and no path from a head to a candidate leaves the region.
+func regionArgs(ctx context.Context, r Runner, repo string, shas []string, sinceFloor string) ([]string, error) {
+	limit := "--max-count=" + strconv.Itoa(maxRegionCommits+1)
+	if sinceFloor != "" {
+		return []string{"rev-list", "--parents", limit, "--branches", sinceFloor, "--"}, nil
+	}
+	bases, err := commonAncestors(ctx, r, repo, shas)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"rev-list", "--parents", limit, "--branches", "--not"}
+	for _, b := range bases {
+		args = append(args, b+"^@")
+	}
+	return append(args, "--"), nil
 }
 
 // commonAncestors returns the merge bases of all shas (an octopus merge-base,

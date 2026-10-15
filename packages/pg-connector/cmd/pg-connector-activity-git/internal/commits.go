@@ -16,7 +16,12 @@
 // commit whose committer date predates its in-range author date, and a commit
 // reachable only through a descendant whose committer date is older than its
 // own (out-of-order committer dates). Skew beyond the margin is the accepted
-// loss. With since omitted no floor is passed and the walk covers the whole
+// loss. The same floor bounds the branch-label region enrichment reads (every
+// commit this walk found is inside it, so no common-ancestor read is needed),
+// and enrichment runs under its own budget, the op deadline minus
+// enrichReserve, so a host stall that spends it still returns the commits
+// read (truncated, without labels or line counts) instead of nothing
+// (pg2-p5asw). With since omitted no floor is passed and the walk covers the whole
 // history, which is the caller's explicit choice. Likewise git's --author is a
 // substring match, so the exact author email is re-checked against the
 // configured addresses.
@@ -70,6 +75,23 @@ func sinceFloorArg(since time.Time) (arg string, ok bool) {
 	return "--since=" + floor.Format(gitDateLayout), true
 }
 
+// enrichReserve is the tail of the op deadline that enrichment never uses: the
+// commit read is the part of a pull worth keeping, and a host stall that eats
+// the whole budget (pg2-p5asw) would otherwise take it down with the
+// enrichment. A variable only so tests can widen it.
+var enrichReserve = 5 * time.Second
+
+// enrichBudget derives the context enrichment runs under: ctx's deadline minus
+// enrichReserve. When the op has no deadline, or leaves less than the reserve,
+// the budget is the op's own deadline moved earlier, possibly into the past
+// (then enrichment is skipped outright and the commits come back plain).
+func enrichBudget(ctx context.Context) (context.Context, context.CancelFunc) {
+	if dl, ok := ctx.Deadline(); ok {
+		return context.WithDeadline(ctx, dl.Add(-enrichReserve))
+	}
+	return context.WithCancel(ctx)
+}
+
 // logSkip records one skipped configured path: exactly one line, naming the
 // path and why, on this backend's own stderr (never fatal, no wire carrier).
 func (b *Backend) logSkip(path, reason string) {
@@ -87,8 +109,9 @@ func (b *Backend) logSkip(path, reason string) {
 func (b *Backend) collectCommits(ctx context.Context, cfg Config, emails []string, since, before time.Time) ([]schema.ActivityItem, bool, error) {
 	asOf := b.now().UTC().Format(time.RFC3339)
 	items := []schema.ActivityItem{}
+	truncated := false
 	for _, repo := range b.repoList(cfg) {
-		got, ok, err := b.collectRepoCommits(ctx, repo, cfg.IncludeMerges, emails, since, before, asOf)
+		got, ok, partial, err := b.collectRepoCommits(ctx, repo, cfg.IncludeMerges, emails, since, before, asOf)
 		if err != nil {
 			// The op deadline (or a cancel) fired mid-read: keep every repo
 			// already read and say so with truncated=true, which the caller
@@ -104,36 +127,41 @@ func (b *Backend) collectCommits(ctx context.Context, cfg Config, emails []strin
 			continue
 		}
 		items = append(items, got...)
+		truncated = truncated || partial
 	}
-	return items, false, nil
+	return items, truncated, nil
 }
 
 // collectRepoCommits reads one repo. ok is false when the path was skipped
 // (missing or not a repo; already logged). An error means a git failure on a
-// valid repo, which is never silent.
-func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMerges bool, emails []string, since, before time.Time, asOf string) (items []schema.ActivityItem, ok bool, err error) {
+// valid repo, which is never silent. partial is true when the commits were
+// read but their enrichment ran out of its budget (see enrichBudget): the
+// items then carry no branch label and no line counts, and the caller MUST
+// report the result as truncated.
+func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMerges bool, emails []string, since, before time.Time, asOf string) (items []schema.ActivityItem, ok, partial bool, err error) {
 	st, statErr := os.Stat(repo)
 	switch {
 	case statErr != nil:
 		b.logSkip(repo, "path does not exist or is not readable")
-		return nil, false, nil
+		return nil, false, false, nil
 	case !st.IsDir():
 		b.logSkip(repo, "path is not a directory")
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 	if _, err := b.runner.Run(ctx, repo, "rev-parse", "--git-dir"); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return nil, false, fmt.Errorf("pg-connector-activity-git: git is not available: %w", err)
+			return nil, false, false, fmt.Errorf("pg-connector-activity-git: git is not available: %w", err)
 		}
 		b.logSkip(repo, "not a git repository")
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 
 	args := []string{"log", "--branches", "--fixed-strings", "--regexp-ignore-case"}
 	if !includeMerges {
 		args = append(args, "--no-merges")
 	}
-	if floor, ok := sinceFloorArg(since); ok {
+	floor, bounded := sinceFloorArg(since)
+	if bounded {
 		args = append(args, floor)
 	}
 	for _, e := range emails {
@@ -142,11 +170,11 @@ func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMe
 	args = append(args, logFormat)
 	out, err := b.runner.Run(ctx, repo, args...)
 	if err != nil {
-		return nil, false, fmt.Errorf("pg-connector-activity-git: read commits of %s: %w", repo, err)
+		return nil, false, false, fmt.Errorf("pg-connector-activity-git: read commits of %s: %w", repo, err)
 	}
 	commits, err := parseLog(out)
 	if err != nil {
-		return nil, false, fmt.Errorf("pg-connector-activity-git: read commits of %s: %w", repo, err)
+		return nil, false, false, fmt.Errorf("pg-connector-activity-git: read commits of %s: %w", repo, err)
 	}
 
 	// Filter first, then enrich the survivors in one batch: the git cost of
@@ -170,27 +198,47 @@ func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMe
 	for i, c := range kept {
 		shas[i] = c.sha
 	}
-	details, err := enrichCommits(ctx, b.runner, repo, shas)
+	// The branch region is bounded by the same committer-date floor the log
+	// walk used (every kept commit was found by that walk), not by the
+	// candidates' common ancestor (pg2-p5asw, see enrich.go).
+	enrichFloor := ""
+	if bounded {
+		enrichFloor = floor
+	}
+	enrichCtx, cancelEnrich := enrichBudget(ctx)
+	defer cancelEnrich()
+	details, err := enrichCommitsSince(enrichCtx, b.runner, repo, shas, enrichFloor)
 	if err != nil {
-		return nil, false, fmt.Errorf("pg-connector-activity-git: enrich commits of %s: %w", repo, err)
+		if enrichCtx.Err() == nil || ctx.Err() != nil {
+			return nil, false, false, fmt.Errorf("pg-connector-activity-git: enrich commits of %s: %w", repo, err)
+		}
+		// Only enrichment's own budget ran out: the op deadline is still
+		// ahead. The commits are already read; keep them without the extras.
+		b.logSkip(repo, "enrichment budget spent; returning its commits without branch labels and line counts as a truncated result")
+		details, partial = nil, true
 	}
 
 	ident := repoIdent(ctx, b.runner, repo)
 	items = []schema.ActivityItem{}
 	for _, c := range kept {
-		det := details[c.sha]
+		det, enriched := details[c.sha]
 		labels := []string{"repo:" + ident}
 		if det.branch != "" {
 			labels = append(labels, "branch:"+det.branch)
 		}
-		fields, _ := json.Marshal(map[string]any{
+		fm := map[string]any{
 			"sha":          c.sha,
 			"repo_path":    repo,
 			"author_email": c.email,
-			"insertions":   det.insertions,
-			"deletions":    det.deletions,
 			"refs":         extractRefs(c.subject, c.body),
-		})
+		}
+		if enriched {
+			fm["insertions"], fm["deletions"] = det.insertions, det.deletions
+		} else {
+			// Never a made-up 0: a later full read replaces this entry.
+			fm["enriched"] = false
+		}
+		fields, _ := json.Marshal(fm)
 		entityID := ident + "@" + c.sha
 		items = append(items, schema.ActivityItem{
 			ID:         entityID,
@@ -205,7 +253,7 @@ func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMe
 			Stale:      false,
 		})
 	}
-	return items, true, nil
+	return items, true, partial, nil
 }
 
 type commitRecord struct {
