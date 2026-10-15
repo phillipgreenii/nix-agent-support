@@ -247,8 +247,26 @@ func servedCacheResponse(hit showCacheHit, now time.Time) *scriptout.Response {
 // every answer carries served_from and age_seconds (INV-CACHE-5). A cache
 // problem of any kind degrades to today's behavior, never to a failure.
 func dispatchShow(ctx context.Context, reg *Registry, entityType, id, pinned string, fresh bool) (*scriptout.Response, error) {
-	backends := candidateShowBackends(reg, entityType, pinned)
+	candidates := candidateShowBackends(reg, entityType, pinned)
 	ttl := resolveCacheReadTTL(reg)
+	// A backend that declares cache_opt_out keeps its own cache (INV-CACHE-9):
+	// the umbrella neither reads nor writes an entry for it, so it takes no
+	// part in the read-through or the single-flight lock below.
+	optedOut := map[string]bool{}
+	declaresOptOut := func(b string) bool {
+		v, ok := optedOut[b]
+		if !ok {
+			v = backendDeclaresCacheOptOut(ctx, reg, b)
+			optedOut[b] = v
+		}
+		return v
+	}
+	var backends []string
+	for _, b := range candidates {
+		if !declaresOptOut(b) {
+			backends = append(backends, b)
+		}
+	}
 	readThrough := ttl > 0 && len(backends) > 0 && !typeOptedOut(reg, entityType)
 	start := time.Now()
 
@@ -280,6 +298,11 @@ func dispatchShow(ctx context.Context, reg *Registry, entityType, id, pinned str
 	resp, backend, fromCache, err := dispatchShowWithCache(ctx, reg, entityType, id, pinned)
 	if err != nil || resp == nil {
 		return resp, err
+	}
+	if declaresOptOut(backend) {
+		// The backend's own answer, annotations included, reaches the caller
+		// unchanged; nothing is cached for it (INV-CACHE-9).
+		return resp, nil
 	}
 	if fromCache {
 		// The unavailable stale fallback: a cache answer, honestly aged.

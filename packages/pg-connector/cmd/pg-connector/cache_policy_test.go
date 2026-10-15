@@ -26,6 +26,8 @@ import (
 //	list-full.json the raw wire response for a full list
 //	show-<id>.json the raw wire response for show of <id>; absent means not_found
 //	show-error     when present, every show answers this error code instead
+//	cache-opt-out  when present, capabilities declares vocabulary.cache_opt_out
+//	caps-fail      when present, capabilities answers something undecodable
 //	delay          seconds to sleep inside a show (to hold a call in flight)
 //	write-error    when present, every write op (comment, transition, update,
 //	               close, review_submit) answers this error code
@@ -47,7 +49,11 @@ id=$(printf '%s' "$req" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 echo "$op $id" >> "$D/calls.log"
 case "$op" in
 capabilities)
-  if [ -f "$D/show_many-enabled" ]; then
+  if [ -f "$D/caps-fail" ]; then
+    printf 'not a capabilities answer\n'
+  elif [ -f "$D/cache-opt-out" ]; then
+    printf '{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list"],"vocabulary":{"owns_changes":false,"cache_opt_out":true}}\n'
+  elif [ -f "$D/show_many-enabled" ]; then
     printf '{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list","show_many"]}\n'
   else
     printf '{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list"]}\n'

@@ -583,6 +583,22 @@ func cacheEnabled(ctx context.Context, reg *Registry, entityType, backend string
 	return true, nil
 }
 
+// backendDeclaresCacheOptOut reports whether backend's capabilities declare
+// the cache_opt_out vocabulary flag (backendOptedOut's reading). It is the
+// per-BACKEND half of cacheEnabled on its own, without the type opt-out: a
+// backend that declares it holds its own cache and freshness, so the umbrella
+// passes its answer annotations through unchanged and keeps no cache entry or
+// tombstone for it (INV-CACHE-9). It fails open like cacheEnabled: a
+// capabilities call that fails reads as "not declared", so a daemon outage
+// never mistakes the backend for an opt-out.
+func backendDeclaresCacheOptOut(ctx context.Context, reg *Registry, backend string) bool {
+	resp, err := reg.InvokeCapabilities(ctx, backend)
+	if err != nil {
+		return false
+	}
+	return backendOptedOut(resp.Vocabulary)
+}
+
 // typeOptedOut reports whether entityType is named in the
 // cacheStateOptOutTypesKey state: value's comma-separated list.
 func typeOptedOut(reg *Registry, entityType string) bool {

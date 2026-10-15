@@ -345,6 +345,12 @@ func commitCacheWrites(ctx context.Context, reg *Registry, entityType string, re
 		if r.skipAdvance || r.ledger == nil {
 			continue
 		}
+		// A backend that declares cache_opt_out gets no cache write
+		// (INV-CACHE-9); putEntitiesCacheLevel would skip it too, but the
+		// refresher must not even stage writes for it.
+		if backendDeclaresCacheOptOut(ctx, reg, r.backend) {
+			continue
+		}
 		var writes []cacheWrite
 		add := func(raws []json.RawMessage, level CacheLevel, refreshed bool) {
 			for _, raw := range raws {

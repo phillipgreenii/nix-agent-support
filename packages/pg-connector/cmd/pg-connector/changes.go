@@ -357,7 +357,7 @@ func newChangesCmd(entityType string) *cobra.Command {
 		// Cache writes (INV-CACHE-6) come first, so a confirmed removal's
 		// content is already cached when its tombstone is set.
 		commitCacheWrites(cmd.Context(), reg, entityType, results)
-		if commitErr := commitCacheTombstones(reg, entityType, results); commitErr != nil {
+		if commitErr := commitCacheTombstones(cmd.Context(), reg, entityType, results); commitErr != nil {
 			return commitErr
 		}
 		return werr
@@ -524,7 +524,7 @@ func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, 
 	if res.pass != nil {
 		confirmed = res.pass.confirmed
 	}
-	res.entries = mergeChanges(b, l, consumerID, preCursor, refreshChanges, entityType, reg, confirmed)
+	res.entries = mergeChanges(ctx, b, l, consumerID, preCursor, refreshChanges, entityType, reg, confirmed)
 	res.ledger = l
 	return res
 }
@@ -609,7 +609,7 @@ func changesListFn(ctx context.Context, reg *Registry, backend, query string, la
 // by the ChangeRemoved branch below, to look up a removed id in that
 // backend's own entity cache — READ-ONLY, no cache write of any kind
 // happens in this function (see this file's own header comment for why).
-func mergeChanges(backend string, l *Ledger, consumerID string, preCursor int64, refreshChanges []LedgerChange, entityType string, reg *Registry, confirmed map[string]json.RawMessage) []changesEntry {
+func mergeChanges(ctx context.Context, backend string, l *Ledger, consumerID string, preCursor int64, refreshChanges []LedgerChange, entityType string, reg *Registry, confirmed map[string]json.RawMessage) []changesEntry {
 	full := make(map[string]LedgerChange, len(refreshChanges))
 	for _, c := range refreshChanges {
 		if c.Change == ChangeRemoved {
@@ -646,10 +646,17 @@ func mergeChanges(backend string, l *Ledger, consumerID string, preCursor int64,
 			// (nothing was ever Put for it, so Get naturally reports no
 			// entry, and the idOnlyEntity fallback applies exactly as it
 			// would for any other cache miss).
+			//
+			// A backend that declares cache_opt_out keeps no entry here, so the
+			// read is skipped for it: the umbrella neither writes nor reads a
+			// cache file for it (INV-CACHE-9), and the ledger's own envelope
+			// supplies the removed row's content.
 			entity := c.Entity
-			if cache, err := loadCache(CacheKey{Type: entityType, Backend: backend}); err == nil {
-				if content, _, ok := cache.Get(id, resolveCacheMaxAge(reg), time.Now()); ok {
-					entity = content
+			if !backendDeclaresCacheOptOut(ctx, reg, backend) {
+				if cache, err := loadCache(CacheKey{Type: entityType, Backend: backend}); err == nil {
+					if content, _, ok := cache.Get(id, resolveCacheMaxAge(reg), time.Now()); ok {
+						entity = content
+					}
 				}
 			}
 			// A removal the refresher confirmed with a read of the entity
@@ -704,10 +711,16 @@ func commitAdvances(results []changesBackendResult, consumerID string) error {
 // remain"). Called only AFTER the response has been written and flushed
 // (same call site as commitAdvances) — never before, per this docket's
 // own cache-write ordering rule.
-func commitCacheTombstones(reg *Registry, entityType string, results []changesBackendResult) error {
+func commitCacheTombstones(ctx context.Context, reg *Registry, entityType string, results []changesBackendResult) error {
 	now := time.Now()
 	for _, r := range results {
 		if r.skipAdvance || r.ledger == nil {
+			continue
+		}
+		// A backend that declares cache_opt_out keeps no tombstone either: the
+		// umbrella holds no entry for it (INV-CACHE-9). A removed change still
+		// carries the content the ledger path supplies.
+		if backendDeclaresCacheOptOut(ctx, reg, r.backend) {
 			continue
 		}
 		var removedIDs []string
