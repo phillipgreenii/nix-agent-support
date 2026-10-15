@@ -98,6 +98,14 @@
 //     was before this call, so the NEXT call's ChangesSince recomputes
 //     and reports the same entries again — a duplicate, never a loss.
 //
+// FORWARD-ONLY MODE (docket pg2-z5fax, Phase 3c): a backend whose
+// capabilities declare owns_changes keeps its own change log, so
+// fanOutChangesOne hands it to forwardChangesOne (changes_forward.go)
+// instead of running steps 1-3 above: the call is forwarded, never diffed,
+// and the rows are acknowledged with changes_ack only after step 4's write
+// and flush. Such a source never reaches steps 5 and 6 (skipAdvance, no
+// ledger loaded). Every other backend takes the algorithm above unchanged.
+//
 // Phase 14 (bead pg2-2j5ac.42.2, docket pg2-2j5ac.42) adds two further
 // edits to this file, both scoped to the umbrella entity cache
 // (cache.go/cache_dispatch.go), never to the ledger above:
@@ -127,6 +135,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 	"github.com/spf13/cobra"
 )
@@ -172,10 +181,19 @@ type rawListResult struct {
 // changesEntry is one item in the wire response's changes[] array
 // (Produces section's illustrative shape:
 // {"change": "added", "source": "...", "entity": {}}).
+//
+// Seq, Kinds and Fields are set ONLY on an entry a forwarded source produced
+// (changes_forward.go): omitted otherwise, so the wire output of a call in
+// which no source was forwarded is byte-identical to the ledger path's. Seq is a
+// pointer because 0 (a --reset replay entry) is a value the forwarded wire
+// carries.
 type changesEntry struct {
 	Change ChangeKind      `json:"change"`
 	Source string          `json:"source"`
 	Entity json.RawMessage `json:"entity"`
+	Seq    *int64          `json:"seq,omitempty"`
+	Kinds  json.RawMessage `json:"kinds,omitempty"`
+	Fields json.RawMessage `json:"fields,omitempty"`
 }
 
 // changesSourceRow is one item in the wire response's sources[] array —
@@ -202,11 +220,18 @@ type changesSourceRow struct {
 	Version   int64        `json:"version"`
 	Truncated bool         `json:"truncated"`
 	Reason    string       `json:"reason,omitempty"`
+	// NextSeq is set only on a forwarded source (changes_forward.go): the
+	// backend's log position scanned up to, which the umbrella acknowledges
+	// after the output is flushed.
+	NextSeq *int64 `json:"next_seq,omitempty"`
 }
 
 type changesWire struct {
 	Sources []changesSourceRow `json:"sources"`
 	Changes []changesEntry     `json:"changes"`
+	// SourcesFreshness is set only when at least one source was forwarded
+	// (changes_forward.go); a pointer so an empty list still writes [].
+	SourcesFreshness *[]schema.SourceFreshness `json:"sources_freshness,omitempty"`
 }
 
 // changesBackendResult is one backend's own outcome within a "changes"
@@ -228,6 +253,19 @@ type changesBackendResult struct {
 	// listed holds every entity the ordinary (non-refresher) list returned,
 	// for the post-flush summary-level cache write (INV-CACHE-6).
 	listed []json.RawMessage
+
+	// forwarded is true for a source handled by forwardChangesOne
+	// (changes_forward.go): its ledger is never loaded here, so skipAdvance is
+	// true and ledger nil, which keeps commitAdvances, commitCacheWrites and
+	// commitCacheTombstones away from it.
+	forwarded bool
+	// answered is true when the forwarded backend answered; only an answered
+	// source is acknowledged, with nextSeq.
+	answered  bool
+	nextSeq   *int64
+	version   int64                    // the backend's own sources[].version
+	freshness []schema.SourceFreshness // the answer's sources_freshness[]
+	notes     []string                 // lines for stderr after the flush
 }
 
 // newChangesCmd builds the "changes" cobra command for entityType (pr or
@@ -287,6 +325,15 @@ func newChangesCmd(entityType string) *cobra.Command {
 		wire := changesWireFor(results)
 		exitCode := listExitCode(outcomeSources)
 		werr := writeFanOutResult(cmd, wire, exitCode, func() string { return humanizeChangesOutcome(wire) })
+		// A forwarded source is acknowledged only after its answer is
+		// written and flushed (INV-CACHE-9): an exit-code error means the
+		// output was written; any other error means it may not have been,
+		// so nothing is acknowledged and the next poll redelivers.
+		var wroteExit *exitError
+		if werr == nil || errors.As(werr, &wroteExit) {
+			commitForwardedAcks(cmd.Context(), reg, results, consumer, query, cmd.ErrOrStderr())
+		}
+		reportForwardNotes(results, cmd.ErrOrStderr())
 		// Step 5 (design: section 5.3) runs regardless of exitCode/werr —
 		// the response above has already been written and flushed by the
 		// time we get here; a save failure here is a more severe,
@@ -377,6 +424,14 @@ func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backen
 // fanOutChangesOne is one backend's share of fanOutChanges: the per-backend
 // ledger refresh and merge (this file's header comment, steps 1-3).
 func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, consumerID string, cached, reset bool, pruneAfter time.Duration, instance string) changesBackendResult {
+	// A backend that declares owns_changes keeps its own change log: forward
+	// the call and never fall back to the ledger diff. A backend whose
+	// capabilities call fails has declared nothing and keeps the ledger path
+	// (the fail-open rule of cacheEnabled, INV-CACHE-8).
+	if owns, err := backendOwnsChanges(ctx, reg, b); err == nil && owns {
+		return forwardChangesOne(ctx, reg, entityType, b, query, consumerID, cached, reset)
+	}
+
 	key := LedgerKey{Type: entityType, Backend: b, Query: query, Instance: instance}
 	res := changesBackendResult{backend: b, key: key}
 
@@ -701,13 +756,26 @@ func changesOutcomeSources(results []changesBackendResult) []SourceResult {
 
 func changesWireFor(results []changesBackendResult) changesWire {
 	w := changesWire{Sources: make([]changesSourceRow, 0, len(results)), Changes: make([]changesEntry, 0)}
+	var freshness []schema.SourceFreshness
+	anyForwarded := false
 	for _, r := range results {
 		var version int64
 		if r.ledger != nil {
 			version = r.ledger.Version
 		}
-		w.Sources = append(w.Sources, changesSourceRow{Backend: r.backend, Status: r.status, Version: version, Truncated: r.truncated, Reason: r.reason})
+		if r.forwarded {
+			anyForwarded = true
+			version = r.version
+			freshness = append(freshness, r.freshness...)
+		}
+		w.Sources = append(w.Sources, changesSourceRow{Backend: r.backend, Status: r.status, Version: version, Truncated: r.truncated, Reason: r.reason, NextSeq: r.nextSeq})
 		w.Changes = append(w.Changes, r.entries...)
+	}
+	if anyForwarded {
+		if freshness == nil {
+			freshness = []schema.SourceFreshness{}
+		}
+		w.SourcesFreshness = &freshness
 	}
 	return w
 }
@@ -752,6 +820,9 @@ func humanizeChangesOutcome(w changesWire) string {
 			b.WriteByte('\n')
 		}
 		fmt.Fprintf(&b, "  %s: %s version=%d truncated=%t", s.Backend, s.Status, s.Version, s.Truncated)
+		if s.NextSeq != nil {
+			fmt.Fprintf(&b, " next_seq=%d", *s.NextSeq)
+		}
 		if s.Reason != "" {
 			fmt.Fprintf(&b, " (%s)", s.Reason)
 		}

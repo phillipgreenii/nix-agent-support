@@ -11,14 +11,19 @@ import (
 )
 
 // writeMarkerBackend creates an executable shell script named name that,
-// if ever invoked, appends a line to markerPath and answers with a wire
-// error envelope — used to PROVE a backend was never called (e.g.
-// --cached) by asserting markerPath does not exist afterward.
+// if ever invoked for an op other than capabilities, appends a line to
+// markerPath and answers with a wire error envelope — used to PROVE a
+// backend's data ops were never called (e.g. --cached) by asserting
+// markerPath does not exist afterward. A capabilities call is answered with
+// the same error but is NOT recorded: the changes verb asks every backend
+// whether it declares owns_changes (changes_forward.go), also under --cached,
+// and an error there means the backend declared nothing, which keeps the
+// ledger path.
 func writeMarkerBackend(t *testing.T, name, markerPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	script := filepath.Join(dir, name)
-	content := "#!/bin/sh\ncat >/dev/null\necho invoked >>" + markerPath + "\nprintf '{\"protocolVersion\":1,\"schemaVersion\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"must not be called\"}}\\n'\n"
+	content := "#!/bin/sh\nreq=$(cat)\ncase \"$req\" in *'\"op\":\"capabilities\"'*) ;; *) echo invoked >>" + markerPath + " ;; esac\nprintf '{\"protocolVersion\":1,\"schemaVersion\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"must not be called\"}}\\n'\n"
 	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
 		t.Fatalf("write marker backend: %v", err)
 	}
