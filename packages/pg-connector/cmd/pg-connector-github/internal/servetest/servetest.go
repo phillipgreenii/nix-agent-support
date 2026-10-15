@@ -33,6 +33,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	_ "modernc.org/sqlite" // read-only store inspection
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
@@ -362,10 +363,39 @@ func (d *Daemon) Term(t *testing.T) {
 	}
 }
 
-// Kill ends the daemon with SIGKILL (a crash) and returns once it is gone.
+// Kill ends the daemon with SIGKILL (a crash) and returns once it is gone: the
+// process is reaped and its single-instance lock can be taken again. The second
+// matters on a loaded host. A child the daemon forked just before the kill (a gh
+// call) holds a copy of the lock's descriptor until its exec closes it, so the
+// lock outlives the daemon for as long as the host takes to run that exec, and
+// a start straight after the kill would meet "another instance holds the lock".
 func (d *Daemon) Kill(t *testing.T) {
 	t.Helper()
 	d.kill()
+	if !awaitLockFree(filepath.Join(d.StateDir, config.LockFileName), 30*time.Second) {
+		t.Fatalf("servetest: the killed daemon's lock %s is still held after 30s", filepath.Join(d.StateDir, config.LockFileName))
+	}
+}
+
+// awaitLockFree waits until the flock at path can be taken (or does not exist)
+// and reports whether that happened within max. It releases the lock again.
+func awaitLockFree(path string, max time.Duration) bool {
+	lk := flock.New(path)
+	deadline := time.Now().Add(max)
+	for {
+		locked, err := lk.TryLock()
+		if err == nil && locked {
+			_ = lk.Unlock()
+			return true
+		}
+		if err != nil && os.IsNotExist(err) {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // WaitReady waits until the daemon answers an auth_status request (its gate is
