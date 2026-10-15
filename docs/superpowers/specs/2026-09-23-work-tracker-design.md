@@ -942,7 +942,8 @@ escalated-all --backend pg-connector-issue-beads --output json` and matched on t
   "why is Tuesday empty" is answered.
 - **Telemetry declaration (D24 of the pg-desk design)**: work-report logs one JSONL line per
   source per pull to `$XDG_STATE_HOME/work-report/log/pull.jsonl` (`ts`, `source`, `since`,
-  `before`, `status`, `count`, `unchanged`, `rejected`, `truncated`, `duration_ms`, `reason`) and
+  `before`, `status`, `count`, `unchanged`, `rejected`, `truncated`, `duration_ms`, `reason`, and
+  `retried` when the source was re-invoked after a deadline, see "Deadline retry" below) and
   one per report to `report.jsonl`; the same facts are queryable through `status`. It emits no
   OpenTelemetry or Prometheus metrics in v1; the scheduled query's fire history, failures, and
   any `escalated.pg2` events the pull query emits are visible in pg-router's `status`, TUI, and JSONL event
@@ -953,6 +954,18 @@ escalated-all --backend pg-connector-issue-beads --output json` and matched on t
   non-zero in `pg-router` output (the pull could not run). A store lock (a manual pull
   overlapping the scheduled one) waits on SQLite's busy timeout, then reports `degraded` for the
   whole pull the same way.
+- **Deadline retry** (bead `pg2-frp7e`): a source whose row is degraded because it ran out of its
+  time budget (a backend or umbrella deadline; under host load this hit 12-17% of hourly pulls)
+  is re-invoked ONCE, pinned with `--backend <source>`, after a single wait of 30 seconds shared by
+  every such source (`pull.DefaultRetryWait`; `Deps.RetryWait` and `Deps.Sleep` are the test
+  seam). The retry sits between the fan-out and persistence: every first-attempt row is held, the
+  retried rows replace the failed ones, and only then is one pull row and one `pull.jsonl` line
+  written per source, so a recovered source never produces a degraded row or an alert. The retry
+  row carries `"retried": true` in `pull.jsonl`. Only deadline-kind failures are retried (a non-zero
+  exit, a source's own reason, truncation, a store lock and "could not run" are not), healthy
+  sources are never re-run, and a retry that cannot run keeps the first row. The deadline is
+  recognized from pg-connector's free-text reason (the `sources[]` row has no failure code), so a
+  reword there silently disables the retry; `internal/pull/pull_test.go` pins today's wording.
 
 ### 7.8 CLI (WT-D13)
 

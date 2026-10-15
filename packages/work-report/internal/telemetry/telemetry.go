@@ -35,6 +35,10 @@ type PullLog struct {
 	Truncated  bool      `json:"truncated"`
 	DurationMS int64     `json:"duration_ms"`
 	Reason     string    `json:"reason"`
+	// Retried is true when the source degraded on a deadline in the first
+	// attempt and the pull re-invoked it once (the status and reason are those
+	// of the retry).
+	Retried bool `json:"retried,omitempty"`
 }
 
 // ReconcileLog is one failed tracker call of the degraded-source reconcile

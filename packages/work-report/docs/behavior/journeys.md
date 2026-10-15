@@ -46,7 +46,8 @@ _Requires:_ `INV-RANGE-1`, `INV-DEGRADE-1`, `INV-TYPE-1`, `INV-ORDER-1`, `INV-ID
 Extensions:
 
 - 2a. A source is unavailable or errors: reported degraded, with a reason; the other sources'
-  pulls continue (`INV-DEGRADE-1`).
+  pulls continue (`INV-DEGRADE-1`). A source that merely ran out of time is first given one more attempt after a short
+  wait, and is reported degraded only if that attempt also fails.
 - 2b. A source is disabled: reported disabled; never attempted.
 - 3a. An entry fails its type's schema: rejected and reported, never stored (`INV-TYPE-1`); the
   source's other entries are still stored and its outcome is succeeded, with the rejections

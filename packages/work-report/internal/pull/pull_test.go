@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -593,5 +595,378 @@ func TestTelemetryFailureDoesNotFailThePull(t *testing.T) {
 	fake.Install(t, listRoute(fixture(t, "mixed.json"), 0))
 	if res := run(t, e, pull.Opts{}); res.ExitCode() != 2 || len(queryAll(t, e.st)) != 4 {
 		t.Errorf("pull must proceed despite log failures: %+v", res)
+	}
+}
+
+// ---- deadline retry (bead pg2-frp7e) ----
+
+// The failure texts below are what a degraded sources[] row carries today:
+// the backend's own structured deadline error, and the umbrella's backstop
+// when it had to kill a backend that could not even report.
+const (
+	backendDeadline = `scriptout: unavailable: deadline exceeded after 1m0.02s (limit 1m0s) in op=list_activity args={"since":"2026-03-02T00:00:00Z"}: signal: killed`
+	umbrellaKill    = `scriptout: pg-connector-activity-git: op=list_activity elapsed=1m5.001s (umbrella deadline 1m5s exceeded; backend killed) args={"since":"x"}: signal: killed`
+	exitStatusOne   = `scriptout: pg-connector-pr-github: op=list_activity elapsed=2.1s: exit status 1 (stderr: boom)`
+)
+
+// scriptedConn is a hermetic pgconn.Runner: answers[source] is consumed one
+// reply per call that names the source ("" is the single fan-out call), and
+// every argv is recorded.
+type scriptedConn struct {
+	answers map[string][]string
+	calls   [][]string
+}
+
+func (c *scriptedConn) Run(_ context.Context, args ...string) ([]byte, int, error) {
+	c.calls = append(c.calls, append([]string(nil), args...))
+	backend := ""
+	for i, a := range args {
+		if a == "--backend" && i+1 < len(args) {
+			backend = args[i+1]
+		}
+	}
+	replies := c.answers[backend]
+	if len(replies) == 0 {
+		return nil, 0, errors.New("scriptedConn: no reply left for backend " + strconv.Quote(backend))
+	}
+	c.answers[backend] = replies[1:]
+	return []byte(replies[0]), 0, nil
+}
+
+// backends lists the --backend of every recorded call ("" for the fan-out).
+func (c *scriptedConn) backends() []string {
+	var out []string
+	for _, a := range c.calls {
+		b := ""
+		for i, x := range a {
+			if x == "--backend" && i+1 < len(a) {
+				b = a[i+1]
+			}
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+func srcRow(source, status, reason string) string {
+	b, _ := json.Marshal(map[string]any{"source": source, "status": status, "count": 0, "reason": reason})
+	return string(b)
+}
+
+func goodItem(source, id string) string {
+	b, _ := json.Marshal(map[string]any{"source": source, "item": map[string]any{
+		"id": id, "kind": "commit", "entity_type": "commit", "entity_id": "e-" + id,
+		"occurred_at": "2026-03-02T10:00:00Z", "summary": "s " + id, "fields": map[string]any{},
+	}})
+	return string(b)
+}
+
+func listDoc(rows []string, items ...string) string {
+	return `{"sources":[` + strings.Join(rows, ",") + `],"items":[` + strings.Join(items, ",") + `]}`
+}
+
+type sleepRecorder struct{ waits []time.Duration }
+
+func (s *sleepRecorder) sleep(_ context.Context, d time.Duration) error {
+	s.waits = append(s.waits, d)
+	return nil
+}
+
+func retryEnv(t *testing.T, conn *scriptedConn) (*env, *sleepRecorder) {
+	t.Helper()
+	e := newEnv(t, config.Config{})
+	rec := &sleepRecorder{}
+	e.deps.Conn = conn
+	e.deps.Sleep = rec.sleep
+	return e, rec
+}
+
+func logLines(t *testing.T, e *env) []map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(e.stateDir, "log", "pull.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(l), &m); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func linesFor(lines []map[string]any, source string) []map[string]any {
+	var out []map[string]any
+	for _, l := range lines {
+		if l["source"] == source {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func TestDeadlineDegradedSourceRecoversOnRetry(t *testing.T) {
+	conn := &scriptedConn{answers: map[string][]string{
+		"": {listDoc([]string{
+			srcRow("src-ok", "succeeded", ""),
+			srcRow("src-slow", "degraded", backendDeadline),
+			srcRow("src-broken", "degraded", exitStatusOne),
+		}, goodItem("src-ok", "a"))},
+		"src-slow": {listDoc([]string{srcRow("src-slow", "succeeded", "")}, goodItem("src-slow", "b"))},
+	}}
+	e, sl := retryEnv(t, conn)
+
+	res := run(t, e, pull.Opts{})
+
+	if got, want := conn.backends(), []string{"", "src-slow"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("invocations = %q; want the fan-out then only the degraded deadline source %q", got, want)
+	}
+	wantRetry := []string{"activity", "list", "--since", "2026-03-02T00:00:00Z", "--before", "2026-03-03T00:00:00Z", "--backend", "src-slow", "--output", "json"}
+	if len(conn.calls) < 2 || !reflect.DeepEqual(conn.calls[1], wantRetry) {
+		t.Errorf("calls = %q; want the retry to repeat the range pinned to the source: %q", conn.calls, wantRetry)
+	}
+	if len(sl.waits) != 1 || sl.waits[0] != pull.DefaultRetryWait {
+		t.Errorf("waits = %v; want exactly one wait of the default %v", sl.waits, pull.DefaultRetryWait)
+	}
+
+	var order []string
+	for _, r := range res.Rows {
+		order = append(order, r.Source)
+	}
+	if want := []string{"src-ok", "src-slow", "src-broken"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("row order = %q; want the fan-out's order %q", order, want)
+	}
+	rows := rowsBySource(res)
+	if r := rows["src-slow"]; r.Status != pull.StatusSucceeded || r.Count != 1 || r.Reason != "" {
+		t.Errorf("src-slow = %+v; want succeeded with the retry's entry stored", r)
+	}
+	if r := rows["src-broken"]; r.Status != pull.StatusDegraded || r.Reason != exitStatusOne {
+		t.Errorf("src-broken = %+v; want it degraded exactly as before", r)
+	}
+	if got := res.ExitCode(); got != 2 {
+		t.Errorf("ExitCode = %d; want 2 (only src-broken is degraded)", got)
+	}
+	if n := len(queryAll(t, e.st)); n != 2 {
+		t.Errorf("stored %d entries; want 2 (src-ok and the recovered src-slow)", n)
+	}
+
+	// a recovered source never emits a degraded row: one pull row, one log line.
+	st, err := e.st.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range st.Sources {
+		if s.Source == "src-slow" && s.LastStatus != pull.StatusSucceeded {
+			t.Errorf("persisted src-slow status = %q; want succeeded", s.LastStatus)
+		}
+	}
+	lines := logLines(t, e)
+	if len(lines) != 3 {
+		t.Fatalf("pull.jsonl has %d lines; want one per source (3)", len(lines))
+	}
+	slow := linesFor(lines, "src-slow")
+	if len(slow) != 1 || slow[0]["status"] != pull.StatusSucceeded || slow[0]["retried"] != true {
+		t.Errorf("src-slow log = %v; want one succeeded line marked retried", slow)
+	}
+	if ok := linesFor(lines, "src-ok"); len(ok) != 1 || ok[0]["retried"] != nil {
+		t.Errorf("src-ok log = %v; a source that was not retried carries no retried field", ok)
+	}
+}
+
+func TestDeadlineDegradedSourceThatFailsTheRetryEndsDegraded(t *testing.T) {
+	conn := &scriptedConn{answers: map[string][]string{
+		"": {listDoc([]string{
+			srcRow("src-ok", "succeeded", ""),
+			srcRow("src-slow", "degraded", backendDeadline),
+		}, goodItem("src-ok", "a"))},
+		"src-slow": {listDoc([]string{srcRow("src-slow", "degraded", umbrellaKill)})},
+	}}
+	e, sl := retryEnv(t, conn)
+
+	res := run(t, e, pull.Opts{})
+
+	if got, want := conn.backends(), []string{"", "src-slow"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("invocations = %q; want one retry only %q", got, want)
+	}
+	if len(sl.waits) != 1 {
+		t.Errorf("waits = %v; want one", sl.waits)
+	}
+	r := rowsBySource(res)["src-slow"]
+	if r.Status != pull.StatusDegraded || r.Reason != umbrellaKill {
+		t.Errorf("src-slow = %+v; want degraded with the retry's own reason", r)
+	}
+	if res.ExitCode() != 2 || res.CouldNotRun {
+		t.Errorf("ExitCode = %d CouldNotRun = %v; want 2/false as for any degraded source", res.ExitCode(), res.CouldNotRun)
+	}
+	slow := linesFor(logLines(t, e), "src-slow")
+	if len(slow) != 1 || slow[0]["status"] != pull.StatusDegraded || slow[0]["retried"] != true {
+		t.Errorf("src-slow log = %v; want one degraded line marked retried", slow)
+	}
+}
+
+func TestNonDeadlineFailuresAreNotRetried(t *testing.T) {
+	reasons := map[string]string{
+		"exit status 1":                exitStatusOne,
+		"the pull's own context":       "context deadline exceeded",
+		"upstream message":             "upstream timed out",
+		"bare kill":                    "signal: killed",
+		"unauthenticated":              "scriptout: unauthenticated: token expired",
+		"mentions a deadline loosely":  "the deadline for this report was exceeded",
+		"a deadline word, wrong shape": "deadline exceeded after a while",
+	}
+	for name, reason := range reasons {
+		t.Run(name, func(t *testing.T) {
+			conn := &scriptedConn{answers: map[string][]string{
+				"": {listDoc([]string{srcRow("src-a", "degraded", reason)})},
+			}}
+			e, sl := retryEnv(t, conn)
+			res := run(t, e, pull.Opts{})
+			if got := conn.backends(); !reflect.DeepEqual(got, []string{""}) {
+				t.Errorf("invocations = %q; a non-deadline failure must not be retried", got)
+			}
+			if len(sl.waits) != 0 {
+				t.Errorf("waits = %v; want none", sl.waits)
+			}
+			if r := res.Rows[0]; r.Status != pull.StatusDegraded || r.Reason != reason {
+				t.Errorf("row = %+v; want it degraded exactly as reported", r)
+			}
+		})
+	}
+}
+
+func TestOnlyDegradedDeadlineSourcesAreReinvokedUnderOneWait(t *testing.T) {
+	conn := &scriptedConn{answers: map[string][]string{
+		"": {listDoc([]string{
+			srcRow("src-a", "succeeded", ""),
+			srcRow("src-b", "degraded", backendDeadline),
+			srcRow("src-c", "disabled", "not applicable"),
+			srcRow("src-d", "degraded", umbrellaKill),
+			srcRow("src-e", "degraded", exitStatusOne),
+		})},
+		"src-b": {listDoc([]string{srcRow("src-b", "succeeded", "")})},
+		"src-d": {listDoc([]string{srcRow("src-d", "degraded", backendDeadline)})},
+	}}
+	e, sl := retryEnv(t, conn)
+
+	res := run(t, e, pull.Opts{})
+
+	if got, want := conn.backends(), []string{"", "src-b", "src-d"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("invocations = %q; want the fan-out then exactly the two deadline-degraded sources %q", got, want)
+	}
+	if len(sl.waits) != 1 {
+		t.Errorf("waits = %v; want a single wait shared by both retries", sl.waits)
+	}
+	rows := rowsBySource(res)
+	want := map[string]string{
+		"src-a": pull.StatusSucceeded, "src-b": pull.StatusSucceeded, "src-c": pull.StatusDisabled,
+		"src-d": pull.StatusDegraded, "src-e": pull.StatusDegraded,
+	}
+	for s, st := range want {
+		if rows[s].Status != st {
+			t.Errorf("%s = %+v; want %s", s, rows[s], st)
+		}
+	}
+	if len(res.Rows) != 5 {
+		t.Errorf("%d rows; want exactly one per source (5)", len(res.Rows))
+	}
+}
+
+func TestPinnedSourcesRetryOnlyTheDeadlineDegradedOne(t *testing.T) {
+	conn := &scriptedConn{answers: map[string][]string{
+		"src-a": {listDoc([]string{srcRow("src-a", "succeeded", "")})},
+		"src-b": {
+			listDoc([]string{srcRow("src-b", "degraded", backendDeadline)}),
+			listDoc([]string{srcRow("src-b", "succeeded", "")}),
+		},
+	}}
+	e, sl := retryEnv(t, conn)
+
+	res := run(t, e, pull.Opts{Sources: []string{"src-a", "src-b"}})
+
+	if got, want := conn.backends(), []string{"src-a", "src-b", "src-b"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("invocations = %q; want %q", got, want)
+	}
+	if len(sl.waits) != 1 {
+		t.Errorf("waits = %v; want one", sl.waits)
+	}
+	if len(res.Rows) != 2 || res.Rows[0].Source != "src-a" || res.Rows[1].Source != "src-b" ||
+		res.Rows[1].Status != pull.StatusSucceeded || res.ExitCode() != 0 {
+		t.Errorf("res = %+v exit=%d", res.Rows, res.ExitCode())
+	}
+}
+
+func TestRetryThatCannotRunKeepsTheOriginalRow(t *testing.T) {
+	for name, reply := range map[string]string{
+		"not a document": "{not json",
+		"no row for it":  listDoc([]string{srcRow("src-other", "succeeded", "")}),
+		"empty":          "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			conn := &scriptedConn{answers: map[string][]string{
+				"":         {listDoc([]string{srcRow("src-slow", "degraded", backendDeadline)})},
+				"src-slow": {reply},
+			}}
+			e, _ := retryEnv(t, conn)
+			res := run(t, e, pull.Opts{})
+			r := res.Rows[0]
+			if r.Status != pull.StatusDegraded || r.Reason != backendDeadline {
+				t.Errorf("row = %+v; want the original degraded row", r)
+			}
+			if res.CouldNotRun {
+				t.Error("a failed retry must not turn a pull that ran into CouldNotRun")
+			}
+			if len(res.Rows) != 1 {
+				t.Errorf("%d rows; want one", len(res.Rows))
+			}
+		})
+	}
+}
+
+func TestCancelledDuringRetryWaitStillRecordsTheDegradedRows(t *testing.T) {
+	conn := &scriptedConn{answers: map[string][]string{
+		"": {listDoc([]string{
+			srcRow("src-ok", "succeeded", ""),
+			srcRow("src-slow", "degraded", backendDeadline),
+		})},
+	}}
+	e, _ := retryEnv(t, conn)
+	e.deps.Sleep = func(ctx context.Context, _ time.Duration) error { return context.Canceled }
+
+	res, err := pull.Run(context.Background(), e.deps, pull.Opts{Range: rng, Now: now})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v; want context.Canceled", err)
+	}
+	if len(res.Rows) != 2 || rowsBySource(res)["src-slow"].Status != pull.StatusDegraded {
+		t.Errorf("rows = %+v; the first attempt's rows must still be recorded", res.Rows)
+	}
+	if n := len(logLines(t, e)); n != 2 {
+		t.Errorf("pull.jsonl has %d lines; want 2", n)
+	}
+}
+
+func TestRetryWaitDefaultsAndIsConfigurable(t *testing.T) {
+	doc := listDoc([]string{srcRow("src-slow", "degraded", backendDeadline)})
+	for name, tc := range map[string]struct {
+		set  time.Duration
+		want time.Duration
+	}{
+		"zero means the default": {0, pull.DefaultRetryWait},
+		"explicit":               {7 * time.Second, 7 * time.Second},
+	} {
+		t.Run(name, func(t *testing.T) {
+			conn := &scriptedConn{answers: map[string][]string{"": {doc}, "src-slow": {doc}}}
+			e, sl := retryEnv(t, conn)
+			e.deps.RetryWait = tc.set
+			run(t, e, pull.Opts{})
+			if len(sl.waits) != 1 || sl.waits[0] != tc.want {
+				t.Errorf("waits = %v; want [%v]", sl.waits, tc.want)
+			}
+		})
+	}
+	if pull.DefaultRetryWait != 30*time.Second {
+		t.Errorf("DefaultRetryWait = %v; the documented default is 30s", pull.DefaultRetryWait)
 	}
 }
