@@ -73,8 +73,9 @@ See the [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md
 - **`STORY-OP-13`** <!-- uuid: a260725e-4e73-4368-b752-046812439ff9 --> — read the same PR or
   issue repeatedly without every reader calling its origin, and be told for each answer whether it
   came from the origin or from a cache entry and how old it is, so a cache never passes stale
-  content off as current. _(→ `USECASE-CACHED-READ`; `INV-CACHE-4`, `INV-CACHE-5`,
-  `INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-4`, `INV-ASOF-1`, `INV-ASOF-2`.)_
+  content off as current, and so a PR or issue I have just changed through the umbrella reads back
+  as changed rather than as its pre-write copy. _(→ `USECASE-CACHED-READ`; `INV-CACHE-4`,
+  `INV-CACHE-5`, `INV-CACHE-10`, `INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-4`, `INV-ASOF-1`, `INV-ASOF-2`.)_
 - **`STORY-OP-14`** <!-- uuid: a8d513e2-b211-40f8-8d0b-9f13239f48ad --> — see my calendar in the
   attention feed so that a meeting stands out as it nears and while it runs, at a level that
   follows the clock alone and never my guess at its importance. _(→ `USECASE-CALENDAR-ATTENTION`;
@@ -591,6 +592,11 @@ Extensions:
   the ledger is still kept (`INV-CACHE-1`, `INV-CACHE-4`).
 - A consumer that has just detected a change and needs the current entity passes `--fresh`, because
   a detail entry younger than `read_ttl` is otherwise served (`INV-CACHE-8`).
+- The operator changed the entity through the umbrella (an accepted `issue comment`,
+  `issue transition`, `issue update`, `issue close` or `pr review submit`): the write drops the
+  entity's cache entry, so the next `show` reads the origin instead of serving the pre-write entity
+  until `read_ttl` expires; a failed write drops nothing and the ledger is not touched
+  (`INV-CACHE-10`).
 
 ### `USECASE-CALENDAR-ATTENTION` — see calendar events in the attention feed, ramped by time alone <!-- uuid: 8bf21ca6-1f5e-43be-a397-436ef2252c5d -->
 

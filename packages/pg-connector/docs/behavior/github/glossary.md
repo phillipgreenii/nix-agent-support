@@ -2,9 +2,10 @@
 
 Vocabulary for the daemon-backed GitHub backend. A term the parent set already defines (backend,
 daemon, daemon-backed backend, `owns_changes`, `cache_opt_out`, `sources_freshness[]`,
-`last_seen`, `served_from`, `age_seconds`) is **inherited** with its parent meaning
-(`INV-20`), cited from `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior`,
-and is not redefined here. Where this set needs a different meaning it takes a different name.
+`last_seen`, `served_from`, `age_seconds`) is **inherited** with its parent meaning, cited from
+`phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior`, and is not redefined here.
+
+Inheritance follows `INV-20`: where this set needs a different meaning it takes a different name.
 
 ## Process and placement
 
