@@ -93,6 +93,7 @@ func TestPrepareState_roundTrip(t *testing.T) {
 		Start: "2026-10-10T12:00:00Z", Now: "2026-10-10T12:00:05Z",
 		Counts: map[string]int{"open": 2, "ready": 1}, Review: []string{"b", "a", "a"},
 		ReadyIDs: []string{"z"}, Pre: map[string]string{"a": "open"}, Closed: []string{"c2", "c1"},
+		EpicCandidates: []string{"e2", "e1", "e1"}, EpicMarkerSkip: []string{"e2"},
 	}
 	if err := WritePrepare(p, in); err != nil {
 		t.Fatal(err)
@@ -104,6 +105,7 @@ func TestPrepareState_roundTrip(t *testing.T) {
 	want := in
 	want.Review = []string{"a", "b"}
 	want.Closed = []string{"c1", "c2"}
+	want.EpicCandidates = []string{"e1", "e2"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v want %+v", got, want)
 	}
@@ -769,5 +771,142 @@ func TestLoadReportInput_toleratesMissingOptionalFiles(t *testing.T) {
 	}
 	if _, err := LoadReportInput(Workdir{Path: t.TempDir()}, nil, nil, false, rtNow); err == nil {
 		t.Error("missing prepare.json: want error")
+	}
+}
+
+// ---- finished-epic candidates ----
+
+func rtEpicIn(pre map[string]string, cands, skipped []string, post []Row) ReportInput {
+	in := rtIn(pre, post)
+	in.Prepare.EpicCandidates = cands
+	in.Prepare.EpicMarkerSkip = skipped
+	return in
+}
+
+func TestBuildReport_epicsClosedUnchangedNeedsChildrenSkipped(t *testing.T) {
+	const ts = "2026-10-10T12:30:00Z"
+	pre := map[string]string{"e1": "open", "e2": "open", "e3": "open", "e4": "open", "e5": "open", "e6": "open"}
+	post := []Row{
+		{ID: "e1", Status: StatusClosed, CloseReason: "all 4 children shipped"},
+		{ID: "e2", Status: StatusOpen, Notes: rtMarker(ts, "unchanged")},
+		{ID: "e3", Status: StatusOpen, Notes: rtMarker(ts, "needs-children")},
+		{ID: "e4", Status: StatusOpen},
+		{ID: "e5", Status: StatusClosed, CloseReason: "peer closed"},
+		{ID: "e6", Status: StatusOpen},
+	}
+	in := rtEpicIn(pre, []string{"e6", "e5", "e4", "e3", "e2", "e1"}, []string{"e6"}, post)
+	in.Batches["E01"] = []string{"e1", "e2", "e3", "e4", "e5"}
+	in.Results["E01"] = "closed e1: all 4 children shipped\n"
+	rep := BuildReport(in)
+	ep := rep.Epics
+	if ep.Candidates != 6 || ep.Unchanged != 1 || ep.MarkerSkipped != 1 ||
+		!reflect.DeepEqual(ep.NeedsChildren, []string{"e3"}) || !reflect.DeepEqual(ep.Unresolved, []string{"e4"}) {
+		t.Errorf("epics = %+v", ep)
+	}
+	wantClosed := []ClosedBead{{"e1", "all 4 children shipped", AttribSweep}, {"e5", "peer closed", AttribPeer}}
+	if !reflect.DeepEqual(ep.Closed, wantClosed) {
+		t.Errorf("closed = %+v, want %+v", ep.Closed, wantClosed)
+	}
+	if want := "epic candidates 6 = closed 2 + unchanged 1 + needs-children 1 + marker-skipped 1 + unresolved 1"; ep.Arithmetic != want {
+		t.Errorf("arithmetic = %q, want %q", ep.Arithmetic, want)
+	}
+	human := rep.RenderHuman()
+	for _, s := range []string{ep.Arithmetic, "Epics needing children (1):", "Epic candidates left unresolved (1):"} {
+		if !strings.Contains(human, s) {
+			t.Errorf("human report lacks %q:\n%s", s, human)
+		}
+	}
+	js, err := rep.RenderJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Epics map[string]any `json:"epics"`
+	}
+	if err := json.Unmarshal(js, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Epics["candidates"] != float64(6) || m.Epics["marker_skipped"] != float64(1) {
+		t.Errorf("--json epics = %v", m.Epics)
+	}
+	for _, k := range []string{"closed", "unchanged", "needs_children", "unresolved", "arithmetic"} {
+		if _, ok := m.Epics[k]; !ok {
+			t.Errorf("--json epics lacks %q", k)
+		}
+	}
+}
+
+func TestBuildReport_epicsFullyAccountedOmitsUnresolved(t *testing.T) {
+	const ts = "2026-10-10T12:30:00Z"
+	pre := map[string]string{"e1": "open", "e2": "open", "e3": "open", "e4": "open"}
+	post := []Row{
+		{ID: "e1", Status: StatusClosed, CloseReason: "done"},
+		{ID: "e2", Status: StatusOpen, Notes: rtMarker(ts, "unchanged")},
+		{ID: "e3", Status: StatusOpen, Notes: rtMarker(ts, "needs-children")},
+		{ID: "e4", Status: StatusOpen},
+	}
+	rep := BuildReport(rtEpicIn(pre, []string{"e1", "e2", "e3", "e4"}, []string{"e4"}, post))
+	want := "epic candidates 4 = closed 1 + unchanged 1 + needs-children 1 + marker-skipped 1"
+	if rep.Epics.Arithmetic != want || len(rep.Epics.Unresolved) != 0 {
+		t.Errorf("arithmetic = %q unresolved = %v", rep.Epics.Arithmetic, rep.Epics.Unresolved)
+	}
+	sum := rep.Epics.Candidates - len(rep.Epics.Closed) - rep.Epics.Unchanged - len(rep.Epics.NeedsChildren) - rep.Epics.MarkerSkipped
+	if sum != 0 {
+		t.Errorf("candidates do not equal the parts: remainder %d", sum)
+	}
+}
+
+func TestBuildReport_epicMarkerBeforeSweepNotCounted(t *testing.T) {
+	// A marker from an earlier sweep (before start, or already on the bead
+	// pre-sweep) must not make a dispatched candidate look handled.
+	old := rtMarker("2026-10-01T00:00:00Z", "unchanged")
+	in := rtEpicIn(map[string]string{"e1": "open"}, []string{"e1"}, nil, []Row{{ID: "e1", Status: StatusOpen, Notes: old}})
+	in.PreRows = []Row{{ID: "e1", Status: StatusOpen, Notes: old}}
+	rep := BuildReport(in)
+	if !reflect.DeepEqual(rep.Epics.Unresolved, []string{"e1"}) || rep.Epics.Unchanged != 0 {
+		t.Errorf("epics = %+v", rep.Epics)
+	}
+}
+
+func TestReadPrepare_oldFileWithoutEpicFieldsLoads(t *testing.T) {
+	// testdata/report/prepare.json predates epic candidates.
+	st, err := ReadPrepare(filepath.Join("testdata", "report", "prepare.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.EpicCandidates == nil || len(st.EpicCandidates) != 0 || st.EpicMarkerSkip == nil || len(st.EpicMarkerSkip) != 0 {
+		t.Errorf("epic fields = %#v / %#v, want non-nil empty", st.EpicCandidates, st.EpicMarkerSkip)
+	}
+	in := rtIn(st.Pre, nil)
+	in.Prepare = st
+	if got := BuildReport(in).Epics.Arithmetic; got != "epic candidates 0 = closed 0 + unchanged 0 + needs-children 0 + marker-skipped 0" {
+		t.Errorf("arithmetic for an old prepare.json = %q", got)
+	}
+
+	// A hand-written minimal prepare.json with no epic keys at all.
+	p := filepath.Join(t.TempDir(), "prepare.json")
+	if err := os.WriteFile(p, []byte(`{"start":"2026-10-10T12:00:00Z","now":"2026-10-10T12:00:00Z","counts":{},"review":[],"ready_ids":[],"pre":{},"closed":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadPrepare(p); err != nil {
+		t.Errorf("minimal old prepare.json: %v", err)
+	}
+}
+
+func TestPrepareState_epicFieldsRoundTripAndJSONNames(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "prepare.json")
+	in := PrepareState{Start: "2026-10-10T12:00:00Z", EpicCandidates: []string{"e2", "e1"}, EpicMarkerSkip: []string{"e2"}}
+	if err := WritePrepare(p, in); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(p)
+	for _, s := range []string{`"epic_candidates"`, `"epic_marker_skip"`} {
+		if !strings.Contains(string(raw), s) {
+			t.Errorf("prepare.json lacks %s:\n%s", s, raw)
+		}
+	}
+	got, err := ReadPrepare(p)
+	if err != nil || !reflect.DeepEqual(got.EpicCandidates, []string{"e1", "e2"}) || !reflect.DeepEqual(got.EpicMarkerSkip, []string{"e2"}) {
+		t.Errorf("got %+v err %v", got, err)
 	}
 }

@@ -17,7 +17,7 @@
     "created_at": "",
     "updated_at": "",
     "closed_at": "2026-10-03T00:00:00Z",
-    "close_reason": "",
+    "close_reason": "superseded",
     "blockers": [],
     "blocked_dependents": [
       {
@@ -29,7 +29,8 @@
           "y"
         ],
         "defer_until": "",
-        "closed_at": ""
+        "closed_at": "",
+        "close_reason": ""
       }
     ],
     "parent": null,
@@ -63,7 +64,8 @@
         "y"
       ],
       "defer_until": "",
-      "closed_at": ""
+      "closed_at": "",
+      "close_reason": ""
     },
     "children": []
   },
@@ -104,7 +106,8 @@
           "l"
         ],
         "defer_until": "2026-12-01T00:00:00Z",
-        "closed_at": "2026-10-03T00:00:00Z"
+        "closed_at": "2026-10-03T00:00:00Z",
+        "close_reason": "superseded"
       },
       {
         "id": "f-ghost",
@@ -112,7 +115,8 @@
         "status": "UNKNOWN",
         "labels": [],
         "defer_until": "",
-        "closed_at": ""
+        "closed_at": "",
+        "close_reason": ""
       }
     ],
     "blocked_dependents": [
@@ -122,7 +126,8 @@
         "status": "open",
         "labels": [],
         "defer_until": "",
-        "closed_at": ""
+        "closed_at": "",
+        "close_reason": ""
       }
     ],
     "parent": {
@@ -131,16 +136,27 @@
       "status": "open",
       "labels": [],
       "defer_until": "",
-      "closed_at": ""
+      "closed_at": "",
+      "close_reason": ""
     },
     "children": [
+      {
+        "id": "f-done",
+        "title": "Done kid",
+        "status": "closed",
+        "labels": [],
+        "defer_until": "",
+        "closed_at": "2026-10-04T00:00:00Z",
+        "close_reason": "shipped in abc123"
+      },
       {
         "id": "f-kid",
         "title": "Kid",
         "status": "open",
         "labels": [],
         "defer_until": "",
-        "closed_at": ""
+        "closed_at": "",
+        "close_reason": ""
       }
     ]
   }

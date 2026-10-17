@@ -9,6 +9,7 @@ Counts (before -> after):
   ready: 2 -> 4 (+2 = 4 - 2)
   open-not-ready: 8 - 5 left (sweep 2 + peers 3) + 1 entered = 4
   changed in window 9 = sweep 5 + peers 4
+  epic candidates 0 = closed 0 + unchanged 0 + needs-children 0 + marker-skipped 0
 
 Markers added by outcome (5):
   de-labelled: 1 (sy-2)

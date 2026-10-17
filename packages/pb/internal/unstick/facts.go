@@ -21,6 +21,9 @@ type Ref struct {
 	Labels     []string `json:"labels"`
 	DeferUntil string   `json:"defer_until"`
 	ClosedAt   string   `json:"closed_at"`
+	// CloseReason is the bead's close reason: the evidence an epic worker
+	// reads on each (closed) child.
+	CloseReason string `json:"close_reason"`
 }
 
 // Fact is one bead's facts file entry: the explicit projection of the export
@@ -60,7 +63,7 @@ func MakeRef(g *Graph, id string) Ref {
 	return Ref{
 		ID: r.ID, Title: r.Title, Status: r.Status,
 		Labels:     nonNilStrings(r.Labels),
-		DeferUntil: r.DeferUntil, ClosedAt: r.ClosedAt,
+		DeferUntil: r.DeferUntil, ClosedAt: r.ClosedAt, CloseReason: r.CloseReason,
 	}
 }
 

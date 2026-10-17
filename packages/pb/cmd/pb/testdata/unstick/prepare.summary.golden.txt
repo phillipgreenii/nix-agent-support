@@ -12,15 +12,20 @@
     "marker_skip": 1,
     "review": 3,
     "drainable": 1,
-    "focus_excluded": 0
+    "focus_excluded": 0,
+    "epic_candidates": 0,
+    "epic_marker_skip": 0
   },
   "partition": "targets 5 = live 1 + marker 1 + review 3",
   "batches": [
     {
       "name": "B01",
+      "kind": "review",
       "size": 3
     }
   ],
+  "epic_candidates": [],
+  "epic_marker_skip": [],
   "claim_candidates": [
     {
       "id": "a-7",
@@ -54,6 +59,7 @@
     "ready.json",
     "triage-assigned_open.txt",
     "triage-drain.txt",
+    "triage-epic-candidates.txt",
     "triage-inprog.txt",
     "triage-live.txt",
     "triage-marker.txt",

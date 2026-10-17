@@ -153,5 +153,14 @@
   "peer_changed": 4,
   "operator": ["decide on sy-5 policy", "review sy-2 label"],
   "followup": ["file a bead for sy-3 cleanup"],
-  "changed_arithmetic": "changed in window 9 = sweep 5 + peers 4"
+  "changed_arithmetic": "changed in window 9 = sweep 5 + peers 4",
+  "epics": {
+    "candidates": 0,
+    "closed": [],
+    "unchanged": 0,
+    "needs_children": [],
+    "marker_skipped": 0,
+    "unresolved": [],
+    "arithmetic": "epic candidates 0 = closed 0 + unchanged 0 + needs-children 0 + marker-skipped 0"
+  }
 }

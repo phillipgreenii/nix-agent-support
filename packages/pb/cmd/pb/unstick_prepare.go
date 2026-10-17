@@ -21,8 +21,15 @@ const (
 	gateCheckUnavailable = "unavailable"
 )
 
+// Batch kinds. Both kinds draw on the same worker pool.
+const (
+	batchKindReview = "review" // B<NN>: REVIEW beads, clustered
+	batchKindEpic   = "epic"   // E<NN>: finished-epic candidates, unclustered
+)
+
 type batchSummary struct {
 	Name string `json:"name"`
+	Kind string `json:"kind"`
 	Size int    `json:"size"`
 }
 
@@ -38,6 +45,8 @@ type prepareSummary struct {
 	Counts           unstick.TriageCounts     `json:"counts"`
 	Partition        string                   `json:"partition"`
 	Batches          []batchSummary           `json:"batches"`
+	EpicCandidates   []string                 `json:"epic_candidates"`
+	EpicMarkerSkip   []string                 `json:"epic_marker_skip"`
 	ClaimCandidates  []unstick.ClaimCandidate `json:"claim_candidates"`
 	MalformedMarkers malformedSummary         `json:"malformed_markers"`
 	GateCheck        string                   `json:"gate_check"`
@@ -63,7 +72,15 @@ in-process (dry-run), then computes LIVE / marker-skip / REVIEW over the WHOLE
 workspace. --label and --id-prefix narrow the TARGETS only after LIVE and
 DRAINABLE are computed. --full ignores sweep markers.
 
-Writes triage-*.txt, batches/B<NN>, facts/B<NN>.json and prepare.json. A gate
+Also lists FINISHED-EPIC CANDIDATES: ready, open, unassigned epics (no focus-item
+label, not templates) with at least one child, every child closed. They are never
+targets, so the targets = live + marker + review partition is unchanged. Candidates
+with a valid sweep marker are counted, the rest are packed unclustered into E01,
+E02, ... batches of 3-5 epics that share the worker pool with the B batches. "All
+children closed" is a candidate signal only; the worker decides.
+
+Writes triage-*.txt (including triage-epic-candidates.txt), batches/B<NN> and
+batches/E<NN>, the matching facts/*.json and prepare.json. A gate
 check that skipped gates is reported as gate_check "partial", one that failed
 outright as "unavailable"; neither is fatal.
 
@@ -174,6 +191,7 @@ func runPrepare(cmd *cobra.Command, env unstickEnv, w unstick.Workdir, root stri
 		{"triage-inprog.txt", res.InProgress},
 		{"triage-assigned_open.txt", res.AssignedOpen},
 		{"triage-drain.txt", res.Drainable},
+		{"triage-epic-candidates.txt", res.EpicCandidates},
 	}
 	for _, l := range lists {
 		if err := writeIDList(w.Join(l.name), l.ids); err != nil {
@@ -193,13 +211,30 @@ func runPrepare(cmd *cobra.Command, env unstickEnv, w unstick.Workdir, root stri
 	}
 	sum.Batches = []batchSummary{}
 	for i, n := range names {
-		sum.Batches = append(sum.Batches, batchSummary{Name: n, Size: len(batches[i])})
+		sum.Batches = append(sum.Batches, batchSummary{Name: n, Kind: batchKindReview, Size: len(batches[i])})
+		written = append(written, unstick.BatchesDir+"/"+n, unstick.FactsDir+"/"+n+".json")
+	}
+
+	// Finished-epic candidates: E batches are written and coverage-checked
+	// separately from REVIEW (their ids are never targets), and share the
+	// worker pool with the B batches.
+	epicBatches := unstick.PackEpics(res.EpicReview)
+	if err := checkEpicBatches(res.EpicReview, epicBatches); err != nil {
+		return sum, err
+	}
+	epicNames, err := unstick.WriteEpicBatches(w, epicBatches, g)
+	if err != nil {
+		return sum, err
+	}
+	for i, n := range epicNames {
+		sum.Batches = append(sum.Batches, batchSummary{Name: n, Kind: batchKindEpic, Size: len(epicBatches[i])})
 		written = append(written, unstick.BatchesDir+"/"+n, unstick.FactsDir+"/"+n+".json")
 	}
 
 	st := unstick.PrepareState{
 		Start: sum.Start, Now: sum.Start, Review: res.Review,
 		Counts: countsMap(res.Counts), Pre: map[string]string{},
+		EpicCandidates: res.EpicCandidates, EpicMarkerSkip: res.EpicMarkerSkip,
 	}
 	for _, rr := range ready {
 		st.ReadyIDs = append(st.ReadyIDs, rr.ID)
@@ -218,6 +253,8 @@ func runPrepare(cmd *cobra.Command, env unstickEnv, w unstick.Workdir, root stri
 
 	sum.Counts = res.Counts
 	sum.Partition = res.Arithmetic()
+	sum.EpicCandidates = nonNilIDs(res.EpicCandidates)
+	sum.EpicMarkerSkip = nonNilIDs(res.EpicMarkerSkip)
 	sum.ClaimCandidates = res.ClaimCandidates
 	if sum.ClaimCandidates == nil {
 		sum.ClaimCandidates = []unstick.ClaimCandidate{}
@@ -257,6 +294,7 @@ func countsMap(c unstick.TriageCounts) map[string]int {
 		"open": c.Open, "blocked": c.Blocked, "deferred": c.Deferred, "in_progress": c.InProgress,
 		"ready": c.Ready, "targets": c.Targets, "live_skip": c.LiveSkip, "marker_skip": c.MarkerSkip,
 		"review": c.Review, "drainable": c.Drainable, "focus_excluded": c.FocusExcluded,
+		"epic_candidates": c.EpicCandidates, "epic_marker_skip": c.EpicMarkerSkip,
 	}
 }
 
@@ -292,6 +330,8 @@ func renderPrepareHuman(w io.Writer, s prepareSummary) {
 		fmt.Fprintf(w, " %s(%d)", b.Name, b.Size)
 	}
 	fmt.Fprintln(w)
+	fmt.Fprintf(w, "epics:    %d finished-epic candidates (marker-skipped %d, batched %d)\n",
+		len(s.EpicCandidates), len(s.EpicMarkerSkip), len(s.EpicCandidates)-len(s.EpicMarkerSkip))
 	fmt.Fprintf(w, "claim candidates: %d\n", len(s.ClaimCandidates))
 	for _, cc := range s.ClaimCandidates {
 		fmt.Fprintf(w, "  %s  %s  assignee=%s  updated=%s\n", cc.ID, cc.Status, cc.Assignee, cc.UpdatedAt)
@@ -309,4 +349,27 @@ func renderPrepareHuman(w io.Writer, s prepareSummary) {
 	for _, p := range s.Written {
 		fmt.Fprintf(w, "  %s/%s\n", s.Workdir, p)
 	}
+}
+
+// checkEpicBatches asserts every dispatched epic candidate is in exactly one
+// E batch, no batch holds anything else, and no batch exceeds
+// unstick.EpicMaxBatch epics (epics are never clustered; each needs live
+// probes, so a batch stays small).
+func checkEpicBatches(epics []string, batches [][]string) error {
+	if err := checkBatchCoverage(epics, batches); err != nil {
+		return fmt.Errorf("epic %w", err)
+	}
+	for i, b := range batches {
+		if len(b) > unstick.EpicMaxBatch {
+			return fmt.Errorf("epic batch %s holds %d epics, max %d", unstick.EpicBatchName(i), len(b), unstick.EpicMaxBatch)
+		}
+	}
+	return nil
+}
+
+func nonNilIDs(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
 }

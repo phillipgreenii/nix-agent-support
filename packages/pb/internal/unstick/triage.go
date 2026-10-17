@@ -92,6 +92,11 @@ type TriageCounts struct {
 	Drainable  int `json:"drainable"`
 	// FocusExcluded counts focus-item beads removed from TARGETS.
 	FocusExcluded int `json:"focus_excluded"`
+	// EpicCandidates counts finished-epic candidates (open ready epics whose
+	// children are all closed). They are NOT part of Targets.
+	EpicCandidates int `json:"epic_candidates"`
+	// EpicMarkerSkip counts the candidates skipped on a valid sweep marker.
+	EpicMarkerSkip int `json:"epic_marker_skip"`
 }
 
 // TriageResult is the deterministic outcome of Triage. Every id list is sorted
@@ -122,7 +127,15 @@ type TriageResult struct {
 	// MalformedMarkers lists beads (any non-closed status) carrying a
 	// malformed marker line.
 	MalformedMarkers []MalformedBead
-	Counts           TriageCounts
+	// EpicCandidates lists the finished-epic candidates (ready, open epics
+	// with at least one child and every child closed), after narrowing.
+	// EpicMarkerSkip is the subset skipped on a valid sweep marker and
+	// EpicReview the rest, which are batched for workers. They are disjoint
+	// from Targets, so the Targets partition is unaffected.
+	EpicCandidates []string
+	EpicMarkerSkip []string
+	EpicReview     []string
+	Counts         TriageCounts
 }
 
 // Arithmetic renders the partition line "targets N = live a + marker b +
@@ -263,6 +276,18 @@ func Triage(rows []Row, ready []ReadyRow, opts TriageOptions, now time.Time) Tri
 	res.Counts.MarkerSkip = len(res.MarkerSkip)
 	res.Counts.Review = len(res.Review)
 	res.Counts.FocusExcluded = len(res.FocusExcluded)
+
+	res.EpicCandidates = t.epicCandidates()
+	for _, id := range res.EpicCandidates {
+		row, _ := t.g.Row(id)
+		if skip, _ := t.markerSkip(row); skip {
+			res.EpicMarkerSkip = append(res.EpicMarkerSkip, id)
+		} else {
+			res.EpicReview = append(res.EpicReview, id)
+		}
+	}
+	res.Counts.EpicCandidates = len(res.EpicCandidates)
+	res.Counts.EpicMarkerSkip = len(res.EpicMarkerSkip)
 	return res
 }
 

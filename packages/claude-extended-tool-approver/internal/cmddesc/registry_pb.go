@@ -52,6 +52,10 @@ import "strings"
 // scripts) and `pb help <topic>`. A stray positional on any verb is
 // Unmodeled, so it is insufficient.
 //
+// `pb unstick {prepare,batch,marker,report}` (the deterministic stages of the
+// /unstick-beads sweep, including its finished-epic candidate lists and E<NN>
+// batches, tc-tce2q) is likewise not modeled in this file; the finished-epic
+// change added no flag or verb to this model.
 // Flags and synopses were verified against the host's installed binary
 // (`pb --help`, `pb drain isolate --help`, `pb gate {create,check,
 // attach-verified-child} --help`; pb version 0.0.0-b674b6b9, 2026-10-05) and

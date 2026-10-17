@@ -24,9 +24,10 @@ func factsWorld() *Graph {
 	}
 	kid := Row{ID: "f-kid", Title: "Kid", Status: StatusOpen, Dependencies: []Dep{{IssueID: "f-kid", DependsOnID: "f-main", Type: DepParentChild}}}
 	dep := Row{ID: "f-dep", Title: "Dependent", Status: StatusOpen, Dependencies: []Dep{{IssueID: "f-dep", DependsOnID: "f-main", Type: DepBlocks}}}
-	blk := Row{ID: "f-blk", Title: "Blocker", Status: StatusClosed, Labels: []string{"l"}, DeferUntil: "2026-12-01T00:00:00Z", ClosedAt: "2026-10-03T00:00:00Z"}
+	blk := Row{ID: "f-blk", Title: "Blocker", Status: StatusClosed, Labels: []string{"l"}, DeferUntil: "2026-12-01T00:00:00Z", ClosedAt: "2026-10-03T00:00:00Z", CloseReason: "superseded"}
+	done := Row{ID: "f-done", Title: "Done kid", Status: StatusClosed, ClosedAt: "2026-10-04T00:00:00Z", CloseReason: "shipped in abc123", Dependencies: []Dep{{IssueID: "f-done", DependsOnID: "f-main", Type: DepParentChild}}}
 	par := Row{ID: "f-par", Title: "Parent", Status: StatusOpen}
-	return NewGraph([]Row{main, kid, dep, blk, par})
+	return NewGraph([]Row{main, kid, done, dep, blk, par})
 }
 
 func TestFactsProjectionAndRefs(t *testing.T) {
@@ -40,7 +41,7 @@ func TestFactsProjectionAndRefs(t *testing.T) {
 		t.Errorf("row fields not projected: %+v", f)
 	}
 	wantBlk := []Ref{
-		{ID: "f-blk", Title: "Blocker", Status: StatusClosed, Labels: []string{"l"}, DeferUntil: "2026-12-01T00:00:00Z", ClosedAt: "2026-10-03T00:00:00Z"},
+		{ID: "f-blk", Title: "Blocker", Status: StatusClosed, Labels: []string{"l"}, DeferUntil: "2026-12-01T00:00:00Z", ClosedAt: "2026-10-03T00:00:00Z", CloseReason: "superseded"},
 		{ID: "f-ghost", Status: StatusUnknown, Labels: []string{}},
 	}
 	if !reflect.DeepEqual(f.Blockers, wantBlk) {
@@ -52,8 +53,12 @@ func TestFactsProjectionAndRefs(t *testing.T) {
 	if f.Parent == nil || f.Parent.ID != "f-par" || f.Parent.Status != StatusOpen {
 		t.Errorf("parent %+v", f.Parent)
 	}
-	if len(f.Children) != 1 || f.Children[0].ID != "f-kid" {
-		t.Errorf("children %+v", f.Children)
+	if len(f.Children) != 2 || f.Children[0].ID != "f-done" || f.Children[1].ID != "f-kid" {
+		t.Fatalf("children %+v", f.Children)
+	}
+	// A worker judging a finished epic reads the evidence on each child.
+	if f.Children[0].CloseReason != "shipped in abc123" || f.Children[0].ClosedAt != "2026-10-04T00:00:00Z" || f.Children[1].CloseReason != "" {
+		t.Errorf("child refs must carry close_reason: %+v", f.Children)
 	}
 }
 

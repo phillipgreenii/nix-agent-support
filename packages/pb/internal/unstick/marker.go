@@ -21,6 +21,9 @@ import (
 const (
 	OutcomeUnchanged = "unchanged"
 	OutcomeReleased  = "released"
+	// OutcomeNeedsChildren is the marker an epic worker writes for a finished
+	// epic whose scope is not complete (more children must be decomposed).
+	OutcomeNeedsChildren = "needs-children"
 )
 
 const (

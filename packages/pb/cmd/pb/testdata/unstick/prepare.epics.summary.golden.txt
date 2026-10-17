@@ -1,0 +1,80 @@
+{
+  "workdir": "<WORKDIR>",
+  "start": "2026-10-10T12:00:00Z",
+  "counts": {
+    "open": 18,
+    "blocked": 1,
+    "deferred": 0,
+    "in_progress": 1,
+    "ready": 18,
+    "targets": 1,
+    "live_skip": 1,
+    "marker_skip": 0,
+    "review": 0,
+    "drainable": 3,
+    "focus_excluded": 0,
+    "epic_candidates": 8,
+    "epic_marker_skip": 1
+  },
+  "partition": "targets 1 = live 1 + marker 0 + review 0",
+  "batches": [
+    {
+      "name": "E01",
+      "kind": "epic",
+      "size": 4
+    },
+    {
+      "name": "E02",
+      "kind": "epic",
+      "size": 3
+    }
+  ],
+  "epic_candidates": [
+    "e-01",
+    "e-02",
+    "e-03",
+    "e-04",
+    "e-05",
+    "e-06",
+    "e-07",
+    "e-08"
+  ],
+  "epic_marker_skip": [
+    "e-08"
+  ],
+  "claim_candidates": [
+    {
+      "id": "x-06",
+      "status": "in_progress",
+      "assignee": "worker-9",
+      "updated_at": "2026-10-10T09:00:00Z"
+    }
+  ],
+  "malformed_markers": {
+    "count": 0,
+    "ids": []
+  },
+  "gate_check": "ok",
+  "warnings": [],
+  "written": [
+    "batches/E01",
+    "batches/E02",
+    "export.jsonl",
+    "facts/E01.json",
+    "facts/E02.json",
+    "followups.txt",
+    "prepare.json",
+    "probes/gate-check.json",
+    "progress.txt",
+    "ready.json",
+    "triage-assigned_open.txt",
+    "triage-drain.txt",
+    "triage-epic-candidates.txt",
+    "triage-inprog.txt",
+    "triage-live.txt",
+    "triage-marker.txt",
+    "triage-review.txt",
+    "triage-skip-focus-item.txt",
+    "triage-targets.txt"
+  ]
+}

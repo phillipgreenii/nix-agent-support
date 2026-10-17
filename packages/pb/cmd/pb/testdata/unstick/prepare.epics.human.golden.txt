@@ -1,0 +1,30 @@
+workdir:  <WORKDIR>
+start:    2026-10-10T12:00:00Z
+counts:   open 18, blocked 1, deferred 0, in_progress 1, ready 18, drainable 3
+triage:   targets 1 = live 1 + marker 0 + review 0
+batches:  2 E01(4) E02(3)
+epics:    8 finished-epic candidates (marker-skipped 1, batched 7)
+claim candidates: 1
+  x-06  in_progress  assignee=worker-9  updated=2026-10-10T09:00:00Z
+malformed markers: 0
+gate check: ok
+written:
+  <WORKDIR>/batches/E01
+  <WORKDIR>/batches/E02
+  <WORKDIR>/export.jsonl
+  <WORKDIR>/facts/E01.json
+  <WORKDIR>/facts/E02.json
+  <WORKDIR>/followups.txt
+  <WORKDIR>/prepare.json
+  <WORKDIR>/probes/gate-check.json
+  <WORKDIR>/progress.txt
+  <WORKDIR>/ready.json
+  <WORKDIR>/triage-assigned_open.txt
+  <WORKDIR>/triage-drain.txt
+  <WORKDIR>/triage-epic-candidates.txt
+  <WORKDIR>/triage-inprog.txt
+  <WORKDIR>/triage-live.txt
+  <WORKDIR>/triage-marker.txt
+  <WORKDIR>/triage-review.txt
+  <WORKDIR>/triage-skip-focus-item.txt
+  <WORKDIR>/triage-targets.txt

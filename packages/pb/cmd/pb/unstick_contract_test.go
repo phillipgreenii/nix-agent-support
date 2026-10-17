@@ -126,6 +126,10 @@ func unstickSweep(t *testing.T) {
 	future := seedBead(t, ws, "deferred, date in the future")
 	shellOut(t, ws, "bd", "update", future, "--status", "deferred", "--defer", "2099-01-01")
 	shellOut(t, ws, "bd", "comments", "add", drain, "a synthetic comment")
+	// A finished epic: open (so ready), one child, every child closed.
+	epic := seedBead(t, ws, "finished epic", "-t", "epic")
+	epicKid := seedBead(t, ws, "finished epic child", "--parent", epic)
+	shellOut(t, ws, "bd", "close", epicKid, "-r", "shipped for the contract test")
 
 	// A recent, well-formed marker made by `pb unstick marker`, applied the way
 	// a worker does (bd update --append-notes). Written last, so nothing it
@@ -188,8 +192,8 @@ func unstickSweep(t *testing.T) {
 	if c.Targets != 5 || c.LiveSkip != len(wantLive) || c.MarkerSkip != 1 || c.Review != len(wantReview) {
 		t.Errorf("counts = %+v", c)
 	}
-	if c.Open != 6 || c.Blocked != 0 || c.Deferred != 2 || c.InProgress != 0 {
-		t.Errorf("status counts = %+v (6 open, 2 deferred expected)", c)
+	if c.Open != 7 || c.Blocked != 0 || c.Deferred != 2 || c.InProgress != 0 {
+		t.Errorf("status counts = %+v (7 open incl. the epic, 2 deferred expected)", c)
 	}
 	if c.Ready < 3 || c.Drainable < 2 {
 		t.Errorf("ready/drainable = %d/%d, want >= 3/2", c.Ready, c.Drainable)
@@ -224,9 +228,29 @@ func unstickSweep(t *testing.T) {
 	if !slices.Contains(drainIDs, drain) || !slices.Contains(drainIDs, headA) || slices.Contains(drainIDs, human) {
 		t.Errorf("drainable = %v: want %s and %s, never the human bead %s", drainIDs, drain, headA, human)
 	}
+	// Finished-epic candidates (real bd): the epic is a candidate and is not a
+	// target, so the partition line above is unchanged by it.
+	if !slices.Equal(sum.EpicCandidates, []string{epic}) || c.EpicCandidates != 1 || c.EpicMarkerSkip != 0 {
+		t.Errorf("epic candidates = %v counts %+v, want [%s]", sum.EpicCandidates, c, epic)
+	}
+	if slices.Contains(readIDList(t, filepath.Join(workdir, "triage-targets.txt")), epic) {
+		t.Errorf("epic %s must not be a target", epic)
+	}
+	if got := readIDList(t, filepath.Join(workdir, "triage-epic-candidates.txt")); !slices.Equal(got, []string{epic}) {
+		t.Errorf("triage-epic-candidates.txt = %v", got)
+	}
+	if got := readIDList(t, filepath.Join(workdir, "batches", "E01")); !slices.Equal(got, []string{epic}) {
+		t.Errorf("batches/E01 = %v, want [%s]", got, epic)
+	}
+	if len(sum.Batches) != 2 || sum.Batches[1].Name != "E01" || sum.Batches[1].Kind != "epic" || sum.Batches[1].Size != 1 {
+		t.Fatalf("batches = %+v, want B01 (review) then E01 (epic)", sum.Batches)
+	}
+	if facts := readFile(t, filepath.Join(workdir, "facts", "E01.json")); !strings.Contains(facts, "shipped for the contract test") {
+		t.Errorf("facts/E01.json lacks the child's close_reason:\n%s", facts)
+	}
 	// Batch coverage: every REVIEW id in exactly one batch.
-	if len(sum.Batches) != 1 || sum.Batches[0].Size != len(wantReview) {
-		t.Fatalf("batches = %+v, want one batch of %d", sum.Batches, len(wantReview))
+	if sum.Batches[0].Kind != "review" || sum.Batches[0].Size != len(wantReview) {
+		t.Fatalf("batches = %+v, want one review batch of %d", sum.Batches, len(wantReview))
 	}
 	batch := readIDList(t, filepath.Join(workdir, "batches", sum.Batches[0].Name))
 	if !slices.Equal(sortedCopy(batch), sortedCopy(wantReview)) {
@@ -253,7 +277,7 @@ func unstickSweep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRealShape(t, rawExport, rawReady, realShape{child: tailB, parent: headA, commented: drain})
+	assertRealShape(t, rawExport, rawReady, realShape{child: tailB, parent: headA, commented: drain, epic: epic, epicChild: epicKid})
 	if !strings.HasPrefix(strings.TrimSpace(string(rawReady)), "{") {
 		t.Errorf("bd ready --json with BD_JSON_ENVELOPE=1 should be an envelope object: %.80s", rawReady)
 	}
@@ -300,6 +324,12 @@ func unstickSweep(t *testing.T) {
 		[]byte("closed "+future+": stale: nothing left to wait for\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The epic worker closes the finished epic and says so in results.
+	shellOut(t, ws, "bd", "close", epic, "-r", "every child shipped; scope complete")
+	if err := os.WriteFile(filepath.Join(workdir, "results", "E01.md"),
+		[]byte("closed "+epic+": every child shipped; scope complete\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	// A peer closes a drainable bead that is in no batch.
 	shellOut(t, ws, "bd", "close", drain, "-r", "peer finished it")
 
@@ -328,8 +358,14 @@ func unstickSweep(t *testing.T) {
 	if !gotMarker {
 		t.Errorf("markers_by_outcome = %+v, want retargeted -> [%s]", rep.MarkersByOutcome, malformed)
 	}
-	if rep.SweepN != 1 || rep.PeerN < 1 {
-		t.Errorf("sweep/peer changed = %d/%d (want sweep 1 = the closed bead; marker-only changes are not status changes; peer >= 1): %s", rep.SweepN, rep.PeerN, rout)
+	if want := "epic candidates 1 = closed 1 + unchanged 0 + needs-children 0 + marker-skipped 0"; rep.Epics.Arithmetic != want {
+		t.Errorf("epic arithmetic = %q, want %q", rep.Epics.Arithmetic, want)
+	}
+	if len(rep.Epics.Closed) != 1 || rep.Epics.Closed[0].ID != epic || rep.Epics.Closed[0].Attribution != unstick.AttribSweep {
+		t.Errorf("epics.closed = %+v, want %s attributed to the sweep", rep.Epics.Closed, epic)
+	}
+	if rep.SweepN != 2 || rep.PeerN < 1 {
+		t.Errorf("sweep/peer changed = %d/%d (want sweep 2 = the closed bead and the closed epic; marker-only changes are not status changes; peer >= 1): %s", rep.SweepN, rep.PeerN, rout)
 	}
 	if _, err := os.Stat(filepath.Join(workdir, "export.post.jsonl")); err != nil {
 		t.Errorf("missing export.post.jsonl: %v", err)

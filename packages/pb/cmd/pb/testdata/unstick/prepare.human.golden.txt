@@ -3,6 +3,7 @@ start:    2026-10-10T12:00:00Z
 counts:   open 4, blocked 2, deferred 1, in_progress 1, ready 1, drainable 1
 triage:   targets 5 = live 1 + marker 1 + review 3
 batches:  1 B01(3)
+epics:    0 finished-epic candidates (marker-skipped 0, batched 0)
 claim candidates: 2
   a-7  in_progress  assignee=worker-1  updated=2026-10-10T11:00:00Z
   a-9  open  assignee=worker-2  updated=2026-10-05T00:00:00Z
@@ -19,6 +20,7 @@ written:
   <WORKDIR>/ready.json
   <WORKDIR>/triage-assigned_open.txt
   <WORKDIR>/triage-drain.txt
+  <WORKDIR>/triage-epic-candidates.txt
   <WORKDIR>/triage-inprog.txt
   <WORKDIR>/triage-live.txt
   <WORKDIR>/triage-marker.txt

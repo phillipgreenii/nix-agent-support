@@ -233,7 +233,7 @@ pb drain isolate --bead pg2-1qcro.7 --repo "$PN_WORKSPACE_ROOT/nix-repo-base"
 ## `pb unstick`
 
 The deterministic stages of the `/pb:unstick-beads` sweep (inventory, triage, clustering,
-follow-up batches, marker authoring, the closing report). Per-bead judgement (undefer,
+finished-epic candidates, follow-up batches, marker authoring, the closing report). Per-bead judgement (undefer,
 de-label, fix dependencies, close as stale) stays with the `pb:unstick-batch-worker`
 subagents; the services pause/resume and the "needs you" prose stay with the orchestrator.
 The same inputs plus the same `--now` always produce byte-identical files.
@@ -288,10 +288,51 @@ flowchart TD
     M -- otherwise --> R[REVIEW]
     R --> K[cluster by links, pack 10-15 per batch]
     K --> BT[batches/B01 ... facts/B01.json]
+    RE[bd ready: open unassigned epic, at least one child, every child closed] --> EC{Marker skip}
+    EC -- "valid marker" --> ECS[counted, not batched]
+    EC -- otherwise --> EB[pack 3-5 per batch, unclustered]
+    EB --> ET[batches/E01 ... facts/E01.json]
 ```
 
 `in_progress` beads are never targets; they appear only as claim candidates (and seed LIVE
 when updated within 24 hours of `--now`).
+
+### Finished-epic candidates
+
+An epic that is open with every child closed is ready, so it is never a target, and
+`/pb:drain-beads` never claims epics, so it would stay open forever. `prepare` therefore lists
+**finished-epic candidates** next to (never inside) the targets. "Every child closed" is a
+candidate signal only: the epic's scope may be larger than what was ever decomposed, so the
+worker decides whether to close it.
+
+A candidate is a row of `bd ready` that is all of:
+
+- `issue_type` epic and not a template (`is_template` exists only on ready rows);
+- status open (export row) with an empty assignee and no `focus-item` label (a `human` label
+  does NOT disqualify);
+- at least one child by a `parent-child` edge (a `blocks` edge is not a child; an epic with
+  zero children is an undecomposed container and is not a candidate);
+- every child closed (a child absent from the export counts as not closed; a child with two
+  parents counts for both).
+
+It is computed from the export rows plus the ready list, with no extra `bd` calls. A parent
+whose child epic is still open is not a candidate this sweep; it becomes one next sweep.
+`--label` and `--id-prefix` narrow candidates as they narrow targets. A candidate whose newest
+valid sweep marker is still good (recheck-when not due, no child or parent changed after it) is
+**marker-skipped**: counted, not batched; `--full` ignores markers. Epics are never claimed, never
+deferred and never `blocked-by` a child: an epic is only open or closed.
+
+Dispatched candidates are packed, unclustered, into `E01`, `E02`, ... batches of 3-5 epics (each
+needs live probes; fewer than 3 in total is one batch). E batches are written and
+coverage-checked separately from the REVIEW batches (REVIEW coverage stays strict), appear in the
+same `batches` list of the summary (each with `kind` `review` or `epic`), and share the
+orchestrator's worker pool with the `B<NN>` batches. The facts of every bead (so each epic's
+children) carry `close_reason` for the worker to read. The targets partition line
+(`targets N = live a + marker b + review c`) is unchanged.
+
+A worker records an epic outcome with `pb unstick marker`: `unchanged` or `needs-children` write a
+marker; closing the epic writes none (the close reason is the record) and is listed as
+`closed <epic-id>: <reason>` in `results/E<NN>.md` so the report can attribute it.
 
 ### Exit codes
 
@@ -313,9 +354,12 @@ ready.json            bd ready -n 0 --json, the {data, schema_version} envelope 
 prepare.json          pre-sweep snapshot read back by report
 triage-targets.txt    triage-live.txt   triage-marker.txt   triage-review.txt
 triage-inprog.txt     triage-assigned_open.txt              triage-drain.txt
-batches/B<NN>         one bead id per line
-facts/B<NN>.json      per-bead facts for the worker (projection; no raw dependencies)
-results/              workers write B<NN>.md here
+triage-epic-candidates.txt   every finished-epic candidate (marker-skipped ones included)
+batches/B<NN>         one bead id per line (REVIEW beads, clustered)
+batches/E<NN>         one epic id per line (finished-epic candidates, 3-5 each, unclustered)
+facts/B<NN>.json      per-bead facts for the worker (projection; no raw dependencies);
+facts/E<NN>.json      children carry status, closed_at and close_reason
+results/              workers write B<NN>.md / E<NN>.md here
 probes/gate-check.json
 work/                 scratch for the orchestrator and workers
 progress.txt          line 1 is the sweep start (UTC)
@@ -323,11 +367,15 @@ followups.txt         OPERATOR: / FOLLOWUP: lines
 ```
 
 `prepare.json` holds `start`, `now`, `counts` (open, blocked, deferred, in_progress, ready,
-targets, live_skip, marker_skip, review, drainable), the sorted `review` ids, `ready_ids`,
-`pre` (id to status for every non-closed bead) and `closed` (ids closed before the sweep).
+targets, live_skip, marker_skip, review, drainable, focus_excluded, epic_candidates,
+epic_marker_skip), the sorted `review` ids, `ready_ids`, `pre` (id to status for every non-closed
+bead), `closed` (ids closed before the sweep), and `epic_candidates` / `epic_marker_skip` (all
+finished-epic candidates, and the marker-skipped subset). The two epic keys are optional: a
+`prepare.json` written before they existed still loads, as no candidates.
 `prepare` asserts that LIVE + MARKER + REVIEW partition the targets
-(`targets N = live a + marker b + review c`) and that every REVIEW id is in exactly one
-batch; a violation is an internal error (exit 1).
+(`targets N = live a + marker b + review c`), that every REVIEW id is in exactly one
+B batch, and that every dispatched epic candidate is in exactly one E batch of at most 5; a
+violation is an internal error (exit 1).
 
 ### Sweep marker grammar
 
@@ -374,6 +422,12 @@ window is attributed to peers (concurrent drain sessions, humans). Limits:
 - Marker-only outcomes change no status, so they appear under "markers added by outcome" but
   not in the "changed in window" arithmetic.
 - Beads that were never in a batch (LIVE, MARKER-skipped) are always peers.
+- `report` accounts for the finished-epic candidates on one line,
+  `epic candidates N = closed a + unchanged b + needs-children c + marker-skipped d` (plus
+  `+ unresolved e` when a dispatched candidate was neither closed nor marked), from the ids in
+  `prepare.json`; `--json` carries the same figures under `epics`. The newest marker added in the
+  window decides `unchanged` versus `needs-children`; an epic closed by a peer still counts as
+  closed, with its attribution shown.
 
 ### Preflight
 
@@ -386,7 +440,8 @@ first and, on failure, stops with: `pb too old or not installed; run pn workspac
 `go test -tags contract -run TestContract_UnstickSweep ./cmd/pb/` seeds a synthetic workspace
 in a throwaway embedded Dolt database (real `bd`, real `pb` binary, never a server or the
 real tracker), pins the real `bd export` and `bd ready --json` row shapes, and runs prepare,
-marker, close and report end to end. `TestUnstickRealShapeSample` asserts the same shape
+marker, close and report end to end (including a finished epic: candidate, E batch, close
+and the epic report line). `TestUnstickRealShapeSample` asserts the same shape
 facts over a committed sample, so decoder drift is caught without `bd`.
 
 ## Versioning

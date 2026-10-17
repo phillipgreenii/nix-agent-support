@@ -16,6 +16,9 @@ type realShape struct {
 	child, parent string // child has a "blocks" dependency on parent
 	commented     string // a bead carrying exactly the comment shape below
 	nullable      string // optional: a bead whose assignee/labels/defer_until may be explicit null
+	// epic and epicChild, when set, name an open ready epic and its only child,
+	// which is closed: the facts the finished-epic candidate rule reads.
+	epic, epicChild string
 }
 
 // assertRealShape pins the facts about `bd export` rows and `bd ready --json`
@@ -157,6 +160,10 @@ func assertRealShape(t *testing.T, rawExport, rawReady []byte, w realShape) {
 			t.Errorf("ready row %s unexpectedly is_template", rr.ID)
 		}
 	}
+
+	if w.epic != "" {
+		assertEpicShape(t, rows, byID, ready, w)
+	}
 }
 
 // TestUnstickRealShapeSample runs the shape facts over a committed synthetic
@@ -172,7 +179,7 @@ func TestUnstickRealShapeSample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRealShape(t, exp, rdy, realShape{child: "rs-bbb", parent: "rs-aaa", commented: "rs-aaa", nullable: "rs-bbb"})
+	assertRealShape(t, exp, rdy, realShape{child: "rs-bbb", parent: "rs-aaa", commented: "rs-aaa", nullable: "rs-bbb", epic: "rs-eee", epicChild: "rs-fff"})
 
 	// Labels on a ready row and the omitted/explicit-null equivalence.
 	rows, _ := unstick.ReadExport(bytes.NewReader(exp))
@@ -180,5 +187,61 @@ func TestUnstickRealShapeSample(t *testing.T) {
 		if r.ID == "rs-ddd" && !r.HasLabel("human") {
 			t.Errorf("rs-ddd lost its human label: %+v", r)
 		}
+	}
+}
+
+// assertEpicShape pins the facts the finished-epic candidate rule depends on:
+// a parent-child edge is listed on the CHILD row (issue_id = child,
+// depends_on_id = epic), a closed child carries closed_at and close_reason,
+// and an open epic is a bd ready row with issue_type epic. It then runs the
+// real triage over the rows and expects the epic to be the one candidate.
+func assertEpicShape(t *testing.T, rows []unstick.Row, byID map[string]unstick.Row, ready []unstick.ReadyRow, w realShape) {
+	t.Helper()
+	epic, ok := byID[w.epic]
+	if !ok {
+		t.Fatalf("epic %s missing from export", w.epic)
+	}
+	kid, ok := byID[w.epicChild]
+	if !ok {
+		t.Fatalf("epic child %s missing from export", w.epicChild)
+	}
+	if epic.IssueType != "epic" || epic.Status != unstick.StatusOpen {
+		t.Errorf("%s: issue_type/status = %q/%q, want epic/open", w.epic, epic.IssueType, epic.Status)
+	}
+	var edge bool
+	for _, d := range kid.Dependencies {
+		if d.IssueID == w.epicChild && d.DependsOnID == w.epic && d.Type == unstick.DepParentChild {
+			edge = true
+		}
+	}
+	if !edge {
+		t.Errorf("%s: no parent-child dependency {issue_id=%s, depends_on_id=%s}: %+v", w.epicChild, w.epicChild, w.epic, kid.Dependencies)
+	}
+	for _, d := range epic.Dependencies {
+		if d.Type == unstick.DepParentChild {
+			t.Errorf("epic %s must not list its children's parent-child edges: %+v", w.epic, d)
+		}
+	}
+	if kid.Status != unstick.StatusClosed || kid.ClosedAt == "" || kid.CloseReason == "" {
+		t.Errorf("%s: closed child must carry closed_at and close_reason: %+v", w.epicChild, kid)
+	}
+	var rr *unstick.ReadyRow
+	for i := range ready {
+		if ready[i].ID == w.epic {
+			rr = &ready[i]
+		}
+	}
+	if rr == nil {
+		t.Fatalf("open epic %s is not a bd ready row", w.epic)
+	}
+	if rr.IssueType != "epic" || rr.IsTemplate {
+		t.Errorf("ready row for %s = %+v, want issue_type epic and no is_template", w.epic, *rr)
+	}
+	res := unstick.Triage(rows, ready, unstick.TriageOptions{}, time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
+	if err := res.CheckPartition(); err != nil {
+		t.Error(err)
+	}
+	if len(res.EpicCandidates) != 1 || res.EpicCandidates[0] != w.epic {
+		t.Errorf("epic candidates over real-shape rows = %v, want [%s]", res.EpicCandidates, w.epic)
 	}
 }

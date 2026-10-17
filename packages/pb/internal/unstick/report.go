@@ -38,6 +38,13 @@ type PrepareState struct {
 	Pre map[string]string `json:"pre"`
 	// Closed is the set of ids already closed before the sweep.
 	Closed []string `json:"closed"`
+	// EpicCandidates lists every finished-epic candidate (open ready epics
+	// whose children are all closed), sorted. Optional: a prepare.json
+	// written before epic candidates existed omits it and loads as empty.
+	EpicCandidates []string `json:"epic_candidates"`
+	// EpicMarkerSkip is the subset of EpicCandidates skipped on a valid sweep
+	// marker (counted, never batched). Optional like EpicCandidates.
+	EpicMarkerSkip []string `json:"epic_marker_skip"`
 }
 
 // Normalize sorts and de-duplicates the slice fields and allocates nil maps.
@@ -45,6 +52,8 @@ func (p *PrepareState) Normalize() {
 	p.Review = rptSortedUnique(p.Review)
 	p.ReadyIDs = rptSortedUnique(p.ReadyIDs)
 	p.Closed = rptSortedUnique(p.Closed)
+	p.EpicCandidates = rptSortedUnique(p.EpicCandidates)
+	p.EpicMarkerSkip = rptSortedUnique(p.EpicMarkerSkip)
 	if p.Counts == nil {
 		p.Counts = map[string]int{}
 	}
@@ -288,6 +297,20 @@ type ClosedBead struct {
 	Attribution string `json:"attribution"`
 }
 
+// EpicReport accounts for the finished-epic candidates `prepare` recorded.
+// Invariant: Candidates == len(Closed) + Unchanged + len(NeedsChildren) +
+// MarkerSkipped + len(Unresolved). Unresolved lists dispatched candidates the
+// sweep left with neither a close nor an unchanged / needs-children marker.
+type EpicReport struct {
+	Candidates    int          `json:"candidates"`
+	Closed        []ClosedBead `json:"closed"`
+	Unchanged     int          `json:"unchanged"`
+	NeedsChildren []string     `json:"needs_children"`
+	MarkerSkipped int          `json:"marker_skipped"`
+	Unresolved    []string     `json:"unresolved"`
+	Arithmetic    string       `json:"arithmetic"`
+}
+
 // Report is the full output of `pb unstick report`.
 type Report struct {
 	Start string `json:"start"`
@@ -312,6 +335,8 @@ type Report struct {
 	Operator  []string `json:"operator"`
 	Followup  []string `json:"followup"`
 	ChangedBy string   `json:"changed_arithmetic"`
+	// Epics accounts for the finished-epic candidates of the sweep.
+	Epics EpicReport `json:"epics"`
 }
 
 // AttributionHeuristic is the documented rule (kept as one string so the
@@ -560,6 +585,15 @@ func BuildReport(in ReportInput) Report {
 		rep.OpenNotReady = sp
 	}
 
+	// Newest marker added in the window per bead (later entries win a tie).
+	latest := map[string]Marker{}
+	for _, a := range added {
+		if cur, ok := latest[a.id]; !ok || !a.m.Time.Before(cur.Time) {
+			latest[a.id] = a.m
+		}
+	}
+	rep.Epics = buildEpicReport(st, postRow, latest, attr)
+
 	rep.Operator, rep.Followup = ParseFollowups(in.Followups)
 	return rep
 }
@@ -670,7 +704,8 @@ func (r Report) RenderHuman() string {
 	} else {
 		b.WriteString("  open-not-ready: unavailable (post-sweep ready set missing)\n")
 	}
-	fmt.Fprintf(&b, "  %s\n\n", r.ChangedBy)
+	fmt.Fprintf(&b, "  %s\n", r.ChangedBy)
+	fmt.Fprintf(&b, "  %s\n\n", r.Epics.Arithmetic)
 
 	rptSection(&b, "Markers added by outcome", len(r.MarkersByOutcome), func() {
 		for _, g := range r.MarkersByOutcome {
@@ -690,6 +725,16 @@ func (r Report) RenderHuman() string {
 			for _, c := range s.list {
 				fmt.Fprintf(&b, "  %s [%s]: %s\n", c.ID, c.Attribution, c.Detail)
 			}
+		})
+	}
+	if len(r.Epics.NeedsChildren) > 0 {
+		rptSection(&b, "Epics needing children", len(r.Epics.NeedsChildren), func() {
+			fmt.Fprintf(&b, "  %s\n", strings.Join(r.Epics.NeedsChildren, ", "))
+		})
+	}
+	if len(r.Epics.Unresolved) > 0 {
+		rptSection(&b, "Epic candidates left unresolved", len(r.Epics.Unresolved), func() {
+			fmt.Fprintf(&b, "  %s\n", strings.Join(r.Epics.Unresolved, ", "))
 		})
 	}
 	rptSection(&b, "Claims released", len(r.ClaimsReleased), func() {
@@ -723,4 +768,37 @@ func rptSection(b *strings.Builder, title string, n int, body func()) {
 	}
 	fmt.Fprintf(b, "%s (%d):\n", title, n)
 	body()
+}
+
+// buildEpicReport classifies every finished-epic candidate recorded by
+// prepare. A candidate skipped on a marker is marker-skipped; a dispatched one
+// is closed (now closed, attribution shown), unchanged / needs-children (by
+// the newest marker added in the window) or unresolved.
+func buildEpicReport(st PrepareState, postRow map[string]Row, latest map[string]Marker, attr func(string) string) EpicReport {
+	er := EpicReport{
+		Candidates: len(st.EpicCandidates),
+		Closed:     []ClosedBead{}, NeedsChildren: []string{}, Unresolved: []string{},
+	}
+	skipped := rptSet(st.EpicMarkerSkip)
+	for _, id := range st.EpicCandidates {
+		row, inPost := postRow[id]
+		switch {
+		case skipped[id]:
+			er.MarkerSkipped++
+		case inPost && row.Status == StatusClosed:
+			er.Closed = append(er.Closed, ClosedBead{ID: id, CloseReason: row.CloseReason, Attribution: attr(id)})
+		case latest[id].Outcome == OutcomeUnchanged:
+			er.Unchanged++
+		case latest[id].Outcome == OutcomeNeedsChildren:
+			er.NeedsChildren = append(er.NeedsChildren, id)
+		default:
+			er.Unresolved = append(er.Unresolved, id)
+		}
+	}
+	er.Arithmetic = fmt.Sprintf("epic candidates %d = closed %d + unchanged %d + needs-children %d + marker-skipped %d",
+		er.Candidates, len(er.Closed), er.Unchanged, len(er.NeedsChildren), er.MarkerSkipped)
+	if n := len(er.Unresolved); n > 0 {
+		er.Arithmetic += fmt.Sprintf(" + unresolved %d", n)
+	}
+	return er
 }

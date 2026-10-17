@@ -21,6 +21,14 @@
       "issue_type": "task",
       "labels": ["human"],
       "updated_at": "2026-10-10T19:15:59Z"
+    },
+    {
+      "id": "rs-eee",
+      "title": "Finished epic",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "epic",
+      "updated_at": "2026-10-10T19:16:30Z"
     }
   ],
   "schema_version": 1
