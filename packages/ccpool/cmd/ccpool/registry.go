@@ -35,6 +35,15 @@ const registryWaitingFreshWindow = 5 * time.Minute
 //	ct.WaitingForHuman -> state.WaitingForHuman
 //	ct.Idle            -> state.Idle
 func registryVerdict(sessionsDir, claudeSessionID, transcriptPath string, freshWindow time.Duration) (ct.ActivityVerdict, bool) {
+	return registryVerdictWith(sessionsDir, claudeSessionID, transcriptPath, freshWindow, nil)
+}
+
+// registryVerdictWith is registryVerdict with the live process start-time reader
+// (the PID-reuse guard's input) injected. A nil procStart uses the production
+// `ps -o lstart=` reader (ct.ProcessStartTime), which fails open when `ps`
+// cannot run; tests inject a deterministic reader so they do not depend on a
+// host `ps` (absent inside the nix build sandbox).
+func registryVerdictWith(sessionsDir, claudeSessionID, transcriptPath string, freshWindow time.Duration, procStart func(int) (time.Time, error)) (ct.ActivityVerdict, bool) {
 	if claudeSessionID == "" {
 		return ct.ActivityVerdict{}, false
 	}
@@ -46,7 +55,8 @@ func registryVerdict(sessionsDir, claudeSessionID, transcriptPath string, freshW
 		if reg.SessionID != claudeSessionID {
 			continue
 		}
-		if !ct.SessionAlive(reg) {
+		// Same predicate as ct.SessionAlive, with the start-time reader injectable.
+		if !ct.PidAlive(reg.PID) || !ct.ProcStartMatchesWith(reg, procStart) {
 			return ct.ActivityVerdict{}, false // stale row from a dead/crashed pid (or a reused pid: procStart mismatch)
 		}
 		awaitingInput := false

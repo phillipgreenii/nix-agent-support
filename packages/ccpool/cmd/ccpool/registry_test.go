@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // writeRegFile writes a minimal Claude session-registry JSON keyed by pid.
@@ -74,16 +75,58 @@ func TestRegistryVerdict_missingDirIsNotFound(t *testing.T) {
 	}
 }
 
+// TestRegistryVerdict_reusedPidProcStartMismatchIsNotFound pins the PID-reuse
+// guard with an injected live-start-time reader. It used to call the real `ps`,
+// which is not on PATH in the nix build sandbox (ccpool-go-tests carries only
+// git), so the guard failed open there and the recycled-PID row stayed alive
+// (tc-lzxnm).
 func TestRegistryVerdict_reusedPidProcStartMismatchIsNotFound(t *testing.T) {
 	dir := t.TempDir()
 	// The test process's own pid is alive, but the row claims it started in
-	// 2001: a recycled pid, not the session that wrote the row.
-	body := `{"pid":` + itoa(os.Getpid()) + `,"sessionId":"MY-SESSION","status":"busy","procStart":"Mon Jan  1 00:00:00 2001"}`
-	if err := os.WriteFile(filepath.Join(dir, itoa(os.Getpid())+".json"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, found := registryVerdict(dir, "MY-SESSION", "", registryWaitingFreshWindow)
+	// 2001 while the (injected) live start time is years later: a recycled pid,
+	// not the session that wrote the row.
+	pid := os.Getpid()
+	live := time.Date(2026, time.October, 14, 7, 51, 50, 0, time.UTC)
+	writeProcStartRow(t, dir, pid, "Mon Jan  1 00:00:00 2001")
+	_, found := registryVerdictWith(dir, "MY-SESSION", "", registryWaitingFreshWindow,
+		func(p int) (time.Time, error) {
+			if p != pid {
+				t.Errorf("procStart reader called with pid %d, want %d", p, pid)
+			}
+			return live, nil
+		})
 	if found {
 		t.Error("found = true, want false (alive pid whose procStart does not match)")
+	}
+}
+
+func TestRegistryVerdict_procStartWithinToleranceIsFound(t *testing.T) {
+	dir := t.TempDir()
+	live := time.Date(2026, time.October, 14, 7, 51, 50, 0, time.UTC)
+	writeProcStartRow(t, dir, os.Getpid(), "Wed Oct 14 07:51:51 2026")
+	_, found := registryVerdictWith(dir, "MY-SESSION", "", registryWaitingFreshWindow,
+		func(int) (time.Time, error) { return live, nil })
+	if !found {
+		t.Error("found = false, want true (procStart within tolerance of live start)")
+	}
+}
+
+// A reader that cannot determine the live start time fails open: the alive row
+// is still trusted rather than declared dead.
+func TestRegistryVerdict_procStartReaderErrorFailsOpen(t *testing.T) {
+	dir := t.TempDir()
+	writeProcStartRow(t, dir, os.Getpid(), "Mon Jan  1 00:00:00 2001")
+	_, found := registryVerdictWith(dir, "MY-SESSION", "", registryWaitingFreshWindow,
+		func(int) (time.Time, error) { return time.Time{}, os.ErrNotExist })
+	if !found {
+		t.Error("found = false, want true (unreadable live start time must fail open)")
+	}
+}
+
+func writeProcStartRow(t *testing.T, dir string, pid int, procStart string) {
+	t.Helper()
+	body := `{"pid":` + itoa(pid) + `,"sessionId":"MY-SESSION","status":"busy","procStart":"` + procStart + `"}`
+	if err := os.WriteFile(filepath.Join(dir, itoa(pid)+".json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
