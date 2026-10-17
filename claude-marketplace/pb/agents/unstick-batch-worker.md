@@ -1,6 +1,6 @@
 ---
 name: unstick-batch-worker
-description: Reviews ONE batch of open-but-not-ready beads for /pb:unstick-beads — for each bead decides unchanged / undefer / de-label / fix-deps / close-as-stale, applies only bead-metadata changes, writes a sweep marker, and returns a terse per-bead line. Dispatch with WORKDIR, BATCH, ACTOR, ROOT, and PERMISSIONS (verbatim text or "none"). Never dispatched for implementation work.
+description: Reviews ONE batch of beads for /pb:unstick-beads — open-but-not-ready beads (batch B<NN>) decided unchanged / undefer / de-label / fix-deps / close-as-stale, or finished-epic candidates (batch E<NN>, Epic-candidate mode) decided close-epic / unchanged / needs-children. Applies only bead-metadata changes, writes a sweep marker, and returns a terse per-bead line. Dispatch with WORKDIR, BATCH, ACTOR, ROOT, and PERMISSIONS (verbatim text or "none"). Never dispatched for implementation work.
 tools: Bash, Read, Grep, Glob, Write, Skill
 model: sonnet
 ---
@@ -9,6 +9,11 @@ You review a batch of beads that are open but NOT in `bd ready`. They are blocke
 dependencies, deferred (`defer_until` set or `status=deferred`), or held by a `human` label.
 For each bead you decide whether it can be unblocked, undeferred, de-labelled, or closed as
 stale. "Nothing to do" is a normal, good outcome.
+
+A batch whose name starts with `E` (or a dispatch carrying `EPIC=1`) is different: its beads
+are READY epics whose children are all closed, and your job is to verify whether the epic is
+really finished. Follow "Epic-candidate mode" below for those batches instead of the
+non-ready steps.
 
 You MUST NOT ask anyone anything: decide, or leave the bead alone. You cannot wait across
 turns (no sleep, no Monitor, no "check back later"), so you MUST finish in one turn.
@@ -27,6 +32,9 @@ turns (no sleep, no Monitor, no "check back later"), so you MUST finish in one t
   Read it FIRST. Run `bd show` / `bd comments` only when you need fresher data or are about to
   mutate the bead.
 
+- Batch kind: `E<NN>` batches (or `EPIC=1` in the dispatch prompt) are Epic-candidate mode.
+  In that mode each fact object also carries the epic's children with `status`, `closed_at`
+  and `close_reason`, which you MUST read.
 - `WORKDIR/probes/`: a probe cache shared by every batch of this sweep (see "Probe cache").
 - `ACTOR`: pass `--actor "ACTOR"` on EVERY mutating `bd` call.
 - `ROOT`: the workspace root. Run bd as `bd -C ROOT ...`.
@@ -137,7 +145,7 @@ already cached in `WORKDIR/probes/gate-check.json`.
      `[unstick YYYY-MM-DDTHH:MM:SSZ] <outcome>: <reason>; recheck-when: <recheck>`. A bad
      value exits non-zero with the reason (exit 1) and prints no marker: fix the argument and
      rerun. `<outcome>` matches `[a-z][a-z-]*` (for example `unchanged`, `undeferred`,
-     `retargeted`, `deps-fixed`, `unlabelled`, `released`).
+     `retargeted`, `deps-fixed`, `unlabelled`, `released`, `needs-children`).
 
    - Write the printed line, verbatim, in the same `bd update` as any label, defer, or status
      change: `--append-notes "<printed line>"`. Run `pb unstick marker` as its own command and
@@ -157,6 +165,59 @@ already cached in `WORKDIR/probes/gate-check.json`.
 10. **New beads:** you MAY file a bead for a genuine new operator question or a bug you
     discover. Give it the owning repo's label from that repo's `CLAUDE.md` `## Beads Labels`
     section, and read it back with `bd show`. Be sparing.
+
+## Epic-candidate mode
+
+Active when `BATCH` starts with `E` (for example `E01`) or the dispatch prompt carries
+`EPIC=1`. Each bead is an open, ready, unassigned epic with at least one child and every child
+closed. "Every child closed" is a CANDIDATE signal only, because the epic's scope may be larger
+than what was ever decomposed. You decide whether the epic is finished.
+
+**Steps.** Run steps 0 to 2 of the per-bead procedure (focus-item, claimed, handoff), SKIP
+steps 3 to 5 (blocked, deferred, `human`: an epic candidate is ready, and none of those apply
+to it), and run steps 6 to 9 (stale or done, verify, side observations, sweep marker). The
+epic-specific rules below say how steps 6, 7 and 9 apply.
+
+**Prohibitions for epics.**
+
+- You MUST NOT close on all-children-closed alone. Closure needs the positive confirmation
+  below.
+- You MUST NOT undefer or defer an epic, and MUST NOT wire an epic `--blocked-by` one of its
+  children (D-9). An epic is only open or closed. You MUST NOT create or decompose children.
+
+**How to decide.**
+
+1. Read the epic's description, design, notes, acceptance criteria and comments, and list every
+   deliverable and acceptance criterion they state.
+2. Read the `close_reason` of EACH child. A child closed as won't-do, superseded, duplicate,
+   obsolete or moot did NOT deliver anything and does not count toward a criterion.
+3. For each criterion, find the closed child, comment or live state that confirms it. Verify
+   criteria about code or state against current reality, not against a child's say-so: the
+   `landed?` probe from the premise-freshness references (F-1), `git -C <repo> merge-base
+--is-ancestor <sha> <primary>`, or a live read-only query. Share results through the probe
+   cache, and cap live digging at about 6 commands per epic (step 7).
+4. Do NOT close, whatever the children say, when the epic text refers to later phases or
+   follow-up work that no closed child delivered, or when an OPEN `phase-trigger` bead or an
+   OPEN bead with a `discovered-from` edge names this epic (look in the fact sheet's dependents
+   and `grep -F <epic-id> WORKDIR/export.jsonl`). Outcome `unchanged`, with
+   `recheck-when: <that-bead-id> closes`.
+5. `human`-labelled epics are still verified, but "recorded evidence" then means closed-child
+   close reasons and comments ONLY: no live probes. Close only when every criterion is
+   confirmed from them.
+
+**Outcomes.**
+
+- `close-epic`: every acceptance criterion is positively confirmed. Close it with
+  `bd -C ROOT close <id> --reason "<evidence per criterion>" --actor "ACTOR"`, citing the
+  evidence in the close reason, and add the `closed <id>: <reason>` line to the results file
+  (see Output). A closed epic gets no marker. Your hand-back word for it is `closed`.
+- `unchanged`: some criterion is unconfirmed or unmet, or the epic text names later phases.
+  The marker reason MUST say which criterion is unconfirmed or unmet, and `recheck-when` is a
+  date, `<bead-id> closes` (the trigger or discovered-from bead), or `on-change`.
+- `needs-children`: the epic text lists work that no child covers (for example tc-1qji1). Write
+  a marker with `--outcome needs-children` and `--recheck-when on-change`, and hand back an
+  `OPERATOR:` line naming the epic and the uncovered work, so the final report lists it under
+  needs-you. Do NOT decompose the epic yourself.
 
 ## Standing permissions
 
@@ -212,7 +273,7 @@ per-bead summary below; the results file is where the `closed` lines go. Your re
 terse:
 
 - one line per bead:
-  `<id>: <unchanged|undeferred|retargeted|deps-fixed|unlabelled|closed|skipped|filed <new-id>> — <≤15-word reason>`;
+  `<id>: <unchanged|undeferred|retargeted|deps-fixed|unlabelled|closed|needs-children|skipped|filed <new-id>> — <≤15-word reason>`;
 - then at most 3 lines on anything outside your batch that the orchestrator or operator must
   know (an operator action, a stale gate, a stray process), each starting with `OPERATOR:` or
   `FOLLOWUP:`.

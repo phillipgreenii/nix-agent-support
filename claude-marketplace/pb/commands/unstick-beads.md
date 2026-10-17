@@ -1,12 +1,14 @@
 ---
 description: >-
   Periodic sweep of this pn-workspace's open-but-not-ready beads (dependency-blocked,
-  deferred, `human`-labelled but not ready): pre-triages deterministically with `pb unstick`,
-  then fans the rest out to `pb:unstick-batch-worker` subagents. Each worker decides per bead
-  whether to undefer, de-label, fix dependencies, or close as stale, and writes a sweep marker
-  so the next sweep can skip beads whose reason is still valid. Never asks questions
-  mid-sweep; ends with one report of what changed and what needs the operator. Ready `human`
-  beads belong to /unblock-human-beads, not here. Accepts optional narrowing $ARGUMENTS.
+  deferred, `human`-labelled but not ready), plus its finished-epic candidates (ready epics
+  whose children are all closed): pre-triages deterministically with `pb unstick`, then fans
+  the rest out to `pb:unstick-batch-worker` subagents. Each worker decides per bead whether to
+  undefer, de-label, fix dependencies, or close as stale, and for an epic whether it is really
+  finished (close it, leave it, or flag that it needs children), and writes a sweep marker so
+  the next sweep can skip beads whose reason is still valid. Never asks questions mid-sweep;
+  ends with one report of what changed and what needs the operator. Ready `human` beads belong
+  to /unblock-human-beads, not here. Accepts optional narrowing $ARGUMENTS.
 argument-hint: "[optional narrowing: --label X, an id prefix, or --full to ignore sweep markers]"
 ---
 
@@ -18,6 +20,14 @@ dependencies, deferred (`defer_until` set or `status=deferred`), or held by a `h
 behind a blocker. The goal is to unstick what can be unstuck: wrong dependency edges, defers
 whose trigger has already happened, `human` labels where no person is actually needed, and
 beads that are already done or moot. "Nothing to do" is a normal outcome for most beads.
+
+The sweep has a second, separate population: **finished-epic candidates**. An epic that is
+open with every child closed is ready, so it is never a target above, and `/pb:drain-beads`
+never claims epics, so it would stay open forever. `pb unstick prepare` lists these candidates
+next to the targets and packs them into `E<NN>` batches, which workers handle in
+Epic-candidate mode: verify that the epic's scope is really delivered, then close it
+(`close-epic`), leave it (`unchanged`) or flag it (`needs-children`). Workers MUST NOT close an
+epic on all-children-closed alone.
 
 The operator runs this occasionally and walks away, so you MUST NOT ask questions during the
 sweep: anything that needs a person goes into the final report. You and your workers MAY file
@@ -34,7 +44,7 @@ summary, and keeps all state in files. The orchestrator MUST keep its own contex
 flowchart LR
   P["PREFLIGHT: pb unstick --help"] --> S1["pb unstick prepare"]
   S1 --> S2["Stage 2: claim liveness (manual)"]
-  S1 --> S6["Stage 6: dispatch workers"]
+  S1 --> S6["Stage 6: dispatch workers (B and E batches, one pool of 4)"]
   S6 --> W["pb:unstick-batch-worker: pb unstick marker, results/BATCH.md"]
   W --> S7["Stage 7: pb unstick batch (follow-ups)"]
   S7 --> S8["Stage 8: pb unstick report + needs-you prose"]
@@ -92,17 +102,24 @@ pb unstick prepare --root ROOT --json
 In order, it: allocates WORKDIR; runs `bd -C ROOT export -o WORKDIR/export.jsonl` and
 `bd -C ROOT ready -n 0 --json`; runs the `pn:applied` gate check in-process (dry run, written
 to `WORKDIR/probes/gate-check.json`, which workers use instead of hand-comparing patch-ids);
-pre-triages every target; clusters the REVIEW set into batches; and writes the fact sheets. On
-disk: `WORKDIR/triage-*.txt`, `WORKDIR/batches/B<NN>`, `WORKDIR/facts/B<NN>.json` and
+pre-triages every target; clusters the REVIEW set into `B<NN>` batches; lists the finished-epic
+candidates and packs them into `E<NN>` batches; and writes the fact sheets. On disk:
+`WORKDIR/triage-*.txt` (including `triage-epic-candidates.txt`), `WORKDIR/batches/B<NN>` and
+`WORKDIR/batches/E<NN>`, `WORKDIR/facts/B<NN>.json` and `WORKDIR/facts/E<NN>.json`, and
 `WORKDIR/prepare.json` (the pre-sweep state that `report` diffs against). Each pre-filtered
 bead gets NO subagent and NO note; it only counts in the report.
 
 Read the JSON summary and record it in `progress.txt`. Its fields:
 
 - `workdir`, `start`, `counts` (`open`, `blocked`, `deferred`, `in_progress`, `ready`,
-  `targets`, `live_skip`, `marker_skip`, `review`, `drainable`, `focus_excluded`) and
-  `partition`, the arithmetic line `targets N = live a + marker b + review c`;
-- `batches` (`name`, `size`): the batches to dispatch in Stage 6;
+  `targets`, `live_skip`, `marker_skip`, `review`, `drainable`, `focus_excluded`,
+  `epic_candidates`, `epic_marker_skip`) and `partition`, the arithmetic line
+  `targets N = live a + marker b + review c` (finished-epic candidates are NOT targets and are
+  not in this line);
+- `epic_candidates` and `epic_marker_skip`: the ids of every finished-epic candidate and of
+  the marker-skipped subset (the rest are batched);
+- `batches` (`name`, `kind`, `size`): the batches to dispatch in Stage 6, `B<NN>` of kind
+  `review` and `E<NN>` of kind `epic`;
 - `claim_candidates` (`id`, `status`, `assignee`, `updated_at`): the
   input to Stage 2;
 - `malformed_markers` (`count`, `ids`): beads carrying a marker that does not match the
@@ -161,6 +178,14 @@ report it); `2` a `bd` call failed (STOP and report; do not retry blindly). `pb 
   outside bead, bead ids mentioned in another REVIEW bead's title, description or notes,
   identical `defer_until`; never labels), then packed into batches of 10-15 beads (fewer than
   10 in total: one batch). Every REVIEW id is in exactly one batch.
+- **Finished-epic candidates** are computed from the same export rows plus the ready list, with
+  no extra `bd` calls, and are disjoint from the targets. A candidate is a `bd ready` row of
+  `issue_type` epic, not a template, open and unassigned, without a `focus-item` label (a
+  `human` label does NOT disqualify it), with at least one `parent-child` child and every child
+  closed. The same marker skip applies (`--full` ignores it), and `--label` / `--id-prefix`
+  narrow candidates as they narrow targets. Candidates are packed, unclustered, into `E<NN>`
+  batches of 3 to 5 epics (fewer than 3 in total: one batch), written and coverage-checked
+  separately from the REVIEW batches. "Every child closed" is a signal only; the worker decides.
 - **Marker grammar.** It is the contract between workers (who write it), `pb` (which parses
   it) and this document. Workers generate lines with `pb unstick marker`, never by hand:
 
@@ -208,10 +233,14 @@ and releasing the claim stays here, by judgement.
 
 ## Stage 6 — dispatch the worker pool
 
-- Dispatch each batch from the Stage 1 `batches` list as
-  `subagent_type: pb:unstick-batch-worker`, in the background, with at most **4** agents
-  running at once (Stage 2 included). Higher concurrency has hit API spend limits. Refill a
-  slot as soon as an agent hands back.
+- Dispatch each batch from the combined Stage 1 `batches` list (the `B<NN>` review batches and
+  the `E<NN>` epic batches, one list, one pool) as `subagent_type: pb:unstick-batch-worker`, in
+  the background, with at most **4** agents running at once (Stage 2 included). E batches hold
+  at most **5** epics each and count toward the 4-agent cap like any other batch. Higher
+  concurrency has hit API spend limits. Refill a slot as soon as an agent hands back.
+- An `E<NN>` batch is Epic-candidate mode for the worker (the batch-name prefix `E` selects it);
+  add `EPIC=1` to its dispatch prompt as well. The worker verifies each epic and closes it only
+  on positive confirmation of every criterion, never on all-children-closed alone.
 - Dispatch prompt:
 
   ```text
@@ -254,8 +283,10 @@ When the last worker hands back, check `followups.txt`:
    post-process). It re-exports to `WORKDIR/export.post.jsonl`, diffs against `prepare.json`,
    and prints every figure with its arithmetic: before/after counts, the open-not-ready split
    between this sweep and peers, markers added by outcome, closed beads (id plus close
-   reason), undeferred / de-labelled / retargeted beads, claims released, new beads, and the
-   `OPERATOR:` / `FOLLOWUP:` lines grouped. Exit `2` means the post-sweep export failed; a
+   reason), undeferred / de-labelled / retargeted beads, claims released, new beads, the
+   epic line `epic candidates N = closed a + unchanged b + needs-children c + marker-skipped d`
+   (plus any unresolved candidates), and the `OPERATOR:` / `FOLLOWUP:` lines grouped. Exit `2`
+   means the post-sweep export failed; a
    missing post-sweep ready list is only a warning.
 3. **Attribution is a HEURISTIC.** bd records no closer, so a bead is attributed to this sweep
    iff it is in a dispatched batch AND (it has a non-`unchanged` marker at or after the start,
@@ -264,10 +295,11 @@ When the last worker hands back, check `followups.txt`:
    the final report, not "proved".
 4. **Final report**, in at most 40 lines: the `pb unstick report` figures (condensed, keeping
    the arithmetic), the Stage 1 triage counts (including `focus_excluded`: a count only, no
-   ids), any `malformed_markers` and `gate_check`
-   caveat, and **needs you**: one line per item, starting with an action verb (grant, decide,
-   run, approve, publish, schedule), naming the bead ids. Beads that need the same action are
-   grouped onto one line. Compose the "needs you" prose yourself from the `OPERATOR:` lines
+   ids), the epic line (epics closed, and epics left `unchanged` with the reason), any
+   `malformed_markers` and `gate_check` caveat, and **needs you**: one line per item, starting
+   with an action verb (grant, decide, run, approve, publish, schedule), naming the bead ids.
+   Every `needs-children` epic belongs here (for example `decompose tc-xxx: its text lists work
+no child covers`). Beads that need the same action are grouped onto one line. Compose the "needs you" prose yourself from the `OPERATOR:` lines
    and your own observations.
 
 ## Rules
