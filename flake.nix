@@ -4843,9 +4843,21 @@
               # one here is what lets this check catch a FUTURE pnwf
               # regression (e.g. a new subcommand this rule does not yet
               # classify) inside a *non*-assignment invocation shape.
+              #
+              # tc-ny0h1: a later repo-base bump added skills whose prescribed
+              # commands this check could not classify. `pg-nix-log-wrapped`
+              # was a genuine rule gap, fixed in internal/rules/pgnixlogwrapped
+              # (it forwards the WRAPPED command's verdict, so no --allow entry).
+              # The two remaining are deliberate engine deferrals on a runtime-
+              # dynamic argument (`grep ... "$f"` with `f` assigned earlier in
+              # the same example, and a `sed -n '/regex/,$p'` address
+              # mistaken for a path) -- undecidable statically, so they are
+              # allowed by their exact deferral reason, not by command name.
               plugin-conformance-repo-base = pkgs.runCommand "check-plugin-conformance-repo-base" { } ''
                 ${pkgs.plugin-conformance-check}/bin/plugin-conformance-check \
                   --allow-reason "env assignments only" \
+                  --allow-reason "has a dynamically-expanded path arg" \
+                  --allow-reason "references unknown path" \
                   ${phillipgreenii-nix-base}/pn-workspace-rules \
                   ${phillipgreenii-nix-base}/capability-model
                 touch $out

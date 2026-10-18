@@ -125,6 +125,7 @@ func TestBashErrorSitesReportGenuineFailure(t *testing.T) {
 		"vault":              true,
 		"pn-workspace":       true,
 		"pnwf":               true,
+		"pg-nix-log-wrapped": true,
 		"kill-probe":         true,
 		"pg-ccaudit":         true,
 		"pg-pr":              true,

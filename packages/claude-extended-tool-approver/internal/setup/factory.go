@@ -28,6 +28,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgccaudit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgconnector"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgnixlogwrapped"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgpr"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnwf"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnworkspace"
@@ -283,6 +284,10 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// by no other rule in this chain); placed alongside its sibling pnworkspace
 		// for readability.
 		pnwf.New(),
+		// pg-nix-log-wrapped is a transparent pass-through wrapper (bead tc-ny0h1): it
+		// takes the engine as its Evaluator and forwards the verdict of the wrapped
+		// command, so it can never launder a nix/darwin-rebuild switch.
+		pgnixlogwrapped.NewWithEvaluator(eng),
 		// kill-probe approves the narrow `kill -0`/`kill -s 0` null-signal
 		// liveness-probe idiom (pg2-z3u4f, ADR 0074) — a runtime-composed shape,
 		// not a plugin-prescribed one, so unlike pnworkspace above it needs no
