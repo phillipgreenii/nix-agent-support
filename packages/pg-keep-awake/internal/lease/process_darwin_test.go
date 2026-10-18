@@ -3,6 +3,7 @@
 package lease
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -264,5 +265,26 @@ func TestSignalGuardRefusesPID1AndBelow(t *testing.T) {
 	}
 	if refusePID(os.Getpid()) != nil {
 		t.Error("a normal pid was refused")
+	}
+}
+
+// refusePID is the guard every signalling path in these tests goes through:
+// pid 1 or lower would signal init or a process group. Darwin-only, like its
+// callers.
+func refusePID(pid int) error {
+	if pid <= 1 {
+		return fmt.Errorf("refusing to signal pid %d", pid)
+	}
+	return nil
+}
+
+// signalPID signals only a pid the test spawned.
+func signalPID(t *testing.T, pid int, sig syscall.Signal) {
+	t.Helper()
+	if err := refusePID(pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(pid, sig); err != nil {
+		t.Fatalf("kill(%d, %v): %v", pid, sig, err)
 	}
 }

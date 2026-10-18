@@ -186,7 +186,7 @@ func (c *Client) Call(ctx context.Context, instance string, req scriptout.Reques
 			return nil, down(err, now().Sub(start))
 		}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if left := budget - now().Sub(start); left > 0 {
 		_ = conn.SetDeadline(time.Now().Add(left))
 	}

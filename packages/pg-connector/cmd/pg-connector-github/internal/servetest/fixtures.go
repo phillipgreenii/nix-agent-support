@@ -122,7 +122,7 @@ func (s *Shim) After(kind, src, dst string) {
 	if err != nil {
 		s.t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := fmt.Fprintf(f, "%s %s\n", src, dst); err != nil {
 		s.t.Fatal(err)
 	}

@@ -714,10 +714,7 @@ func TestANoChangeRunInvalidatesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.seedFresh(groups.Pending, "p")
-	for { // drop the first call's queued refresh
-		if w.rig.Sched.Step(context.Background()) == 0 {
-			break
-		}
+	for w.rig.Sched.Step(context.Background()) != 0 { // drop the first call's queued refresh
 	}
 	w.rig.Sched.Wait()
 	before, _ := w.rig.Group("PR_1", groups.Pending)

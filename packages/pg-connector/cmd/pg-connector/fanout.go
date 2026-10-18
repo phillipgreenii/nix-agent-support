@@ -193,22 +193,6 @@ func registryConfig(reg *Registry) func(string) (json.RawMessage, error) {
 	return reg.BackendConfig
 }
 
-// sourceRows turns a fan-out whose per-backend value is already its sources[]
-// row into the rows, in registration order; a backend whose call panicked (or
-// whose turn never came because ctx ended) becomes a degraded row carrying
-// that error, so it never aborts or silently drops out of the envelope.
-func sourceRows(backends []string, results []fanOutResult[SourceResult]) []SourceResult {
-	rows := make([]SourceResult, len(results))
-	for i, r := range results {
-		if r.Err != nil {
-			rows[i] = SourceResult{Source: backends[i], Status: SourceDegraded, Reason: r.Err.Error()}
-			continue
-		}
-		rows[i] = r.Val
-	}
-	return rows
-}
-
 // capabilitiesAll probes every backend's capabilities in parallel and returns
 // the responses in registration order; a backend whose probe failed (or
 // panicked) yields nil, because every caller treats a failed probe as "this

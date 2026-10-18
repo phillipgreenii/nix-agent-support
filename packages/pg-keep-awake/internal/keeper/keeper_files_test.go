@@ -39,7 +39,7 @@ func TestSingletonLockIsPerStateDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer la.Release()
+	defer func() { _ = la.Release() }()
 	lb, err := TryLockInstance(b)
 	if err != nil {
 		t.Fatalf("a keeper in another state directory must not be blocked: %v", err)

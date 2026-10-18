@@ -337,7 +337,7 @@ func corruptDaemon(t *testing.T, sock string) {
 				return
 			}
 			go func() {
-				defer conn.Close()
+				defer func() { _ = conn.Close() }()
 				_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 				if _, err := socket.ReadFrame(bufio.NewReader(conn), socket.MaxFrameBytes); err != nil {
 					return

@@ -116,7 +116,7 @@ func healthReason(doc backendStatusDoc) string {
 // and, in the same per-backend call, the optional status call; the rows come
 // back in registration order, each backend's health row (when it has one)
 // directly after its own row. A backend whose call panicked becomes a
-// degraded row carrying that error, as sourceRows does.
+// degraded row carrying that error.
 func withHealthRows(ctx context.Context, reg *Registry, backends []string, one func(ctx context.Context, backend string) SourceResult) []SourceResult {
 	results := fanOutEach(ctx, reg, backends, func(ctx context.Context, b string) []SourceResult {
 		rows := []SourceResult{one(ctx, b)}

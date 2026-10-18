@@ -132,11 +132,6 @@ func (s focusSetup) mapped(t *testing.T) map[string]any {
 	return m
 }
 
-func (s focusSetup) typ(t *testing.T) string {
-	t.Helper()
-	return focusMap(t, s.fixture)["type"].(string)
-}
-
 // focusOutcome is what focus.item did in a plan: at most one action, or a skip.
 type focusOutcome struct {
 	act  *action.Action

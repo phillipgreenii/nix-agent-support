@@ -246,7 +246,7 @@ func TestLockSkippedSweepStillTouchesHeartbeat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lk.Unlock()
+	defer func() { _ = lk.Unlock() }()
 	g.tick() // blocks for the 2 second bound, then carries on
 	if !g.hbMTime().After(old) {
 		t.Fatal("a pass with a lock-skipped sweep must still touch the heartbeat")

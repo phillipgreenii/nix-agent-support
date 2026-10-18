@@ -72,7 +72,7 @@ func TestStartCreatesStateDirAndSocketWithTheirModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if got := mode(t, cfg.StateDir); got != 0o700 {
 		t.Errorf("state dir mode = %04o, want 0700", got)
 	}
@@ -93,7 +93,7 @@ func TestStartTightensAnExistingLooseStateDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if got := mode(t, cfg.StateDir); got != 0o700 {
 		t.Errorf("state dir mode = %04o, want 0700", got)
 	}
@@ -105,11 +105,11 @@ func TestSecondStartOnTheSameStateDirRefusesNamingTheLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close()
+	defer func() { _ = first.Close() }()
 
 	second, err := Start(cfg)
 	if err == nil {
-		second.Close()
+		_ = second.Close()
 		t.Fatal("second Start succeeded on a held lock")
 	}
 	if !errors.Is(err, ErrLocked) || !strings.Contains(err.Error(), "daemon.lock") {
@@ -122,7 +122,7 @@ func TestSecondStartOnTheSameStateDirRefusesNamingTheLock(t *testing.T) {
 	if c, err := net.Dial("unix", cfg.SocketPath); err != nil {
 		t.Errorf("first instance's socket is gone: %v", err)
 	} else {
-		c.Close()
+		_ = c.Close()
 	}
 }
 
@@ -138,7 +138,7 @@ func TestStartRemovesAStaleSocketLeftByADeadInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 	ul.SetUnlinkOnClose(false)
-	ul.Close()
+	_ = ul.Close()
 	if fi, err := os.Lstat(cfg.SocketPath); err != nil || fi.Mode()&os.ModeSocket == 0 {
 		t.Fatalf("fixture: stale socket missing: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestStartRemovesAStaleSocketLeftByADeadInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start must replace a stale socket: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if !log.has("stale_socket_removed") {
 		t.Error("removing a stale socket must be logged")
 	}
@@ -163,7 +163,7 @@ func TestStartNeverDeletesANonSocketAtTheSocketPath(t *testing.T) {
 	}
 	s, err := Start(cfg)
 	if err == nil {
-		s.Close()
+		_ = s.Close()
 		t.Fatal("Start must refuse a regular file at the socket path")
 	}
 	if b, rerr := os.ReadFile(cfg.SocketPath); rerr != nil || string(b) != "mine" {
@@ -177,7 +177,7 @@ func TestStartNeverDeletesANonSocketAtTheSocketPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a failed Start left the lock held: %v", err)
 	}
-	s.Close()
+	_ = s.Close()
 }
 
 func TestCheckSocketPathBoundary(t *testing.T) {
@@ -206,7 +206,7 @@ func TestStartRefusesAPathOverThePlatformLimitAndSaysSo(t *testing.T) {
 	}
 	s, err := Start(cfg)
 	if err == nil {
-		s.Close()
+		_ = s.Close()
 		t.Fatal("Start accepted an over-limit socket path")
 	}
 	if !errors.Is(err, ErrSocketPathTooLong) || !strings.Contains(err.Error(), "limit") {
@@ -225,13 +225,13 @@ func TestStartRejectsRelativePaths(t *testing.T) {
 	rel := cfg
 	rel.StateDir = "state"
 	if s, err := Start(rel); err == nil {
-		s.Close()
+		_ = s.Close()
 		t.Error("a relative state directory must be refused")
 	}
 	rel = cfg
 	rel.SocketPath = "sock"
 	if s, err := Start(rel); err == nil {
-		s.Close()
+		_ = s.Close()
 		t.Error("a relative socket path must be refused")
 	}
 }
@@ -269,7 +269,7 @@ func TestServeAcceptsAPeerWithTheDaemonsUID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	buf := make([]byte, 2)
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if _, err := conn.Read(buf); err != nil || string(buf) != "hi" {
@@ -297,7 +297,7 @@ func TestServeRejectsAPeerWhoseUIDDiffersAndLogsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	// The daemon closes a rejected connection: the read ends with EOF.
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if n, err := conn.Read(make([]byte, 1)); err == nil || n != 0 {
@@ -330,7 +330,7 @@ func TestServeRejectsAPeerWhoseCredentialsCannotBeRead(t *testing.T) {
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, _ = conn.Read(make([]byte, 1))
-	conn.Close()
+	_ = conn.Close()
 	_ = stop()
 	if !log.has("peer_cred_failed") {
 		t.Error("an unreadable credential must be logged as peer_cred_failed")
@@ -365,7 +365,7 @@ func TestDrainLetsInFlightHandlersFinishThenRunsHooksInOrderThenReleasesTheLock(
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	<-entered
 
 	stopped := make(chan error, 1)
@@ -383,7 +383,7 @@ func TestDrainLetsInFlightHandlersFinishThenRunsHooksInOrderThenReleasesTheLock(
 		// backlog on some systems; it must at least not be served.
 		_ = c.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
 		_, rerr := c.Read(make([]byte, 1))
-		c.Close()
+		_ = c.Close()
 		if rerr == nil {
 			t.Error("a connection accepted during drain")
 		}
@@ -406,7 +406,7 @@ func TestDrainLetsInFlightHandlersFinishThenRunsHooksInOrderThenReleasesTheLock(
 	if err != nil {
 		t.Fatalf("a second Start after the drain: %v", err)
 	}
-	s2.Close()
+	_ = s2.Close()
 }
 
 func TestDrainTimeoutCancelsAStuckHandlerAndStillRunsHooks(t *testing.T) {
@@ -428,7 +428,7 @@ func TestDrainTimeoutCancelsAStuckHandlerAndStillRunsHooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	<-entered
 	if err := stop(); err != nil {
 		t.Errorf("Serve: %v", err)
@@ -465,7 +465,7 @@ func TestFailedHookIsReportedAndDoesNotSkipLaterHooksOrTheLockRelease(t *testing
 	if err != nil {
 		t.Fatalf("lock not released after a failed hook: %v", err)
 	}
-	s2.Close()
+	_ = s2.Close()
 }
 
 func TestHooksRegistryIsOrderedAndNilSafe(t *testing.T) {
@@ -494,7 +494,7 @@ func TestRunIsStartThenServe(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if c, err := net.Dial("unix", cfg.SocketPath); err == nil {
-			c.Close()
+			_ = c.Close()
 			break
 		}
 		if time.Now().After(deadline) {

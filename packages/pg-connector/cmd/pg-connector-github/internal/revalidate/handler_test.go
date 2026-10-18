@@ -141,7 +141,7 @@ func minTime(a, b time.Time) time.Time {
 }
 
 func TestHandlerHasTheHooksExactSignature(t *testing.T) {
-	var hook func(prev *summary.Summary, next summary.Stored) = (&Handler{}).OnSummaryRefreshed
+	hook := (&Handler{}).OnSummaryRefreshed
 	_ = summary.ServiceConfig{OnSummaryRefreshed: hook}
 }
 

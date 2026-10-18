@@ -81,7 +81,7 @@ func TestLockHeldTooLongExits3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lk.Unlock()
+	defer func() { _ = lk.Unlock() }()
 	start := time.Now()
 	if code, _, stderr := runCLI(t, "acquire", "--owner", "t", "--for", "1m"); code != 3 {
 		t.Fatalf("exit = %d, want 3 (stderr %q)", code, stderr)

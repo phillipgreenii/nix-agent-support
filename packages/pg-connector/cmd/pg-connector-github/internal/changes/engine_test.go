@@ -122,19 +122,6 @@ func (r *rig) seedGroup(group, content, head, base string) {
 	}))
 }
 
-func (r *rig) storedSummary() summary.Summary {
-	r.t.Helper()
-	var s summary.Summary
-	r.must(r.inTx(func(tx *store.Tx) error {
-		row, ok, err := tx.GetGroup(context.Background(), LogKindPR, node, groups.Summary)
-		if err != nil || !ok {
-			r.t.Fatalf("stored summary: ok=%v err=%v", ok, err)
-		}
-		return json.Unmarshal(row.Content, &s)
-	}))
-	return s
-}
-
 // changeSummary stores a changed summary and runs DetectSummary in the same
 // transaction, the way the persister's seam does.
 func (r *rig) changeSummary(mutate func(*summary.Summary), tweak func(*summary.Stored)) error {

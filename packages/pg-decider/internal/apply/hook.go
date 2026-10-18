@@ -46,13 +46,6 @@ func (e Env) stderr() io.Writer {
 	return e.Stderr
 }
 
-func (e Env) now() time.Time {
-	if e.Clock == nil {
-		return time.Now()
-	}
-	return e.Clock()
-}
-
 // Outcome is what happened to one action.
 type Outcome string
 

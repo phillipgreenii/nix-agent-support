@@ -89,7 +89,7 @@ func exchange(t *testing.T, path, line string) (ReplyFrame, scriptout.Response) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	// A write that fails because the daemon already answered and closed is
 	// fine: the reply is what is asserted.
@@ -270,13 +270,13 @@ func TestServerClientThatLeavesWithoutAFrameIsHarmless(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn.Close()
+	_ = conn.Close()
 	// A client that connects and says nothing is dropped at the read timeout.
 	idle, err := net.Dial("unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer idle.Close()
+	defer func() { _ = idle.Close() }()
 	_ = idle.SetReadDeadline(time.Now().Add(3 * time.Second))
 	if n, err := idle.Read(make([]byte, 1)); n != 0 || err == nil {
 		t.Errorf("an idle client gets no bytes, only a close (n=%d err=%v)", n, err)

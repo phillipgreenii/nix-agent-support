@@ -21,7 +21,7 @@ func TestLinuxPeerUIDIsTheConnectingProcessUID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	accepted := make(chan net.Conn, 1)
 	go func() {
 		c, _ := ln.Accept()
@@ -31,9 +31,9 @@ func TestLinuxPeerUIDIsTheConnectingProcessUID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	server := <-accepted
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	uid, err := PeerUID(server)
 	if err != nil {
@@ -46,8 +46,8 @@ func TestLinuxPeerUIDIsTheConnectingProcessUID(t *testing.T) {
 
 func TestLinuxPeerUIDRefusesANonUnixConnection(t *testing.T) {
 	a, b := net.Pipe()
-	defer a.Close()
-	defer b.Close()
+	defer func() { _ = a.Close() }()
+	defer func() { _ = b.Close() }()
 	if _, err := PeerUID(a); err == nil {
 		t.Error("PeerUID must fail on a connection that is not a unix socket")
 	}

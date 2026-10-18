@@ -1,9 +1,6 @@
 package parity
 
-import (
-	"errors"
-	"testing"
-)
+import "testing"
 
 // realEnv returns an Env over the built binaries. When EnvFromProcess reports
 // they were not provided it skips the test with an explicit message, so a plain
@@ -40,5 +37,3 @@ func scenarioByPrefix(t *testing.T, prefix string) Scenario {
 	t.Fatalf("no scenario starts with %q", prefix)
 	return Scenario{}
 }
-
-func isUnsupported(err error) bool { return errors.Is(err, ErrUnsupported) }

@@ -787,7 +787,7 @@ func TestASearchWhoseAnswerCannotBeCountedBooksItsEstimate(t *testing.T) {
 // the cap is refused before gh runs, whatever the answer would have been.
 func TestASearchIsStillAdmittedAtItsUpperBound(t *testing.T) {
 	h := newHarness(t, func(innerCall) ([]byte, error) { return []byte("[]"), nil })
-	cap := config.Defaults().Settings.RESTSearchPerMinute
+	cap := config.Defaults().RESTSearchPerMinute
 	// Leave 5 of the window: below the ten pages a limit of 1000 is admitted at.
 	if err := h.gov.Record(governor.Spend{Bucket: governor.BucketRESTSearch, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Cost: int64(cap) - 5}); err != nil {
 		t.Fatal(err)

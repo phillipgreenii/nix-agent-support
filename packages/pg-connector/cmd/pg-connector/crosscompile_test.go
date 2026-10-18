@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"go/build"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -137,7 +137,7 @@ func crossCompileGo(t *testing.T) string {
 	if p, err := exec.LookPath("go"); err == nil {
 		return p
 	}
-	cand := filepath.Join(runtime.GOROOT(), "bin", "go")
+	cand := filepath.Join(build.Default.GOROOT, "bin", "go")
 	if _, err := os.Stat(cand); err == nil {
 		return cand
 	}

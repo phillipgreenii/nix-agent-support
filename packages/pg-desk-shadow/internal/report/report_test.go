@@ -175,7 +175,7 @@ func TestDataQualityAndStopCriteria(t *testing.T) {
 func TestLabelsAreStableKeyedAndHideTheID(t *testing.T) {
 	a, b := Labeler{Key: []byte("k1")}, Labeler{Key: []byte("k2")}
 	id := synthID(101)
-	if a.Label(id) != a.Label(id) || a.Label(id) == b.Label(id) || strings.Contains(a.Label(id), "101") {
+	if first, second := a.Label(id), a.Label(id); first != second || a.Label(id) == b.Label(id) || strings.Contains(a.Label(id), "101") {
 		t.Errorf("labels: %s %s", a.Label(id), b.Label(id))
 	}
 	if !strings.HasPrefix(a.Label(id), "pr-") || len(a.Label(id)) != 11 {

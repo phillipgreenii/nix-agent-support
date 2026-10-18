@@ -116,7 +116,7 @@ func labelSets(t *testing.T, m metricdata.Metrics) []string {
 	for _, s := range sets {
 		var kv []string
 		for _, a := range s.ToSlice() {
-			kv = append(kv, string(a.Key)+"="+a.Value.Emit())
+			kv = append(kv, string(a.Key)+"="+a.Value.String())
 		}
 		out = append(out, strings.Join(kv, ","))
 	}
@@ -154,7 +154,7 @@ func gaugeFloat(t *testing.T, m metricdata.Metrics, labels string) float64 {
 func setString(s attribute.Set) string {
 	var kv []string
 	for _, a := range s.ToSlice() {
-		kv = append(kv, string(a.Key)+"="+a.Value.Emit())
+		kv = append(kv, string(a.Key)+"="+a.Value.String())
 	}
 	return strings.Join(kv, ",")
 }
@@ -447,7 +447,7 @@ func TestNoLabelValueIsAnEntityIdOrAnAdHocQueryKey(t *testing.T) {
 	// Spans carry no request argument either.
 	for _, s := range f.spans.Ended() {
 		for _, a := range s.Attributes() {
-			if v := a.Value.Emit(); strings.Contains(v, "#") || strings.Contains(v, "adhoc") {
+			if v := a.Value.String(); strings.Contains(v, "#") || strings.Contains(v, "adhoc") {
 				t.Errorf("span %s attribute %s=%q leaks an id or query key", s.Name(), a.Key, v)
 			}
 		}
@@ -485,7 +485,7 @@ func TestRequestSpanHasAChildPerOriginCallWithItsCost(t *testing.T) {
 	attrs := func(s sdktrace.ReadOnlySpan) map[string]string {
 		m := map[string]string{}
 		for _, a := range s.Attributes() {
-			m[string(a.Key)] = a.Value.Emit()
+			m[string(a.Key)] = a.Value.String()
 		}
 		return m
 	}

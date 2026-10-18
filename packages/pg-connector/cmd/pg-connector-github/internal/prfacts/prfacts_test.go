@@ -365,7 +365,7 @@ func TestFetch_StampedFreshnessThroughTheRules(t *testing.T) {
 			}
 			name := fmt.Sprintf("%s terminal=%v", group, terminal)
 			if terminal {
-				if want := fetchedAt.Add(config.Defaults().Settings.TerminalTTL.Std()); !freshUntil.Equal(want) {
+				if want := fetchedAt.Add(config.Defaults().TerminalTTL.Std()); !freshUntil.Equal(want) {
 					t.Errorf("%s: fresh_until = %v, want %v", name, freshUntil, want)
 				}
 			} else if !freshUntil.IsZero() {

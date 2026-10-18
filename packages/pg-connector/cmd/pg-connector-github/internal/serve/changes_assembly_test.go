@@ -111,7 +111,7 @@ func storedChanges(t *testing.T, d *servetest.Daemon) []storedChange {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []storedChange
 	for rows.Next() {
 		var c storedChange

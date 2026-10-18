@@ -140,7 +140,7 @@ func TestASecondaryLimitPausesTheBackgroundForExactlyTheStatedTime(t *testing.T)
 	authish := fmt.Errorf("gh api: gh: You have exceeded a secondary rate limit (HTTP 403): run `gh auth login`: %w", github.ErrGHAuthInvalid)
 	headers := rateHeaders("core", 5000, 4900, 100, [2]string{"Retry-After", "60"})
 	out := ghInclude("403 Forbidden", headers, `{"message":"You have exceeded a secondary rate limit."}`)
-	f, g, clk, _, _ := newFeed(t, out, authish)
+	f, _, clk, _, _ := newFeed(t, out, authish)
 
 	var pauses []string
 	g2, err := governor.New(GovernorConfig(config.Defaults().Settings), governor.Options{
@@ -153,7 +153,7 @@ func TestASecondaryLimitPausesTheBackgroundForExactlyTheStatedTime(t *testing.T)
 		t.Fatal(err)
 	}
 	f = New(g2, f.gh, clk)
-	g = g2
+	g := g2
 
 	resp, err := f.REST(context.Background(), RESTCall{Meta: Meta{Class: governor.ClassQuery, Purpose: governor.PurposeQuery}, Args: []string{"repos/o/r/actions/runs"}})
 	var rl *RateLimitError

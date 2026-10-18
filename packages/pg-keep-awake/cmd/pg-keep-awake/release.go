@@ -53,7 +53,7 @@ func runRelease(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return failState(stderr, "release", err)
 	}
-	defer lk.Unlock()
+	defer func() { _ = lk.Unlock() }()
 
 	if !*all {
 		if err := lk.Remove(lease.MakeID(*owner, k)); err != nil {

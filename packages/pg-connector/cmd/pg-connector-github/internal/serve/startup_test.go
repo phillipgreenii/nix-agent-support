@@ -150,7 +150,7 @@ func TestServeStartupOrderIsObservableInTheLog(t *testing.T) {
 	// first, then the store, then the gate opens.
 	lines := d.DaemonLog(t)
 	shell, migrated, started := indexOf(lines, "shell_started"), indexOf(lines, "store_migrated"), indexOf(lines, "daemon_started")
-	if !(0 <= shell && shell < migrated && migrated < started) {
+	if shell < 0 || shell >= migrated || migrated >= started {
 		t.Errorf("order: shell_started %d, store_migrated %d, daemon_started %d", shell, migrated, started)
 	}
 	// The viewer was resolved before the gate opened: by the time the daemon
@@ -169,7 +169,7 @@ func TestServeStartupOrderIsObservableInTheLog(t *testing.T) {
 		after = append(after, lines[i])
 	}
 	stale, shell2, started2 := indexOf(after, "stale_socket_removed"), indexOf(after, "shell_started"), indexOf(after, "daemon_started")
-	if !(0 <= stale && stale < shell2 && shell2 < started2) {
+	if stale < 0 || stale >= shell2 || shell2 >= started2 {
 		t.Errorf("restart order: stale_socket_removed %d, shell_started %d, daemon_started %d", stale, shell2, started2)
 	}
 	if indexOf(after, "store_migrated") >= 0 {

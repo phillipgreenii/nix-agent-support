@@ -50,7 +50,7 @@ func readSafe(path string, max int64) ([]byte, fileMeta, error) {
 		return nil, fileMeta{}, &fs.PathError{Op: "open", Path: path, Err: err}
 	}
 	f := os.NewFile(uintptr(fd), path)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	fi, err := f.Stat()
 	if err != nil {
 		return nil, fileMeta{}, err
@@ -113,17 +113,17 @@ func (d *Dir) WriteAtomic(rel string, data []byte) error {
 	cleanup := func() { _ = os.Remove(tmp) }
 	// The umask can only remove bits, but make the mode exact regardless.
 	if err := f.Chmod(0o600); err != nil {
-		f.Close()
+		_ = f.Close()
 		cleanup()
 		return err
 	}
 	if _, err := f.Write(data); err != nil {
-		f.Close()
+		_ = f.Close()
 		cleanup()
 		return err
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		cleanup()
 		return err
 	}

@@ -89,12 +89,12 @@ func decodeKinds(t *testing.T, raw string) []string {
 func (d *Daemon) ChangeLog(t *testing.T) []ChangeLogRow {
 	t.Helper()
 	db := d.readDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	rows, err := db.Query(`SELECT seq, kind, id, version, head_sha, kinds, origin FROM change_log ORDER BY seq`)
 	if err != nil {
 		t.Fatalf("servetest: read the change log: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []ChangeLogRow
 	for rows.Next() {
 		var r ChangeLogRow
@@ -115,12 +115,12 @@ func (d *Daemon) ChangeLog(t *testing.T) []ChangeLogRow {
 func (d *Daemon) PendingRows(t *testing.T) []PendingRow {
 	t.Helper()
 	db := d.readDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	rows, err := db.Query(`SELECT kind, id, kinds, awaited, head_sha, origin, deadline FROM pending_change ORDER BY kind, id`)
 	if err != nil {
 		t.Fatalf("servetest: read the pending rows: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []PendingRow
 	for rows.Next() {
 		var r PendingRow
@@ -154,7 +154,7 @@ func (d *Daemon) PendingRows(t *testing.T) []PendingRow {
 func (d *Daemon) EntityVersion(t *testing.T, kind, id string) int64 {
 	t.Helper()
 	db := d.readDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var v int64
 	err := db.QueryRow(`SELECT version FROM entity WHERE kind = ? AND id = ?`, kind, id).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -170,7 +170,7 @@ func (d *Daemon) EntityVersion(t *testing.T, kind, id string) int64 {
 func (d *Daemon) Group(t *testing.T, nodeID, group string) GroupState {
 	t.Helper()
 	db := d.readDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var g GroupState
 	var fresh sql.NullInt64
 	var content []byte

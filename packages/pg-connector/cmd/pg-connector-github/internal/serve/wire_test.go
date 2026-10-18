@@ -74,7 +74,7 @@ func TestErrorTable_ProtocolOutsideNAndNMinus1_IsVersionMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_, _ = conn.Write([]byte("not a frame\n"))
 	buf := make([]byte, 4096)
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))

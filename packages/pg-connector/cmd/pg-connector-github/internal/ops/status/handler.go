@@ -108,7 +108,7 @@ func (b *Builder) Handler(schemaVersion int) scriptout.OpHandler {
 // Build is the daemon's report now.
 func (b *Builder) Build(ctx context.Context) (Report, error) {
 	now := b.cfg.Clock.Now()
-	r := b.cfg.Static.base(now)
+	r := b.cfg.base(now)
 	r.Source = SourceDaemon
 
 	if !b.cfg.Started.IsZero() {

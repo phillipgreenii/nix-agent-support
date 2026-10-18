@@ -255,7 +255,7 @@ func (f *Feed) rest(ctx context.Context, call RESTCall, run func(ctx context.Con
 		spend.Reading = &rd
 	}
 
-	var result error = runErr
+	result := runErr
 	if wait, secondary := SecondaryLimit(resp.StatusCode, hd); secondary {
 		f.gov.PauseAll(wait, fmt.Sprintf("secondary rate limit (HTTP %d, retry after %s)", resp.StatusCode, wait))
 		spend.Outcome = OutcomeRateLimited

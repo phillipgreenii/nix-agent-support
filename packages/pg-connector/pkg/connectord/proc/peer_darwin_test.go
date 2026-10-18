@@ -23,7 +23,7 @@ func connectedPair(t *testing.T) (client, server net.Conn) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	accepted := make(chan net.Conn, 1)
 	go func() {
 		c, _ := ln.Accept()
@@ -51,8 +51,8 @@ func TestDarwinPeerUIDIsTheConnectingProcessUID(t *testing.T) {
 
 func TestDarwinPeerUIDRefusesANonUnixConnection(t *testing.T) {
 	a, b := net.Pipe()
-	defer a.Close()
-	defer b.Close()
+	defer func() { _ = a.Close() }()
+	defer func() { _ = b.Close() }()
 	if _, err := PeerUID(a); err == nil {
 		t.Error("PeerUID must fail on a connection that is not a unix socket")
 	}

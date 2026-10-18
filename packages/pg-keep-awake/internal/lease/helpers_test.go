@@ -1,10 +1,8 @@
 package lease
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -26,25 +24,6 @@ func newDir(t *testing.T) *Dir {
 		t.Fatalf("EnsureDir: %v", err)
 	}
 	return d
-}
-
-// signalPID signals only a pid the test spawned and refuses pid 1 or lower
-// (a non-positive or tiny pid would signal a process group or init).
-func refusePID(pid int) error {
-	if pid <= 1 {
-		return fmt.Errorf("refusing to signal pid %d", pid)
-	}
-	return nil
-}
-
-func signalPID(t *testing.T, pid int, sig syscall.Signal) {
-	t.Helper()
-	if err := refusePID(pid); err != nil {
-		t.Fatal(err)
-	}
-	if err := syscall.Kill(pid, sig); err != nil {
-		t.Fatalf("kill(%d, %v): %v", pid, sig, err)
-	}
 }
 
 // fakeProber answers from a table, for portable liveness tests.

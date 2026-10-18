@@ -94,7 +94,7 @@ func (p *serveProc) waitListening(t *testing.T, socket string) {
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if c, err := net.Dial("unix", socket); err == nil {
-			c.Close()
+			_ = c.Close()
 			return
 		}
 		select {
@@ -156,7 +156,7 @@ func TestRealServeLifecycle(t *testing.T) {
 	if !strings.Contains(string(reply[:n]), "invalid_argument") {
 		t.Errorf("a malformed frame must be answered invalid_argument, got %q", reply[:n])
 	}
-	c.Close()
+	_ = c.Close()
 
 	// A second serve on the same state directory refuses, naming the lock.
 	second := startServe(t, cfg)
@@ -234,7 +234,7 @@ func TestServeDrainsOnContextCancelInProcess(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if c, err := net.Dial("unix", cfg.SocketPath); err == nil {
-			c.Close()
+			_ = c.Close()
 			break
 		}
 		if time.Now().After(deadline) {

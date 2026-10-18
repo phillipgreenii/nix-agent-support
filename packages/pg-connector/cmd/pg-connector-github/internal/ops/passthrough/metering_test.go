@@ -176,7 +176,7 @@ func TestMetering_ListActivityBooksEveryOriginCallAsClassOnePassthrough(t *testi
 // (Booking the upper bound, ten per search, refused the third search of the very
 // first call: bead pg2-rgbco.)
 func TestMetering_ListActivityCompletesUnderTheDefaultSearchCap(t *testing.T) {
-	cap := config.Defaults().Settings.RESTSearchPerMinute
+	cap := config.Defaults().RESTSearchPerMinute
 	if cap != 20 {
 		t.Fatalf("the default rest_search_per_minute is %d, this test pins the shipped default of 20", cap)
 	}

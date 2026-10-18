@@ -61,17 +61,6 @@ func refusePID(pid int) error {
 	return nil
 }
 
-// signalChild signals only a pid the test spawned.
-func signalChild(t *testing.T, pid int, sig syscall.Signal) {
-	t.Helper()
-	if err := refusePID(pid); err != nil {
-		t.Fatal(err)
-	}
-	if err := syscall.Kill(pid, sig); err != nil {
-		t.Fatalf("kill(%d, %v): %v", pid, sig, err)
-	}
-}
-
 // fakeProber answers pid liveness from a table.
 type fakeProber map[int]lease.ProcState
 

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	gobuild "go/build"
 	"net"
 	"os"
 	"os/exec"
@@ -456,7 +457,7 @@ func (d *Daemon) Raw(frame socket.RequestFrame) (socket.ReplyFrame, error) {
 	if err != nil {
 		return socket.ReplyFrame{}, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if err := socket.WriteFrame(conn, frame); err != nil {
 		return socket.ReplyFrame{}, err
 	}
@@ -561,7 +562,7 @@ func build(t testing.TB, ldflags string) string {
 	}
 	goBin, err := exec.LookPath("go")
 	if err != nil {
-		cand := filepath.Join(runtime.GOROOT(), "bin", "go")
+		cand := filepath.Join(gobuild.Default.GOROOT, "bin", "go")
 		if _, serr := os.Stat(cand); serr != nil {
 			t.Skipf("servetest: no go toolchain to build the real binary: %v", err)
 		}

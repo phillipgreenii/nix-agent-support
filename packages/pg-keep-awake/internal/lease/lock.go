@@ -45,11 +45,11 @@ func (d *Dir) takeLock(timeout time.Duration) (*Lock, error) {
 			return &Lock{d: d, f: f}, nil
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			f.Close()
+			_ = f.Close()
 			return nil, fmt.Errorf("flock %s: %w", path, err)
 		}
 		if !time.Now().Before(deadline) {
-			f.Close()
+			_ = f.Close()
 			return nil, ErrLockTimeout
 		}
 		time.Sleep(lockPoll)

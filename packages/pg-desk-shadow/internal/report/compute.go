@@ -682,10 +682,10 @@ func classifyMiss(id, raw string, e time.Time, T time.Duration, firstStart, t0 t
 		if s.Before(lo) || s.After(hi) {
 			continue
 		}
-		switch {
-		case t.Status == schema.StatusSkippedBudget:
+		switch t.Status {
+		case schema.StatusSkippedBudget:
 			skipped = true
-		case t.Status == schema.StatusFailed:
+		case schema.StatusFailed:
 			hydFail = true
 		}
 		for _, src := range t.Sources {

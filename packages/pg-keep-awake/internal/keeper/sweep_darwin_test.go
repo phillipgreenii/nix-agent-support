@@ -323,3 +323,15 @@ func TestSweepsKeepAssertionProcessesAndFiles(t *testing.T) {
 		}
 	}
 }
+
+// signalChild signals only a pid the test spawned. Darwin-only: the sweep
+// tests that need a real signal are the only callers.
+func signalChild(t *testing.T, pid int, sig syscall.Signal) {
+	t.Helper()
+	if err := refusePID(pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(pid, sig); err != nil {
+		t.Fatalf("kill(%d, %v): %v", pid, sig, err)
+	}
+}

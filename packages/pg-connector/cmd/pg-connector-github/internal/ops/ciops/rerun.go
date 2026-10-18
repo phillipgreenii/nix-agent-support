@@ -91,7 +91,7 @@ func (h *handler) rerunLocked(ctx context.Context, id, node string) error {
 	}
 	if len(res.Groups) == 0 || res.Groups[0].Status != groupsvc.Fresh {
 		// A stale summary could name an old head: refuse rather than guess.
-		var cause error = errors.New("the pull request's current head could not be read")
+		cause := errors.New("the pull request's current head could not be read")
 		if len(res.Groups) > 0 && res.Groups[0].Err != nil {
 			cause = fmt.Errorf("the pull request's current head could not be read: %w", res.Groups[0].Err)
 		}

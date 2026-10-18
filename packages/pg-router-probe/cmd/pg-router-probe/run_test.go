@@ -754,8 +754,8 @@ func timeoutErr() error {
 }
 
 // runWithGrafanaErr drives one runProbe whose Grafana call fails with err
-// and whose backlog sub-check succeeds, returning the error and stderr.
-func runWithGrafanaErr(t *testing.T, opts runOptions, err error) (error, string) {
+// and whose backlog sub-check succeeds, returning stderr and the error.
+func runWithGrafanaErr(t *testing.T, opts runOptions, err error) (string, error) {
 	t.Helper()
 	cmd, stderr := testCmd()
 	opts.grafanaURL = "http://example.invalid"
@@ -763,7 +763,8 @@ func runWithGrafanaErr(t *testing.T, opts runOptions, err error) (error, string)
 	spy := &spyDeps{fetchAlertsFn: func(ctx context.Context, opts runOptions) ([]grafanaAlert, error) {
 		return nil, err
 	}}
-	return runProbe(cmd, opts, spy.toRunDeps(time.Now())), stderr.String()
+	runErr := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
+	return stderr.String(), runErr
 }
 
 // TestRunProbeSingleDegradedRunIsLoggedNotReported is the pg2-zzf54 core
@@ -773,7 +774,7 @@ func runWithGrafanaErr(t *testing.T, opts runOptions, err error) (error, string)
 func TestRunProbeSingleDegradedRunIsLoggedNotReported(t *testing.T) {
 	opts := withProdThreshold(baseOpts(t))
 	for run := 1; run < defaultDegradedThreshold; run++ {
-		err, stderr := runWithGrafanaErr(t, opts, errUnreachable)
+		stderr, err := runWithGrafanaErr(t, opts, errUnreachable)
 		if err != nil {
 			t.Fatalf("run %d: expected exit 0 below the threshold, got %v", run, err)
 		}
@@ -785,7 +786,7 @@ func TestRunProbeSingleDegradedRunIsLoggedNotReported(t *testing.T) {
 			t.Fatalf("run %d: Degraded[grafana-alerts] = %d (loaded=%v), want %d", run, snap.Degraded[grafanaAlertsKey], ok, run)
 		}
 	}
-	err, _ := runWithGrafanaErr(t, opts, errUnreachable)
+	_, err := runWithGrafanaErr(t, opts, errUnreachable)
 	if exitCodeOf(t, err) != 4 {
 		t.Fatalf("threshold-th consecutive failure must exit 4, got %v", err)
 	}
@@ -797,17 +798,17 @@ func TestRunProbeSingleDegradedRunIsLoggedNotReported(t *testing.T) {
 func TestRunProbeSuccessResetsDegradedStreak(t *testing.T) {
 	opts := withProdThreshold(baseOpts(t))
 	for range defaultDegradedThreshold - 1 {
-		if err, _ := runWithGrafanaErr(t, opts, errUnreachable); err != nil {
+		if _, err := runWithGrafanaErr(t, opts, errUnreachable); err != nil {
 			t.Fatalf("expected exit 0 below the threshold, got %v", err)
 		}
 	}
-	if err, _ := runWithGrafanaErr(t, opts, nil); err != nil {
+	if _, err := runWithGrafanaErr(t, opts, nil); err != nil {
 		t.Fatalf("clean run: expected exit 0, got %v", err)
 	}
 	if snap, _ := loadSnapshot(opts.snapshotPath); len(snap.Degraded) != 0 {
 		t.Fatalf("a successful run must clear Degraded, got %v", snap.Degraded)
 	}
-	if err, _ := runWithGrafanaErr(t, opts, errUnreachable); err != nil {
+	if _, err := runWithGrafanaErr(t, opts, errUnreachable); err != nil {
 		t.Fatalf("failure after a reset must exit 0, got %v", err)
 	}
 	if snap, _ := loadSnapshot(opts.snapshotPath); snap.Degraded[grafanaAlertsKey] != 1 {
@@ -837,7 +838,7 @@ func TestRunProbeUnattemptedSubcheckKeepsItsStreak(t *testing.T) {
 func TestRunProbeDegradedThresholdOneReportsImmediately(t *testing.T) {
 	opts := baseOpts(t)
 	opts.degradedThreshold = 1
-	err, _ := runWithGrafanaErr(t, opts, errUnreachable)
+	_, err := runWithGrafanaErr(t, opts, errUnreachable)
 	if exitCodeOf(t, err) != 4 {
 		t.Fatalf("--degraded-threshold 1 must keep the immediate exit 4, got %v", err)
 	}

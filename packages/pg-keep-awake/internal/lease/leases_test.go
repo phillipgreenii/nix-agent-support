@@ -162,7 +162,7 @@ func TestSymlinkAndFIFOAreSkippedAndCounted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lk.Unlock()
+	defer func() { _ = lk.Unlock() }()
 	if n, _ := lk.SweepJunk(time.Now().Add(time.Hour)); n != 0 {
 		t.Errorf("sweep removed %d special files", n)
 	}
@@ -224,7 +224,7 @@ func TestUnparsableJSONKeptUntilStale(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer lk.Unlock()
+		defer func() { _ = lk.Unlock() }()
 		n, err := lk.SweepJunk(now)
 		if err != nil {
 			t.Fatal(err)
@@ -281,7 +281,7 @@ func TestFutureSchemaLeaseUnreadableNotDeleted(t *testing.T) {
 		t.Errorf("ReadLease = %v, want ErrUnreadable", err)
 	}
 	lk, _ := d.TakeLock()
-	defer lk.Unlock()
+	defer func() { _ = lk.Unlock() }()
 	if n, _ := lk.SweepJunk(time.Now().Add(24 * time.Hour)); n != 0 {
 		t.Errorf("sweep deleted a future-schema file")
 	}
@@ -316,7 +316,7 @@ func TestSweepRemovesOnlyStaleTmp(t *testing.T) {
 		t.Fatal(err)
 	}
 	lk, _ := d.TakeLock()
-	defer lk.Unlock()
+	defer func() { _ = lk.Unlock() }()
 	n, err := lk.SweepJunk(time.Now())
 	if err != nil || n != 1 {
 		t.Fatalf("sweep = %d, %v", n, err)
@@ -358,7 +358,7 @@ func TestLockBoundIsTwoSeconds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lock not released: %v", err)
 	}
-	lk.Unlock()
+	_ = lk.Unlock()
 	if err := lk.Unlock(); err != nil {
 		t.Errorf("double Unlock: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestLockBoundIsTwoSeconds(t *testing.T) {
 func TestLockShortTimeout(t *testing.T) {
 	d := newDir(t)
 	held, _ := d.TakeLock()
-	defer held.Unlock()
+	defer func() { _ = held.Unlock() }()
 	start := time.Now()
 	if _, err := d.takeLock(50 * time.Millisecond); !errors.Is(err, ErrLockTimeout) {
 		t.Fatalf("got %v", err)
@@ -390,7 +390,7 @@ func TestLockSerialisesWriters(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(d.LeasesPath(), "o.k.json")); err == nil {
 		t.Fatal("writer got past the held lock")
 	}
-	lk.Unlock()
+	_ = lk.Unlock()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}

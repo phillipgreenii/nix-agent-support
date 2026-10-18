@@ -100,7 +100,7 @@ func (g *fakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
 		parts := strings.Split(strings.SplitN(endpoint, "?", 2)[0], "/")
 		// repos/o/r/actions/runs/<id>/attempts/<n>/jobs
 		var attempt int
-		fmt.Sscanf(parts[7], "%d", &attempt)
+		_, _ = fmt.Sscanf(parts[7], "%d", &attempt) // malformed attempt segment leaves attempt at 0
 		ans = ghAnswer{status: 200, body: `{"total_count":0,"jobs":[]}`}
 		if g.jobs != nil {
 			ans = g.jobs(parts[5], attempt)

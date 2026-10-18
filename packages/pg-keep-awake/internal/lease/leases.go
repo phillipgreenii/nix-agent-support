@@ -31,7 +31,7 @@ func (d *Dir) PutLease(l *Lease) error {
 	if err != nil {
 		return err
 	}
-	defer lk.Unlock()
+	defer func() { _ = lk.Unlock() }()
 	return lk.Put(l)
 }
 
@@ -41,7 +41,7 @@ func (d *Dir) RemoveLease(id string) error {
 	if err != nil {
 		return err
 	}
-	defer lk.Unlock()
+	defer func() { _ = lk.Unlock() }()
 	return lk.Remove(id)
 }
 

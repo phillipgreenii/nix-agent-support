@@ -241,9 +241,7 @@ func (s *Shim) Calls() []Call {
 		}
 		fields := strings.Split(line, "\t")
 		c := Call{Host: strings.TrimPrefix(fields[0], "GH_HOST=")}
-		for _, f := range fields[1:] {
-			c.Args = append(c.Args, f)
-		}
+		c.Args = append(c.Args, fields[1:]...)
 		out = append(out, c)
 	}
 	return out

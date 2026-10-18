@@ -78,7 +78,7 @@ func TestCallRetriesARefusedConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
+	_ = ln.Close()
 	clk := newFakeClock()
 	c := &Client{SocketPath: path, Now: clk.Now, Sleep: clk.Sleep}
 	_, err = c.Call(context.Background(), "pr", listReq, 4*time.Second, 3*time.Second)
@@ -98,7 +98,7 @@ func TestCallDoesNotRetryAPermissionRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	if err := os.Chmod(path, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestCallRelaysADaemonErrorAnswerAsAReply(t *testing.T) {
 
 func TestCallWithADaemonThatClosesWithoutAReply(t *testing.T) {
 	// The peer-uid rejection looks like this to a client: accepted, then closed.
-	path := startDaemon(t, func(_ context.Context, conn net.Conn, _ proc.Peer) { conn.Close() })
+	path := startDaemon(t, func(_ context.Context, conn net.Conn, _ proc.Peer) { _ = conn.Close() })
 	c := &Client{SocketPath: path, RestartHint: "the hint"}
 	_, err := c.Call(context.Background(), "pr", listReq, 3*time.Second, 2*time.Second)
 	var down *DaemonDownError

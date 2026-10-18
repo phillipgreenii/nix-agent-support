@@ -458,7 +458,7 @@ func (fx *Fixture) prShowJSON(p PRFixture) []byte {
 		MergeStateStatus: p.MergeStateStatus, ChecksRollup: p.ChecksRollup, NodeID: p.NodeID, ReviewDecision: p.ReviewDecision,
 	}
 	for _, c := range p.Comments {
-		w.Comments = append(w.Comments, commentWire{ID: c.ID, Author: c.Author, Body: c.Body, Resolved: c.Resolved})
+		w.Comments = append(w.Comments, commentWire(c))
 	}
 	return mustJSON(w)
 }

@@ -68,7 +68,7 @@ func labelSets(t *testing.T, m metricdata.Metrics) map[string]int64 {
 	add := func(a attribute.Set, v int64) {
 		kvs := []string{}
 		for _, kv := range a.ToSlice() {
-			kvs = append(kvs, string(kv.Key)+"="+kv.Value.Emit())
+			kvs = append(kvs, string(kv.Key)+"="+kv.Value.String())
 		}
 		sort.Strings(kvs)
 		out[strings.Join(kvs, ",")] = v
@@ -318,7 +318,7 @@ func TestLeaseIDAndPIDNeverMetricLabels(t *testing.T) {
 				if !allowed[string(kv.Key)] {
 					t.Errorf("%s: unexpected label %q", name, kv.Key)
 				}
-				if v := kv.Value.Emit(); strings.Contains(v, "lease-id-123") || v == "4242" || v == "4243" {
+				if v := kv.Value.String(); strings.Contains(v, "lease-id-123") || v == "4242" || v == "4243" {
 					t.Errorf("%s: label %s carries a lease id or pid: %s", name, kv.Key, v)
 				}
 			}
@@ -345,7 +345,7 @@ func TestLogEvents(t *testing.T) {
 	for _, rec := range logs.recs {
 		attrs := map[string]string{}
 		rec.WalkAttributes(func(kv attribute.KeyValue) bool {
-			attrs[string(kv.Key)] = kv.Value.Emit()
+			attrs[string(kv.Key)] = kv.Value.String()
 			return true
 		})
 		n := attrs["event_name"]

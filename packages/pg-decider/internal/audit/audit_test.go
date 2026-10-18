@@ -27,11 +27,10 @@ func str(s string) *string { return &s }
 // and answers from Go; the child process is a tiny shell script that prints
 // the canned stdout and exit code and reports the beads-dir variable it saw.
 type fake struct {
-	t        *testing.T
-	dir      string
-	execs    []string // "<binary> <args...>"
-	beadsDir []string // per exec: "unset" or "set:<value>"
-	respond  func(line string) (stdout string, exit int)
+	t       *testing.T
+	dir     string
+	execs   []string // "<binary> <args...>"
+	respond func(line string) (stdout string, exit int)
 }
 
 func newFake(t *testing.T, respond func(line string) (string, int)) *fake {

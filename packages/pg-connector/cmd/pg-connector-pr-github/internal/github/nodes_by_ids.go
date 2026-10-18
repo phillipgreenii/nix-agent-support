@@ -138,7 +138,7 @@ func (p *Provider) SummariesByNodeIDs(ctx context.Context, nodeIDs []string, gat
 
 		var resp ghNodesResponse
 		parsed := len(bytes.TrimSpace(raw)) > 0 && json.Unmarshal(raw, &resp) == nil
-		if runErr != nil && !(parsed && onlyNodeLookupFailures(resp.Errors)) {
+		if runErr != nil && (!parsed || !onlyNodeLookupFailures(resp.Errors)) {
 			return nil, runErr
 		}
 		if !parsed {

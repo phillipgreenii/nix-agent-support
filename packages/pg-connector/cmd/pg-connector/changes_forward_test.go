@@ -130,7 +130,7 @@ func (w *markingWriter) Write(p []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.WriteString(fwdOutputMark + "\n"); err != nil {
 		return 0, err
 	}

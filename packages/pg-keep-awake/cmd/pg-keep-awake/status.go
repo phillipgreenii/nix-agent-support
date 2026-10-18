@@ -395,7 +395,7 @@ func renderStatus(w io.Writer, r *statusReport, now time.Time) {
 			fmt.Fprintf(tw, "         %s\t%s\t%s\t%s\t%s\n", dash(l.Owner), cutKey(l.Key, l.ID), clientCell(r.leaseDetail[i]),
 				expiresCell(l.ExpiresAt, now), stateCell(l))
 		}
-		tw.Flush()
+		_ = tw.Flush()
 	}
 	renderExternal(w, r)
 	renderNotes(w, r)

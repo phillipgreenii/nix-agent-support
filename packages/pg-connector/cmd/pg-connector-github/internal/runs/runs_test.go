@@ -60,7 +60,7 @@ func (g *fakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
 		parts := strings.Split(strings.SplitN(endpoint, "?", 2)[0], "/")
 		// repos/o/r/actions/runs/<id>/attempts/<n>/jobs
 		id = parts[5]
-		fmt.Sscanf(parts[7], "%d", &attempt)
+		_, _ = fmt.Sscanf(parts[7], "%d", &attempt) // malformed attempt segment leaves attempt at 0
 		return g.jobs(id, attempt, len(g.jobCalls))
 	}
 	g.runsCalls = append(g.runsCalls, endpoint)

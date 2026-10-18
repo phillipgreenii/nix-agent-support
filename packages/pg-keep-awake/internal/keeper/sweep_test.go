@@ -419,7 +419,7 @@ func TestSweepSkippedWhenLockCannotBeTaken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer held.Unlock()
+	defer func() { _ = held.Unlock() }()
 
 	s, _ := sweeperWith(t, d, fakeProber{}, nil)
 	start := time.Now()
@@ -496,7 +496,7 @@ func TestShutdownRemovesHeartbeatEvenWhenSweepSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer held.Unlock()
+	defer func() { _ = held.Unlock() }()
 	s, _ := sweeperWith(t, d, fakeProber{}, nil)
 	res, err := s.Shutdown()
 	if err != nil || !res.LockSkipped || exists(t, hb) {
