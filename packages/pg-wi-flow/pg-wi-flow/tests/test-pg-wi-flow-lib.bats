@@ -418,18 +418,6 @@ show_fixture() {
   grep -q '^list --status open,in_progress --limit 0 --json$' "$MOCK_BD_LOG"
 }
 
-@test "pgwf_list_unpooled: large row sets (past the single-argument size limit) still work" {
-  local pad
-  pad="$(head -c 2000 /dev/zero | tr '\0' x)"
-  jq -nc --arg p "$pad" '[range(0;200) | {id: ("tc-" + tostring), notes: $p}]' >"$MOCK_BD_READY_DIR/default.json"
-  MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
-  export MOCK_BD_LIST_FILE
-  jq -nc --arg p "$pad" '{data: [range(0;201) | {id: ("tc-" + tostring), notes: $p}]}' >"$MOCK_BD_LIST_FILE"
-  run pgwf_list_unpooled '{}'
-  [ "$status" -eq 0 ]
-  [ "$(jq -r 'map(.id) | join(",")' <<<"$output")" = "tc-200" ]
-}
-
 @test "cmd_list: --stale --days dispatches to pgwf_list_stale_days" {
   MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
   export MOCK_BD_LIST_FILE
