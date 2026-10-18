@@ -99,6 +99,20 @@ update)
   done
   echo '{"data":[{}]}'
   ;;
+ready | list | children | dep)
+  # Row-set reads: optionally mimic bd's truncation notice on STDERR (exit 0)
+  # next to a truncated pagination envelope; MOCK_BD_ROWS_FAIL makes it fail.
+  if [[ -n ${MOCK_BD_ROWS_FAIL:-} ]]; then
+    echo "mock bd $1: boom" >&2
+    exit 1
+  fi
+  if [[ -n ${MOCK_BD_TRUNCATED:-} ]]; then
+    echo "Showing 100 of 109 ready issues. Use --limit 0 for all, or --limit N to raise the cap." >&2
+    printf '{"data":[{"id":"a"},{"id":"b"}],"pagination":{"returned":100,"total":109,"truncated":true}}\n'
+  else
+    printf '{"data":[{"id":"a"},{"id":"b"}]}\n'
+  fi
+  ;;
 memories)
   if [[ -n ${MOCK_BD_MEMORIES_FAIL:-} ]]; then
     echo "mock bd memories: boom" >&2
@@ -381,4 +395,43 @@ show_fixture() {
 @test "pgwf_tracker_lessons: a failing bd memories read returns non-zero" {
   MOCK_BD_MEMORIES_FAIL=1 run pgwf_tracker_lessons litellm
   [ "$status" -ne 0 ]
+}
+
+# --- row-set reads: bd's stderr notice and 100-row cap (tc-wxvd2) ---
+
+@test "pgwf_tracker_ready: stderr truncation notice plus truncated envelope does not break parsing" {
+  MOCK_BD_TRUNCATED=1 run --separate-stderr pgwf_tracker_ready --label x
+  [ "$status" -eq 0 ]
+  [ "$output" = '[{"id":"a"},{"id":"b"}]' ]
+}
+
+@test "pgwf_tracker_list: stderr truncation notice plus truncated envelope does not break parsing" {
+  MOCK_BD_TRUNCATED=1 run --separate-stderr pgwf_tracker_list --status open
+  [ "$status" -eq 0 ]
+  [ "$output" = '[{"id":"a"},{"id":"b"}]' ]
+}
+
+@test "pgwf_tracker_children/dependents: stderr notice does not break parsing" {
+  MOCK_BD_TRUNCATED=1 run --separate-stderr pgwf_tracker_open_children p
+  [ "$status" -eq 0 ]
+  [ "$output" = '[{"id":"a"},{"id":"b"}]' ]
+  MOCK_BD_TRUNCATED=1 run --separate-stderr pgwf_tracker_dependents p blocks
+  [ "$status" -eq 0 ]
+  [ "$output" = '[{"id":"a"},{"id":"b"}]' ]
+}
+
+@test "pgwf_tracker_ready, pgwf_tracker_list and pgwf_tracker_ready_under pass --limit 0" {
+  pgwf_tracker_ready --label x >/dev/null
+  pgwf_tracker_list --status open >/dev/null
+  pgwf_tracker_ready_under p --label y >/dev/null
+  grep -qx 'ready --label x --limit 0 --json' "$MOCK_BD_LOG"
+  grep -qx 'list --status open --limit 0 --json' "$MOCK_BD_LOG"
+  grep -qx 'ready --parent p --label y --limit 0 --json' "$MOCK_BD_LOG"
+}
+
+@test "pgwf_tracker_ready: a bd failure reports bd's stderr and returns non-zero" {
+  MOCK_BD_ROWS_FAIL=1 run --separate-stderr pgwf_tracker_ready
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [[ $stderr == *"pg-wi-flow: bd ready failed"*"mock bd ready: boom"* ]]
 }

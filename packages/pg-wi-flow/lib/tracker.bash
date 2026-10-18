@@ -18,14 +18,30 @@
 # escalated before the flag existed. Documented in pg-wi-flow.md.
 PGWF_CONCERN_METADATA_KEY="originating_concern"
 
+# _pgwf_bd_json LABEL BD_ARGS... -- runs `bd BD_ARGS...`, printing ONLY its
+# stdout (the JSON stream). bd's stderr (for example the "Showing 100 of N
+# ready issues" truncation notice, printed alongside a zero exit) is captured
+# separately and used only in the failure message under LABEL, so it can
+# never corrupt the JSON handed to jq (tc-wxvd2).
+_pgwf_bd_json() {
+  local label="$1" out err_file rc=0
+  shift
+  err_file="$(mktemp)" || return 1
+  out="$(bd "$@" 2>"$err_file")" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "pg-wi-flow: $label failed: $out$(<"$err_file")" >&2
+    rm -f "$err_file"
+    return 1
+  fi
+  rm -f "$err_file"
+  printf '%s\n' "$out"
+}
+
 # pgwf_tracker_show_json ID -- `bd show ID --json`'s .data[0] object
 # (compact JSON on stdout). Fails loudly on a `bd` error.
 pgwf_tracker_show_json() {
   local id="$1" out
-  if ! out="$(bd show "$id" --json 2>&1)"; then
-    echo "pg-wi-flow: bd show $id failed: $out" >&2
-    return 1
-  fi
+  out="$(_pgwf_bd_json "bd show $id" show "$id" --json)" || return 1
   jq -c '(if type == "object" and has("data") then .data else . end) | if type == "array" then .[0] else . end' <<<"$out"
 }
 
@@ -189,10 +205,7 @@ pgwf_query_build() {
 pgwf_tracker_ready() {
   local -a args=("$@")
   local out
-  if ! out="$(bd ready "${args[@]}" --json 2>&1)"; then
-    echo "pg-wi-flow: bd ready failed: $out" >&2
-    return 1
-  fi
+  out="$(_pgwf_bd_json "bd ready" ready "${args[@]}" --limit 0 --json)" || return 1
   jq -c '(if type == "object" and has("data") then .data else . end)' <<<"$out"
 }
 
@@ -205,10 +218,7 @@ pgwf_tracker_ready() {
 pgwf_tracker_list() {
   local -a args=("$@")
   local out
-  if ! out="$(bd list "${args[@]}" --json 2>&1)"; then
-    echo "pg-wi-flow: bd list failed: $out" >&2
-    return 1
-  fi
+  out="$(_pgwf_bd_json "bd list" list "${args[@]}" --limit 0 --json)" || return 1
   jq -c '(if type == "object" and has("data") then .data else . end)' <<<"$out"
 }
 
@@ -227,10 +237,7 @@ pgwf_tracker_ready_under() {
 # filtered to non-closed items (compact JSON array on stdout).
 pgwf_tracker_open_children() {
   local id="$1" out
-  if ! out="$(bd children "$id" --json 2>&1)"; then
-    echo "pg-wi-flow: bd children $id failed: $out" >&2
-    return 1
-  fi
+  out="$(_pgwf_bd_json "bd children $id" children "$id" --json)" || return 1
   jq -c '[(if type == "object" and has("data") then .data else . end)[] | select(.status != "closed")]' <<<"$out"
 }
 
@@ -241,10 +248,7 @@ pgwf_tracker_open_children() {
 # "Fingerprint dedupe"]).
 pgwf_tracker_dependents() {
   local id="$1" dep_type="$2" out
-  if ! out="$(bd dep list "$id" --direction up --type "$dep_type" --json 2>&1)"; then
-    echo "pg-wi-flow: bd dep list $id failed: $out" >&2
-    return 1
-  fi
+  out="$(_pgwf_bd_json "bd dep list $id" dep list "$id" --direction up --type "$dep_type" --json)" || return 1
   jq -c '(if type == "object" and has("data") then .data else . end)' <<<"$out"
 }
 
@@ -302,10 +306,7 @@ pgwf_tracker_release() {
 # Components table, advance row: "adds container if children exist"].
 pgwf_tracker_any_children() {
   local id="$1" out
-  if ! out="$(bd children "$id" --json 2>&1)"; then
-    echo "pg-wi-flow: bd children $id failed: $out" >&2
-    return 1
-  fi
+  out="$(_pgwf_bd_json "bd children $id" children "$id" --json)" || return 1
   jq -c '(if type == "object" and has("data") then .data else . end)' <<<"$out"
 }
 
@@ -405,10 +406,7 @@ pgwf_tracker_note() {
 # moot-premise follow-up target.
 pgwf_tracker_blocks() {
   local id="$1" out
-  if ! out="$(bd dep list "$id" --direction=up --type blocks --json 2>&1)"; then
-    echo "pg-wi-flow: bd dep list $id --direction=up failed: $out" >&2
-    return 1
-  fi
+  out="$(_pgwf_bd_json "bd dep list $id --direction=up" dep list "$id" --direction=up --type blocks --json)" || return 1
   jq -c '(if type == "object" and has("data") then .data else . end)' <<<"$out"
 }
 
@@ -420,10 +418,7 @@ pgwf_tracker_blocks() {
 # last open blocker the CLI closes the parent in the same call"].
 pgwf_tracker_open_blockers_excluding() {
   local id="$1" exclude_id="$2" out
-  if ! out="$(bd dep list "$id" --direction=down --type blocks --json 2>&1)"; then
-    echo "pg-wi-flow: bd dep list $id --direction=down failed: $out" >&2
-    return 1
-  fi
+  out="$(_pgwf_bd_json "bd dep list $id --direction=down" dep list "$id" --direction=down --type blocks --json)" || return 1
   jq -c --arg x "$exclude_id" \
     '[(if type == "object" and has("data") then .data else . end)[] | select(.id != $x) | select(.status != "closed")]' <<<"$out"
 }
