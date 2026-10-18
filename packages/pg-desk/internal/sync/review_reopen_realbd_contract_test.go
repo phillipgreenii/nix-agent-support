@@ -5,8 +5,10 @@ package sync
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -80,27 +82,80 @@ func (f *closureRealBD) assignee(id string) string {
 	return who
 }
 
+// bdWrapperDoltDir matches the `PATH='<dir>'$PATH` line a nix wrapper writes to
+// put bd's own dolt first.
+var bdWrapperDoltDir = regexp.MustCompile(`PATH='([^']*dolt[^']*/bin)'`)
+
+func isExecutable(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
+}
+
+// doltCandidates lists the dolt CLIs that might read bd's store, best guess
+// first: the dolt bd's own nix wrapper pins, then every dolt on PATH.
+func (f *closureRealBD) doltCandidates() []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	if real, err := filepath.EvalSymlinks(f.bdPath); err == nil {
+		if wrapper, err := os.ReadFile(real); err == nil && len(wrapper) < 64<<10 {
+			for _, m := range bdWrapperDoltDir.FindAllStringSubmatch(string(wrapper), -1) {
+				if p := filepath.Join(m[1], "dolt"); isExecutable(p) {
+					add(p)
+				}
+			}
+		}
+	}
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if p := filepath.Join(dir, "dolt"); isExecutable(p) {
+			add(p)
+		}
+	}
+	return out
+}
+
 // expireLease moves id's claim lease into the past, in the store's private
 // embedded dolt database, and proves through bd itself that it now reads as
 // expired.
+//
+// It tries each candidate dolt CLI until one can read the store: the store is
+// written by the dolt engine bd ships with, and an older `dolt` earlier on PATH
+// cannot read it (every statement fails with "table has unknown fields", even
+// SHOW TABLES), so a plain LookPath is not enough. nix's bd wrapper prepends
+// its own dolt to PATH for bd alone (bead tc-777k7).
 func (f *closureRealBD) expireLease(id string) {
 	f.t.Helper()
-	doltPath, err := exec.LookPath("dolt")
-	if err != nil {
+	candidates := f.doltCandidates()
+	if len(candidates) == 0 {
 		f.t.Skip("dolt not on PATH: cannot expire a lease in the embedded store")
 	}
 	dbs, err := filepath.Glob(filepath.Join(f.dir, ".beads", "embeddeddolt", "*", ".dolt"))
 	if err != nil || len(dbs) != 1 {
 		f.t.Fatalf("want exactly one embedded dolt database under %s, got %v (err %v)", f.dir, dbs, err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), closureRealBDDeadline)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, doltPath, "sql", "-q",
-		`UPDATE leases SET lease_expires_at = '2020-01-01 00:00:00' WHERE issue_id = '`+id+`'`)
-	cmd.Dir = filepath.Dir(dbs[0])
-	cmd.Env = f.env
-	if out, err := cmd.CombinedOutput(); err != nil {
-		f.t.Fatalf("expire lease of %s: %v\n%s", id, err, out)
+	var failures []string
+	expired := false
+	for _, doltPath := range candidates {
+		ctx, cancel := context.WithTimeout(context.Background(), closureRealBDDeadline)
+		cmd := exec.CommandContext(ctx, doltPath, "sql", "-q",
+			`UPDATE leases SET lease_expires_at = '2020-01-01 00:00:00' WHERE issue_id = '`+id+`'`)
+		cmd.Dir = filepath.Dir(dbs[0])
+		cmd.Env = f.env
+		out, err := cmd.CombinedOutput()
+		cancel()
+		if err == nil {
+			expired = true
+			break
+		}
+		failures = append(failures, doltPath+": "+err.Error()+"\n"+string(out))
+	}
+	if !expired {
+		f.t.Fatalf("expire lease of %s: no dolt CLI could update the store:\n%s", id, strings.Join(failures, "\n"))
 	}
 	if at := f.leaseExpiry(id); !at.Before(time.Now()) {
 		f.t.Fatalf("bd still reports the lease of %s as live (%s) after expiring it", id, at)
