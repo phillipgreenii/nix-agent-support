@@ -630,13 +630,15 @@ func TestCLI_Evaluate_JSON_ApprovalSourceAndFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	// cwd must exist so rows are not classified stale-cwd.
+	// cwd must exist so rows are not classified stale-cwd. Row 1 is an auto-mode
+	// classifier denial: CETA abstained (hook_decision 'abstain', no prompt), so
+	// it buckets as "auto"; a CETA 'allow' would bucket as "hook" (ApprovalSource).
 	_, err = store.DB().Exec(`INSERT INTO tool_decisions
 		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 		 hook_decision, outcome, created_at,
 		 permission_mode, agent_type, outcome_notes, tool_response, prompt_id)
 		VALUES
-		 (1,'s',?,'Bash','h1','{"command":"ls"}','ls','allow','denied','2026-01-01T00:00:00Z',
+		 (1,'s',?,'Bash','h1','{"command":"ls"}','ls','abstain','denied','2026-01-01T00:00:00Z',
 		  'auto','Explore','auto_mode_classifier: x','{"is_error":true}',NULL),
 		 (2,'s',?,'Bash','h2','{"command":"pwd"}','pwd','allow','approved','2026-01-01T00:00:00Z',
 		  'bypassPermissions',NULL,NULL,'{"is_error":false}',NULL)`, dir, dir)

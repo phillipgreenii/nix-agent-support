@@ -246,6 +246,14 @@ func TestP15ReportAssignSubst(t *testing.T) {
 // widened beyond what the operator expected and needs a human, not a golden
 // refresh.
 func TestP15ReportPnWorkspaceMarker(t *testing.T) {
+	// Hermetic HOME (tc-dea6a): probes such as `go clean -modcache` delete
+	// ~/go/pkg/mod, so their verdict depends on HOME. The nix sandbox's
+	// HOME=/homeless-shelter (nonexistent) rejects where a real host HOME
+	// approves; a fresh HOME under /tmp gives both the same verdict.
+	t.Setenv("HOME", tempDirUnderRealTmp(t))
+	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_DENIED_ROOTS", "XDG_DATA_HOME"} {
+		t.Setenv(v, "")
+	}
 	rep, err := GeneratePnWorkspaceMarkerP15(tempDirUnderRealTmp(t))
 	if err != nil {
 		t.Fatal(err)
