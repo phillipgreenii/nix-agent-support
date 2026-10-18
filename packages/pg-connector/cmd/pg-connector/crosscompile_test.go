@@ -8,9 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -31,7 +29,7 @@ import (
 
 // crossCompileFailure is one step of the gate that failed.
 type crossCompileFailure struct {
-	// Step is "go list", "go vet ./..." or "go test -c <package>".
+	// Step is "go list", "go vet ./..." or "go test -c ./...".
 	Step string
 	// Package is the import path the step names ("" for module-wide steps).
 	Package string
@@ -43,15 +41,22 @@ func (f crossCompileFailure) String() string {
 }
 
 // crossCompileLinux runs the Linux cross-compile gate over the Go module rooted
-// at dir and returns every failing step. workers bounds how many `go test -c`
-// run at once (one `go vet ./...` covers the whole module, so the module-wide
-// cost is a single vet plus one link per package with tests).
-func crossCompileLinux(ctx context.Context, goBin, dir string, workers int) []crossCompileFailure {
+// at dir and returns every failing step. jobs bounds the compile/link jobs
+// each go invocation runs at once (go's -p).
+//
+// Both steps are ONE go invocation over the whole module, so the build graph
+// is planned once and every shared dependency is compiled once. The gate used
+// to run one `go test -c` process per package (two at a time); each process
+// re-resolved its dependencies and re-linked, and on a loaded builder the sum
+// outlasted the gate's context deadline (bead tc-14rqw: ~80 packages failed
+// with empty output, because the deadline killed their go processes, not
+// because they did not compile).
+func crossCompileLinux(ctx context.Context, goBin, dir string, jobs int) []crossCompileFailure {
 	env := append(os.Environ(), "GOOS=linux", "CGO_ENABLED=0")
 	run := func(args ...string) (string, error) {
-		// Niced and capped at 2 compile jobs: this gate shares the machine with
-		// the module's other tests (several are timing-sensitive) and must not
-		// starve them.
+		// Niced and capped at `jobs` compile jobs: this gate shares the machine
+		// with the module's other tests (several are timing-sensitive) and must
+		// not starve them.
 		name, argv := goBin, args
 		if nice, err := exec.LookPath("nice"); err == nil {
 			name, argv = nice, append([]string{"-n", "10", goBin}, args...)
@@ -62,62 +67,46 @@ func crossCompileLinux(ctx context.Context, goBin, dir string, workers int) []cr
 		var out bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &out
 		err := cmd.Run()
+		if ctx.Err() != nil {
+			// A killed go process prints nothing; say why, so a deadline is never
+			// mistaken for a compile failure with no reason attached.
+			return out.String() + "\ncross-compile gate: " + ctx.Err().Error() + " before the step finished", ctx.Err()
+		}
 		return out.String(), err
 	}
+	if jobs < 1 {
+		jobs = 1
+	}
+	p := fmt.Sprint(jobs)
+
+	var failures []crossCompileFailure
 
 	// Enumerate under GOOS=linux, so a package whose files are all Linux-only
-	// is included.
+	// is included; a module with no packages cannot pass the gate vacuously.
 	listed, err := run("list", "./...")
 	if err != nil {
 		return []crossCompileFailure{{Step: "go list ./...", Output: listed}}
 	}
-	var pkgs []string
-	for _, line := range strings.Split(listed, "\n") {
-		if p := strings.TrimSpace(line); p != "" {
-			pkgs = append(pkgs, p)
-		}
-	}
-	sort.Strings(pkgs)
-
-	var (
-		mu       sync.Mutex
-		failures []crossCompileFailure
-	)
-	add := func(f crossCompileFailure) {
-		mu.Lock()
-		failures = append(failures, f)
-		mu.Unlock()
+	if strings.TrimSpace(listed) == "" {
+		return []crossCompileFailure{{Step: "go list ./...", Output: "no packages listed"}}
 	}
 
-	if out, err := run("vet", "-p", "2", "./..."); err != nil {
-		add(crossCompileFailure{Step: "go vet ./...", Package: vetPackage(out), Output: out})
+	if out, err := run("vet", "-p", p, "./..."); err != nil {
+		failures = append(failures, crossCompileFailure{Step: "go vet ./...", Package: vetPackage(out), Output: out})
 	}
 
-	jobs := make(chan string)
-	var wg sync.WaitGroup
-	if workers < 1 {
-		workers = 1
+	// Compile and link EVERY package's test binary (the equivalent of
+	// `go test -c` per package; a package without test files is a clean no-op),
+	// but run none: -run '^$' selects no test and `-exec true` makes the
+	// "run" of each linked binary a no-op, so a Linux-only test is only
+	// COMPILED here. -vet=off because the step above already vetted.
+	trueBin, err := exec.LookPath("true")
+	if err != nil {
+		return append(failures, crossCompileFailure{Step: "go test -c ./...", Output: "no `true` binary on PATH to use as -exec: " + err.Error()})
 	}
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for pkg := range jobs {
-				// -o os.DevNull: compile and link the test binary, keep nothing.
-				// A package without test files is a clean no-op.
-				if out, err := run("test", "-p", "2", "-c", "-o", os.DevNull, pkg); err != nil {
-					add(crossCompileFailure{Step: "go test -c " + pkg, Package: pkg, Output: out})
-				}
-			}
-		}()
+	if out, err := run("test", "-p", p, "-vet=off", "-run", "^$", "-exec", trueBin, "./..."); err != nil {
+		failures = append(failures, crossCompileFailure{Step: "go test -c ./...", Package: vetPackage(out), Output: out})
 	}
-	for _, p := range pkgs {
-		jobs <- p
-	}
-	close(jobs)
-	wg.Wait()
-
-	sort.Slice(failures, func(i, j int) bool { return failures[i].Step < failures[j].Step })
 	return failures
 }
 
