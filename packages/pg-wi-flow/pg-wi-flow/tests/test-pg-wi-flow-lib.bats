@@ -371,7 +371,7 @@ show_fixture() {
   run pgwf_tracker_list --status open
   [ "$status" -eq 0 ]
   [ "$(jq -r '.[0].id' <<<"$output")" = "tc-1" ]
-  grep -q '^list --status open --json$' "$MOCK_BD_LOG"
+  grep -q '^list --status open --limit 0 --json$' "$MOCK_BD_LOG"
 }
 
 @test "pgwf_tracker_list: fails loudly on a bd error" {
@@ -392,7 +392,7 @@ show_fixture() {
   [ "$status" -eq 0 ]
   [ "$(jq 'length' <<<"$output")" -eq 1 ]
   [ "$(jq -r '.[0].id' <<<"$output")" = "tc-old" ]
-  grep -q '^list --label-any question --label-any human --status open,in_progress,blocked,deferred --json$' "$MOCK_BD_LOG"
+  grep -q '^list --label-any question --label-any human --status open,in_progress,blocked,deferred --limit 0 --json$' "$MOCK_BD_LOG"
 }
 
 @test "pgwf_list_stale_reserved: dispatcher-held reservations older than H hours" {
@@ -403,7 +403,7 @@ show_fixture() {
   [ "$status" -eq 0 ]
   [ "$(jq 'length' <<<"$output")" -eq 1 ]
   [ "$(jq -r '.[0].id' <<<"$output")" = "tc-stale" ]
-  grep -q '^list --status in_progress --json$' "$MOCK_BD_LOG"
+  grep -q '^list --status in_progress --limit 0 --json$' "$MOCK_BD_LOG"
 }
 
 @test "pgwf_list_unpooled: open items neither the default nor the attention query admits" {
@@ -415,7 +415,19 @@ show_fixture() {
   [ "$status" -eq 0 ]
   [ "$(jq 'length' <<<"$output")" -eq 1 ]
   [ "$(jq -r '.[0].id' <<<"$output")" = "tc-3" ]
-  grep -q '^list --status open,in_progress --json$' "$MOCK_BD_LOG"
+  grep -q '^list --status open,in_progress --limit 0 --json$' "$MOCK_BD_LOG"
+}
+
+@test "pgwf_list_unpooled: large row sets (past the single-argument size limit) still work" {
+  local pad
+  pad="$(head -c 2000 /dev/zero | tr '\0' x)"
+  jq -nc --arg p "$pad" '[range(0;200) | {id: ("tc-" + tostring), notes: $p}]' >"$MOCK_BD_READY_DIR/default.json"
+  MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
+  export MOCK_BD_LIST_FILE
+  jq -nc --arg p "$pad" '{data: [range(0;201) | {id: ("tc-" + tostring), notes: $p}]}' >"$MOCK_BD_LIST_FILE"
+  run pgwf_list_unpooled '{}'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'map(.id) | join(",")' <<<"$output")" = "tc-200" ]
 }
 
 @test "cmd_list: --stale --days dispatches to pgwf_list_stale_days" {

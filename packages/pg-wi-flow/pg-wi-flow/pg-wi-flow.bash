@@ -251,8 +251,12 @@ pgwf_list_unpooled() {
     echo "pg-wi-flow: list --unpooled failed" >&2
     return 1
   fi
-  jq -c --argjson d "$default_ready" --argjson a "$attended_ready" \
-    '($d + $a | map(.id)) as $admitted | [.[] | select((.id as $i | $admitted | index($i)) == null)]' \
+  # Pass only the admitted ids (not whole rows): full row sets can exceed
+  # the single-argument size limit once --limit 0 returns every row.
+  local admitted
+  admitted="$(jq -c -s 'add | map(.id)' <<<"$default_ready $attended_ready")" || return 1
+  jq -c --argjson admitted "$admitted" \
+    '[.[] | select((.id as $i | $admitted | index($i)) == null)]' \
     <<<"$all"
 }
 
