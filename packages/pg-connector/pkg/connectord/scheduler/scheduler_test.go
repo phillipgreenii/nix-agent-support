@@ -240,7 +240,15 @@ func TestSingleFlightSharesOneFetch(t *testing.T) {
 }
 
 func TestAgingLetsClass4RunWhileClass3StaysBusy(t *testing.T) {
-	e := &fakeExec{max: 1}
+	// The executor holds its single worker until the round's Step has returned.
+	// Without that, a batch that finishes before Step loops again frees the
+	// worker mid-Step and Step starts the class 4 task in the same round (a
+	// scheduling race that -race and host load make visible).
+	hold := make(chan struct{}, 1)
+	e := &fakeExec{max: 1, fn: func(items []Item) []Result {
+		<-hold
+		return make([]Result, len(items))
+	}}
 	s, clk := newSched(t, Options{Workers: 1, AgeAfter: 5 * time.Minute}, e)
 	mustSubmit(t, s, task("starved", governor.ClassKeepAlive, t0))
 	ranAt := func() int {
@@ -255,6 +263,7 @@ func TestAgingLetsClass4RunWhileClass3StaysBusy(t *testing.T) {
 	for round := range 20 {
 		mustSubmit(t, s, task(fmt.Sprintf("q-%02d", round), governor.ClassQuery, clk.Now()))
 		s.Step(context.Background())
+		hold <- struct{}{}
 		s.Wait()
 		if ranAt() >= 0 {
 			break
