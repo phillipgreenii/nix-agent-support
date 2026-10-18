@@ -11,6 +11,13 @@
 # Depends on lib/config.bash (composed ahead of this file by mkBashLibrary's
 # own `libraries` chaining -- see packages/pg-wi-flow/lib/default.nix).
 
+# PGWF_CONCERN_METADATA_KEY -- the item-metadata key under which `escalate
+# --concern <name>` records a question's originating concern (for example
+# `destructive-actions`); `resolve --decision` reads it back to decide
+# whether an approval owes a kind:docs follow-up. Absent on questions
+# escalated before the flag existed. Documented in pg-wi-flow.md.
+PGWF_CONCERN_METADATA_KEY="originating_concern"
+
 # pgwf_tracker_show_json ID -- `bd show ID --json`'s .data[0] object
 # (compact JSON on stdout). Fails loudly on a `bd` error.
 pgwf_tracker_show_json() {
@@ -28,6 +35,12 @@ pgwf_tracker_metadata_field() {
   local id="$1" key="$2" item
   item="$(pgwf_tracker_show_json "$id")" || return 1
   jq -r --arg k "$key" '.metadata[$k] // empty' <<<"$item"
+}
+
+# pgwf_tracker_concern ID -- ID's recorded originating concern (see
+# PGWF_CONCERN_METADATA_KEY), or empty if none was recorded.
+pgwf_tracker_concern() {
+  pgwf_tracker_metadata_field "$1" "$PGWF_CONCERN_METADATA_KEY"
 }
 
 # pgwf_tracker_parent_id ID -- ID's parent id, or empty if it has none.
@@ -439,4 +452,42 @@ pgwf_advance_stage() {
     remove_args=(--remove-label "${stage_prefix}${cur_stage}")
   fi
   bd update "$id" "${remove_args[@]}" --add-label "${stage_prefix}${to_stage}" --actor "$actor" --json >/dev/null
+}
+
+# pgwf_tracker_lessons_key COMPONENT TOPIC -- the `bd remember --key` value
+# that links the learn stage's WRITER to WI_LESSONS' READER (tc-9ddu3.2.2,
+# gap G-D). Convention (the design leaves the spelling open): a lesson for
+# component C is stored with `bd remember "<lesson>" --key
+# lesson-<C>-<topic-slug>`, i.e. the key starts with `lesson-<C>-` and ends
+# in a short slug of what was ruled out (slug-like: lowercase, [a-z0-9-]).
+# pgwf_tracker_lessons reads them back by searching `bd memories
+# lesson-<C>-` and keeping only keys that START with that prefix, so a
+# memory merely mentioning the component name elsewhere never leaks in.
+# The same convention is documented in pg-wi-flow.md (man page). Prints the
+# key; fails on an empty COMPONENT or TOPIC.
+pgwf_tracker_lessons_key() {
+  local component="$1" topic="$2"
+  [[ -n $component && -n $topic ]] || return 1
+  printf 'lesson-%s-%s\n' "$component" "$topic"
+}
+
+# pgwf_tracker_lessons COMPONENT -- the lesson memories recorded for
+# COMPONENT (see pgwf_tracker_lessons_key), one line each (newlines
+# collapsed to a space), joined by ";" in `bd memories` order. Empty output
+# and status 0 for an empty COMPONENT or a component with no memories;
+# status 1 (with a bd diagnostic on stderr) when the `bd memories` read
+# itself fails, which the caller degrades to an empty WI_LESSONS.
+pgwf_tracker_lessons() {
+  local component="$1" prefix out
+  [[ -n $component ]] || return 0
+  prefix="lesson-${component}-"
+  if ! out="$(bd memories "$prefix" --json 2>&1)"; then
+    echo "pg-wi-flow: bd memories $prefix failed: $out" >&2
+    return 1
+  fi
+  jq -r --arg p "$prefix" '
+    (if type == "object" and has("data") then .data else . end)
+    | if type == "object" then to_entries else [] end
+    | map(select(.key | startswith($p)) | .value | tostring | gsub("[\n\r]+"; " "))
+    | join(";")' <<<"$out"
 }

@@ -115,6 +115,17 @@ list)
 dep)
   printf '{"data":[]}\n'
   ;;
+memories)
+  if [[ -n ${MOCK_BD_MEMORIES_FAIL:-} ]]; then
+    echo "mock bd memories: boom" >&2
+    exit 1
+  fi
+  if [[ -n ${MOCK_BD_MEMORIES_FILE:-} && -f $MOCK_BD_MEMORIES_FILE ]]; then
+    printf '{"data":%s}\n' "$(cat "$MOCK_BD_MEMORIES_FILE")"
+  else
+    printf '{"data":{}}\n'
+  fi
+  ;;
 *)
   echo "mock bd: unhandled subcommand: $1" >&2
   exit 1
@@ -254,6 +265,83 @@ DOC
   run pgwf_context_cmd tc-1
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qxF 'WI_APPLICABLE_DOCS='
+}
+
+# --- WI_LESSONS / WI_REVIEW_MODE (tc-9ddu3.2.2) -------------------------
+
+lessons_fixture() {
+  MOCK_BD_MEMORIES_FILE="$(mktemp)"
+  export MOCK_BD_MEMORIES_FILE
+  printf '%s' '{"lesson-litellm-retry":"retrying the proxy restart does not help","unrelated-key":"x"}' >"$MOCK_BD_MEMORIES_FILE"
+}
+
+@test "context: WI_LESSONS is populated from the component's memories" {
+  repo_with_config '{}'
+  lessons_fixture
+  show_fixture tc-1 '{"id":"tc-1","title":"item","labels":["component:litellm"],"metadata":{}}'
+  run pgwf_context_cmd tc-1
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF 'WI_LESSONS=retrying the proxy restart does not help'
+  rm -f "$MOCK_BD_MEMORIES_FILE"
+}
+
+@test "context: WI_LESSONS is empty with no component (and bd memories is not called)" {
+  repo_with_config '{}'
+  lessons_fixture
+  show_fixture tc-1 '{"id":"tc-1","title":"item","labels":[],"metadata":{}}'
+  run pgwf_context_cmd tc-1
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF 'WI_LESSONS='
+  run ! grep -q '^memories' "$MOCK_BD_LOG"
+  rm -f "$MOCK_BD_MEMORIES_FILE"
+}
+
+@test "context: WI_LESSONS is empty for a component with no memories" {
+  repo_with_config '{}'
+  show_fixture tc-1 '{"id":"tc-1","title":"item","labels":["component:other"],"metadata":{}}'
+  run pgwf_context_cmd tc-1
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF 'WI_LESSONS='
+}
+
+@test "context: a failing bd memories read degrades to empty WI_LESSONS with one warning, exit 0" {
+  repo_with_config '{}'
+  show_fixture tc-1 '{"id":"tc-1","title":"item","labels":["component:litellm"],"metadata":{}}'
+  MOCK_BD_MEMORIES_FAIL=1 run --separate-stderr pgwf_context_cmd tc-1
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF 'WI_LESSONS='
+  [ "$(printf '%s\n' "$stderr" | grep -c 'WI_LESSONS left empty')" -eq 1 ]
+}
+
+@test "context --render: lessons section only when render.include lists lessons" {
+  repo_with_config '{"render":{"include":["title","lessons"]}}'
+  lessons_fixture
+  show_fixture tc-1 '{"id":"tc-1","title":"item","labels":["component:litellm"],"metadata":{}}'
+  run pgwf_context_cmd --render tc-1
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF 'lessons: retrying the proxy restart does not help'
+  rm -f "$MOCK_BD_MEMORIES_FILE"
+}
+
+@test "context --render: no lessons content when render.include omits lessons" {
+  repo_with_config '{"render":{"include":["title"]}}'
+  lessons_fixture
+  show_fixture tc-1 '{"id":"tc-1","title":"item","labels":["component:litellm"],"metadata":{}}'
+  run pgwf_context_cmd --render tc-1
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"lessons:"* ]]
+  [[ "$output" != *"retrying the proxy restart"* ]]
+  rm -f "$MOCK_BD_MEMORIES_FILE"
+}
+
+@test "context: WI_REVIEW_MODE follows the stage's configured review_mode, defaulting to batched" {
+  repo_with_config '{"workflows":{"homelab":{"primary":true,"stages":{"groom":{"order":1,"entry":true,"review_mode":"parallel"},"implement":{"order":2}}}}}'
+  show_fixture tc-1 '{"id":"tc-1","title":"item","labels":["stage:groom"],"metadata":{}}'
+  show_fixture tc-2 '{"id":"tc-2","title":"item","labels":["stage:implement"],"metadata":{}}'
+  run pgwf_context_cmd tc-1
+  printf '%s\n' "$output" | grep -qxF 'WI_REVIEW_MODE=parallel'
+  run pgwf_context_cmd tc-2
+  printf '%s\n' "$output" | grep -qxF 'WI_REVIEW_MODE=batched'
 }
 
 # --- stale premise flagged ------------------------------------------------

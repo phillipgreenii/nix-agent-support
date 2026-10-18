@@ -307,6 +307,68 @@ dep_fixture() {
   grep '^create' "$MOCK_BD_LOG" | grep -q -- "--parent tc-parentB"
 }
 
+# --- escalate --concern / resolve destructive-actions follow-up (tc-9ddu3.2.2) ---
+
+@test "escalate --concern: records the originating concern in the new question's metadata" {
+  show_fixture tc-parent '{"id":"tc-parent","labels":[],"metadata":{}}'
+  run pgwf_cmd_escalate tc-parent --question "drop the table?" --trigger q:intent --concern destructive-actions
+  [ "$status" -eq 0 ]
+  create_line="$(grep '^create' "$MOCK_BD_LOG")"
+  [[ "$create_line" == *'"originating_concern":"destructive-actions"'* ]]
+}
+
+@test "escalate --concern: a reused open question with no recorded concern adopts it" {
+  printf '[{"id":"tc-existing-q"}]' >"$MOCK_BD_LIST_FILE"
+  show_fixture tc-existing-q '{"id":"tc-existing-q","labels":["question"],"metadata":{}}'
+  show_fixture tc-parent2 '{"id":"tc-parent2","labels":[],"metadata":{}}'
+  run pgwf_cmd_escalate tc-parent2 --question "drop the table?" --trigger q:intent --concern destructive-actions
+  [ "$status" -eq 0 ]
+  grep -q -- "^update tc-existing-q .*--set-metadata originating_concern=destructive-actions" "$MOCK_BD_LOG"
+  ! grep -q '^create' "$MOCK_BD_LOG"
+}
+
+@test "escalate --concern: a reused question that already has a concern keeps it" {
+  printf '[{"id":"tc-existing-q"}]' >"$MOCK_BD_LIST_FILE"
+  show_fixture tc-existing-q '{"id":"tc-existing-q","labels":["question"],"metadata":{"originating_concern":"other"}}'
+  show_fixture tc-parent2 '{"id":"tc-parent2","labels":[],"metadata":{}}'
+  run pgwf_cmd_escalate tc-parent2 --question "drop the table?" --trigger q:intent --concern destructive-actions
+  [ "$status" -eq 0 ]
+  ! grep -q -- "--set-metadata originating_concern" "$MOCK_BD_LOG"
+}
+
+@test "resolve --decision on a destructive-actions question with no authorizing doc files exactly one kind:docs follow-up" {
+  export MOCK_BD_CREATE_ID="tc-docsfu"
+  show_fixture tc-qd1 '{"id":"tc-qd1","labels":["question","escalated","q:info"],"metadata":{"originating_concern":"destructive-actions"}}'
+  show_fixture tc-parentD '{"id":"tc-parentD","labels":[],"metadata":{}}'
+  dep_fixture tc-qd1 up '[{"id":"tc-parentD","status":"open"}]'
+  run pgwf_cmd_resolve tc-qd1 --decision "go ahead" --rationale "cleanup"
+  [ "$status" -eq 0 ]
+  grep -q -- "^close tc-qd1" "$MOCK_BD_LOG"
+  [ "$(grep -c '^create' "$MOCK_BD_LOG")" -eq 1 ]
+  create_line="$(grep '^create' "$MOCK_BD_LOG")"
+  [[ "$create_line" == *"--parent tc-parentD"* ]]
+  [[ "$create_line" == *"--labels kind:docs"* ]]
+  [[ "$create_line" == *"--no-inherit-labels"* ]]
+}
+
+@test "resolve --decision --authorizing-doc on a destructive-actions question files no follow-up" {
+  show_fixture tc-qd2 '{"id":"tc-qd2","labels":["question","escalated","q:info"],"metadata":{"originating_concern":"destructive-actions"}}'
+  show_fixture tc-parentD '{"id":"tc-parentD","labels":[],"metadata":{}}'
+  dep_fixture tc-qd2 up '[{"id":"tc-parentD","status":"open"}]'
+  run pgwf_cmd_resolve tc-qd2 --decision "go ahead" --rationale "cleanup" --authorizing-doc docs/runbooks/x.md
+  [ "$status" -eq 0 ]
+  grep -q -- "^close tc-qd2" "$MOCK_BD_LOG"
+  ! grep -q '^create' "$MOCK_BD_LOG"
+}
+
+@test "resolve --decision on a question with no recorded concern files no follow-up" {
+  show_fixture tc-qd3 '{"id":"tc-qd3","labels":["question","escalated","q:info"],"metadata":{}}'
+  dep_fixture tc-qd3 up '[{"id":"tc-parentD","status":"open"}]'
+  run pgwf_cmd_resolve tc-qd3 --decision "go ahead" --rationale "cleanup"
+  [ "$status" -eq 0 ]
+  ! grep -q '^create' "$MOCK_BD_LOG"
+}
+
 # --- resolve: legacy human items ---
 
 @test "resolve --answer on a legacy human item: appends notes, removes human, releases (stays open)" {

@@ -113,19 +113,27 @@ Commands:
       Refuses unless ID is newer than OF and OF is open on a fresh read;
       adds a related link.
 
-  escalate ID [--question T --trigger t]...
+  escalate ID [--question T --trigger t]... [--concern NAME]
       With --question/--trigger pairs: ID is the blocked work item.
       Computes a fingerprint per pair; reuses an OPEN question already
       carrying it (blocking edge added, nothing created) or creates a new
       question child (labeled question+escalated+the trigger). With no
       --question at all: ID must already be a question -- bumps it from
       escalated to human (the resolver could not settle it).
+      --concern NAME records the originating concern (for example
+      destructive-actions) in the question's "originating_concern"
+      metadata; an already-open reused question with none recorded adopts
+      it.
 
-  resolve ID (--decision D --rationale R | --answer A |
+  resolve ID (--decision D --rationale R [--authorizing-doc PATH] | --answer A |
              --abandon --reason-code r | --defer d)
       Exactly one outcome. --decision/--answer record and close (the
       parent resumes); --decision refuses a q:intent question unless the
-      actor's role is main. --abandon --reason-code
+      actor's role is main. Approving (--decision) a question whose
+      originating concern is destructive-actions WITHOUT --authorizing-doc
+      files one kind:docs follow-up under each parent it blocked (never
+      refuses); WITH --authorizing-doc (a repo path, not checked) it files
+      none. --abandon --reason-code
       <moot-premise|superseded|wont-do|duplicate> records and closes;
       moot-premise also files a groom-stage follow-up; if this was the
       parent's last open blocker, the parent is closed too. --defer defers.

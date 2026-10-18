@@ -1252,8 +1252,13 @@ pgwf_cmd_escalate() {
   shift
 
   local -a questions=() triggers=()
+  local concern=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
+    --concern)
+      concern="$2"
+      shift 2
+      ;;
     --question)
       questions+=("$2")
       shift 2
@@ -1273,6 +1278,10 @@ pgwf_cmd_escalate() {
   config_json="$(pgwf_config_effective)" || return 1
 
   if [[ ${#questions[@]} -eq 0 ]]; then
+    if [[ -n $concern ]]; then
+      echo "pg-wi-flow: escalate: --concern is only valid together with --question" >&2
+      return 1
+    fi
     if ! pgwf_tracker_has_label "$id" question; then
       echo "pg-wi-flow: escalate: --question is required (or ID must already be a question, to bump escalated -> human)" >&2
       return 1
@@ -1321,6 +1330,11 @@ pgwf_cmd_escalate() {
     existing_id="$(jq -r '.[0].id // empty' <<<"$existing")"
 
     if [[ -n $existing_id ]]; then
+      # An already-open question with no recorded originating concern
+      # adopts --concern (never overwrites a recorded one).
+      if [[ -n $concern && -z "$(pgwf_tracker_concern "$existing_id")" ]]; then
+        pgwf_tracker_update "$existing_id" "$actor" --set-metadata "${PGWF_CONCERN_METADATA_KEY}=${concern}" >/dev/null || return 1
+      fi
       pgwf_tracker_add_dependency "$id" "$existing_id" "$actor" >/dev/null || return 1
       continue
     fi
@@ -1330,7 +1344,8 @@ pgwf_cmd_escalate() {
       --parent "$id"
       --labels "${question_label},${escalated_label},${trigger}"
       --no-inherit-labels
-      --metadata "$(jq -cn --arg fp "$fp" '{fingerprint: $fp}')"
+      --metadata "$(jq -cn --arg fp "$fp" --arg k "$PGWF_CONCERN_METADATA_KEY" --arg c "$concern" \
+        '{fingerprint: $fp} + (if $c == "" then {} else {($k): $c} end)')"
     )
     local created new_id
     created="$(pgwf_tracker_create "$actor" "${create_args[@]}")" || return 1
@@ -1356,7 +1371,7 @@ pgwf_cmd_resolve() {
   fi
   shift
 
-  local decision="" rationale="" answer="" reason_code="" defer_date=""
+  local decision="" rationale="" answer="" reason_code="" defer_date="" authorizing_doc=""
   local have_decision=0 have_rationale=0 have_answer=0 have_abandon=0 have_reason_code=0 have_defer=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1368,6 +1383,10 @@ pgwf_cmd_resolve() {
     --rationale)
       rationale="$2"
       have_rationale=1
+      shift 2
+      ;;
+    --authorizing-doc)
+      authorizing_doc="$2"
       shift 2
       ;;
     --answer)
@@ -1395,6 +1414,11 @@ pgwf_cmd_resolve() {
       ;;
     esac
   done
+
+  if [[ -n $authorizing_doc && $have_decision -ne 1 ]]; then
+    echo "pg-wi-flow: resolve: --authorizing-doc is only valid with --decision" >&2
+    return 1
+  fi
 
   local -i outcome_count=0
   [[ $have_decision -eq 1 || $have_rationale -eq 1 ]] && outcome_count+=1
@@ -1495,8 +1519,28 @@ pgwf_cmd_resolve() {
 
   if [[ $have_decision -eq 1 ]]; then
     pgwf_tracker_update "$id" "$actor" --append-notes "decision: ${decision}; rationale: ${rationale}" >/dev/null || return 1
-    pgwf_tracker_close "$id" "$decision" "$actor" >/dev/null
-    return $?
+    # A destructive-actions question approved with NO authorizing doc files
+    # a kind:docs follow-up under every parent it blocked, so the next
+    # occurrence of the same action has a doc to cite. The question is
+    # recognized by the originating concern recorded at escalate time
+    # (metadata key $PGWF_CONCERN_METADATA_KEY == destructive-actions); a
+    # question without one (escalated before --concern existed) is not
+    # treated as destructive-actions. Omitting --authorizing-doc never
+    # refuses; it only triggers the follow-up.
+    local da_parents=""
+    if [[ -z $authorizing_doc && "$(jq -r --arg k "$PGWF_CONCERN_METADATA_KEY" '.metadata[$k] // empty' <<<"$item_json")" == destructive-actions ]]; then
+      da_parents="$(pgwf_tracker_blocks "$id")" || return 1
+    fi
+    pgwf_tracker_close "$id" "$decision" "$actor" >/dev/null || return 1
+    if [[ -n $da_parents ]]; then
+      local da_parent
+      while IFS= read -r da_parent; do
+        [[ -z $da_parent ]] && continue
+        pgwf_cmd_create_child "$da_parent" --kind docs \
+          --title "Write the authorizing doc for the destructive action approved in $id: $decision" >/dev/null || return 1
+      done < <(jq -r '.[].id' <<<"$da_parents")
+    fi
+    return 0
   fi
 
   if [[ $have_answer -eq 1 ]]; then

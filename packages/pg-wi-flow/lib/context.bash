@@ -572,6 +572,22 @@ pgwf_context_facts() {
   fi
   questions="$(pgwf_context_questions "$config_json" "$id")"
 
+  # WI_LESSONS: the `bd memories` entries for the item's component
+  # (tracker adapter owns the key convention). A failed read degrades to
+  # empty with one warning line, never an error.
+  local lessons="" review_mode
+  if [[ -n $component ]]; then
+    if ! lessons="$(pgwf_tracker_lessons "$component" 2>/dev/null)"; then
+      echo "pg-wi-flow: context: bd memories read failed for component $component, WI_LESSONS left empty" >&2
+      lessons=""
+    fi
+  fi
+  # WI_REVIEW_MODE: the current stage's review_mode (rule C-7), defaulting
+  # to the null workflow's "batched".
+  review_mode="$(pgwf_workflow_stages_by_name "$config_json" "$workflow" 2>/dev/null |
+    jq -r --arg s "$stage" '.[$s].review_mode // "batched"' 2>/dev/null)"
+  [[ -n $review_mode ]] || review_mode=batched
+
   local concerns_json skipped_json
   if [[ ${#concerns[@]} -eq 0 ]]; then
     concerns_json='[]'
@@ -618,6 +634,7 @@ pgwf_context_facts() {
     --arg round "$round" --arg must_escalate "$must_escalate" --argjson legacy_human "$legacy_human" \
     --arg parent "$parent" --arg worktree "$worktree" --argjson premise_stale "$stale" \
     --arg instructions_ref "$instructions_ref" --arg escalation_ref "$escalation_ref" \
+    --arg lessons "$lessons" --arg review_mode "$review_mode" \
     '. as $content | {
       id: $id, type: $type, class: $class, stage: $stage, workflow: $workflow,
       kind: $kind, component: $component,
@@ -628,7 +645,7 @@ pgwf_context_facts() {
       checklist: $content.checklist, concerns: $content.concerns, skipped_concerns: $content.skipped_concerns,
       duplicates: $content.duplicates, related: $content.related, applicable_docs: $content.applicable_docs,
       siblings: $content.siblings, blocked_parents: $content.blocked_parents, same_fingerprint: $content.same_fingerprint,
-      questions: $content.questions, title: $content.title, description: $content.description, lessons: ""
+      questions: $content.questions, title: $content.title, description: $content.description, lessons: $lessons, review_mode: $review_mode
     }'
 }
 
@@ -658,7 +675,7 @@ pgwf_context_format_lines() {
   local id type class stage workflow kind kinds_rendered topics_rendered component
   local round must_escalate legacy_human parent siblings blocked_parents same_fp worktree
   local premise premise_stale instructions_ref escalation_ref checklist concerns skipped
-  local duplicates related applicable_docs questions
+  local duplicates related applicable_docs questions lessons review_mode
 
   id="$(jq -r '.id' <<<"$f")"
   type="$(jq -r '.type' <<<"$f")"
@@ -688,6 +705,8 @@ pgwf_context_format_lines() {
   related="$(pgwf_context_join_list "$(jq -c '.related' <<<"$f")")"
   applicable_docs="$(pgwf_context_join_docs "$(jq -c '.applicable_docs' <<<"$f")")"
   questions="$(pgwf_context_join_list "$(jq -c '.questions' <<<"$f")")"
+  lessons="$(jq -r '.lessons' <<<"$f")"
+  review_mode="$(jq -r '.review_mode' <<<"$f")"
 
   cat <<LINES
 WI_ID=$id
@@ -717,8 +736,9 @@ WI_SKIPPED_CONCERNS=$skipped
 WI_DUPLICATES=$duplicates
 WI_RELATED=$related
 WI_APPLICABLE_DOCS=$applicable_docs
-WI_LESSONS=
+WI_LESSONS=$lessons
 WI_QUESTIONS=$questions
+WI_REVIEW_MODE=$review_mode
 LINES
 }
 
@@ -791,7 +811,13 @@ pgwf_context_format_render() {
   # --- item-specific block: structural fields always, content fields per
   # render.include ---
   printf '## Item\n\n'
-  pgwf_context_format_lines "$f"
+  # WI_LESSONS is item-content: when `lessons` is not on render.include the
+  # WI_LESSONS= line is blanked too, so the memories never reach the prompt.
+  if pgwf_context_include "$config_json" lessons; then
+    pgwf_context_format_lines "$f"
+  else
+    pgwf_context_format_lines "$(jq -c '.lessons = ""' <<<"$f")"
+  fi
   if pgwf_context_include "$config_json" title; then
     printf 'title: %s\n' "$(jq -r '.title' <<<"$f")"
   fi

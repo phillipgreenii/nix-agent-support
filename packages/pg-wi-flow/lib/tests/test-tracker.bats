@@ -99,6 +99,17 @@ update)
   done
   echo '{"data":[{}]}'
   ;;
+memories)
+  if [[ -n ${MOCK_BD_MEMORIES_FAIL:-} ]]; then
+    echo "mock bd memories: boom" >&2
+    exit 1
+  fi
+  if [[ -n ${MOCK_BD_MEMORIES_FILE:-} && -f $MOCK_BD_MEMORIES_FILE ]]; then
+    printf '{"data":%s}\n' "$(cat "$MOCK_BD_MEMORIES_FILE")"
+  else
+    printf '{"data":{}}\n'
+  fi
+  ;;
 *)
   echo "mock bd: unhandled subcommand: $1" >&2
   exit 1
@@ -337,4 +348,37 @@ show_fixture() {
   run pgwf_effective_stage_name '{}' tc-1
   [ "$status" -eq 0 ]
   [ "$output" = "work" ]
+}
+
+# --- lessons (tc-9ddu3.2.2) ----------------------------------------------
+
+@test "pgwf_tracker_lessons_key: lesson-<component>-<topic>" {
+  run pgwf_tracker_lessons_key litellm no-retry-x
+  [ "$status" -eq 0 ]
+  [ "$output" = "lesson-litellm-no-retry-x" ]
+}
+
+@test "pgwf_tracker_lessons: joins matching memories with ';' and ignores other keys" {
+  MOCK_BD_MEMORIES_FILE="$(mktemp)"
+  export MOCK_BD_MEMORIES_FILE
+  printf '%s' '{"lesson-litellm-a":"ruled out A","other-litellm-b":"unrelated","lesson-litellm-c":"line1\nline2"}' >"$MOCK_BD_MEMORIES_FILE"
+  run pgwf_tracker_lessons litellm
+  [ "$status" -eq 0 ]
+  [ "$output" = "ruled out A;line1 line2" ]
+  grep -q -- "^memories lesson-litellm- --json" "$MOCK_BD_LOG"
+  rm -f "$MOCK_BD_MEMORIES_FILE"
+}
+
+@test "pgwf_tracker_lessons: empty component or no memories is empty and exit 0" {
+  run pgwf_tracker_lessons ""
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run pgwf_tracker_lessons litellm
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "pgwf_tracker_lessons: a failing bd memories read returns non-zero" {
+  MOCK_BD_MEMORIES_FAIL=1 run pgwf_tracker_lessons litellm
+  [ "$status" -ne 0 ]
 }
