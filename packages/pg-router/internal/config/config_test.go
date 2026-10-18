@@ -87,7 +87,14 @@ func TestUserConfigIsUnreachable(t *testing.T) {
 	if !strings.HasPrefix(got, tmp) {
 		t.Errorf("configHome() = %q, want a path under the temp dir %q", got, tmp)
 	}
-	for name, real := range map[string]string{"HOME": callerHome, "XDG_CONFIG_HOME": callerXDGConfigHome} {
+	// Compare against the caller's CONFIG dirs, not its HOME: under the nix
+	// build sandbox HOME is $TMPDIR itself (mkGoTest), so every temp path is
+	// "under HOME" and a HOME-prefix check could never pass there.
+	callerConfigDirs := map[string]string{"XDG_CONFIG_HOME": callerXDGConfigHome}
+	if callerHome != "" {
+		callerConfigDirs["HOME/.config"] = filepath.Join(callerHome, ".config")
+	}
+	for name, real := range callerConfigDirs {
 		if real != "" && (got == real || strings.HasPrefix(got, real+string(filepath.Separator))) {
 			t.Errorf("configHome() = %q is under the caller's %s %q", got, name, real)
 		}

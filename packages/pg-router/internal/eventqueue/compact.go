@@ -237,9 +237,19 @@ func (f *logFold) apply(r Record) {
 	}
 }
 
-// addArchive appends one history record, dropping the oldest beyond the bound.
+// addArchive appends one history record. The oldest records beyond the bound are
+// dropped in batches (once the slice reaches twice the bound) rather than on every
+// append: re-copying a full-size slice per evicted event made folding a long log
+// quadratic (a ~180k-record log took ~2 minutes). records() applies the exact bound.
 func (f *logFold) addArchive(r Record) {
 	f.archive = append(f.archive, r)
+	if len(f.archive) >= 2*maxArchiveRecords {
+		f.trimArchive()
+	}
+}
+
+// trimArchive keeps only the newest maxArchiveRecords history records.
+func (f *logFold) trimArchive() {
 	if over := len(f.archive) - maxArchiveRecords; over > 0 {
 		f.archive = append(f.archive[:0:0], f.archive[over:]...)
 	}
@@ -283,6 +293,7 @@ func (f *logFold) records() []Record {
 	}
 	sort.Strings(gateTypes)
 
+	f.trimArchive()
 	archive := f.archive
 	if f.archiveBudget > 0 {
 		var total int64

@@ -50,7 +50,11 @@ func fakeConnector(t *testing.T, stdout string, code int) string {
 	t.Helper()
 	dir := t.TempDir()
 	argv := filepath.Join(dir, "argv")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > '" + argv + "'\ncat <<'EOF'\n" + stdout + "\nEOF\nexit " +
+	// Shell builtins only (printf, exit): PATH below is just this dir plus
+	// /usr/bin:/bin, and the nix build sandbox has no coreutils there, so an
+	// external `cat` is "command not found".
+	quoted := "'" + strings.ReplaceAll(stdout, "'", `'\''`) + "'"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > '" + argv + "'\nprintf '%s\\n' " + quoted + "\nexit " +
 		string(rune('0'+code)) + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "pg-connector"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)

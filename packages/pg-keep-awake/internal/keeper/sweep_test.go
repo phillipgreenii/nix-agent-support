@@ -347,6 +347,12 @@ func TestConcurrentAcquireAndReapLosesNoLease(t *testing.T) {
 		put(t, d, &lease.Lease{Owner: "dead", Key: fmt.Sprintf("d%02d", i), Kind: lease.KindAcquire, ExpiresAt: &past})
 	}
 	const writers, perWriter = 4, 25
+	// The reaper sweeps on a short tick, as the keeper does, rather than
+	// back-to-back: leases/.lock is a non-blocking flock polled every
+	// lease.lockPoll with no fairness, so a reaper that re-takes the lock
+	// immediately after every release starves the writers past
+	// lease.LockTimeout once the host is loaded (-race, parallel builds).
+	const sweepGap = 5 * time.Millisecond
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 	reaperDone := make(chan struct{})
@@ -357,7 +363,7 @@ func TestConcurrentAcquireAndReapLosesNoLease(t *testing.T) {
 			select {
 			case <-stop:
 				return
-			default:
+			case <-time.After(sweepGap):
 			}
 			if _, err := s.Sweep(); err != nil {
 				t.Errorf("sweep: %v", err)

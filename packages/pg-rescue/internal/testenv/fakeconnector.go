@@ -20,7 +20,7 @@ import (
 // never races the fork (a SIGKILL of the process group landing mid-fork can
 // leave the grandchild alive holding the output pipes, so the caller never
 // returns) and never reads a half-written file.
-const fakeConnectorScript = `#!/bin/bash
+const fakeConnectorScript = `#!/bin/sh
 d="$FAKE_CONNECTOR_DIR"
 n=1
 while [ -e "$d/call.$n.args" ]; do n=$((n + 1)); done
