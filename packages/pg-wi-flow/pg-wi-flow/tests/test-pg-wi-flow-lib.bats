@@ -418,6 +418,21 @@ show_fixture() {
   grep -q '^list --status open,in_progress --limit 0 --json$' "$MOCK_BD_LOG"
 }
 
+# Regression guard (tc-wxvd2): one row set just past Linux MAX_ARG_STRLEN
+# (131072 bytes). The old code handed the whole rows to jq as ONE --argjson
+# argument and died with E2BIG; the ids-only code must not. Kept to a single
+# ~140KB value so it also fits the nix sandbox's argv+env budget.
+@test "pgwf_list_unpooled: a row set past MAX_ARG_STRLEN still works (ids only reach jq argv)" {
+  set +a # the nix check harness exports every variable; keep the big values local
+  jq -nc '[{id: "tc-1", notes: ("x" * 140000)}]' >"$MOCK_BD_READY_DIR/default.json"
+  MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
+  export MOCK_BD_LIST_FILE
+  printf '{"data":[{"id":"tc-1"},{"id":"tc-2"}]}' >"$MOCK_BD_LIST_FILE"
+  run pgwf_list_unpooled '{}'
+  [ "$status" -eq 0 ] || { echo "status=$status ${output:0:400}"; false; }
+  [ "$(jq -r 'map(.id) | join(",")' <<<"$output")" = "tc-2" ]
+}
+
 @test "cmd_list: --stale --days dispatches to pgwf_list_stale_days" {
   MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
   export MOCK_BD_LIST_FILE
