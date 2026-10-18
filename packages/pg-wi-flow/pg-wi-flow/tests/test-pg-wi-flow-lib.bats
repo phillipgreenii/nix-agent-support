@@ -423,7 +423,9 @@ show_fixture() {
 # argument and died with E2BIG; the ids-only code must not. Kept to a single
 # ~140KB value so it also fits the nix sandbox's argv+env budget.
 @test "pgwf_list_unpooled: a row set past MAX_ARG_STRLEN still works (ids only reach jq argv)" {
-  set +a # the nix check harness exports every variable; keep the big values local
+  # nix builds export $out, and a bash `local out` inherits that export
+  # attribute, which would put the big values into every child's environment.
+  export -n out
   jq -nc '[{id: "tc-1", notes: ("x" * 140000)}]' >"$MOCK_BD_READY_DIR/default.json"
   MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
   export MOCK_BD_LIST_FILE
