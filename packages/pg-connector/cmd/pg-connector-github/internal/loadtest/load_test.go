@@ -661,6 +661,7 @@ func runAll(t *testing.T, name string, opts ...scenarioOpts) []*result {
 }
 
 func TestLoad(t *testing.T) {
+	t.Parallel() // with TestLoadMutationsAreCaught: under -race the two run for minutes each
 	start := time.Now()
 	// Two runs of the same seed, side by side: the first is checked, and the two
 	// must agree.
@@ -715,6 +716,7 @@ func sortedKeys[V any](m map[string]V) []string {
 // TestLoadMutationsAreCaught weakens the harness three ways, as the packet's
 // validation does by hand, and requires the matching assertion to fail.
 func TestLoadMutationsAreCaught(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		opt  scenarioOpts

@@ -224,7 +224,7 @@ func (d *Daemon) Start(t *testing.T) {
 	cmd := exec.Command(d.bin, "--config", d.ConfigPath, "serve")
 	cmd.Dir = "/"
 	cmd.Env = []string{
-		"PATH=/usr/bin:/bin",
+		"PATH=" + DaemonPath(),
 		"FAKE_GH_DIR=" + d.Shim.Dir,
 	}
 	for k, v := range d.opts.Env {
@@ -670,4 +670,16 @@ func (d *Daemon) WritableStore(t *testing.T) *sql.DB {
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	return db
+}
+
+// DaemonPath is the PATH of a daemon (and of the fake gh it runs): the
+// minimal system dirs a service manager gives it, followed by the test
+// process's own PATH. The tail matters in the nix build sandbox, where
+// /usr/bin and /bin hold nothing but env and sh, while the coreutils the fake
+// gh script needs (tr, cat, sed, ...) live only on the build's PATH.
+func DaemonPath() string {
+	if p := os.Getenv("PATH"); p != "" {
+		return "/usr/bin:/bin:" + p
+	}
+	return "/usr/bin:/bin"
 }

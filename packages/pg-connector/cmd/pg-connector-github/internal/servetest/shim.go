@@ -3,6 +3,7 @@ package servetest
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,7 +33,7 @@ func newShim(t testing.TB, dir, token string) *Shim {
 		t.Fatalf("servetest: read the fake gh: %v", err)
 	}
 	s := &Shim{Dir: dir, Path: filepath.Join(dir, "gh"), t: t}
-	if err := os.WriteFile(s.Path, src, 0o700); err != nil {
+	if err := os.WriteFile(s.Path, withResolvedBash(src), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	s.Set("token", token)
@@ -305,4 +306,18 @@ func (s *Shim) WaitQuiet(t testing.TB, quiet, max time.Duration, kinds ...string
 	}
 	t.Fatalf("servetest: the daemon kept calling gh for %s (%d calls)", max, last)
 	return last
+}
+
+// withResolvedBash rewrites the script's "#!/bin/bash" line to the bash on
+// PATH. The nix build sandbox has no /bin/bash (only /bin/sh), so the literal
+// shebang makes every exec of the fake gh fail with "no such file or
+// directory"; the module's check derivation puts pkgs.bash on PATH. When no
+// bash is on PATH the script is left unchanged.
+func withResolvedBash(src []byte) []byte {
+	const shebang = "#!/bin/bash\n"
+	bash, err := exec.LookPath("bash")
+	if err != nil || !strings.HasPrefix(string(src), shebang) {
+		return src
+	}
+	return append([]byte("#!"+bash+"\n"), src[len(shebang):]...)
 }

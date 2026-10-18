@@ -48,7 +48,7 @@ func TestEnvIndependenceServeUnderEnvDashI(t *testing.T) {
 	wrapper := filepath.Join(d.Shim.Dir, "gh-wrapper")
 	script := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$0\" >>'" + execLog + "'\n" +
-		"FAKE_GH_DIR='" + d.Shim.Dir + "' exec '" + d.Shim.Path + "' \"$@\"\n"
+		"PATH='" + servetest.DaemonPath() + "' FAKE_GH_DIR='" + d.Shim.Dir + "' exec '" + d.Shim.Path + "' \"$@\"\n"
 	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

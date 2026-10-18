@@ -5837,6 +5837,18 @@
                 # the module's ONLY nix-side test gate.
                 src = ./packages/pg-connector;
                 gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
+                # The scheduler/governor load test (cmd/pg-connector-github/
+                # internal/loadtest) is deterministic but CPU-bound: ~26s for
+                # TestLoad and ~24s for TestLoadMutationsAreCaught without
+                # -race, but the race detector (always on here) slows it ~15x
+                # (TestLoad alone measured 404s on 4 cores), so that package
+                # needs more than go's default 10m per-package test timeout.
+                # A measured need, not a blanket bump; every other package
+                # finishes in minutes and is unaffected by a higher ceiling.
+                testFlags = [
+                  "-timeout"
+                  "30m"
+                ];
                 testDeps = [
                   pkgs.bash
                   pkgs.git
