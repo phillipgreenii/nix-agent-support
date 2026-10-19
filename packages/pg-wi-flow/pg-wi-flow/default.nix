@@ -2,6 +2,7 @@
   mkBashScript,
   pkgs,
   pgWiFlowLib,
+  pgWiFlowData,
   testSupport ? null,
 }:
 mkBashScript {
@@ -32,5 +33,11 @@ mkBashScript {
     pkgs.git
     pkgs.coreutils
   ];
+  # PG_WI_FLOW_DATA_UNDER_TEST: the built plugin-default data store path, read
+  # by tests/test-pg-wi-flow-homelab-data.bats (tc-9ddu3.2.10). It must be an
+  # `exportedConfig` entry (a plain `config` entry is not exported into the
+  # check's bats run); the shipped script therefore also exports this one
+  # store path, which is inert for the CLI itself.
+  exportedConfig.PG_WI_FLOW_DATA_UNDER_TEST = "${pgWiFlowData}";
   inherit testSupport;
 }

@@ -19,19 +19,19 @@ let
     inherit (bashBuilders) mkBashScript;
   };
 
+  # pgWiFlowData: the paths.defaults store directory (bead tc-9ddu3.1.5) --
+  # a plain data directory, not a bashBuilders artifact, so it is
+  # `pkgs.callPackage`d directly rather than threaded through mkBashLibrary/
+  # mkBashScript. Also handed to the CLI check (tc-9ddu3.2.10).
+  pgWiFlowData = pkgs.callPackage ./data { };
+
   # pg-wi-flow: the CLI itself. tc-9ddu3.1.1 adds query/list/next/claim/
   # release; later packets in the tc-9ddu3.1 docket add more subcommands to
   # this same script.
   pg-wi-flow = pkgs.callPackage ./pg-wi-flow {
     inherit (bashBuilders) mkBashScript;
-    inherit pkgs pgWiFlowLib;
+    inherit pkgs pgWiFlowLib pgWiFlowData;
   };
-
-  # pgWiFlowData: the paths.defaults store directory (bead tc-9ddu3.1.5) --
-  # a plain data directory, not a bashBuilders artifact, so it is
-  # `pkgs.callPackage`d directly rather than threaded through mkBashLibrary/
-  # mkBashScript.
-  pgWiFlowData = pkgs.callPackage ./data { };
 in
 {
   inherit
