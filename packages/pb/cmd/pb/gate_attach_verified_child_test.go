@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,5 +85,58 @@ func TestAttachVerifiedChildCmd_requiredFlags(t *testing.T) {
 	cmd.SetArgs([]string{}) // nothing supplied
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected required-flag error")
+	}
+}
+
+// TestWriteAttachResult pins what attach-verified-child prints (pg2-0jt3s): a
+// result only once the child exists, so a failure before creation leaves stdout
+// empty while a partial failure still reports the child and its gates.
+func TestWriteAttachResult(t *testing.T) {
+	partial := gate.AttachResult{
+		ChildID: "pg2-child",
+		Gates:   []gate.CreatedGate{{GateID: "pg2-gate1"}},
+	}
+	tests := []struct {
+		name   string
+		out    gate.AttachResult
+		asJSON bool
+		want   string
+	}{
+		{"json, nothing created", gate.AttachResult{}, true, ""},
+		{"text, nothing created", gate.AttachResult{}, false, ""},
+		{"json, child created", partial, true, `{"child":"pg2-child","gates":[{"gate-id":"pg2-gate1"`},
+		{"text, child created", partial, false, "child=pg2-child gates=1\n"},
+		{"json, child without gates", gate.AttachResult{ChildID: "pg2-child"}, true, `{"child":"pg2-child","gates":null`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			writeAttachResult(&buf, tt.out, tt.asJSON)
+			got := buf.String()
+			if tt.want == "" {
+				if got != "" {
+					t.Fatalf("stdout = %q, want empty", got)
+				}
+				return
+			}
+			if !strings.HasPrefix(got, tt.want) {
+				t.Fatalf("stdout = %q, want prefix %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAttachExitCode(t *testing.T) {
+	for _, tt := range []struct {
+		err  error
+		want int
+	}{
+		{errors.New("bead not found"), 1},
+		{fmt.Errorf("%w: gate for r@c: x", gate.ErrGatingIncomplete), 3},
+		{fmt.Errorf("%w: child: x", gate.ErrChildMayBeWorkable), 4},
+	} {
+		if got := attachExitCode(tt.err); got != tt.want {
+			t.Errorf("attachExitCode(%v) = %d, want %d", tt.err, got, tt.want)
+		}
 	}
 }

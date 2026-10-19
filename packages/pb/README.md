@@ -155,7 +155,10 @@ pb gate attach-verified-child --impl <beadid> --title <t> --gate <repo>=<sha> [-
   - The implementation bead is read before the child exists, so an unreadable one is an exit `1`
     with nothing created.
 - Human output: `child=<id> gates=<n>`. `--json` emits the `AttachResult` envelope
-  (`child`, `gates`, `comment_failed`) instead.
+  (`child`, `gates`, `comment_failed`) instead. Either form is printed only once the child
+  exists, so exit `3` and `4` still report the child and the gates created so far; a failure
+  before the child exists (exit `1`) prints **nothing** on stdout and the reason on stderr,
+  never a `{"child":""}` object that looks like a success shape.
 
 | Exit | Meaning                                                                                                                  |
 | ---- | ------------------------------------------------------------------------------------------------------------------------ |

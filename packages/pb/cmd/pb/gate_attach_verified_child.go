@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -69,6 +70,35 @@ child was LEFT DEFERRED (safe — route the impl bead to STUCK); 4 the child
 could not be proven un-workable (do NOT close the impl bead).`, strings.Join(gate.WorkflowStateLabels, ", "))
 }
 
+// writeAttachResult prints the result of an attach run to w. Nothing is
+// printed when no child exists: a failure before the child was created has
+// nothing to report, and under --json a {"child":"","gates":null} object would
+// look like a success shape to a caller that parses stdout first (pg2-0jt3s).
+// Every partial failure (exit 3 or 4) has a child id, so its result, the child
+// and the gates created so far, still prints.
+func writeAttachResult(w io.Writer, out gate.AttachResult, asJSON bool) {
+	if out.ChildID == "" {
+		return
+	}
+	if asJSON {
+		_ = json.NewEncoder(w).Encode(out)
+		return
+	}
+	fmt.Fprintf(w, "child=%s gates=%d\n", out.ChildID, len(out.Gates))
+}
+
+// attachExitCode maps an Attach error to the documented exit code: 4 the child
+// could not be proven un-workable, 3 gating incomplete, 1 anything else.
+func attachExitCode(err error) int {
+	switch {
+	case errors.Is(err, gate.ErrChildMayBeWorkable):
+		return 4
+	case errors.Is(err, gate.ErrGatingIncomplete):
+		return 3
+	}
+	return 1
+}
+
 func newGateAttachVerifiedChildCmd() *cobra.Command {
 	var (
 		impl, title, actor, reason, bodyFile, acceptance string
@@ -106,11 +136,7 @@ func newGateAttachVerifiedChildCmd() *cobra.Command {
 			})
 			// Emit the result BEFORE exiting: on partial failure the child id and
 			// the gates already created are what the operator needs.
-			if asJSON {
-				_ = json.NewEncoder(cmd.OutOrStdout()).Encode(out)
-			} else if out.ChildID != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "child=%s gates=%d\n", out.ChildID, len(out.Gates))
-			}
+			writeAttachResult(cmd.OutOrStdout(), out, asJSON)
 			// The warning goes to stderr under BOTH output modes: a --json caller
 			// still gets "comment_failed":true, but stderr is what a human sees.
 			if out.CommentFailed {
@@ -118,13 +144,7 @@ func newGateAttachVerifiedChildCmd() *cobra.Command {
 			}
 			if aerr != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), "pb:", aerr)
-				switch {
-				case errors.Is(aerr, gate.ErrChildMayBeWorkable):
-					os.Exit(4)
-				case errors.Is(aerr, gate.ErrGatingIncomplete):
-					os.Exit(3)
-				}
-				os.Exit(1)
+				os.Exit(attachExitCode(aerr))
 			}
 			return nil
 		},
