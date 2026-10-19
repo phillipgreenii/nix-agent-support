@@ -49,6 +49,9 @@ let
   # only emitted when the option exists; a darwin host that lacks it gets a
   # clear assertion instead of a silent no-op.
   hasLaunchdRegistry = options.phillipgreenii.programs ? launchdServices;
+  # Same option-tree probe for the pg-keep-awake HM module, so keepAwake.package
+  # follows the keeper's own package when that module is imported.
+  hasKeepAwakeModule = options.phillipgreenii.programs ? pg-keep-awake;
   isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
 
   # SwiftBar menu bar plugin (packages/pa-monitor-swiftbar). The wrapper is a
@@ -74,11 +77,32 @@ in
       reads this flag across `config.home-manager.users.<u>`.
     '';
 
+    keepAwake.package = lib.mkOption {
+      type = lib.types.package;
+      default =
+        if hasKeepAwakeModule then
+          config.phillipgreenii.programs.pg-keep-awake.package
+        else
+          pkgs.pg-keep-awake;
+      defaultText = lib.literalMD "`phillipgreenii.programs.pg-keep-awake.package` when that module is imported, else `pkgs.pg-keep-awake`";
+      description = ''
+        The pg-keep-awake package whose `bin/pg-keep-awake` the daemon runs to
+        acquire and release the keep-awake assertion. Rendered as the
+        `keep_awake_bin` config key (an absolute store path, so the lookup never
+        depends on the PATH launchd gives the daemon). Only rendered when
+        `daemon.enable` is set.
+      '';
+    };
+
     caffeinate = {
       batteryHoldPercent = lib.mkOption {
         type = lib.types.ints.between 0 100;
         default = 30;
         description = ''
+          DEPRECATED: set `phillipgreenii.programs.pg-keep-awake.battery.holdPct`
+          instead. pg-keep-awake now owns the low-battery rule and pa-monitor
+          ignores this value; setting it emits a warning but still evaluates.
+
           Low-battery HOLD threshold for the keep-awake assertion (pa-monitor
           `caffeinate_battery_hold_pct`). While the Mac is on battery power at or
           below this charge, the daemon does NOT start a caffeinate subprocess,
@@ -95,6 +119,10 @@ in
         type = lib.types.ints.between 0 100;
         default = 20;
         description = ''
+          DEPRECATED: set `phillipgreenii.programs.pg-keep-awake.battery.releasePct`
+          instead. pg-keep-awake now owns the low-battery rule and pa-monitor
+          ignores this value; setting it emits a warning but still evaluates.
+
           Low-battery RELEASE threshold (pa-monitor
           `caffeinate_battery_release_pct`). While on battery at or below this
           charge, a RUNNING caffeinate subprocess is stopped at the next tick.
@@ -205,16 +233,30 @@ in
     (lib.mkIf (cfg.daemon.enable && otelSettings != { }) {
       phillipgreenii.programs.pa-monitor.settings = otelSettings;
     })
-    # Low-battery keep-awake thresholds (bead pg2-s86z9). The daemon is the only
-    # reader, so they render with daemon.enable, into the same config.toml as the
-    # OTel endpoint; the Go-side defaults are the same 30/20, so this adds the
-    # operator's declared values rather than the only copy.
+    # Low-battery keep-awake thresholds (bead pg2-s86z9), now DEPRECATED
+    # (docket pg2-8bgxg.2, packet 21-pa-options): the pg-keep-awake keeper owns the
+    # battery rule and pa-monitor ignores the keys, but the options keep
+    # evaluating and keep rendering so an older pa-monitor (a rollback) still
+    # reads the operator's values. The daemon is the only reader, so they render
+    # with daemon.enable, into the same config.toml as the OTel endpoint.
+    #
+    # keep_awake_bin is the absolute path of the pg-keep-awake executable the
+    # daemon runs (20-pa-cli's `keep_awake_bin` key): a launchd agent's PATH does
+    # not list the per-user profile, so a PATH lookup would fail there.
     (lib.mkIf cfg.daemon.enable {
       phillipgreenii.programs.pa-monitor.settings = {
         caffeinate_battery_hold_pct = cfg.caffeinate.batteryHoldPercent;
         caffeinate_battery_release_pct = cfg.caffeinate.batteryReleasePercent;
+        keep_awake_bin = "${cfg.keepAwake.package}/bin/pg-keep-awake";
       };
     })
+    {
+      # Deprecation: `isDefined` is true only when some module sets the option,
+      # so an unset configuration emits nothing.
+      warnings =
+        lib.optional options.phillipgreenii.programs.pa-monitor.caffeinate.batteryHoldPercent.isDefined "phillipgreenii.programs.pa-monitor.caffeinate.batteryHoldPercent is deprecated and ignored: pg-keep-awake owns the low-battery rule now. Set phillipgreenii.programs.pg-keep-awake.battery.holdPct instead."
+        ++ lib.optional options.phillipgreenii.programs.pa-monitor.caffeinate.batteryReleasePercent.isDefined "phillipgreenii.programs.pa-monitor.caffeinate.batteryReleasePercent is deprecated and ignored: pg-keep-awake owns the low-battery rule now. Set phillipgreenii.programs.pg-keep-awake.battery.releasePct instead.";
+    }
     {
       assertions = [
         {

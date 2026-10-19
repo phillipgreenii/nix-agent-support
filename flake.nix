@@ -11291,6 +11291,11 @@
                                 type = lib.types.listOf lib.types.anything;
                                 default = [ ];
                               };
+                              # The deprecated battery options (pg2-8bgxg.2.22) emit through warnings.
+                              warnings = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
+                                default = [ ];
+                              };
                               xdg.stateHome = lib.mkOption {
                                 type = lib.types.str;
                                 default = "/Users/tester/.local/state";
@@ -11356,6 +11361,22 @@
                       };
                     };
                   };
+                  # pg2-8bgxg.2.22: the two battery options are DEPRECATED in favor of
+                  # pg-keep-awake's battery settings. Setting one still evaluates and emits
+                  # exactly one warning naming the replacement; setting neither is silent.
+                  holdOnly = evalCfg {
+                    phillipgreenii.programs.pa-monitor = {
+                      daemon.enable = true;
+                      caffeinate.batteryHoldPercent = 40;
+                    };
+                  };
+                  releaseOnly = evalCfg {
+                    phillipgreenii.programs.pa-monitor = {
+                      daemon.enable = true;
+                      caffeinate.batteryReleasePercent = 10;
+                    };
+                  };
+                  mentions = needle: w: lib.hasInfix needle w;
                 in
                 assert hasConfig daemonOnly; # the fix: daemon.enable alone ⇒ config rendered
                 assert hasConfig tuiOnly; # TUI path unchanged ⇒ still rendered
@@ -11371,6 +11392,26 @@
                 assert hasConfig tunedBattery; # a thresholds-only daemon still gets its config.toml
                 assert assertionsPass tunedBattery;
                 assert !(assertionsPass invertedBattery); # release above hold is refused
+                # pg2-8bgxg.2.22: deprecation. Unset => no warning (the unset case is unchanged);
+                # set => still evaluates, still renders, one warning pointing at pg-keep-awake.
+                assert daemonOnly.warnings == [ ];
+                assert neither.warnings == [ ];
+                assert tuiOnly.warnings == [ ];
+                assert bothEnabled.warnings == [ ];
+                assert builtins.length holdOnly.warnings == 1;
+                assert mentions "caffeinate.batteryHoldPercent is deprecated" (builtins.head holdOnly.warnings);
+                assert mentions "pg-keep-awake.battery.holdPct" (builtins.head holdOnly.warnings);
+                assert (settingsOf holdOnly).caffeinate_battery_hold_pct == 40; # still evaluates and renders
+                assert builtins.length releaseOnly.warnings == 1;
+                assert mentions "caffeinate.batteryReleasePercent is deprecated" (
+                  builtins.head releaseOnly.warnings
+                );
+                assert mentions "pg-keep-awake.battery.releasePct" (builtins.head releaseOnly.warnings);
+                assert builtins.length tunedBattery.warnings == 2; # both set => both warned
+                # the daemon locates pg-keep-awake by an absolute store path (never launchd's PATH)
+                assert (settingsOf daemonOnly).keep_awake_bin == "${pkgs.pg-keep-awake}/bin/pg-keep-awake";
+                assert !((settingsOf neither) ? keep_awake_bin);
+                assert !((settingsOf tuiOnly) ? keep_awake_bin);
                 pkgs.runCommand "pa-monitor-config-gating-ok" { } "touch $out";
 
               # pg2-sgs4y (V3 of the HM launchdServices work; personal ADR 0055): the
@@ -11452,6 +11493,11 @@
                           type = lib.types.listOf lib.types.anything;
                           default = [ ];
                         };
+                        # The deprecated battery options (pg2-8bgxg.2.22) emit through warnings.
+                        warnings = lib.mkOption {
+                          type = lib.types.listOf lib.types.str;
+                          default = [ ];
+                        };
                       };
                     };
                   launchdOption =
@@ -11526,6 +11572,8 @@
                   batteryDefaults = {
                     caffeinate_battery_hold_pct = 30;
                     caffeinate_battery_release_pct = 20;
+                    # pg2-8bgxg.2.22: the absolute path of the pg-keep-awake executable the daemon runs.
+                    keep_awake_bin = "${pkgs.pg-keep-awake}/bin/pg-keep-awake";
                   };
 
                   # OTel endpoint lands in settings iff daemon.enable AND the stack is on.
@@ -11620,6 +11668,9 @@
                 assert failedAssertions disabled == [ ];
                 assert builtins.length (failedAssertions darwinNoRegistry) == 1;
                 assert (settingsOf linux) == batteryDefaults;
+                # pg2-8bgxg.2.22: nothing deprecated is set here, so no warning
+                assert enabled.warnings == [ ];
+                assert linux.warnings == [ ];
                 pkgs.runCommand "pa-monitor-hm-launchd-ok" { } "touch $out";
 
               # pg-connector-github's supervisor entry (docket pg2-z5fax, Phase 2): the
@@ -11921,6 +11972,11 @@
                         };
                         assertions = lib.mkOption {
                           type = lib.types.listOf lib.types.anything;
+                          default = [ ];
+                        };
+                        # The deprecated battery options (pg2-8bgxg.2.22) emit through warnings.
+                        warnings = lib.mkOption {
+                          type = lib.types.listOf lib.types.str;
                           default = [ ];
                         };
                       };

@@ -175,11 +175,16 @@ rule is withholding the assertion even though the toggle is on (the toggle itsel
 as `caffeinate.mode`); and `status --json` carries `caffeinate.battery`
 ([above](#status---json-the-rate_limits-caffeinate-and-auto_resume-keys)).
 
-Configure it with the Home-Manager options `phillipgreenii.programs.pa-monitor.caffeinate.batteryHoldPercent`
-(default 30) and `batteryReleasePercent` (default 20; asserted not to exceed the hold value), or with
-the `caffeinate_battery_*_pct` keys under [Other keys](#other-keys). A value of 0 for the hold
-threshold disables the rule. Config is read at daemon start (ADR 0028), so a change applies when the
-daemon restarts.
+Configure it with the Home-Manager options `phillipgreenii.programs.pg-keep-awake.battery.holdPct`,
+`releasePct` and `hysteresisPct`: the keeper owns the rule now. The pa-monitor options
+`phillipgreenii.programs.pa-monitor.caffeinate.batteryHoldPercent` (default 30) and
+`batteryReleasePercent` (default 20; asserted not to exceed the hold value) are DEPRECATED: they still
+evaluate and still render the `caffeinate_battery_*_pct` keys under [Other keys](#other-keys), but
+pa-monitor ignores the keys, and setting either option emits a warning naming its replacement. The
+module also renders `keep_awake_bin` (the absolute path of `pg-keep-awake`, from
+`phillipgreenii.programs.pa-monitor.keepAwake.package`, which follows the pg-keep-awake module's
+package when that module is imported). Config is read at daemon start (ADR 0028), so a change applies
+when the daemon restarts.
 
 ### Busy/idle gates: a blocked session counts as idle
 
