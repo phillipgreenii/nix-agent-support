@@ -35,7 +35,7 @@ flowchart LR
   `{backend: reason}` map — omitted entirely when no degraded backend on that call reported one
   (bead `pg2-wa5uk`).
 
-  `--retry-window <duration>` (default `0` = off, as the bead recorded above settled) gives the router a bounded
+  `--retry-window <duration>` (bead `pg2-1ldvy`; default `0` = off) gives the router a bounded
   retry window per change. With the default, the item `id` is the bare entity id and the output is
   byte-identical to a call without the flag apart from `metadata.entity_id`; no `at`/`expiresAt` is
   printed, so every event is born expired and a failed dispatch is offered once (pg-router
