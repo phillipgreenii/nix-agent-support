@@ -22,7 +22,7 @@ else
 fi
 ```
 
-The framework exports `TEST_SUPPORT` in nix check derivations and copies `*.bash` from the test-support directory alongside tests so `load test_helper` resolves.
+The framework exports `TEST_SUPPORT` in nix check derivations and copies `*.bash` from the test-support directory alongside tests so `load test_helper` resolves. It also exports `GFH_LIB` (the path to `git-fixture-harness.bash`), so suites that need a git fixture `source "$GFH_LIB"` directly (no `TEST_SUPPORT` fallback).
 
 ## Library wrapper pattern
 

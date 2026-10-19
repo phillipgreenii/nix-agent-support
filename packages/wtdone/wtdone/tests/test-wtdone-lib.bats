@@ -13,9 +13,9 @@ setup() {
   local scripts_dir_saved="${SCRIPTS_DIR:-}"
   local test_support_saved="${TEST_SUPPORT:-}"
 
-  # GFH_LIB is the one required file (tc-4ehow); nix package checks inject
-  # TEST_SUPPORT (the directory holding it) instead, so alias that.
-  local gfh_lib="${GFH_LIB:-${TEST_SUPPORT:+$TEST_SUPPORT/git-fixture-harness.bash}}"
+  # GFH_LIB is the one required file (tc-4ehow); nix package checks
+  # export it.
+  local gfh_lib="${GFH_LIB:-}"
   if [[ -z $gfh_lib ]]; then
     echo "GFH_LIB is not set: commit via the run-unit-tests hook, run under the workspace .envrc (direnv, or direnv exec <workspace-root> ...), or export GFH_LIB=<path to git-fixture-harness.bash>." >&2
     return 1

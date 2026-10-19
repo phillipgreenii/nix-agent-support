@@ -17,8 +17,8 @@ setup() {
   # SCRIPTS_DIR / SCRIPT_UNDER_TEST / TEST_SUPPORT may be exported by the nix
   # check; gfh_setup scrubs every exported var off its allowlist, so carry
   # them across it. GFH_LIB is the one required file (tc-4ehow); nix package
-  # checks inject TEST_SUPPORT (the directory holding it) instead.
-  local gfh_lib="${GFH_LIB:-${TEST_SUPPORT:+$TEST_SUPPORT/git-fixture-harness.bash}}"
+  # checks export it.
+  local gfh_lib="${GFH_LIB:-}"
   if [[ -z $gfh_lib ]]; then
     echo "GFH_LIB is not set: commit via the run-unit-tests hook, run under the workspace .envrc (direnv, or direnv exec <workspace-root> ...), or export GFH_LIB=<path to git-fixture-harness.bash>." >&2
     return 1

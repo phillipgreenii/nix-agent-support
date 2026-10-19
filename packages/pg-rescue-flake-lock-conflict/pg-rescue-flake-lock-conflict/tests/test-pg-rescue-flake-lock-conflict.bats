@@ -10,17 +10,13 @@
 setup() {
   # Capture what the suite needs across gfh_setup: gfh_reset_env rebuilds the
   # exported environment from an allowlist, so SCRIPTS_DIR / SCRIPT_UNDER_TEST /
-  # TEST_SUPPORT (injected by the nix check) and GFH_LIB (local runs) MUST be
+  # TEST_SUPPORT (injected by the nix check) and GFH_LIB MUST be
   # saved BEFORE it and restored AFTER it
   # (code-file-standards "Tests That Need Git"; pg2-emjgm).
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
     SCRIPTS_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
   fi
-  # GFH_LIB is the one required file (tc-4ehow); the nix check injects
-  # TEST_SUPPORT (the directory holding it) instead, so alias that.
-  if [[ -z ${GFH_LIB:-} && -n ${TEST_SUPPORT:-} ]]; then
-    GFH_LIB="$TEST_SUPPORT/git-fixture-harness.bash"
-  fi
+  # GFH_LIB is the one required file (tc-4ehow); the nix check exports it.
   if [[ -z ${GFH_LIB:-} ]]; then
     echo "GFH_LIB is not set: commit via the run-unit-tests hook, run under the workspace .envrc (direnv, or direnv exec <workspace-root> ...), or export GFH_LIB=<path to git-fixture-harness.bash>." >&2
     return 1

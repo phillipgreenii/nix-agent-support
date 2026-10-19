@@ -25,7 +25,7 @@ setup() {
   if ! command -v bd >/dev/null 2>&1; then
     skip "bd not on PATH; real-bd data-guard tests need it"
   fi
-  local gfh_lib="${GFH_LIB:-${TEST_SUPPORT:+$TEST_SUPPORT/git-fixture-harness.bash}}"
+  local gfh_lib="${GFH_LIB:-}"
   if [[ -z $gfh_lib ]]; then
     echo "GFH_LIB is not set: commit via the run-unit-tests hook, run under the workspace .envrc (direnv, or direnv exec <workspace-root> ...), or export GFH_LIB=<path to git-fixture-harness.bash>." >&2
     return 1
