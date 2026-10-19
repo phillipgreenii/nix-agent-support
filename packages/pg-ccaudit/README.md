@@ -358,7 +358,7 @@ deterministic read of files that live independently of the gold set
 (`feedback_*.md` under `~/.claude/projects/*/memory/`, plus a workspace `FEEDBACK.md`):
 
 ```bash
-pg-ccaudit gold seed -feedback /Users/phillipg/phillipg_mbp/FEEDBACK.md
+pg-ccaudit gold seed -feedback "$PN_WORKSPACE_ROOT/FEEDBACK.md"
 ```
 
 The **hand-labelled** portion is not: once a person spends attention labelling a
@@ -372,10 +372,10 @@ file is outside git (every entry quotes real transcript text or the operator's o
 critique):
 
 ```bash
-cp "$PG_CCAUDIT_GOLD" /Users/phillipg/phillipg_mbp/.local-backups/pg-ccaudit/goldset.jsonl
+cp "$PG_CCAUDIT_GOLD" "$PN_WORKSPACE_ROOT/.local-backups/pg-ccaudit/goldset.jsonl"
 ```
 
-`/Users/phillipg/phillipg_mbp` is not itself a git repository, so nothing under
+`$PN_WORKSPACE_ROOT` (the workspace root) is not itself a git repository, so nothing under
 `.local-backups/` can be accidentally committed. This is a **manual** step — nothing
 in `pg-ccaudit` runs it automatically — so re-run it after any session that adds
 labels, most importantly after an operator labelling pass, since that is the

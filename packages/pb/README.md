@@ -227,7 +227,7 @@ pb drain isolate --bead <id> --repo <abs-path> [--json] [--git-timeout <duration
 | `3`  | Conflicting isolation state — the worktree path holds another branch, or `drain/<bead>` is checked out elsewhere. Never forced; route the bead to STUCK. |
 
 ```bash
-pb drain isolate --bead pg2-1qcro.7 --repo /Users/phillipg/phillipg_mbp/phillipg-nix-repo-base
+pb drain isolate --bead pg2-1qcro.7 --repo "$PN_WORKSPACE_ROOT/nix-repo-base"
 ```
 
 ## `pb unstick`
