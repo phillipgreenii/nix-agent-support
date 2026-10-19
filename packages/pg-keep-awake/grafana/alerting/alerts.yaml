@@ -40,9 +40,9 @@
 # nothing about the keeper.
 #
 # The folder "Keep Awake" has no dashboard provider yet (a dashboard is not designed); never pin
-# a folderUid (Grafana alerting provisioning ignores it, grafana/grafana#125079). Registering
-# this file with the observability stack (phillipgreenii.observability.alertRuleFiles from a
-# darwin module) is a separate follow-up bead and is not done here.
+# a folderUid (Grafana alerting provisioning ignores it, grafana/grafana#125079). This file is
+# registered with the observability stack (phillipgreenii.observability.alertRuleFiles) by
+# darwin/modules/pg-keep-awake, behind the pg-keep-awake enable flag.
 apiVersion: 1
 groups:
   - orgId: 1

@@ -2812,6 +2812,110 @@
                     touch $out
                   '';
 
+              # darwin/modules/pg-keep-awake (bead pg2-8bgxg.5): registers the keeper's
+              # Grafana alert rules (packages/pg-keep-awake/grafana/alerting/alerts.yaml)
+              # through observability.alertRuleFiles, at system scope, following the HM
+              # flag across home-manager.users (the pg-task-focus precedent). Same stub
+              # technique as test-pg-task-focus-darwin-module: a stub of the observability
+              # surface. The stub declares metricsTargets, logSources and
+              # dashboardProviders too, so the assertions prove the module leaves them
+              # alone (the keeper pushes OTel, writes no jsonl log, has no dashboard).
+              test-pg-keep-awake-darwin-module =
+                let
+                  evalDarwin =
+                    {
+                      obsEnable,
+                      users,
+                    }:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-keep-awake/default.nix
+                        {
+                          options = {
+                            home-manager.users = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                            phillipgreenii.observability = {
+                              enable = lib.mkOption {
+                                type = lib.types.bool;
+                                default = false;
+                              };
+                              metricsTargets = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              logSources = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              dashboardProviders = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              alertRuleFiles = lib.mkOption {
+                                type = lib.types.listOf lib.types.path;
+                                default = [ ];
+                              };
+                            };
+                          };
+                          config = {
+                            phillipgreenii.observability.enable = obsEnable;
+                            home-manager.users = users;
+                          };
+                        }
+                      ];
+                    }).config.phillipgreenii.observability;
+                  keeperUser = enable: {
+                    phillipgreenii.programs.pg-keep-awake.enable = enable;
+                  };
+                  alertsFile = ./packages/pg-keep-awake/grafana/alerting/alerts.yaml;
+                  enabled = evalDarwin {
+                    obsEnable = true;
+                    users.alice = keeperUser true;
+                  };
+                  keeperOff = evalDarwin {
+                    obsEnable = true;
+                    users.alice = keeperUser false;
+                  };
+                  noUsers = evalDarwin {
+                    obsEnable = true;
+                    users = { };
+                  };
+                  obsOff = evalDarwin {
+                    obsEnable = false;
+                    users.alice = keeperUser true;
+                  };
+                in
+                # present when the keeper is enabled (and the stack is on) ...
+                assert enabled.alertRuleFiles == [ alertsFile ];
+                # ... and absent otherwise
+                assert keeperOff.alertRuleFiles == [ ];
+                assert noUsers.alertRuleFiles == [ ];
+                assert obsOff.alertRuleFiles == [ ];
+                # nothing else is registered: the keeper pushes OTel, has no jsonl log, no dashboard
+                assert enabled.metricsTargets == { };
+                assert enabled.logSources == { };
+                assert enabled.dashboardProviders == { };
+                pkgs.runCommand "test-pg-keep-awake-darwin-module-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.jq
+                      pkgs.yq-go
+                    ];
+                  }
+                  ''
+                    # The registered file is well-formed, holds the three rules in one
+                    # "Keep Awake" folder, and pins no folderUid.
+                    yq -o=json '.' ${alertsFile} > alerts.json
+                    jq -e '.apiVersion == 1' alerts.json >/dev/null
+                    jq -e '[.groups[].folder] | unique == ["Keep Awake"]' alerts.json >/dev/null || { echo "FAIL: the alert folder is not Keep Awake" >&2; exit 1; }
+                    jq -e '[.groups[].rules[]] | length == 3' alerts.json >/dev/null || { echo "FAIL: expected 3 rules" >&2; exit 1; }
+                    jq -e '[.. | objects | select(has("folderUid"))] | length == 0' alerts.json >/dev/null || { echo "FAIL: a folderUid is pinned" >&2; exit 1; }
+                    touch $out
+                  '';
+
               # darwin/modules/pg-connector-pr-github (bead pg2-ph0o4): registers the
               # backend's own event log as a Loki log source and its LogQL alert
               # rules, from its own nix module rather than through pg-connector's

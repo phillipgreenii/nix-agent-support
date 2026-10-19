@@ -169,6 +169,12 @@ per-user profile and runs `packages/pg-keep-awake/tests/test-pg-keep-awake-shim-
 (symlink target, PATH order, and, on macOS, a real `caffeinate -t` through the symlink writing and
 removing a lease).
 
+The keeper's three Grafana alert rules (`packages/pg-keep-awake/grafana/alerting/alerts.yaml`) are
+registered by `darwin/modules/pg-keep-awake` (bead `pg2-8bgxg.5`): ONLY `alertRuleFiles`, gated on
+`observability.enable` and on some `home-manager.users.<u>` enabling the keeper. There is no
+`metricsTargets` (the keeper pushes OTel and listens on no port), no `logSources` (no jsonl event
+log) and no `dashboardProviders` (none designed). Check: `test-pg-keep-awake-darwin-module`.
+
 ## Status Line (`home/programs/claude-status-line`)
 
 Full contract (part-script protocol, ordering convention, glyph/width/locale mechanics) moved to
