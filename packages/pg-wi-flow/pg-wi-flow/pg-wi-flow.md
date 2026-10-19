@@ -84,6 +84,16 @@ memories, prints an empty `WI_LESSONS=`; a failed `bd memories` read
 prints one warning on stderr and an empty value (exit 0). `context
 --render` shows it only when `render.include` lists `lessons`.
 
+Question linkage. `escalate --question` creates the question as a
+parentless item that blocks the escalated item through a `blocks` edge
+(`bd dep add <item> <question>`), and records the escalated item in the
+question's `originating_item` metadata. It is never created with
+`--parent`: bd 1.3.1 refuses a parent blocked by its own child. `context`
+and workflow resolution treat `originating_item` as the question's
+parent (stage, workflow, `WI_PARENT`, `WI_SIBLINGS`); `WI_QUESTIONS` is
+the set of open questions blocking the item, and `resolve` finds the
+items a question blocked through the same `blocks` edges.
+
 Destructive-actions follow-up. `escalate --concern <name>` records the
 originating concern in the question's `originating_concern` metadata
 (set at creation, or adopted by a reused open question that has none).

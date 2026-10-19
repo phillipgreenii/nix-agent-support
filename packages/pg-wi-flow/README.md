@@ -71,8 +71,12 @@ inside Claude Code; an explicit `--actor` override only outside it).
 
 - **`escalate ID [--question T --trigger t]...`** -- with `--question`/`--trigger` pairs: `ID` is
   the blocked work item. Computes a fingerprint per pair; reuses an OPEN question already carrying
-  it (blocking edge added, nothing created) or creates a new question child (labeled
-  `question`+`escalated`+the trigger). With no `--question` at all: `ID` must already be a
+  it (blocking edge added, nothing created) or creates a new question (labeled
+  `question`+`escalated`+the trigger) that blocks `ID` through a real `blocks` edge. The question is
+  NOT a bd child of `ID` (bd 1.3.1 refuses a parent blocked by its own child); its
+  `originating_item` metadata names `ID` and is followed wherever the question's parent is needed
+  (stage, workflow, `WI_PARENT`, `WI_SIBLINGS`). `WI_QUESTIONS` lists the open questions blocking an
+  item. With no `--question` at all: `ID` must already be a
   question -- bumps it from `escalated` to `human` (the resolver could not settle it).
 - **`resolve ID (--decision D --rationale R | --answer A | --abandon --reason-code r | --defer d)`**
   -- exactly one outcome. `--decision`/`--answer` record and close (the parent resumes);

@@ -435,3 +435,18 @@ show_fixture() {
   [ -z "$output" ]
   [[ $stderr == *"pg-wi-flow: bd ready failed"*"mock bd ready: boom"* ]]
 }
+
+# --- logical parent (tc-ir4en) -------------------------------------------
+
+@test "pgwf_tracker_item_parent: bd .parent wins, else the originating_item metadata, else empty" {
+  run pgwf_tracker_item_parent '{"id":"a","parent":"p","metadata":{"originating_item":"o"}}'
+  [ "$status" -eq 0 ]
+  [ "$output" = p ]
+  run pgwf_tracker_item_parent '{"id":"q","metadata":{"originating_item":"o"}}'
+  [ "$output" = o ]
+  run pgwf_tracker_item_parent '{"id":"x","metadata":{}}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run pgwf_tracker_item_parent '{"id":"y"}'
+  [ -z "$output" ]
+}

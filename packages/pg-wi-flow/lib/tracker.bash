@@ -18,6 +18,19 @@
 # escalated before the flag existed. Documented in pg-wi-flow.md.
 PGWF_CONCERN_METADATA_KEY="originating_concern"
 
+# PGWF_ORIGIN_METADATA_KEY -- the item-metadata key under which `escalate
+# --question` records the item the question was FIRST raised for (the
+# question's logical parent). A question cannot be created with
+# `bd create --parent <blocked item>`: the blocks edge the escalation needs
+# (blocked item depends on the question) would then point from a parent at
+# its own descendant, which bd 1.3.1 refuses (blocked status cascades to
+# descendants; beads-lifecycle D-9, tc-ir4en). The question is therefore a
+# parentless item that blocks the escalating item via a real blocks edge
+# and carries this key for provenance; every reader of "the question's
+# parent" (stage, workflow, WI_PARENT, WI_SIBLINGS) goes through
+# pgwf_tracker_item_parent / pgwf_tracker_parent_id so they all agree.
+PGWF_ORIGIN_METADATA_KEY="originating_item"
+
 # _pgwf_bd_json LABEL BD_ARGS... -- runs `bd BD_ARGS...`, printing ONLY its
 # stdout (the JSON stream). bd's stderr (for example the "Showing 100 of N
 # ready issues" truncation notice, printed alongside a zero exit) is captured
@@ -59,11 +72,20 @@ pgwf_tracker_concern() {
   pgwf_tracker_metadata_field "$1" "$PGWF_CONCERN_METADATA_KEY"
 }
 
-# pgwf_tracker_parent_id ID -- ID's parent id, or empty if it has none.
+# pgwf_tracker_item_parent ITEM_JSON -- ITEM_JSON's logical parent id, or
+# empty if it has none: its bd `.parent`, else (for a question, which is
+# never a bd child of the item it blocks -- see PGWF_ORIGIN_METADATA_KEY)
+# the item it was escalated for.
+pgwf_tracker_item_parent() {
+  jq -r --arg k "$PGWF_ORIGIN_METADATA_KEY" '.parent // .metadata[$k] // empty' <<<"$1"
+}
+
+# pgwf_tracker_parent_id ID -- ID's logical parent id (see
+# pgwf_tracker_item_parent), or empty if it has none.
 pgwf_tracker_parent_id() {
   local id="$1" item
   item="$(pgwf_tracker_show_json "$id")" || return 1
-  jq -r '.parent // empty' <<<"$item"
+  pgwf_tracker_item_parent "$item"
 }
 
 # pgwf_tracker_has_label ID LABEL -- true if ID carries LABEL.

@@ -270,9 +270,9 @@ concerns_section() {
 # authorizing doc files the kind:docs follow-up (tc-h4334, design gap G-D).
 # Real bd: the resolve round trip exercises the recorded originating_concern
 # metadata, the blocks-edge lookup and create-child. The question is built
-# directly with bd (labels, metadata, blocks edge) rather than via
-# `pg-wi-flow escalate`, because escalate creates it with --parent and bd
-# 1.3.1 then refuses the parent-blocked-by-child edge (reported separately).
+# directly with bd (labels, metadata, blocks edge) to keep this guard focused
+# on resolve; the real `pg-wi-flow escalate` -> resolve round trip is covered
+# by test-pg-wi-flow-escalate-real-bd.bats (tc-ir4en).
 make_destructive_question() {
   local parent="$1" qid
   qid="$(make_item "may we drop the scratch table?" question escalated q:info)"

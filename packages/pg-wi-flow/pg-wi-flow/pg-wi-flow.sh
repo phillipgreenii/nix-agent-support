@@ -117,7 +117,10 @@ Commands:
       With --question/--trigger pairs: ID is the blocked work item.
       Computes a fingerprint per pair; reuses an OPEN question already
       carrying it (blocking edge added, nothing created) or creates a new
-      question child (labeled question+escalated+the trigger). With no
+      question (labeled question+escalated+the trigger) that blocks ID;
+      the question is NOT a bd child of ID (bd refuses a parent blocked by
+      its own child) -- its "originating_item" metadata names ID instead,
+      and context follows that link as the question's parent. With no
       --question at all: ID must already be a question -- bumps it from
       escalated to human (the resolver could not settle it).
       --concern NAME records the originating concern (for example

@@ -435,17 +435,20 @@ pgwf_context_same_fingerprint() {
   jq -c --arg id "$id" '[.[] | select(.id != $id)] | map({id, title})' <<<"$hits"
 }
 
-# pgwf_context_questions CONFIG_JSON ID -- ID's own open question children
-# [design: ## Components -> "Rendered prompt contract", WI_QUESTIONS].
-# Compact JSON array of {id,title}.
+# pgwf_context_questions CONFIG_JSON ID -- the open questions currently
+# blocking ID [design: ## Components -> "Rendered prompt contract",
+# WI_QUESTIONS]: ID's open `blocks` blockers that carry the question label
+# (a question is never a bd child of the item it blocks, so `bd children`
+# cannot find it -- see PGWF_ORIGIN_METADATA_KEY). Compact JSON array of
+# {id,title}.
 pgwf_context_questions() {
-  local config_json="$1" id="$2" question_label kids
+  local config_json="$1" id="$2" question_label blockers
   question_label="$(pgwf_config_label "$config_json" question question)"
-  kids="$(pgwf_tracker_open_children "$id")" || {
+  blockers="$(pgwf_tracker_open_blockers_excluding "$id" "")" || {
     printf '[]'
     return 0
   }
-  jq -c --arg l "$question_label" '[.[] | select((.labels // []) | index($l) != null)] | map({id, title})' <<<"$kids"
+  jq -c --arg l "$question_label" '[.[] | select((.labels // []) | index($l) != null)] | map({id, title})' <<<"$blockers"
 }
 
 # pgwf_context_worktree ITEM_JSON -- ITEM_JSON's own metadata.wi_worktree,
@@ -510,7 +513,7 @@ pgwf_context_facts() {
 
   item_json="$(pgwf_tracker_show_json "$id")" || return 1
   class="$(pgwf_context_class "$config_json" "$item_json")"
-  parent="$(jq -r '.parent // empty' <<<"$item_json")"
+  parent="$(pgwf_tracker_item_parent "$item_json")"
   stage="$(pgwf_context_stage_for_class "$config_json" "$id" "$parent" "$class")" || return 1
   workflow="$(pgwf_workflow_for "$config_json" "$id")" || return 1
   type="$(jq -r '.issue_type // empty' <<<"$item_json")"

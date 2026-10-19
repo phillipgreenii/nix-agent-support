@@ -1,14 +1,18 @@
 #!/usr/bin/env bats
 # bats file_tags=type:unit
-# End-to-end escalate -> context (tc-9ddu3.1.18, gap G-A of the P8 review):
-# the question bead `escalate` creates MUST be a child of the escalating item
-# (`bd create --parent`) as well as blocking it, because `context` and
-# workflow resolution follow `.parent` ("a question's stage is its parent's",
-# design: ## State model -> Axis 2). The null workflow hides a missing parent
-# (every item resolves to the same built-in stage), so these tests run under
-# a MULTI-STAGE, NON-PRIMARY workflow and use a STATEFUL mock `bd` that
-# really stores what `create` is given and answers show/children/dep from
-# that store -- never the real remote Dolt server.
+# End-to-end escalate -> context (tc-9ddu3.1.18, gap G-A of the P8 review;
+# reshaped by tc-ir4en): `context` and workflow resolution MUST resolve a
+# question's stage/workflow/parent from the item it was escalated for ("a
+# question's stage is its parent's", design: ## State model -> Axis 2). The
+# question is NOT created with `bd create --parent`: real bd 1.3.1 refuses
+# the blocks edge from a parent to its own child (D-9). Instead it records the
+# escalated item in `originating_item` metadata, which every parent reader
+# follows. The null workflow hides a missing link (every item resolves to the
+# same built-in stage), so these tests run under a MULTI-STAGE, NON-PRIMARY
+# workflow and use a STATEFUL mock `bd` that really stores what `create` is
+# given and answers show/children/dep from that store -- never the real
+# remote Dolt server. The real-bd round trip is in
+# test-pg-wi-flow-escalate-real-bd.bats.
 bats_require_minimum_version 1.5.0
 
 setup() {
@@ -75,12 +79,26 @@ dep)
     echo "$3" >>"$store/blocks-$4.up"
     echo '{"data":[{}]}'
     ;;
-  list) # dep list ID --direction up : items ID blocks
-    if [[ -f $store/blocks-$3.up ]]; then
-      while read -r b; do cat "$store/$b.json"; echo; done <"$store/blocks-$3.up" | jq -cs '{data: .}'
-    else
-      echo '{"data":[]}'
-    fi
+  list) # dep list ID --direction up : items ID blocks; --direction down : ID's blockers
+    case "$*" in
+    *"--direction down"* | *"--direction=down"*)
+      for f in "$store"/blocks-*.up; do
+        [[ -f $f ]] || continue
+        if grep -qx "$3" "$f"; then
+          q="${f##*/blocks-}"
+          cat "$store/${q%.up}.json"
+          echo
+        fi
+      done | jq -cs '{data: .}'
+      ;;
+    *)
+      if [[ -f $store/blocks-$3.up ]]; then
+        while read -r b; do cat "$store/$b.json"; echo; done <"$store/blocks-$3.up" | jq -cs '{data: .}'
+      else
+        echo '{"data":[]}'
+      fi
+      ;;
+    esac
     ;;
   esac
   ;;
@@ -128,12 +146,14 @@ seed_beta_parent() {
   seed_item tc-sib '{"id":"tc-sib","title":"sibling task","status":"open","labels":[],"metadata":{},"parent":"tc-parent"}'
 }
 
-@test "escalate: passes --parent <escalating item> to bd create and still adds the blocks edge" {
+@test "escalate: creates the question WITHOUT --parent (bd refuses a parent blocked by its child), records originating_item, adds the blocks edge" {
   seed_beta_parent
   run pgwf_cmd_escalate tc-parent --question "which host?" --trigger q:info
   [ "$status" -eq 0 ]
   create_line="$(grep '^create' "$MOCK_BD_LOG")"
-  [[ "$create_line" == *"--parent tc-parent"* ]]
+  [[ "$create_line" != *"--parent"* ]]
+  [ "$(jq -r '.metadata.originating_item' "$MOCK_BD_STORE/tc-q1.json")" = tc-parent ]
+  [ "$(jq -r '.parent // "none"' "$MOCK_BD_STORE/tc-q1.json")" = none ]
   grep -q -- "dep add tc-parent tc-q1" "$MOCK_BD_LOG"
 }
 
@@ -162,7 +182,7 @@ seed_beta_parent() {
   [[ "$output" != *"WI_WORKFLOW=alpha"* ]]
 }
 
-@test "escalate: two questions on one parent each resolve the parent's stage and see each other as siblings" {
+@test "escalate: two questions on one parent each resolve the parent's stage, and the parent's WI_QUESTIONS lists both" {
   seed_beta_parent
   run pgwf_cmd_escalate tc-parent --question "which host?" --trigger q:info --question "which user?" --trigger q:intent
   [ "$status" -eq 0 ]
@@ -171,5 +191,9 @@ seed_beta_parent() {
   [[ "$output" == *"WI_STAGE=build"* ]]
   [[ "$output" == *"WI_WORKFLOW=beta"* ]]
   [[ "$output" == *"WI_PARENT=tc-parent"* ]]
-  [[ "$output" == *"tc-q1:which host?"* ]]
+
+  run pgwf_context_cmd tc-parent
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WI_QUESTIONS="*"tc-q1:which host?"* ]]
+  [[ "$output" == *"WI_QUESTIONS="*"tc-q2:which user?"* ]]
 }

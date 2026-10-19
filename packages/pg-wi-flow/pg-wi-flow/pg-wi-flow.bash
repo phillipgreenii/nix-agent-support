@@ -1237,10 +1237,14 @@ pgwf_resolve_actor_role() {
 #    of appearance): ID is the BLOCKED work item. Per pair, computes the
 #    fingerprint, reuses an OPEN question already carrying it (adds a
 #    blocking edge from ID to that question, creates nothing) or creates a
-#    new question child (bd type task, --parent ID so context/workflow
-#    resolution follow .parent, --no-inherit-labels, labeled
-#    question+escalated+the trigger, `fingerprint` metadata set), then adds
-#    the blocking edge from ID to it. The check-then-create race is
+#    new question (bd type task, --no-inherit-labels, labeled
+#    question+escalated+the trigger, `fingerprint` and `originating_item`
+#    metadata set), then adds the blocking edge from ID to it. The question
+#    is deliberately NOT created with --parent ID: a parent blocked by its
+#    own child is refused by bd 1.3.1 (blocked status cascades to
+#    descendants; D-9, tc-ir4en). `originating_item` is the question's
+#    logical parent instead -- context/workflow resolution follow it
+#    (pgwf_tracker_item_parent) exactly as they follow .parent. The check-then-create race is
 #    ACCEPTED, not prevented [rev7] -- no locking is added here.
 # 2. No --question given at all: ID must already carry the question label
 #    -- the resolver, unable to settle it, bumps escalated -> human [design:
@@ -1345,11 +1349,11 @@ pgwf_cmd_escalate() {
 
     local -a create_args=(
       --title "$question"
-      --parent "$id"
       --labels "${question_label},${escalated_label},${trigger}"
       --no-inherit-labels
       --metadata "$(jq -cn --arg fp "$fp" --arg k "$PGWF_CONCERN_METADATA_KEY" --arg c "$concern" \
-        '{fingerprint: $fp} + (if $c == "" then {} else {($k): $c} end)')"
+        --arg ok "$PGWF_ORIGIN_METADATA_KEY" --arg origin "$id" \
+        '{fingerprint: $fp, ($ok): $origin} + (if $c == "" then {} else {($k): $c} end)')"
     )
     local created new_id
     created="$(pgwf_tracker_create "$actor" "${create_args[@]}")" || return 1
