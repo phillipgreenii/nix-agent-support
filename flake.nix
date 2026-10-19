@@ -5021,12 +5021,16 @@
                   });
 
               # pg-keep-awake (docket pg2-8bgxg.2) - whole-module Go test gate.
-              # Pattern A: flat src at the module dir, no local replace. The
-              # integration-test skip line is added by the 15-integration packet.
+              # Pattern A: flat src at the module dir, no local replace. -v puts
+              # the integration suite's visible lines in the check log: either
+              # one "SKIPPED integration: <reason>" line (TestMain, when
+              # caffeinate, pmset or launchd cannot run in the sandbox) or the
+              # "--- PASS" lines of its scenarios.
               pg-keep-awake-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-keep-awake-go-tests";
                 src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
                 gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
+                testFlags = [ "-v" ];
               };
 
               # pg-desk-shadow (bead pg2-nu7h0) - whole-module Go test gate. Pattern
