@@ -54,6 +54,11 @@ let
   hasKeepAwakeModule = options.phillipgreenii.programs ? pg-keep-awake;
   isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
 
+  # True when some module defines the option itself: an option with only its
+  # `default` resolves at the mkOptionDefault priority, and `isDefined` is true
+  # for that too, so it cannot tell "left alone" from "set".
+  explicitlySet = opt: opt.highestPrio < (lib.mkOptionDefault null).priority;
+
   # SwiftBar menu bar plugin (packages/pa-monitor-swiftbar). The wrapper is a
   # function of this module's config (it bakes in cfg.package and the stale
   # threshold), so it is built here rather than being a fixed overlay attr.
@@ -251,11 +256,11 @@ in
       };
     })
     {
-      # Deprecation: `isDefined` is true only when some module sets the option,
-      # so an unset configuration emits nothing.
+      # Deprecation: `isDefined` is also true for an option's default, so `explicitlySet`
+      # (let above) tests the priority instead; an unset configuration emits nothing.
       warnings =
-        lib.optional options.phillipgreenii.programs.pa-monitor.caffeinate.batteryHoldPercent.isDefined "phillipgreenii.programs.pa-monitor.caffeinate.batteryHoldPercent is deprecated and ignored: pg-keep-awake owns the low-battery rule now. Set phillipgreenii.programs.pg-keep-awake.battery.holdPct instead."
-        ++ lib.optional options.phillipgreenii.programs.pa-monitor.caffeinate.batteryReleasePercent.isDefined "phillipgreenii.programs.pa-monitor.caffeinate.batteryReleasePercent is deprecated and ignored: pg-keep-awake owns the low-battery rule now. Set phillipgreenii.programs.pg-keep-awake.battery.releasePct instead.";
+        lib.optional (explicitlySet options.phillipgreenii.programs.pa-monitor.caffeinate.batteryHoldPercent) "phillipgreenii.programs.pa-monitor.caffeinate.batteryHoldPercent is deprecated and ignored: pg-keep-awake owns the low-battery rule now. Set phillipgreenii.programs.pg-keep-awake.battery.holdPct instead."
+        ++ lib.optional (explicitlySet options.phillipgreenii.programs.pa-monitor.caffeinate.batteryReleasePercent) "phillipgreenii.programs.pa-monitor.caffeinate.batteryReleasePercent is deprecated and ignored: pg-keep-awake owns the low-battery rule now. Set phillipgreenii.programs.pg-keep-awake.battery.releasePct instead.";
     }
     {
       assertions = [
