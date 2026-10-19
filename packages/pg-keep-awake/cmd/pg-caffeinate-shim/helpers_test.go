@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -22,6 +23,14 @@ import (
 var shimBin string
 
 func TestMain(m *testing.M) {
+	// A runner started under nohup (or as a non-interactive background job)
+	// has SIGHUP/SIGINT ignored, and children inherit that. Holding a handler
+	// here makes Go reset those signals to the default in every child it
+	// execs, so the tests see the dispositions they assume. The tests that
+	// need an ignored signal set it explicitly (trap '').
+	keep := make(chan os.Signal, 1)
+	signal.Notify(keep, syscall.SIGHUP, syscall.SIGINT)
+
 	dir, err := os.MkdirTemp("", "pg-caffeinate-shim-test-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
