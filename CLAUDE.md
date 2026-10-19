@@ -158,6 +158,17 @@ as the agents above; the check is `test-pg-keep-awake-hm-launchd`
 (`tests/pg-keep-awake-hm-launchd.nix`), whose `passthru.wrapper` is the rendered entry for a live run
 (the sandbox cannot run `caffeinate`).
 
+The module also installs the tool through the per-user profile (`home.packages`, so
+`/etc/profiles/per-user/<user>/bin`, which a pool session's PATH lists before `/usr/bin`; a shim that
+landed only in `~/.nix-profile` would be bypassed) and registers the package's tldr page through
+`programs.tldr.customPages`. `shim.enable` (default true, darwin only, requires the module's `enable`)
+adds `bin/caffeinate`, a symlink to `pg-caffeinate-shim` built as a tiny `runCommand` package; false
+removes the symlink while live shim leases, the keeper and the anchor carry on. The `claude-fleet`
+capability in `home/capabilities/default.nix` lists `pg-keep-awake`. The same check also builds the
+per-user profile and runs `packages/pg-keep-awake/tests/test-pg-keep-awake-shim-wiring.bats` against it
+(symlink target, PATH order, and, on macOS, a real `caffeinate -t` through the symlink writing and
+removing a lease).
+
 ## Status Line (`home/programs/claude-status-line`)
 
 Full contract (part-script protocol, ordering convention, glyph/width/locale mechanics) moved to

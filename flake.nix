@@ -11646,6 +11646,7 @@
                       pkgs.yq-go
                       pkgs.coreutils
                       pkgs.gnugrep
+                      pkgs.bats
                     ];
                     passthru.wrapper = r.live.wrapper;
                   }
@@ -11654,6 +11655,30 @@
                       echo "pg-keep-awake launchd eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
                       exit 1
                     ''}
+
+                    # Packet 17b, the shim wiring. The per-user profile built from the
+                    # module's home.packages holds bin/caffeinate as a symlink that
+                    # resolves to pg-caffeinate-shim; with shim.enable = false it holds
+                    # no caffeinate but still the tool itself.
+                    [ -L ${r.live.profile}/bin/caffeinate ] \
+                      || { echo "FAIL: no bin/caffeinate symlink in the per-user profile" >&2; exit 1; }
+                    [ "$(readlink -f ${r.live.profile}/bin/caffeinate)" = "${r.live.package}/bin/pg-caffeinate-shim" ] \
+                      || { echo "FAIL: caffeinate does not resolve to pg-caffeinate-shim" >&2; exit 1; }
+                    [ -x ${r.live.profile}/bin/pg-keep-awake ] \
+                      || { echo "FAIL: the tool is not in the per-user profile" >&2; exit 1; }
+                    [ ! -e ${r.live.profileShimOff}/bin/caffeinate ] \
+                      || { echo "FAIL: shim.enable = false still installs caffeinate" >&2; exit 1; }
+                    [ -x ${r.live.profileShimOff}/bin/pg-keep-awake ] \
+                      || { echo "FAIL: shim.enable = false dropped the tool itself" >&2; exit 1; }
+                    # The registered tldr page is a real file in the package output.
+                    [ -s ${r.live.tldrSource} ] \
+                      || { echo "FAIL: the tldr page ${r.live.tldrSource} is missing" >&2; exit 1; }
+
+                    # PATH order (the per-user profile bin before /usr/bin) and a real
+                    # invocation through the symlink under a hermetic state directory.
+                    # The lease half runs only on macOS (the shim reads macOS process
+                    # state) and is skipped, by the suite itself, elsewhere.
+                    SHIM_PROFILE=${r.live.profile} bats ${./packages/pg-keep-awake/tests/test-pg-keep-awake-shim-wiring.bats}
 
                     # Building the checked files already ran `config check` on them. Run it
                     # again by hand, and read the rendered TOML back.

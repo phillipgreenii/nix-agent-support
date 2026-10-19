@@ -102,6 +102,7 @@
           "ccpool"
           "pg-router"
           "pa-monitor"
+          "pg-keep-awake"
           "pw-agent-activity"
           "pw-reset-agents"
           "wait-for-agents"

@@ -14,9 +14,11 @@
 # registers the keeper as an HM-scoped launchd user agent through
 # `phillipgreenii.programs.launchdServices.userAgents` (the pa-monitor,
 # pg-task-focus and pg-connector precedents in this repo's CLAUDE.md,
-# "HM-scoped launchd agents"). The shim wiring (the `caffeinate` symlink,
-# `shim.enable`, `home.packages`, the claude-fleet capability and the tldr page)
-# is packet 17b and lands in this same file.
+# "HM-scoped launchd agents"). It also installs the tool through the per-user
+# profile (`home.packages`, which lands in /etc/profiles/per-user/<user>/bin),
+# registers the package's tldr page, and, with `shim.enable`, adds a `caffeinate`
+# symlink to `pg-caffeinate-shim` beside it. The claude-fleet capability that
+# enables the module lives in home/capabilities/default.nix.
 
 let
   cfg = config.phillipgreenii.programs.pg-keep-awake;
@@ -94,6 +96,18 @@ let
   # is not mode 0700, and launchd would create a missing parent with the
   # default mode.
   logDir = "${config.xdg.stateHome}/pg-keep-awake-launchd";
+
+  # `bin/caffeinate` -> pg-caffeinate-shim, as its own tiny package so it rides
+  # `home.packages` beside the tool and lands in the per-user profile bin. The
+  # shim does not depend on argv[0] (it is a plain program that parses the
+  # caffeinate command line), so a symlink is all the "presentation" it needs.
+  # Darwin only: `caffeinate` is a macOS tool and the shim reads macOS process
+  # state, so a Linux host gets the CLI but no shim.
+  shimPackage = pkgs.runCommand "pg-keep-awake-caffeinate-shim" { } ''
+    mkdir -p "$out/bin"
+    ln -s ${cfg.package}/bin/pg-caffeinate-shim "$out/bin/caffeinate"
+  '';
+  installShim = cfg.shim.enable && isDarwin;
 in
 {
   options.phillipgreenii.programs.pg-keep-awake = {
@@ -156,7 +170,35 @@ in
       };
     };
 
+    shim.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Install `bin/caffeinate`, a symlink to `pg-caffeinate-shim`, into the
+        per-user profile (`home.packages`, so /etc/profiles/per-user/<user>/bin,
+        which a pool session's PATH lists before /usr/bin). Callers of a bare
+        `caffeinate` then pass the keeper's battery rule instead of holding their
+        own assertion. It applies only on darwin and only while the module's own
+        `enable` is true: a shim with no keeper would silently drop keep-awake
+        requests. Setting it to false removes the symlink; live shim leases stay
+        valid until their clients exit, and the keeper and anchor keep running.
+        The assertion drains only when the keeper agent is also disabled, after
+        the watchdog timeout. A caller that execs `/usr/bin/caffeinate` by
+        absolute path is never intercepted, and shells that started before the
+        first apply keep their old holders until they end.
+      '';
+    };
+
     internal = {
+      shimPackage = lib.mkOption {
+        type = lib.types.package;
+        internal = true;
+        readOnly = true;
+        default = shimPackage;
+        defaultText = lib.literalMD "the package holding only `bin/caffeinate`";
+        description = "The symlink package `shim.enable` installs. Read-only; used by tests.";
+      };
+
       configFile = lib.mkOption {
         type = lib.types.path;
         internal = true;
@@ -191,6 +233,16 @@ in
       # The keeper reads ${XDG_CONFIG_HOME:-~/.config}/pg-keep-awake/config.toml
       # at startup; this renders it there (config is managed by home-manager).
       xdg.configFile."pg-keep-awake/config.toml".source = configFile;
+
+      # Through the per-user profile, never only ~/.nix-profile: a pool session's
+      # PATH lists /etc/profiles/per-user/<user>/bin before /usr/bin but not
+      # ~/.nix-profile/bin, so a shim that landed only there would be bypassed.
+      home.packages = [ cfg.package ] ++ lib.optional installShim shimPackage;
+
+      programs.tldr.customPages.pg-keep-awake = lib.mkIf config.programs.tldr.enable {
+        platform = "common";
+        source = "${cfg.package}/share/tldr/pages.common/pg-keep-awake.md";
+      };
 
       assertions = [
         {

@@ -17,6 +17,11 @@
 #   env -i PATH=/usr/bin:/bin XDG_STATE_HOME=<tmp> XDG_CONFIG_HOME=<tmp> HOME=<tmp> \
 #     PG_KEEP_AWAKE_BATTERY_SOURCE=file:<tmp>/battery "$w" &
 #
+# Packet 17b adds the shim wiring cases (the per-user profile contents, the
+# `caffeinate` symlink package, the tldr page) and exposes the per-user profile
+# built from the module's home.packages, which the check hands to the bats suite
+# packages/pg-keep-awake/tests/test-pg-keep-awake-shim-wiring.bats.
+#
 # All values are EXAMPLE values.
 { lib, pkgs }:
 let
@@ -55,6 +60,7 @@ let
     {
       pkgs',
       declareLaunchd ? true,
+      tldrEnable ? true,
     }:
     cfg: osConfig:
     lib.evalModules {
@@ -84,6 +90,21 @@ let
               home.homeDirectory = lib.mkOption {
                 type = lib.types.str;
                 default = "/example/home";
+              };
+              # The per-user profile's contents (the shim wiring installs the
+              # tool and the caffeinate symlink through it) and home-manager's
+              # tldr custom-page registry.
+              home.packages = lib.mkOption {
+                type = lib.types.listOf lib.types.package;
+                default = [ ];
+              };
+              programs.tldr.enable = lib.mkOption {
+                type = lib.types.bool;
+                default = tldrEnable;
+              };
+              programs.tldr.customPages = lib.mkOption {
+                type = lib.types.attrsOf lib.types.anything;
+                default = { };
               };
               assertions = lib.mkOption {
                 type = lib.types.listOf lib.types.anything;
@@ -129,6 +150,9 @@ let
   # only one value differs: the battery hold
   onOtherHold = case darwin { battery.holdPct = 40; } osWithObs;
   disabled = case darwin { enable = false; } osWithObs;
+  # the shim wiring: off, and the tldr registry disabled
+  shimOff = case darwin { shim.enable = false; } osWithObs;
+  tldrOff = case (darwin // { tldrEnable = false; }) { } osWithObs;
   # the two relations the module asserts
   badWatchdog = case darwin {
     heartbeatIntervalSeconds = 10;
@@ -157,6 +181,12 @@ let
   env = e.serviceConfig.EnvironmentVariables;
   binary = "${pkgs.pg-keep-awake}/bin/pg-keep-awake";
   stateDir = "/example/home/.local/state";
+
+  # The per-user profile, as the shim wiring fills it: store paths of what the
+  # module puts in home.packages.
+  pkgsOf = c: map toString c.config.home.packages;
+  shimPkg = c: toString (opts c).internal.shimPackage;
+  toolPkg = toString pkgs.pg-keep-awake;
 
   cases = {
     # ---- the entry exists only when enabled, on darwin ---------------------
@@ -243,6 +273,32 @@ let
         "pg-keep-awake/config.toml"
       ];
 
+    # ---- the shim wiring: the per-user profile and the tldr page -----------
+    # Through home.packages (the per-user profile), never only ~/.nix-profile:
+    # the module writes no home.file (undeclared in this stub) and its only xdg
+    # file is the config (configRenderedAtXdgPath above).
+    toolInPerUserProfile = builtins.elem toolPkg (pkgsOf on);
+    shimInPerUserProfile = builtins.elem (shimPkg on) (pkgsOf on);
+    shimIsOnByDefault = (opts on).shim.enable == true;
+    shimOffRemovesOnlyTheSymlink =
+      !(builtins.elem (shimPkg shimOff) (pkgsOf shimOff)) && builtins.elem toolPkg (pkgsOf shimOff);
+    # disabled module: nothing in the profile, so no symlink without a keeper
+    disabledInstallsNothing = pkgsOf disabled == [ ];
+    # a Linux host gets the CLI but no shim (caffeinate is macOS only)
+    linuxNoShim =
+      !(builtins.elem (shimPkg linuxRegistry) (pkgsOf linuxRegistry))
+      && builtins.elem toolPkg (pkgsOf linuxRegistry);
+    shimPackageIsOnlyTheSymlink = lib.hasSuffix "-pg-keep-awake-caffeinate-shim" (shimPkg on);
+    tldrPageRegistered =
+      on.config.programs.tldr.customPages == {
+        pg-keep-awake = {
+          platform = "common";
+          source = "${toolPkg}/share/tldr/pages.common/pg-keep-awake.md";
+        };
+      };
+    tldrNotRegisteredWhenTldrIsOff = tldrOff.config.programs.tldr.customPages == { };
+    tldrNotRegisteredWhenDisabled = disabled.config.programs.tldr.customPages == { };
+
     # ---- darwin without personal's module: a clear assertion ---------------
     darwinNoRegistryAsserts =
       builtins.length (messages darwinNoRegistry) == 1
@@ -274,6 +330,17 @@ in
     inherit script;
     package = pkgs.pg-keep-awake;
     wrapper = wrapperOf on;
+    # The per-user profile the module's home.packages build, with the shim on
+    # and off (what /etc/profiles/per-user/<user> is made of).
+    profile = pkgs.buildEnv {
+      name = "pg-keep-awake-per-user-profile";
+      paths = on.config.home.packages;
+    };
+    profileShimOff = pkgs.buildEnv {
+      name = "pg-keep-awake-per-user-profile-shim-off";
+      paths = shimOff.config.home.packages;
+    };
+    tldrSource = on.config.programs.tldr.customPages.pg-keep-awake.source;
     hash = env.PG_KEEP_AWAKE_CONFIG_HASH;
     hashOtherHeartbeat =
       (entryOf onOtherHeartbeat).serviceConfig.EnvironmentVariables.PG_KEEP_AWAKE_CONFIG_HASH;
