@@ -1,11 +1,13 @@
 package store
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -616,10 +618,23 @@ func TestMovedAsideCollisionGetsDistinctName(t *testing.T) {
 
 const crashEnv = "PG_CONNECTOR_STORE_TEST_CRASH_WRITER"
 
+// crashReadyMarker is the line the helper prints once every write has been
+// committed; the parent kills the helper only after reading it.
+const crashReadyMarker = "PG_CONNECTOR_STORE_TEST_CRASH_WRITER_READY"
+
 // TestCrashWriterHelper is not a test: the parent re-executes the test
 // binary with crashEnv set, and this function writes through the real Open
-// path and then kills its own process with SIGKILL, with no Checkpoint and
-// no Close.
+// path, announces crashReadyMarker on stdout, and then parks forever with no
+// Checkpoint and no Close. The PARENT delivers the SIGKILL.
+//
+// The helper deliberately does not kill itself (pg2-b6njq). A self-sent
+// SIGKILL is not guaranteed to take effect before the next instruction, and
+// the old `select {}` after it let the Go runtime's deadlock detector win the
+// race under host load (and under GOMAXPROCS=1): all goroutines were asleep, so
+// the process exited 2 with "all goroutines are asleep - deadlock!" instead of
+// dying by SIGKILL. Parking in a sleep loop keeps a timer pending, so the
+// runtime can never declare a deadlock, and the only way out is the parent's
+// kill: no timing dependence remains.
 func TestCrashWriterHelper(t *testing.T) {
 	path := os.Getenv(crashEnv)
 	if path == "" {
@@ -645,8 +660,10 @@ func TestCrashWriterHelper(t *testing.T) {
 			os.Exit(4)
 		}
 	}
-	_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
-	select {} // unreachable; SIGKILL is not catchable
+	fmt.Fprintln(os.Stdout, "\n"+crashReadyMarker)
+	for {
+		time.Sleep(time.Hour) // a pending timer: never a runtime deadlock
+	}
 }
 
 // testLadder is the builtin ladder extended to n steps with no-op steps.
@@ -665,6 +682,10 @@ func testLadder(n int) []Migration {
 	return l[:n]
 }
 
+// runCrashWriter re-executes the test binary as the crash writer, waits for it
+// to report that every write is committed, then SIGKILLs it from here. The
+// kill is sent only after the ready marker, so it needs no sleep or retry and
+// does not depend on host load.
 func runCrashWriter(t *testing.T, path string, ladder int) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestCrashWriterHelper$", "-test.v")
@@ -672,14 +693,42 @@ func runCrashWriter(t *testing.T, path string, ladder int) {
 	if ladder > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s_LADDER=%d", crashEnv, ladder))
 	}
-	out, err := cmd.CombinedOutput()
+	var stderr bytes.Buffer // read only after Wait returns
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var seen strings.Builder
+	ready := false
+	sc := bufio.NewScanner(stdout)
+	for sc.Scan() {
+		seen.WriteString(sc.Text() + "\n")
+		if sc.Text() == crashReadyMarker {
+			ready = true
+			break
+		}
+	}
+	if !ready {
+		// The helper exited before committing its writes; surface why.
+		werr := cmd.Wait()
+		t.Fatalf("helper never reported ready: wait=%v stdout=%s stderr=%s", werr, seen.String(), stderr.String())
+	}
+	if err := cmd.Process.Kill(); err != nil { // SIGKILL
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, stdout) // drain until the pipe closes on death
+	werr := cmd.Wait()
 	var ee *exec.ExitError
-	if !errors.As(err, &ee) {
-		t.Fatalf("helper should have been killed, got err=%v output=%s", err, out)
+	if !errors.As(werr, &ee) {
+		t.Fatalf("helper should have been killed, got err=%v stdout=%s stderr=%s", werr, seen.String(), stderr.String())
 	}
 	ws, ok := ee.Sys().(syscall.WaitStatus)
 	if !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
-		t.Fatalf("helper did not die by SIGKILL: %v output=%s", err, out)
+		t.Fatalf("helper did not die by SIGKILL: %v stdout=%s stderr=%s", werr, seen.String(), stderr.String())
 	}
 }
 
