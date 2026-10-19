@@ -95,12 +95,19 @@ real default lives in personal.
 ### Why the 10-15 apply did not bring it back
 
 A `pn` apply was recorded at 2026-10-15T23:02:01Z, two hours after the stop, and the daemon stayed
-down until the 10-19 apply. Why that apply did not reload the agent is NOT DETERMINED: the launchd
-lines are gone. The likely reason is that nix-darwin reloads only agents whose generated plist
-changed, and this plist's `ProgramArguments` is the stable path, so a config-only change does not
-touch it. The post-activation health check in `phillipgreenii-nix-personal` (`pg2-vfkyk`: one
-`launchctl bootstrap` when `launchctl print` exits 113) is the designed safety net and did not
-restore it either. Both are in another repo and are filed as follow-up, not changed here.
+down until the 10-19 apply. The cause is DETERMINED (bead `pg2-4345r`), and it is neither of the two
+guesses this note first made (that nix-darwin reloads only agents whose plist changed, and that the
+post-activation health check failed to recover it). The activated generations of the 21:48Z and
+23:02Z applies did not define the LaunchAgent at all: the daemon option was disabled on purpose,
+temporarily, in the terminal flake's home-manager configuration, ten minutes before the 21:48Z apply.
+An agent that is not defined has no plist for activation to reload and is not in the set the health
+check polls, so there was nothing for either to restore. The 10-19 generation defines it again, and
+that apply brought it back.
+
+The evidence (the activated generations compared directly, the per-apply health-check records, and
+the policy now pinned by tests for the health check's one `launchctl bootstrap` of a defined,
+unloaded agent) is in `docs/investigations/2026-10-19-unloaded-agent-not-restored-on-apply.md` in
+`phillipgreenii-nix-personal`.
 
 ## Alerting
 
@@ -148,9 +155,12 @@ These are policy statements for the owners named. None is implementable in this 
    procedure that unloads it, not a trailing note. The plan lives in `phillipg-nix-ziprecruiter`.
 2. A manual `launchctl bootout` of a `KeepAlive` agent SHOULD be followed immediately by a check that
    prints `state = running`; the check SHOULD be the last line of any procedure that unloads one.
-3. `phillipgreenii-nix-personal`: the activation health check SHOULD restore an unloaded user agent
-   whenever a `pn` apply runs, including an apply where the agent's plist is unchanged. Establish why
-   it did not on 2026-10-15T23:02Z.
+3. A deliberate disable of the daemon option in the terminal flake MUST be paired, in the same
+   procedure, with the step that re-enables it, because an agent the configuration no longer defines
+   is neither reloaded by activation nor checked by the health check (and MUST NOT be, since that
+   would resurrect a service the operator just removed). The health check itself needs no change for
+   this outage: it already bootstraps a defined, unloaded user agent once per activation, pinned by
+   tests in `phillipgreenii-nix-personal`.
 4. `phillipgreenii-nix-support-apps`: the owner SHOULD establish why the launchd-health rule's sends
    produced no notifier entry. A critical "daemon down" alert for the daemon that drives work SHOULD
    have a delivery that does not depend on a transient banner, and the notifier SHOULD NOT report a
