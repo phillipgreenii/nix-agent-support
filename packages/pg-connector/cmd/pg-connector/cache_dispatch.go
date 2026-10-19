@@ -83,18 +83,27 @@ func noConsumersTracked(string) bool { return false }
 // "Produces" — "track this via a second return value or a sentinel
 // field, your choice"].
 func dispatchShowWithCache(ctx context.Context, reg *Registry, entityType, id, pinned string) (resp *scriptout.Response, backend string, fromCache bool, err error) {
+	return dispatchShowWithCacheFresh(ctx, reg, entityType, id, pinned, false)
+}
+
+// dispatchShowWithCacheFresh is dispatchShowWithCache with --fresh: with fresh
+// set, the show request to a backend that declares cache_opt_out carries
+// fresh: true, and the request to every other backend is exactly the {id} one
+// dispatchShowWithCache sends. The cache fallback is untouched.
+func dispatchShowWithCacheFresh(ctx context.Context, reg *Registry, entityType, id, pinned string, fresh bool) (resp *scriptout.Response, backend string, fromCache bool, err error) {
 	backends, err := resolveBackends(reg, entityType)
 	if err != nil {
 		return nil, "", false, err
 	}
-	args := map[string]string{"id": id}
+	base := map[string]any{"id": id}
+	argsFor := func(b string) any { return withFresh(ctx, reg, b, base, fresh) }
 
 	if pinned != "" {
 		b, pinErr := pinBackend(entityType, backends, pinned)
 		if pinErr != nil {
 			return nil, "", false, pinErr
 		}
-		r, callErr := invokeOne(ctx, reg, b, "show", args)
+		r, callErr := invokeOne(ctx, reg, b, "show", argsFor(b))
 		if callErr != nil && errors.Is(callErr, scriptout.ErrUnavailable) {
 			if cached, ok := tryCacheFallback(ctx, reg, entityType, b, id); ok {
 				return cached, b, true, nil
@@ -108,7 +117,7 @@ func dispatchShowWithCache(ctx context.Context, reg *Registry, entityType, id, p
 	var lastBackend string
 	for _, b := range backends {
 		lastBackend = b
-		r, callErr = invokeOne(ctx, reg, b, "show", args)
+		r, callErr = invokeOne(ctx, reg, b, "show", argsFor(b))
 		if callErr == nil {
 			return r, b, false, nil
 		}

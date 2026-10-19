@@ -143,6 +143,24 @@ func DispatchTargetedOptional(ctx context.Context, reg *Registry, entityType, op
 }
 
 func dispatchTargeted(ctx context.Context, reg *Registry, entityType, op string, args any, pinned string, skipUnknownOp bool) (*scriptout.Response, error) {
+	return dispatchTargetedFor(ctx, reg, entityType, op, func(string) any { return args }, pinned, skipUnknownOp)
+}
+
+// DispatchTargetedFresh is DispatchTargeted for an id-keyed READ that honors
+// --fresh: with fresh set, the request to each backend that declares
+// cache_opt_out carries "fresh": true beside args, and the request to every
+// other backend is args untouched (see withFresh). With fresh unset it is
+// exactly DispatchTargeted and makes no capabilities call.
+func DispatchTargetedFresh(ctx context.Context, reg *Registry, entityType, op string, args map[string]any, pinned string, fresh bool) (*scriptout.Response, error) {
+	return dispatchTargetedFor(ctx, reg, entityType, op, func(b string) any {
+		return withFresh(ctx, reg, b, args, fresh)
+	}, pinned, false)
+}
+
+// dispatchTargetedFor is dispatchTargeted with the request arguments built per
+// backend by argsFor, called once per backend just before that backend is
+// invoked.
+func dispatchTargetedFor(ctx context.Context, reg *Registry, entityType, op string, argsFor func(backend string) any, pinned string, skipUnknownOp bool) (*scriptout.Response, error) {
 	backends, err := resolveBackends(reg, entityType)
 	if err != nil {
 		return nil, err
@@ -152,14 +170,14 @@ func dispatchTargeted(ctx context.Context, reg *Registry, entityType, op string,
 		if pinErr != nil {
 			return nil, pinErr
 		}
-		return invokeOne(ctx, reg, b, op, args)
+		return invokeOne(ctx, reg, b, op, argsFor(b))
 	}
 	var resp *scriptout.Response
 	var callErr error
 	var notFoundResp *scriptout.Response
 	var notFoundErr error
 	for _, b := range backends {
-		resp, callErr = invokeOne(ctx, reg, b, op, args)
+		resp, callErr = invokeOne(ctx, reg, b, op, argsFor(b))
 		if callErr == nil {
 			return resp, nil
 		}

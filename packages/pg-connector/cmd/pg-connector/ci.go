@@ -99,6 +99,14 @@ func (o ciListOutcome) exitCode() int {
 // that backend's returned run list into its own cache keyed by prID, so
 // it stays current for the next unavailable window.
 func fanOutCIList(ctx context.Context, reg *Registry, backends []string, prID string) ciListOutcome {
+	return fanOutCIListFresh(ctx, reg, backends, prID, false)
+}
+
+// fanOutCIListFresh is fanOutCIList with --fresh: with fresh set, the
+// list_runs request to each backend that declares cache_opt_out carries
+// fresh: true, and the request to every other backend is exactly what
+// fanOutCIList sends ({pr_id}).
+func fanOutCIListFresh(ctx context.Context, reg *Registry, backends []string, prID string, fresh bool) ciListOutcome {
 	// Runs and Sources both start as non-nil empty slices so a
 	// zero-backend (misconfigured host) result, or a backend that
 	// answers with zero runs, still marshals runs[]/sources[] as []
@@ -107,7 +115,10 @@ func fanOutCIList(ctx context.Context, reg *Registry, backends []string, prID st
 		Runs:    make([]schema.CIRun, 0),
 		Sources: make([]SourceResult, 0, len(backends)),
 	}
-	calls := invokeAll(ctx, reg, backends, "list_runs", map[string]string{"pr_id": prID}, registryConfig(reg))
+	optedOut := freshBackends(ctx, reg, backends, fresh)
+	calls := invokeAllFor(ctx, reg, backends, "list_runs",
+		freshArgsFor(optedOut, func(string) map[string]any { return map[string]any{"pr_id": prID} }),
+		registryConfig(reg))
 	for i, b := range backends {
 		call := calls[i]
 		if call.cfgErr != nil {
@@ -266,6 +277,7 @@ func newCiListCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 	}
 	backendFlag := addBackendFlag(cmd, "pin the fan-out to exactly this backend instead of every registered ci backend")
+	freshFlag := addFreshReadFlag(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		reg, err := LoadRegistry()
 		if err != nil {
@@ -275,7 +287,7 @@ func newCiListCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		outcome := fanOutCIList(cmd.Context(), reg, backends, args[0])
+		outcome := fanOutCIListFresh(cmd.Context(), reg, backends, args[0], *freshFlag)
 		return writeFanOutResult(cmd, outcome, outcome.exitCode(), func() string {
 			return humanizeCiList(outcome)
 		})

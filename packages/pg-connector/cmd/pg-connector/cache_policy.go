@@ -295,7 +295,7 @@ func dispatchShow(ctx context.Context, reg *Registry, entityType, id, pinned str
 		}
 	}
 
-	resp, backend, fromCache, err := dispatchShowWithCache(ctx, reg, entityType, id, pinned)
+	resp, backend, fromCache, err := dispatchShowWithCacheFresh(ctx, reg, entityType, id, pinned, fresh)
 	if err != nil || resp == nil {
 		return resp, err
 	}

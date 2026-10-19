@@ -143,20 +143,30 @@ type backendCall struct {
 // backends. A backend whose config fails is reported in cfgErr and not
 // invoked, exactly as the serial loops did.
 func invokeAll(ctx context.Context, reg *Registry, backends []string, op string, args any, configFor func(backend string) (json.RawMessage, error)) []backendCall {
+	return invokeAllFor(ctx, reg, backends, op, func(string) any { return args }, configFor)
+}
+
+// invokeAllFor is invokeAll with the request arguments built per backend by
+// argsFor, which runs SERIALLY with configFor, in registration order, before
+// any call starts. A fan-out whose request differs by backend (--fresh goes
+// only to a backend that declares cache_opt_out, fresh.go) uses it; invokeAll
+// is the case where every backend gets the same value.
+func invokeAllFor(ctx context.Context, reg *Registry, backends []string, op string, argsFor func(backend string) any, configFor func(backend string) (json.RawMessage, error)) []backendCall {
 	type prepared struct {
 		config json.RawMessage
+		args   any
 		err    error
 	}
 	prep := make(map[string]prepared, len(backends))
 	for _, b := range backends {
 		config, err := configFor(b)
-		prep[b] = prepared{config: config, err: err}
+		prep[b] = prepared{config: config, args: argsFor(b), err: err}
 	}
 	results := fanOutEach(ctx, reg, backends, func(ctx context.Context, b string) backendCall {
 		if p := prep[b]; p.err != nil {
 			return backendCall{cfgErr: p.err}
 		}
-		return invokeCall(ctx, reg, b, op, args, prep[b].config)
+		return invokeCall(ctx, reg, b, op, prep[b].args, prep[b].config)
 	})
 	calls := make([]backendCall, len(backends))
 	for i, r := range results {

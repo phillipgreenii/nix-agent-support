@@ -84,12 +84,13 @@ func newPrFilesCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 	}
 	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	freshFlag := addFreshReadFlag(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		reg, err := LoadRegistry()
 		if err != nil {
 			return reportPrTargetedOutcome(cmd, nil, err, humanizePRFiles)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "files", map[string]string{"id": args[0]}, *backendFlag)
+		resp, dispatchErr := DispatchTargetedFresh(cmd.Context(), reg, "pr", "files", map[string]any{"id": args[0]}, *backendFlag, *freshFlag)
 		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRFiles)
 	}
 	return cmd
@@ -104,12 +105,13 @@ func newPrCommitsCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 	}
 	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	freshFlag := addFreshReadFlag(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		reg, err := LoadRegistry()
 		if err != nil {
 			return reportPrTargetedOutcome(cmd, nil, err, humanizePRCommits)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "commits", map[string]string{"id": args[0]}, *backendFlag)
+		resp, dispatchErr := DispatchTargetedFresh(cmd.Context(), reg, "pr", "commits", map[string]any{"id": args[0]}, *backendFlag, *freshFlag)
 		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRCommits)
 	}
 	return cmd
@@ -211,6 +213,13 @@ type prListOutcome struct {
 // (putLiveEntity) so the cache stays current for the next unavailable
 // window.
 func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange, fingerprints bool) prListOutcome {
+	return fanOutPRListFresh(ctx, reg, backends, query, idsOnly, bounds, fingerprints, false)
+}
+
+// fanOutPRListFresh is fanOutPRList with --fresh: with fresh set, the list
+// request to each backend that declares cache_opt_out carries fresh: true, and
+// the request to every other backend is exactly what fanOutPRList sends.
+func fanOutPRListFresh(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange, fingerprints, fresh bool) prListOutcome {
 	// Entities and Sources both start as non-nil empty slices so a
 	// zero-backend (misconfigured host) result, or a backend that
 	// answers with zero matches, still marshals entities[]/sources[] as
@@ -223,7 +232,11 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 	if fingerprints {
 		out.Fingerprints = make(map[string]string)
 	}
-	calls := invokeAll(ctx, reg, backends, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly},
+	optedOut := freshBackends(ctx, reg, backends, fresh)
+	calls := invokeAllFor(ctx, reg, backends, "list",
+		freshArgsFor(optedOut, func(string) map[string]any {
+			return map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}
+		}),
 		func(b string) (json.RawMessage, error) { return listBackendConfig(reg, b, bounds) })
 	for i, b := range backends {
 		call := calls[i]
@@ -301,6 +314,7 @@ func newPrListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&query, "query", "", "named query to run, resolved against each backend's own config.queries (required)")
 	cmd.Flags().BoolVar(&idsOnly, "ids-only", false, "return only each matched PR's id, omitting full entity detail")
 	cmd.Flags().BoolVar(&fingerprints, "fingerprints", false, "also return a fingerprints map (entity id to fingerprint string) so a caller can diff one listing against another without a cursor")
+	freshFlag := addFreshReadFlag(cmd)
 	bounds := addTimeBoundFlags(cmd, "PRs last updated", listTimeBoundAsymmetryHelp)
 	_ = cmd.MarkFlagRequired("query")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -317,7 +331,7 @@ func newPrListCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		outcome := fanOutPRList(cmd.Context(), reg, backends, query, idsOnly, rng, fingerprints)
+		outcome := fanOutPRListFresh(cmd.Context(), reg, backends, query, idsOnly, rng, fingerprints, *freshFlag)
 		if allQueryNotRecognized(outcome.Sources) {
 			// design: every registered backend answered
 			// query_not_recognized -> the umbrella fails the whole call

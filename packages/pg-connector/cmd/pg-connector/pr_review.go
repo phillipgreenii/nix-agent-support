@@ -172,12 +172,13 @@ func newPrReviewPendingCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 	}
 	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	freshFlag := addFreshReadFlag(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		reg, err := LoadRegistry()
 		if err != nil {
 			return reportPrTargetedOutcome(cmd, nil, err, humanizeReviewPending)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "review_pending", map[string]any{"id": args[0]}, *backendFlag)
+		resp, dispatchErr := DispatchTargetedFresh(cmd.Context(), reg, "pr", "review_pending", map[string]any{"id": args[0]}, *backendFlag, *freshFlag)
 		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizeReviewPending)
 	}
 	return cmd
