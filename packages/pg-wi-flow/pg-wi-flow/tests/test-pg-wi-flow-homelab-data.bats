@@ -265,3 +265,47 @@ concerns_section() {
   [[ $output != *"do not retry the helm upgrade"* ]]
   [ -z "$(grep '^WI_LESSONS=' <<<"$output" | cut -d= -f2-)" ]
 }
+
+# (6) resolve --decision on a destructive-actions question with no
+# authorizing doc files the kind:docs follow-up (tc-h4334, design gap G-D).
+# Real bd: the resolve round trip exercises the recorded originating_concern
+# metadata, the blocks-edge lookup and create-child. The question is built
+# directly with bd (labels, metadata, blocks edge) rather than via
+# `pg-wi-flow escalate`, because escalate creates it with --parent and bd
+# 1.3.1 then refuses the parent-blocked-by-child edge (reported separately).
+make_destructive_question() {
+  local parent="$1" qid
+  qid="$(make_item "may we drop the scratch table?" question escalated q:info)"
+  bd update "$qid" --set-metadata originating_concern=destructive-actions >/dev/null
+  bd dep add "$parent" "$qid" >/dev/null
+  printf '%s' "$qid"
+}
+
+kind_docs_children() {
+  bd list --label kind:docs --json --limit 0 |
+    jq -c --arg p "$1" '(if type=="object" and has("data") then .data else . end) | map(select(.id | startswith($p + ".")))'
+}
+
+@test "resolve --decision on a destructive-actions question files a kind:docs follow-up under the blocked parent" {
+  local parent qid docs_json
+  parent="$(make_item "parent needing a destructive action")"
+  qid="$(make_destructive_question "$parent")"
+
+  run --separate-stderr $SCRIPT resolve "$qid" --decision "yes, drop it" --rationale "scratch data"
+  [ "$status" -eq 0 ]
+  [ "$(bd show "$qid" --json | jq -r '(if type=="array" then .[0] else . end).status')" = closed ]
+
+  docs_json="$(kind_docs_children "$parent")"
+  [ "$(jq 'length' <<<"$docs_json")" -eq 1 ]
+  [[ "$(jq -r '.[0].title' <<<"$docs_json")" == "Write the authorizing doc for the destructive action approved in $qid"* ]]
+}
+
+@test "resolve --decision --authorizing-doc on a destructive-actions question files no kind:docs follow-up" {
+  local parent qid
+  parent="$(make_item "parent with an authorized destructive action")"
+  qid="$(make_destructive_question "$parent")"
+
+  run --separate-stderr $SCRIPT resolve "$qid" --decision "yes" --rationale "runbook covers it" --authorizing-doc docs/runbooks/prune.md
+  [ "$status" -eq 0 ]
+  [ "$(kind_docs_children "$parent" | jq 'length')" -eq 0 ]
+}
