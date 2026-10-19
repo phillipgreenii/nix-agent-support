@@ -6697,6 +6697,36 @@
                 assert
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.ExitTimeOut
                   == 60;
+                # pg2-zuc5x: restart semantics of the daemon LaunchAgent are
+                # pinned. KeepAlive = true makes launchd respawn the job after
+                # ANY exit while it stays loaded, including a clean exit 0
+                # after SIGTERM (so a clean "run: shutdown requested" is
+                # restarted); only an unload (launchctl bootout) leaves it
+                # down, which no KeepAlive value can change. Narrowing this
+                # to { SuccessfulExit = false; } would stop restarting after
+                # exit 0, so it MUST stay plain `true`
+                # (docs/investigations/2026-10-19-pg-router-daemon-90h-outage.md).
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.keepAlive
+                  == true;
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.runAtLoad
+                  == true;
+                # pg2-zuc5x: the liveness alert that DID fire during the
+                # 2026-10-15..19 outage stays at a <= 15 minute threshold and
+                # keeps treating "no series" as Alerting (a down daemon has no
+                # /metrics, hence no pg_router_liveness series at all).
+                assert
+                  let
+                    alertsText = builtins.readFile ./packages/pg-router/grafana/alerting/alerts.yaml;
+                    livenessRule = lib.findFirst (s: lib.hasPrefix "pg-router-liveness-down" s) null (
+                      lib.splitString "- uid: " alertsText
+                    );
+                  in
+                  livenessRule != null
+                  && lib.hasInfix "for: 5m" livenessRule
+                  && lib.hasInfix "noDataState: Alerting" livenessRule
+                  && lib.hasInfix "expr: pg_router_liveness" livenessRule;
                 assert darwinWithoutDaemon.phillipgreenii.system.launchdServices.userAgents == { };
                 # alertRuleFiles (pg2-02n5o): registered whenever obs.enable,
                 # independent of daemonEnable -- both darwinWithDaemon and
