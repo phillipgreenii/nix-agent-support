@@ -10,6 +10,15 @@ let
   # home-manager module -- setting them from HM targets undeclared options and
   # fails eval (same reasoning as pg-connector-pr-github's registration).
   obs = config.phillipgreenii.observability;
+
+  # The daemon, its config and its LaunchAgent live in home-manager scope
+  # (home/programs/pg-connector, option `github.enable`, off by default). The
+  # alert rules are registered here at darwin scope, so they follow that flag
+  # across `home-manager.users.<u>` (same pattern as darwin/modules/pg-task-focus).
+  hmUsers = config.home-manager.users or { };
+  daemonDeployed = lib.any (u: u.phillipgreenii.programs.pg-connector.github.enable or false) (
+    lib.attrValues hmUsers
+  );
 in
 {
   # Phase 4a of the pg-connector-github daemon program (docket pg2-z5fax.6,
@@ -19,9 +28,16 @@ in
   # BESIDE darwin/modules/pg-connector-pr-github, which stays untouched until
   # Phase 6b so a rollback is still observed; the two share no attribute name.
   #
-  # Gated on `obs.enable` alone: a no-op on a machine without the observability
-  # stack, and harmless while the daemon is idle or not yet installed (the log
-  # files do not exist and the rules see no data).
+  # The module is a no-op on a machine without the observability stack. The log
+  # sources and the dashboard are harmless while the daemon is not installed
+  # (the log files do not exist and the panels see no data), so they follow
+  # `obs.enable` alone. The ALERT RULES do NOT: the daemon-down rule has
+  # noDataState Alerting, so with no daemon installed it fires critical forever
+  # (pg2-bry0w: it fired for 4 days, the rules having landed in Phase 4a ahead
+  # of the shadow run and cutover that first install the daemon). They are
+  # therefore registered only when some home-manager user sets
+  # `phillipgreenii.programs.pg-connector.github.enable`, the option that
+  # installs the daemon.
   config = lib.mkIf (obs.enable or false) {
     # The daemon writes three JSONL files into $XDG_STATE_HOME/pg-connector-github/
     # (Go constants config.EventLogFileName, config.DaemonLogFileName and
@@ -83,8 +99,9 @@ in
       # the daemon's own metrics and one Loki rule over daemon.log.jsonl.
       # pr-github-alerts.yaml is deliberately NOT listed (it belongs to the old
       # module). Surfaces in the SwiftBar menu through pg-connector-alert-grafana,
-      # which lists every firing Grafana alert.
-      alertRuleFiles = [
+      # which lists every firing Grafana alert. Listed only while the daemon is
+      # deployed (see the header comment).
+      alertRuleFiles = lib.optionals daemonDeployed [
         ../../../packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml
       ];
 

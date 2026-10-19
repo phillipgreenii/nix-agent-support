@@ -3101,11 +3101,18 @@
                     };
                   };
                   evalDarwin =
-                    obsEnable:
+                    obsEnable: users:
                     (lib.evalModules {
                       specialArgs = { inherit pkgs lib; };
                       modules = [
                         ./darwin/modules/pg-connector-github/default.nix
+                        {
+                          options.home-manager.users = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.anything;
+                            default = { };
+                          };
+                          config.home-manager.users = users;
+                        }
                         {
                           options.phillipgreenii.observability = {
                             enable = lib.mkOption {
@@ -3129,8 +3136,22 @@
                         }
                       ];
                     }).config.phillipgreenii.observability;
-                  enabled = evalDarwin true;
-                  disabled = evalDarwin false;
+                  daemonUser = {
+                    alice.phillipgreenii.programs.pg-connector.github.enable = true;
+                  };
+                  idleUser = {
+                    alice.phillipgreenii.programs.pg-connector.github.enable = false;
+                  };
+                  # The daemon is deployed: some HM user sets github.enable.
+                  enabled = evalDarwin true daemonUser;
+                  disabled = evalDarwin false daemonUser;
+                  # Observability on, but no user enables the daemon: the alert
+                  # rules MUST be absent (the daemon-down rule would fire forever,
+                  # pg2-bry0w); the log sources and dashboard stay.
+                  noUsers = evalDarwin true { };
+                  noDaemon = evalDarwin true idleUser;
+                  # a user whose config does not mention pg-connector at all
+                  otherUser = evalDarwin true { alice.home.username = "alice"; };
                   alertsFile = ./packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml;
                   dashboardFile = ./packages/pg-connector/grafana/pg-connector-github.json;
                   alertingServiceNames = lib.mapAttrsToList (_: s: s.serviceName) (
@@ -3151,6 +3172,13 @@
                 # already pages).
                 assert !(lib.elem "pg-connector-github" alertingServiceNames);
                 assert enabled.alertRuleFiles == [ alertsFile ];
+                # Gate: the rules appear only while the daemon is deployed.
+                assert disabled.alertRuleFiles == [ ];
+                assert noUsers.alertRuleFiles == [ ];
+                assert noDaemon.alertRuleFiles == [ ];
+                assert otherUser.alertRuleFiles == [ ];
+                assert lib.attrNames noDaemon.logSources == lib.attrNames enabled.logSources;
+                assert lib.attrNames noDaemon.dashboardProviders == [ "pg-connector-github" ];
                 assert lib.attrNames enabled.dashboardProviders == [ "pg-connector-github" ];
                 assert enabled.dashboardProviders.pg-connector-github.dashboards == [ dashboardFile ];
                 assert enabled.dashboardProviders.pg-connector-github.folder == "pg-connector";

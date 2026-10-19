@@ -142,6 +142,14 @@ cases (an assertion, not a silent no-op), then runs the rendered command under `
 `pkgs.stdenv.hostPlatform.isDarwin`: `pkgs` can be a `_module.args` value, and choosing attribute
 names from it is infinite recursion; the platform gates the entry's VALUE (`mkIf`) and the assertion.
 
+The daemon's alert rules (`packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml`) are
+registered by `darwin/modules/pg-connector-github` ONLY while some `home-manager.users.<u>` sets
+`github.enable` (bead `pg2-bry0w`): the daemon-down rule has `noDataState: Alerting`, so registering it
+without a deployed daemon fires critical forever. The log sources and dashboard follow
+`observability.enable` alone. Check: `test-pg-connector-github-darwin-module`. A new rule is NOT
+escalated to a bead unless its uid is also registered with `pg-router-probe`
+(`docs/investigations/2026-10-19-pg-connector-github-daemon-down-alert.md`).
+
 ### pg-keep-awake keeper (`phillipgreenii.programs.pg-keep-awake`)
 
 The fourth HM-scoped launchd agent (docket `pg2-8bgxg.2`): `home/programs/pg-keep-awake` renders
