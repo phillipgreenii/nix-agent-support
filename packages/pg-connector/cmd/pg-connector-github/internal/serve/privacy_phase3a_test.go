@@ -26,7 +26,7 @@ func TestPrivacy_AFixtureTokenNeverAppearsInAnyGroupAJobRowOrALogWhateverTheNewO
 	opts.Config = map[string]any{"rest_search_per_minute": 100}
 	d := servetest.NewDaemon(t, opts)
 	d.Start(t)
-	settle(t, d)
+	settlePRs(t, d, 4)
 
 	// Every new group and op: the reads, the write, the rerun, the pass-through
 	// ops and the diagnostics.

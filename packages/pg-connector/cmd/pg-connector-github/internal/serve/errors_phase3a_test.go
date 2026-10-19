@@ -244,7 +244,7 @@ func TestErrorTable_ViewerChanged_FlushesIdentityScopedDataAndHidesOlderAppends(
 	opts.Hooks = "viewer_interval=300ms,poll_interval=50ms"
 	d := servetest.NewDaemon(t, opts)
 	d.Start(t)
-	settle(t, d)
+	settlePRs(t, d, 4)
 
 	// An append recorded by the first viewer, and a stored pending group.
 	res := decode[pr.ReviewSubmitResult](t, callOK(t, d, "pr", "review_submit", submitArgs()))

@@ -102,10 +102,19 @@ func quiet(t *testing.T, d *servetest.Daemon) int {
 // to make. It returns the number of origin calls recorded.
 func settle(t *testing.T, d *servetest.Daemon) int {
 	t.Helper()
+	return settlePRs(t, d, 3)
+}
+
+// settlePRs is settle for a daemon whose configured queries hold prs pull
+// requests (the write tests add prW to the three fixture PRs, so they settle 4):
+// it waits for the first-sighting groups of all of them, not just the first
+// three to finish, before it waits for the daemon to go quiet.
+func settlePRs(t *testing.T, d *servetest.Daemon, prs int) int {
+	t.Helper()
 	for _, q := range []string{servetest.QueryMine, servetest.QueryTeam} {
 		mustList(t, d, q, nil)
 	}
-	awaitFirstSightingFetches(t, d, 3)
+	awaitFirstSightingFetches(t, d, prs)
 	return quiet(t, d)
 }
 

@@ -1,6 +1,7 @@
 package serve_test
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -86,7 +87,7 @@ func TestWrites_ReviewSubmitThroughTheDaemon_RecordsTheSidecarInvalidatesPending
 	stateHome := t.TempDir()
 	d := servetest.NewDaemon(t, writeOpts(stateHome))
 	d.Start(t)
-	settle(t, d)
+	settlePRs(t, d, 4)
 
 	// The pending group is stored first (one read), so the write has something
 	// to invalidate.
@@ -165,6 +166,18 @@ func TestWrites_ReviewSubmitThroughTheDaemon_RecordsTheSidecarInvalidatesPending
 	// The write invalidated exactly the pending group, and queued it once: the
 	// run's own reads (the lookup, the look-again after the create, the final
 	// re-read) plus one refresh.
+	// The write left the pending group stale (fresh_until = the write's moment);
+	// only the queued refresh's commit makes it fresh again. The call log's
+	// silence does not say that: a host under load can have the refresh in
+	// flight (its lookup recorded, its row not yet stored) for longer than any
+	// quiet period, and the read below would then join it and answer from
+	// origin (bead pg2-8byzi).
+	db := d.OpenStore(t)
+	until(t, 60*time.Second, "the queued refresh of the pending group to be stored", func() bool {
+		var freshUntil sql.NullInt64
+		err := db.QueryRow(`SELECT fresh_until FROM entity_group WHERE id = ? AND group_name = 'pending'`, prW.NodeID).Scan(&freshUntil)
+		return err == nil && freshUntil.Valid && freshUntil.Int64 > time.Now().UnixMilli()
+	})
 	d.Shim.WaitQuiet(t, time.Second, 30*time.Second)
 	if got, want := d.Shim.CountKindWith("pending", "number=21")-pendingBefore, 3+1; got != want {
 		t.Errorf("the pending lookups after the write = %d, want %d (3 in the run, 1 queued refresh)", got, want)
@@ -208,7 +221,7 @@ func TestWrites_ASecondProcessHoldingTheSidecarLockDelaysTheWriteThenLetsItRun(t
 	stateHome := t.TempDir()
 	d := servetest.NewDaemon(t, writeOpts(stateHome))
 	d.Start(t)
-	settle(t, d)
+	settlePRs(t, d, 4)
 
 	locker := posted.Locker{Dir: filepath.Join(stateHome, "pg-connector-pr-github", "locks"), Wait: 5 * time.Second, Poll: 20 * time.Millisecond}
 	lock, err := locker.Acquire("example-org", "widget", 21)
@@ -276,7 +289,7 @@ func TestWrites_ACorruptSidecarRefusesTheWriteAndIsNeverReplaced(t *testing.T) {
 	stateHome := t.TempDir()
 	d := servetest.NewDaemon(t, writeOpts(stateHome))
 	d.Start(t)
-	settle(t, d)
+	settlePRs(t, d, 4)
 
 	store := sidecarStore(stateHome)
 	path, err := store.Path("example-org", "widget", 21)
@@ -313,7 +326,7 @@ func TestWrites_ReviewSubmitWithoutAStateHomeAnswersUnavailableAndTheDaemonRuns(
 	// No XDG_STATE_HOME, HOME or posted_state_dir in the daemon's environment.
 	d := servetest.NewDaemon(t, servetest.Options{Before: seedWrites})
 	d.Start(t)
-	settle(t, d)
+	settlePRs(t, d, 4)
 	e := callErr(t, d, "pr", "review_submit", submitArgs(), 20*time.Second)
 	if e == nil || e.Code != "unavailable" {
 		t.Fatalf("with no state home review_submit must answer unavailable: %+v", e)
@@ -339,7 +352,7 @@ func TestWrites_SamePRWritesSerializeDifferentPRsRunInParallelAndTheWaitStaysIns
 	stateHome := t.TempDir()
 	d := servetest.NewDaemon(t, writeOpts(stateHome))
 	d.Start(t)
-	settle(t, d)
+	settlePRs(t, d, 4)
 
 	type outcome struct {
 		resp scriptout.Response
@@ -414,7 +427,7 @@ func TestWrites_ADaemonKilledMidWriteAndTheRequestRetriedLeavesNoDuplicateCommen
 	stateHome := t.TempDir()
 	d := servetest.NewDaemon(t, writeOpts(stateHome))
 	d.Start(t)
-	settle(t, d)
+	settlePRs(t, d, 4)
 
 	// The write document is held on its way out; the daemon is killed while the
 	// caller waits for its answer. The document still lands on the host (the
@@ -451,7 +464,7 @@ func TestWrites_SIGTERMDuringAnInFlightWriteWaitsForItToFinishBeforeExit(t *test
 	stateHome := t.TempDir()
 	d := servetest.NewDaemon(t, writeOpts(stateHome))
 	d.Start(t)
-	settle(t, d)
+	settlePRs(t, d, 4)
 
 	d.Shim.Block("create_review", 1)
 	type outcome struct {
@@ -504,7 +517,7 @@ func TestWrites_ARefreshStartedBeforeAWriteNeitherOverwritesItNorSurvivesIt(t *t
 	stateHome := t.TempDir()
 	d := servetest.NewDaemon(t, writeOpts(stateHome))
 	d.Start(t)
-	settle(t, d)
+	settlePRs(t, d, 4)
 	callOK(t, d, "pr", "review_pending", map[string]any{"id": prW.Ref()})
 	d.Shim.WaitQuiet(t, 500*time.Millisecond, 30*time.Second)
 
