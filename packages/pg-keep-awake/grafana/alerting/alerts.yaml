@@ -1,0 +1,169 @@
+# pg-keep-awake unified-alerting rules (docket pg2-8bgxg.2, packet 18-alerts; design section 12
+# "Observability"), following pg-task-focus's alerts.yaml pattern ("Daemon down":
+# noDataState Alerting, severity critical, for 5m) and NOT pa-monitor's daemon-connection.yaml
+# (noDataState OK, severity warning, because a closed pane there is not an incident). A keeper
+# that is down while leases are live leaves the Mac without its assertion, or holding it
+# without the battery rule, so it is an incident.
+#
+# Metric names are the underscored series of the keeper's dotted OTel names (10-otel):
+# pg_keep_awake_leases_live, pg_keep_awake_keeper_up, pg_keep_awake_assertion_held,
+# pg_keep_awake_battery_on_battery, pg_keep_awake_battery_percent and
+# pg_keep_awake_battery_release_pct. pa_monitor_keep_awake_keeper_up is emitted by pa-monitor
+# from `pg-keep-awake status --check` each tick (20-pa-cli).
+#
+# refId A is plain PromQL and refId C a single threshold stage (gt 0 for the rules that read a
+# value, lt 1 for the up gauge), so any rule can be wrapped and run under `promtool test rules`:
+# packages/pg-keep-awake/check-alert-rules.sh does that for the cases under rule-tests/.
+#
+# launchd-health (confirmed at implementation, design section 12 item 2): the existing
+# phillipgreenii.observability.launchdHealthCheck exporter (nix-support-apps,
+# darwin/modules/observability/launchd-health.nix) DOES cover this keeper. It derives its
+# watch-list from launchdServices.{daemons,userAgents,extraHealthChecks}, the design registers
+# the keeper as a launchdServices.userAgents entry (keep-alive), and the home-manager bridge
+# appends the PRIMARY user's health-checked agents to extraHealthChecks (nix-personal
+# docs/service-daemon-checklist.md, item 5). Its rules are rendered per label by that module
+# from the registration, so this file adds NO rule for it: the keeper being not running is
+# alerted by the launchd-health rule once the keeper is registered, and by rules 1 and 2 below.
+#
+# Rule 1 (keeper down while leases were live) reads the LAST KNOWN state, because a dead keeper
+# emits nothing: max_over_time over 30m offset 3m remembers leases the keeper last reported, and
+# `unless on() (pg_keep_awake_keeper_up == 1)` drops them while the keeper is still reporting
+# up. OTel push staleness makes detection take about 5 minutes. The design's expression is the
+# first operand of `or vector(0)`: with noDataState Alerting, a healthy keeper (no result at
+# all, because `unless` removed it, or no live lease) would otherwise be NoData and fire
+# permanently. vector(0) turns "healthy or nothing to protect" into 0 and leaves the design's
+# expression untouched: the only change in what fires is that the healthy state does not.
+#
+# Rule 2 is independent of the keeper: pa-monitor keeps reporting pa_monitor_keep_awake_keeper_up
+# while the keeper is dead. Its noDataState is OK: no series means pa-monitor itself is not
+# running, which pa-monitor's own liveness and the launchd-health rule cover, and which says
+# nothing about the keeper.
+#
+# The folder "Keep Awake" has no dashboard provider yet (a dashboard is not designed); never pin
+# a folderUid (Grafana alerting provisioning ignores it, grafana/grafana#125079). Registering
+# this file with the observability stack (phillipgreenii.observability.alertRuleFiles from a
+# darwin module) is a separate follow-up bead and is not done here.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-keep-awake-alerts
+    folder: Keep Awake
+    interval: 1m
+    rules:
+      - uid: pg-keep-awake-keeper-down-leases-live
+        title: pg-keep-awake keeper down while leases were live
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pg-keep-awake has stopped reporting while leases were live"
+          description: "pg_keep_awake_leases_live was above 0 in the last 30 minutes and pg_keep_awake_keeper_up is not reporting 1 (a dead keeper emits nothing, so this reads the last known state; OTel push staleness makes detection take about 5 minutes). Requests still succeed while the keeper is down, but nothing applies the battery rule or holds the assertion. Run `pg-keep-awake status` and `pg-keep-awake status --check`, read the keeper log, then restart the keeper launchd agent. The keeper being down is also seen by pa_monitor_keep_awake_keeper_up (rule 2)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "(sum(max_over_time(pg_keep_awake_leases_live[30m] offset 3m)) > 0 unless on() (pg_keep_awake_keeper_up == 1)) or vector(0)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-keep-awake-keeper-down-pa-monitor
+        title: pg-keep-awake keeper down (seen by pa-monitor)
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pa-monitor reports the pg-keep-awake keeper down for over 5 minutes"
+          description: "pa_monitor_keep_awake_keeper_up has been 0 for over 5 minutes: `pg-keep-awake status --check` reports the keeper not running (exit 5) or cannot be asked. This signal comes from pa-monitor, not from the keeper, so it keeps reporting while the keeper is dead. Run `pg-keep-awake status`, read the keeper log, then restart the keeper launchd agent."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "min(pa_monitor_keep_awake_keeper_up)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+      - uid: pg-keep-awake-held-on-low-battery
+        title: pg-keep-awake assertion held on battery at or below the release level
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pg-keep-awake holds the Mac awake on battery at or below its release level"
+          description: "The assertion is held, the Mac is on battery, and the battery percent is at or below pg_keep_awake_battery_release_pct for over 5 minutes: the battery rule should have released it. Run `pg-keep-awake status` for the lease, gate and battery state, and `pg-keep-awake config check`. If the keeper is stuck, restart the keeper launchd agent. A missing series (keeper down) is the keeper-down rules' to report."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "pg_keep_awake_assertion_held == 1 and pg_keep_awake_battery_on_battery == 1 and pg_keep_awake_battery_percent <= pg_keep_awake_battery_release_pct"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

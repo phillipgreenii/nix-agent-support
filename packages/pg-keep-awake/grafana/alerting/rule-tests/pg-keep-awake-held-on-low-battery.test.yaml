@@ -1,0 +1,114 @@
+# promtool unit tests for the pg-keep-awake-held-on-low-battery alert (packet pg2-8bgxg.2.19).
+# Run by the flake check test-pg-keep-awake-alert-rules (see the other test files for the
+# wrapping). The rule is the design's expression, held for 5m: the assertion is held, the Mac is
+# on battery and the percent is at or below the configured release level. The value of the `and`
+# is the left operand (assertion_held == 1), so the wrapped `> 0` fires whenever the whole
+# conjunction holds.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: held on battery below the release level fires after 5m
+    interval: 1m
+    input_series:
+      - series: pg_keep_awake_assertion_held
+        values: "1x120"
+      - series: pg_keep_awake_battery_on_battery
+        values: "1x120"
+      - series: pg_keep_awake_battery_percent
+        values: "15x120"
+      - series: pg_keep_awake_battery_release_pct
+        values: "20x120"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: pg-keep-awake-held-on-low-battery
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: pg-keep-awake-held-on-low-battery
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: exactly at the release level counts (at or below)
+    interval: 1m
+    input_series:
+      - series: pg_keep_awake_assertion_held
+        values: "1x120"
+      - series: pg_keep_awake_battery_on_battery
+        values: "1x120"
+      - series: pg_keep_awake_battery_percent
+        values: "20x120"
+      - series: pg_keep_awake_battery_release_pct
+        values: "20x120"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-keep-awake-held-on-low-battery
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: above the release level does not fire
+    interval: 1m
+    input_series:
+      - series: pg_keep_awake_assertion_held
+        values: "1x120"
+      - series: pg_keep_awake_battery_on_battery
+        values: "1x120"
+      - series: pg_keep_awake_battery_percent
+        values: "21x120"
+      - series: pg_keep_awake_battery_release_pct
+        values: "20x120"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-keep-awake-held-on-low-battery
+        exp_alerts: []
+
+  - name: on AC power does not fire however low the percent
+    interval: 1m
+    input_series:
+      - series: pg_keep_awake_assertion_held
+        values: "1x120"
+      - series: pg_keep_awake_battery_on_battery
+        values: "0x120"
+      - series: pg_keep_awake_battery_percent
+        values: "5x120"
+      - series: pg_keep_awake_battery_release_pct
+        values: "20x120"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-keep-awake-held-on-low-battery
+        exp_alerts: []
+
+  - name: the assertion released does not fire
+    interval: 1m
+    input_series:
+      - series: pg_keep_awake_assertion_held
+        values: "0x120"
+      - series: pg_keep_awake_battery_on_battery
+        values: "1x120"
+      - series: pg_keep_awake_battery_percent
+        values: "15x120"
+      - series: pg_keep_awake_battery_release_pct
+        values: "20x120"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-keep-awake-held-on-low-battery
+        exp_alerts: []
+
+  - name: a release inside the 5m wait never fires
+    interval: 1m
+    input_series:
+      - series: pg_keep_awake_assertion_held
+        values: "1x3 0x117"
+      - series: pg_keep_awake_battery_on_battery
+        values: "1x120"
+      - series: pg_keep_awake_battery_percent
+        values: "15x120"
+      - series: pg_keep_awake_battery_release_pct
+        values: "20x120"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-keep-awake-held-on-low-battery
+        exp_alerts: []

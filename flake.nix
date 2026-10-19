@@ -5134,6 +5134,28 @@
                     touch "$out"
                   '';
 
+              # pg-keep-awake: the alert rules (docket pg2-8bgxg.2, packet 18-alerts). The script
+              # pins the design's expressions and the Grafana-only fields (for, severity,
+              # noDataState), then wraps refId A of each rule as a Prometheus alert and runs the
+              # cases under grafana/alerting/rule-tests/ under `promtool test rules`.
+              test-pg-keep-awake-alert-rules =
+                pkgs.runCommand "test-pg-keep-awake-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.prometheus.cli
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    bash ${./packages/pg-keep-awake/check-alert-rules.sh} \
+                      ${./packages/pg-keep-awake/grafana/alerting/alerts.yaml} \
+                      ${./packages/pg-keep-awake/grafana/alerting/rule-tests}
+                    touch "$out"
+                  '';
+
               # pg-connector-github: the PromQL behaviour of its six Prometheus alert rules
               # (docket pg2-z5fax.6). refId A of each rule listed in
               # packages/pg-connector/grafana/check-alert-rules.sh is wrapped as a Prometheus

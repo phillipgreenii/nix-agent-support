@@ -1,0 +1,89 @@
+# promtool unit tests for the pg-keep-awake-keeper-down-leases-live alert (packet pg2-8bgxg.2.19).
+# Run by the flake check test-pg-keep-awake-alert-rules, which generates rules.yml next to this
+# file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's
+# `for: 5m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: both series are 1m gauges the keeper pushes every tick; a dead keeper emits NOTHING,
+# so its end is modelled as missing samples (`_`). The expression reads the last known lease
+# count (max_over_time over 30m offset 3m) and drops it while pg_keep_awake_keeper_up is
+# reporting 1 (instant selector, 5m lookback).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a keeper that dies with live leases fires after the 5m wait, labelled critical
+    interval: 1m
+    input_series:
+      - series: pg_keep_awake_leases_live{owner="pa-monitor"}
+        values: "2x60 _x180"
+      - series: pg_keep_awake_keeper_up
+        values: "1x60 _x180"
+    alert_rule_test:
+      - eval_time: 62m
+        alertname: pg-keep-awake-keeper-down-leases-live
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: pg-keep-awake-keeper-down-leases-live
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: a healthy keeper with live leases never fires and the wrapped expression is empty
+    interval: 1m
+    input_series:
+      - series: pg_keep_awake_leases_live{owner="pa-monitor"}
+        values: "2x240"
+      - series: pg_keep_awake_keeper_up
+        values: "1x240"
+    promql_expr_test:
+      - expr: wrapped:pg_keep_awake_keeper_down_leases_live
+        eval_time: 120m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-keep-awake-keeper-down-leases-live
+        exp_alerts: []
+
+  - name: a dead keeper that last held no lease does not fire
+    interval: 1m
+    input_series:
+      - series: pg_keep_awake_leases_live{owner="pa-monitor"}
+        values: "0x60 _x180"
+      - series: pg_keep_awake_keeper_up
+        values: "1x60 _x180"
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: pg-keep-awake-keeper-down-leases-live
+        exp_alerts: []
+
+  - name: a restart gap shorter than the wait does not fire
+    interval: 1m
+    input_series:
+      - series: pg_keep_awake_leases_live{owner="pa-monitor"}
+        values: "2x60 _x4 2x176"
+      - series: pg_keep_awake_keeper_up
+        values: "1x60 _x4 1x176"
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: pg-keep-awake-keeper-down-leases-live
+        exp_alerts: []
+
+  - name: the alert resolves once the last known leases age out of the 30m window
+    interval: 1m
+    input_series:
+      - series: pg_keep_awake_leases_live{owner="pa-monitor"}
+        values: "2x60 _x180"
+      - series: pg_keep_awake_keeper_up
+        values: "1x60 _x180"
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: pg-keep-awake-keeper-down-leases-live
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+      # 60m last sample + 3m offset + 30m window: gone by 100m.
+      - eval_time: 100m
+        alertname: pg-keep-awake-keeper-down-leases-live
+        exp_alerts: []
