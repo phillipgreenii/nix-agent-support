@@ -175,8 +175,10 @@ func holdLockHelper(dir string) int {
 	}
 	fmt.Println("locked")
 	// Not select{}: with no other goroutine the runtime would report a
-	// deadlock and exit, releasing the lock.
-	time.Sleep(24 * time.Hour)
+	// deadlock and exit, releasing the lock. Exit when the test binary dies.
+	for ppid := os.Getppid(); os.Getppid() == ppid; {
+		time.Sleep(200 * time.Millisecond)
+	}
 	return 0
 }
 

@@ -548,8 +548,14 @@ func TestS12StoppedClientHoldingLock(t *testing.T) {
 	if maxGap > 4*time.Second {
 		t.Errorf("largest gap between heartbeat updates = %v, want at most 4s", maxGap)
 	}
-	r := <-res
-	if r.code != 3 || r.took > 4*time.Second || !strings.Contains(r.stderr, "leases/.lock") {
+	var r result
+	select {
+	case r = <-res:
+	case <-time.After(8 * time.Second):
+		t.Error("acquire under a held lock did not return within 8s (the lock wait is unbounded)")
+		r = result{code: -1, took: 8 * time.Second}
+	}
+	if r.code != -1 && (r.code != 3 || r.took > 4*time.Second || !strings.Contains(r.stderr, "leases/.lock")) {
 		t.Errorf("acquire under a held lock: exit %d after %v, stderr %q; want exit 3 within 4s naming leases/.lock",
 			r.code, r.took, r.stderr)
 	}
