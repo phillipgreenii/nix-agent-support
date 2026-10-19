@@ -70,8 +70,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261012201341-92b5729d7f1b'
-    hash = 'sha256-o9Y3Sw3yQJrJijNVWk6LW98NmoufqEwkt/RbSnYC5m8='
+    version = 'v0.0.0-20261017014701-54682a56878d'
+    hash = 'sha256-aYL7kWWShAwm6jVVIzP0PkE2YzXFSKeoHWuajLRRZUM='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -90,8 +90,8 @@ cachePackages = [
     hash = 'sha256-/1S3yy3in72ygZT1CKymvOzJZqCMYiGSqZDfvSyB3LI='
 
   [mod.'modernc.org/libc']
-    version = 'v1.78.0'
-    hash = 'sha256-3Q33tXjmrJoV7SF77qFyunwWVnC2WT7p3zRFamsHMUw='
+    version = 'v1.79.0'
+    hash = 'sha256-f70OLLdDHzjlwu2PKdPDPS+427MhJKViGPdUj3a1arA='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
