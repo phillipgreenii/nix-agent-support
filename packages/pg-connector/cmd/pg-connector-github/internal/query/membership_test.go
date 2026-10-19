@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -646,5 +647,85 @@ func TestMembershipPlan_IsEmptyWithoutABaseline(t *testing.T) {
 		store.QueryRow{Key: "mine", IDs: ids(memA), Complete: true}, listing{members: nil, complete: true})
 	if err != nil || len(plan.arrivals) != 0 || len(plan.departures) != 0 {
 		t.Errorf("plan = %+v err = %v, want empty without a baseline", plan, err)
+	}
+}
+
+// scanCountingAliases is the real store with a count of the alias-by-reference
+// reads it served. Each AliasByRefFold is one scan of the alias table (the fold
+// cannot use the alias_ref index) and each AliasesByRefFold is one scan per
+// chunk of 500 references, so the count is the number of scans.
+type scanCountingAliases struct {
+	*store.Store
+	scans atomic.Int64
+}
+
+func (c *scanCountingAliases) AliasByRefFold(ctx context.Context, ref string) (store.AliasRow, bool, error) {
+	c.scans.Add(1)
+	return c.Store.AliasByRefFold(ctx, ref)
+}
+
+func (c *scanCountingAliases) AliasesByRefFold(ctx context.Context, refs []string) (map[string]store.AliasRow, error) {
+	c.scans.Add(int64((len(refs) + 499) / 500))
+	return c.Store.AliasesByRefFold(ctx, refs)
+}
+
+// planMembership must not scan the alias table once per previous member: with
+// 150 previous members that was 150 scans on every run of a query (pg2-6cwpf).
+// The test runs on the real store and also pins the plan's content: the
+// departures are the resolvable previous members the listing no longer shows,
+// in previous order, with the alias's own spelling and each node once.
+func TestMembershipPlan_ReadsTheAliasTableOnceForAllPreviousMembers(t *testing.T) {
+	ctx := context.Background()
+	var counted *scanCountingAliases
+	lg := &logs{}
+	r := newRigWith(t, func(c *Config) {
+		counted = &scanCountingAliases{Store: c.Store.(*store.Store)}
+		c.Identity = entity.NewIdentity(counted, c.Clock)
+		c.Log = lg.log
+	})
+
+	const n = 150
+	var prevIDs []string
+	for i := 0; i < n; i++ {
+		ref := fmt.Sprintf("Acme-Org/Widget#%d", i+1)
+		if err := r.st.PutAlias(ctx, store.AliasRow{NodeID: fmt.Sprintf("PR_%03d", i), Ref: ref, SeenAt: t0}); err != nil {
+			t.Fatal(err)
+		}
+		// Queries store the reference in lower case: the match is case-folded.
+		prevIDs = append(prevIDs, strings.ToLower(ref))
+	}
+	// An unparsable id, a reference no alias names, and a duplicate of the first.
+	prevIDs = append(prevIDs, "not a reference", "acme-org/unknown#1", prevIDs[0])
+
+	// The listing still shows the first 100; the other 50 departed.
+	var members []member
+	for i := 0; i < 100; i++ {
+		ref, err := entity.ParseRef(fmt.Sprintf("Acme-Org/Widget#%d", i+1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		members = append(members, member{nodeID: fmt.Sprintf("PR_%03d", i), ref: ref})
+	}
+
+	prev := store.QueryRow{Key: "mine", IDs: prevIDs, Complete: true, BaselineAt: t0}
+	plan, err := r.runner.planMembership(ctx, Key{Name: "mine"}, prev, listing{members: members, complete: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if scans := counted.scans.Load(); scans > 1 {
+		t.Errorf("planMembership scanned the alias table %d times for %d previous members, want one scan for all of them", scans, len(prevIDs))
+	}
+	if len(plan.arrivals) != 0 || len(plan.departures) != n-100 {
+		t.Fatalf("plan = %d arrivals, %d departures, want 0 and %d", len(plan.arrivals), len(plan.departures), n-100)
+	}
+	for i, d := range plan.departures {
+		wantNode, wantRef := fmt.Sprintf("PR_%03d", 100+i), fmt.Sprintf("Acme-Org/Widget#%d", 101+i)
+		if d.node != wantNode || d.ref != wantRef {
+			t.Fatalf("departure %d = %+v, want node %s ref %s", i, d, wantNode, wantRef)
+		}
+	}
+	if want := []string{"query_membership_unparsable_id", "query_membership_no_alias"}; !slices.Equal(lg.seen(), want) {
+		t.Errorf("log = %v, want %v", lg.seen(), want)
 	}
 }

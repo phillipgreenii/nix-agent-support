@@ -93,7 +93,15 @@ func (r *Runner) planMembership(ctx context.Context, key Key, prev store.QueryRo
 	}
 	prevNodes := make(map[string]bool, len(prev.IDs))
 	prevRefs := make(map[string]bool, len(prev.IDs))
-	var gone []departure
+	// One batched read resolves every previous member: the alias lookup folds
+	// the reference's case, which cannot use the table's index, so a lookup per
+	// previous member would scan the whole alias table once each (pg2-6cwpf).
+	type parsed struct {
+		id  string
+		ref entity.Ref
+	}
+	var ids []parsed
+	var refs []entity.Ref
 	for _, id := range prev.IDs {
 		prevRefs[refFold(id)] = true
 		ref, err := entity.ParseRef(id)
@@ -101,19 +109,28 @@ func (r *Runner) planMembership(ctx context.Context, key Key, prev store.QueryRo
 			r.log("query_membership_unparsable_id", "query", key.Name, "id", id, "error", err.Error())
 			continue
 		}
-		node, canonical, ok, err := r.cfg.Identity.NodeID(ctx, ref)
-		if err != nil {
+		ids = append(ids, parsed{id: id, ref: ref})
+		refs = append(refs, ref)
+	}
+	var known map[string]entity.KnownAlias
+	if len(refs) > 0 {
+		var err error
+		if known, err = r.cfg.Identity.NodeIDs(ctx, refs); err != nil {
 			return membershipPlan{}, err
 		}
+	}
+	var gone []departure
+	for _, p := range ids {
+		a, ok := known[p.ref.Key()]
 		if !ok {
-			r.log("query_membership_no_alias", "query", key.Name, "id", id)
+			r.log("query_membership_no_alias", "query", key.Name, "id", p.id)
 			continue
 		}
-		if prevNodes[node] {
+		if prevNodes[a.NodeID] {
 			continue
 		}
-		prevNodes[node] = true
-		gone = append(gone, departure{node: node, ref: canonical.String()})
+		prevNodes[a.NodeID] = true
+		gone = append(gone, departure{node: a.NodeID, ref: a.Canonical.String()})
 	}
 	if prev.Complete {
 		for _, m := range l.members {
