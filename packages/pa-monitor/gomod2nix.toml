@@ -33,6 +33,7 @@ cachePackages = [
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
   'github.com/phillipgreenii/x/gittest',
+  'github.com/phillipgreenii/x/pprofserver',
   'github.com/remyoudompheng/bigfft',
   'github.com/rivo/uniseg',
   'github.com/xo/terminfo',
