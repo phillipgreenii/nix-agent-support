@@ -45,6 +45,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/api"
@@ -61,6 +62,9 @@ type Provider struct {
 	retry RetryPolicy
 	// retryGuard, when set, runs before every retry (see SetRetryGuard).
 	retryGuard func(ctx context.Context) error
+	// now is the clock the connection time budgets read (review_context.go);
+	// nil means time.Now. Tests inject a fake one.
+	now func() time.Time
 }
 
 // New constructs a GitHub VCS provider backed by the gh CLI on PATH, reached

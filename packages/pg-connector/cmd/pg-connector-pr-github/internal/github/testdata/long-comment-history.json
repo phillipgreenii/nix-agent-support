@@ -1,0 +1,4342 @@
+{
+  "description": "Recorded-shape GraphQL pages of a PR with a long comment history (bead pg2-vq8ii): 100 review threads in 10 pages, 50 issue comments in 5 pages, 1 review. Page N is read after cursor <prefix>N (T threads, I issue comments).",
+  "threads": [
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "totalCount": 100,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "T1"
+              },
+              "nodes": [
+                {
+                  "id": "PRRT_kwDOA_0",
+                  "isResolved": true,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_0",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 0 comment",
+                        "path": "svc/file_0.py",
+                        "line": 10,
+                        "originalLine": 10,
+                        "createdAt": "2026-10-19T00:00:00Z",
+                        "updatedAt": "2026-10-19T00:00:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_1",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_1",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 1 comment",
+                        "path": "svc/file_1.py",
+                        "line": 11,
+                        "originalLine": 11,
+                        "createdAt": "2026-10-19T00:01:00Z",
+                        "updatedAt": "2026-10-19T00:01:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_2",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_2",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 2 comment",
+                        "path": "svc/file_2.py",
+                        "line": 12,
+                        "originalLine": 12,
+                        "createdAt": "2026-10-19T00:02:00Z",
+                        "updatedAt": "2026-10-19T00:02:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_3",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_3",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 3 comment",
+                        "path": "svc/file_3.py",
+                        "line": 13,
+                        "originalLine": 13,
+                        "createdAt": "2026-10-19T00:03:00Z",
+                        "updatedAt": "2026-10-19T00:03:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_4",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_4",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 4 comment",
+                        "path": "svc/file_4.py",
+                        "line": 14,
+                        "originalLine": 14,
+                        "createdAt": "2026-10-19T00:04:00Z",
+                        "updatedAt": "2026-10-19T00:04:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_5",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_5",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 5 comment",
+                        "path": "svc/file_5.py",
+                        "line": 15,
+                        "originalLine": 15,
+                        "createdAt": "2026-10-19T00:05:00Z",
+                        "updatedAt": "2026-10-19T00:05:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_6",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_6",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 6 comment",
+                        "path": "svc/file_6.py",
+                        "line": 16,
+                        "originalLine": 16,
+                        "createdAt": "2026-10-19T00:06:00Z",
+                        "updatedAt": "2026-10-19T00:06:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_7",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_7",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 7 comment",
+                        "path": "svc/file_0.py",
+                        "line": 17,
+                        "originalLine": 17,
+                        "createdAt": "2026-10-19T00:07:00Z",
+                        "updatedAt": "2026-10-19T00:07:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_8",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_8",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 8 comment",
+                        "path": "svc/file_1.py",
+                        "line": 18,
+                        "originalLine": 18,
+                        "createdAt": "2026-10-19T00:08:00Z",
+                        "updatedAt": "2026-10-19T00:08:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_9",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_9",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 9 comment",
+                        "path": "svc/file_2.py",
+                        "line": 19,
+                        "originalLine": 19,
+                        "createdAt": "2026-10-19T00:09:00Z",
+                        "updatedAt": "2026-10-19T00:09:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "totalCount": 100,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "T2"
+              },
+              "nodes": [
+                {
+                  "id": "PRRT_kwDOA_10",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_10",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 10 comment",
+                        "path": "svc/file_3.py",
+                        "line": 20,
+                        "originalLine": 20,
+                        "createdAt": "2026-10-19T00:10:00Z",
+                        "updatedAt": "2026-10-19T00:10:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_11",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_11",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 11 comment",
+                        "path": "svc/file_4.py",
+                        "line": 21,
+                        "originalLine": 21,
+                        "createdAt": "2026-10-19T00:11:00Z",
+                        "updatedAt": "2026-10-19T00:11:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_12",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_12",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 12 comment",
+                        "path": "svc/file_5.py",
+                        "line": 22,
+                        "originalLine": 22,
+                        "createdAt": "2026-10-19T00:12:00Z",
+                        "updatedAt": "2026-10-19T00:12:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_13",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_13",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 13 comment",
+                        "path": "svc/file_6.py",
+                        "line": 23,
+                        "originalLine": 23,
+                        "createdAt": "2026-10-19T00:13:00Z",
+                        "updatedAt": "2026-10-19T00:13:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_14",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_14",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 14 comment",
+                        "path": "svc/file_0.py",
+                        "line": 24,
+                        "originalLine": 24,
+                        "createdAt": "2026-10-19T00:14:00Z",
+                        "updatedAt": "2026-10-19T00:14:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_15",
+                  "isResolved": true,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_15",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 15 comment",
+                        "path": "svc/file_1.py",
+                        "line": 25,
+                        "originalLine": 25,
+                        "createdAt": "2026-10-19T00:15:00Z",
+                        "updatedAt": "2026-10-19T00:15:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_16",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_16",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 16 comment",
+                        "path": "svc/file_2.py",
+                        "line": 26,
+                        "originalLine": 26,
+                        "createdAt": "2026-10-19T00:16:00Z",
+                        "updatedAt": "2026-10-19T00:16:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_17",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_17",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 17 comment",
+                        "path": "svc/file_3.py",
+                        "line": 27,
+                        "originalLine": 27,
+                        "createdAt": "2026-10-19T00:17:00Z",
+                        "updatedAt": "2026-10-19T00:17:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_18",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_18",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 18 comment",
+                        "path": "svc/file_4.py",
+                        "line": 28,
+                        "originalLine": 28,
+                        "createdAt": "2026-10-19T00:18:00Z",
+                        "updatedAt": "2026-10-19T00:18:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_19",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_19",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 19 comment",
+                        "path": "svc/file_5.py",
+                        "line": 29,
+                        "originalLine": 29,
+                        "createdAt": "2026-10-19T00:19:00Z",
+                        "updatedAt": "2026-10-19T00:19:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "totalCount": 100,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "T3"
+              },
+              "nodes": [
+                {
+                  "id": "PRRT_kwDOA_20",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_20",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 20 comment",
+                        "path": "svc/file_6.py",
+                        "line": 30,
+                        "originalLine": 30,
+                        "createdAt": "2026-10-19T00:20:00Z",
+                        "updatedAt": "2026-10-19T00:20:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_21",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_21",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 21 comment",
+                        "path": "svc/file_0.py",
+                        "line": 31,
+                        "originalLine": 31,
+                        "createdAt": "2026-10-19T00:21:00Z",
+                        "updatedAt": "2026-10-19T00:21:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_22",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_22",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 22 comment",
+                        "path": "svc/file_1.py",
+                        "line": 32,
+                        "originalLine": 32,
+                        "createdAt": "2026-10-19T00:22:00Z",
+                        "updatedAt": "2026-10-19T00:22:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_23",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_23",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 23 comment",
+                        "path": "svc/file_2.py",
+                        "line": 33,
+                        "originalLine": 33,
+                        "createdAt": "2026-10-19T00:23:00Z",
+                        "updatedAt": "2026-10-19T00:23:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_24",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_24",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 24 comment",
+                        "path": "svc/file_3.py",
+                        "line": 34,
+                        "originalLine": 34,
+                        "createdAt": "2026-10-19T00:24:00Z",
+                        "updatedAt": "2026-10-19T00:24:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_25",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_25",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 25 comment",
+                        "path": "svc/file_4.py",
+                        "line": 35,
+                        "originalLine": 35,
+                        "createdAt": "2026-10-19T00:25:00Z",
+                        "updatedAt": "2026-10-19T00:25:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_26",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_26",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 26 comment",
+                        "path": "svc/file_5.py",
+                        "line": 36,
+                        "originalLine": 36,
+                        "createdAt": "2026-10-19T00:26:00Z",
+                        "updatedAt": "2026-10-19T00:26:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_27",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_27",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 27 comment",
+                        "path": "svc/file_6.py",
+                        "line": 37,
+                        "originalLine": 37,
+                        "createdAt": "2026-10-19T00:27:00Z",
+                        "updatedAt": "2026-10-19T00:27:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_28",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_28",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 28 comment",
+                        "path": "svc/file_0.py",
+                        "line": 38,
+                        "originalLine": 38,
+                        "createdAt": "2026-10-19T00:28:00Z",
+                        "updatedAt": "2026-10-19T00:28:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_29",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_29",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 29 comment",
+                        "path": "svc/file_1.py",
+                        "line": 39,
+                        "originalLine": 39,
+                        "createdAt": "2026-10-19T00:29:00Z",
+                        "updatedAt": "2026-10-19T00:29:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "totalCount": 100,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "T4"
+              },
+              "nodes": [
+                {
+                  "id": "PRRT_kwDOA_30",
+                  "isResolved": true,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_30",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 30 comment",
+                        "path": "svc/file_2.py",
+                        "line": 40,
+                        "originalLine": 40,
+                        "createdAt": "2026-10-19T00:30:00Z",
+                        "updatedAt": "2026-10-19T00:30:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_31",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_31",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 31 comment",
+                        "path": "svc/file_3.py",
+                        "line": 41,
+                        "originalLine": 41,
+                        "createdAt": "2026-10-19T00:31:00Z",
+                        "updatedAt": "2026-10-19T00:31:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_32",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_32",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 32 comment",
+                        "path": "svc/file_4.py",
+                        "line": 42,
+                        "originalLine": 42,
+                        "createdAt": "2026-10-19T00:32:00Z",
+                        "updatedAt": "2026-10-19T00:32:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_33",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_33",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 33 comment",
+                        "path": "svc/file_5.py",
+                        "line": 43,
+                        "originalLine": 43,
+                        "createdAt": "2026-10-19T00:33:00Z",
+                        "updatedAt": "2026-10-19T00:33:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_34",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_34",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 34 comment",
+                        "path": "svc/file_6.py",
+                        "line": 44,
+                        "originalLine": 44,
+                        "createdAt": "2026-10-19T00:34:00Z",
+                        "updatedAt": "2026-10-19T00:34:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_35",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_35",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 35 comment",
+                        "path": "svc/file_0.py",
+                        "line": 45,
+                        "originalLine": 45,
+                        "createdAt": "2026-10-19T00:35:00Z",
+                        "updatedAt": "2026-10-19T00:35:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_36",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_36",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 36 comment",
+                        "path": "svc/file_1.py",
+                        "line": 46,
+                        "originalLine": 46,
+                        "createdAt": "2026-10-19T00:36:00Z",
+                        "updatedAt": "2026-10-19T00:36:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_37",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_37",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 37 comment",
+                        "path": "svc/file_2.py",
+                        "line": 47,
+                        "originalLine": 47,
+                        "createdAt": "2026-10-19T00:37:00Z",
+                        "updatedAt": "2026-10-19T00:37:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_38",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_38",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 38 comment",
+                        "path": "svc/file_3.py",
+                        "line": 48,
+                        "originalLine": 48,
+                        "createdAt": "2026-10-19T00:38:00Z",
+                        "updatedAt": "2026-10-19T00:38:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_39",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_39",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 39 comment",
+                        "path": "svc/file_4.py",
+                        "line": 49,
+                        "originalLine": 49,
+                        "createdAt": "2026-10-19T00:39:00Z",
+                        "updatedAt": "2026-10-19T00:39:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "totalCount": 100,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "T5"
+              },
+              "nodes": [
+                {
+                  "id": "PRRT_kwDOA_40",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_40",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 40 comment",
+                        "path": "svc/file_5.py",
+                        "line": 50,
+                        "originalLine": 50,
+                        "createdAt": "2026-10-19T00:40:00Z",
+                        "updatedAt": "2026-10-19T00:40:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_41",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_41",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 41 comment",
+                        "path": "svc/file_6.py",
+                        "line": 51,
+                        "originalLine": 51,
+                        "createdAt": "2026-10-19T00:41:00Z",
+                        "updatedAt": "2026-10-19T00:41:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_42",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_42",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 42 comment",
+                        "path": "svc/file_0.py",
+                        "line": 52,
+                        "originalLine": 52,
+                        "createdAt": "2026-10-19T00:42:00Z",
+                        "updatedAt": "2026-10-19T00:42:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_43",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_43",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 43 comment",
+                        "path": "svc/file_1.py",
+                        "line": 53,
+                        "originalLine": 53,
+                        "createdAt": "2026-10-19T00:43:00Z",
+                        "updatedAt": "2026-10-19T00:43:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_44",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_44",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 44 comment",
+                        "path": "svc/file_2.py",
+                        "line": 54,
+                        "originalLine": 54,
+                        "createdAt": "2026-10-19T00:44:00Z",
+                        "updatedAt": "2026-10-19T00:44:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_45",
+                  "isResolved": true,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_45",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 45 comment",
+                        "path": "svc/file_3.py",
+                        "line": 55,
+                        "originalLine": 55,
+                        "createdAt": "2026-10-19T00:45:00Z",
+                        "updatedAt": "2026-10-19T00:45:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_46",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_46",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 46 comment",
+                        "path": "svc/file_4.py",
+                        "line": 56,
+                        "originalLine": 56,
+                        "createdAt": "2026-10-19T00:46:00Z",
+                        "updatedAt": "2026-10-19T00:46:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_47",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_47",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 47 comment",
+                        "path": "svc/file_5.py",
+                        "line": 57,
+                        "originalLine": 57,
+                        "createdAt": "2026-10-19T00:47:00Z",
+                        "updatedAt": "2026-10-19T00:47:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_48",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_48",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 48 comment",
+                        "path": "svc/file_6.py",
+                        "line": 58,
+                        "originalLine": 58,
+                        "createdAt": "2026-10-19T00:48:00Z",
+                        "updatedAt": "2026-10-19T00:48:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_49",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_49",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 49 comment",
+                        "path": "svc/file_0.py",
+                        "line": 59,
+                        "originalLine": 59,
+                        "createdAt": "2026-10-19T00:49:00Z",
+                        "updatedAt": "2026-10-19T00:49:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "totalCount": 100,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "T6"
+              },
+              "nodes": [
+                {
+                  "id": "PRRT_kwDOA_50",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_50",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 50 comment",
+                        "path": "svc/file_1.py",
+                        "line": 60,
+                        "originalLine": 60,
+                        "createdAt": "2026-10-19T00:50:00Z",
+                        "updatedAt": "2026-10-19T00:50:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_51",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_51",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 51 comment",
+                        "path": "svc/file_2.py",
+                        "line": 61,
+                        "originalLine": 61,
+                        "createdAt": "2026-10-19T00:51:00Z",
+                        "updatedAt": "2026-10-19T00:51:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_52",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_52",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 52 comment",
+                        "path": "svc/file_3.py",
+                        "line": 62,
+                        "originalLine": 62,
+                        "createdAt": "2026-10-19T00:52:00Z",
+                        "updatedAt": "2026-10-19T00:52:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_53",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_53",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 53 comment",
+                        "path": "svc/file_4.py",
+                        "line": 63,
+                        "originalLine": 63,
+                        "createdAt": "2026-10-19T00:53:00Z",
+                        "updatedAt": "2026-10-19T00:53:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_54",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_54",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 54 comment",
+                        "path": "svc/file_5.py",
+                        "line": 64,
+                        "originalLine": 64,
+                        "createdAt": "2026-10-19T00:54:00Z",
+                        "updatedAt": "2026-10-19T00:54:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_55",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_55",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 55 comment",
+                        "path": "svc/file_6.py",
+                        "line": 65,
+                        "originalLine": 65,
+                        "createdAt": "2026-10-19T00:55:00Z",
+                        "updatedAt": "2026-10-19T00:55:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_56",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_56",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 56 comment",
+                        "path": "svc/file_0.py",
+                        "line": 66,
+                        "originalLine": 66,
+                        "createdAt": "2026-10-19T00:56:00Z",
+                        "updatedAt": "2026-10-19T00:56:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_57",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_57",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 57 comment",
+                        "path": "svc/file_1.py",
+                        "line": 67,
+                        "originalLine": 67,
+                        "createdAt": "2026-10-19T00:57:00Z",
+                        "updatedAt": "2026-10-19T00:57:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_58",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_58",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 58 comment",
+                        "path": "svc/file_2.py",
+                        "line": 68,
+                        "originalLine": 68,
+                        "createdAt": "2026-10-19T00:58:00Z",
+                        "updatedAt": "2026-10-19T00:58:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_59",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_59",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 59 comment",
+                        "path": "svc/file_3.py",
+                        "line": 69,
+                        "originalLine": 69,
+                        "createdAt": "2026-10-19T00:59:00Z",
+                        "updatedAt": "2026-10-19T00:59:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "totalCount": 100,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "T7"
+              },
+              "nodes": [
+                {
+                  "id": "PRRT_kwDOA_60",
+                  "isResolved": true,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_60",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 60 comment",
+                        "path": "svc/file_4.py",
+                        "line": 70,
+                        "originalLine": 70,
+                        "createdAt": "2026-10-19T01:00:00Z",
+                        "updatedAt": "2026-10-19T01:00:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_61",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_61",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 61 comment",
+                        "path": "svc/file_5.py",
+                        "line": 71,
+                        "originalLine": 71,
+                        "createdAt": "2026-10-19T01:01:00Z",
+                        "updatedAt": "2026-10-19T01:01:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_62",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_62",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 62 comment",
+                        "path": "svc/file_6.py",
+                        "line": 72,
+                        "originalLine": 72,
+                        "createdAt": "2026-10-19T01:02:00Z",
+                        "updatedAt": "2026-10-19T01:02:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_63",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_63",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 63 comment",
+                        "path": "svc/file_0.py",
+                        "line": 73,
+                        "originalLine": 73,
+                        "createdAt": "2026-10-19T01:03:00Z",
+                        "updatedAt": "2026-10-19T01:03:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_64",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_64",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 64 comment",
+                        "path": "svc/file_1.py",
+                        "line": 74,
+                        "originalLine": 74,
+                        "createdAt": "2026-10-19T01:04:00Z",
+                        "updatedAt": "2026-10-19T01:04:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_65",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_65",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 65 comment",
+                        "path": "svc/file_2.py",
+                        "line": 75,
+                        "originalLine": 75,
+                        "createdAt": "2026-10-19T01:05:00Z",
+                        "updatedAt": "2026-10-19T01:05:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_66",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_66",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 66 comment",
+                        "path": "svc/file_3.py",
+                        "line": 76,
+                        "originalLine": 76,
+                        "createdAt": "2026-10-19T01:06:00Z",
+                        "updatedAt": "2026-10-19T01:06:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_67",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_67",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 67 comment",
+                        "path": "svc/file_4.py",
+                        "line": 77,
+                        "originalLine": 77,
+                        "createdAt": "2026-10-19T01:07:00Z",
+                        "updatedAt": "2026-10-19T01:07:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_68",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_68",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 68 comment",
+                        "path": "svc/file_5.py",
+                        "line": 78,
+                        "originalLine": 78,
+                        "createdAt": "2026-10-19T01:08:00Z",
+                        "updatedAt": "2026-10-19T01:08:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_69",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_69",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 69 comment",
+                        "path": "svc/file_6.py",
+                        "line": 79,
+                        "originalLine": 79,
+                        "createdAt": "2026-10-19T01:09:00Z",
+                        "updatedAt": "2026-10-19T01:09:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "totalCount": 100,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "T8"
+              },
+              "nodes": [
+                {
+                  "id": "PRRT_kwDOA_70",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_70",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 70 comment",
+                        "path": "svc/file_0.py",
+                        "line": 80,
+                        "originalLine": 80,
+                        "createdAt": "2026-10-19T01:10:00Z",
+                        "updatedAt": "2026-10-19T01:10:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_71",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_71",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 71 comment",
+                        "path": "svc/file_1.py",
+                        "line": 81,
+                        "originalLine": 81,
+                        "createdAt": "2026-10-19T01:11:00Z",
+                        "updatedAt": "2026-10-19T01:11:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_72",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_72",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 72 comment",
+                        "path": "svc/file_2.py",
+                        "line": 82,
+                        "originalLine": 82,
+                        "createdAt": "2026-10-19T01:12:00Z",
+                        "updatedAt": "2026-10-19T01:12:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_73",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_73",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 73 comment",
+                        "path": "svc/file_3.py",
+                        "line": 83,
+                        "originalLine": 83,
+                        "createdAt": "2026-10-19T01:13:00Z",
+                        "updatedAt": "2026-10-19T01:13:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_74",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_74",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 74 comment",
+                        "path": "svc/file_4.py",
+                        "line": 84,
+                        "originalLine": 84,
+                        "createdAt": "2026-10-19T01:14:00Z",
+                        "updatedAt": "2026-10-19T01:14:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_75",
+                  "isResolved": true,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_75",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 75 comment",
+                        "path": "svc/file_5.py",
+                        "line": 85,
+                        "originalLine": 85,
+                        "createdAt": "2026-10-19T01:15:00Z",
+                        "updatedAt": "2026-10-19T01:15:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_76",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_76",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 76 comment",
+                        "path": "svc/file_6.py",
+                        "line": 86,
+                        "originalLine": 86,
+                        "createdAt": "2026-10-19T01:16:00Z",
+                        "updatedAt": "2026-10-19T01:16:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_77",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_77",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 77 comment",
+                        "path": "svc/file_0.py",
+                        "line": 87,
+                        "originalLine": 87,
+                        "createdAt": "2026-10-19T01:17:00Z",
+                        "updatedAt": "2026-10-19T01:17:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_78",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_78",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 78 comment",
+                        "path": "svc/file_1.py",
+                        "line": 88,
+                        "originalLine": 88,
+                        "createdAt": "2026-10-19T01:18:00Z",
+                        "updatedAt": "2026-10-19T01:18:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_79",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_79",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 79 comment",
+                        "path": "svc/file_2.py",
+                        "line": 89,
+                        "originalLine": 89,
+                        "createdAt": "2026-10-19T01:19:00Z",
+                        "updatedAt": "2026-10-19T01:19:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "totalCount": 100,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "T9"
+              },
+              "nodes": [
+                {
+                  "id": "PRRT_kwDOA_80",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_80",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 80 comment",
+                        "path": "svc/file_3.py",
+                        "line": 90,
+                        "originalLine": 90,
+                        "createdAt": "2026-10-19T01:20:00Z",
+                        "updatedAt": "2026-10-19T01:20:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_81",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_81",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 81 comment",
+                        "path": "svc/file_4.py",
+                        "line": 91,
+                        "originalLine": 91,
+                        "createdAt": "2026-10-19T01:21:00Z",
+                        "updatedAt": "2026-10-19T01:21:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_82",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_82",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 82 comment",
+                        "path": "svc/file_5.py",
+                        "line": 92,
+                        "originalLine": 92,
+                        "createdAt": "2026-10-19T01:22:00Z",
+                        "updatedAt": "2026-10-19T01:22:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_83",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_83",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 83 comment",
+                        "path": "svc/file_6.py",
+                        "line": 93,
+                        "originalLine": 93,
+                        "createdAt": "2026-10-19T01:23:00Z",
+                        "updatedAt": "2026-10-19T01:23:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_84",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_84",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 84 comment",
+                        "path": "svc/file_0.py",
+                        "line": 94,
+                        "originalLine": 94,
+                        "createdAt": "2026-10-19T01:24:00Z",
+                        "updatedAt": "2026-10-19T01:24:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_85",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_85",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 85 comment",
+                        "path": "svc/file_1.py",
+                        "line": 95,
+                        "originalLine": 95,
+                        "createdAt": "2026-10-19T01:25:00Z",
+                        "updatedAt": "2026-10-19T01:25:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_86",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_86",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 86 comment",
+                        "path": "svc/file_2.py",
+                        "line": 96,
+                        "originalLine": 96,
+                        "createdAt": "2026-10-19T01:26:00Z",
+                        "updatedAt": "2026-10-19T01:26:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_87",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_87",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 87 comment",
+                        "path": "svc/file_3.py",
+                        "line": 97,
+                        "originalLine": 97,
+                        "createdAt": "2026-10-19T01:27:00Z",
+                        "updatedAt": "2026-10-19T01:27:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_88",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_88",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 88 comment",
+                        "path": "svc/file_4.py",
+                        "line": 98,
+                        "originalLine": 98,
+                        "createdAt": "2026-10-19T01:28:00Z",
+                        "updatedAt": "2026-10-19T01:28:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_89",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_89",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 89 comment",
+                        "path": "svc/file_5.py",
+                        "line": 99,
+                        "originalLine": 99,
+                        "createdAt": "2026-10-19T01:29:00Z",
+                        "updatedAt": "2026-10-19T01:29:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "totalCount": 100,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": ""
+              },
+              "nodes": [
+                {
+                  "id": "PRRT_kwDOA_90",
+                  "isResolved": true,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_90",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 90 comment",
+                        "path": "svc/file_6.py",
+                        "line": 100,
+                        "originalLine": 100,
+                        "createdAt": "2026-10-19T01:30:00Z",
+                        "updatedAt": "2026-10-19T01:30:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_91",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_91",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 91 comment",
+                        "path": "svc/file_0.py",
+                        "line": 101,
+                        "originalLine": 101,
+                        "createdAt": "2026-10-19T01:31:00Z",
+                        "updatedAt": "2026-10-19T01:31:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_92",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_92",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 92 comment",
+                        "path": "svc/file_1.py",
+                        "line": 102,
+                        "originalLine": 102,
+                        "createdAt": "2026-10-19T01:32:00Z",
+                        "updatedAt": "2026-10-19T01:32:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_93",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_93",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 93 comment",
+                        "path": "svc/file_2.py",
+                        "line": 103,
+                        "originalLine": 103,
+                        "createdAt": "2026-10-19T01:33:00Z",
+                        "updatedAt": "2026-10-19T01:33:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_94",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_94",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 94 comment",
+                        "path": "svc/file_3.py",
+                        "line": 104,
+                        "originalLine": 104,
+                        "createdAt": "2026-10-19T01:34:00Z",
+                        "updatedAt": "2026-10-19T01:34:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_95",
+                  "isResolved": false,
+                  "isOutdated": true,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_95",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 95 comment",
+                        "path": "svc/file_4.py",
+                        "line": 105,
+                        "originalLine": 105,
+                        "createdAt": "2026-10-19T01:35:00Z",
+                        "updatedAt": "2026-10-19T01:35:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_96",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_96",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 96 comment",
+                        "path": "svc/file_5.py",
+                        "line": 106,
+                        "originalLine": 106,
+                        "createdAt": "2026-10-19T01:36:00Z",
+                        "updatedAt": "2026-10-19T01:36:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_97",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_97",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 97 comment",
+                        "path": "svc/file_6.py",
+                        "line": 107,
+                        "originalLine": 107,
+                        "createdAt": "2026-10-19T01:37:00Z",
+                        "updatedAt": "2026-10-19T01:37:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_98",
+                  "isResolved": false,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_98",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 98 comment",
+                        "path": "svc/file_0.py",
+                        "line": 108,
+                        "originalLine": 108,
+                        "createdAt": "2026-10-19T01:38:00Z",
+                        "updatedAt": "2026-10-19T01:38:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PRRT_kwDOA_99",
+                  "isResolved": true,
+                  "isOutdated": false,
+                  "comments": {
+                    "totalCount": 1,
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "x"
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRRC_kwDOA_99",
+                        "author": {
+                          "login": "teammate"
+                        },
+                        "authorAssociation": "MEMBER",
+                        "body": "thread 99 comment",
+                        "path": "svc/file_1.py",
+                        "line": 109,
+                        "originalLine": 109,
+                        "createdAt": "2026-10-19T01:39:00Z",
+                        "updatedAt": "2026-10-19T01:39:00Z",
+                        "isMinimized": false,
+                        "minimizedReason": null,
+                        "originalCommit": {
+                          "oid": "abc123"
+                        },
+                        "pullRequestReview": {
+                          "id": "PRR_1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "issues": [
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "comments": {
+              "totalCount": 50,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "I1"
+              },
+              "nodes": [
+                {
+                  "id": "IC_kwDOA_0",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 0",
+                  "createdAt": "2026-10-19T03:20:00Z",
+                  "updatedAt": "2026-10-19T03:20:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_1",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 1",
+                  "createdAt": "2026-10-19T03:21:00Z",
+                  "updatedAt": "2026-10-19T03:21:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_2",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 2",
+                  "createdAt": "2026-10-19T03:22:00Z",
+                  "updatedAt": "2026-10-19T03:22:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_3",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 3",
+                  "createdAt": "2026-10-19T03:23:00Z",
+                  "updatedAt": "2026-10-19T03:23:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_4",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 4",
+                  "createdAt": "2026-10-19T03:24:00Z",
+                  "updatedAt": "2026-10-19T03:24:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_5",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 5",
+                  "createdAt": "2026-10-19T03:25:00Z",
+                  "updatedAt": "2026-10-19T03:25:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_6",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 6",
+                  "createdAt": "2026-10-19T03:26:00Z",
+                  "updatedAt": "2026-10-19T03:26:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_7",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 7",
+                  "createdAt": "2026-10-19T03:27:00Z",
+                  "updatedAt": "2026-10-19T03:27:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_8",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 8",
+                  "createdAt": "2026-10-19T03:28:00Z",
+                  "updatedAt": "2026-10-19T03:28:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_9",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 9",
+                  "createdAt": "2026-10-19T03:29:00Z",
+                  "updatedAt": "2026-10-19T03:29:00Z"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "comments": {
+              "totalCount": 50,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "I2"
+              },
+              "nodes": [
+                {
+                  "id": "IC_kwDOA_10",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 10",
+                  "createdAt": "2026-10-19T03:30:00Z",
+                  "updatedAt": "2026-10-19T03:30:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_11",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 11",
+                  "createdAt": "2026-10-19T03:31:00Z",
+                  "updatedAt": "2026-10-19T03:31:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_12",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 12",
+                  "createdAt": "2026-10-19T03:32:00Z",
+                  "updatedAt": "2026-10-19T03:32:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_13",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 13",
+                  "createdAt": "2026-10-19T03:33:00Z",
+                  "updatedAt": "2026-10-19T03:33:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_14",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 14",
+                  "createdAt": "2026-10-19T03:34:00Z",
+                  "updatedAt": "2026-10-19T03:34:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_15",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 15",
+                  "createdAt": "2026-10-19T03:35:00Z",
+                  "updatedAt": "2026-10-19T03:35:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_16",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 16",
+                  "createdAt": "2026-10-19T03:36:00Z",
+                  "updatedAt": "2026-10-19T03:36:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_17",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 17",
+                  "createdAt": "2026-10-19T03:37:00Z",
+                  "updatedAt": "2026-10-19T03:37:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_18",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 18",
+                  "createdAt": "2026-10-19T03:38:00Z",
+                  "updatedAt": "2026-10-19T03:38:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_19",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 19",
+                  "createdAt": "2026-10-19T03:39:00Z",
+                  "updatedAt": "2026-10-19T03:39:00Z"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "comments": {
+              "totalCount": 50,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "I3"
+              },
+              "nodes": [
+                {
+                  "id": "IC_kwDOA_20",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 20",
+                  "createdAt": "2026-10-19T03:40:00Z",
+                  "updatedAt": "2026-10-19T03:40:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_21",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 21",
+                  "createdAt": "2026-10-19T03:41:00Z",
+                  "updatedAt": "2026-10-19T03:41:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_22",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 22",
+                  "createdAt": "2026-10-19T03:42:00Z",
+                  "updatedAt": "2026-10-19T03:42:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_23",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 23",
+                  "createdAt": "2026-10-19T03:43:00Z",
+                  "updatedAt": "2026-10-19T03:43:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_24",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 24",
+                  "createdAt": "2026-10-19T03:44:00Z",
+                  "updatedAt": "2026-10-19T03:44:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_25",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 25",
+                  "createdAt": "2026-10-19T03:45:00Z",
+                  "updatedAt": "2026-10-19T03:45:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_26",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 26",
+                  "createdAt": "2026-10-19T03:46:00Z",
+                  "updatedAt": "2026-10-19T03:46:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_27",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 27",
+                  "createdAt": "2026-10-19T03:47:00Z",
+                  "updatedAt": "2026-10-19T03:47:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_28",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 28",
+                  "createdAt": "2026-10-19T03:48:00Z",
+                  "updatedAt": "2026-10-19T03:48:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_29",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 29",
+                  "createdAt": "2026-10-19T03:49:00Z",
+                  "updatedAt": "2026-10-19T03:49:00Z"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "comments": {
+              "totalCount": 50,
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "I4"
+              },
+              "nodes": [
+                {
+                  "id": "IC_kwDOA_30",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 30",
+                  "createdAt": "2026-10-19T03:50:00Z",
+                  "updatedAt": "2026-10-19T03:50:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_31",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 31",
+                  "createdAt": "2026-10-19T03:51:00Z",
+                  "updatedAt": "2026-10-19T03:51:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_32",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 32",
+                  "createdAt": "2026-10-19T03:52:00Z",
+                  "updatedAt": "2026-10-19T03:52:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_33",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 33",
+                  "createdAt": "2026-10-19T03:53:00Z",
+                  "updatedAt": "2026-10-19T03:53:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_34",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 34",
+                  "createdAt": "2026-10-19T03:54:00Z",
+                  "updatedAt": "2026-10-19T03:54:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_35",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 35",
+                  "createdAt": "2026-10-19T03:55:00Z",
+                  "updatedAt": "2026-10-19T03:55:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_36",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 36",
+                  "createdAt": "2026-10-19T03:56:00Z",
+                  "updatedAt": "2026-10-19T03:56:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_37",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 37",
+                  "createdAt": "2026-10-19T03:57:00Z",
+                  "updatedAt": "2026-10-19T03:57:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_38",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 38",
+                  "createdAt": "2026-10-19T03:58:00Z",
+                  "updatedAt": "2026-10-19T03:58:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_39",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 39",
+                  "createdAt": "2026-10-19T03:59:00Z",
+                  "updatedAt": "2026-10-19T03:59:00Z"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "comments": {
+              "totalCount": 50,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": ""
+              },
+              "nodes": [
+                {
+                  "id": "IC_kwDOA_40",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 40",
+                  "createdAt": "2026-10-19T04:00:00Z",
+                  "updatedAt": "2026-10-19T04:00:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_41",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 41",
+                  "createdAt": "2026-10-19T04:01:00Z",
+                  "updatedAt": "2026-10-19T04:01:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_42",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 42",
+                  "createdAt": "2026-10-19T04:02:00Z",
+                  "updatedAt": "2026-10-19T04:02:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_43",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 43",
+                  "createdAt": "2026-10-19T04:03:00Z",
+                  "updatedAt": "2026-10-19T04:03:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_44",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 44",
+                  "createdAt": "2026-10-19T04:04:00Z",
+                  "updatedAt": "2026-10-19T04:04:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_45",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 45",
+                  "createdAt": "2026-10-19T04:05:00Z",
+                  "updatedAt": "2026-10-19T04:05:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_46",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 46",
+                  "createdAt": "2026-10-19T04:06:00Z",
+                  "updatedAt": "2026-10-19T04:06:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_47",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 47",
+                  "createdAt": "2026-10-19T04:07:00Z",
+                  "updatedAt": "2026-10-19T04:07:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_48",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 48",
+                  "createdAt": "2026-10-19T04:08:00Z",
+                  "updatedAt": "2026-10-19T04:08:00Z"
+                },
+                {
+                  "id": "IC_kwDOA_49",
+                  "author": {
+                    "login": "review-bot"
+                  },
+                  "authorAssociation": "NONE",
+                  "body": "bot comment 49",
+                  "createdAt": "2026-10-19T04:09:00Z",
+                  "updatedAt": "2026-10-19T04:09:00Z"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "reviews": [
+    {
+      "data": {
+        "rateLimit": {
+          "cost": 1
+        },
+        "repository": {
+          "pullRequest": {
+            "reviews": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": ""
+              },
+              "nodes": [
+                {
+                  "id": "PRR_1",
+                  "state": "COMMENTED",
+                  "body": "review",
+                  "createdAt": "2026-10-19T00:01:00Z",
+                  "submittedAt": "2026-10-19T00:01:00Z",
+                  "author": {
+                    "login": "teammate"
+                  },
+                  "commit": {
+                    "oid": "abc123"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

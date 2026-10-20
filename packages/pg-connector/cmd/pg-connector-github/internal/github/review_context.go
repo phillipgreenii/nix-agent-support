@@ -39,11 +39,75 @@ import (
 // fetched is sorted newest-first on the client. A truncated connection is
 // therefore the first items the server returned, never "the newest 1000", and
 // callers MUST NOT treat a truncated set as complete.
+//
+// Time budget (bead pg2-vq8ii). `pr show` reads GetPR, the threads, the issue
+// comments and the reviews serially under ONE whole-call deadline
+// (scriptout.DefaultBackendTimeout, 30s). The thread read is by far the
+// heaviest (a page is 100 threads each carrying 100 comments), so on a PR with
+// hundreds of threads it used up the whole deadline and the call died while
+// reading the cheap issue comments that come after it ("list issue comments:
+// deadline exceeded", 14 desk-pr gather failures on 2026-10-19). Each
+// connection is now given a share of the time the call has left when the read
+// starts (threadsTimeShare, issueCommentsTimeShare, reviewsTimeShare); once a
+// connection's share is spent it reads no further page and what it has is
+// returned as a truncated connection (ConnectionReport.Truncated with
+// Total > Returned), exactly like a cap cut, so the later connections still get
+// their first page and the call succeeds with a report that says what is
+// missing. A context with no deadline (a test) has no time bound.
 const (
 	maxReviews  = 1000
 	maxThreads  = 1000
 	maxComments = 1000
 )
+
+// The share of the call's remaining time a connection may spend paging, as a
+// fraction of the time left when the read began; see the file comment. The
+// first page of a connection is always read, whatever its share.
+const (
+	// threadsTimeShare covers the review threads and the follow-up pages of
+	// their comments (the heaviest reads).
+	threadsTimeShare = 0.5
+	// issueCommentsTimeShare is the point, in the same measure, by which the
+	// issue-comment paging must be done, leaving the rest for the reviews.
+	issueCommentsTimeShare = 0.8
+	// reviewsTimeShare bounds the reviews read, which runs last and normally
+	// needs a single page.
+	reviewsTimeShare = 0.8
+)
+
+// pageBound is a point in time after which a connection reads no further page.
+// The zero value is unbounded.
+type pageBound struct {
+	until time.Time
+	now   func() time.Time
+}
+
+// spent reports whether the bound has passed.
+func (b pageBound) spent() bool {
+	if b.until.IsZero() {
+		return false
+	}
+	now := b.now
+	if now == nil {
+		now = time.Now
+	}
+	return !now().Before(b.until)
+}
+
+// boundAt returns the bound that is share (0..1) of the way from now to ctx's
+// deadline, or an unbounded one when ctx has no deadline.
+func (p *Provider) boundAt(ctx context.Context, share float64) pageBound {
+	now := p.now
+	if now == nil {
+		now = time.Now
+	}
+	dl, ok := ctx.Deadline()
+	if !ok {
+		return pageBound{now: now}
+	}
+	start := now()
+	return pageBound{until: start.Add(time.Duration(float64(dl.Sub(start)) * share)), now: now}
+}
 
 // connPage is one page of a GraphQL connection.
 type connPage[T any] struct {
@@ -61,6 +125,14 @@ type connPage[T any] struct {
 // connection's totalCount as the last page reported it. At least one page is
 // always read, so a limit of zero still yields the total.
 func fetchConnection[T any](limit int, after string, fetch func(after string) (connPage[T], error)) ([]T, int, error) {
+	return fetchConnectionBounded(limit, after, pageBound{}, fetch)
+}
+
+// fetchConnectionBounded is fetchConnection that also stops, with what it has,
+// once bound is spent: no page after the first is requested then. The result is
+// then shorter than the connection's total, which the caller reports as a
+// truncation.
+func fetchConnectionBounded[T any](limit int, after string, bound pageBound, fetch func(after string) (connPage[T], error)) ([]T, int, error) {
 	var nodes []T
 	total := 0
 	for {
@@ -76,7 +148,7 @@ func fetchConnection[T any](limit int, after string, fetch func(after string) (c
 		if room > 0 {
 			nodes = append(nodes, page.Nodes[:room]...)
 		}
-		if !page.PageInfo.HasNextPage || len(nodes) >= limit {
+		if !page.PageInfo.HasNextPage || len(nodes) >= limit || bound.spent() {
 			return nodes, total, nil
 		}
 		if page.PageInfo.EndCursor == "" || len(page.Nodes) == 0 {
@@ -256,7 +328,7 @@ func (p *Provider) reviewsConnection(ctx context.Context, repo string, number in
 		return nil, 0, err
 	}
 	vars := map[string]string{"owner": owner, "name": name}
-	return fetchConnection(maxReviews, "", func(after string) (connPage[gqlReview], error) {
+	return fetchConnectionBounded(maxReviews, "", p.boundAt(ctx, reviewsTimeShare), func(after string) (connPage[gqlReview], error) {
 		var d prQueryEnvelope[struct {
 			Reviews connPage[gqlReview] `json:"reviews"`
 		}]
@@ -440,13 +512,13 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
 }
 `
 
-func (p *Provider) threadsConnection(ctx context.Context, repo string, number int) ([]gqlThread, int, error) {
+func (p *Provider) threadsConnection(ctx context.Context, repo string, number int, bound pageBound) ([]gqlThread, int, error) {
 	owner, name, err := splitRepo(repo, number)
 	if err != nil {
 		return nil, 0, err
 	}
 	vars := map[string]string{"owner": owner, "name": name}
-	return fetchConnection(maxThreads, "", func(after string) (connPage[gqlThread], error) {
+	return fetchConnectionBounded(maxThreads, "", bound, func(after string) (connPage[gqlThread], error) {
 		var d prQueryEnvelope[struct {
 			ReviewThreads connPage[gqlThread] `json:"reviewThreads"`
 		}]
@@ -462,8 +534,8 @@ func (p *Provider) threadsConnection(ctx context.Context, repo string, number in
 
 // moreThreadComments reads the pages of a thread's comments after the first,
 // up to limit comments.
-func (p *Provider) moreThreadComments(ctx context.Context, t gqlThread, limit int) ([]gqlThreadComment, error) {
-	nodes, _, err := fetchConnection(limit, t.Comments.PageInfo.EndCursor, func(after string) (connPage[gqlThreadComment], error) {
+func (p *Provider) moreThreadComments(ctx context.Context, t gqlThread, limit int, bound pageBound) ([]gqlThreadComment, error) {
+	nodes, _, err := fetchConnectionBounded(limit, t.Comments.PageInfo.EndCursor, bound, func(after string) (connPage[gqlThreadComment], error) {
 		var d struct {
 			Node *struct {
 				Comments connPage[gqlThreadComment] `json:"comments"`
@@ -480,13 +552,13 @@ func (p *Provider) moreThreadComments(ctx context.Context, t gqlThread, limit in
 	return nodes, err
 }
 
-func (p *Provider) issueCommentsConnection(ctx context.Context, repo string, number, limit int) ([]gqlIssueComment, int, error) {
+func (p *Provider) issueCommentsConnection(ctx context.Context, repo string, number, limit int, bound pageBound) ([]gqlIssueComment, int, error) {
 	owner, name, err := splitRepo(repo, number)
 	if err != nil {
 		return nil, 0, err
 	}
 	vars := map[string]string{"owner": owner, "name": name}
-	return fetchConnection(limit, "", func(after string) (connPage[gqlIssueComment], error) {
+	return fetchConnectionBounded(limit, "", bound, func(after string) (connPage[gqlIssueComment], error) {
 		var d prQueryEnvelope[struct {
 			Comments connPage[gqlIssueComment] `json:"comments"`
 		}]
@@ -511,7 +583,11 @@ func (p *Provider) ListCommentsReport(ctx context.Context, repo string, number i
 	if _, _, err := splitRepo(repo, number); err != nil {
 		return nil, err
 	}
-	threads, threadTotal, err := p.threadsConnection(ctx, repo, number)
+	// Both bounds are measured from the same start, so the issue comments'
+	// share is what is left after the threads' (see the file comment).
+	threadsBound := p.boundAt(ctx, threadsTimeShare)
+	issueBound := p.boundAt(ctx, issueCommentsTimeShare)
+	threads, threadTotal, err := p.threadsConnection(ctx, repo, number, threadsBound)
 	if err != nil {
 		return nil, fmt.Errorf("github: list review threads: %w", err)
 	}
@@ -521,8 +597,8 @@ func (p *Provider) ListCommentsReport(ctx context.Context, repo string, number i
 	for _, t := range threads {
 		commentTotal += t.Comments.TotalCount
 		nodes := t.Comments.Nodes
-		if room := maxComments - len(out) - len(nodes); t.Comments.PageInfo.HasNextPage && room > 0 {
-			more, merr := p.moreThreadComments(ctx, t, room)
+		if room := maxComments - len(out) - len(nodes); t.Comments.PageInfo.HasNextPage && room > 0 && !threadsBound.spent() {
+			more, merr := p.moreThreadComments(ctx, t, room, threadsBound)
 			if merr != nil {
 				return nil, fmt.Errorf("github: list review thread comments: %w", merr)
 			}
@@ -536,7 +612,7 @@ func (p *Provider) ListCommentsReport(ctx context.Context, repo string, number i
 		}
 	}
 
-	issue, issueTotal, err := p.issueCommentsConnection(ctx, repo, number, maxComments-len(out))
+	issue, issueTotal, err := p.issueCommentsConnection(ctx, repo, number, maxComments-len(out), issueBound)
 	if err != nil {
 		return nil, fmt.Errorf("github: list issue comments: %w", err)
 	}
