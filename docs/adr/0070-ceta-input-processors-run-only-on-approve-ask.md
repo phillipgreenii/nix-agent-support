@@ -67,3 +67,33 @@ was never going to approve or ask about it anyway).
   ORIGINAL command instead of the updated one, say), this ADR's Decision should be re-measured
   rather than assumed to still hold — the table above is a snapshot of one Claude Code version,
   not a permanent property of the protocol.
+
+## Amendment 2026-10-20 (pg2-jwilh): drop a rewrite the worktree-isolation guard would refuse
+
+Claude Code's own worktree-isolation guard (not a workspace tool) refuses, in a session isolated
+with `EnterWorktree` (or an `isolation: worktree` subagent), any command whose program is not a
+known launcher (`env`, `nice`, `nohup`, `sudo`, `timeout`, ...) and that has a git-named word among
+its operands. It judges the REWRITTEN command ceta hands back as `updatedInput`, so
+`git commit -m x` rewritten to `rtk git commit -m x` was refused (as was every `rtk git ...`,
+and `rtk rg -n git src`). Whether rtk rewrites a `git` command at all depends on Claude Code's
+permission allow rules (rtk exits 0 only when they cover the command), so it cannot be configured
+away in rtk.
+
+**Decision.** After the input-processor chain returns a changed command, ceta MUST drop the rewrite
+(emit the decision with no `updatedInput`, so the original command runs) when BOTH hold:
+
+1. the hook payload `cwd` is inside a linked git worktree (walking up from `cwd`, the first
+   directory holding a `.git` entry has a `.git` that is a regular file starting with `gitdir:`;
+   filesystem-only), AND
+2. the rewritten command is guard-hostile: some simple command in it has an executable that is not
+   git-named and a git-named word among its arguments (Claude Code's normalisation: strip a leading
+   `-opt=`, take the part after the last `/`, strip a `:...`/`@...` suffix, lowercase, match
+   `^git(\.exe|\.real|-[a-z][\w-]*)?$`), or the rewrite cannot be parsed.
+
+The predicate is deliberately a superset of the guard (it ignores the guard's last-operand
+exception and known-launcher exemption) because dropping a rewrite is always safe: the original
+command runs, only uncompacted. Each drop writes one stderr line. The payload carries no isolation
+field, so `cwd` is the only signal; a non-isolated session in a linked worktree merely loses rtk
+compaction for guard-hostile commands. Rewrites of other commands, and every rewrite outside a
+linked worktree, are unchanged. Implemented in `internal/inputproc/isolation.go` and applied in
+`handlePreToolUse`; guarded by a real-rtk integration test.

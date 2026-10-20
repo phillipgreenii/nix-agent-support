@@ -4602,16 +4602,30 @@
               # `-tags integration` re-runs every untagged suite alongside the
               # tagged ones. Both are kept — the plain one is the fast gate that
               # must stay green on its own.
-              claude-extended-tool-approver-integration-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "claude-extended-tool-approver-integration-tests";
-                src = lib.cleanSource ./packages/claude-extended-tool-approver; # matches default.nix
-                gomod2nixToml = ./packages/claude-extended-tool-approver/gomod2nix.toml;
-                testDeps = [ pkgs.git ];
-                testFlags = [
-                  "-tags"
-                  "integration"
-                ];
-              };
+              #
+              # rtk (pg2-jwilh): the real-rtk regression test for the worktree-
+              # isolation drop rule (rtk_worktree_isolation_integration_test.go)
+              # drives the REAL rtk. It skips when rtk is missing; the REQUIRE
+              # variable turns that skip into a failure here, so a green check
+              # means it ran. rtk is resolved like the spec-drift check does (no
+              # top-level rtk overlay attr in this standalone flake).
+              claude-extended-tool-approver-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "claude-extended-tool-approver-integration-tests";
+                  src = lib.cleanSource ./packages/claude-extended-tool-approver; # matches default.nix
+                  gomod2nixToml = ./packages/claude-extended-tool-approver/gomod2nix.toml;
+                  testDeps = [
+                    pkgs.git
+                    (pkgs.llm-agentsPkgs.rtk or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.rtk)
+                  ];
+                  testFlags = [
+                    "-tags"
+                    "integration"
+                  ];
+                }).overrideAttrs
+                  (_: {
+                    CETA_REQUIRE_RTK = "1";
+                  });
 
               # claude-extended-tool-approver-spec-lint — Phase 1 packet 1.3
               # (tc-o14i5.2.3): runs the new `lint --embedded` CLI subcommand

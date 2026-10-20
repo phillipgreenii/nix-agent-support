@@ -229,8 +229,16 @@ func handlePreToolUse(input *hookio.HookInput) {
 				CWD:       input.CWD,
 			}
 			if rewritten, changed := inputproc.Process(cmd, payload); changed {
-				updatedInput = map[string]interface{}{
-					"command": rewritten,
+				// pg2-jwilh: Claude Code's worktree-isolation guard judges the
+				// REWRITTEN command and refuses e.g. `rtk git commit` in an
+				// isolated session. Drop such a rewrite (the original runs, only
+				// uncompacted) when cwd is a linked worktree. See ADR 0070.
+				if inputproc.DropRewriteForIsolation(input.CWD, rewritten) {
+					fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: input processor rewrite dropped (linked worktree; Claude Code worktree-isolation guard would refuse): %s\n", rewritten)
+				} else {
+					updatedInput = map[string]interface{}{
+						"command": rewritten,
+					}
 				}
 			}
 		}

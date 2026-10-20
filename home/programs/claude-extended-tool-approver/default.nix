@@ -158,6 +158,16 @@ in
         X=1;` / `X=1 <cmd>` prefix on an otherwise-allowlisted command needed
         `Bash(export:*)` to still auto-run. See `phillipgreenii-nix-agent-support`
         ADR 0070.
+
+        DROP RULE (pg2-jwilh) -- a rewrite is DROPPED (ceta emits no
+        updatedInput, so the ORIGINAL command runs) when the hook payload cwd
+        is inside a linked git worktree AND the rewritten command has a simple
+        command whose executable is not git-named but which has a git-named
+        word among its arguments (e.g. `rtk git commit`, `rtk rg -n git src`).
+        Claude Code's worktree-isolation guard refuses exactly such commands in
+        a session isolated with EnterWorktree, and it judges the REWRITTEN
+        command. Each drop is logged on stderr. Rewrites of other commands, and
+        every rewrite outside a linked worktree, are kept. See ADR 0070.
       '';
     };
     extraReadWriteRoots = lib.mkOption {

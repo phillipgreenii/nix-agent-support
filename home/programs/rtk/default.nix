@@ -31,7 +31,9 @@ in
     #
     # Confirmed against rtk's vendored source (src/hooks/rewrite_cmd.rs, rtk
     # 0.49.0, pinned by the llm-agents.nix package this module already
-    # installs): `rtk rewrite <cmd>` exits 0 with the rewritten command on
+    # installs; re-verified against the deployed rtk 1.0.1, where exit 3 is
+    # "rewrite printed, an ask rule matched or allow rules do not cover every
+    # command"): `rtk rewrite <cmd>` exits 0 with the rewritten command on
     # stdout when a rewrite is allowed (RewriteOutcome::Allow) and exit 1
     # with empty stdout when there is no RTK equivalent (Passthrough) --
     # exactly matching inputProcessors' own "exit 0 + non-empty stdout =
@@ -55,6 +57,18 @@ in
     # normal priority: pg-wi-flow's own identity-processor contribution
     # (home/programs/pg-wi-flow/default.nix) is deliberately `mkAfter`ed so
     # it always sorts after this one.
+    #
+    # DROP RULE (pg2-jwilh): ceta drops an rtk rewrite (emits no updatedInput,
+    # so the original runs) when the payload cwd is inside a linked git
+    # worktree and the rewrite is guard-hostile -- a non-git-named executable
+    # with a git-named word among its arguments, e.g. `rtk git commit` or
+    # `rtk rg -n git src`. Claude Code's worktree-isolation guard refuses those
+    # in an EnterWorktree-isolated session, and judges the REWRITTEN command.
+    # rtk's rewrite of `git ...` depends on Claude Code allow rules (exit 0 when
+    # they cover the command), so this cannot be fixed in rtk config. Other
+    # rewrites (rtk find, rtk read, rtk ls, ...) and every rewrite outside a
+    # linked worktree are kept. Implemented in ceta's internal/inputproc
+    # (isolation.go), so it also protects any later processor in the chain.
     phillipgreenii.programs.claude-extended-tool-approver.inputProcessors = lib.mkIf cetaCfg.enable [
       "rtk rewrite"
     ];
