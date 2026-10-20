@@ -204,8 +204,9 @@ type Call struct {
 
 // Kind classifies the call as the fake gh does: "auth_token", "viewer",
 // "search" (the membership search), "nodes" (the summary batch), "detail" (the
-// detail batch), "threads", "issue_comments", "reviews", "files", "commits",
-// "pending" (the pending review lookup), "runs", "jobs", "rerun" (the REST
+// detail batch), "resolve" (the identity query of unseen references),
+// "threads", "issue_comments", "reviews", "files", "commits", "pending" (the
+// pending review lookup), "runs", "jobs", "rerun" (the REST
 // runs list, a run's jobs and the rerun request), "create_review" (the REST
 // create of a pending review), "search_prs" (`gh search prs`), "run_view"
 // (`gh run view`) or "other". A GraphQL write sends its document on standard
@@ -245,6 +246,8 @@ func (c Call) Kind() string {
 		return "search"
 	case strings.Contains(all, "nodes(ids"):
 		return "nodes"
+	case strings.Contains(all, "p0: repository(owner: $o0"):
+		return "resolve"
 	case strings.Contains(all, "reviewThreads(first: 100, after"):
 		return "threads"
 	case strings.Contains(all, "reviews(first: 100, after: $after) {"):

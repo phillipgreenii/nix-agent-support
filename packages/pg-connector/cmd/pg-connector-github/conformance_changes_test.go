@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/servetest"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
 )
 
 // The change feed, refresh and capability vocabulary over the real client: the
@@ -477,5 +478,141 @@ func TestConformanceExplainReportsARecordedChange(t *testing.T) {
 		if len(ex.LastChanges) == 0 || ex.LastChanges[0].Seq != res.Changes[0].Seq || !slices.Contains(ex.LastChanges[0].Kinds, "left_query") {
 			t.Errorf("%s explain of %s: last_changes %+v, want the delivered row seq %d with kind left_query", inst.name, confPRB.Ref(), ex.LastChanges, res.Changes[0].Seq)
 		}
+	}
+}
+
+// confExplain is the part of explain's answer the settle cases read.
+type confExplain struct {
+	PendingSettle *struct {
+		Awaited []struct {
+			Group string `json:"group"`
+		} `json:"awaited"`
+		Deadline time.Time `json:"deadline"`
+		Kinds    []string  `json:"kinds"`
+	} `json:"pending_settle"`
+	LastChanges []struct {
+		Seq   int64    `json:"seq"`
+		Kinds []string `json:"kinds"`
+	} `json:"last_changes"`
+}
+
+// confExplainOf asks the instance to explain id and decodes the answer.
+func confExplainOf(t *testing.T, b conformance.Backend, what string, version int, id string) confExplain {
+	t.Helper()
+	r := invoke(t, b, `{"op":"explain","args":{"id":"`+id+`"}}`)
+	r.wantResult(t, what, version)
+	var ex confExplain
+	if err := json.Unmarshal(r.resp.Result, &ex); err != nil {
+		t.Fatalf("%s: %v", what, err)
+	}
+	return ex
+}
+
+// A pull request whose head moved, while a group the change awaits is still
+// being fetched, is explained with its pending settle row, end to end through
+// the real client and a daemon child; once the group arrives the row is
+// appended, the pending_settle field goes away and the change shows in
+// last_changes. The in-process settle tests prove the engine; this proves the
+// explain answer carries the row over the wire for both instances.
+func TestConformanceExplainReportsAPendingSettleWhileTheAwaitedGroupIsHeld(t *testing.T) {
+	// The summary is re-read every second so the head move is seen quickly; the
+	// settle window outlasts the held fetch (the shim holds a call for at most
+	// 60 s), so the row is still pending when the test explains it.
+	d := servetest.StartDaemon(t, servetest.Options{
+		Before: func(d *servetest.Daemon) {
+			d.Shim.SetPRs(servetest.MineExpr, confPRA, confPRB)
+			d.Shim.SetPRs(servetest.TeamExpr, confPRA)
+			d.Shim.SetRuns(confPRA.Repo, "feature-3", servetest.Run{ID: 3001, Name: "ci", Status: "completed", Conclusion: "success", Head: "head-3"})
+		},
+		Config: map[string]any{
+			"summary_ttl": "1s", "terminal_ttl": "1s", "settle_timeout": "50s",
+			"query_ttl": map[string]any{servetest.QueryMine: "1h", servetest.QueryTeam: "1h"},
+		},
+	})
+	bin := servetest.Binary(t, "", "")
+	confAwaitBaseline(t, d, servetest.QueryMine)
+	pr := confBackend(bin, d.ConfigPath, "pr")
+	invoke(t, pr, `{"op":"list","args":{"query":"mine"}}`).wantResult(t, "warm list", schema.PRSchemaVersion)
+	confUntil(t, "the runs group of the first fixture PR to be stored", func() bool {
+		return d.Group(t, confPRA.NodeID, "runs").Present
+	})
+
+	// The head moves; the runs fetch it queues is held, so the row stays pending.
+	d.Shim.Block("runs", 4)
+	moved := confPRA
+	moved.Head = "head-3-moved"
+	d.Shim.SetPRs(servetest.MineExpr, moved, confPRB)
+	d.Shim.SetPRs(servetest.TeamExpr, moved)
+	confUntil(t, "the runs fetch to be held and the head change to be pending", func() bool {
+		return d.Shim.Held("runs") >= 1 && len(d.PendingRows(t)) == 1
+	})
+	t.Cleanup(func() { d.Shim.Release("runs") })
+
+	for _, inst := range confInstances {
+		ex := confExplainOf(t, confBackend(bin, d.ConfigPath, inst.name), inst.name+" explain while pending", inst.schemaVersion, confPRA.Ref())
+		ps := ex.PendingSettle
+		if ps == nil {
+			t.Fatalf("%s explain of %s has no pending_settle while its runs fetch is held", inst.name, confPRA.Ref())
+		}
+		awaitsRuns := false
+		for _, a := range ps.Awaited {
+			awaitsRuns = awaitsRuns || a.Group == "runs"
+		}
+		if !awaitsRuns || !slices.Contains(ps.Kinds, "head_changed") || !ps.Deadline.After(time.Now()) {
+			t.Errorf("%s pending_settle = %+v, want it to await runs for head_changed with a future deadline", inst.name, ps)
+		}
+		if len(ex.LastChanges) != 0 {
+			t.Errorf("%s last_changes = %+v before the row is appended, want none", inst.name, ex.LastChanges)
+		}
+	}
+
+	// The held group arrives: the row is appended and explain reports it as a
+	// change instead of a pending settle.
+	d.Shim.Release("runs")
+	confUntil(t, "the pending row to be appended to the change log", func() bool {
+		return len(d.PendingRows(t)) == 0 && len(d.ChangeLog(t)) >= 1
+	})
+	for _, inst := range confInstances {
+		ex := confExplainOf(t, confBackend(bin, d.ConfigPath, inst.name), inst.name+" explain after the settle", inst.schemaVersion, confPRA.Ref())
+		if ex.PendingSettle != nil {
+			t.Errorf("%s explain still carries pending_settle after the row was appended: %+v", inst.name, ex.PendingSettle)
+		}
+		if len(ex.LastChanges) == 0 || !slices.Contains(ex.LastChanges[0].Kinds, "head_changed") {
+			t.Errorf("%s last_changes = %+v, want the head_changed row", inst.name, ex.LastChanges)
+		}
+	}
+}
+
+// confUntil polls cond until it holds or a minute passes.
+func confUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// A refresh of a pull request GitHub does not know is not_found on both
+// instances, the mirror of explain's not_found for a pull request the daemon
+// never listed: the daemon asks GitHub (one identity query, answered NOT_FOUND
+// by the fake gh for a reference with no resolve fixture). Without that handler
+// the fake answers an unrecognized request and the refresh is unavailable.
+func TestConformanceRefreshOfAnUnknownPullRequestIsNotFound(t *testing.T) {
+	d := confDaemon(t)
+	bin := servetest.Binary(t, "", "")
+	const unseen = "example-org/widget#9999"
+	for _, inst := range confInstances {
+		b := confBackend(bin, d.ConfigPath, inst.name)
+		arg := "id"
+		if inst.name == "ci" {
+			arg = "pr_id"
+		}
+		invoke(t, b, `{"op":"refresh","args":{"`+arg+`":"`+unseen+`"}}`).wantError(t, inst.name+" refresh of an unseen pull request", "not_found")
+	}
+	if got := d.Shim.CountKind("resolve"); got == 0 {
+		t.Errorf("the refusal did not come from an identity query: %d resolve calls", got)
 	}
 }

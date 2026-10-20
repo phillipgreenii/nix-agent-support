@@ -31,6 +31,8 @@
 #   search               the membership-only search             search.<q>.json, search.json
 #   summary              the summary nodes(ids:) batch          node.<id>.json (null when absent)
 #   detail               the detail nodes(ids:) batch           detail.<id>.json (null when absent)
+#   resolve              the identity query of unseen refs      resolve.<o>__<r>__<n>.json, one per ref; a ref with
+#                        (one repository(...) field per ref)    no fixture is answered NOT_FOUND (a null field, exit 1)
 #   threads              the review threads page                threads.<o>__<r>__<n>.json, threads.json
 #   issue_comments       the issue comments page                issue_comments.<o>__<r>__<n>.json, ...
 #   reviews              the reviews page                       reviews.<o>__<r>__<n>.json, ...
@@ -141,6 +143,10 @@ name=
 number=
 useinput=no
 ids=()
+res_count=0
+res_o=()
+res_r=()
+res_n=()
 shift
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -159,6 +165,20 @@ while [ $# -gt 0 ]; do
     query=*) doc=${1#query=} ;;
     q=*) q=${1#q=} ;;
     ids\[\]=*) ids+=("${1#ids\[\]=}") ;;
+    # The identity query's per-ref variables: o<i> owner, r<i> name, n<i> number.
+    o[0-9]*=*)
+      k=${1%%=*}
+      res_o[${k#o}]=${1#*=}
+      res_count=$((res_count + 1))
+      ;;
+    r[0-9]*=*)
+      k=${1%%=*}
+      res_r[${k#r}]=${1#*=}
+      ;;
+    n[0-9]*=*)
+      k=${1%%=*}
+      res_n[${k#n}]=${1#*=}
+      ;;
     owner=*) owner=${1#owner=} ;;
     name=*) name=${1#name=} ;;
     number=*) number=${1#number=} ;;
@@ -195,6 +215,7 @@ if [ "$endpoint" = graphql ]; then
   *"viewer { login }"*) kind=viewer ;;
   *"search("*) kind=search ;;
   *"nodes(ids"*) kind=summary ;;
+  *"p0: repository(owner: \$o0"*) kind=resolve ;;
   *"reviewThreads(first: 100, after"*) kind=threads ;;
   *"node(id: \$threadId)"*) kind=thread_comments ;;
   *"reviews(first: 100, after: \$after) {"*) kind=reviews ;;
@@ -444,6 +465,28 @@ gql_reply() {
   exit 1
 }
 
+# resolve_reply: the identity answer, one field per ref from its fixture. A ref
+# with no fixture is a null field and a NOT_FOUND error, which gh reports with
+# its body on standard output and a non-zero exit.
+resolve_reply() {
+  local i fields='' errs='' f field
+  for ((i = 0; i < res_count; i++)); do
+    f="$dir/resolve.$(sanitize "${res_o[$i]}")__$(sanitize "${res_r[$i]}")__$(sanitize "${res_n[$i]}").json"
+    if [ -f "$f" ]; then
+      field=$(cat "$f")
+    else
+      field=null
+      errs="${errs:+$errs,}{\"type\":\"NOT_FOUND\",\"path\":[\"p$i\",\"repository\"],\"message\":\"Could not resolve to a Repository\"}"
+    fi
+    fields="${fields:+$fields,}\"p$i\":$field"
+  done
+  block_wait
+  if [ -n "$errs" ]; then
+    reply "HTTP/2.0 200 OK" "" "{\"data\":{$rate,$fields},\"errors\":[$errs]}" "gh: Could not resolve to a Repository" 1
+  fi
+  reply "HTTP/2.0 200 OK" "" "{\"data\":{$rate,$fields}}" "" 0
+}
+
 case "$kind" in
 viewer)
   login=$(read_or viewer.login fixture-viewer)
@@ -468,6 +511,9 @@ detail)
   body=$(nodes_reply detail)
   block_wait
   reply "HTTP/2.0 200 OK" "" "$body" "" 0
+  ;;
+resolve)
+  resolve_reply
   ;;
 threads | issue_comments | reviews | files | commits | pending)
   gql_reply "$kind.$prkey.json" "$kind.json"

@@ -116,3 +116,24 @@ func ProcessGone(pid int) bool {
 	}
 	return false
 }
+
+// RequireSandbox skips (or, with PG_DESK_SHADOW_REQUIRE_TOOLS=1, fails) when
+// the macOS sandbox cannot run here: the tool is missing, or it exists but
+// cannot nest (inside a nix build sandbox sandbox_apply fails).
+func RequireSandbox(t *testing.T) {
+	t.Helper()
+	fail := func(format string, a ...any) {
+		if os.Getenv("PG_DESK_SHADOW_REQUIRE_TOOLS") == "1" {
+			t.Fatalf(format, a...)
+		}
+		t.Skipf(format, a...)
+	}
+	if _, err := os.Stat(safety.DefaultSandboxExec); err != nil {
+		fail("%s not available here (nested sandboxes are unavailable in the nix build sandbox)", safety.DefaultSandboxExec)
+		return
+	}
+	argv := safety.Wrap(safety.DefaultSandboxExec, t.TempDir(), []string{"/usr/bin/true"})
+	if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
+		fail("sandbox-exec unusable here: %v %s", err, out)
+	}
+}
