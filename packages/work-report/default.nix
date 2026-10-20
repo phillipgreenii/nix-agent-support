@@ -37,9 +37,16 @@ mkGoApp {
 
   nativeBuildInputs = [ makeWrapper ];
 
+  # No subPackages: the builder compiles every cmd/ program, so the second
+  # binary bin/work-report-narrative (the narrative generator, docket pg2-6oop0)
+  # is installed beside bin/work-report. Verified by `nix build .#work-report`.
+  #
   # work-report execs the pg-connector binary from PATH and nothing else; the
   # wrapper supplies it at runtime, resolved by its bare $PATH name, never as a
-  # compile-time import.
+  # compile-time import. work-report-narrative is deliberately NOT wrapped: it
+  # execs only `claude`, which is the operator's own install and not a nix
+  # package of this flake, so it is resolved from the PATH the report runner
+  # passes (the runner's base environment always includes PATH).
   postInstall = ''
     wrapProgram $out/bin/work-report --prefix PATH : ${lib.makeBinPath [ pg-connector ]}
   '';

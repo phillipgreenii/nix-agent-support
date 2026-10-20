@@ -1,7 +1,6 @@
 package report
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,16 +10,9 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/store"
 )
 
-// BaselineKind is the kind name of the always-available baseline generator.
+// BaselineKind is the name of the always-available built-in baseline; the
+// rendered header states it as the generator.
 const BaselineKind = "baseline"
-
-func init() { Register(baseline{}) }
-
-// baseline is the plain chronological rendering of the queried entries
-// (INV-BASELINE-1). It depends on no external program and no option.
-type baseline struct{}
-
-func (baseline) Kind() string { return BaselineKind }
 
 const (
 	dayLayout    = "2006-01-02"
@@ -61,10 +53,6 @@ func oneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-func (baseline) Generate(_ context.Context, r Request) (Result, error) {
-	return Result{Content: Baseline(r)}, nil
-}
-
 // SortBaselineOrder sorts entries into the baseline order: by occurrence time,
 // then id. It is the order generators receive entries in.
 func SortBaselineOrder(entries []store.Entry) {
@@ -76,24 +64,28 @@ func SortBaselineOrder(entries []store.Entry) {
 	})
 }
 
-// Baseline renders r as the built-in baseline text. The report command
-// writes it to baseline.md and sends it to generators that ask for the
-// baseline input.
-func Baseline(r Request) string {
-	loc := r.Range.Before.Location()
-	rng := FormatRange(r.Range)
+// Baseline renders the entries of a range as the built-in baseline text: the
+// plain chronological rendering (INV-BASELINE-1) over the already queried and
+// narrowed entries. The report command writes it to baseline.md and sends it
+// to generators that ask for the baseline input.
+//
+// The zone dates and times render in is the zone of rng.Before
+// (rangespec.Resolve always yields bounds in the configured zone).
+func Baseline(rng rangespec.Range, narrowing Narrowing, entries []store.Entry, footer []SourceFooter) string {
+	loc := rng.Before.Location()
+	rngText := FormatRange(rng)
 
 	var b strings.Builder
 	b.WriteString("# Work report\n\n")
-	fmt.Fprintf(&b, "- Range: %s\n", rng)
+	fmt.Fprintf(&b, "- Range: %s\n", rngText)
 	fmt.Fprintf(&b, "- Generator: %s\n", BaselineKind)
-	fmt.Fprintf(&b, "- Narrowing: %s\n", FormatNarrowing(r.Narrowing))
+	fmt.Fprintf(&b, "- Narrowing: %s\n", FormatNarrowing(narrowing))
 
-	entries := append([]store.Entry(nil), r.Entries...)
+	entries = append([]store.Entry(nil), entries...)
 	SortBaselineOrder(entries)
 
 	if len(entries) == 0 {
-		fmt.Fprintf(&b, "\nNo entries for %s.\n", rng)
+		fmt.Fprintf(&b, "\nNo entries for %s.\n", rngText)
 	}
 	day := ""
 	for _, e := range entries {
@@ -113,7 +105,7 @@ func Baseline(r Request) string {
 		b.WriteString(line + "\n")
 	}
 
-	writeFooter(&b, entries, r.Footer, loc)
+	writeFooter(&b, entries, footer, loc)
 	return b.String()
 }
 

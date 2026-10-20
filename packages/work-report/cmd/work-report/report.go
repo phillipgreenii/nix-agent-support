@@ -356,11 +356,7 @@ func doReport(cmd *cobra.Command, o *reportOpts, args []string) error {
 	}
 	report.SortBaselineOrder(entries)
 	footer := buildFooter(status, entries)
-	breq := report.Request{
-		Range:     r.rng,
-		Narrowing: report.Narrowing{Labels: r.nar.Labels, Sources: r.nar.Sources, Types: r.nar.Types},
-		Entries:   entries, Footer: footer,
-	}
+	baselineText := report.Baseline(r.rng, report.Narrowing{Labels: r.nar.Labels, Sources: r.nar.Sources, Types: r.nar.Types}, entries, footer)
 
 	req := runner.Request{
 		Generator:     gen,
@@ -375,10 +371,10 @@ func doReport(cmd *cobra.Command, o *reportOpts, args []string) error {
 		OutputParent:  r.parent,
 	}
 	if gen.Builtin {
-		req.Builtin = baselineBuiltin(breq)
+		req.Builtin = baselineBuiltin(baselineText, len(entries))
 	}
 	if slices.Contains(gen.Inputs, config.BaselineName) {
-		req.Baseline = report.Baseline(breq)
+		req.Baseline = baselineText
 	}
 
 	out := runner.New(Version).Run(ctx, req)
@@ -387,7 +383,7 @@ func doReport(cmd *cobra.Command, o *reportOpts, args []string) error {
 	// baseline preset prints to stdout when its output parent is unusable. No
 	// run directory, manifest.json or latest update exists in that case.
 	if r.isBaselinePreset() && out.Record.OutcomeKind == runner.KindOutputDirUnwritable && out.RunDir == "" {
-		return r.stdoutFallback(out, report.Baseline(breq))
+		return r.stdoutFallback(out, baselineText)
 	}
 	if !out.OK() {
 		return r.failure(out)
@@ -397,12 +393,11 @@ func doReport(cmd *cobra.Command, o *reportOpts, args []string) error {
 
 // baselineBuiltin is the in-process baseline generator: it writes
 // baseline.md and returns the manifest an external generator would print.
-func baselineBuiltin(breq report.Request) runner.BuiltinFunc {
+func baselineBuiltin(text string, n int) runner.BuiltinFunc {
 	return func(_ context.Context, _ runner.Envelope, dir string) (runner.GeneratorManifest, error) {
-		if err := os.WriteFile(filepath.Join(dir, baselineFile), []byte(report.Baseline(breq)), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, baselineFile), []byte(text), 0o600); err != nil {
 			return runner.GeneratorManifest{}, err
 		}
-		n := len(breq.Entries)
 		return runner.GeneratorManifest{
 			Files:   []runner.ManifestFile{{Path: baselineFile, ContentType: "text/markdown", Title: "Work report"}},
 			Summary: fmt.Sprintf("Rendered %d %s into 1 file.", n, plural(n, "entry", "entries")),

@@ -1,10 +1,7 @@
 package report
 
 import (
-	"context"
-	"errors"
 	"flag"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,17 +34,18 @@ func golden(t *testing.T, name, got string) {
 	}
 }
 
-func gen(t *testing.T, r Request) string {
+// request is everything Baseline renders, so each test states its input as one
+// value.
+type request struct {
+	Range     rangespec.Range
+	Narrowing Narrowing
+	Entries   []store.Entry
+	Footer    []SourceFooter
+}
+
+func gen(t *testing.T, r request) string {
 	t.Helper()
-	g, ok := Lookup(BaselineKind)
-	if !ok {
-		t.Fatal("baseline is not registered")
-	}
-	res, err := g.Generate(context.Background(), r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return res.Content
+	return Baseline(r.Range, r.Narrowing, r.Entries, r.Footer)
 }
 
 func utc(day, hour, min int) time.Time {
@@ -63,7 +61,7 @@ func entries() []store.Entry {
 }
 
 func TestBaselineMultiDay(t *testing.T) {
-	got := gen(t, Request{
+	got := gen(t, request{
 		Range:   rangespec.Range{Since: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Before: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC)},
 		Entries: entries(),
 		Footer: []SourceFooter{
@@ -79,7 +77,7 @@ func TestBaselineMultiDay(t *testing.T) {
 }
 
 func TestBaselineNarrowed(t *testing.T) {
-	got := gen(t, Request{
+	got := gen(t, request{
 		Range:     rangespec.Range{Since: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Before: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC)},
 		Narrowing: Narrowing{Labels: []string{"alpha"}, Sources: []string{"backend-one"}, Types: []string{"change", "review"}},
 		Entries:   []store.Entry{entries()[0], entries()[2]},
@@ -92,7 +90,7 @@ func TestBaselineNarrowed(t *testing.T) {
 }
 
 func TestBaselineEmptyRange(t *testing.T) {
-	got := gen(t, Request{
+	got := gen(t, request{
 		Range: rangespec.Range{Since: time.Date(2026, 3, 5, 0, 0, 0, 0, time.UTC), Before: time.Date(2026, 3, 6, 0, 0, 0, 0, time.UTC)},
 	})
 	golden(t, "empty", got)
@@ -106,7 +104,7 @@ func TestBaselineEmptyRange(t *testing.T) {
 }
 
 func TestBaselineOpenStart(t *testing.T) {
-	got := gen(t, Request{Range: rangespec.Range{OpenStart: true, Before: time.Date(2026, 3, 6, 0, 0, 0, 0, time.UTC)}})
+	got := gen(t, request{Range: rangespec.Range{OpenStart: true, Before: time.Date(2026, 3, 6, 0, 0, 0, 0, time.UTC)}})
 	if !strings.Contains(got, "Range: the beginning to 2026-03-06 00:00 UTC") {
 		t.Errorf("open-ended range not stated:\n%s", got)
 	}
@@ -119,7 +117,7 @@ func TestBaselineNonUTCZone(t *testing.T) {
 		{ID: "z1", SourceID: "backend-one", Type: "change", OccurredAt: utc(1, 22, 30), Summary: "late change"},
 		{ID: "z2", SourceID: "backend-one", Type: "change", OccurredAt: utc(1, 5, 0), Summary: "early change"},
 	}
-	got := gen(t, Request{
+	got := gen(t, request{
 		Range:   rangespec.Range{Since: time.Date(2026, 3, 1, 0, 0, 0, 0, zoneA), Before: time.Date(2026, 3, 3, 0, 0, 0, 0, zoneA)},
 		Entries: es,
 		Footer:  []SourceFooter{{Source: "backend-one", LastSuccessAt: utc(1, 23, 0)}},
@@ -129,52 +127,5 @@ func TestBaselineNonUTCZone(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q:\n%s", want, got)
 		}
-	}
-}
-
-type stubGen struct {
-	kind string
-	err  error
-}
-
-func (s stubGen) Kind() string { return s.kind }
-func (s stubGen) Generate(context.Context, Request) (Result, error) {
-	if s.err != nil {
-		return Result{}, s.err
-	}
-	return Result{Content: "stub"}, nil
-}
-
-func TestRegistryLookupRegister(t *testing.T) {
-	if _, ok := Lookup("no-such-kind"); ok {
-		t.Fatal("unknown kind must not resolve")
-	}
-	Register(stubGen{kind: "registry-probe"})
-	g, ok := Lookup("registry-probe")
-	if !ok || g.Kind() != "registry-probe" {
-		t.Fatalf("Lookup after Register = %v, %v", g, ok)
-	}
-	found := false
-	for _, k := range Kinds() {
-		found = found || k == BaselineKind
-	}
-	if !found {
-		t.Errorf("Kinds() = %v lacks baseline", Kinds())
-	}
-}
-
-func TestRegisterRejectsEmptyKind(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Error("Register with an empty kind must panic")
-		}
-	}()
-	Register(stubGen{})
-}
-
-func TestNarrowingUnhonoredIsDetectable(t *testing.T) {
-	err := fmt.Errorf("%w: labels", ErrNarrowingUnhonored)
-	if !errors.Is(err, ErrNarrowingUnhonored) {
-		t.Error("a wrapped ErrNarrowingUnhonored must satisfy errors.Is")
 	}
 }
