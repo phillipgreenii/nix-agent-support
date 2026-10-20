@@ -46,6 +46,12 @@ type SynthOptions struct {
 	// IgnoredItems adds items that no figure counts: a reset-replay item and an
 	// old pg-connector origin item, each for the PR of an unexplained miss.
 	IgnoredItems bool
+	// NoDaemonSamples omits the per-row daemon sample (a run that supervised no
+	// daemon); NoDaemonCap leaves daemon_graphql_points_per_hour out of the
+	// manifest (an older scratch directory); DaemonCap sets it (0 means 1,500).
+	NoDaemonSamples bool
+	NoDaemonCap     bool
+	DaemonCap       int
 }
 
 func w(path string, lines []string) error {
@@ -84,6 +90,12 @@ func Synthesize(dir string, o SynthOptions) (Synthetic, error) {
 	m := scratch.Manifest{
 		Phase: o.Phase, CreatedAt: schema.Format(t0), Seeded: o.Seeded, BDMode: "passthrough", Queries: []string{"mine", "team"},
 		Consumer: "shadow-compare", MaxPerPoll: 50, SweepMaxAge: "8760h", ReconcileAge: "30m", Builds: map[string]string{"pg-desk": "pg-desk version 0.0.0-synth", "pg-connector": "pg-connector version 0.0.0-synth"},
+	}
+	if !o.NoDaemonCap {
+		m.DaemonGraphQLPointsPerHour = 1500
+		if o.DaemonCap > 0 {
+			m.DaemonGraphQLPointsPerHour = o.DaemonCap
+		}
 	}
 	if err := l.Save(m); err != nil {
 		return s, err
@@ -159,6 +171,9 @@ func Synthesize(dir string, o SynthOptions) (Synthetic, error) {
 		for _, it := range extra[slot] {
 			row.Hydrations++
 			row.Items = append(row.Items, schema.Item{EntityID: it.id, Kinds: it.kinds, Seq: int64(n), Origin: it.origin, At: schema.Format(it.t), Fields: it.fields, CIRollup: it.ci, Replay: it.replay, UpdatedAt: schema.Format(it.t.Add(-90 * time.Second))})
+		}
+		if !o.NoDaemonSamples {
+			row.Daemon = &schema.DaemonSample{State: schema.DaemonHealthy, StatusExit: 0, Alive: true}
 		}
 		if slot.Equal(at(10, 15, 0)) {
 			row.Status = schema.StatusSkippedBudget

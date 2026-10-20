@@ -206,7 +206,16 @@ func Compute(in Input, p Params) PhaseReport {
 		dq.Statements = append(dq.Statements, "The router events copy is EMPTY: no LIVE-DETECTED events and router uptime cannot be judged.")
 	}
 
-	// Uptime: slots between the first and the last tick.
+	// Uptime: slots between the first and the last tick. upSlots counts the grid
+	// slots whose tick row carries a healthy or degraded daemon sample (the
+	// cutover uptime criterion); a slot with no sample is not up.
+	upSlots := 0
+	daemonUp := map[time.Time]bool{}
+	for _, r := range in.Rows {
+		if r.Kind == schema.KindTick && daemonServing(r.Daemon) {
+			daemonUp[parseTS(r.Slot)] = true
+		}
+	}
 	if len(ticks) > 0 {
 		var slots []time.Time
 		for s := parseTS(ticks[0].Slot); !s.IsZero() && !s.After(parseTS(ticks[len(ticks)-1].Slot)); s = s.Add(p.SlotPeriod) {
@@ -232,6 +241,9 @@ func Compute(in Input, p Params) PhaseReport {
 			}
 			if doneAt[s] {
 				okEligible++
+			}
+			if daemonUp[s] {
+				upSlots++
 			}
 			if !excluded {
 				dq.SlotsEligible++
@@ -590,6 +602,14 @@ func Compute(in Input, p Params) PhaseReport {
 	for _, c := range pr.Stop.Criteria {
 		pr.Stop.Complete = pr.Stop.Complete && c.Met
 	}
+
+	// Cutover criteria and the budget recommendation.
+	pr.Cutover = evalCutover(cutoverInput{
+		liveInWindow: pr.Live.InWindow, unexplained: pr.Misses.Unexplained,
+		shadowDelay: pr.Delay.ShadowFromUpdate, liveDelay: pr.Delay.LiveFromUpdate,
+		hours: pr.Cost.Hours, cap: m.DaemonGraphQLPointsPerHour,
+		upSlots: upSlots, totalSlots: dq.SlotsTotal,
+	})
 	return pr
 }
 

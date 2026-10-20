@@ -66,6 +66,10 @@ func Combine(phases []PhaseReport) *Combined {
 		hh = append(hh, p.samp.hydrationsHour...)
 		ch = append(ch, p.samp.costHour...)
 		dl = append(dl, p.samp.dVsLive...)
+		// The per-phase cutover verdicts are carried through unchanged.
+		for _, cr := range p.Cutover.Criteria {
+			c.Cutover = append(c.Cutover, CombinedCutover{Phase: p.Phase, Name: cr.Name, Met: cr.Met})
+		}
 	}
 	c.TickDurationS, c.HydrationsPerHour, c.CostPerHour, c.VsLiveEnqueue = MakeDist(td), MakeDist(hh), MakeDist(ch), MakeDist(dl)
 	return c
@@ -193,6 +197,7 @@ func Markdown(rep Report) string {
 			}
 		}
 		w("\n")
+		writeCutover(&b, p)
 	}
 	if c := rep.Combined; c != nil {
 		w("## Combined (%s)\n\n- LIVE-DETECTED in window %d, matched %d, missed %d (of which flagged later %d), unexplained %d; misses by class %v.\n- SWEEP-CAUGHT headline %d; shadow-only %d.\n- Tick duration: %s; hydrations per hour: %s; points per hour: %s; shadow minus live enqueue: %s (slot-length bound %.0f s).\n- CI-driven categorization changes: daemon side %d (%d also seen by the live side); ", strings.Join(c.Phases, " + "), c.LiveDetected, c.Matched, c.Missed, c.LateDetected, c.Unexplained, c.ByClass, c.SweepHeadline, c.ShadowOnly, dist(c.TickDurationS, "s"), dist(c.HydrationsPerHour, ""), dist(c.CostPerHour, ""), dist(c.VsLiveEnqueue, "s"), c.SlotBoundS, c.CIDaemonChanges, c.CIDaemonSeenByLive)
@@ -201,6 +206,46 @@ func Markdown(rep Report) string {
 		} else {
 			w("live side not observable in at least one phase.\n")
 		}
+		w("\n## Combined cutover criteria\n\n")
+		for _, e := range c.Cutover {
+			w("- %s: %s: %s\n", e.Phase, metWord(e.Met), e.Name)
+		}
 	}
 	return b.String()
+}
+
+func metWord(met bool) string {
+	if met {
+		return "MET"
+	}
+	return "NOT MET"
+}
+
+// writeCutover renders one phase's cutover section: one `- MET|NOT MET: <name>:
+// <have>` line per criterion in the fixed order (the definition and the evidence
+// follow as indented lines), the budget recommendation with its method, and,
+// only when a criterion is unmet, the follow-ups.
+func writeCutover(b *strings.Builder, p PhaseReport) {
+	w := func(f string, a ...any) { fmt.Fprintf(b, f, a...) }
+	w("## Cutover criteria\n\nPhase %s.\n\n", p.Phase)
+	unmet := 0
+	for _, c := range p.Cutover.Criteria {
+		w("- %s: %s: %s\n", metWord(c.Met), c.Name, c.Have)
+		w("  - Definition: %s.\n  - Evidence: %s.\n", c.Need, c.Evidence)
+		if !c.Met {
+			unmet++
+		}
+	}
+	r := p.Cutover.Recommendation
+	w("\n### Budget recommendation\n\nRecommendation: %s\n\n%s\n\n", r.Verdict, r.Method)
+	if unmet > 0 {
+		w("### Follow-ups\n\n")
+		for _, f := range p.Cutover.FollowUps {
+			w("- %s\n", f.Title)
+			for _, line := range strings.Split(f.Body, "\n") {
+				w("  - %s\n", line)
+			}
+		}
+		w("\n")
+	}
 }

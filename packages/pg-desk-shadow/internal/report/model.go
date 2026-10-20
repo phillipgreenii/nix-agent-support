@@ -335,6 +335,7 @@ type PhaseReport struct {
 	SkippedBudgetTicks int         `json:"skipped_budget_ticks"`
 	HeadSHA            *HeadSHA    `json:"head_sha,omitempty"`
 	Stop               Stop        `json:"stop"`
+	Cutover            Cutover     `json:"cutover"`
 
 	samp samples
 }
@@ -376,4 +377,13 @@ type Combined struct {
 	CILiveObservable   bool `json:"ci_live_observable"`
 	CILiveChanges      int  `json:"ci_live_changes"`
 	CILiveSeenByDaemon int  `json:"ci_live_changes_also_seen_by_daemon"`
+	// Cutover carries each phase's four cutover verdicts through unchanged.
+	Cutover []CombinedCutover `json:"cutover"`
+}
+
+// CombinedCutover is one phase's verdict on one cutover criterion.
+type CombinedCutover struct {
+	Phase string `json:"phase"`
+	Name  string `json:"name"`
+	Met   bool   `json:"met"`
 }
