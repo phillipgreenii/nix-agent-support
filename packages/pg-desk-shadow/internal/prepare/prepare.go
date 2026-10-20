@@ -48,6 +48,13 @@ type Options struct {
 	// 3 (the team listing sits close to the connector's 25s backend deadline
 	// and a loaded machine tips it over).
 	ListAttempts int
+	// DaemonPointsPerHour is the GraphQL points-per-hour cap the shadow daemon
+	// runs under (0 means scratch.DefaultDaemonPointsPerHour, 1500).
+	DaemonPointsPerHour int
+	// DaemonQueriesFile names a JSON object mapping each watched query name to
+	// its native-syntax expression (a string or an array of strings). Required:
+	// the expressions go only into the rendered daemon config.
+	DaemonQueriesFile string
 }
 
 // Defaults fills unset options from the environment.
@@ -128,7 +135,51 @@ func (o *Options) Defaults() error {
 	default:
 		return fmt.Errorf("--bd-mode must be passthrough or hermetic, got %q", o.BDMode)
 	}
+	if o.DaemonPointsPerHour == 0 {
+		o.DaemonPointsPerHour = scratch.DefaultDaemonPointsPerHour
+	}
+	if err := scratch.ValidateDaemonPoints(o.DaemonPointsPerHour); err != nil {
+		return fmt.Errorf("--daemon-points-per-hour: %w", err)
+	}
 	return nil
+}
+
+// daemonInputs is everything the daemon needs that can be checked before any
+// file is written: the resolved binary and the rendered configuration.
+type daemonInputs struct {
+	tool   scratch.Tool
+	config []byte
+}
+
+// resolveDaemon checks the daemon prerequisites without touching the scratch
+// directory: the pg-connector-github binary is found, the queries file holds an
+// expression for every watched query, and the socket path fits the platform
+// limit. Errors name a query, never its expression.
+func resolveDaemon(o Options, l scratch.Layout) (daemonInputs, error) {
+	var d daemonInputs
+	t, err := scratch.Resolve(scratch.DaemonBinary, o.LookPath)
+	if err != nil {
+		return d, fmt.Errorf("prepare: %s is required (the shadow run starts it as its own child): %w", scratch.DaemonBinary, err)
+	}
+	d.tool = t
+	if o.DaemonQueriesFile == "" {
+		return d, fmt.Errorf("prepare: --daemon-queries-file is required: a JSON object mapping each watched query name (%s) to its native-syntax expression", strings.Join(o.Queries, ", "))
+	}
+	raw, err := os.ReadFile(o.DaemonQueriesFile)
+	if err != nil {
+		return d, fmt.Errorf("prepare: read the daemon queries file: %w", err)
+	}
+	q, err := scratch.ParseDaemonQueries(raw)
+	if err != nil {
+		return d, fmt.Errorf("prepare: %w", err)
+	}
+	if d.config, err = l.RenderDaemonConfig(o.Queries, q, o.DaemonPointsPerHour); err != nil {
+		return d, fmt.Errorf("prepare: %w", err)
+	}
+	if err := l.ValidateSocketPath(); err != nil {
+		return d, fmt.Errorf("prepare: %w", err)
+	}
+	return d, nil
 }
 
 func (o Options) logf(f string, a ...any) { _, _ = fmt.Fprintf(o.Log, f+"\n", a...) }
@@ -155,6 +206,10 @@ func Prepare(ctx context.Context, o Options) (scratch.Layout, scratch.Manifest, 
 	}
 	if root == safety.Resolve(o.Home) {
 		return l, m, fmt.Errorf("prepare: the scratch directory must not be the home directory")
+	}
+	daemon, err := resolveDaemon(o, l)
+	if err != nil {
+		return l, m, err
 	}
 	if err := l.MkdirAll(); err != nil {
 		return l, m, err
@@ -191,6 +246,9 @@ func Prepare(ctx context.Context, o Options) (scratch.Layout, scratch.Manifest, 
 	if err := os.WriteFile(l.PRConfig(), prYAML, 0o600); err != nil {
 		return l, m, err
 	}
+	if err := os.WriteFile(l.DaemonConfig(), daemon.config, 0o600); err != nil {
+		return l, m, err
+	}
 
 	// Tools.
 	var tools []scratch.Tool
@@ -207,6 +265,8 @@ func Prepare(ctx context.Context, o Options) (scratch.Layout, scratch.Manifest, 
 		tools = append(tools, t)
 		reals[name] = t.Path
 	}
+	tools = append(tools, daemon.tool)
+	reals[scratch.DaemonBinary] = daemon.tool.Path
 	ghReal, err := scratch.Resolve("gh", o.LookPath)
 	if err != nil {
 		return l, m, err
@@ -234,6 +294,7 @@ func Prepare(ctx context.Context, o Options) (scratch.Layout, scratch.Manifest, 
 		Queries: o.Queries, Consumer: "shadow-compare", MaxPerPoll: info.MaxPerPoll, SweepMaxAge: o.SweepMaxAge, ReconcileAge: "30m",
 		LiveStore: o.LiveStore, Home: o.Home, SandboxExec: o.SandboxExec, Tools: map[string]string{}, Reals: reals,
 		Builds: map[string]string{}, Scrub: []string{info.SelfLogin, info.Remote}, Live: o.Live,
+		DaemonGraphQLPointsPerHour: o.DaemonPointsPerHour,
 	}
 	if o.NoSeed {
 		m.SweepMaxAge = "default"
@@ -244,6 +305,7 @@ func Prepare(ctx context.Context, o Options) (scratch.Layout, scratch.Manifest, 
 	m.Tools["gh"], m.Tools["bd"] = filepath.Join(l.BinDir(), "gh"), filepath.Join(l.BinDir(), "bd")
 	m.Builds["pg-desk"] = scratch.Version(ctx, filepath.Join(l.BinDir(), "pg-desk"))
 	m.Builds["pg-connector"] = scratch.Version(ctx, filepath.Join(l.BinDir(), "pg-connector"))
+	m.Builds[scratch.DaemonBinary] = scratch.Version(ctx, filepath.Join(l.BinDir(), scratch.DaemonBinary))
 	if live, err := o.LookPath("pg-desk"); err == nil {
 		m.Builds["live-pg-desk"] = scratch.Version(ctx, live)
 	}

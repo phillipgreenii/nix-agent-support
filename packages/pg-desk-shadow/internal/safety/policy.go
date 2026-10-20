@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -32,7 +33,32 @@ type Policy struct {
 	// LiveRoots are directories the run must never use as state: the live
 	// state home and everything under it.
 	LiveRoots []string
+
+	// Daemon enables the pg-connector-github child's variables: ChildEnv emits
+	// the five PG_CONNECTOR_GITHUB_* values below and Verify checks them. With
+	// it unset (every policy that predates the daemon) none of them may appear.
+	Daemon bool
+	// DaemonSocket, DaemonStateDir and DaemonConfig are scratch paths for
+	// PG_CONNECTOR_GITHUB_SOCKET, _STATE_DIR and _CONFIG.
+	DaemonSocket, DaemonStateDir, DaemonConfig string
+	// DaemonGH is the scratch gh shim PG_CONNECTOR_GITHUB_GH must resolve to.
+	DaemonGH string
+	// DaemonPointsPerHour is PG_CONNECTOR_GITHUB_GRAPHQL_POINTS_PER_HOUR.
+	DaemonPointsPerHour int
 }
+
+// Names of the five daemon variables (the daemon's config.Env* constants).
+const (
+	EnvDaemonSocket        = "PG_CONNECTOR_GITHUB_SOCKET"
+	EnvDaemonStateDir      = "PG_CONNECTOR_GITHUB_STATE_DIR"
+	EnvDaemonConfig        = "PG_CONNECTOR_GITHUB_CONFIG"
+	EnvDaemonGH            = "PG_CONNECTOR_GITHUB_GH"
+	EnvDaemonPointsPerHour = "PG_CONNECTOR_GITHUB_GRAPHQL_POINTS_PER_HOUR"
+)
+
+// daemonVars lists the five daemon variables, which are on the allowlist only
+// when the policy has the daemon enabled.
+var daemonVars = []string{EnvDaemonSocket, EnvDaemonStateDir, EnvDaemonConfig, EnvDaemonGH, EnvDaemonPointsPerHour}
 
 // allowed is the environment allowlist (env -i plus these).
 var allowed = map[string]bool{
@@ -61,6 +87,16 @@ func ChildEnv(p Policy, systemPath string) []string {
 	if p.BeadsDir != "" {
 		env = append(env, "BEADS_DIR="+p.BeadsDir, "PG_CONNECTOR_ISSUE_BEADS_DIR="+p.BeadsDir)
 	}
+	if p.Daemon {
+		env = append(
+			env,
+			EnvDaemonSocket+"="+p.DaemonSocket,
+			EnvDaemonStateDir+"="+p.DaemonStateDir,
+			EnvDaemonConfig+"="+p.DaemonConfig,
+			EnvDaemonGH+"="+p.DaemonGH,
+			EnvDaemonPointsPerHour+"="+strconv.Itoa(p.DaemonPointsPerHour),
+		)
+	}
 	return env
 }
 
@@ -81,6 +117,9 @@ func Verify(env []string, p Policy) error {
 	}
 	sort.Strings(names)
 	for _, k := range names {
+		if p.Daemon && isDaemonVar(k) {
+			continue
+		}
 		if !allowed[k] {
 			return fmt.Errorf("safety: environment variable %s is not on the allowlist", k)
 		}
@@ -117,6 +156,11 @@ func Verify(env []string, p Policy) error {
 	if err := verifyPRConfigBeadsDirs(p); err != nil {
 		return err
 	}
+	if p.Daemon {
+		if err := verifyDaemon(m, p); err != nil {
+			return err
+		}
+	}
 	if m["BEADS_DOLT_AUTO_START"] != "0" {
 		return fmt.Errorf("safety: BEADS_DOLT_AUTO_START must be 0 (got %q): no dolt server may be started", m["BEADS_DOLT_AUTO_START"])
 	}
@@ -130,6 +174,56 @@ func Verify(env []string, p Policy) error {
 	}
 	if m["HOME"] != p.Home {
 		return fmt.Errorf("safety: HOME=%q differs from %q", m["HOME"], p.Home)
+	}
+	return nil
+}
+
+func isDaemonVar(k string) bool {
+	for _, d := range daemonVars {
+		if k == d {
+			return true
+		}
+	}
+	return false
+}
+
+// verifyDaemon checks the five daemon variables: each is set, the three paths
+// and the gh shim equal the policy and sit under the scratch directory, the gh
+// path resolves to the scratch gh shim (never the real gh) and the cap equals
+// the policy's.
+func verifyDaemon(m map[string]string, p Policy) error {
+	for _, c := range []struct{ name, want string }{
+		{EnvDaemonSocket, p.DaemonSocket},
+		{EnvDaemonStateDir, p.DaemonStateDir},
+		{EnvDaemonConfig, p.DaemonConfig},
+	} {
+		got := m[c.name]
+		if got == "" {
+			return fmt.Errorf("safety: %s is unset", c.name)
+		}
+		if !filepath.IsAbs(got) || !Under(got, p.Scratch) {
+			return fmt.Errorf("safety: %s=%s is not under the scratch directory %s", c.name, got, p.Scratch)
+		}
+		if resolve(got) != resolve(c.want) {
+			return fmt.Errorf("safety: %s=%s differs from the configured scratch value %s", c.name, got, c.want)
+		}
+	}
+	gh := m[EnvDaemonGH]
+	if gh == "" {
+		return fmt.Errorf("safety: %s is unset", EnvDaemonGH)
+	}
+	shim := filepath.Join(p.BinDir, "gh")
+	// The final component is not resolved: a path named gh inside the scratch
+	// bin directory IS the scratch shim, wherever it points.
+	if !filepath.IsAbs(gh) || filepath.Base(gh) != "gh" || resolve(filepath.Dir(gh)) != resolve(filepath.Dir(shim)) || filepath.Dir(p.DaemonGH) != filepath.Dir(shim) {
+		return fmt.Errorf("safety: %s=%s is not the scratch gh shim %s", EnvDaemonGH, gh, shim)
+	}
+	pts := m[EnvDaemonPointsPerHour]
+	if pts == "" {
+		return fmt.Errorf("safety: %s is unset", EnvDaemonPointsPerHour)
+	}
+	if pts != strconv.Itoa(p.DaemonPointsPerHour) {
+		return fmt.Errorf("safety: %s=%s differs from the configured cap %d", EnvDaemonPointsPerHour, pts, p.DaemonPointsPerHour)
 	}
 	return nil
 }

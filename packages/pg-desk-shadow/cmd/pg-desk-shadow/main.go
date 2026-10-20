@@ -96,6 +96,8 @@ func cmdPrepare(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.DeskConfig, "pg-desk-config", "", "live pg-desk config")
 	fs.StringVar(&o.PRConfig, "pg-pr-config", "", "live pg-pr config")
 	fs.IntVar(&o.ListAttempts, "list-attempts", 6, "tries per warm-up listing that exits 3 (the team listing sits near the connector's 25s backend deadline)")
+	fs.IntVar(&o.DaemonPointsPerHour, "daemon-points-per-hour", scratch.DefaultDaemonPointsPerHour, "GraphQL points per hour the shadow daemon (pg-connector-github) may spend, 1 to 100000; the operator MAY raise the 1,500 default")
+	fs.StringVar(&o.DaemonQueriesFile, "daemon-queries-file", "", "JSON object mapping each watched query name to its native-syntax expression (a string or an array of strings); required, rendered only into the scratch daemon config")
 	var toolDirs string
 	fs.StringVar(&toolDirs, "tool-dir", "", "comma-separated extra directories searched for tools after PATH")
 	if err := fs.Parse(args); err != nil {
@@ -103,6 +105,10 @@ func cmdPrepare(args []string, stdout, stderr io.Writer) int {
 	}
 	if o.Root == "" {
 		_, _ = fmt.Fprintln(stderr, "pg-desk-shadow prepare: --scratch is required")
+		return exitRefuse
+	}
+	if err := scratch.ValidateDaemonPoints(o.DaemonPointsPerHour); err != nil {
+		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow prepare: --daemon-points-per-hour: %v\n", err)
 		return exitRefuse
 	}
 	o.Queries = strings.Split(queries, ",")

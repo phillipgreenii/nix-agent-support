@@ -259,3 +259,123 @@ func TestSelfTestRefusesAnEnforcementlessSandbox(t *testing.T) {
 		t.Fatalf("a non-enforcing sandbox must be refused, got %v", err)
 	}
 }
+
+// daemonPolicy is policy(t) with the daemon enabled: every path under the
+// scratch directory and the gh shim in the scratch bin.
+func daemonPolicy(t *testing.T) Policy {
+	t.Helper()
+	p := policy(t)
+	p.Daemon = true
+	p.DaemonSocket = filepath.Join(p.RuntimeDir, "pcg.sock")
+	p.DaemonStateDir = filepath.Join(p.StateHome, "pg-connector-github")
+	p.DaemonConfig = filepath.Join(p.Scratch, "config", "pg-connector-github.json")
+	p.DaemonGH = filepath.Join(p.BinDir, "gh")
+	p.DaemonPointsPerHour = 1500
+	if err := os.WriteFile(p.DaemonGH, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestDaemonEnvironmentIsEmittedAndAccepted(t *testing.T) {
+	p := daemonPolicy(t)
+	env := ChildEnv(p, "/usr/bin:/bin")
+	have := map[string]string{}
+	for _, kv := range env {
+		if k, v, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "PG_CONNECTOR_GITHUB_") {
+			have[k] = v
+		}
+	}
+	want := map[string]string{
+		"PG_CONNECTOR_GITHUB_SOCKET": p.DaemonSocket, "PG_CONNECTOR_GITHUB_STATE_DIR": p.DaemonStateDir,
+		"PG_CONNECTOR_GITHUB_CONFIG": p.DaemonConfig, "PG_CONNECTOR_GITHUB_GH": p.DaemonGH,
+		"PG_CONNECTOR_GITHUB_GRAPHQL_POINTS_PER_HOUR": "1500",
+	}
+	if len(have) != len(want) {
+		t.Fatalf("daemon variables = %v, want exactly %v", have, want)
+	}
+	for k, v := range want {
+		if have[k] != v {
+			t.Errorf("%s = %q, want %q", k, have[k], v)
+		}
+	}
+	if err := Verify(env, p); err != nil {
+		t.Fatalf("Verify refused the policy's own environment: %v", err)
+	}
+	p.DaemonPointsPerHour = 4000
+	if err := Verify(ChildEnv(p, "/usr/bin:/bin"), p); err != nil {
+		t.Fatalf("a raised cap: %v", err)
+	}
+}
+
+func TestVerifyRefusesAnUnsetDaemonVariable(t *testing.T) {
+	p := daemonPolicy(t)
+	base := ChildEnv(p, "/usr/bin:/bin")
+	for _, k := range daemonVars {
+		err := Verify(set(append([]string(nil), base...), k, "\x00unset"), p)
+		if err == nil || !strings.Contains(err.Error(), k) {
+			t.Errorf("%s unset: err = %v", k, err)
+		}
+	}
+}
+
+func TestVerifyRefusesADaemonPathOutsideScratch(t *testing.T) {
+	p := daemonPolicy(t)
+	base := ChildEnv(p, "/usr/bin:/bin")
+	other := Resolve(t.TempDir())
+	for _, k := range []string{EnvDaemonSocket, EnvDaemonStateDir, EnvDaemonConfig} {
+		err := Verify(set(append([]string(nil), base...), k, filepath.Join(other, "x")), p)
+		if err == nil || !strings.Contains(err.Error(), k) || !strings.Contains(err.Error(), "not under the scratch directory") {
+			t.Errorf("%s outside scratch: err = %v", k, err)
+		}
+	}
+	err := Verify(set(append([]string(nil), base...), EnvDaemonSocket, "pcg.sock"), p)
+	if err == nil {
+		t.Error("a relative socket path was accepted")
+	}
+}
+
+func TestVerifyRefusesADaemonGHThatIsNotTheScratchShim(t *testing.T) {
+	p := daemonPolicy(t)
+	base := ChildEnv(p, "/usr/bin:/bin")
+	realGH := filepath.Join(Resolve(t.TempDir()), "gh")
+	for name, v := range map[string]string{
+		"real gh":              realGH,
+		"bare name":            "gh",
+		"another scratch bin":  filepath.Join(p.Scratch, "other", "gh"),
+		"the shim's directory": p.BinDir,
+	} {
+		err := Verify(set(append([]string(nil), base...), EnvDaemonGH, v), p)
+		if err == nil || !strings.Contains(err.Error(), "scratch gh shim") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+func TestVerifyRefusesAnUnlistedDaemonVariable(t *testing.T) {
+	for name, p := range map[string]Policy{"daemon enabled": daemonPolicy(t), "daemon disabled": policy(t)} {
+		base := ChildEnv(p, "/usr/bin:/bin")
+		for _, k := range []string{"PG_CONNECTOR_GITHUB_HOST", "PG_CONNECTOR_GITHUB_TOKEN", "PG_CONNECTOR_GITHUB_SOCKET2"} {
+			err := Verify(append(append([]string(nil), base...), k+"=x"), p)
+			if err == nil || !strings.Contains(err.Error(), k) {
+				t.Errorf("%s: %s accepted: %v", name, k, err)
+			}
+		}
+	}
+	// With the daemon off, even a listed variable is refused.
+	p := policy(t)
+	err := Verify(append(ChildEnv(p, "/usr/bin:/bin"), "PG_CONNECTOR_GITHUB_SOCKET=/x"), p)
+	if err == nil {
+		t.Error("a daemon variable was accepted with the daemon disabled")
+	}
+}
+
+func TestVerifyRefusesAWrongDaemonCap(t *testing.T) {
+	p := daemonPolicy(t)
+	base := ChildEnv(p, "/usr/bin:/bin")
+	for _, v := range []string{"4000", "abc", "0"} {
+		if err := Verify(set(append([]string(nil), base...), EnvDaemonPointsPerHour, v), p); err == nil {
+			t.Errorf("cap %q accepted", v)
+		}
+	}
+}

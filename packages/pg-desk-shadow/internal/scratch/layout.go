@@ -41,10 +41,11 @@ func (l Layout) HMACKey() string         { return l.j("hmac.key") }
 func (l Layout) Manifest() string        { return l.j("run.json") }
 func (l Layout) SeedFile() string        { return l.j("seed.json") }
 
-// ConnectorLog is the scratch pg-connector-pr-github event log (the backend
-// writes it under $XDG_STATE_HOME).
+// ConnectorLog is the scratch daemon's own event log (pg-connector-github
+// writes it under its state directory). LiveSources.ConnectorEvents is NOT
+// derived from it: it keeps naming the live old pr-github log until Phase 5.
 func (l Layout) ConnectorLog() string {
-	return l.j("state", "pg-connector-pr-github", "events.jsonl")
+	return filepath.Join(l.DaemonStateDir(), "events.jsonl")
 }
 
 // Manifest records how the scratch directory was prepared.
@@ -74,6 +75,11 @@ type Manifest struct {
 	Scrub []string `json:"scrub"`
 	// Live source paths.
 	Live LiveSources `json:"live"`
+	// DaemonGraphQLPointsPerHour is the GraphQL points-per-hour cap the shadow
+	// daemon runs under (default 1500, raised by a prepare flag). 0 or absent
+	// means unknown: the report says "cap unknown" and the kill criterion
+	// assumes the 1,500 default.
+	DaemonGraphQLPointsPerHour int `json:"daemon_graphql_points_per_hour,omitempty"`
 }
 
 // LiveSources names the live logs the collector tails and the live connector
@@ -91,7 +97,7 @@ const ManifestSchema = "pg-desk-shadow.run/v1"
 // Policy derives the safety policy for this scratch directory.
 func (l Layout) Policy(m Manifest) safety.Policy {
 	root := safety.Resolve(l.Root)
-	return safety.Policy{
+	p := safety.Policy{
 		Scratch:    root,
 		StateHome:  l.StateHome(),
 		RuntimeDir: l.RuntimeDir(),
@@ -103,6 +109,15 @@ func (l Layout) Policy(m Manifest) safety.Policy {
 		Home:       m.Home,
 		LiveRoots:  LiveRoots(m.Home),
 	}
+	if m.DaemonGraphQLPointsPerHour > 0 {
+		p.Daemon = true
+		p.DaemonSocket = l.DaemonSocket()
+		p.DaemonStateDir = l.DaemonStateDir()
+		p.DaemonConfig = l.DaemonConfig()
+		p.DaemonGH = l.DaemonGH()
+		p.DaemonPointsPerHour = m.DaemonGraphQLPointsPerHour
+	}
+	return p
 }
 
 // LiveRoots are the state directories the run must never use.
@@ -146,7 +161,7 @@ func (m Manifest) T0() time.Time {
 func (l Layout) MkdirAll() error {
 	for _, d := range []string{
 		l.Root, l.StateHome(), filepath.Dir(l.StoreDB()), l.TmpDir(), l.BinDir(), l.WorkDir(), l.ConfigDir(),
-		l.LogsDir(), l.CollectorDir(), l.LiveDir(), l.ReportsDir(), filepath.Dir(l.ConnectorLog()),
+		l.LogsDir(), l.CollectorDir(), l.LiveDir(), l.ReportsDir(), l.DaemonStateDir(), l.j("state", "pg-connector-pr-github"),
 	} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return err
