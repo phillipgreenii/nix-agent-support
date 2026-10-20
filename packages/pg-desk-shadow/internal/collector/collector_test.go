@@ -31,6 +31,7 @@ func (c *clock) sleep(_ context.Context, until time.Time) error {
 // clientCall is one request the collector sent to the (fake) client.
 type clientCall struct {
 	instance, op, query string
+	consumer            string
 	reset               bool
 	nextSeq             int64
 }
@@ -58,15 +59,16 @@ func (f *fakeExec) RunStdin(_ context.Context, _ time.Duration, stdin string, _ 
 	var req struct {
 		Op   string `json:"op"`
 		Args struct {
-			Query   string `json:"query"`
-			Reset   bool   `json:"reset"`
-			NextSeq int64  `json:"next_seq"`
+			Consumer string `json:"consumer"`
+			Query    string `json:"query"`
+			Reset    bool   `json:"reset"`
+			NextSeq  int64  `json:"next_seq"`
 		} `json:"args"`
 	}
 	if err := json.Unmarshal([]byte(stdin), &req); err != nil {
 		return runner.Result{}, err
 	}
-	c := clientCall{instance: argv[len(argv)-1], op: req.Op, query: req.Args.Query, reset: req.Args.Reset, nextSeq: req.Args.NextSeq}
+	c := clientCall{instance: argv[len(argv)-1], op: req.Op, query: req.Args.Query, consumer: req.Args.Consumer, reset: req.Args.Reset, nextSeq: req.Args.NextSeq}
 	f.calls = append(f.calls, c)
 	f.argv = append(f.argv, argv)
 	if c.op == "changes" && c.instance == "pr" && c.query == f.firstQuery {
@@ -445,7 +447,7 @@ func TestAPollWithNoRowsStillAcknowledgesItsNextSeq(t *testing.T) {
 		t.Fatalf("items = %+v", r.Items)
 	}
 	log := strings.Join(s.log(), "\n")
-	for _, want := range []string{`pr {"args":{"consumer":"shadow-compare","next_seq":11,"query":"mine"},"op":"changes_ack"}`, `ci {"args":{"consumer":"shadow-compare","next_seq":12,"query":"mine"},"op":"changes_ack"}`} {
+	for _, want := range []string{`pr {"args":{"consumer":"shadow-compare","next_seq":11,"query":"mine"},"op":"changes_ack"}`, `ci {"args":{"consumer":"shadow-compare-ci","next_seq":12,"query":"mine"},"op":"changes_ack"}`} {
 		if !strings.Contains(log, want) {
 			t.Errorf("missing ack %s in:\n%s", want, log)
 		}
@@ -615,6 +617,17 @@ func TestEveryCallIsTheDaemonClientAndNothingElse(t *testing.T) {
 		}
 		if strings.Contains(strings.Join(a, " "), "pg-desk") {
 			t.Errorf("the collector must not run pg-desk: %v", a)
+		}
+	}
+	// The daemon refuses one consumer on both feeds of a query, so the ci
+	// instance is polled and acknowledged as its own consumer.
+	for _, call := range e.ex.calls {
+		want := "shadow-compare"
+		if call.instance == "ci" {
+			want = "shadow-compare-ci"
+		}
+		if call.consumer != want {
+			t.Errorf("%s %s used consumer %q, want %q", call.instance, call.op, call.consumer, want)
 		}
 	}
 	if got, want := e.ex.polls(), 2*2*2; got != want {

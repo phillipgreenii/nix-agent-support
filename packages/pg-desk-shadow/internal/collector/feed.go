@@ -17,7 +17,22 @@ const (
 
 	// statusSucceeded is the feed's own word for a source it consulted.
 	statusSucceeded = "succeeded"
+
+	// ciConsumerSuffix names the ci instance's consumer: the daemon refuses to
+	// create the key (C, ci, Q) while (C, pr, Q) exists (one consumer acting on
+	// both feeds would act twice on one CI event), so the two instances are
+	// polled as two consumers of the same query.
+	ciConsumerSuffix = "-ci"
 )
+
+// consumerFor is the change-feed consumer the collector uses on an instance:
+// the manifest's consumer on pr, that consumer plus ciConsumerSuffix on ci.
+func (c *Collector) consumerFor(instance string) string {
+	if instance == instanceCI {
+		return c.cfg.Consumer + ciConsumerSuffix
+	}
+	return c.cfg.Consumer
+}
 
 // feedPoll is the outcome of polling one watched query on one instance.
 type feedPoll struct {
@@ -72,7 +87,7 @@ func (c *Collector) call(ctx context.Context, instance, op string, args map[stri
 
 // ask runs one changes request and decodes the answer.
 func (c *Collector) ask(ctx context.Context, instance, query string, reset bool, p *feedPoll) (feedResult, *answerError, error) {
-	args := map[string]any{"consumer": c.cfg.Consumer, "query": query}
+	args := map[string]any{"consumer": c.consumerFor(instance), "query": query}
 	if reset {
 		args["reset"] = true
 	}
@@ -172,7 +187,7 @@ func (c *Collector) ackFeed(ctx context.Context, polls []*feedPoll) (denied int,
 		if p.failed || !p.canAck {
 			continue
 		}
-		res, rerr := c.call(ctx, p.instance, "changes_ack", map[string]any{"consumer": c.cfg.Consumer, "query": p.query, "next_seq": p.ackSeq})
+		res, rerr := c.call(ctx, p.instance, "changes_ack", map[string]any{"consumer": c.consumerFor(p.instance), "query": p.query, "next_seq": p.ackSeq})
 		if errors.Is(rerr, runner.ErrSafety) {
 			return denied, rerr
 		}
