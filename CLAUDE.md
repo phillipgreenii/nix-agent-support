@@ -465,6 +465,15 @@ allowlist longer than the rule. Everywhere else rules 1-3 are convention, not a 
 
 ---
 
+## Go Daemons
+
+The workspace-wide convention for Go daemons (the opt-in pprof endpoint standard) lives in
+`docs/go-daemons.md` in `phillipg-nix-repo-base`. Read it before adding or changing a Go daemon in
+this repo. Its operator runbook is `docs/go-daemon-profiling-runbook.md` in the same repo, and the
+decision record is `docs/adr/0034-opt-in-pprof-endpoint-for-go-daemons.md` there.
+
+---
+
 ## Markdown Authoring Conventions
 
 Full contract (the prettier-safe backtick-wrapping convention) moved to the
