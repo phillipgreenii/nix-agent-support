@@ -127,8 +127,9 @@ func caffeinateWatch(argv []string) (watch int, flags []string, ok bool) {
 //     whose --state-dir equals this keeper's, adopt the newest valid one
 //     (alive, parameters equal, with a caffeinate partner) and stop the
 //     others. A process with a different state_dir is never touched.
-//  3. A pair that differs from the desired state is replaced make-before-break
-//     by the next Reconcile.
+//  3. A pair that differs from the desired state, including one whose anchor
+//     parameters differ (adopted as stale by the scan), is replaced
+//     make-before-break by the next Reconcile.
 //
 // Reconcile calls Adopt itself on its first run, so calling it earlier is only
 // needed to read its result separately. Adopt runs at most once.
@@ -191,11 +192,28 @@ func (r *Reconciler) adoptFromFile(in ReconcileInputs, res *ReconcileResult) boo
 type scanned struct {
 	desc  lease.ProcDesc
 	valid bool
+	args  anchorArgs
 	caff  *lease.ProcDesc
 }
 
+// params is the parameter set the scanned anchor was started with, read back
+// from its argv.
+func (a anchorArgs) params() lease.AssertionParams {
+	return lease.AssertionParams{
+		ReleasePct:       a.releasePct,
+		BlindPct:         a.blindPct,
+		WatchdogSeconds:  a.watchdogS,
+		HeartbeatSeconds: a.intervalS,
+		StateDir:         a.stateDir,
+	}
+}
+
 // adoptByScan finds this state_dir's anchors, adopts the newest valid pair and
-// stops the others.
+// stops the others. When no pair is valid (its parameters differ from the
+// current ones) the newest complete pair is still adopted, marked stale, so
+// the first Reconcile tick replaces it make-before-break: the new pair is
+// started and recorded before this one is stopped, and the assertion is never
+// dropped in between.
 func (r *Reconciler) adoptByScan(in ReconcileInputs, res *ReconcileResult) {
 	cfg := in.Config
 	pids, err := r.procs.PIDs()
@@ -225,23 +243,38 @@ func (r *Reconciler) adoptByScan(in ReconcileInputs, res *ReconcileResult) {
 			continue
 		}
 		if args, ok := parseAnchorArgv(info.Argv); ok && args.stateDir == cfg.StateDir {
-			anchors = append(anchors, &scanned{desc: desc, valid: args.matches(cfg)})
+			anchors = append(anchors, &scanned{desc: desc, args: args, valid: args.matches(cfg)})
 		}
 	}
 
-	var best *scanned
+	var best, newestStale *scanned
 	for _, s := range anchors {
 		if cs := caffs[s.desc.PID]; len(cs) > 0 {
 			c := slices.MaxFunc(cs, func(x, y lease.ProcDesc) int { return int(x.StartUS - y.StartUS) })
 			s.caff = &c
 		}
-		if s.valid && s.caff != nil && (best == nil || s.desc.StartUS > best.desc.StartUS) {
-			best = s
+		if s.caff == nil {
+			continue
 		}
+		if s.valid {
+			if best == nil || s.desc.StartUS > best.desc.StartUS {
+				best = s
+			}
+		} else if newestStale == nil || s.desc.StartUS > newestStale.desc.StartUS {
+			newestStale = s
+		}
+	}
+	stale := false
+	if best == nil && newestStale != nil {
+		best, stale = newestStale, true
 	}
 	if best != nil {
 		_, flags, _ := caffeinateWatch(best.caff.Argv)
-		r.cur = &pair{anchor: best.desc, caff: *best.caff, flags: flags, params: cfg.Params(), startedAt: in.Now}
+		params := cfg.Params()
+		if stale {
+			params = best.args.params()
+		}
+		r.cur = &pair{anchor: best.desc, caff: *best.caff, flags: flags, params: params, startedAt: in.Now, stale: stale}
 		r.writeAssertion(r.cur, cfg, res)
 		res.Adopted = true
 	}

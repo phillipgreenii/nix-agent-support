@@ -3,10 +3,12 @@ package keeper
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-keep-awake/internal/lease"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-keep-awake/internal/policy"
 )
 
 // seededPair is a running anchor and caffeinate seeded into the fake table, as
@@ -295,5 +297,110 @@ func TestCaffeinateWatch(t *testing.T) {
 		if w != c.watch || ok != c.ok || !slices.Equal(f, c.flags) {
 			t.Errorf("%q = %d %v %v, want %d %v %v", c.argv, w, f, ok, c.watch, c.flags, c.ok)
 		}
+	}
+}
+
+// firstTerm is the index of the first signal in calls, or len(calls).
+func firstTerm(calls []string) int {
+	i := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "TERM ") || strings.HasPrefix(c, "KILL ") })
+	if i < 0 {
+		return len(calls)
+	}
+	return i
+}
+
+// TestAdoptByScanStaleParamsReplacedMakeBeforeBreak: a pair whose anchor was
+// started with other parameters (the scan path, as assertion.json no longer
+// matches) is kept by adoption and replaced by the first tick make-before-
+// break: the new pair is started, and recorded, before the old one is stopped.
+func TestAdoptByScanStaleParamsReplacedMakeBeforeBreak(t *testing.T) {
+	g := newRig(t)
+	stale := g.cfg
+	stale.Watchdog = time.Minute
+	old := g.seedPair(stale, 5_000, "i")
+	g.writeFile(old, func(a *lease.AssertionFile) { a.Params = stale.Params() })
+
+	// Adoption alone must not drop the assertion: the old pair still holds.
+	res := g.rc.Adopt(g.inputs(nil, okGate()))
+	noErrs(t, res)
+	if !res.Adopted || !res.Held || res.AnchorPID != old.anchor || res.CaffeinatePID != old.caff {
+		t.Fatalf("adopt result = %+v, want the stale pair held", res)
+	}
+	if len(res.StoppedOthers) != 0 || len(g.fp.signalled) != 0 {
+		t.Fatalf("adoption stopped %v (signalled %v), want nothing", res.StoppedOthers, g.fp.signalled)
+	}
+
+	res = g.tick(ll("a", "i"))
+	noErrs(t, res)
+	if !res.Replaced || !res.Held || res.AnchorPID == old.anchor || res.CaffeinatePID == old.caff {
+		t.Fatalf("tick result = %+v, want a replacement", res)
+	}
+	calls := g.fp.log()
+	startAnchor := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "start anchor#") })
+	startCaff := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "start caffeinate#") })
+	if startAnchor < 0 || startCaff < 0 || startCaff > firstTerm(calls) || startAnchor > firstTerm(calls) {
+		t.Fatalf("make before break violated: %q", calls)
+	}
+	if g.fp.procs[old.anchor].up || g.fp.procs[old.caff].up {
+		t.Fatal("the old pair must be stopped after the replacement")
+	}
+	a, err := g.dir.ReadAssertion()
+	if err != nil || a.Anchor.PID != res.AnchorPID || a.Params != g.cfg.Params() {
+		t.Fatalf("assertion.json = %+v, %v", a, err)
+	}
+}
+
+// TestAdoptByScanStaleHeartbeatPathIsReplaced: an anchor whose only difference
+// is the heartbeat path records equal params, but is still replaced.
+func TestAdoptByScanStaleHeartbeatPathIsReplaced(t *testing.T) {
+	g := newRig(t)
+	old := g.seedPair(g.cfg, 5_000, "i")
+	g.fp.procs[old.anchor].argv[9] = "/elsewhere/keeper.heartbeat"
+
+	res := g.tick(ll("a", "i"))
+	noErrs(t, res)
+	if !res.Adopted || !res.Replaced || res.AnchorPID == old.anchor {
+		t.Fatalf("result = %+v, want the old pair replaced", res)
+	}
+	calls := g.fp.log()
+	if i := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "start caffeinate#") }); i < 0 || i > firstTerm(calls) {
+		t.Fatalf("make before break violated: %q", calls)
+	}
+}
+
+// TestAdoptByScanStaleKeptWhileSpawnBlocked: when a start is withheld, the
+// stale pair keeps holding rather than being stopped into a gap.
+func TestAdoptByScanStaleKeptWhileSpawnBlocked(t *testing.T) {
+	g := newRig(t)
+	stale := g.cfg
+	stale.Watchdog = time.Minute
+	old := g.seedPair(stale, 5_000, "i")
+
+	res := g.tickG(gateOf(policy.GateNoSpawn), ll("a", "i"))
+	noErrs(t, res)
+	if !res.Held || res.AnchorPID != old.anchor || !res.SpawnBlocked || res.Replaced {
+		t.Fatalf("result = %+v, want the stale pair kept while blocked", res)
+	}
+	if len(g.fp.signalled) != 0 || !g.fp.procs[old.anchor].up || !g.fp.procs[old.caff].up {
+		t.Fatalf("the old pair was stopped: signalled %v", g.fp.signalled)
+	}
+}
+
+// TestAdoptByScanPrefersValidOverStale: a valid pair wins and the stale one is
+// stopped, as before.
+func TestAdoptByScanPrefersValidOverStale(t *testing.T) {
+	g := newRig(t)
+	stale := g.cfg
+	stale.Watchdog = time.Minute
+	valid := g.seedPair(g.cfg, 1_000, "i")
+	old := g.seedPair(stale, 9_000, "i") // newer, but wrong parameters
+
+	res := g.tick(ll("a", "i"))
+	noErrs(t, res)
+	if !res.Adopted || res.AnchorPID != valid.anchor || res.Replaced || res.Started {
+		t.Fatalf("result = %+v, want the valid pair kept", res)
+	}
+	if g.fp.procs[old.anchor].up || g.fp.procs[old.caff].up {
+		t.Fatal("the stale pair must be stopped")
 	}
 }

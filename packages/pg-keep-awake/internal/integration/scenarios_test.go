@@ -83,18 +83,45 @@ func TestS2FlagSetChangeNoGap(t *testing.T) {
 	e.acquire("t", "a", "120s", "-i")
 	first := e.waitHeld()
 
+	stopSampler := e.sampleGaps(first.Caffeinate.PID)
+
+	e.acquire("t", "b", "120s", "-s")
+	var second *lease.AssertionFile
+	waitFor(t, "a new pair and the old pair gone", mustHappen, func() bool {
+		second = e.assertion()
+		return second != nil && second.Anchor.PID != first.Anchor.PID &&
+			!alive(first.Anchor.PID) && !alive(first.Caffeinate.PID)
+	})
+	if gaps := stopSampler(); gaps != 0 {
+		t.Errorf("%d samples with no held caffeinate during the flag-set change", gaps)
+	}
+	info, err := lease.ProcessInfo(second.Caffeinate.PID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-i", "-s", "-w", strconv.Itoa(second.Anchor.PID)}
+	if !slices.Equal(info.Argv[1:], want) {
+		t.Errorf("new caffeinate argv after the executable = %v, want %v", info.Argv[1:], want)
+	}
+}
+
+// sampleGaps samples, every 100 ms, whether pmset lists a held caffeinate among
+// the candidate pairs (the one given and every pair assertion.json names from
+// now on). The returned stop ends sampling and reports the number of samples
+// with no held candidate: zero means the assertion never lapsed.
+func (e *testEnv) sampleGaps(firstCaffeinate int) (stop func() int) {
 	var (
 		mu    sync.Mutex
 		gaps  int
-		stop  = make(chan struct{})
+		quit  = make(chan struct{})
 		done  = make(chan struct{})
-		seenC = map[int]bool{first.Caffeinate.PID: true}
+		seenC = map[int]bool{firstCaffeinate: true}
 	)
 	go func() {
 		defer close(done)
 		for {
 			select {
-			case <-stop:
+			case <-quit:
 				return
 			default:
 			}
@@ -123,28 +150,12 @@ func TestS2FlagSetChangeNoGap(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}()
-
-	e.acquire("t", "b", "120s", "-s")
-	var second *lease.AssertionFile
-	waitFor(t, "a new pair and the old pair gone", mustHappen, func() bool {
-		second = e.assertion()
-		return second != nil && second.Anchor.PID != first.Anchor.PID &&
-			!alive(first.Anchor.PID) && !alive(first.Caffeinate.PID)
-	})
-	close(stop)
-	<-done
-	mu.Lock()
-	defer mu.Unlock()
-	if gaps != 0 {
-		t.Errorf("%d samples with no held caffeinate during the flag-set change", gaps)
-	}
-	info, err := lease.ProcessInfo(second.Caffeinate.PID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"-i", "-s", "-w", strconv.Itoa(second.Anchor.PID)}
-	if !slices.Equal(info.Argv[1:], want) {
-		t.Errorf("new caffeinate argv after the executable = %v, want %v", info.Argv[1:], want)
+	return func() int {
+		close(quit)
+		<-done
+		mu.Lock()
+		defer mu.Unlock()
+		return gaps
 	}
 }
 
@@ -662,7 +673,8 @@ func TestS13FifoAndSymlinkIgnored(t *testing.T) {
 }
 
 // TestS14ConfigChangeThenAdoption: a changed anchor parameter replaces the
-// pair; a parameter the pair does not record is adopted.
+// pair make-before-break (no sample without a held caffeinate); a parameter
+// the pair does not record is adopted.
 func TestS14ConfigChangeThenAdoption(t *testing.T) {
 	restart := func(t *testing.T, e *testEnv) (*lease.AssertionFile, *keeperProc) {
 		t.Helper()
@@ -678,6 +690,7 @@ func TestS14ConfigChangeThenAdoption(t *testing.T) {
 		e := newEnv(t)
 		first, _ := restart(t, e)
 		e.writeConfig("45s", "0s", "")
+		stopSampler := e.sampleGaps(first.Caffeinate.PID)
 		e.startKeeper()
 		var got *lease.AssertionFile
 		waitFor(t, "a new pair with watchdog 45", mustHappen, func() bool {
@@ -687,6 +700,9 @@ func TestS14ConfigChangeThenAdoption(t *testing.T) {
 		})
 		gone(t, first.Anchor.PID)
 		gone(t, first.Caffeinate.PID)
+		if gaps := stopSampler(); gaps != 0 {
+			t.Errorf("%d samples with no held caffeinate during the parameter change", gaps)
+		}
 	})
 
 	t.Run("no param change", func(t *testing.T) {

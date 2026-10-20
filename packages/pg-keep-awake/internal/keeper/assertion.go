@@ -188,6 +188,10 @@ type pair struct {
 	// spawnedAt is when this keeper spawned the anchor; zero for an adopted
 	// pair, which the churn guard does not judge.
 	spawnedAt time.Time
+	// stale marks an adopted pair whose anchor was started with other
+	// parameters than the current ones: converge replaces it make-before-break
+	// even when the recorded params happen to compare equal.
+	stale bool
 }
 
 // AssertionOptions are the Reconciler's construction parameters.
@@ -336,7 +340,7 @@ func (r *Reconciler) converge(in ReconcileInputs, res *ReconcileResult) {
 	// A lone anchor (its caffeinate was killed): restart the caffeinate under
 	// the same anchor when starting is allowed and nothing else changed.
 	if r.cur != nil && r.cur.caff.PID == 0 {
-		if block == "" && slices.Equal(r.cur.flags, flags) && r.cur.params == params {
+		if block == "" && slices.Equal(r.cur.flags, flags) && r.cur.params == params && !r.cur.stale {
 			if err := r.restartCaffeinate(r.cur); err != nil {
 				res.Errs = append(res.Errs, err)
 				r.stopPair(r.cur, res)
@@ -356,7 +360,7 @@ func (r *Reconciler) converge(in ReconcileInputs, res *ReconcileResult) {
 
 	if r.cur != nil {
 		// A pair is held.
-		if slices.Equal(r.cur.flags, flags) && r.cur.params == params {
+		if slices.Equal(r.cur.flags, flags) && r.cur.params == params && !r.cur.stale {
 			return
 		}
 		if block != "" {
