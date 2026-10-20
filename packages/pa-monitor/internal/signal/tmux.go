@@ -2,6 +2,7 @@ package signal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -11,10 +12,13 @@ import (
 	"time"
 )
 
-// tmuxCacheTTL is how long an enumeration result stays fresh. Mirrors
-// CmuxSignaler's surfaceCacheTTL so a single signalNonWorking pass over N
-// non-Working sessions runs ps + per-socket list-panes once, not N times.
-const tmuxCacheTTL = 2 * time.Second
+// tmuxCacheTTL is how long an enumeration result stays fresh, so a single
+// signalNonWorking pass over N non-Working sessions runs ps + per-socket
+// list-panes once, not N times. It matches CmuxSignaler's serverPIDCacheTTL
+// (both ration a whole-table `ps -A`), NOT the short surfaceCacheTTL. Worst-case
+// staleness is this TTL plus up to one daemon tick (5 s); a pane created inside
+// that window is missed by Detect until the cache refreshes.
+const tmuxCacheTTL = 10 * time.Second
 
 // paneLoc identifies a tmux pane by the socket name (`-L`) of its server and
 // the canonical pane target string (`<session>:<window>.<pane>`). panePID is
@@ -33,10 +37,53 @@ type paneLoc struct {
 type TmuxSignaler struct {
 	RunCmd func(ctx context.Context, name string, args ...string) ([]byte, error)
 
+	// LookPath resolves the tmux executable for the availability gate (see
+	// available). nil means: when RunCmd is injected the gate is open (the
+	// injected runner replaces process execution entirely, so PATH is
+	// irrelevant); otherwise exec.LookPath.
+	LookPath func(file string) (string, error)
+
 	cacheMu   sync.Mutex
 	cacheAt   time.Time
 	cacheLocs map[int]paneLoc
 	cacheErr  error
+
+	// now is the clock the TTL check reads; nil means time.Now. Tests inject
+	// one so they can cross the TTL without sleeping.
+	now func() time.Time
+}
+
+func (t *TmuxSignaler) clock() time.Time {
+	if t.now != nil {
+		return t.now()
+	}
+	return time.Now()
+}
+
+// errTmuxUnavailable is returned (uncached) when tmux is not resolvable on PATH.
+var errTmuxUnavailable = errors.New("signal: tmux not on PATH")
+
+// available reports whether tmux can possibly be in play: its executable is
+// resolvable on PATH. When it is not, every TmuxSignaler entry point that would
+// spawn a process (the whole-table `ps -A` enumeration and the per-ancestor
+// `ps -o ppid=,comm=` walk) is short-circuited, so a cmux-only machine does not
+// pay for - or emit security-logged process-discovery noise from - a tmux
+// probe that can never find anything. exec.LookPath is stat calls only; it
+// spawns nothing. Known trap: a launchd PATH can lack tmux even when it is
+// installed; that case already failed before this gate (list-panes errored and
+// the panes were skipped), so gating does not regress it, and the daemon's
+// startup MissingBinaries ERROR remains the signal for it.
+func (t *TmuxSignaler) available() bool {
+	switch {
+	case t.LookPath != nil:
+		_, err := t.LookPath("tmux")
+		return err == nil
+	case t.RunCmd != nil:
+		return true
+	default:
+		_, err := exec.LookPath("tmux")
+		return err == nil
+	}
 }
 
 func (t *TmuxSignaler) Name() string { return "tmux" }
@@ -265,12 +312,15 @@ func parseTmuxSocketNames(psOut string) []string {
 func (t *TmuxSignaler) cachedPanes() (map[int]paneLoc, error) {
 	t.cacheMu.Lock()
 	defer t.cacheMu.Unlock()
-	if t.cacheAt != (time.Time{}) && time.Since(t.cacheAt) < tmuxCacheTTL {
+	if !t.available() {
+		return nil, errTmuxUnavailable
+	}
+	if t.cacheAt != (time.Time{}) && t.clock().Sub(t.cacheAt) < tmuxCacheTTL {
 		return t.cacheLocs, t.cacheErr
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	locs, err := t.enumeratePanes(ctx)
-	t.cacheLocs, t.cacheErr, t.cacheAt = locs, err, time.Now()
+	t.cacheLocs, t.cacheErr, t.cacheAt = locs, err, t.clock()
 	return locs, err
 }

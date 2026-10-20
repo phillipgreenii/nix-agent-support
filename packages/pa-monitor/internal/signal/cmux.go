@@ -16,7 +16,21 @@ import (
 // surfaceCacheTTL is how long a cmux --json top --processes result stays fresh.
 // Within one signalNonWorking pass we want a single enumeration to serve every
 // per-pid Detect, but we also want fresh data between user-triggered nudges.
+//
+// This TTL MUST stay short and MUST NOT be merged with serverPIDCacheTTL:
+// CmuxSignaler.Send resolves its target through cachedSurfaces, so a stale map
+// misses a newly created surface, findSurfaceForPID returns NoCmuxSurfaceError,
+// and the dispatcher treats that as non-retryable (it records the attempt,
+// suppresses with "no_surface" and removes the pending key) - the nudge is
+// DROPPED, not merely delayed.
 const surfaceCacheTTL = 2 * time.Second
+
+// serverPIDCacheTTL is how long the cmux server-PID list (`ps -A -o pid,comm`)
+// stays fresh. Server PIDs only change when the cmux app starts or stops, so
+// this is deliberately much longer than surfaceCacheTTL: the whole-table ps is
+// the expensive, security-logged (process discovery) call this cache exists to
+// ration. Worst-case staleness is this TTL plus up to one daemon tick (5 s).
+const serverPIDCacheTTL = 10 * time.Second
 
 // CmuxSignaler sends keys to the cmux surface hosting a process.
 // RunCmd and LookupEnv are injectable for tests; nil values fall back to
@@ -31,11 +45,23 @@ type CmuxSignaler struct {
 	cacheErr  error
 
 	// Independent cache for cmux server PIDs (used by ancestry-based Detect).
-	// Refreshed at the same surfaceCacheTTL cadence as cacheLocs but kept
-	// separate so the two enumeration commands stay independent.
+	// Refreshed on the slower serverPIDCacheTTL cadence (the surface map keeps
+	// the short surfaceCacheTTL) and kept separate so the two enumeration
+	// commands stay independent.
 	serverCacheAt   time.Time
 	serverCachePids []int
 	serverCacheErr  error
+
+	// now is the clock the TTL checks read; nil means time.Now. Tests inject
+	// a controllable clock so they can cross a TTL without sleeping.
+	now func() time.Time
+}
+
+func (c *CmuxSignaler) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
 }
 
 // surfaceLoc identifies a cmux surface by its enclosing workspace and surface ref.
@@ -149,17 +175,17 @@ func (c *CmuxSignaler) FindCmuxServerAncestor(targetPID int) (int, bool) {
 
 // cachedCmuxServerPIDs returns the PIDs of running cmux server processes
 // (those where `ps -A -o pid,comm` reports comm == "cmux"). Cached for
-// surfaceCacheTTL so a sweep over N sessions runs ps once.
+// serverPIDCacheTTL so a sweep over N sessions runs ps once.
 func (c *CmuxSignaler) cachedCmuxServerPIDs() ([]int, error) {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()
-	if !c.serverCacheAt.IsZero() && time.Since(c.serverCacheAt) < surfaceCacheTTL {
+	if !c.serverCacheAt.IsZero() && c.clock().Sub(c.serverCacheAt) < serverPIDCacheTTL {
 		return c.serverCachePids, c.serverCacheErr
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	pids, err := c.enumerateCmuxServerPIDs(ctx)
-	c.serverCachePids, c.serverCacheErr, c.serverCacheAt = pids, err, time.Now()
+	c.serverCachePids, c.serverCacheErr, c.serverCacheAt = pids, err, c.clock()
 	return pids, err
 }
 
@@ -230,13 +256,13 @@ func (c *CmuxSignaler) parentPID(pid int) (int, error) {
 func (c *CmuxSignaler) cachedSurfaces() (map[int]surfaceLoc, error) {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()
-	if c.cacheAt != (time.Time{}) && time.Since(c.cacheAt) < surfaceCacheTTL {
+	if c.cacheAt != (time.Time{}) && c.clock().Sub(c.cacheAt) < surfaceCacheTTL {
 		return c.cacheLocs, c.cacheErr
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	locs, err := c.enumerateSurfaces(ctx)
-	c.cacheLocs, c.cacheErr, c.cacheAt = locs, err, time.Now()
+	c.cacheLocs, c.cacheErr, c.cacheAt = locs, err, c.clock()
 	return locs, err
 }
 
