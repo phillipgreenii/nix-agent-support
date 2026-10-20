@@ -1,7 +1,8 @@
 # work-report: external report generators and report presets
 
-**Status**: Proposed (revision 3: reviewed in two rounds by independent read-only reviewers, whose
-findings are folded in; section 19 lists decisions still awaiting operator confirmation)
+**Status**: Approved for decomposition (revision 4: reviewed in three rounds by independent
+read-only reviewers, whose findings are folded in; the review-time decisions D11 to D15 were ruled
+on by the operator on 2026-10-20 and are recorded in section 3)
 **Date**: 2026-10-20
 **Deciders**: Phillip Green II
 **Decision record**: none yet; an ADR is written when the first implementation packet lands
@@ -49,7 +50,8 @@ the executable. Today there are two: `baseline` and `narrative`.
 - G6. Stop storing reports in the database. The output files and a per-run `manifest.json` are the
   record.
 - G7. The scheduled `pull`, `query`, `status` and the baseline report keep working when any
-  generator or preset is misconfigured (`INV-BASELINE-1`).
+  generator or preset is misconfigured (`INV-BASELINE-1`). This does not cover the retired `kinds`
+  key, which is a load error in every verb (D13).
 
 ### Non-goals
 
@@ -81,6 +83,11 @@ the executable. Today there are two: `baseline` and `narrative`.
 | D8  | Caching and lookup of earlier reports are deferred and not built.                                                                                                                                                                                                                                       | operator, 2026-10-20                 |
 | D9  | Backward compatibility is not a goal. The change is breaking and the breakage is listed in section 12.                                                                                                                                                                                                  | operator, 2026-10-20                 |
 | D10 | Exit codes follow ADR 0042: `0` ok, `1` unexpected, `2` usage, `3` and above app-specific. Per-verb meanings of `3` and above are listed in section 7.4 (`pull` already uses `2` and `3` for degraded sources).                                                                                         | ADR 0042                             |
+| D11 | `INV-REPORT-RANGE-1` is weakened: `work-report` guarantees the range in its own output and in the run record; a generator SHOULD state it in its files (section 13). The strict wording cannot be met by non-text output.                                                                               | operator, 2026-10-20                 |
+| D12 | `--generator NAME` runs a registered generator ad hoc, with an empty `config` and no preset, replacing the ad hoc use of `--kind narrative` (section 7.1).                                                                                                                                              | operator, 2026-10-20                 |
+| D13 | The retired `kinds` key is a hard error: `Load` rejects it in every verb, including the scheduled `pull`, and the error carries the migration text of section 7.3. It is not tolerated.                                                                                                                 | operator, 2026-10-20                 |
+| D14 | `work-report` maintains a `latest` symlink in each output parent directory as the discovery aid that replaces the removed `status` line (section 6).                                                                                                                                                    | operator, 2026-10-20                 |
+| D15 | `config validate` exits `3` for any problem found (today `1`), so `1` means only an unexpected error (section 7.2).                                                                                                                                                                                     | operator, 2026-10-20; ADR 0042       |
 
 ## 4. Architecture
 
@@ -310,10 +317,11 @@ The human output always prints `entries: N` and, when `N` is `0`, a warning line
 ## 6. Configuration
 
 Unchanged keys: `timezone`, `sources`, `schedule`, `store`. The decode remains strict (an unknown key
-is an error naming the key), with one exception: the retired `kinds` key is **tolerated by `Load`**
-so that scheduled `pull` and the other verbs keep working on a config that still carries it (G7).
-`config validate` reports it as an error, and `report` reports it as a warning on stderr (section
-7.3).
+is an error naming the key). The retired `kinds` key is **rejected by `Load`** in every verb,
+including the scheduled `pull` (D13): it is checked before the generic unknown-key error so that the
+error carries the migration text of section 7.3 rather than only the key name. Its nested content
+is not inspected; the key's presence alone is the error. The home-manager module never renders
+`kinds` once P2 removes its options, so only a hand-written config can hit this.
 
 `Load` MUST decode the `generators` and `reports` sections as **raw YAML nodes** and check nothing
 inside them, so a typo, a bad name or a wrong type in those sections cannot fail it. Parsing and all
@@ -323,10 +331,6 @@ an unknown generator, an unparsable `range`, `inputs` values) live in a separate
 never affects `pull`, `query` or `status`, and `report baseline` MUST work with a broken
 `generators` or `reports` section. `config show` prints such problems and still exits `0`;
 `config validate` and a `report` of the affected preset fail.
-
-The tolerated `kinds` key is accepted with **any content** (its nested keys are not checked, unlike
-today, where an unknown nested key is an error); `Load` records only that the key was present, in a
-field `config validate` and `report` read to emit the migration text.
 
 ```yaml
 generators:
@@ -442,8 +446,9 @@ a preset: reports.<name>.generator: narrative, with kinds.narrative.model becomi
 reports.<name>.config.model and kinds.narrative.systemPromptFile becoming
 reports.<name>.config.promptFile (it now replaces only the task section; the injection guard is
 fixed)`.
-- The retired `kinds` key produces the same translation text, as a warning from `report` and an
-  error from `config validate`.
+- The retired `kinds` key produces the same translation text as the load error of every verb (D13).
+  `config validate` reports it as a `kinds_retired` problem with `preset: null` and exits `3`; the
+  other verbs fail with exit `1`, their existing code for a config that does not load.
 - `--out FILE` is likewise kept as a hidden flag that fails with exit `2` and
   `--out was removed; use 'work-report report --print > FILE' for a single text report, or read the
 files in the output directory`.
@@ -575,6 +580,7 @@ rewritten in the same packet that changes the module. `pgRouterConfigText` is un
 | `work-report report --out FILE`                                                   | `cmd/work-report/report.go`                    |
 | Report text on stdout by default (now `--print`)                                  | `cmd/work-report/report.go`                    |
 | `kinds.narrative.*` config keys and module options                                | `internal/config`, `home/programs/work-report` |
+| A config still carrying `kinds` fails to load in every verb, including `pull`     | `internal/config`                              |
 | `report` table, `meta.last_report`, `status` `last_report` and its human line     | `internal/store`, `cmd/work-report/status.go`  |
 | Telemetry `report.jsonl` key set                                                  | `internal/telemetry`                           |
 | Generator interface `Generate(...) (Result{Content}, error)`; the registry        | `internal/report`, `internal/narrative`        |
@@ -597,7 +603,7 @@ module and its flake check.
 - `INV-CUSTOM-1`: narrowing is applied by work-report before generation; a generator receives only
   matching entries and MUST NOT filter. Remove the "report distinctly when it cannot honor" clause.
 - `INV-GEN-PLUGIN-1`: adding a generator is registering a command that meets the contract.
-- `INV-REPORT-RANGE-1` (decision D11, awaiting operator confirmation): the range a report covers MUST
+- `INV-REPORT-RANGE-1` (decision D11): the range a report covers MUST
   be stated in work-report's own output and in its per-run record; a generator SHOULD state it in its
   files but it is not required for non-text output.
 - `INTF-REQUEST` (`interfaces.md`, request and response tables and the "unrecognized `kind`" outcome
@@ -661,7 +667,7 @@ and Linux. Because of the environment allowlist, the fake generator's registrati
 | Run record          | `manifest.json` is written last and atomically; a pre-planted `manifest.json` or `stderr.log` symlink is replaced, not followed, and a pre-planted directory of either name gives `output_dir_unwritable`; a key named `monkey` is redacted and an object value under a matching key is replaced whole; a failed run keeps its directory with `status: failed`, the right `outcome_kind`, `generator_exit`, `signal` and `timed_out`; `stderr.log` is present; secrets keys are redacted and `config_sha256` is stable; `input_sha256` changes when entries change and not when the clock changes; modes `0700` and `0600`.                                                                                                                                                                                                                                            |
 | Directory creation  | Collision (same second, forced identical suffix, two concurrent runs) retries on `EEXIST` and stops after 10 attempts with `output_dir_unwritable`; clock and random source are injected seams; unwritable parent gives `output_dir_unwritable`; baseline falls back to stdout with a warning and no run record; the `latest` symlink is updated atomically and an existing non-symlink `latest` is left alone with a warning; `~user` and an unset `$VAR` are rejected.                                                                                                                                                                                                                                                                                                                                                                                               |
 | Validate mode       | `config validate` attributes exit `3` to each preset and prints all problems; JSON shape; a generator that writes into the validate directory is a failure; a missing executable is `not_found`; an unreferenced generator is only warned about; the aggregate exit code is `3`; the existing pg-connector checks and their `ChecksConfigFirst`-style ordering tests keep passing with the new exit code; `problems` and `warnings` JSON, including `kinds_retired`.                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Config              | Unknown keys; the tolerated `kinds` key (accepted by `pull`, `query`, `status`, error in `config validate`, warning in `report`); a broken preset, a typo key, a bad name or a wrong type inside `generators` or `reports` leaves `pull`, `query`, `status` and `report baseline` working (and `config show` still exits `0` printing the problem); `kinds` with arbitrary nested content is tolerated; unknown generator in a preset; invalid range; `inputs` with an unknown value; redefining `baseline`; `config` on a baseline preset; empty `command`; name charset; `~` and `$VAR` expansion; non-absolute `output.dir` rejected.                                                                                                                                                                                                                               |
+| Config              | Unknown keys; the retired `kinds` key fails `Load` with the migration text (not only the key name) for `pull`, `query`, `status`, `report` and `config show`, and is a `kinds_retired` problem with exit `3` in `config validate`; `kinds` with arbitrary or empty nested content is rejected the same way; a broken preset, a typo key, a bad name or a wrong type inside `generators` or `reports` leaves `pull`, `query`, `status` and `report baseline` working (and `config show` still exits `0` printing the problem); unknown generator in a preset; invalid range; `inputs` with an unknown value; redefining `baseline`; `config` on a baseline preset; empty `command`; name charset; `~` and `$VAR` expansion; non-absolute `output.dir` rejected.                                                                                                         |
 | CLI                 | Preset resolution; `--generator` ad hoc and its exclusion with a preset; flag replaces field per dimension using `Changed`; the "replaces preset" note; unknown preset exit `2` listing names; flag errors, argument errors and a bad `--range` or `--output` exit `2` for `report` and `config` but stay `1` for `pull`, via an `exitCode(err)` seam, plus one subprocess test of the built binary for `0`, `2` and `3`; hidden `--kind` and `--out` messages; a generator that requires config fails `--generator` with the "define a preset" hint; `--print` refusal exits `3` with the run `status: ok`; `--print` with one text file, several files and over the limit; `--print` with `--output json` is a usage error; summary goes to stderr under `--print`; `--output json` shape; `entries: N` and the zero-entries warning; baseline preset golden output. |
 | Store               | The migration drops `report` and `last_report`, leaves the other tables and `meta` keys, is idempotent, and bumps the schema version; `status` JSON has no `last_report` and the human output has no such line.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Telemetry           | The new key set and the retired keys; failed runs record `outcome_kind` and the stderr tail; the log tolerates concurrent writers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -685,7 +691,7 @@ check in `flake.nix`.
 | #   | Packet                                                                                                                                                                                                                                                                                                                                                                                                       | Size | Depends on | Test deliverable                                                                          |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---- | ---------- | ----------------------------------------------------------------------------------------- |
 | P1  | Behavior-doc amendments (section 13) and the pointer note in the 2026-09-23 spec                                                                                                                                                                                                                                                                                                                             | M    | none       | conformance passes (intra)                                                                |
-| P2  | Config schema: `generators`, `reports`, built-ins, structure-only `Load`, tolerated `kinds`, `config show`; in the same packet drop the module's `kinds` options and rewrite `test-work-report-module`                                                                                                                                                                                                       | M    | P1         | Config rows; module row                                                                   |
+| P2  | Config schema: `generators`, `reports`, built-ins, structure-only `Load`, `kinds` rejected with the migration text, `config show`; in the same packet drop the module's `kinds` options and rewrite `test-work-report-module`                                                                                                                                                                                | M    | P1         | Config rows; module row                                                                   |
 | P3  | Generator runner: exec, envelope, env allowlist, timeout and process control, caps, manifest validation, run record, directory creation, `TestMain` fake generator, clock and random seams                                                                                                                                                                                                                   | L    | P2         | Runner, Process control, Caps, Manifest validation, Run record, Directory creation rows   |
 | P4  | `report` command rework: presets, `--generator`, flag override, output and `--print`, exit-code seam and flag-error hook, hidden `--kind`, validate mode in `config validate`, telemetry; delete the `--kind` dispatch, the registered-kinds use in `cmd` and `--out`; `internal/report` keeps `Generator`, `Request`, `Result` and `Lookup`, and `internal/narrative` stays, until P6 deletes them together | L    | P3         | CLI, Validate mode, Telemetry rows; subprocess exit-code test; rewritten `report_test.go` |
 | P5  | Store migration dropping report storage; remove the `status` report line and JSON key                                                                                                                                                                                                                                                                                                                        | S    | P4         | Store row                                                                                 |
@@ -735,20 +741,13 @@ $ echo $?
 3
 ```
 
-## 19. Decisions awaiting operator confirmation
+## 19. Operator rulings on review-time decisions
 
-These were proposed by the author while resolving review findings and are not covered by D1 to D10.
-
-- **D11.** Weaken `INV-REPORT-RANGE-1` as in section 13: the tool guarantees the range in its output
-  and run record; generators SHOULD state it in files. Alternative: keep the strict wording and
-  require every generator to state the range in a file, which is impossible for non-text output.
-- **D12.** Add `--generator NAME` for ad hoc runs without a preset, so `--kind narrative`'s ad hoc
-  use has a replacement.
-- **D13.** Tolerate the retired `kinds` key in `Load` (an error only in `config validate`), so a
-  stale config cannot break scheduled pulls.
-- **D14.** Maintain a `latest` symlink in each preset's parent directory as the discovery aid, in
-  place of the removed `status` line.
-- **D15.** `config validate` exits `3` for any problem found (it exits `1` today).
+D11 to D15 were proposed by the author while resolving review findings and ruled on by the operator
+(Phillip, 2026-10-20). D11, D12, D14 and D15 were confirmed as proposed. D13 was ruled the other way:
+the author proposed tolerating the retired `kinds` key in `Load` so a stale config could not break
+scheduled pulls; the operator chose a hard error in every verb. The rulings are recorded in section
+3 and applied throughout; no decision remains open.
 
 ## 20. Evidence and not yet verified
 
