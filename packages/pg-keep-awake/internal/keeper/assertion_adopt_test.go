@@ -409,9 +409,11 @@ func TestAdoptByScanPrefersValidOverStale(t *testing.T) {
 	}
 }
 
-// A pair started with sub-second parameters is adopted by a keeper with the
-// same configuration (argv and assertion.json both carry the fractions), and
-// is not adopted by one whose heartbeat differs by a sub-second amount.
+// A pair started with sub-second parameters is adopted as valid by a keeper with
+// the same configuration (argv and assertion.json both carry the fractions). A
+// keeper whose heartbeat differs by a sub-second amount does not treat it as
+// valid: it adopts the pair as stale and replaces it make-before-break with a
+// pair carrying the new interval.
 func TestAdoptSubSecondParams(t *testing.T) {
 	g := newRig(t)
 	g.cfg.Heartbeat = 200 * time.Millisecond
@@ -425,10 +427,27 @@ func TestAdoptSubSecondParams(t *testing.T) {
 
 	h := newRig(t)
 	h.cfg.Heartbeat = 200 * time.Millisecond
-	sp = h.seedPair(h.cfg, 5_000, "i")
-	h.writeFile(sp, nil)
+	old := h.seedPair(h.cfg, 5_000, "i")
+	h.writeFile(old, nil)
 	h.cfg.Heartbeat = 300 * time.Millisecond
-	if res := h.rc.Adopt(h.inputs(nil, okGate())); res.Adopted {
-		t.Fatalf("result = %+v, a 200ms pair must not match a 300ms config", res)
+	res = h.tick(ll("a", "i"))
+	noErrs(t, res)
+	if !res.Adopted || !res.Replaced || res.AnchorPID == old.anchor {
+		t.Fatalf("result = %+v, want the 200ms pair adopted stale and replaced", res)
+	}
+	calls := h.fp.log()
+	if i := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "start caffeinate#") }); i < 0 || i > firstTerm(calls) {
+		t.Fatalf("make before break violated: %q", calls)
+	}
+	if h.fp.procs[old.anchor].up || h.fp.procs[old.caff].up {
+		t.Fatal("the 200ms pair must be stopped after the replacement")
+	}
+	argv := h.fp.procs[res.AnchorPID].argv
+	if i := slices.Index(argv, "--interval"); i < 0 || argv[i+1] != "300ms" {
+		t.Fatalf("replacement argv = %q, want --interval 300ms", argv)
+	}
+	a, err := h.dir.ReadAssertion()
+	if err != nil || a.Anchor.PID != res.AnchorPID || a.Params.HeartbeatSeconds != 0.3 {
+		t.Fatalf("assertion.json = %+v, %v", a, err)
 	}
 }
