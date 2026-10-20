@@ -128,9 +128,9 @@ blocked when an event's final attempt falls due loses that event, so long gates 
 in `pg_router_gate_drops`). External systems use the `gate-set`/`gate-clear` socket verbs.
 
 **Operator convention: `BEAD_SERVER_DOWN`.** Gate TYPEs are arbitrary, and `BEAD_SERVER_DOWN` is
-the one an operator sets before taking the shared beads/Dolt server down (for example a `bd`
-schema migration): `pg-router gate set BEAD_SERVER_DOWN --owner beads-migration --description
-"bd schema migration: shared Dolt server down"`, with NO `--ttl` (a lapsed lease counts as
+the one an operator sets before taking the shared issue-store server down (for example a schema
+migration): `pg-router gate set BEAD_SERVER_DOWN --owner beads-migration --description
+"issue-store schema migration: shared server down"`, with NO `--ttl` (a lapsed lease counts as
 cleared). It needs a running core, so set it BEFORE the router is stopped, and clear it last with
 `pg-router gate clear BEAD_SERVER_DOWN`. Participants that never touch beads declare
 `non_blocking_gates = ["BEAD_SERVER_DOWN"]` and keep running; an emitter/listener pair that must
@@ -188,7 +188,7 @@ A query is a tagged union discriminated by a `type` field; a role is not:
   `MIGRATION.md`'s section on the handler split.
 - **query `type`**: `command` (run an executable that emits items as
   JSON/JSONL — an opaque token pg-router just invokes and never interprets, so
-  this is how you wire pg-router to `bd`, `gh`, Jira, or anything else) or
+  this is how you wire pg-router to an issue-tracker CLI, a code-host CLI, or anything else) or
   `event` (an in-process correlated-event source for the aggregator/saga
   path). `beads-ready` / `beads-list` / `github-issues` / `jira-issues` were
   typed query sources here through pg2-n75tk; each one typed "how another
@@ -199,7 +199,7 @@ A query is a tagged union discriminated by a `type` field; a role is not:
   removed types to an equivalent `command` block, worked through for each.
   The built-in feedback/worker/review defaults (`pg-router config
 --print-defaults`) are themselves the worked beads-ready -> command example:
-  each is now printed as a `command` block shelling to `bd ready | jq ...`.
+  each is now printed as a `command` block shelling to an issue-tracker CLI piped through `jq`.
   `MIGRATION.md` also carries a worked example (not a migration) wiring a
   `command` source to `pg-connector`'s `ci` capability as a per-connector CI
   health probe (bead `pg2-h410q`) — it surfaces through the same Sources pane
@@ -240,10 +240,10 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PG_ROUTER_BUDGET_TOKENS` — per-worker token budget; 0 = unlimited (default 0)
 - `PG_ROUTER_BUDGET_COST` — per-worker cost budget in cents; 0 = unlimited (default 0)
 - `PG_ROUTER_BUDGET_TIME` — per-worker wall-clock budget in seconds (default 1500)
-- `PG_ROUTER_MODEL` — claude model override (default: the handler's own default)
-- `PG_ROUTER_EFFORT` — claude `--effort` value (default `max`)
-- `PG_ROUTER_PERMISSION_MODE` — claude `--permission-mode` for workers (default `dontAsk`: deny-by-default; `bypassPermissions` is the opt-in escape)
-- `PG_ROUTER_ALLOWED_TOOLS` — claude `--allowed-tools` allowlist for workers (default: a conservative set; `git push` excluded. Empty clears the flag)
+- `PG_ROUTER_MODEL` — model override forwarded to the session runner (default: the handler's own default)
+- `PG_ROUTER_EFFORT` — effort value forwarded to the session runner (default `max`)
+- `PG_ROUTER_PERMISSION_MODE` — permission mode forwarded to the session runner for workers (default `dontAsk`: deny-by-default; `bypassPermissions` is the opt-in escape)
+- `PG_ROUTER_ALLOWED_TOOLS` — tool allowlist forwarded to the session runner for workers (default: a conservative set; `git push` excluded. Empty clears the flag)
 - `PG_ROUTER_AUTONOMOUS` — block AskUserQuestion so human-less workers never stall on the picker (default `true`)
 - `PG_ROUTER_HANDLER_COMMAND` — the **earlier path**: the argv prefix invoked, over the wire
   (DEC-WIRE-1), for every enabled role that does **not** set `handler` (a role that sets it needs
@@ -430,8 +430,8 @@ retry later ...` and `log_unwritable: ...`. Retrying is safe because delivery is
 ### Logs
 
 `internal/telemetry` (`Init`/`NewSlogHandler`/`Fanout`) is a deliberate small
-duplication of `packages/pg-pr/internal/telemetry`'s own OTLP-log shape — an
-`internal/` package cannot be imported across the pg-pr/pg-router module boundary, so
+duplication of the sibling PR-management package's own OTLP-log shape — an
+`internal/` package cannot be imported across that package's module boundary, so
 the proven pattern is copied rather than shared, LOG half only (pg-router emits no
 spans). `main()` calls `telemetry.Init(ctx, "pg-router", version)` unconditionally
 for every subcommand (a no-op when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset — the common
@@ -445,7 +445,7 @@ object per line) conforming to the phillipgreenii JSONL logging standard: every
 record carries `time` (RFC3339Nano, UTC), `level` (lowercase
 `debug`/`info`/`warn`/`error`), and `msg`, plus an event-type `kind` field
 (`reminder` → `info`, `cancel` → `warn`, `hard_stop` → `error`). This is
-pg-router's own dispatch-outcome ledger, not the Claude transcript, and it is a
+pg-router's own dispatch-outcome ledger, not the session runner's own transcript, and it is a
 DIFFERENT signal from the OTLP operational logs above — see the relabel note below.
 
 The log is written to the standard path

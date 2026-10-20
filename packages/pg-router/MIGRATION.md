@@ -15,8 +15,8 @@ it validates the declared wiring and nothing beyond it — "source semantics are
 opaque to the core." Typing `beads-ready` / `beads-list` / `github-issues` /
 `jira-issues` into `internal/config/registry.go`'s `queryTOML` struct and
 `internal/query/factory.go`'s dispatch map broke that boundary: each one baked
-knowledge of **how a specific other tool is configured** (bd's label-filter
-flags, `gh issue list`'s JSON shape, a Jira search tool's JQL/envelope) into
+knowledge of **how a specific other tool is configured** (an issue tracker CLI's label-filter
+flags, a code-host CLI's JSON shape, a ticket-search tool's query language and envelope) into
 Core, so adding or changing a source type meant changing Core — a live
 violation of the "adding a source type must not require changing Core"
 invariant (`GOAL-MIN-1` in `docs/behavior/invariants.md`; the deploying ZR
@@ -32,7 +32,7 @@ There is also a **correctness reason**, not just an architectural one. A
 recent change (`pg2-0xa2n`) made "a source or handler whose backing command is
 absent" a **blocking pre-flight failure** in `Config.Load()` (`INV-WORKFLOW-1`
 check 5) instead of a runtime warning. `jira-issues`' backing command
-(`pg-pr-issues-jira-zr`) is a package defined **only** in the downstream
+(a ticket-search CLI) is a package defined **only** in the downstream
 `your-private-flake` (e.g. the operator's private ZR-deployment flake) — this (upstream, public) flake can never
 legitimately supply it without inverting the dependency direction. So
 `jira-issues` as a typed-in-Core source was **structurally unsatisfiable**:
@@ -44,7 +44,7 @@ weakens check 5 nor inverts the dependency.
 
 `github-issues`' backing command (`gh`) is a plain nixpkgs package and was
 already fixed upstream (the pg-router wrapper added it, `f427a830`) before this
-change; `beads-ready`/`beads-list`'s backing command (`bd`) is pg-router's own
+change; `beads-ready`/`beads-list`'s backing command (the issue-tracker CLI) is pg-router's own
 first-class dependency and was never at risk. Those two are removed from the
 TOML surface for the **architectural** reason only (boundary/`GOAL-MIN-1`),
 not the correctness one — but the fix is the same shape.
@@ -137,8 +137,8 @@ project = "PROJ"
 labels = ["worker-ready"]
 ```
 
-After — the deploying flake (ZR) already owns a `pg-pr-issues-jira-zr search`
-command whose `{items,truncated}` envelope is close to the contract; wrap it
+After — the deploying flake (ZR) already owns a ticket-search CLI (`ticket-search` below) whose
+`search` command emits a `{items,truncated}` envelope close to the contract; wrap it
 so `key`/`summary` become `id`/`title`:
 
 ```toml
@@ -149,12 +149,12 @@ type = "command"
 [query.command]
 argv = [
   "sh", "-c",
-  "pg-pr-issues-jira-zr search --jql 'project = \"PROJ\" AND labels = \"worker-ready\" AND resolution = Unresolved ORDER BY created ASC' --limit 100 | jq -c '[.items[] | {id: .key, type: \"jira-issue\", title: .summary, metadata: {project: \"PROJ\", key, issuetype, status, labels, url}}]'"
+  "ticket-search search --jql 'project = \"PROJ\" AND labels = \"worker-ready\" AND resolution = Unresolved ORDER BY created ASC' --limit 100 | jq -c '[.items[] | {id: .key, type: \"jira-issue\", title: .summary, metadata: {project: \"PROJ\", key, issuetype, status, labels, url}}]'"
 ]
 format = "json"
 ```
 
-`pg-pr-issues-jira-zr` (or whatever the deploying flake names its Jira CLI)
+`ticket-search` (or whatever the deploying flake names its ticket-search CLI)
 MUST be on the PATH the `pg-router` process actually runs with — the deploying
 flake's OWN wrapper/service definition supplies it, exactly as it always had
 to (agent-support's wrapper never carried it; see `default.nix`'s comment on
@@ -162,8 +162,8 @@ why it must not).
 
 ## Worked example: `beads-ready` / `beads-list` -> `command`
 
-`bd` is pg-router's own first-class dependency (already on the wrapper's PATH),
-so this is the simplest of the four, and pg-router's own built-in defaults now
+The issue-tracker CLI used here is pg-router's own first-class dependency (already on the
+wrapper's PATH), so this is the simplest of the four, and pg-router's own built-in defaults now
 use exactly this shape — run `pg-router config --print-defaults` to see it
 live, or read `internal/config/example.go`'s `beadsReadyCommand`.
 
@@ -181,8 +181,10 @@ title_prefix = "process-feedback:"
 item_type = "task"
 ```
 
-After (`bd list` instead of `bd ready` for a `beads-list` migration — the flag
+After (the issue-tracker CLI's `list` instead of its `ready` subcommand for a `beads-list` migration — the flag
 shape is otherwise identical):
+
+(`issue-cli` below stands for the deployment's issue-tracker CLI; substitute its real name.)
 
 ```toml
 [[query]]
@@ -192,12 +194,12 @@ type = "command"
 [query.command]
 argv = [
   "sh", "-c",
-  "bd ready --label worker-ready --exclude-label human --json --limit 0 | jq -c '[(.data // [])[] | select(.title | startswith(\"process-feedback:\")) | select(.issue_type == \"task\") | {id, type: .issue_type, title, metadata}]'"
+  "issue-cli ready --label worker-ready --exclude-label human --json --limit 0 | jq -c '[(.data // [])[] | select(.title | startswith(\"process-feedback:\")) | select(.issue_type == \"task\") | {id, type: .issue_type, title, metadata}]'"
 ]
 format = "json"
 ```
 
-`bd`'s issue JSON uses `issue_type`, not `type`, and wraps results in a
+The issue-tracker CLI's issue JSON uses `issue_type`, not `type`, and wraps results in a
 `{"data": [...]}` envelope — the `jq` filter does that translation and
 reproduces the `title_prefix`/`item_type` post-filters `BeadsReady.Run` used
 to apply in Go. Drop the `select(...)` clauses you don't need (e.g. the
@@ -219,7 +221,7 @@ This MUST fail with `backing command "<argv[0]>" cannot be invoked` if
 that minimal PATH, and MUST succeed once it is. For a `sh -c` pipeline,
 remember this only proves `sh` resolves — anything the pipeline shells out to
 internally needs to be on the real runtime PATH by construction (this flake's
-own wrapper bundles the tools its worked examples shell out to, such as `bd`, `pg-pr` and
+own wrapper bundles the tools its worked examples shell out to, such as the issue-tracker CLI, the PR-management CLI and
 `jq`, for exactly this reason — see `default.nix`).
 
 ## Gates: file-backed gates replaced by the Gate Registry (bead `pg2-h63eu`, `INV-LIFE-2`)
@@ -269,7 +271,7 @@ simply stops gating when its owner dies. `pg-router status`/`--json` and the TUI
 list the active gates (TYPE, description, owner, set-at, TTL remaining).
 
 **Operator convention: `BEAD_SERVER_DOWN`.** An operator sets this gate before taking the shared
-beads/Dolt server down (for example a `bd` schema migration):
+issue-store server down (for example a schema migration):
 `pg-router gate set BEAD_SERVER_DOWN --owner beads-migration --description "..."`, with NO `--ttl`
 (a lapsed lease counts as cleared). It needs a running core, so set it BEFORE the router is stopped
 (`gate set` fails with `no running core` otherwise), and clear it last, once the server is verified
@@ -442,7 +444,7 @@ ci list` already fans out across every registered backend and returns one `sourc
 `$provider` is cheaper than shelling out once per connector.
 
 A real deployment tracking a live, changing set of open PRs (rather than one fixed `pr-id`) can
-replace the fixed positional argument with a small loop over `pg-pr pr list --json` (the same seam
+replace the fixed positional argument with a small loop over the PR-management CLI's `pr list --json` (the same seam
 `internal/pgrouteracl.ReadPRList` already reads, and the same `<repo>#<number>` id shape
 `internal/pgrouteracl.prKey` already builds) feeding `pg-connector ci list` once per open PR, then
 folding every call's `runs`/`sources` together before the same staleness/degraded check above —
@@ -486,7 +488,7 @@ type = "<kind>"
 enabled = true
 binds = ["feedback.requested"]
 [role.<kind>]
-actor = "claude"
+actor = "<actor>"
 completion = "close-only"
 on_failure = "unclaim"
 on_dispatch_fail = "unclaim"
@@ -564,7 +566,7 @@ To move one role to the per-role path:
 2. Build. The adapter's `validate-config` runs over the role's rendered table during the build, so
    a mistake fails before apply.
 3. Exercise the role once with `pg-router run-role <role> '<json>'` against a realistic event, and
-   read an actual outcome, not just an exit code (`CLAUDE.md`'s config-testing rule).
+   read an actual outcome, not just an exit code (the repo's config-testing rule).
 4. Apply. A session the earlier handler left running at the cutover is adopted by the new adapter
    (`docs/adr/0085`), so no running dispatch is dropped.
 
@@ -578,7 +580,7 @@ absolute path, fails the load with exit `3` before anything runs.
 
 Before this change, an operator relying on zero-config defaults (no `.pg-router/config.toml`) saw
 `pg-router` log "config present but defines no `[[role]]`; using built-in roles" and fall back to
-an in-process feedback/worker role set and a `bd`-backed built-in query. **That fallback is
+an in-process feedback/worker role set and an issue-store-backed built-in query. **That fallback is
 deleted, not degraded** (`docs/adr/0065`'s "Source-side boundary" decision): a core with no
 configured roles/queries today simply dispatches nothing — there is no equivalent "it still mostly
 works" state to fall into. Any deployment that never wrote its own `config.toml` MUST author real
