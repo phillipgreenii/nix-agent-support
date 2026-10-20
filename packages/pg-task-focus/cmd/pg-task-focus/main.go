@@ -23,6 +23,11 @@ func main() {
 
 // serve runs the daemon until ctx ends. SIGHUP reloads the configuration.
 func serve(ctx context.Context, p cli.ServeParams) error {
+	// Opt-in profiling endpoint (PG_TASK_FOCUS_PPROF_ADDR; serve only). Reports
+	// on stderr, never stdout (the JSON log stream), and a rejected value never
+	// stops the daemon.
+	defer startPprofFromEnv(os.Getenv, os.Stderr)()
+
 	d, err := daemon.Start(ctx, daemon.Params{
 		ConfigPath: p.ConfigPath, DataDir: p.DataDir, Version: Version, Log: os.Stdout,
 	})

@@ -10,6 +10,7 @@ cachePackages = [
   'github.com/grpc-ecosystem/grpc-gateway/v2/runtime',
   'github.com/grpc-ecosystem/grpc-gateway/v2/utilities',
   'github.com/munnerz/goautoneg',
+  'github.com/phillipgreenii/x/pprofserver',
   'github.com/prometheus/client_golang/prometheus',
   'github.com/prometheus/client_golang/prometheus/promhttp',
   'github.com/prometheus/client_model/go',
@@ -165,6 +166,10 @@ cachePackages = [
   [mod.'github.com/munnerz/goautoneg']
     version = 'v0.0.0-20191010083416-a7dc8b61c822'
     hash = 'sha256-79URDDFenmGc9JZu+5AXHToMrtTREHb3BC84b/gym9Q='
+
+  [mod.'github.com/phillipgreenii/x']
+    version = 'v0.0.0-20261015022436-7b4c351b3c34'
+    hash = 'sha256-IgDjbWSCmJEBqaZMa86YVkEXAwWR6M5R6wRvwH3uCRw='
 
   [mod.'github.com/prometheus/client_golang']
     version = 'v1.24.1'

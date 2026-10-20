@@ -3,6 +3,7 @@ module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-ta
 go 1.26.0
 
 require (
+	github.com/phillipgreenii/x v0.0.0-20261015022436-7b4c351b3c34
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/common v0.70.1

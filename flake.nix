@@ -2405,6 +2405,13 @@
                   };
                   disabled = evalWith { cfg = { }; };
                   noObs = evalWith { cfg = daemonOn; };
+                  # pprof.enable = false: daemon on, profiling endpoint opted out.
+                  pprofOff = evalWith {
+                    cfg = lib.recursiveUpdate daemonOn {
+                      phillipgreenii.programs.pg-task-focus.pprof.enable = false;
+                    };
+                    osConfig = obsOsConfig true;
+                  };
                   badSettings = evalWith {
                     cfg.phillipgreenii.programs.pg-task-focus = {
                       enable = true;
@@ -2466,6 +2473,29 @@
                 assert e.serviceConfig.EnvironmentVariables.OTEL_SERVICE_NAME == "pg-task-focus";
                 assert
                   !((entries noObs).pg-task-focus.serviceConfig.EnvironmentVariables ? OTEL_EXPORTER_OTLP_ENDPOINT);
+                # Profiling endpoint: pprof.enable (default on) points the daemon at a 0600
+                # unix socket under its own state dir (an absolute path, never a TCP
+                # address), merged beside the existing EnvironmentVariables (emitterEnv
+                # and HOME survive); off leaves the variable out and the rest as before.
+                assert
+                  e.serviceConfig.EnvironmentVariables.PG_TASK_FOCUS_PPROF_ADDR
+                  == "/Users/tester/.local/state/pg-task-focus/pprof.sock";
+                assert e.serviceConfig.EnvironmentVariables.HOME == "/Users/tester";
+                assert
+                  e.serviceConfig.EnvironmentVariables == {
+                    OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4317";
+                    OTEL_SERVICE_NAME = "pg-task-focus";
+                    HOME = "/Users/tester";
+                    PG_TASK_FOCUS_PPROF_ADDR = "/Users/tester/.local/state/pg-task-focus/pprof.sock";
+                  };
+                assert
+                  !((entries pprofOff).pg-task-focus.serviceConfig.EnvironmentVariables ? PG_TASK_FOCUS_PPROF_ADDR);
+                assert
+                  (entries pprofOff).pg-task-focus.serviceConfig.EnvironmentVariables == {
+                    OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4317";
+                    OTEL_SERVICE_NAME = "pg-task-focus";
+                    HOME = "/Users/tester";
+                  };
                 # the CLI finds the daemon and the configuration
                 assert enabled.home.sessionVariables.PG_TASK_FOCUS_ADDR == "127.0.0.1:49310";
                 assert enabled.home.sessionVariables.PG_TASK_FOCUS_CONFIG == toString cfgFile;

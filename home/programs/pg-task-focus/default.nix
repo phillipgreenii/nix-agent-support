@@ -95,6 +95,19 @@ in
       `home-manager.users.<u>`
     '';
 
+    pprof.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Expose Go's runtime profiler (`net/http/pprof`) for `pg-task-focus serve`
+        on a mode-0600 unix socket at `$XDG_STATE_HOME/pg-task-focus/pprof.sock`
+        (the module writes the resolved absolute path into the launchd agent's
+        `PG_TASK_FOCUS_PPROF_ADDR`). When `false` the variable is absent and
+        serve opens no profiling listener. Capture recipe:
+        `docs/go-daemon-profiling-runbook.md` in `phillipg-nix-repo-base`.
+      '';
+    };
+
     listenPort = lib.mkOption {
       type = lib.types.port;
       default = 49210;
@@ -331,11 +344,22 @@ in
               # (and not its rotated archive or the stderr file).
               StandardOutPath = "${stateDir}/pg-task-focus.jsonl";
               StandardErrorPath = "${stateDir}/launchd-stderr.log";
-              EnvironmentVariables = emitterEnv // {
-                # launchd's bare default environment has no locale; the daemon
-                # needs none, and nothing is inherited from the user's shell.
-                HOME = config.home.homeDirectory;
-              };
+              EnvironmentVariables =
+                emitterEnv
+                // {
+                  # launchd's bare default environment has no locale; the daemon
+                  # needs none, and nothing is inherited from the user's shell.
+                  HOME = config.home.homeDirectory;
+                }
+                # Profiling endpoint (github.com/phillipgreenii/x/pprofserver): a 0600
+                # unix socket under the daemon's own state dir, so no port is
+                # allocated or exposed. launchd does not expand $XDG_STATE_HOME in
+                # EnvironmentVariables, so the resolved stateDir is written out.
+                # Absent when pprof.enable is false. Capture recipe:
+                # docs/go-daemon-profiling-runbook.md in phillipg-nix-repo-base.
+                // lib.optionalAttrs cfg.pprof.enable {
+                  PG_TASK_FOCUS_PPROF_ADDR = "${stateDir}/pprof.sock";
+                };
             };
           };
     })
