@@ -266,6 +266,10 @@ func TestParseAnchorArgv(t *testing.T) {
 		a.heartbeat != "/s/keeper.heartbeat" || a.stateDir != "/s" || !a.haveRelease || !a.haveBlind {
 		t.Fatalf("parsed = %+v, %v", a, ok)
 	}
+	sub, ok := parseAnchorArgv([]string{"/x/pg-keep-awake", "anchor", "--watchdog", "1500ms", "--interval=200ms", "--state-dir=/s"})
+	if !ok || sub.watchdogS != 1.5 || sub.intervalS != 0.2 {
+		t.Fatalf("sub-second parse = %+v, %v", sub, ok)
+	}
 	for name, argv := range map[string][]string{
 		"not anchor":         {"/x/pg-keep-awake", "run", "--state-dir", "/s"},
 		"no subcommand":      {"/x/pg-keep-awake"},
@@ -402,5 +406,29 @@ func TestAdoptByScanPrefersValidOverStale(t *testing.T) {
 	}
 	if g.fp.procs[old.anchor].up || g.fp.procs[old.caff].up {
 		t.Fatal("the stale pair must be stopped")
+	}
+}
+
+// A pair started with sub-second parameters is adopted by a keeper with the
+// same configuration (argv and assertion.json both carry the fractions), and
+// is not adopted by one whose heartbeat differs by a sub-second amount.
+func TestAdoptSubSecondParams(t *testing.T) {
+	g := newRig(t)
+	g.cfg.Heartbeat = 200 * time.Millisecond
+	sp := g.seedPair(g.cfg, 5_000, "i")
+	g.writeFile(sp, nil)
+	res := g.rc.Adopt(g.inputs(nil, okGate()))
+	noErrs(t, res)
+	if !res.Adopted || res.AnchorPID != sp.anchor {
+		t.Fatalf("result = %+v, want the sub-second pair adopted", res)
+	}
+
+	h := newRig(t)
+	h.cfg.Heartbeat = 200 * time.Millisecond
+	sp = h.seedPair(h.cfg, 5_000, "i")
+	h.writeFile(sp, nil)
+	h.cfg.Heartbeat = 300 * time.Millisecond
+	if res := h.rc.Adopt(h.inputs(nil, okGate())); res.Adopted {
+		t.Fatalf("result = %+v, a 200ms pair must not match a 300ms config", res)
 	}
 }

@@ -86,14 +86,40 @@ func (c AssertionConfig) Params() lease.AssertionParams {
 	return lease.AssertionParams{
 		ReleasePct:       c.EffectiveRelease(),
 		BlindPct:         c.BlindLevel(),
-		WatchdogSeconds:  ceilSeconds(c.Watchdog),
-		HeartbeatSeconds: ceilSeconds(c.Heartbeat),
+		WatchdogSeconds:  seconds(c.Watchdog),
+		HeartbeatSeconds: seconds(c.Heartbeat),
 		StateDir:         c.StateDir,
 	}
 }
 
-// ceilSeconds rounds a positive duration up to whole seconds (at least 1), so
-// a sub-second value never becomes the invalid "0s".
+// seconds is d in fractional seconds, 0 for a non-positive d. Nothing is rounded:
+// the anchor takes the configured duration as it is, so heartbeat_interval =
+// "200ms" polls every 200ms and is recorded as 0.2.
+func seconds(d time.Duration) float64 {
+	if d <= 0 {
+		return 0
+	}
+	return d.Seconds()
+}
+
+// formatDuration renders d for an anchor flag: whole seconds as "Ns" (the
+// long-standing form), otherwise milliseconds or, below that, the Go form. It
+// round-trips through time.ParseDuration exactly; a non-positive d is "0s".
+func formatDuration(d time.Duration) string {
+	switch {
+	case d <= 0:
+		return "0s"
+	case d%time.Second == 0:
+		return strconv.FormatInt(int64(d/time.Second), 10) + "s"
+	case d%time.Millisecond == 0:
+		return strconv.FormatInt(int64(d/time.Millisecond), 10) + "ms"
+	}
+	return d.String()
+}
+
+// ceilSeconds rounds a positive duration up to whole seconds (at least 1). It
+// is for the status.json staleness threshold only (rounding up is the safe
+// side there), never for anchor parameters.
 func ceilSeconds(d time.Duration) int {
 	if d <= 0 {
 		return 0
@@ -112,9 +138,9 @@ func (c AssertionConfig) AnchorArgv(exe string) []string {
 		exe, "anchor",
 		"--release-pct", strconv.Itoa(p.ReleasePct),
 		"--blind-pct", strconv.Itoa(p.BlindPct),
-		"--watchdog", strconv.Itoa(p.WatchdogSeconds) + "s",
+		"--watchdog", formatDuration(c.Watchdog),
 		"--heartbeat", c.HeartbeatPath(),
-		"--interval", strconv.Itoa(p.HeartbeatSeconds) + "s",
+		"--interval", formatDuration(c.Heartbeat),
 		"--state-dir", c.StateDir,
 	}
 }

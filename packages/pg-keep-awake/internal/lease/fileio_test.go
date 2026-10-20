@@ -1,6 +1,7 @@
 package lease
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -232,5 +233,24 @@ func TestStateFileSymlinkRefused(t *testing.T) {
 	}
 	if _, err := d.ReadStatus(); !errors.Is(err, ErrNotRegular) {
 		t.Errorf("symlinked status.json = %v, want ErrNotRegular", err)
+	}
+}
+
+// assertion.json params carry fractional seconds (a 200ms heartbeat is 0.2) and
+// whole seconds still encode as integers, so files written before the fields
+// became fractional read back unchanged.
+func TestAssertionParamsFractionalSeconds(t *testing.T) {
+	d := newDir(t)
+	a := &AssertionFile{Params: AssertionParams{WatchdogSeconds: 1.5, HeartbeatSeconds: 0.2, StateDir: "/abs"}}
+	if err := d.WriteAssertion(a); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.ReadAssertion()
+	if err != nil || got.Params.WatchdogSeconds != 1.5 || got.Params.HeartbeatSeconds != 0.2 {
+		t.Fatalf("fractional round trip: %v %+v", err, got)
+	}
+	raw, err := json.Marshal(AssertionParams{WatchdogSeconds: 600, HeartbeatSeconds: 10})
+	if err != nil || !strings.Contains(string(raw), `"watchdog_seconds":600,`) || !strings.Contains(string(raw), `"heartbeat_seconds":10,`) {
+		t.Fatalf("whole seconds must encode as integers: %v %s", err, raw)
 	}
 }

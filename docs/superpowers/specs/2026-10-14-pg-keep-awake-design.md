@@ -452,8 +452,11 @@ The keeper MUST NOT signal a pid taken from an `acquire` lease (it may be pa-mon
 
 `pg-keep-awake anchor --release-pct R --blind-pct B --watchdog D --heartbeat PATH --interval I --state-dir DIR`
 is autonomous: it takes its parameters from argv, MUST NOT read `config.toml`, and keeps no connection
-to the keeper. `I` is the keeper's `heartbeat_interval`, recorded as `heartbeat_seconds` in
-`assertion.json` and compared on adoption with the other parameters. When `hold_pct` is 0 (the rule is
+to the keeper. `I` is the keeper's `heartbeat_interval`, passed to the anchor as configured (never rounded:
+`200ms` polls every 200 ms, and the same holds for `D` and `watchdog_timeout`), and recorded as
+`heartbeat_seconds` in `assertion.json` and compared on adoption with the other parameters.
+`heartbeat_seconds` and `watchdog_seconds` are seconds as JSON numbers, fractional when the configured
+duration is not a whole number of seconds (`0.2` for `200ms`; whole seconds stay integers, as in 5.2). When `hold_pct` is 0 (the rule is
 off) the keeper passes `--release-pct 0 --blind-pct 0`.
 Every `I`:
 

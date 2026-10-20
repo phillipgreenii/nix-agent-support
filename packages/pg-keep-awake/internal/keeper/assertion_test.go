@@ -539,3 +539,55 @@ func TestBatterySourceNeedsNoArgvElement(t *testing.T) {
 		}
 	}
 }
+
+// A sub-second heartbeat_interval and watchdog_timeout reach the anchor as
+// configured: design section 9 makes the anchor interval I the keeper's
+// heartbeat_interval, so nothing is rounded up to whole seconds.
+func TestSubSecondIntervalsAreHonored(t *testing.T) {
+	g := newRig(t)
+	g.cfg.Heartbeat = 200 * time.Millisecond
+	g.cfg.Watchdog = 1500 * time.Millisecond
+	noErrs(t, g.tick(ll("a", "i")))
+
+	argv := g.fp.procs[101].argv
+	for flag, want := range map[string]string{"--interval": "200ms", "--watchdog": "1500ms"} {
+		i := slices.Index(argv, flag)
+		if i < 0 || argv[i+1] != want {
+			t.Fatalf("argv = %q, want %s %s", argv, flag, want)
+		}
+	}
+	a, err := g.dir.ReadAssertion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Params.HeartbeatSeconds != 0.2 || a.Params.WatchdogSeconds != 1.5 {
+		t.Fatalf("params = %+v, want heartbeat_seconds 0.2 and watchdog_seconds 1.5", a.Params)
+	}
+	// The recorded values are the ones the next tick compares: no replacement.
+	res := g.tick(ll("a", "i"))
+	if res.Started || res.Replaced || !res.Held {
+		t.Fatalf("second tick = %+v, want the pair kept", res)
+	}
+}
+
+func TestFormatDuration(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		-time.Second:                            "0s",
+		0:                                       "0s",
+		10 * time.Second:                        "10s",
+		10 * time.Minute:                        "600s",
+		200 * time.Millisecond:                  "200ms",
+		1500 * time.Millisecond:                 "1500ms",
+		time.Millisecond + 500*time.Microsecond: "1.5ms",
+	} {
+		got := formatDuration(d)
+		if got != want {
+			t.Errorf("formatDuration(%v) = %q, want %q", d, got, want)
+		}
+		if d > 0 {
+			if back, err := time.ParseDuration(got); err != nil || back != d {
+				t.Errorf("formatDuration(%v) = %q does not round-trip: %v, %v", d, got, back, err)
+			}
+		}
+	}
+}

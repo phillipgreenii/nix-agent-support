@@ -170,11 +170,14 @@ type ProcDesc struct {
 
 // AssertionParams records the parameters the assertion was started with.
 type AssertionParams struct {
-	ReleasePct       int    `json:"release_pct"`
-	BlindPct         int    `json:"blind_pct"`
-	WatchdogSeconds  int    `json:"watchdog_seconds"`
-	HeartbeatSeconds int    `json:"heartbeat_seconds"`
-	StateDir         string `json:"state_dir"`
+	ReleasePct int `json:"release_pct"`
+	BlindPct   int `json:"blind_pct"`
+	// WatchdogSeconds and HeartbeatSeconds are fractional seconds: a sub-second
+	// configured value (heartbeat_interval = "200ms" records 0.2) is kept as is,
+	// and whole seconds still encode as integers (10, not 10.0).
+	WatchdogSeconds  float64 `json:"watchdog_seconds"`
+	HeartbeatSeconds float64 `json:"heartbeat_seconds"`
+	StateDir         string  `json:"state_dir"`
 }
 
 // AssertionFile is assertion.json: the anchor and caffeinate the keeper started.

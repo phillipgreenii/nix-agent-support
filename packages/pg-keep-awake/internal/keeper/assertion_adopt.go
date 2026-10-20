@@ -14,7 +14,7 @@ import (
 // anchorArgs are the parameters read back from a running anchor's argv.
 type anchorArgs struct {
 	releasePct, blindPct   int
-	watchdogS, intervalS   int
+	watchdogS, intervalS   float64
 	heartbeat, stateDir    string
 	haveRelease, haveBlind bool
 }
@@ -65,12 +65,12 @@ func atoiOK(s string) (int, bool) {
 	return n, err == nil
 }
 
-func durSeconds(s string) int {
+func durSeconds(s string) float64 {
 	d, err := time.ParseDuration(s)
 	if err != nil {
 		return 0
 	}
-	return ceilSeconds(d)
+	return seconds(d)
 }
 
 // matches reports whether the anchor argv carries exactly the parameters cfg
