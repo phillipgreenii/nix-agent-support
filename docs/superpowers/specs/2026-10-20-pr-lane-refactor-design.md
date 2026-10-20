@@ -120,6 +120,47 @@ flowchart LR
   W --> K
 ```
 
+### 5.0 What hydration does and what the decider decides
+
+Two separate jobs, and the design keeps them separate.
+
+**Hydration (pg-desk) answers "what is true about this PR right now?" and decides nothing.** For one
+PR id it reads from the connector only, never from the forge or the tracker directly: the PR itself
+(title, state, draft flag, head commit, mergeability, review decision, comment and review counts),
+its files and commits (stored by head commit and not re-read while the head is unchanged), its CI
+runs (per-job results only for failing runs on the current head), its conversation (comments and
+review threads), the work items already linked to it, and the dependencies of those work items. It
+then interprets that data with pure, deterministic rules and no model: who owns the PR (mine,
+co-owned or team), its kind, languages and size, urgency, category, which feedback is addressed,
+approvals, gate state, whether it waits on the operator, why it matched a watched query, and whether
+it is ready to promote. The result is stored: the raw snapshot with a version and a `hydrated_at`
+stamp, the interpretation row, and one change-log entry. After that, `pg-desk pr show <id>` answers
+from the store alone, which is the only thing the decider reads.
+
+**The decider answers "which work items should exist for this PR, and in what state?"** It reads the
+stored view and computes the whole action set again on every run, so a re-run on an unchanged view
+writes nothing. The work-item kinds (`docs/behavior/pg-decider/work-items.md`):
+
+| Kind               | What it asks a worker to do                       | Governed by rule           | Only for       |
+| ------------------ | ------------------------------------------------- | -------------------------- | -------------- |
+| `anchor`           | nothing; it is the parent, one per PR             | adoption and closure rules | every PR       |
+| `review-pr`        | review the PR at its current head                 | `review.head-advanced`     | per ownership  |
+| `process-feedback` | address the unaddressed review feedback           | `feedback.digest-changed`  | mine, co-owned |
+| `fix-ci`           | fix the failing CI builds on the current head     | `fixci.failing-on-head`    | mine, co-owned |
+| `resolve-conflict` | resolve the merge conflict with the base          | the conflict rule          | mine, co-owned |
+| `focus-item`       | one bead per source entity picked for daily focus | `focus.item`               | PR and issue   |
+
+Around those: a PR that merges or closes gets its anchor and children closed, and a reopened PR gets
+them reopened; existing anchors are adopted by backend node id or by title shape instead of being
+recreated; `hide` stops every action on a PR, `wip` is view-only; a closed `fix-ci`,
+`resolve-conflict` or `process-feedback` item is not recreated for the same context (the same head
+and base); every write carries an audit comment naming the rule and the facts it keyed on; and a
+rule that fails `escalate_after` (3) runs in a row raises one `human` task instead of retrying
+forever. The decider never calls the forge and never writes pg-desk state except annotations.
+
+Today, with the sync stage dead, none of this runs: the legacy lane did both jobs in one process
+and needed the dropped ledger to know which work item belonged to which PR.
+
 ### 5.1 Hydrate then decide (ordering)
 
 The decider MUST NOT read a view that has not been hydrated for the event it is deciding on. Today
