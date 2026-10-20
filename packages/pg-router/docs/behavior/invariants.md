@@ -365,7 +365,10 @@ Nothing here changes a gate or `INV-LIFE-2`; a wrap failure is a failure kind, n
   status only for its own failure, and on an activation failure it **MUST** exit before starting the
   payload, with the reason on stderr. Exit codes alone cannot tell a wrapper's failure from the
   payload's (common tools reuse the same small codes, and a handler's `busy` decline has its own), so
-  detection uses the ready marker (`INV-ENV-5`). **WC-3** It **MUST NOT** write to stdout; it **MAY**
+  detection uses the ready marker (`INV-ENV-5`). A wrap entry whose command cannot be run is no
+  exception: the shell's own status comes back unnormalised — 127 for a bare name or a missing command
+  behind `env`, and 126 or 127 for a missing absolute path that `/bin/sh` itself execs (macOS bash 3.2
+  gives 126, POSIX dash 127) — so nothing may depend on which; the absent marker is the signal. **WC-3** It **MUST NOT** write to stdout; it **MAY**
   write to stderr and **SHOULD** prefix its own messages `pg-wrap[<stage>]:`. **WC-4** It **MUST**
   leave the payload with the same controlling terminal and in the foreground process group.
   **WC-5** It **MUST** deliver `SIGTERM`, `SIGINT` and `SIGHUP` to the payload, then run its own

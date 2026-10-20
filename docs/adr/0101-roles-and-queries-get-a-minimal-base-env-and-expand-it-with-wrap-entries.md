@@ -79,6 +79,10 @@ activate -d ... --`, a `nix develop ... -c`, an `env K=V`, a `timeout --foregrou
      only for its own failure; on activation failure it MUST exit before starting the payload, with the
      reason on stderr. Exit codes alone cannot tell wrapper from payload failure (flox exits 1, timeout
      124, and the command adapter treats 9 as busy), so detection uses the ready marker (decision 9).
+     A wrap entry whose command cannot be run is no exception: the shell's own status comes back
+     unnormalised, 127 for a bare name or a missing command behind `env`, and 126 or 127 for a missing
+     absolute path that `/bin/sh` itself execs (macOS bash 3.2 gives 126, POSIX dash 127). Nothing may
+     depend on which of the two; the absent marker is the signal.
    - **WC-3** It MUST NOT write to stdout. It MAY write to stderr, and SHOULD prefix its own messages
      `pg-wrap[<stage>]:`.
    - **WC-4** It MUST leave the payload with the same controlling terminal and in the foreground process
