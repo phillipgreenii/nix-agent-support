@@ -118,9 +118,10 @@ func newEngineRig(t *testing.T) *engineRig {
 	return &engineRig{rig: r, conf: conf, log: lg}
 }
 
-// list sets the listing the next run reads.
+// list sets the listing the next run reads. The scheduler goroutine may be
+// inside fakeGH.Run, so the swap goes through the fake's lock.
 func (r *rig) list(complete bool, ms ...mem) {
-	r.gh.answer = func(call) ([]byte, error) { return listBody(complete, ms...), nil }
+	r.gh.setAnswer(func(call) ([]byte, error) { return listBody(complete, ms...), nil })
 }
 
 // runKey runs the configured query "mine" once, directly.

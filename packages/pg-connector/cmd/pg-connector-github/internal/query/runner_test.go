@@ -40,7 +40,9 @@ type call struct {
 }
 
 // fakeGH answers the membership document from canned fixtures and records every
-// call. answer maps (q, after) to a body and error.
+// call. answer maps (q, after) to a body and error. answer is read by the
+// scheduler goroutine inside Run, so a test that swaps it while the scheduler
+// loop is running MUST go through setAnswer, which takes mu.
 type fakeGH struct {
 	mu     sync.Mutex
 	calls  []call
@@ -64,6 +66,15 @@ func (g *fakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
 	answer := g.answer
 	g.mu.Unlock()
 	return answer(c)
+}
+
+// setAnswer replaces the canned answer under mu. The lock publishes everything
+// the new closure captures to the goroutine that next calls Run, so the closure
+// and its captured data need no further synchronization.
+func (g *fakeGH) setAnswer(answer func(c call) ([]byte, error)) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.answer = answer
 }
 
 func (g *fakeGH) count() int {
@@ -473,9 +484,9 @@ func TestExecutor_TracksTheMembersSoTheyAreRefreshedWithoutAnyListCall(t *testin
 	}
 
 	// A new member appears on the next run and is refreshed on its own.
-	r.gh.answer = func(call) ([]byte, error) {
+	r.gh.setAnswer(func(call) ([]byte, error) {
 		return []byte(`{"data":{"rateLimit":{"cost":1,"remaining":4800,"resetAt":"2026-10-12T10:00:00Z"},"search":{"issueCount":4,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"id":"PR_d","number":9,"repository":{"nameWithOwner":"Acme-Org/Widget"}}]}}}`), nil
-	}
+	})
 	canned["PR_d"] = struct {
 		repo   string
 		number int
@@ -663,7 +674,7 @@ func TestRun_AFailureKeepsThePreviousIDsAndRecordsLastError(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.clk.Advance(2 * time.Minute)
-	r.gh.answer = func(call) ([]byte, error) { return nil, errors.New("gh: HTTP 502: bad gateway") }
+	r.gh.setAnswer(func(call) ([]byte, error) { return nil, errors.New("gh: HTTP 502: bad gateway") })
 	_, err := r.runner.Fetch(ctx, Key{Name: "mine"})
 	if err == nil || !strings.Contains(err.Error(), "502") {
 		t.Fatalf("err = %v, want the origin failure", err)
@@ -726,7 +737,7 @@ func TestRun_AuthFailureFromTheOriginMarksUnauthenticatedAndSuccessClearsIt(t *t
 	r := newRig(t)
 	r.run(t)
 	ctx := context.Background()
-	r.gh.answer = func(call) ([]byte, error) { return nil, fmt.Errorf("gh api: %w", vcs.ErrAuthInvalid) }
+	r.gh.setAnswer(func(call) ([]byte, error) { return nil, fmt.Errorf("gh api: %w", vcs.ErrAuthInvalid) })
 	if _, err := r.runner.Fetch(ctx, Key{Name: "mine"}); err == nil {
 		t.Fatal("want an error")
 	}
@@ -734,7 +745,7 @@ func TestRun_AuthFailureFromTheOriginMarksUnauthenticatedAndSuccessClearsIt(t *t
 		t.Fatal("an origin 401 must mark the daemon unauthenticated")
 	}
 	r.auth.Observe(nil) // the viewer refresh recovers it
-	r.gh.answer = func(call) ([]byte, error) { return fixture(t, "search_three.json"), nil }
+	r.gh.setAnswer(func(call) ([]byte, error) { return fixture(t, "search_three.json"), nil })
 	r.clk.Advance(2 * time.Minute)
 	if _, err := r.runner.Fetch(ctx, Key{Name: "mine"}); err != nil {
 		t.Fatal(err)
@@ -747,7 +758,7 @@ func TestRun_AuthFailureFromTheOriginMarksUnauthenticatedAndSuccessClearsIt(t *t
 func TestRun_AnEmptyAnswerIsAnError(t *testing.T) {
 	r := newRig(t)
 	r.run(t)
-	r.gh.answer = func(call) ([]byte, error) { return fixture(t, "search_null.json"), nil }
+	r.gh.setAnswer(func(call) ([]byte, error) { return fixture(t, "search_null.json"), nil })
 	_, err := r.runner.Fetch(context.Background(), Key{Name: "mine"})
 	if err == nil || !strings.Contains(err.Error(), "search is unavailable") {
 		t.Errorf("err = %v", err)
