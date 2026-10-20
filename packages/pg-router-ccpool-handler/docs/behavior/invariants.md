@@ -45,7 +45,9 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   the capacity read is the same decline: the handler MUST NOT stamp or escalate the bead for it.
   - **A command-backed role.** A command-backed role whose configured argv exits `9` is the same
     signal: the handler MUST report it as the pre-accept busy decline (reason `command-busy`), not
-    as a handler failure, and MUST NOT carry the command's stderr into that decline.
+    as a handler failure, and MUST NOT carry the command's stderr into that decline. That mapping
+    holds only when the run's ready marker exists (`INV-CCH-33`): an exit `9` without the marker
+    came from the wrap chain, not from the command, and is a wrap failure (`INV-CCH-9`).
 - **`INV-CCH-7`** — when a session ends before its bead completes, the handler MUST read
   ccpool's recorded close reason. An external close (`idle_ttl`, `cap_eviction`, `operator`)
   MUST release the bead (status open, assignee cleared) with a comment naming the reason,
@@ -82,7 +84,7 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   it runs before launching one failed, it MUST name the cause as exactly one failure signature
   from a closed set: `git-auth`, `git-network`, `mount-or-path`, `budget`, `index-lock`,
   `api-transient`, `api-rate-limit`, `api-auth`, `context-limit`, `session-errored`,
-  `session-idle`, `session-gone`, or `unknown`. It MUST NOT use a free-form or empty label. The
+  `session-idle`, `session-gone`, `wrap-failed`, or `unknown`. It MUST NOT use a free-form or empty label. The
   signature MUST come from one classification that every caller in this module shares, applied in a fixed precedence order,
   so two callers never label the same failure text differently. Text that matches no rule is
   `unknown`. That includes text that shows success even though the process exited non-zero, and
@@ -124,6 +126,23 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
     counter. The raw transcript MUST never be logged. There is no new metric or store: "first
     seen" and "how often" are answered from the event log's own timestamps (see
     `docs/runbooks/dispatched-session-failure-signatures.md` in the repo root).
+  - **Wrap-failed.** `wrap-failed` names an end whose payload never started: the wrap chain of
+    the role's payload failed before the **ready marker** of `INV-CCH-33` was written. It is
+    decided by the marker, never by matching text, and it outranks every other signature, because
+    nothing a payload wrote can explain an end that happened before the payload ran. A non-zero end
+    or a session death WITH the marker is never `wrap-failed`; it is classified as before. The
+    evidence for a `wrap-failed` MUST be the failing stage's stderr, redacted and bounded like all
+    other evidence, and never empty (an unreadable or empty source is stated in words): for a
+    command-backed role, the redacted stderr tail of the run; for a ccpool-backed role, the tail of
+    the per-dispatch stderr file the launcher writes for each stage beside the marker
+    (`INV-CCH-36`), because a session's terminal output never reaches its transcript. The error the
+    dispatch returns for a `wrap-failed` end MUST contain the **wrap-failed sentinel**, the stable
+    substring `wrap failed before the payload started` that
+    `packages/pg-router/docs/behavior/interfaces.md` ("Wrap-failed sentinel") defines and this set
+    never rewords, followed by that evidence, and MUST NOT carry prompt or item content. This is
+    consistent with `INV-CCH-3`, which already lets a stable substring ride the opaque error
+    string. A `wrap-failed` end is exempt from the unclaimed-end strike policy of `INV-CCH-28` and
+    pauses the one role it happened in (`INV-CCH-34`).
 - **`INV-CCH-10`** <!-- uuid: b9cc174c-4c9f-43e0-bc9a-8d36fadbd36e --> — before accepting a dispatch, the handler MUST decline it when the git
   origin the dispatch needs is unavailable, and MUST NOT decline a dispatch for any other
   reason of origin state. Availability is per origin, keyed by a normalized repo key
@@ -691,6 +710,16 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     contain the stable substring `session ended on a usage limit or API outage`
     (`packages/pg-router/docs/behavior/interfaces.md`, "Usage-limit sentinel"), so the router can count it under its own reason
     instead of as an unexplained handler failure.
+  - **Wrap-failure exemption.** An end whose failure signature is `wrap-failed` (`INV-CCH-9`) is
+    exempt from the strike policy exactly as the limit and outage class above is, and for the same
+    reason: the payload never started, so the end says nothing about the bead. Such an end MUST NOT
+    add `drain-unclaimed-end`, MUST NOT add `human`, and MUST leave an existing
+    `drain-unclaimed-end` exactly as it was; a claim the handler itself holds on the bead is
+    released, and nothing else is written to the bead. The brake against re-dispatching
+    into a broken wrap is not a strike on the bead but the pause of the one role
+    (`INV-CCH-34`). The error the dispatch returns carries the wrap-failed sentinel
+    (`INV-CCH-9`), not the usage-limit substring above, so the router counts it under its own
+    reason.
   - **Absorption.** A dispatch under this mode that ends with its bead still open leaves a settled
     session like any other, and a settled session is never absorbed (`INV-CCH-17`, `INV-CCH-30`):
     a same-event re-request after a hand-back runs in a fresh session.
@@ -870,3 +899,154 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   follows the session's effort: nothing in this module or the roles' configuration sets a subagent
   effort, so a subagent most likely follows the session flag, but that is a property of claude and
   is confirmed from a subagent transcript after a change, not assumed.
+
+## Payload environment (wrap, base environment, ready marker, role gate)
+
+The rules below state how this module applies a role's wrap and the minimal base environment to the
+payload it starts, how it tells a wrap failure from the payload's own failure, and how it pauses
+the one role whose wrap is broken. The generic rules (the two wrap entry forms, one layer per entry,
+the wrapper contract, the base environment as a documented list, the ready-marker outcome rule and
+the wrap-failed sentinel) are the core's and are cited, never restated:
+`packages/pg-router/docs/behavior`, `INV-ROLE-4`, `INV-ENV-1`, `INV-ENV-2`, `INV-ENV-3`,
+`INV-ENV-5` and its "Wrap-failed sentinel". This set carries the concrete names those rules leave
+to each participant. Nothing here changes a core gate or `INV-LIFE-2`.
+
+- **`INV-CCH-32`** <!-- uuid: 4c2973fc-2bff-4ece-a1e8-4e30e5106daa --> — the environment a role's
+  payload starts in is item context plus the base environment, and the handler MUST give the payload
+  nothing else of an item.
+  - **Item context.** For every dispatch the handler MUST set exactly four variables for the
+    payload's chain: `PG_WRAP_ROLE` (the role's name), `PG_WRAP_ITEM_ID`, `PG_WRAP_ITEM_TYPE` and
+    `PG_WRAP_READY_MARKER` (the marker path of `INV-CCH-33`). The item's id and type come from the
+    dispatched item. Its **title is not passed**: a title is untrusted free text, so it never
+    reaches a chain as an environment variable, and a command-backed role that needs it templates it
+    into an array-form wrap entry (`INV-ENV-1`), which is never shell-parsed. A wrapper gets item
+    data only through these variables or through templated array elements (`INV-ENV-3`, WC-8). The
+    handler's command-backed executor sets no environment of its own today, so these four are the
+    first it sets.
+  - **The base keep-list, by explicit name.** The base environment of `INV-ENV-2` is, for this
+    module, the system variables (`HOME`, `USER`, `LOGNAME`, `TMPDIR`, `LANG`, and `PATH` fixed to
+    `/usr/bin:/bin:/usr/sbin:/sbin`); the terminal variables the payload's terminal supplies
+    (`TERM`, and `COLORTERM` where set), because the agent's terminal interface needs them; the
+    four variables of the item context above; and the markers its participants inject:
+    `BEADS_ACTOR`, `BEADS_DIR`, `WORKSPACE_ROOT` and `PG_ROUTER_TEST_MODE` (the last set by the core's
+    smoke-test command), and, for a ccpool-backed session, `CCPOOL_EXTERNAL_ID`,
+    `PA_MONITOR_NO_NUDGE`, `CCPOOL_POOL` and `CCPOOL_AUTONOMOUS`. The list is revisable by decision.
+    A prefix match (every `CCPOOL_` or `BEADS_` variable) is forbidden: it would drop
+    `PA_MONITOR_NO_NUDGE` and `WORKSPACE_ROOT` and keep names that are not markers. The variables
+    ccpool blanks so that a session does not believe it is a child session
+    (`CLAUDE_CODE_CHILD_SESSION`, `CLAUDECODE` and the others of that family) **MUST NOT** be
+    re-introduced by the base.
+  - **Where the switch and the wrap live before the split.** A role's `wrap` (an ordered list of
+    entries, `INV-ENV-1`) and its `strictBaseEnv` switch (a boolean, **off by default**, the
+    strict-env switch of `INV-ENV-2`) are carried in the role's own per-role JSON, because that file
+    is the only place today's handler learns a role's settings from and the core's role entry carries
+    no wrap until the handler is split (`phillipgreenii-nix-agent-support` ADR 0065's Addendum of
+    2026-10-20). While `strictBaseEnv` is off the payload keeps the ambient environment it has today,
+    with its wrap applied; once on, it sees only the keep-list plus what its wrap adds. The handler's
+    own work (the origin probe, the review prefetch) keeps its ambient environment, because that
+    work still needs it. The handler's strict decode of the per-role JSON MUST reject a **templated
+    wrap entry for a ccpool-backed role** (its launcher is a fixed script, `INV-CCH-36`); the
+    deployment's build-time validation rejects it too. A command-backed role MAY use templated array
+    entries.
+  - **Cancellation.** The handler MUST start the chain it runs for each payload in its own process
+    group and cancel by `SIGTERM` to the group, escalating to `SIGKILL` after a grace period, because
+    cancelling only the direct child would orphan the payload behind a wrapper that does not replace
+    itself (`INV-ENV-3`, WC-5).
+  - **A caveat for operators.** The core's `run-role` smoke command runs under the operator's own
+    shell environment, not the daemon's, so while a role's `strictBaseEnv` is off a `run-role` is
+    not representative of the payload's environment.
+
+- **`INV-CCH-33`** <!-- uuid: 1b95354a-668a-4c8c-bc2a-15d418fbda67 --> — the handler MUST tell a
+  failure of the wrap chain from a failure of the payload by a per-dispatch **ready marker**, and
+  the marker stage belongs to the handler, never to the role's wrap list.
+  - **The stage.** The handler MUST append a marker stage as the **innermost** layer of every
+    dispatch: a role with an empty wrap list, or a role written by hand, gets it too. The stage
+    writes the marker, at the path named by `PG_WRAP_READY_MARKER` (`INV-CCH-32`), immediately
+    before starting the payload. A wrap entry that only checks the tools or variables a role
+    declares is an ordinary wrap entry and has nothing to do with the marker.
+  - **The outcome rule.** A non-zero exit, or for a ccpool-backed session a death, WITHOUT the
+    marker is a **wrap failure** (`wrap-failed`, `INV-CCH-9`). With the marker the end is the
+    payload's own outcome, classified exactly as before. A command-backed role's exit `9` maps to
+    the busy decline (`INV-CCH-6`) only when the marker exists.
+  - **Every launch re-sends it.** The session tool does not keep the environment a session was
+    started with, so every ensure and every resume of a ccpool-backed session the handler issues
+    MUST pass the marker path and the item-context variables again, as every brand-new launch does.
+    A session resumed without them would run its payload with no marker and report a wrap failure
+    for work that ran.
+  - **Failing loudly.** A marker stage started with its variable unset MUST NOT skip silently: it
+    MUST write a message prefixed `pg-wrap[marker]:` to stderr and exit non-zero before the payload
+    starts.
+  - **Evidence.** What the failing stage wrote to stderr is the failure's evidence
+    (`INV-CCH-9`): the command-backed executor keeps the redacted stderr tail of its run, and the
+    ccpool-backed launcher redirects each stage's stderr to a per-dispatch file beside the marker
+    (`INV-CCH-36`).
+
+- **`INV-CCH-34`** <!-- uuid: 2627f315-2176-4ead-b4f7-1226d3982312 --> — a `wrap-failed` end
+  (`INV-CCH-9`) MUST pause that one role until the pause is cleared, and the pause is a
+  **handler-side role gate**, built the way the per-origin gate of `INV-CCH-10` is. The gate is
+  needed because `wrap-failed` carries no strike (`INV-CCH-28`): without a brake a permanently broken
+  wrap would re-dispatch every item of its role for ever, and an alert alone would not stop it.
+  - **Why handler-side.** A core gate is global and blocks every participant that did not exempt its
+    type (`INV-LIFE-2`), so it cannot pause one role, and the handler never sets or clears a core
+    gate. The core's gates, `INV-LIFE-2` and the gate set are unchanged by this invariant, and the
+    core's own gate-clear command is NOT a way to clear this one. Rejected: giving the core's gates a
+    per-role scope, and mirroring the pause in a core record; each would change `INV-LIFE-2` and
+    leave two copies of state that can disagree.
+  - **State.** One small file per paused role, in the handler's state directory beside the
+    per-origin state. It records when the pause started, the failure's redacted evidence
+    (`INV-CCH-9`, the stage's stderr tail), and a hash of that role's rendered configuration (its
+    per-role JSON, which carries `wrap` and `strictBaseEnv`, `INV-CCH-32`).
+  - **Effect.** Before accepting a dispatch to a paused role, and before any capacity, isolation or
+    launch step, the handler MUST decline it with the transport's pre-accept busy decline
+    (`conformance.ExitBusy`) and the fixed reason `wrap-gated`. As with `origin-unavailable`, the
+    decline MUST mutate no bead, make no beads or ccpool call, add no strike and set no `human`, the
+    core re-offers the event as for `INV-CCH-6`, and the role's name appears only in the handler's
+    own log and event records, never in the reason, so the reason stays a bounded label. Every other
+    role keeps dispatching. The decline reaches
+    `pg_router_failures{class=declined,reason=wrap-gated}` through the core's existing handling of a
+    busy decline's reason.
+  - **Clearing.** The gate clears on either of two things and no other. (a) A **new configuration
+    generation**: the role's current rendered-configuration hash differs from the recorded one, so
+    the next dispatch to the role clears the gate and proceeds. (b) An explicit operator clear
+    through this module's own subcommand `wrap-gate clear <role>`. Clearing a role that is not paused
+    is a successful no-op. A successful `run-role` MUST NOT clear it, because that command runs under
+    the operator's shell and not the daemon's environment (`INV-CCH-32`).
+  - **Listing.** The subcommand `wrap-gate list` MUST show each paused role with the time its pause
+    started and its evidence tail, so an operator can see why before clearing.
+  - **Telemetry.** The handler has no metrics emitter. Pause and clear transitions are structured
+    log and event-log records carrying the role, the time, and the redacted evidence tail. Routing a
+    wrap failure to its own failure-rate route is the core's concern (`INV-ENV-5`, "Wrap-failed
+    sentinel").
+
+- **`INV-CCH-35`** <!-- uuid: d0f4bed4-d592-4178-9a10-69b37ea487bd --> — the handler MUST be able to
+  tell an operator what environment a dispatch was given, without recording a value. For every
+  dispatch that starts a payload it MUST write one `dispatch_start` event-log record carrying the
+  role, the item's id and type, the wrap entries applied (as declared, with a templated entry as it
+  was rendered), the **names** of the base-environment variables the payload received (never their
+  values, and never the item-context values), and the path of the launcher when the role is
+  ccpool-backed (`INV-CCH-36`). The record is written once the dispatch is past every pre-accept
+  decline, so a declined dispatch (including `wrap-gated`) writes none. A wrap entry is
+  configuration, not item data (`INV-ENV-3`, WC-8), which is why it is recorded as declared.
+  Printing each role's composed command is the core's, after the handler split; until then this
+  record is where an operator finds it (the core prints the composed command of each `[[query]]`).
+
+- **`INV-CCH-36`** <!-- uuid: 0c0db96d-f74b-4c3c-a497-7d2137e056c9 --> — a ccpool-backed role's wrap
+  reaches the agent through **one launcher per pool**, and ccpool itself learns no wrapper concept.
+  The session tool builds each session's environment itself and passes only what it is told, so
+  wrapping the handler or the session tool's own call would not reach the agent.
+  - **The launcher.** The deployment renders, as a fixed script for each pool, a launcher that
+    resets the environment to the keep-list (`INV-CCH-32`), runs the role's wrap one layer per entry
+    (`INV-ENV-1`), always ends with the marker stage (`INV-CCH-33`), redirects each stage's stderr to
+    a per-dispatch file beside the marker, and then starts the agent with the arguments it received,
+    unchanged. It is set as the pool's agent executable (`claude.bin`), which the session tool treats
+    as an opaque executable that receives the agent's arguments, for a new session and for a resume
+    alike.
+  - **A resume runs the current launcher.** The pool's configuration is read again on every call,
+    so a resumed session runs the launcher the currently applied configuration names, not the one
+    it was started with.
+  - **Roles that share a pool declare identical wrap lists.** Roles on a shared pool share its
+    launcher, so for them the environment is a property of the pool, which could drift from what each
+    role declares. The deployment MUST fail evaluation when roles sharing a pool declare different
+    wrap lists; a role that needs a different wrap takes a pool of its own through the role's own
+    pool setting.
+  - **Not covered.** There is no per-session launcher override.

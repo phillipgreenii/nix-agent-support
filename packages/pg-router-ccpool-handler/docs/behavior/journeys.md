@@ -14,7 +14,8 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
   _(→ `USECASE-CCH-DISPATCH`; `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-4`, `INV-CCH-5`,
   `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`,
   `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`,
-  `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`.)_
+  `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`, `INV-CCH-32`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-35`,
+  `INV-CCH-36`.)_
 - **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pg-router's core, I
   want a registered source to query beads for events on my behalf, so pg-router itself never needs
   to know beads' query language. _(→ `USECASE-CCH-QUERY`; `INV-CCH-1`, `INV-CCH-4`, `INV-CCH-5`.)_
@@ -27,8 +28,8 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-8`, `INV-CCH-11`, `INV-CCH-12`, `INV-CCH-13`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-16`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`.
-_Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind; `USECASE-CCH-RELEASE-END` for a role whose completion is `close-or-release`; `USECASE-CCH-SPLIT-TRIAGE` for a role whose completion is `close-or-split-triage`.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-8`, `INV-CCH-11`, `INV-CCH-12`, `INV-CCH-13`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-16`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`, `INV-CCH-32`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-35`, `INV-CCH-36`.
+_Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind; `USECASE-CCH-RELEASE-END` for a role whose completion is `close-or-release`; `USECASE-CCH-SPLIT-TRIAGE` for a role whose completion is `close-or-split-triage`; `USECASE-CCH-WRAP-BROKEN` for a dispatch whose wrap chain failed before its payload started.
 
 1. The core dispatches one event under one tracking id to a bound role.
 2. This module starts a fresh handler session of its own (`INV-CCH-30`; extension 2k is the one
@@ -62,6 +63,17 @@ Extensions:
 - 2b. The git origin the dispatch runs against is unavailable (`INV-CCH-10`): this module declines
   `busy` with reason `origin-unavailable` before touching any bead; dispatches into other origins
   are unaffected, and dispatch resumes on the first successful probe.
+- 2w. The role is paused by a wrap failure (`INV-CCH-34`): this module declines `busy` with reason
+  `wrap-gated` before any capacity, isolation or launch step, writes nothing to any bead and makes
+  no beads or ccpool call; other roles are unaffected, and the core re-offers the event. The pause
+  ends when the role's configuration changes or an operator runs `wrap-gate clear <role>`.
+- 2x. This module starts the payload (`INV-CCH-32`, `INV-CCH-33`): it sets the item-context
+  variables and the ready-marker path for the chain, the chain starts from the base environment's
+  keep-list and the role's wrap, the marker stage is always the innermost layer, and one
+  `dispatch_start` record names the wrap entries, the base-environment variable names and the
+  launcher, never a value (`INV-CCH-35`). For a ccpool-backed role every launch and every resume of
+  its session passes the marker path and item context again, and the pool's launcher runs the wrap
+  (`INV-CCH-36`).
 - 2h. A dispatch whose role opts in to the pre-launch check and whose check says the dispatch is
   not worth running (`INV-CCH-22`): this module declines `busy` before any capacity, isolation or
   launch step, with a reason that starts `skipped-`. For a REVIEW role that is a bead already
@@ -143,6 +155,8 @@ Extensions:
   and replaced by this dispatch's own session. Any other session is never reused, whoever closed
   it: a re-review after a head advance, a re-request after a hand-back and a reopened bead each
   get a fresh session.
+- 3f. The wrap chain failed before the payload started, so the ready marker was never written
+  (`INV-CCH-33`): this module settles the dispatch as described in `USECASE-CCH-WRAP-BROKEN`.
 - 3d. The role's completion is `close-or-release` and its session has ended (`INV-CCH-28`): this
   module settles it as described in `USECASE-CCH-RELEASE-END`, which includes the case of a
   session that ended without ever claiming its bead.
@@ -234,6 +248,43 @@ Extensions:
 - 5b. The split-triage session itself hits its budget: the bead is routed to `human` by the budget
   stop's escalation (`INV-CCH-12`) and also has `needs-split-review` removed, and the role never
   re-enters the split path. No part of this role changes a budget.
+
+### `USECASE-CCH-WRAP-BROKEN` — settle a dispatch whose wrap chain failed, and pause its role <!-- uuid: c93a9d47-0c8e-4986-9f91-202c3373dbf7 -->
+
+**Primary actor:** `ACTOR-CCH-CORE`.
+**Level:** subfunction (the start and settle steps of `USECASE-CCH-DISPATCH`, for a dispatch whose wrap chain fails).
+**Preconditions:** a dispatch to a role has started its payload's chain (`INV-CCH-32`) and the role's wrap, its base environment or an activation step in it is broken, so the chain stops before the payload starts.
+_Requires:_ `INV-CCH-9`, `INV-CCH-28`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-36`.
+_Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind.
+
+1. The chain fails before the payload starts, so the marker stage never writes the ready marker
+   (`INV-CCH-33`). The failing stage's stderr is kept: for a command-backed role as the redacted
+   tail of the run's stderr, for a ccpool-backed role in the per-dispatch file the launcher writes
+   beside the marker (`INV-CCH-36`).
+2. This module classifies the end as `wrap-failed` from the missing marker alone, outranking any
+   other signature, and returns an error carrying the wrap-failed sentinel followed by the redacted
+   evidence (`INV-CCH-9`). The core counts it under its own reason, not as a payload failure.
+3. The end is no strike on the bead: nothing is added to it, no `human`, no change to an existing
+   strike label (`INV-CCH-28`).
+4. This module pauses the one role: it writes the role's gate file with the time, the evidence and
+   the hash of the role's rendered configuration (`INV-CCH-34`). Every later dispatch to that role
+   is declined `busy` with reason `wrap-gated` (extension 2w of `USECASE-CCH-DISPATCH`) until the
+   pause is cleared; every other role keeps dispatching.
+5. An operator reads `wrap-gate list` for the role, the time and the stderr tail, and either fixes
+   the role's configuration, which clears the pause on the next dispatch because the rendered
+   configuration's hash changed, or runs `wrap-gate clear <role>` once the cause outside the
+   configuration is repaired. A successful `run-role` does not clear it.
+
+Extensions:
+
+- 1a. The marker stage was started without its variable (`INV-CCH-33`): it exits non-zero before the
+  payload with a `pg-wrap[marker]:` line on stderr, which is a wrap failure like any other, and the
+  evidence names it.
+- 1b. The payload ran, wrote the marker, and then failed or the session died: this is the payload's
+  own outcome, classified as before (`INV-CCH-9`), not a wrap failure, and the role is not paused.
+- 5a. The operator clears a role that is not paused: the clear succeeds and changes nothing.
+- 5b. The cause is still there after a clear: the next dispatch fails the same way and pauses the
+  role again.
 
 ### `USECASE-CCH-QUERY` — answer a source query from beads <!-- uuid: c73f0cd4-5c9b-4862-84da-1b80716ad937 -->
 

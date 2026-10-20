@@ -29,13 +29,39 @@ copies drifting; this module is bound by the upstream text as written. That incl
 substrings a handler error carries for the core to classify (the "Budget-stop sentinel",
 "Upstream-killed sentinel" and "Usage-limit sentinel" of that `INTF-HANDLER` section): this module
 emits the usage-limit one, `session ended on a usage limit or API outage`, in the error of an
-unclaimed end that died on a usage or spend limit or an API outage (`INV-CCH-28`).
+unclaimed end that died on a usage or spend limit or an API outage (`INV-CCH-28`). It also emits
+the "Wrap-failed sentinel" of the same section, `wrap failed before the payload started`, followed
+by the failing stage's redacted stderr tail, in the error of any end whose wrap chain failed before
+its payload started (`INV-CCH-9`, `INV-CCH-33`); the wording is the core's and is never reworded
+here.
 
 One reply field is this module's to fill in, and is stated here only to name where it comes from.
 A dispatch that adopts a session an earlier offer launched (`INV-CCH-30`'s one exception) reports
 that session's recorded launch time as the optional `startedAt` of its dispatch reply, as
 `INTF-HANDLER` allows an adopting handler to (`DEC-EVENT-5`). A dispatch that launches its own
 session, and an adopted session that recorded no launch time, reply with no `startedAt`.
+
+## This module's own operator-facing surface
+
+Beside the dispatch and source entry points above, this module exposes the following to an operator
+and to the deployment. Each is fully defined by the invariant cited; none is declared to the core.
+
+- **`wrap-gate clear <role>`** and **`wrap-gate list`** — clear the pause of one role whose wrap
+  failed, and list the paused roles with the time each pause started and its stderr tail
+  (`INV-CCH-34`). Clearing a role that is not paused succeeds and does nothing. The core's own
+  gate-clear command cannot clear it.
+- **The per-role JSON's `wrap` and `strictBaseEnv`** — the two settings a role's own JSON file
+  carries, before the core's role entry carries them: `wrap` is an ordered list of entries, each
+  a string or an array of strings (`INV-ENV-1`), and `strictBaseEnv` is a boolean, off by default
+  (`INV-CCH-32`). The file is decoded strictly, and a templated entry in a ccpool-backed role's
+  `wrap` is rejected.
+- **The decline reason `wrap-gated`** — the fixed, bounded reason of the pre-accept busy decline a
+  paused role gives (`INV-CCH-34`), like `origin-unavailable` and `session-in-flight`.
+- **The `dispatch_start` event-log record** — role, item id and type, wrap entries, the names of the
+  base-environment variables and the launcher path, never a value (`INV-CCH-35`).
+- **The environment of a payload** — the four item-context variables `PG_WRAP_ROLE`,
+  `PG_WRAP_ITEM_ID`, `PG_WRAP_ITEM_TYPE` and `PG_WRAP_READY_MARKER` the handler sets, and the
+  keep-list of the base environment (`INV-CCH-32`).
 
 ## Boundary crossings (this module is the initiator; named, not fully specified)
 
@@ -65,6 +91,10 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   (`INV-CCH-30`).
   When a dispatch reaches a terminal outcome, this module also closes (without purging) the one
   session it launched or absorbed, if it is settled and quiet (`INV-CCH-17`).
+  Every launch of a ccpool-backed session, whether a new one, an ensure or a resume, passes the
+  ready-marker path and the item-context variables again, because the session tool keeps none of
+  them (`INV-CCH-33`); the agent it starts is the pool's launcher, an opaque executable that runs the
+  role's wrap and then the agent (`INV-CCH-36`), and a resume runs the launcher currently applied.
   While a dispatch runs, this module writes a supervision lease into the session's metadata
   (`INV-CCH-18`), never as a `ccpool` label. Before checking capacity, a dispatch also reconciles
   its own role's orphaned sessions in that role's pool: a session whose lease has expired is
