@@ -9046,6 +9046,58 @@
                     };
                     store.path = "/var/tmp/wr/store.db";
                   };
+                  # Generators and presets: one preset naming the default
+                  # narrative registration with the minimum keys, one with
+                  # every key set, a second generator, and an override of one
+                  # field of the default narrative registration.
+                  hmPresets = evalHM {
+                    enable = true;
+                    generators = {
+                      json-dump = {
+                        command = [ "work-report-json-dump" ];
+                        timeout = "90s";
+                      };
+                      narrative.timeout = "20m";
+                    };
+                    reports = {
+                      example-daily = {
+                        generator = "narrative";
+                        range = "yesterday";
+                      };
+                      example-weekly = {
+                        generator = "narrative";
+                        range = "last-week";
+                        narrowing = {
+                          labels = [ "alpha" ];
+                          types = [
+                            "issue"
+                            "pr"
+                          ];
+                        };
+                        config = {
+                          model = "sonnet";
+                          nested = {
+                            list = [
+                              1
+                              "two"
+                            ];
+                          };
+                        };
+                        output.dir = "~/reports/example-weekly";
+                      };
+                      dump = {
+                        generator = "json-dump";
+                        config.flag = true;
+                      };
+                    };
+                  };
+                  hmValid = evalHM {
+                    enable = true;
+                    reports.example-daily = {
+                      generator = "narrative";
+                      range = "yesterday";
+                    };
+                  };
                   # The retired kinds options are gone: setting one must fail
                   # to evaluate.
                   kindsAttempt =
@@ -9076,6 +9128,49 @@
                         enable = true;
                         schedule.interval = "soon";
                       }).phillipgreenii.programs.work-report.schedule.interval;
+                  # Generator and preset options are typed: a bad timeout, an
+                  # input other than baseline, a non-name env entry, a
+                  # generator without a command and a preset without a
+                  # generator all fail to evaluate.
+                  badGeneratorTimeout =
+                    builtins.tryEval
+                      (evalHM {
+                        enable = true;
+                        generators.g = {
+                          command = [ "g" ];
+                          timeout = "soon";
+                        };
+                      }).phillipgreenii.programs.work-report.generators.g.timeout;
+                  badGeneratorInput =
+                    builtins.tryEval
+                      (evalHM {
+                        enable = true;
+                        generators.g = {
+                          command = [ "g" ];
+                          inputs = [ "other" ];
+                        };
+                      }).phillipgreenii.programs.work-report.generators.g.inputs;
+                  badGeneratorEnv =
+                    builtins.tryEval
+                      (evalHM {
+                        enable = true;
+                        generators.g = {
+                          command = [ "g" ];
+                          env = [ "NOT A NAME=1" ];
+                        };
+                      }).phillipgreenii.programs.work-report.generators.g.env;
+                  noGeneratorCommand =
+                    builtins.tryEval
+                      (evalHM {
+                        enable = true;
+                        generators.g.timeout = "1m";
+                      }).phillipgreenii.programs.work-report.generators.g.command;
+                  noPresetGenerator =
+                    builtins.tryEval
+                      (evalHM {
+                        enable = true;
+                        reports.p.range = "today";
+                      }).phillipgreenii.programs.work-report.reports.p.generator;
                 in
                 # Disabled: nothing installed or rendered.
                 assert hmDisabled.home.packages == [ ];
@@ -9087,11 +9182,17 @@
                 assert !kindsAttempt.success;
                 assert !badWindow.success;
                 assert !badInterval.success;
+                assert !badGeneratorTimeout.success;
+                assert !badGeneratorInput.success;
+                assert !badGeneratorEnv.success;
+                assert !noGeneratorCommand.success;
+                assert !noPresetGenerator.success;
                 pkgs.runCommand "test-work-report-module-ok"
                   {
                     nativeBuildInputs = [
                       pkgs.work-report
                       pkgs.jq
+                      pkgs.yq-go
                     ];
                   }
                   ''
@@ -9100,18 +9201,34 @@
                     mkdir -p "$HOME"
                     defaults=${hmDefaults.xdg.configFile."work-report/config.yaml".source}
                     custom=${hmCustom.xdg.configFile."work-report/config.yaml".source}
+                    presets=${hmPresets.xdg.configFile."work-report/config.yaml".source}
+                    valid=${hmValid.xdg.configFile."work-report/config.yaml".source}
 
-                    # Defaults: only the schedule is rendered, with 1h / 48h.
+                    # Defaults: the schedule (1h / 48h) and the default
+                    # narrative generator registration are rendered, and no
+                    # preset.
                     grep -q '^schedule:' "$defaults"
                     grep -q 'interval: 1h' "$defaults"
                     grep -q 'window: 48h' "$defaults"
+                    grep -q '^generators:' "$defaults"
                     # `!` does not trip errexit, so a leak must exit explicitly.
-                    if grep -Eq 'timezone|sources|store:' "$defaults"; then exit 1; fi
+                    if grep -Eq 'timezone|sources|store:|reports:' "$defaults"; then exit 1; fi
                     got=$(work-report config show --config "$defaults" --output json)
                     [ "$(jq -r .schedule.interval <<<"$got")" = 1h ]
                     [ "$(jq -r .schedule.window <<<"$got")" = 48h ]
                     # store.path unset: the loader's default, resolved.
                     [ "$(jq -r .store.path <<<"$got")" = "$XDG_STATE_HOME/work-report/store.db" ]
+                    # Default registration: generator narrative runs the
+                    # package's work-report-narrative with inputs [baseline]
+                    # and the proxy, certificate and Claude configuration
+                    # names, and the built-in baseline stays alone as a preset.
+                    [ "$(jq -c '.problems' <<<"$got")" = '[]' ]
+                    [ "$(jq -c '.generators.narrative.command' <<<"$got")" = '["${pkgs.work-report}/bin/work-report-narrative"]' ]
+                    [ -x "${pkgs.work-report}/bin/work-report-narrative" ]
+                    [ "$(jq -c '.generators.narrative.inputs' <<<"$got")" = '["baseline"]' ]
+                    [ "$(jq -r '.generators.narrative.timeout' <<<"$got")" = 10m0s ]
+                    jq -e '.generators.narrative.env | (index("HTTPS_PROXY") != null) and (index("SSL_CERT_FILE") != null) and (index("CLAUDE_CONFIG_DIR") != null)' <<<"$got" > /dev/null
+                    [ "$(jq -c '.presets | keys' <<<"$got")" = '["baseline"]' ]
 
                     # Custom values round-trip through the strict loader.
                     got=$(work-report config show --config "$custom" --output json)
@@ -9124,9 +9241,47 @@
                     [ "$(jq -r '.sources["source-two"].enable' <<<"$got")" = true ]
                     [ "$(jq -c '.sources["source-two"].labels' <<<"$got")" = '["beta","gamma"]' ]
 
+                    # Generators and presets round-trip through the strict
+                    # loader and Presets, with no problems reported.
+                    got=$(work-report config show --config "$presets" --output json)
+                    [ "$(jq -c '.problems' <<<"$got")" = '[]' ]
+                    # The generator override changed one field only.
+                    [ "$(jq -r '.generators.narrative.timeout' <<<"$got")" = 20m0s ]
+                    [ "$(jq -c '.generators.narrative.inputs' <<<"$got")" = '["baseline"]' ]
+                    [ "$(jq -c '.generators["json-dump"].command' <<<"$got")" = '["work-report-json-dump"]' ]
+                    [ "$(jq -r '.generators["json-dump"].timeout' <<<"$got")" = 1m30s ]
+                    [ "$(jq -c '.generators["json-dump"].inputs' <<<"$got")" = '[]' ]
+                    [ "$(jq -c '.generators["json-dump"].env' <<<"$got")" = '[]' ]
+                    # A preset that sets only generator and range takes the
+                    # loader's defaults for everything else.
+                    [ "$(jq -r '.presets["example-daily"].generator' <<<"$got")" = narrative ]
+                    [ "$(jq -r '.presets["example-daily"].range' <<<"$got")" = yesterday ]
+                    [ "$(jq -c '.presets["example-daily"].narrowing' <<<"$got")" = '{"labels":[],"sources":[],"types":[]}' ]
+                    [ "$(jq -c '.presets["example-daily"].config' <<<"$got")" = '{}' ]
+                    [ "$(jq -r '.presets["example-daily"].output.dir' <<<"$got")" = "$XDG_STATE_HOME/work-report/reports/example-daily" ]
+                    # A preset that sets every key.
+                    [ "$(jq -r '.presets["example-weekly"].range' <<<"$got")" = last-week ]
+                    [ "$(jq -c '.presets["example-weekly"].narrowing' <<<"$got")" = '{"labels":["alpha"],"sources":[],"types":["issue","pr"]}' ]
+                    [ "$(jq -c '.presets["example-weekly"].config' <<<"$got")" = '{"model":"sonnet","nested":{"list":[1,"two"]}}' ]
+                    [ "$(jq -r '.presets["example-weekly"].output.dir' <<<"$got")" = "$HOME/reports/example-weekly" ]
+                    [ "$(jq -r '.presets.dump.generator' <<<"$got")" = json-dump ]
+                    [ "$(jq -r '.presets.dump.range' <<<"$got")" = today ]
+                    [ "$(jq -c '.presets.dump.config' <<<"$got")" = '{"flag":true}' ]
+                    # Only the keys that are set are rendered.
+                    daily=$(yq -c '.reports["example-daily"] | keys' "$presets")
+                    [ "$daily" = '["generator","range"]' ]
+                    [ "$(yq -c '.generators["json-dump"] | keys' "$presets")" = '["command","timeout"]' ]
+                    [ "$(yq -c '.reports.dump | keys' "$presets")" = '["config","generator"]' ]
+                    # config validate exits 0 for a valid preset: it runs the
+                    # package's narrative generator in validate mode. (The
+                    # presets file above names json-dump, whose executable
+                    # does not exist here, so it is not validated.)
+                    work-report config validate --config "$valid" > /dev/null
+                    work-report config validate --config "$defaults" > /dev/null
+
                     # No rendered config carries the retired kinds key, and
                     # config show on each exits 0.
-                    if grep -q 'kinds' "$defaults" "$custom"; then exit 1; fi
+                    if grep -q 'kinds' "$defaults" "$custom" "$presets"; then exit 1; fi
                     work-report config show --config "$defaults" > /dev/null
                     work-report config show --config "$custom" > /dev/null
 
