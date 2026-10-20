@@ -187,6 +187,15 @@ registered by `darwin/modules/pg-keep-awake` (bead `pg2-8bgxg.5`): ONLY `alertRu
 `metricsTargets` (the keeper pushes OTel and listens on no port), no `logSources` (no jsonl event
 log) and no `dashboardProviders` (none designed). Check: `test-pg-keep-awake-darwin-module`.
 
+### work-report (`phillipgreenii.programs.work-report`)
+
+Reports are rendered by external generators registered in config and selected through named
+presets, not in the common executable (docket `pg2-6oop0`). Before changing `packages/work-report`
+or `home/programs/work-report`, read `packages/work-report/README.md` (the generator and preset
+model, the breaking changes, and the one-way schema version 2 store migration), the behavior docs
+under `packages/work-report/docs/behavior/`, and ADR 0102 in `docs/adr/` (the process contract).
+The package's identifier guard test covers its `docs/` and `testdata/`: use `example-*` names there.
+
 ## Status Line (`home/programs/claude-status-line`)
 
 Full contract (part-script protocol, ordering convention, glyph/width/locale mechanics) moved to

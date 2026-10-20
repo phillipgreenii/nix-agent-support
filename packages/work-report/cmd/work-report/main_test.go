@@ -87,7 +87,31 @@ func TestMain(m *testing.M) {
 		main()
 		os.Exit(0)
 	}
+	if !invokedAsTest(os.Args) {
+		// Neither `go test` nor a re-executed role: a child that lost WR_FAKE_GEN
+		// or WR_AS_MAIN. Running the suite here would spawn the same child
+		// again, without end (each exec puts its child in its own process
+		// group, so killing the top test process does not reap the descendants).
+		fmt.Fprintln(os.Stderr, "work-report.test: refusing to run the suite as a child without", envFakeGen, "or", envAsMain)
+		os.Exit(exitLostRole)
+	}
 	os.Exit(m.Run())
+}
+
+// exitLostRole is the exit status of a re-executed test binary that has no
+// role (see TestMain).
+const exitLostRole = 93
+
+// invokedAsTest reports whether args carry a test flag. `go test` and a
+// directly run test binary always pass -test.* flags; a re-executed child is
+// started with its registered command and arguments only.
+func invokedAsTest(args []string) bool {
+	for _, a := range args[1:] {
+		if strings.HasPrefix(a, "-test.") {
+			return true
+		}
+	}
+	return false
 }
 
 func TestExitCodeSeam(t *testing.T) {
@@ -214,6 +238,38 @@ func TestProcessExitStatuses(t *testing.T) {
 		}
 		if tc.in != "" && !strings.Contains(stderr, tc.in) {
 			t.Errorf("%s: stderr lacks %q:\n%s", tc.name, tc.in, stderr)
+		}
+	}
+}
+
+// A re-executed test binary that lost its role must refuse at once instead of
+// running the suite, which would re-execute itself without end.
+func TestChildWithoutARoleRefusesToRunTheSuite(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "status")
+	cmd.Env = []string{} // non-nil and empty: neither WR_FAKE_GEN nor WR_AS_MAIN
+	out, err := cmd.CombinedOutput()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != exitLostRole {
+		t.Fatalf("exit = %v, want status %d\n%s", err, exitLostRole, out)
+	}
+}
+
+func TestInvokedAsTestRecognizesOnlyTestFlags(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"x", "status"}, false},
+		{[]string{"x", "-test.v"}, true},
+		{[]string{"x", "-test"}, false},
+		{[]string{"-test.v"}, false},
+	} {
+		if got := invokedAsTest(c.args); got != c.want {
+			t.Errorf("invokedAsTest(%q) = %v, want %v", c.args, got, c.want)
 		}
 	}
 }

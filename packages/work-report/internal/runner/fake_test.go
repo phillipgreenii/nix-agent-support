@@ -84,7 +84,32 @@ func TestMain(m *testing.M) {
 	if mode := os.Getenv(envFakeGen); mode != "" {
 		os.Exit(fakeMain(mode))
 	}
+	if !invokedAsTest(os.Args) {
+		// Not `go test` and not a fake generator: a child that lost WR_FAKE_GEN
+		// (a broken allowlist, a mutant of Environ or Exec). Running the suite
+		// here would spawn the same child again, without end, and each Exec
+		// puts its child in its own process group, so killing the top test
+		// process does not reap the descendants.
+		fmt.Fprintln(os.Stderr, "runner.test: refusing to run the suite as a child without", envFakeGen)
+		os.Exit(exitLostRole)
+	}
 	os.Exit(m.Run())
+}
+
+// exitLostRole is the exit status of a re-executed test binary that has no
+// role (see TestMain).
+const exitLostRole = 93
+
+// invokedAsTest reports whether args carry a test flag. `go test` and a
+// directly run test binary always pass -test.* flags; a generator child is
+// started with the registered command only.
+func invokedAsTest(args []string) bool {
+	for _, a := range args[1:] {
+		if strings.HasPrefix(a, "-test.") {
+			return true
+		}
+	}
+	return false
 }
 
 func fakeMain(mode string) int {
@@ -452,4 +477,46 @@ func (r *cycleReader) Read(p []byte) (int, error) {
 	s := r.suffixes[r.n%len(r.suffixes)]
 	r.n++
 	return copy(p, s[:]), nil
+}
+
+// A re-executed test binary that lost its role (WR_FAKE_GEN) must refuse at
+// once. If it ran the suite instead, every test that starts a generator would
+// start another suite, without end: Exec gives each child its own process
+// group, so killing the top process leaves the descendants running.
+func TestChildWithoutARoleRefusesToRunTheSuite(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe)
+	cmd.Env = []string{} // non-nil and empty: no WR_FAKE_GEN
+	out, err := cmd.CombinedOutput()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != exitLostRole {
+		t.Fatalf("exit = %v, want status %d\n%s", err, exitLostRole, out)
+	}
+	if !strings.Contains(string(out), envFakeGen) {
+		t.Fatalf("output %q does not name %s", out, envFakeGen)
+	}
+}
+
+func TestInvokedAsTestRecognizesOnlyTestFlags(t *testing.T) {
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"x"}, false},
+		{[]string{"x", "$HOME", "*"}, false},
+		{[]string{"x", "-test.v"}, true},
+		{[]string{"x", "-test.timeout=10m0s", "-test.run=A"}, true},
+		{[]string{"x", "-test"}, false},
+		{[]string{"-test.v"}, false}, // argv[0] is the program, never a flag
+	}
+	for _, c := range cases {
+		if got := invokedAsTest(c.args); got != c.want {
+			t.Errorf("invokedAsTest(%q) = %v, want %v", c.args, got, c.want)
+		}
+	}
 }
