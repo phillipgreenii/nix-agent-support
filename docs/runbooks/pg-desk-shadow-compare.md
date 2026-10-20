@@ -4,8 +4,11 @@ Operator reference for running the fingerprint change detection beside the live 
 reading the comparison report. Intended behavior, definitions and metrics:
 [`docs/behavior/pg-desk/shadow-compare.md`](../behavior/pg-desk/shadow-compare.md). Tool:
 `packages/pg-desk-shadow` (`pg-desk-shadow`). Bead: `pg2-nu7h0`. Phase B (default tiers, no seeding)
-is `pg2-dngh6` and MUST NOT run concurrently with this run: two shadow consumers double the list cost
-against the shared token.
+is `pg2-dngh6` and is SUPERSEDED: the next multi-day run is the daemon run, described in
+["Daemon run (Phase 4b)"](#daemon-run-phase-4b) below. The sections before it document the phase A
+tooling that the daemon run reuses (sandbox, shims, budget guard, launch and watch commands). Two
+shadow runs MUST NOT run concurrently: two shadow consumers double the spend against the shared
+token.
 
 **Starting the multi-day run is the operator's.** An agent builds the tooling and proves it with a
 few-tick smoke (below); it MUST NOT start the multi-day run.
@@ -160,6 +163,149 @@ criteria held; that child alone posts the report summary (no identifiers) on `pg
 `pg2-2j5ac.52.22` with an explicit met / not met / needs-operator-ruling statement for metrics (a),
 (b), (c) and (e).
 
+## Daemon run (Phase 4b)
+
+The next multi-day run measures the daemon-backed GitHub backend (`pg-connector-github`) against the
+live change flow (intended behavior: INV-SHADOW-11 to INV-SHADOW-14 in the behavior note). The
+harness, its sandbox, shims, budget guard and the launch, watch and stop commands of sections 2 to 4
+above are reused unchanged; only the prepare flags, one prerequisite and the report's cutover section
+differ. `run` starts the daemon itself as a sandboxed child with its own socket, state directory and
+configuration (the `PG_CONNECTOR_GITHUB_*` variables) under the scratch directory, so it never shares
+the live daemon's socket, state or configuration (see "The daemon child" above). Starting the multi-day
+run is still the operator's; an agent proves the chain with the smoke at the end of this section and
+MUST NOT start it.
+
+### Prerequisites (in addition to the list above)
+
+- `pg-connector-github` on `PATH`, or built into a directory passed to `prepare` with `--tool-dir`
+  (searched after `PATH`). `prepare` pins a copy into `<scratch>/bin`; the run uses that copy, so a
+  later install does not change a running scratch directory.
+- A queries file: one JSON object whose keys are the watched query names (default `mine` and `team`,
+  the `--queries` flag) and whose values are that query's GitHub search expression as a string, or an
+  array of strings, in the same form as the `pr.queries` entries of the backend configuration you
+  already run. Keep it outside the repository and do not paste its contents anywhere; for example
+  `$HOME/pg-desk-shadow/daemon-queries.json`. It is rendered only into the scratch daemon
+  configuration.
+- The same token headroom rule as above: read the NEWEST `graphql_remaining` first and wait when it
+  is under about 3,000. The daemon spends from the same token as the live flow.
+
+### Prepare
+
+```bash
+pg-desk-shadow prepare --scratch "$HOME/pg-desk-shadow/daemon-<date>" --no-seed \
+  --daemon-queries-file "$HOME/pg-desk-shadow/daemon-queries.json"
+# add --tool-dir DIR when pg-connector-github (or another tool) is not installed yet
+```
+
+`--no-seed` skips the phase A warm-up seeding (the daemon needs no seeded store). The daemon's GraphQL
+cap is `--daemon-points-per-hour` and DEFAULTS to 1,500 points per hour, because the daemon runs
+alongside the live flow on the same token. The operator MAY raise it (1 to 100,000 is accepted; the
+cutover ceiling is 4,000), but only when preparing the scratch directory: the cap is rendered into the
+scratch daemon configuration and recorded in `run.json`, so raising it later means a new `prepare` into
+a new scratch directory. `--kill-points-per-hour` of `run` (default `0`, meaning the recorded cap)
+is only the collector's abort ceiling on measured shadow spend; it does not change what the daemon may
+spend. An agent MUST NOT raise the cap.
+
+### Launch, watch and stop
+
+Launch exactly as in section 2, with the daemon scratch directory:
+
+```bash
+bgrun shadow-d -- caffeinate -is pg-desk-shadow run --scratch "$HOME/pg-desk-shadow/daemon-<date>"
+bgcheck shadow-d          # DONE exit=N plus the log tail; the only trustworthy exit status
+```
+
+Watch as in section 3 (`bgcheck shadow-d`, `<scratch>/collector/collector.log`, an idempotent
+`pg-desk-shadow report --scratch <scratch>`), plus the daemon: every tick row of
+`<scratch>/collector/ticks.jsonl` carries a `daemon` sample, so
+
+```bash
+jq -c 'select(.kind=="tick") | {slot, status, d: .daemon.state, exit: .daemon.status_exit, restarts: .daemon.restarts}' \
+  "$HOME/pg-desk-shadow/daemon-<date>/collector/ticks.jsonl" | tail -5
+```
+
+shows the daemon state per tick (`healthy`, `degraded` or `down`, from `status --json` exit 0, 2 or 3)
+and the restart count. The daemon's own logs are `<scratch>/state/pg-connector-github/events.jsonl`
+(kind `origin` rows carry the GraphQL cost the report sums), `daemon.log.jsonl` and `client.log.jsonl`;
+its stdout and stderr are in `<scratch>/logs/daemon.out.log`.
+
+Stop with `SIGTERM` to the collector (it then stops the daemon child itself) and resume as in
+"Resume":
+
+```bash
+pgrep -f 'pg-desk-shadow run --scratch .*daemon-<date>'      # the `pg-desk-shadow run` PID, not its caffeinate parent
+kill -TERM <pid>                                             # then bgcheck shadow-d: exit 0
+pgrep -f 'pg-desk-shadow/daemon-<date>'                       # exit 1 (nothing found) is the success case
+```
+
+If the second `pgrep` still finds a process of the scratch directory, that is a defect to file against the daemon
+child lifecycle (a bare `pgrep -f 'pg-connector-github.*serve'` also matches every other daemon on the host, such as
+test-runner daemons and the live one, so name the scratch path); kill it by the PID the collector log records (`daemon child started (pid N)`),
+never by a broad pattern.
+
+### Reading the cutover section
+
+`pg-desk-shadow report --scratch <scratch>` writes `reports/report.md` and `reports/report.json`.
+The `## Cutover criteria` heading of the report holds one line per default criterion, in this order,
+each `- MET:` or `- NOT MET:` with the measured figure and, indented below it, the definition and the
+evidence (INV-SHADOW-13):
+
+1. zero unexplained misses over the LIVE-DETECTED events in the run window;
+2. detection delay p90 no worse than live;
+3. GraphQL points per hour inside the cap, for every clock hour of the run;
+4. daemon uptime at least 95 percent (a slot counts as up when its tick row carries a healthy or
+   degraded daemon sample).
+
+A criterion that cannot be evaluated (no live events, no delay samples, no hourly cost samples, no
+slots) reads `NOT MET` with `not evaluable`; a run of a few ticks therefore reads NOT MET for most
+criteria, which is the correct output. Below the criteria, `### Budget recommendation` states one
+measured verdict with its arithmetic: `keep-cap`, `raise-cap-to-<N>` (the smallest step of 100 above
+the cap whose 90 percent background share covers the p90 hourly cost; at the 1,500 default only 1,600
+is considered), or `relax-max-age-2h` (relax both `detail_max_age` and `conversation_max_age` to 2 h
+when no cap step covers it). The JSON holds the same as `phases[].cutover` (keys `criteria`, `recommendation`, `follow_ups`).
+
+### An unmet criterion (ruling 14)
+
+The operator MAY cut over with criteria unmet when the run shows the daemon working (INV-SHADOW-14).
+The cutover bead MUST then record the operator's decision and every unmet criterion, and each unmet
+criterion MUST get its own follow-up bead. The report lists the proposed follow-up bead title and body
+for every unmet criterion under `### Follow-ups` (it only lists them; filing is the operator's, or the
+packet that operates the run). When the cutover raises the cap, the dashboard cap line and the alert
+threshold must both be raised to 4,000 (`packages/pg-connector/grafana/pg-connector-github.json` and
+`packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml`).
+
+### Smoke (agent-run, at most three ticks, scratch only)
+
+An agent MAY prove the whole chain with at most three ticks, under `bgrun`, in a throwaway scratch
+directory outside `~/.local/state`, with the cap at its 1,500 default (an agent MUST NOT raise it):
+
+```bash
+pg-desk-shadow prepare --scratch "$HOME/pg-desk-shadow/smoke-<date>" --no-seed --tool-dir "<bin>" \
+  --daemon-queries-file "<queries.json>"
+pg-desk-shadow probe --scratch "$HOME/pg-desk-shadow/smoke-<date>"            # probe ok, exit 0
+pg-desk-shadow run --scratch "$HOME/pg-desk-shadow/smoke-<date>" --max-ticks 3
+pg-desk-shadow report --scratch "$HOME/pg-desk-shadow/smoke-<date>"
+pgrep -f 'pg-desk-shadow/smoke-<date>'                                        # exit 1: nothing of the scratch dir left
+```
+
+Expected: three tick rows, each with a `daemon` object and, unless `skipped_budget`, a `sources` entry
+per watched query and instance (the ci instance's queries are prefixed `ci:`; a healthy entry has
+status `succeeded`); each tick row's `graphql_cost_sum` equals the sum of `graphql_cost` over the
+`kind=origin` rows of the scratch daemon's `events.jsonl` whose `time` is after the previous tick row's
+`tick_end` (after the run start for the first) and not after this row's `tick_end`; a report with the
+cutover section; no daemon process afterwards. Keep the scratch directory as evidence.
+
+Result of the 2026-10-20 daemon smoke (default cap, `--no-seed`, queries `mine` and `team` with the generic
+expressions `is:pr is:open author:@me` and `is:pr is:open review-requested:@me`): `probe` exited 0; three ticks, all
+`ok`, each with `sources` entries `mine`, `ci:mine`, `team` and `ci:team` at `succeeded` and a `daemon` sample
+`healthy` with `status_exit` 0, `alive` true and 0 restarts (the daemon reported exit 2, degraded, only while
+starting); `graphql_cost_sum` 117, 19 and 3, each equal to the sum of `graphql_cost` over the `kind=origin` rows of
+the scratch `events.jsonl` in its window (189 origin rows in total); the report wrote Markdown and JSON with
+criteria 1 and 2 NOT MET (not evaluable: no live events in a three-minute run), criteria 3 and 4 MET and the
+recommendation `keep-cap`; the collector log records the daemon child stopped, and no process of the scratch
+directory remained. From a `bgrun`-launched session `gh auth status` exited 0 and `log show --last 1m --style
+compact --predicate 'sender == "Sandbox"'` exited 0.
+
 ## 5. Troubleshooting
 
 | Symptom                                            | Meaning and action                                                           |
@@ -236,14 +382,14 @@ Every claim was re-verified against current source and logs on 2026-10-07; these
 
 ## Unverified items
 
-| Item                                                        | Result (2026-10-07 smoke)                                                                                                                                                                 |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gh` keychain read from a `bgrun` (non-interactive) session | VERIFIED: `prepare`, three ticks and the adapter exercise ran under `bgrun`, sandboxed, with the real `HOME`                                                                              |
-| `log show` access to sandbox denials from a background run  | VERIFIED: the per-tick scan ran under `bgrun` without an access error and found the denials of the first smoke                                                                            |
-| `bd` read verbs create no file under the live `.beads`      | REFUTED (see correction 8): the machine `bd` attempts writes; the hermetic default avoids them                                                                                            |
-| First-diff shape compatibility of v1 facts versus new facts | OBSERVED, not judged: the first hydrations of seeded rows reported real changes (head, review, CI) plus a `new-entity` reconcile; the 4-tick smoke is too short to tell noise from change |
-| A multi-day run's uptime against the 95 percent criterion   | UNVERIFIED and at risk: ticks that hydrate take 90 to 150 seconds, so slots are skipped (overrun gaps count against uptime)                                                               |
-| `launchd`/sleep behavior of `caffeinate -i` with `bgrun`    | OBSERVED: sleep gaps under `-i` (2026-10-09, 7,269 seconds in an 8-hour run, cause not established); `-is` is the launch command now, UNVERIFIED over a multi-day run                     |
+| Item                                                        | Result (2026-10-07 smoke)                                                                                                                                                                     |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gh` keychain read from a `bgrun` (non-interactive) session | VERIFIED: `prepare`, three ticks and the adapter exercise ran under `bgrun`, sandboxed, with the real `HOME`; again on 2026-10-20 (`gh auth status` exit 0, the daemon smoke ran three ticks) |
+| `log show` access to sandbox denials from a background run  | VERIFIED: the per-tick scan ran under `bgrun` without an access error and found the denials of the first smoke; again on 2026-10-20 (`log show` exit 0 from a `bgrun` session)                |
+| `bd` read verbs create no file under the live `.beads`      | REFUTED (see correction 8): the machine `bd` attempts writes; the hermetic default avoids them                                                                                                |
+| First-diff shape compatibility of v1 facts versus new facts | OBSERVED, not judged: the first hydrations of seeded rows reported real changes (head, review, CI) plus a `new-entity` reconcile; the 4-tick smoke is too short to tell noise from change     |
+| A multi-day run's uptime against the 95 percent criterion   | UNVERIFIED and at risk: ticks that hydrate take 90 to 150 seconds, so slots are skipped (overrun gaps count against uptime)                                                                   |
+| `launchd`/sleep behavior of `caffeinate -i` with `bgrun`    | OBSERVED: sleep gaps under `-i` (2026-10-09, 7,269 seconds in an 8-hour run, cause not established); `-is` is the launch command now, UNVERIFIED over a multi-day run                         |
 
 ## Smoke (agent-run, a few ticks, scratch only)
 

@@ -435,8 +435,10 @@ reboot and router applies WILL occur: they are recorded and excluded from misses
 
 Items the tooling cannot yet assert; the runbook carries the operator-facing list.
 
-- GitHub token access from a `bgrun`-launched (non-interactive) session: verified only at smoke time.
-- `log show` access to sandbox denials from a background session: verified only at smoke time.
+- GitHub token access from a `bgrun`-launched (non-interactive) session: verified at the 2026-10-07 smoke and
+  again at the 2026-10-20 daemon smoke (`gh auth status` exit 0); the runbook records the evidence.
+- `log show` access to sandbox denials from a background session: verified at the 2026-10-07 smoke and again
+  at the 2026-10-20 daemon smoke (exit 0); the runbook records the evidence.
 - The v1 facts stored before the copy and the facts written by the new flow are assumed shape-compatible
   for the first diff of a seeded row; a spurious kind on the first hydration of a seeded row would be
   warm-up noise (reported under shadow-only detections).
