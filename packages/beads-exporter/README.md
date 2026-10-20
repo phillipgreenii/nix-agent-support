@@ -3,8 +3,8 @@
 A Prometheus exporter for the content of bead trackers: how many beads are in each state, how
 many each work queue offers, how old the oldest one is, and how much was created and closed in
 the last day. It reads each configured database through a pinned, read-only `bd` and serves the
-result as hand-rolled Prometheus text. The module has no dependencies outside the standard
-library.
+result as hand-rolled Prometheus text. Beyond the standard library and the sibling `claude-transcript`
+module, its only dependency is the shared profiling package `github.com/phillipgreenii/x/pprofserver`.
 
 Design rationale and rejected alternatives: `docs/adr/0078-beads-content-exporter-ownership.md`
 and `docs/adr/0079-queue-definitions-mirror-contract.md`.
@@ -360,6 +360,7 @@ stack is enabled and `dbs` is not empty; otherwise it defines nothing.
 | `operatorNames`                                                                                                                          | `[]`                                |
 | `port`                                                                                                                                   | `9146`                              |
 | `pollIntervalSeconds`, `strandedIntervalSeconds`, `staleClaimHours`, `commandTimeoutSeconds`, `downAfterConsecutiveFailures`, `labelCap` | `120`, `600`, `6`, `90`, `2`, `500` |
+| `pprof.enable`                                                                                                                           | `true`                              |
 | `internal.configFile` (read-only)                                                                                                        | the rendered config file            |
 
 The configuration file is rendered with the queue list read at evaluation time from
@@ -369,6 +370,33 @@ references it, so a configuration-only change restarts the agent. The wrapper se
 `BD_JSON_ENVELOPE=1`, `BEADS_DOLT_AUTO_START=0`, `BD_BACKUP_ENABLED=0` and an explicit `PATH`.
 Standard output (JSON lines) goes to `$XDG_STATE_HOME/beads-exporter/beads-exporter.jsonl`, which
 the log source picks up; both log files are rotated by the launchd log manager.
+
+## Profiling
+
+The exporter's serve path (`-config`, and not `-version` or `-check-config`) can expose Go's
+runtime profiler (`net/http/pprof`) for diagnosing CPU or memory use. It is off unless
+`BEADS_EXPORTER_PPROF_ADDR` is set; with it unset the exporter opens no listener. The launchd agent
+sets it by default (`phillipgreenii.services.beads-exporter.pprof.enable`, default `true`) to the
+unix socket `$XDG_STATE_HOME/beads-exporter/pprof.sock` (resolved to the absolute path by the Nix
+module), created with mode `0600`. The implementation is the shared package
+`github.com/phillipgreenii/x/pprofserver`.
+
+`go tool pprof` cannot dial a unix socket, so fetch the profile with `curl`, then read the file:
+
+```bash
+SOCK="$XDG_STATE_HOME/beads-exporter/pprof.sock"
+curl --unix-socket "$SOCK" 'http://pprof/debug/pprof/profile?seconds=30' -o cpu.pb.gz
+go tool pprof -top cpu.pb.gz
+```
+
+Do not send SIGQUIT to get a goroutine dump: this daemon traps only SIGINT and SIGTERM, so on
+SIGQUIT the Go runtime dumps goroutines and exits. Fetch `http://pprof/debug/pprof/goroutine?debug=2`
+over the socket instead.
+
+The runbook `docs/go-daemon-profiling-runbook.md` in `phillipg-nix-repo-base` is the authoritative
+home of how to capture and read a profile. The listener accepts only an absolute socket path or a
+loopback `host:port`; any other value is refused with a line on stderr and the exporter keeps
+running.
 
 ## Dashboard and alert rule
 

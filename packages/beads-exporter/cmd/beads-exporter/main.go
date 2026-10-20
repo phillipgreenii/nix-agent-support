@@ -76,6 +76,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Opt-in profiling endpoint (BEADS_EXPORTER_PPROF_ADDR; the serve path only,
+	// never -version or -check-config). Reports on stderr, never stdout (the JSON
+	// log stream), and a rejected value never stops the exporter.
+	defer startPprofFromEnv(os.Getenv, stderr)()
 	log := logx.New(stdout, slog.LevelInfo)
 	if err := serve(ctx, cfg, log); err != nil {
 		log.Error("exporter stopped", "error", err.Error())

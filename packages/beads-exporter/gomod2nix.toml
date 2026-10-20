@@ -1,6 +1,10 @@
 schema = 3
 cachePackages = [
-  'github.com/phillipgreenii/claude-transcript'
+  'github.com/phillipgreenii/claude-transcript',
+  'github.com/phillipgreenii/x/pprofserver'
 ]
 
 [mod]
+  [mod.'github.com/phillipgreenii/x']
+    version = 'v0.0.0-20261015022436-7b4c351b3c34'
+    hash = 'sha256-IgDjbWSCmJEBqaZMa86YVkEXAwWR6M5R6wRvwH3uCRw='

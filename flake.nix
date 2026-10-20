@@ -5599,6 +5599,14 @@
                     inherit (machineValues) dbs;
                   };
                   moduleOff = evalModule true { inherit (machineValues) dbs; };
+                  # pprof.enable = false: service on, profiling endpoint opted out.
+                  pprofOff = evalModule true (
+                    {
+                      enable = true;
+                      pprof.enable = false;
+                    }
+                    // machineValues
+                  );
                   noDbs = evalModule true { enable = true; };
 
                   inertOk =
@@ -5646,6 +5654,26 @@
                     ua.serviceConfig.StandardOutPath
                     ua.serviceConfig.StandardErrorPath
                   ];
+                # Profiling endpoint: pprof.enable (default on) points the exporter at a 0600
+                # unix socket under its own state dir (an absolute path, never a TCP address;
+                # resolved because launchd does not expand $XDG_STATE_HOME); off leaves the
+                # variable out and the rest of the serviceConfig as before.
+                assert defaulted.pprof.enable;
+                assert
+                  ua.serviceConfig.EnvironmentVariables.BEADS_EXPORTER_PPROF_ADDR
+                  == "/Users/tester/.local/state/beads-exporter/pprof.sock";
+                assert
+                  ua.serviceConfig.EnvironmentVariables == {
+                    BEADS_EXPORTER_PPROF_ADDR = "/Users/tester/.local/state/beads-exporter/pprof.sock";
+                  };
+                assert
+                  !(
+                    pprofOff.phillipgreenii.system.launchdServices.userAgents.beads-exporter.serviceConfig
+                      ? EnvironmentVariables
+                  );
+                assert
+                  pprofOff.phillipgreenii.system.launchdServices.userAgents.beads-exporter.serviceConfig.ProcessType
+                  == "Background";
                 # The wrapper references the rendered file, so a config-only change restarts
                 # the agent.
                 assert hasInfixNoCtx "-config ${bx.internal.configFile}" ua.script;

@@ -174,6 +174,19 @@ in
       description = "How many bead labels get their own series; the rest are counted together.";
     };
 
+    pprof.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Expose Go's runtime profiler (`net/http/pprof`) for the exporter on a
+        mode-0600 unix socket at `$XDG_STATE_HOME/beads-exporter/pprof.sock`
+        (the module writes the resolved absolute path into the launchd agent's
+        `BEADS_EXPORTER_PPROF_ADDR`). When `false` the variable is absent and
+        the exporter opens no profiling listener. Capture recipe:
+        `docs/go-daemon-profiling-runbook.md` in `phillipg-nix-repo-base`.
+      '';
+    };
+
     internal.configFile = lib.mkOption {
       type = lib.types.path;
       internal = true;
@@ -216,6 +229,15 @@ in
           ProcessType = "Background";
           StandardOutPath = stdoutLog;
           StandardErrorPath = stderrLog;
+        }
+        # Profiling endpoint (github.com/phillipgreenii/x/pprofserver): a 0600
+        # unix socket under the exporter's own state dir (created by the script
+        # above), so no port is allocated or exposed. launchd does not expand
+        # $XDG_STATE_HOME in EnvironmentVariables, so the resolved stateDir is
+        # written out. Absent when pprof.enable is false. Capture recipe:
+        # docs/go-daemon-profiling-runbook.md in phillipg-nix-repo-base.
+        // lib.optionalAttrs cfg.pprof.enable {
+          EnvironmentVariables.BEADS_EXPORTER_PPROF_ADDR = "${stateDir}/pprof.sock";
         };
       };
 
