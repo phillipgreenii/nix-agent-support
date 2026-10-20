@@ -142,6 +142,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("serve: no listen address: set serve.addr in config, or pass --addr/--port")
 	}
 
+	// Opt-in profiling endpoint (PG_DESK_PPROF_ADDR; serve only). Reports on
+	// stderr, never stdout, and a rejected value never stops the daemon.
+	defer startPprofFromEnv(os.Getenv, os.Stderr)()
+
 	logFile, err := openServeLogFile(cfg.Serve.Log)
 	if err != nil {
 		return fmt.Errorf("serve: open log file: %w", err)

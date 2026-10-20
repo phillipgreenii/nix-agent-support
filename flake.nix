@@ -8629,6 +8629,11 @@
 
                   darwinDisabled = evalDarwin { enable = false; };
                   darwinEnabledNoSoak = evalDarwin { enable = true; };
+                  # pprof.enable = false: service on, profiling endpoint opted out.
+                  darwinPprofOff = evalDarwin {
+                    enable = true;
+                    pprof.enable = false;
+                  };
                   darwinEnabledSoak = evalDarwin {
                     enable = true;
                     soak = {
@@ -8832,6 +8837,28 @@
                 # collapse them into one"].
                 assert lib.hasInfix "--port 9819"
                   darwinEnabledSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
+                # Profiling endpoint: pprof.enable (default on) points the daemon at a
+                # 0600 unix socket under its own state dir (an absolute path, never a
+                # TCP address), merged beside the existing EnvironmentVariables
+                # (PG_DESK_CONFIG survives); off leaves the variable out and the rest
+                # of the attribute exactly as before.
+                assert
+                  darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.serviceConfig.EnvironmentVariables.PG_DESK_PPROF_ADDR
+                  == "/Users/tester/.local/state/pg-desk/pprof.sock";
+                assert
+                  darwinEnabledLogOverride.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.serviceConfig.EnvironmentVariables
+                  == {
+                    PG_DESK_CONFIG = "/tmp/pg-desk-config.yaml";
+                    PG_DESK_PPROF_ADDR = "/Users/tester/.local/state/pg-desk/pprof.sock";
+                  };
+                assert
+                  !(
+                    darwinPprofOff.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.serviceConfig.EnvironmentVariables
+                      ? PG_DESK_PPROF_ADDR
+                  );
+                assert
+                  darwinPprofOff.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.serviceConfig.EnvironmentVariables
+                  == { };
                 # pg-router config path (pg2-t92xc): without a pg-router daemon
                 # anywhere there is nothing to point at, so NO --router-config flag
                 # (serve then emits no pg_desk_sweep_bound_violated series).

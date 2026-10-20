@@ -164,6 +164,19 @@ in
     # without touching that config file at all. When soak.enable is false,
     # no flag is passed and pg-desk serve falls back to its configured (or
     # legacy-default) serve.addr.
+    pprof.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Expose Go's runtime profiler (`net/http/pprof`) for `pg-desk serve` on a
+        mode-0600 unix socket at `$XDG_STATE_HOME/pg-desk/pprof.sock` (the module
+        writes the resolved absolute path into the launchd agent's
+        `PG_DESK_PPROF_ADDR`). When `false` the variable is absent and serve
+        opens no profiling listener. Capture recipe:
+        `docs/go-daemon-profiling-runbook.md` in `phillipg-nix-repo-base`.
+      '';
+    };
+
     soak = {
       enable = lib.mkEnableOption ''
         the temporary soak listen port, overriding config's serve.addr via
@@ -203,6 +216,15 @@ in
             emitterEnv
             // lib.optionalAttrs (pgDeskConfigSource != null) {
               PG_DESK_CONFIG = toString pgDeskConfigSource;
+            }
+            # Profiling endpoint (github.com/phillipgreenii/x/pprofserver): a 0600
+            # unix socket under the daemon's own state dir, so no port is
+            # allocated or exposed. launchd does not expand $XDG_STATE_HOME in
+            # EnvironmentVariables, so the resolved stateHome is written out.
+            # Absent when pprof.enable is false. Capture recipe:
+            # docs/go-daemon-profiling-runbook.md in phillipg-nix-repo-base.
+            // lib.optionalAttrs cfg.pprof.enable {
+              PG_DESK_PPROF_ADDR = "${stateHome}/pg-desk/pprof.sock";
             };
           StandardOutPath = launchdStdoutLog;
           StandardErrorPath = launchdStderrLog;
