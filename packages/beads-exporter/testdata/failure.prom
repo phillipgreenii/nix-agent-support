@@ -4,7 +4,7 @@ beads_created_last_24h{db="alpha"} 1
 # HELP beads_closed_last_24h Beads closed in the last 24 hours, counted by the throughput pass.
 # TYPE beads_closed_last_24h gauge
 beads_closed_last_24h{db="alpha"} 0
-# HELP beads_exporter_up 1 if the last main collection cycle for this database succeeded, 0 if it failed.
+# HELP beads_exporter_up 1 while the main collection cycle for this database is healthy, 0 once it has failed the configured number of consecutive times (downAfterConsecutiveFailures).
 # TYPE beads_exporter_up gauge
 beads_exporter_up{db="alpha"} 0
 beads_exporter_up{db="beta"} 0

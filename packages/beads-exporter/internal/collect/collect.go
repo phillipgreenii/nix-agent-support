@@ -58,6 +58,12 @@ type Meta struct {
 	Duration    time.Duration
 	Errors      map[failure.Reason]uint64
 	Reasons     []failure.Reason
+	// ConsecutiveFailures is the number of failed runs since the last success
+	// (0 after a success).
+	ConsecutiveFailures int
+	// DownAfter is how many consecutive failed runs make the pass count as
+	// down (at least 1).
+	DownAfter int
 }
 
 // PassSnapshot is a pass's published state for one database.
@@ -104,6 +110,17 @@ func (s *Snapshot) Samples() []metrics.Sample {
 	return out
 }
 
+// Down reports whether the pass has failed DownAfter or more consecutive runs.
+// A single failed run below that threshold is tolerated: the pass's series are
+// still dropped and its error counter still rises, but it is not yet down.
+func (m Meta) Down() bool {
+	n := m.DownAfter
+	if n < 1 {
+		n = 1
+	}
+	return m.ConsecutiveFailures >= n
+}
+
 func metaSamples(db, pass string, m Meta) []metrics.Sample {
 	if !m.Attempted {
 		return nil
@@ -114,7 +131,7 @@ func metaSamples(db, pass string, m Meta) []metrics.Sample {
 	var out []metrics.Sample
 	if pass == "main" {
 		up := 0.0
-		if m.OK {
+		if !m.Down() {
 			up = 1
 		}
 		out = append(out, metrics.Sample{Family: metrics.FamExporterUp, Labels: lab(), Value: up})
@@ -136,10 +153,11 @@ type passState struct {
 
 // Collector owns the pass state and the published snapshot.
 type Collector struct {
-	clock  Clock
-	dbs    []DB
-	passes map[string]Pass
-	log    *slog.Logger
+	clock     Clock
+	dbs       []DB
+	passes    map[string]Pass
+	log       *slog.Logger
+	downAfter int
 
 	// runMu serialises pass runs so two passes never drive the same embedded
 	// store at once.
@@ -151,15 +169,34 @@ type Collector struct {
 	snap atomic.Pointer[Snapshot]
 }
 
+// Option configures a Collector.
+type Option func(*Collector)
+
+// WithDownAfter sets how many consecutive failed runs of a pass (per database)
+// it takes before beads_exporter_up reports 0. Values below 1 mean 1, the
+// default: any failed run is down.
+func WithDownAfter(n int) Option {
+	return func(c *Collector) {
+		if n < 1 {
+			n = 1
+		}
+		c.downAfter = n
+	}
+}
+
 // New builds a Collector over dbs and passes. Databases are collected in the
 // order given.
-func New(clock Clock, dbs []DB, passes []Pass, log *slog.Logger) *Collector {
+func New(clock Clock, dbs []DB, passes []Pass, log *slog.Logger, opts ...Option) *Collector {
 	c := &Collector{
-		clock:  clock,
-		dbs:    dbs,
-		passes: map[string]Pass{},
-		log:    log,
-		state:  map[string]map[string]*passState{},
+		clock:     clock,
+		dbs:       dbs,
+		passes:    map[string]Pass{},
+		log:       log,
+		downAfter: 1,
+		state:     map[string]map[string]*passState{},
+	}
+	for _, o := range opts {
+		o(c)
 	}
 	for _, p := range passes {
 		c.passes[p.Name()] = p
@@ -204,7 +241,7 @@ func (c *Collector) record(p Pass, db string, data metrics.Emitter, err error, d
 	c.mu.Lock()
 	ps := c.state[db][p.Name()]
 	if ps == nil {
-		ps = &passState{meta: Meta{Errors: map[failure.Reason]uint64{}, Reasons: p.Reasons()}}
+		ps = &passState{meta: Meta{Errors: map[failure.Reason]uint64{}, Reasons: p.Reasons(), DownAfter: c.downAfter}}
 		c.state[db][p.Name()] = ps
 	}
 	ps.meta.Attempted = true
@@ -212,11 +249,13 @@ func (c *Collector) record(p Pass, db string, data metrics.Emitter, err error, d
 	if err != nil {
 		reason := failure.ReasonOf(err)
 		ps.meta.OK = false
+		ps.meta.ConsecutiveFailures++
 		ps.meta.Errors[reason]++
 		ps.data = nil
 		c.log.Warn("collection failed", "db", db, "pass", p.Name(), "reason", string(reason), "error", err.Error())
 	} else {
 		ps.meta.OK = true
+		ps.meta.ConsecutiveFailures = 0
 		ps.meta.LastSuccess = end
 		ps.data = data
 	}

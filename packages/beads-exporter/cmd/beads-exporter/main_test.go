@@ -22,18 +22,19 @@ func writeConfig(t *testing.T, mutate func(m map[string]any)) string {
 		t.Fatal(err)
 	}
 	m := map[string]any{
-		"bdPath":                  "/nonexistent/bd",
-		"childPath":               "/nonexistent/bash/bin:/nonexistent/coreutils/bin",
-		"beadsDirs":               map[string]string{"alpha": "/nonexistent/alpha/.beads"},
-		"claudeDir":               "/nonexistent/claude",
-		"operatorNames":           []string{"operator"},
-		"port":                    9100,
-		"pollIntervalSeconds":     60,
-		"strandedIntervalSeconds": 300,
-		"staleClaimHours":         4,
-		"commandTimeoutSeconds":   30,
-		"labelCap":                20,
-		"queues":                  queues,
+		"bdPath":                       "/nonexistent/bd",
+		"childPath":                    "/nonexistent/bash/bin:/nonexistent/coreutils/bin",
+		"beadsDirs":                    map[string]string{"alpha": "/nonexistent/alpha/.beads"},
+		"claudeDir":                    "/nonexistent/claude",
+		"operatorNames":                []string{"operator"},
+		"port":                         9100,
+		"pollIntervalSeconds":          60,
+		"strandedIntervalSeconds":      300,
+		"staleClaimHours":              4,
+		"commandTimeoutSeconds":        30,
+		"downAfterConsecutiveFailures": 2,
+		"labelCap":                     20,
+		"queues":                       queues,
 	}
 	if mutate != nil {
 		mutate(m)

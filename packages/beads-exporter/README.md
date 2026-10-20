@@ -40,10 +40,31 @@ flowchart LR
   sleep, a CPU-saturation burst) expires the deadline while bd is merely starved, and the second
   try, started after the stall, completes in about a second. A bd that really hangs times out on
   both tries, so the pass still fails with reason `timeout` after two timeouts, the pass's
-  series are dropped and `beads_exporter_up` goes to 0. Only `timeout` is retried: `bd_error`,
-  `schema_skew`, `parse_error` and `stale_issues_jsonl` fail on the first try. The error counter
-  counts failed passes, not absorbed first tries, so a rise in the `retrying` warnings (not the
-  counter) is the sign of a host under stall.
+  series are dropped and the failure counts toward `beads_exporter_up` (next paragraph). Only
+  `timeout` is retried: `bd_error`, `schema_skew`, `parse_error` and `stale_issues_jsonl` fail on
+  the first try. The error counter counts failed passes, not absorbed first tries, so a rise in the
+  `retrying` warnings (not the counter) is the sign of a host under stall.
+- `beads_exporter_up{db}` tolerates isolated failed passes (operator ruling pg2-6qc9r, option a).
+  The exporter counts consecutive failed runs of each pass per database; a success resets the
+  count to zero. `beads_exporter_up` MUST stay 1 until the main pass has failed
+  `downAfterConsecutiveFailures` consecutive runs in a row (default 2), and MUST then be 0 until
+  the next success. A tolerated failure is still visible: the pass's domain series are dropped, its
+  last-success timestamp stays frozen and `beads_exporter_collect_errors_total` is incremented
+  immediately, so one timeout shows in the counter without flipping `up`. The count is kept
+  per (database, pass) and `up` follows the main pass only, so a failing throughput or stranded
+  pass never moves `up`. The tolerance applies to every failure reason, including a database that
+  has never succeeded since start-up (`up` is 1 after its first failed run and 0 after its second).
+  Setting the option to 1 restores the old behaviour (any failed pass is down).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Up: first run ok, or failures below the threshold
+    Up --> Up: failed run, count below N (counter rises, up stays 1)
+    Up --> Down: failed run, count reaches N (up = 0)
+    Down --> Down: failed run
+    Down --> Up: successful run (count resets to 0)
+    Up --> Up: successful run (count resets to 0)
+```
 
 ## Running
 
@@ -67,20 +88,21 @@ of those exist.
 JSON, one object. Unknown fields are rejected. Every field is required. This file is the seam to
 the module that renders it and the machine wiring that validates the rendered file.
 
-| Field                     | Type                   | Meaning                                                                                                                                                    |
-| ------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bdPath`                  | absolute path          | The bd binary. Always run by this path, never by `PATH` lookup.                                                                                            |
-| `childPath`               | colon-separated paths  | The `PATH` of every bd child: the store paths of bash and coreutils. Every entry MUST be absolute. `git` is deliberately not on it.                        |
-| `beadsDirs`               | object: name -> path   | One entry per database. The key is the database name (the `db` label value); the value is the absolute `.beads` directory, passed to bd as `BEADS_DIR`.    |
-| `claudeDir`               | absolute path          | The Claude state directory. Accepted and validated here; used only by the stranded-claim pass.                                                             |
-| `operatorNames`           | array of strings       | Actor names that identify the operator. May be empty. Used only by the stranded-claim pass.                                                                |
-| `port`                    | integer, 1 to 65535    | The listen port on the loopback interface.                                                                                                                 |
-| `pollIntervalSeconds`     | positive integer       | Period of the main pass.                                                                                                                                   |
-| `strandedIntervalSeconds` | positive integer       | Period of the throughput pass (and of the stranded-claim pass).                                                                                            |
-| `staleClaimHours`         | positive integer       | Accepted and validated here; used only by the stranded-claim pass.                                                                                         |
-| `commandTimeoutSeconds`   | positive integer       | Bound on each bd try. A timed-out call is tried once more, so one failed call takes up to twice this.                                                      |
-| `labelCap`                | positive integer       | How many bead labels get their own series (see `beads_not_closed_by_bead_label`).                                                                          |
-| `queues`                  | array of queue objects | Each is exactly `{ "name": <string>, "args": [<string>...] }`: the tokenised flags that follow `bd ready`. Names are unique and match `^[a-z][a-z0-9-]*$`. |
+| Field                          | Type                   | Meaning                                                                                                                                                    |
+| ------------------------------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bdPath`                       | absolute path          | The bd binary. Always run by this path, never by `PATH` lookup.                                                                                            |
+| `childPath`                    | colon-separated paths  | The `PATH` of every bd child: the store paths of bash and coreutils. Every entry MUST be absolute. `git` is deliberately not on it.                        |
+| `beadsDirs`                    | object: name -> path   | One entry per database. The key is the database name (the `db` label value); the value is the absolute `.beads` directory, passed to bd as `BEADS_DIR`.    |
+| `claudeDir`                    | absolute path          | The Claude state directory. Accepted and validated here; used only by the stranded-claim pass.                                                             |
+| `operatorNames`                | array of strings       | Actor names that identify the operator. May be empty. Used only by the stranded-claim pass.                                                                |
+| `port`                         | integer, 1 to 65535    | The listen port on the loopback interface.                                                                                                                 |
+| `pollIntervalSeconds`          | positive integer       | Period of the main pass.                                                                                                                                   |
+| `strandedIntervalSeconds`      | positive integer       | Period of the throughput pass (and of the stranded-claim pass).                                                                                            |
+| `staleClaimHours`              | positive integer       | Accepted and validated here; used only by the stranded-claim pass.                                                                                         |
+| `commandTimeoutSeconds`        | positive integer       | Bound on each bd try. A timed-out call is tried once more, so one failed call takes up to twice this.                                                      |
+| `downAfterConsecutiveFailures` | positive integer       | How many consecutive failed main passes (per database) it takes before `beads_exporter_up` goes to 0. 1 means any failed pass; the module default is 2.    |
+| `labelCap`                     | positive integer       | How many bead labels get their own series (see `beads_not_closed_by_bead_label`).                                                                          |
+| `queues`                       | array of queue objects | Each is exactly `{ "name": <string>, "args": [<string>...] }`: the tokenised flags that follow `bd ready`. Names are unique and match `^[a-z][a-z0-9-]*$`. |
 
 Database names match `^[A-Za-z0-9][A-Za-z0-9_.-]*$`.
 
@@ -101,6 +123,7 @@ An example (synthetic values):
   "strandedIntervalSeconds": 300,
   "staleClaimHours": 4,
   "commandTimeoutSeconds": 30,
+  "downAfterConsecutiveFailures": 2,
   "labelCap": 20,
   "queues": [
     {
@@ -132,24 +155,24 @@ every successful pass. Timestamps are exported rather than ages, and a timestamp
 when its set is empty. When a pass fails for a database, that pass's series for that database are
 dropped, not served stale. There is no `*_build_info` series.
 
-| Family                                               | Type    | Labels                 | Pass       | Meaning                                                                                                                            |
-| ---------------------------------------------------- | ------- | ---------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `beads_issues`                                       | gauge   | `db`, `state`          | main       | Not-closed beads by derived state. The sum over `state` is the not-closed total.                                                   |
-| `beads_issues_stored`                                | gauge   | `db`, `status`         | main       | Beads by stored status. Non-closed from the list; `closed` from `bd count`, which includes closed gates.                           |
-| `beads_queue_candidates`                             | gauge   | `db`, `queue`          | main       | Beads currently claimable through each queue.                                                                                      |
-| `beads_queue_oldest_timestamp_seconds`               | gauge   | `db`, `queue`          | main       | Creation time of the oldest candidate. Omitted when the queue is empty.                                                            |
-| `beads_not_closed_by_type`                           | gauge   | `db`, `type`           | main       | Not-closed beads by issue type.                                                                                                    |
-| `beads_not_closed_by_priority`                       | gauge   | `db`, `priority`       | main       | Not-closed beads by priority.                                                                                                      |
-| `beads_not_closed_by_bead_label`                     | gauge   | `db`, `bead_label`     | main       | The `labelCap` most common labels; beads carrying any other label are counted once under `__other__`. Labels overlap: not a total. |
-| `beads_oldest_timestamp_seconds`                     | gauge   | `db`, `state`          | main       | Creation time of the oldest not-closed bead per state (start time for `in_progress`). Omitted when the state is empty.             |
-| `beads_created_last_24h`                             | gauge   | `db`                   | throughput | Beads created in the last 24 hours.                                                                                                |
-| `beads_closed_last_24h`                              | gauge   | `db`                   | throughput | Beads closed in the last 24 hours.                                                                                                 |
-| `beads_stranded_claims`                              | gauge   | `db`, `status`         | stranded   | Claims with no live owner by stored status (`open`, `in_progress`, `hooked`). Zero-filled every successful pass.                   |
-| `beads_oldest_stranded_claim_timestamp_seconds`      | gauge   | `db`                   | stranded   | Claim time (`started_at`, else `updated_at`) of the oldest claim with no live owner. Omitted when there are none.                  |
-| `beads_exporter_up`                                  | gauge   | `db`                   | main       | 1 if the last main cycle succeeded, 0 if it failed. Present once a main cycle has been attempted.                                  |
-| `beads_exporter_pass_last_success_timestamp_seconds` | gauge   | `db`, `pass`           | all        | Time of the last success of each pass. Omitted until the pass has succeeded once; frozen while it fails.                           |
-| `beads_exporter_collect_errors_total`                | counter | `db`, `pass`, `reason` | all        | Failures by pass and closed-enum reason. Never carries error text.                                                                 |
-| `beads_exporter_collect_duration_seconds`            | gauge   | `db`, `pass`           | all        | Duration of the last run of each pass.                                                                                             |
+| Family                                               | Type    | Labels                 | Pass       | Meaning                                                                                                                                                 |
+| ---------------------------------------------------- | ------- | ---------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `beads_issues`                                       | gauge   | `db`, `state`          | main       | Not-closed beads by derived state. The sum over `state` is the not-closed total.                                                                        |
+| `beads_issues_stored`                                | gauge   | `db`, `status`         | main       | Beads by stored status. Non-closed from the list; `closed` from `bd count`, which includes closed gates.                                                |
+| `beads_queue_candidates`                             | gauge   | `db`, `queue`          | main       | Beads currently claimable through each queue.                                                                                                           |
+| `beads_queue_oldest_timestamp_seconds`               | gauge   | `db`, `queue`          | main       | Creation time of the oldest candidate. Omitted when the queue is empty.                                                                                 |
+| `beads_not_closed_by_type`                           | gauge   | `db`, `type`           | main       | Not-closed beads by issue type.                                                                                                                         |
+| `beads_not_closed_by_priority`                       | gauge   | `db`, `priority`       | main       | Not-closed beads by priority.                                                                                                                           |
+| `beads_not_closed_by_bead_label`                     | gauge   | `db`, `bead_label`     | main       | The `labelCap` most common labels; beads carrying any other label are counted once under `__other__`. Labels overlap: not a total.                      |
+| `beads_oldest_timestamp_seconds`                     | gauge   | `db`, `state`          | main       | Creation time of the oldest not-closed bead per state (start time for `in_progress`). Omitted when the state is empty.                                  |
+| `beads_created_last_24h`                             | gauge   | `db`                   | throughput | Beads created in the last 24 hours.                                                                                                                     |
+| `beads_closed_last_24h`                              | gauge   | `db`                   | throughput | Beads closed in the last 24 hours.                                                                                                                      |
+| `beads_stranded_claims`                              | gauge   | `db`, `status`         | stranded   | Claims with no live owner by stored status (`open`, `in_progress`, `hooked`). Zero-filled every successful pass.                                        |
+| `beads_oldest_stranded_claim_timestamp_seconds`      | gauge   | `db`                   | stranded   | Claim time (`started_at`, else `updated_at`) of the oldest claim with no live owner. Omitted when there are none.                                       |
+| `beads_exporter_up`                                  | gauge   | `db`                   | main       | 1 while the main cycle is healthy, 0 once it has failed `downAfterConsecutiveFailures` consecutive times. Present once a main cycle has been attempted. |
+| `beads_exporter_pass_last_success_timestamp_seconds` | gauge   | `db`, `pass`           | all        | Time of the last success of each pass. Omitted until the pass has succeeded once; frozen while it fails.                                                |
+| `beads_exporter_collect_errors_total`                | counter | `db`, `pass`, `reason` | all        | Failures by pass and closed-enum reason. Never carries error text.                                                                                      |
+| `beads_exporter_collect_duration_seconds`            | gauge   | `db`, `pass`           | all        | Duration of the last run of each pass.                                                                                                                  |
 
 ### Failure reasons
 
@@ -327,17 +350,17 @@ exporter as a launchd user agent and registers its scrape target, log source, da
 rule file with the observability stack. It is active only when `enable` is set, the observability
 stack is enabled and `dbs` is not empty; otherwise it defines nothing.
 
-| Option                                                                                                   | Default                        |
-| -------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `enable`                                                                                                 | `false`                        |
-| `package`                                                                                                | `pkgs.beads-exporter`          |
-| `bdPackage`                                                                                              | none: the machine's `bd`       |
-| `dbs` (`<name>.beadsDir`, an absolute path)                                                              | `{}`                           |
-| `claudeDir`                                                                                              | none: required                 |
-| `operatorNames`                                                                                          | `[]`                           |
-| `port`                                                                                                   | `9146`                         |
-| `pollIntervalSeconds`, `strandedIntervalSeconds`, `staleClaimHours`, `commandTimeoutSeconds`, `labelCap` | `120`, `600`, `6`, `90`, `500` |
-| `internal.configFile` (read-only)                                                                        | the rendered config file       |
+| Option                                                                                                                                   | Default                             |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `enable`                                                                                                                                 | `false`                             |
+| `package`                                                                                                                                | `pkgs.beads-exporter`               |
+| `bdPackage`                                                                                                                              | none: the machine's `bd`            |
+| `dbs` (`<name>.beadsDir`, an absolute path)                                                                                              | `{}`                                |
+| `claudeDir`                                                                                                                              | none: required                      |
+| `operatorNames`                                                                                                                          | `[]`                                |
+| `port`                                                                                                                                   | `9146`                              |
+| `pollIntervalSeconds`, `strandedIntervalSeconds`, `staleClaimHours`, `commandTimeoutSeconds`, `downAfterConsecutiveFailures`, `labelCap` | `120`, `600`, `6`, `90`, `2`, `500` |
+| `internal.configFile` (read-only)                                                                                                        | the rendered config file            |
 
 The configuration file is rendered with the queue list read at evaluation time from
 `claude-marketplace/pb/queues.json` and a `childPath` of the bash and coreutils store paths (no

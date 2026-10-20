@@ -92,7 +92,7 @@ func Families() []Family {
 		},
 		{
 			FamExporterUp, Gauge,
-			"1 if the last main collection cycle for this database succeeded, 0 if it failed.",
+			"1 while the main collection cycle for this database is healthy, 0 once it has failed the configured number of consecutive times (downAfterConsecutiveFailures).",
 			[]string{"db"},
 		},
 		{

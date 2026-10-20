@@ -30,18 +30,19 @@ type QueueSpec struct {
 
 // File is the on-disk schema.
 type File struct {
-	BDPath                  string            `json:"bdPath"`
-	ChildPath               string            `json:"childPath"`
-	BeadsDirs               map[string]string `json:"beadsDirs"`
-	ClaudeDir               string            `json:"claudeDir"`
-	OperatorNames           []string          `json:"operatorNames"`
-	Port                    int               `json:"port"`
-	PollIntervalSeconds     int               `json:"pollIntervalSeconds"`
-	StrandedIntervalSeconds int               `json:"strandedIntervalSeconds"`
-	StaleClaimHours         int               `json:"staleClaimHours"`
-	CommandTimeoutSeconds   int               `json:"commandTimeoutSeconds"`
-	LabelCap                int               `json:"labelCap"`
-	Queues                  []QueueSpec       `json:"queues"`
+	BDPath                       string            `json:"bdPath"`
+	ChildPath                    string            `json:"childPath"`
+	BeadsDirs                    map[string]string `json:"beadsDirs"`
+	ClaudeDir                    string            `json:"claudeDir"`
+	OperatorNames                []string          `json:"operatorNames"`
+	Port                         int               `json:"port"`
+	PollIntervalSeconds          int               `json:"pollIntervalSeconds"`
+	StrandedIntervalSeconds      int               `json:"strandedIntervalSeconds"`
+	StaleClaimHours              int               `json:"staleClaimHours"`
+	CommandTimeoutSeconds        int               `json:"commandTimeoutSeconds"`
+	DownAfterConsecutiveFailures int               `json:"downAfterConsecutiveFailures"`
+	LabelCap                     int               `json:"labelCap"`
+	Queues                       []QueueSpec       `json:"queues"`
 }
 
 // Config is a validated configuration with derived values resolved.
@@ -170,6 +171,7 @@ func Validate(f File) (*Config, error) {
 	requirePositive("strandedIntervalSeconds", f.StrandedIntervalSeconds)
 	requirePositive("staleClaimHours", f.StaleClaimHours)
 	requirePositive("commandTimeoutSeconds", f.CommandTimeoutSeconds)
+	requirePositive("downAfterConsecutiveFailures", f.DownAfterConsecutiveFailures)
 	requirePositive("labelCap", f.LabelCap)
 
 	if len(f.Queues) == 0 {

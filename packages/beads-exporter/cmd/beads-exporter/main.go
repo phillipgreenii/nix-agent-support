@@ -114,7 +114,8 @@ func serve(parent context.Context, cfg *config.Config, log *slog.Logger) error {
 		Window:        cfg.StaleClaimWindow(),
 		OperatorNames: cfg.OperatorNames,
 	}, log)
-	collector := collect.New(sched.RealClock{}, dbs, []collect.Pass{mainPass, collect.ThroughputPass{}, strandedPass}, log)
+	collector := collect.New(sched.RealClock{}, dbs, []collect.Pass{mainPass, collect.ThroughputPass{}, strandedPass}, log,
+		collect.WithDownAfter(cfg.DownAfterConsecutiveFailures))
 	mainPass.Init(ctx, dbs)
 
 	reg := metrics.Default()

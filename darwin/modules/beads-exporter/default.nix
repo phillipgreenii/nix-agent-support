@@ -45,6 +45,7 @@ let
         strandedIntervalSeconds
         staleClaimHours
         commandTimeoutSeconds
+        downAfterConsecutiveFailures
         labelCap
         ;
       inherit queues;
@@ -149,6 +150,21 @@ in
         saturation, which has stretched a whole pass past 70 s. This bounds each
         try: a call that times out is tried once more, so one failed call takes
         up to twice this before the pass fails.
+      '';
+    };
+
+    downAfterConsecutiveFailures = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 2;
+      description = ''
+        How many consecutive failed main collection passes (per database) it
+        takes before `beads_exporter_up{db}` goes to 0; a success resets the
+        count. With the default of 2, one isolated failed pass (for example a
+        single timeout while the host is stalled) still counts in
+        `beads_exporter_collect_errors_total` and drops that pass's series,
+        but leaves `up` at 1 and does not page. Set to 1 for the old
+        behaviour, where any failed pass is down. This is separate from the
+        retry-once of a timed-out bd call, which is unchanged.
       '';
     };
 

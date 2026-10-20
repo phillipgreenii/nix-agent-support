@@ -5668,6 +5668,7 @@
                 assert defaulted.strandedIntervalSeconds == 600;
                 assert defaulted.staleClaimHours == 6;
                 assert defaulted.commandTimeoutSeconds == 90;
+                assert defaulted.downAfterConsecutiveFailures == 2;
                 assert defaulted.labelCap == 500;
                 pkgs.runCommand "test-beads-exporter-darwin-module-ok"
                   {
@@ -5693,7 +5694,8 @@
                       || fail "childPath must hold exactly the bash and coreutils bin directories"
                     jq -e '.beadsDirs == { alpha: "/srv/alpha/.beads", beta: "/srv/beta/.beads" }
                            and .claudeDir == "/srv/claude" and .operatorNames == ["operator"]
-                           and .port == 9146' "$configFile" >/dev/null \
+                           and .port == 9146
+                           and .downAfterConsecutiveFailures == 2' "$configFile" >/dev/null \
                       || fail "rendered machine values are wrong"
 
                     # The exporter accepts the rendered file and a fixture of the same shape.
@@ -5710,6 +5712,7 @@
                       "strandedIntervalSeconds": 300,
                       "staleClaimHours": 4,
                       "commandTimeoutSeconds": 30,
+                      "downAfterConsecutiveFailures": 2,
                       "labelCap": 20,
                       "queues": [{ "name": "drain-claim", "args": ["--exclude-label", "human"] }]
                     }

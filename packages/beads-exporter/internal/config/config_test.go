@@ -26,18 +26,19 @@ func validFile(t *testing.T) File {
 		t.Fatal(err)
 	}
 	return File{
-		BDPath:                  "/nonexistent/store/bd/bin/bd",
-		ChildPath:               "/nonexistent/store/bash/bin:/nonexistent/store/coreutils/bin",
-		BeadsDirs:               map[string]string{"alpha": "/nonexistent/alpha/.beads", "beta": "/nonexistent/beta/.beads"},
-		ClaudeDir:               "/nonexistent/claude",
-		OperatorNames:           []string{"operator"},
-		Port:                    9100,
-		PollIntervalSeconds:     60,
-		StrandedIntervalSeconds: 300,
-		StaleClaimHours:         4,
-		CommandTimeoutSeconds:   30,
-		LabelCap:                20,
-		Queues:                  qs,
+		BDPath:                       "/nonexistent/store/bd/bin/bd",
+		ChildPath:                    "/nonexistent/store/bash/bin:/nonexistent/store/coreutils/bin",
+		BeadsDirs:                    map[string]string{"alpha": "/nonexistent/alpha/.beads", "beta": "/nonexistent/beta/.beads"},
+		ClaudeDir:                    "/nonexistent/claude",
+		OperatorNames:                []string{"operator"},
+		Port:                         9100,
+		PollIntervalSeconds:          60,
+		StrandedIntervalSeconds:      300,
+		StaleClaimHours:              4,
+		CommandTimeoutSeconds:        30,
+		DownAfterConsecutiveFailures: 2,
+		LabelCap:                     20,
+		Queues:                       qs,
 	}
 }
 
@@ -118,6 +119,7 @@ func TestEachFieldIsRequiredOrChecked(t *testing.T) {
 		{"strandedInterval", func(f *File) { f.StrandedIntervalSeconds = -1 }, "strandedIntervalSeconds must be a positive"},
 		{"staleClaimHours", func(f *File) { f.StaleClaimHours = 0 }, "staleClaimHours must be a positive"},
 		{"commandTimeout", func(f *File) { f.CommandTimeoutSeconds = 0 }, "commandTimeoutSeconds must be a positive"},
+		{"downAfterConsecutiveFailures", func(f *File) { f.DownAfterConsecutiveFailures = 0 }, "downAfterConsecutiveFailures must be a positive"},
 		{"labelCap", func(f *File) { f.LabelCap = 0 }, "labelCap must be a positive"},
 		{"no queues", func(f *File) { f.Queues = nil }, "queues must name at least one"},
 		{"queue bad name", func(f *File) { f.Queues = []QueueSpec{{Name: "Bad_Name", Args: []string{}}} }, "not a valid queue name"},
