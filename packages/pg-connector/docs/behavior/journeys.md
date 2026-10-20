@@ -492,11 +492,12 @@ Extensions:
   `added` and moves the consumer to the tail of the log (`INV-ERR-1`).
 - `--cached`: the backend answers from what it already has without running the query, and the answer
   advances no `refreshed_at` (`INV-LEDGER-FRESH-2`).
-- The consumer wants the CI view of the same query: `ci changes` (PLANNED, not available) returns
+- The consumer wants the CI view of the same query: `ci changes` returns
   the PR rows whose kinds include `ci_changed`, `entered_query`, `left_query` or `removed`, with the
   same acknowledgement and retention rules. Against a `ci` backend that does not declare
-  `owns_changes` the umbrella itself answers `invalid_argument` for that source, naming the instance
-  and saying it does not own changes, and does not forward the call.
+  `owns_changes` the umbrella itself answers for that source, naming the instance and saying it does
+  not own changes, and does not forward the call; if every queried `ci` backend is such a source, the
+  whole call is `invalid_argument`.
 
 ### `USECASE-DAEMON-DOWN-READ` — read from a daemon-backed backend whose daemon is down, and retry <!-- uuid: 85f23c4e-f32c-4b58-bfa9-f0975195541c -->
 
@@ -536,7 +537,7 @@ Extensions:
 - The daemon answers `unavailable` with a `migrating:` message: it is up but still migrating its
   store, and the caller retries as above.
 - The caller needs a read of its own write after a push or a PR creation: it passes `--fresh` on the
-  read or runs `pr refresh <id>` (PLANNED, not available); a polling caller does neither.
+  read or runs `pr refresh <id>`; a polling caller does neither.
 
 ### `USECASE-CACHED-READ` — read an entity through the umbrella's cache and tell how fresh the answer is <!-- uuid: 556f9d0e-57cb-48aa-b844-4267ebad6f25 -->
 

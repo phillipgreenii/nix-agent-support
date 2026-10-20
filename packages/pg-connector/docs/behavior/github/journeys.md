@@ -178,7 +178,7 @@ _Includes:_ `USECASE-GH-FETCH-STALE`.
 
 Extensions:
 
-- The caller prefers not to wait: it runs `pr refresh <id>` (PLANNED, not available), which queues the
+- The caller prefers not to wait: it runs `pr refresh <id>`, which queues the
   groups and returns at once, and reads when it needs them (`INV-GH-DIAG-3`).
 - A polling path never does either: it relies on the backend keeping the data fresh.
 
@@ -285,7 +285,7 @@ Extensions:
   with a `cursor_expired:` message and the consumer re-runs with `--reset`.
 - The daemon is unreachable: `unavailable`, no acknowledgement, no movement of the position
   (`USECASE-GH-DAEMON-DOWN`).
-- The consumer reads the CI view with `ci changes` (PLANNED, not available): the same flow over the
+- The consumer reads the CI view with `ci changes`: the same flow over the
   PR rows whose kinds include a CI change or a membership change, with its own key.
 
 ### `USECASE-GH-DIAGNOSE` — ask whether the daemon is healthy and why data is stale <!-- uuid: d1f29fbf-fadc-4d48-b085-1f8304992e97 -->
@@ -304,7 +304,7 @@ _Requires:_ `INV-GH-DIAG-1`, `INV-GH-DIAG-2`, `INV-GH-FRESH-10`, `INV-EXIT-1`.
    the oldest overdue task by class, per-query last success and error, authentication state, the
    change log's head, pending settle rows, per-consumer positions and the supervisor.
 3. The exit code is 0 for healthy, 2 for degraded, 3 for down.
-4. For one entity the operator runs `pr explain <id>` (PLANNED, not available) and reads each group's
+4. For one entity the operator runs `pr explain <id>` (or `ci explain <pr-id>` for the CI view) and reads each group's
    age and freshness end, last error, the head and base it was fetched for, its queue position, any
    pending row and the last change rows.
 

@@ -53,7 +53,7 @@ the data that explains it is already stored.
   changes to a PR's CI; the rules that keep data fresh (the two caches, field groups, keep-alive,
   revalidation, expiry, persistence across a restart, mergeability); the rules that bound spend (a
   hard cap per bucket, the background share, priority classes); what a caller sees when the daemon
-  is unreachable; and the diagnostics an operator reads (`status`, and the planned `explain` and
+  is unreachable; and the diagnostics an operator reads (`status`, `explain` and
   `refresh`).
 - **Extent (out)** — the umbrella's own half of the seam (forwarding `changes` and `changes_ack`,
   flushing before acknowledging, passing annotations through, stamping the ledger), which is the
@@ -71,8 +71,10 @@ the data that explains it is already stored.
 ## Realization gaps
 
 This set's **realization-gap register** (method `INV-23`): intended behavior this set's
-implementation has not built, one row per gap. The set states intended behavior only, and no
-daemon-backed GitHub backend exists, so every behavior of the set is recorded here.
+implementation has not built, one row per gap. The set states intended behavior only. The
+daemon-backed GitHub backend now exists, and the rows its operations (`explain`, `refresh`, the
+op catalog and the `ci changes` verb) closed are removed; the other rows were written before the
+backend was built and are not all re-verified against it.
 
 | Element               | Intended                                                                                                                                                                                          | Where the implementation stands                                                                                    | Tracked by             |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------- |
@@ -109,10 +111,7 @@ daemon-backed GitHub backend exists, so every behavior of the set is recorded he
 | `INV-GH-BUDGET-4`     | ops that are not cached are performed by the daemon so the governor meters them                                                                                                                   | pass-through ops are performed by each per-call process, outside any shared meter                                  | `pg2-z5fax` (phase 2+) |
 | `INV-GH-BUDGET-5`     | a secondary limit pauses background work, a low primary limit stops it, and an authentication failure still serves cached reads with their age                                                    | no governor reacts to a limit                                                                                      | `pg2-z5fax` (phase 2+) |
 | `INV-GH-DIAG-1`       | `status` reports health, freshness and spend, and still reports with the daemon down                                                                                                              | no backend offers `status`                                                                                         | `pg2-z5fax` (phase 2+) |
-| `INV-GH-DIAG-2`       | `explain` (PLANNED) reports why an entity is stale, group by group                                                                                                                                | the op does not exist                                                                                              | `pg2-z5fax` (phase 3c) |
-| `INV-GH-DIAG-3`       | `refresh` (PLANNED) queues a refresh at the write-invalidated class and returns at once                                                                                                           | the op does not exist                                                                                              | `pg2-z5fax` (phase 3c) |
 | `INV-GH-ERR-1`        | every failure is answered from the existing seven-value taxonomy per the failure catalog of `INTF-GH-WIRE`, and `version_mismatch` only outside the supported range                               | no daemon or socket protocol exists to answer these                                                                | `pg2-z5fax` (phase 2+) |
-| `INTF-GH-WIRE`        | the op catalog of `INTF-GH-WIRE`, including the new ops `changes`, `changes_ack`, `status`, `explain` (PLANNED) and `refresh` (PLANNED), and the `ci changes` verb (PLANNED)                      | none of the new ops is answered by any backend                                                                     | `pg2-z5fax` (phase 3+) |
 | `INTF-GH-CONFIG`      | one rendered file carries every setting and every query, and an unknown query or a mismatched config hash fails loudly                                                                            | no rendered daemon config exists                                                                                   | `pg2-z5fax` (phase 2+) |
 | `INTF-GH-SUPERVISION` | the supervisor starts and restarts the daemon and the application does the rest                                                                                                                   | no daemon exists to supervise                                                                                      | `pg2-z5fax` (phase 2+) |
 | `INTF-GH-STATUS`      | the operator reads health through `status` and through the umbrella's `auth status` and `config validate` rows                                                                                    | no `status` exists and neither umbrella verb reads one                                                             | `pg2-z5fax` (phase 2+) |

@@ -94,7 +94,7 @@ and is not redefined here. Where this set needs a different meaning it takes a d
 - **Tail** — the end of the change log: the position a new cursor key starts at (`INV-GH-CHG-7`).
 - **Retention** — how long change rows are kept, and how long a cursor key may go unseen before it
   is dropped (`INV-GH-CHG-8`).
-- **CI view** — the `ci changes` (PLANNED, not available) presentation of the PR rows whose kinds include a CI change, with
+- **CI view** — the `ci changes` presentation of the PR rows whose kinds include a CI change, with
   the PR's current CI state as the entity (`INV-GH-CHG-10`).
 
 ## Budget

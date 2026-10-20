@@ -111,7 +111,7 @@ restated.
   an origin fetch of every group it needs; the backend, not the umbrella, decides how current its
   answer is (`INV-CACHE-8`). Polling paths SHOULD NOT use `--fresh`, because the backend keeps the
   data fresh itself. A caller that reads back its own **out-of-band write** MUST use `--fresh` on
-  its read or the `refresh` op (PLANNED, not available), and MUST NOT wait for the freshness window.
+  its read or the `refresh` op, and MUST NOT wait for the freshness window.
 - **`INV-GH-FRESH-9`** <!-- uuid: 1a3ef125-102e-4ad9-9003-b18f104b17e6 --> — A `list` query name MUST be configured; an unknown
   name MUST be answered `query_not_recognized` (`INV-ERR-3`). A query's key is its name plus its
   arguments. An argument that only filters a configured query's result (a time range) MUST be
@@ -216,7 +216,7 @@ restated.
   MUST be logged as a row of the PR, with kind `ci_changed` and the run and job fields that changed,
   after the settle rule has refreshed the data. It is therefore delivered by `pr changes` to every
   consumer of a PR query, and one CI event MUST cause one row, not one per feed. `ci changes`
-  (PLANNED, not available) MUST offer the same rows in the CI view: the PR rows for members of Q
+  MUST offer the same rows in the CI view: the PR rows for members of Q
   whose kinds include `ci_changed`, `entered_query`, `left_query` or `removed`, each change's entity
   the PR's current CI state with the row's own `version` and `head_sha`, with its own cursor key,
   its own acknowledgement and the same retention, first-poll, `--cached`, `--reset` and
@@ -262,12 +262,12 @@ restated.
   When the daemon is down it MUST still report the supervisor probe's answer, the socket path, the
   store file's size and age, and the log paths. Its exit code MUST follow `INV-EXIT-1`: 0 healthy, 2
   degraded, 3 down.
-- **`INV-GH-DIAG-2`** <!-- uuid: 74d55235-019d-44ad-babd-91f3de1ac04f --> — `explain` (PLANNED, not available), through
+- **`INV-GH-DIAG-2`** <!-- uuid: 74d55235-019d-44ad-babd-91f3de1ac04f --> — `explain`, through
   `pr explain <id>` and `ci explain <pr-id>`, MUST answer why an entity is stale: per group its fetch
   time, freshness end, hard-age end and last error, the head and base it was fetched for, its queue
   position, any pending row (awaited groups and deadline), and the last change rows. It MUST read the
   store and call no origin.
-- **`INV-GH-DIAG-3`** <!-- uuid: 3ba638f6-aacc-4afe-9b13-7f3eea58c455 --> — `refresh` (PLANNED, not available), through
+- **`INV-GH-DIAG-3`** <!-- uuid: 3ba638f6-aacc-4afe-9b13-7f3eea58c455 --> — `refresh`, through
   `pr refresh <id>` and `pr refresh --query Q`, MUST queue the named groups at the write-invalidated
   class and return at once, without waiting for the fetch.
 

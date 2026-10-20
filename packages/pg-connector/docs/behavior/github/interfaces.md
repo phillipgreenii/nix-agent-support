@@ -46,33 +46,32 @@ flowchart LR
 ### Op catalog
 
 An op's **groups** are the field groups it needs; a read whose groups are all inside their freshness
-window is a local hit (`INV-GH-FRESH-2`). **PLANNED** marks an op or verb that is intended behavior
-and is not available.
+window is a local hit (`INV-GH-FRESH-2`).
 
-| Instance | Op                  | Served from                                | Groups read                        | Note                                                                         |
-| -------- | ------------------- | ------------------------------------------ | ---------------------------------- | ---------------------------------------------------------------------------- |
-| `pr`     | `show`              | store, read-through                        | summary, detail, conversation      |                                                                              |
-| `pr`     | `list`              | query cache and store                      | summary                            | a configured query name is required (`INV-GH-FRESH-9`)                       |
-| `pr`     | `files`             | store, read-through                        | files                              |                                                                              |
-| `pr`     | `commits`           | store, read-through                        | commits                            |                                                                              |
-| `pr`     | `review_pending`    | store, read-through                        | pending                            | never refreshed in the background                                            |
-| `pr`     | `review_submit`     | origin, through the daemon                 | origin reads for its preconditions | creates or appends to the acting identity's pending review; never submits it |
-| `pr`     | `search`            | metered pass-through                       |                                    | not stored (`INV-GH-BUDGET-4`)                                               |
-| `pr`     | `list_activity`     | metered pass-through                       |                                    | not stored                                                                   |
-| `pr`     | `changes`           | change log                                 |                                    | the PR feed (`INV-GH-CHG-5`)                                                 |
-| `pr`     | `changes_ack`       | change log                                 |                                    | moves a consumer position (`INV-GH-CHG-6`)                                   |
-| `pr`     | `refresh` (PLANNED) | queues a refresh, returns at once          | the named groups                   | the verb `pr refresh <id>` or `pr refresh --query Q` (`INV-GH-DIAG-3`)       |
-| `pr`     | `explain` (PLANNED) | store                                      |                                    | the verb `pr explain <id>` (`INV-GH-DIAG-2`)                                 |
-| `ci`     | `list_runs`         | store, read-through                        | runs                               |                                                                              |
-| `ci`     | `get_logs`          | metered pass-through                       |                                    | not stored                                                                   |
-| `ci`     | `rerun_failed`      | origin, through the daemon                 |                                    | invalidates runs; a run already re-running is a no-op answer                 |
-| `ci`     | `changes` (PLANNED) | change log, CI view                        |                                    | the verb `ci changes --consumer C --query Q` (`INV-GH-CHG-10`)               |
-| `ci`     | `changes_ack`       | change log                                 |                                    | for the CI view's own cursor key                                             |
-| `ci`     | `explain` (PLANNED) | store                                      |                                    | the verb `ci explain <pr-id>`                                                |
-| `ci`     | `refresh` (PLANNED) | queues a refresh, returns at once          | runs                               |                                                                              |
-| both     | `capabilities`      | the client, without the daemon             |                                    | `INV-GH-PROC-2`                                                              |
-| both     | `auth_status`       | the daemon; `unavailable` when it is down  |                                    | reports the acting identity and any authentication failure                   |
-| both     | `status`            | the daemon; a local report when it is down |                                    | `INTF-GH-STATUS`                                                             |
+| Instance | Op               | Served from                                | Groups read                        | Note                                                                         |
+| -------- | ---------------- | ------------------------------------------ | ---------------------------------- | ---------------------------------------------------------------------------- |
+| `pr`     | `show`           | store, read-through                        | summary, detail, conversation      |                                                                              |
+| `pr`     | `list`           | query cache and store                      | summary                            | a configured query name is required (`INV-GH-FRESH-9`)                       |
+| `pr`     | `files`          | store, read-through                        | files                              |                                                                              |
+| `pr`     | `commits`        | store, read-through                        | commits                            |                                                                              |
+| `pr`     | `review_pending` | store, read-through                        | pending                            | never refreshed in the background                                            |
+| `pr`     | `review_submit`  | origin, through the daemon                 | origin reads for its preconditions | creates or appends to the acting identity's pending review; never submits it |
+| `pr`     | `search`         | metered pass-through                       |                                    | not stored (`INV-GH-BUDGET-4`)                                               |
+| `pr`     | `list_activity`  | metered pass-through                       |                                    | not stored                                                                   |
+| `pr`     | `changes`        | change log                                 |                                    | the PR feed (`INV-GH-CHG-5`)                                                 |
+| `pr`     | `changes_ack`    | change log                                 |                                    | moves a consumer position (`INV-GH-CHG-6`)                                   |
+| `pr`     | `refresh`        | queues a refresh, returns at once          | the named groups                   | the verb `pr refresh <id>` or `pr refresh --query Q` (`INV-GH-DIAG-3`)       |
+| `pr`     | `explain`        | store                                      |                                    | the verb `pr explain <id>` (`INV-GH-DIAG-2`)                                 |
+| `ci`     | `list_runs`      | store, read-through                        | runs                               |                                                                              |
+| `ci`     | `get_logs`       | metered pass-through                       |                                    | not stored                                                                   |
+| `ci`     | `rerun_failed`   | origin, through the daemon                 |                                    | invalidates runs; a run already re-running is a no-op answer                 |
+| `ci`     | `changes`        | change log, CI view                        |                                    | the verb `ci changes --consumer C --query Q` (`INV-GH-CHG-10`)               |
+| `ci`     | `changes_ack`    | change log                                 |                                    | for the CI view's own cursor key                                             |
+| `ci`     | `explain`        | store                                      |                                    | the verb `ci explain <pr-id>`                                                |
+| `ci`     | `refresh`        | queues a refresh, returns at once          | runs                               | an op only: no umbrella verb names it                                        |
+| both     | `capabilities`   | the client, without the daemon             |                                    | `INV-GH-PROC-2`                                                              |
+| both     | `auth_status`    | the daemon; `unavailable` when it is down  |                                    | reports the acting identity and any authentication failure                   |
+| both     | `status`         | the daemon; a local report when it is down |                                    | `INTF-GH-STATUS`                                                             |
 
 ### Read answers
 

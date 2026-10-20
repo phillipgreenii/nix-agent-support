@@ -62,8 +62,9 @@ does not restate it.
   [`operator-commands.md`](operator-commands.md)).
 - **Mergeability noise cannot reach the run.** The backend carries a PR's last known mergeability
   forward, so a transient mergeability answer does not change the facts a run compares.
-- **A CI-only feed is PLANNED.** The connector's `ci changes` feed, for a consumer that wants CI
-  changes without parsing PR rows, is planned and is not available; pg-desk does not use it.
+- **A CI-only feed is available, and pg-desk does not use it.** The connector's `ci changes` feed,
+  for a consumer that wants CI changes without parsing PR rows, is available; pg-desk does not use
+  it.
 
 ## Behavior
 
