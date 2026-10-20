@@ -41,6 +41,7 @@ func Build(dirs []string, p Params) (Report, error) {
 func Combine(phases []PhaseReport) *Combined {
 	c := &Combined{ByClass: map[string]int{}}
 	var td, hh, ch, dl []float64
+	c.CILiveObservable = len(phases) > 0
 	for _, p := range phases {
 		c.Phases = append(c.Phases, p.Phase)
 		c.LiveDetected += p.Live.InWindow
@@ -53,6 +54,14 @@ func Combine(phases []PhaseReport) *Combined {
 		}
 		c.SweepHeadline += p.Sweep.Headline
 		c.ShadowOnly += p.ShadowOnly.Total
+		c.SlotBoundS = p.Delay.SlotBoundS
+		c.CIDaemonChanges += p.CIDriven.Daemon.Changes
+		c.CIDaemonSeenByLive += p.CIDriven.Daemon.AlsoSeenByOther
+		c.CILiveObservable = c.CILiveObservable && p.CIDriven.LiveObservable
+		if l := p.CIDriven.Live; l != nil {
+			c.CILiveChanges += l.Changes
+			c.CILiveSeenByDaemon += l.AlsoSeenByOther
+		}
 		td = append(td, p.samp.tickDur...)
 		hh = append(hh, p.samp.hydrationsHour...)
 		ch = append(ch, p.samp.costHour...)
@@ -158,8 +167,8 @@ func Markdown(rep Report) string {
 			w("- `%s` %s (%s): %s; live feed missed: %v\n", e.PR, e.End, e.Cause, e.Result, e.FeedMissed)
 		}
 		so := p.ShadowOnly
-		w("\n### (c) Shadow-only detections\n\n%d shadow-only (origin pg-connector, no live pr.changed within tolerance), %.2f per hour; %d first-observation reconciles counted apart; %d with no projection field change. By kind %v; by field %v. Other-origin items %v (of which a real field change %v).\n\n", so.Total, so.NoiseRatePerHour, so.FirstObservation, so.NoFieldChange, so.ByKind, so.ByField, so.OtherOrigins, so.OtherReal)
-		w("### (d) Detection delay\n\nNegative means the shadow was first.\n\n- shadow minus live enqueue: %s\n- shadow minus the PR's own updated time: %s\n- live enqueue minus the PR's own updated time: %s\n- missed events the shadow flagged later (shadow minus live enqueue, an upper bound): %s\n\n", dist(p.Delay.VsLiveEnqueue, "s"), dist(p.Delay.ShadowFromUpdate, "s"), dist(p.Delay.LiveFromUpdate, "s"), dist(p.Delay.MissedThenDetected, "s"))
+		w("\n### (c) Shadow-only detections\n\n%d shadow-only (origin daemon-feed or daemon-ci-feed, no live pr.changed within tolerance), %.2f per hour; %d first-observation observations (a PR first seen, kinds exactly entered_query, no live event within tolerance) counted apart; %d with no projection field change. By kind %v; by field %v. Other-origin items %v (of which a real field change %v).\n\n", so.Total, so.NoiseRatePerHour, so.FirstObservation, so.NoFieldChange, so.ByKind, so.ByField, so.OtherOrigins, so.OtherReal)
+		w("### (d) Detection delay\n\nNegative means the shadow was first. Slot-length bound: %.0f s. %s\n\n- shadow minus live enqueue: %s (slot-length bound %.0f s)\n- shadow minus the PR's own updated time: %s\n- live enqueue minus the PR's own updated time: %s\n- missed events the shadow flagged later (shadow minus live enqueue, an upper bound): %s\n\n", p.Delay.SlotBoundS, p.Delay.Statement, dist(p.Delay.VsLiveEnqueue, "s"), p.Delay.SlotBoundS, dist(p.Delay.ShadowFromUpdate, "s"), dist(p.Delay.LiveFromUpdate, "s"), dist(p.Delay.MissedThenDetected, "s"))
 		w("### (e) Cost\n\n- Tick duration: %s; %d ticks over 60 s.\n- Hydrations per hour: %s.\n- GraphQL points per hour (shadow, lower bound): %s.\n- Hours with the shared token below the 1,000 reserve: %d. %s\n\n", dist(p.Cost.TickDurationS, "s"), p.Cost.TicksOver60s, dist(p.Cost.HydrationsPerHour, ""), dist(p.Cost.CostPerHour, ""), p.Cost.HoursBelowReserve, p.Cost.Statement)
 		w("| Hour (UTC) | Ticks | Hydrations | Points (lower bound) | Token remaining at hour end | Min remaining |\n| --- | --- | --- | --- | --- | --- |\n")
 		for _, h := range p.Cost.Hours {
@@ -173,9 +182,25 @@ func Markdown(rep Report) string {
 		if p.HeadSHA != nil {
 			w("### (g) Head SHA disagreement (optional)\n\nCompared %d, disagreeing %d, only in the shadow store %d, only in the live store %d.\n\n", p.HeadSHA.Compared, p.HeadSHA.Disagreeing, p.HeadSHA.OnlyShadow, p.HeadSHA.OnlyLive)
 		}
+		ci := p.CIDriven
+		w("### (h) CI-driven categorization changes\n\n%s\n\n", ci.Statement)
+		for _, e := range ci.Daemon.Entries {
+			w("- daemon side `%s` at %s: %s to %s; also seen by the live side: %v\n", e.PR, e.At, e.From, e.To, e.AlsoSeenByOther)
+		}
+		if ci.Live != nil {
+			for _, e := range ci.Live.Entries {
+				w("- live side `%s` at %s: %s to %s; also seen by the daemon side: %v\n", e.PR, e.At, e.From, e.To, e.AlsoSeenByOther)
+			}
+		}
+		w("\n")
 	}
 	if c := rep.Combined; c != nil {
-		w("## Combined (%s)\n\n- LIVE-DETECTED in window %d, matched %d, missed %d (of which flagged later %d), unexplained %d; misses by class %v.\n- SWEEP-CAUGHT headline %d; shadow-only %d.\n- Tick duration: %s; hydrations per hour: %s; points per hour: %s; shadow minus live enqueue: %s.\n", strings.Join(c.Phases, " + "), c.LiveDetected, c.Matched, c.Missed, c.LateDetected, c.Unexplained, c.ByClass, c.SweepHeadline, c.ShadowOnly, dist(c.TickDurationS, "s"), dist(c.HydrationsPerHour, ""), dist(c.CostPerHour, ""), dist(c.VsLiveEnqueue, "s"))
+		w("## Combined (%s)\n\n- LIVE-DETECTED in window %d, matched %d, missed %d (of which flagged later %d), unexplained %d; misses by class %v.\n- SWEEP-CAUGHT headline %d; shadow-only %d.\n- Tick duration: %s; hydrations per hour: %s; points per hour: %s; shadow minus live enqueue: %s (slot-length bound %.0f s).\n- CI-driven categorization changes: daemon side %d (%d also seen by the live side); ", strings.Join(c.Phases, " + "), c.LiveDetected, c.Matched, c.Missed, c.LateDetected, c.Unexplained, c.ByClass, c.SweepHeadline, c.ShadowOnly, dist(c.TickDurationS, "s"), dist(c.HydrationsPerHour, ""), dist(c.CostPerHour, ""), dist(c.VsLiveEnqueue, "s"), c.SlotBoundS, c.CIDaemonChanges, c.CIDaemonSeenByLive)
+		if c.CILiveObservable {
+			w("live side %d (%d also seen by the daemon side).\n", c.CILiveChanges, c.CILiveSeenByDaemon)
+		} else {
+			w("live side not observable in at least one phase.\n")
+		}
 	}
 	return b.String()
 }

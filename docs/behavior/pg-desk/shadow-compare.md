@@ -89,14 +89,18 @@ beside the live flow changes.
   run record MUST use the BARE PR id (everything before the first `@`); a join on the raw field never
   matches anything. Two live events are the same event only when their RAW ids and enqueue times are
   equal: two changes of one PR enqueued in the same second are two events.
-- **SHADOW-DETECTED.** Every shadow item whose `origin` is `pg-connector` (the list-diff path), of ANY
-  kind. A PR first seen surfaces as a bare `reconcile` with origin `pg-connector`. The PR kinds are
+- **SHADOW-DETECTED.** Every shadow item whose `origin` is `daemon-feed` (the daemon's pr change feed)
+  or `daemon-ci-feed` (its ci change feed), of ANY kind. A PR first seen surfaces as exactly
+  `entered_query`. Items marked `replay` (a reset re-poll of the feed) and items with the old
+  `pg-connector` origin of an earlier scratch directory (the list-diff path) load but count in no
+  figure. A daemon item carries the time of the poll that first observed the change, never a detection
+  time, so every shadow figure is bounded by the slot length, which the report prints next to the delay
+  figure. The PR kinds of the list-diff path were
   `opened`, `reopened`, `closed`, `merged`, `draft_changed`, `head_changed`, `base_changed`,
   `ci_changed`, `mergeability_changed`, `review_changed`, `feedback_changed`, plus `removed` and
   `reconcile`; the new flow has no `changed` or `added` kind. Items with origin `local-reconcile` or
   `sweep` are reported SEPARATELY and are never SHADOW-DETECTED.
-- **Mapping to the live `metadata.change`.** `added` is a first-observation `reconcile` with origin
-  `pg-connector`; `changed` is any non-`reconcile`, non-`removed` kind; `removed` is `removed`,
+- **Mapping to the live `metadata.change`.** `added` is a first-observation `entered_query` item; `changed` is any non-`reconcile`, non-`removed` kind; `removed` is `removed`,
   `closed` or `merged`.
 - **SWEEP-CAUGHT.** A live run-record row with `change=sweep` AND `anchor_written=true`. The HEADLINE
   is `anchor_cause` `pr-content-change` plus `conflict-flip` (a mergeability change: a declared
@@ -341,8 +345,16 @@ Tolerance `T` is the live query's own period plus the slot period plus the measu
   means the shadow was first), and from the PR's own `updated_at` where the scratch facts carry it;
   plus the late-detection delay of the missed events the shadow flagged later (see (a)).
 - **(e) Cost.** Shadow tick duration p50, p90 and max against 60s; hydrations per hour; GraphQL points
-  per hour p50 and max-hour (shadow spend, a lower bound); the shared-token remaining at each hour end
+  per hour p50 and max-hour (shadow spend, a lower bound, summed over EVERY tick row including the
+  budget-skipped ones, because the daemon spends in the background); the shared-token remaining at each hour end
   against the 4,000 ceiling (5,000 limit minus the connector's 1,000 reserve).
+- **(h) CI-driven categorization changes.** A PR is blocked while its latest CI rollup is `failure` and
+  reviewable otherwise (`success`, `pending`, `none`); a change is a `daemon-ci-feed` item whose rollup
+  moves the PR between the two states relative to the PR's previous ci item (the first ci item of a PR
+  sets its state and is not a change). The report gives the daemon side's count and how many the live
+  side also saw. The live side is reported only when a live log names a PR's blocked-or-reviewable
+  categorization; the live router's logs do not today, and the report then states `live side not
+observable: <reason>` and reports the daemon side alone.
 - **(f) Ticks skipped for budget.** **(g) OPTIONAL** head SHA disagreement between the scratch store
   and the live v1 store `entity.head_sha`, read with `sqlite3 -readonly` at report time.
 

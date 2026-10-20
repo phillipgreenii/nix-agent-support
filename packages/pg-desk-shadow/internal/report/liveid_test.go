@@ -94,7 +94,7 @@ func (f fixture) input() Input {
 }
 
 func shadowItem1(id string, when time.Time) map[time.Time][]schema.Item {
-	return map[time.Time][]schema.Item{when.Truncate(time.Minute): {{EntityID: id, Kinds: []string{"head_changed"}, Origin: "pg-connector", At: schema.Format(when), Fields: []string{"head_sha"}}}}
+	return map[time.Time][]schema.Item{when.Truncate(time.Minute): {{EntityID: id, Kinds: []string{"head_changed"}, Origin: schema.OriginDaemonFeed, At: schema.Format(when), Fields: []string{"head_sha"}}}}
 }
 
 func live(id, hash string, enq time.Time) Dispatch {

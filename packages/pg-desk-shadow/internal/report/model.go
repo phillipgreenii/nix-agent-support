@@ -144,6 +144,11 @@ type DataQuality struct {
 	Baseline           Baseline            `json:"baseline"`
 	Statements         []string            `json:"statements"`
 	Params             map[string]any      `json:"params"`
+	// IgnoredReplayItems counts items marked Replay (a reset re-poll of the
+	// feed); IgnoredLegacyItems counts items with the old pg-connector origin.
+	// Neither enters any figure of the report.
+	IgnoredReplayItems int `json:"ignored_replay_items"`
+	IgnoredLegacyItems int `json:"ignored_legacy_origin_items"`
 }
 
 // Live is the LIVE-DETECTED section.
@@ -235,6 +240,40 @@ type Delay struct {
 	// MissedThenDetected is the late-detection delay of the missed events the
 	// shadow flagged later (an upper bound; see MissEntry).
 	MissedThenDetected Dist `json:"missed_then_detected_shadow_minus_live_enqueue_s"`
+	// SlotBoundS is the slot length (Params.SlotPeriod): a daemon-feed item
+	// carries the poll time that first observed the change, never a detection
+	// time, so every shadow figure is bounded by it.
+	SlotBoundS float64 `json:"slot_length_bound_s"`
+	Statement  string  `json:"statement"`
+}
+
+// CIEntry is one CI-driven categorization change (label only): a PR moved
+// between blocked (latest CI rollup failure) and reviewable (anything else).
+type CIEntry struct {
+	PR              string `json:"pr"`
+	At              string `json:"at"`
+	From            string `json:"from"`
+	To              string `json:"to"`
+	AlsoSeenByOther bool   `json:"also_seen_by_other_side"`
+}
+
+// CISide is one side's CI-driven categorization changes in the run window.
+type CISide struct {
+	Changes         int       `json:"changes"`
+	AlsoSeenByOther int       `json:"also_seen_by_other_side"`
+	Entries         []CIEntry `json:"entries"`
+}
+
+// CIDriven is the CI-driven categorization change section (metric (h)). The
+// live side is reported only when a live log identifies a PR's
+// blocked-or-reviewable move; otherwise LiveObservable is false, Live is nil and
+// the statement starts "live side not observable".
+type CIDriven struct {
+	Daemon         CISide  `json:"daemon"`
+	Live           *CISide `json:"live,omitempty"`
+	LiveObservable bool    `json:"live_observable"`
+	LiveSource     string  `json:"live_source,omitempty"`
+	Statement      string  `json:"statement"`
 }
 
 // Hour is one hour bucket of metric (e).
@@ -291,6 +330,7 @@ type PhaseReport struct {
 	Sweep              Sweep       `json:"sweep"`
 	ShadowOnly         ShadowOnly  `json:"shadow_only"`
 	Delay              Delay       `json:"delay"`
+	CIDriven           CIDriven    `json:"ci_driven"`
 	Cost               Cost        `json:"cost"`
 	SkippedBudgetTicks int         `json:"skipped_budget_ticks"`
 	HeadSHA            *HeadSHA    `json:"head_sha,omitempty"`
@@ -328,4 +368,12 @@ type Combined struct {
 	CostPerHour       Dist           `json:"graphql_points_per_hour"`
 	HydrationsPerHour Dist           `json:"hydrations_per_hour"`
 	VsLiveEnqueue     Dist           `json:"shadow_minus_live_enqueue_s"`
+	SlotBoundS        float64        `json:"slot_length_bound_s"`
+	// CI-driven categorization changes, summed over the phases. CILiveObservable
+	// is true only when every phase could observe the live side.
+	CIDaemonChanges    int  `json:"ci_daemon_changes"`
+	CIDaemonSeenByLive int  `json:"ci_daemon_changes_also_seen_by_live"`
+	CILiveObservable   bool `json:"ci_live_observable"`
+	CILiveChanges      int  `json:"ci_live_changes"`
+	CILiveSeenByDaemon int  `json:"ci_live_changes_also_seen_by_daemon"`
 }

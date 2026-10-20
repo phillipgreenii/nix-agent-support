@@ -28,7 +28,7 @@ func SelfTest(out io.Writer) error {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	s, err := Synthesize(dir, SynthOptions{Seeded: true})
+	s, err := Synthesize(dir, SynthOptions{Seeded: true, CIChanges: true, LiveCategorization: true, IgnoredItems: true})
 	if err != nil {
 		return err
 	}
@@ -60,6 +60,10 @@ func SelfTest(out io.Writer) error {
 		{"a collector-down miss", ph.Misses.ByClass[ClassCollectorDown] == 1},
 		{"hash signal unusable statement", ph.DataQuality.Baseline.SweepRows > 0},
 		{"sweep headline counted", ph.Sweep.Headline == 2},
+		{"daemon feed items matched live events", ph.Misses.Matched == 2},
+		{"daemon ci-feed categorization changes counted", ph.CIDriven.Daemon.Changes == 3},
+		{"live categorization changes compared", ph.CIDriven.LiveObservable && ph.CIDriven.Live != nil && ph.CIDriven.Live.Changes == 2 && ph.CIDriven.Daemon.AlsoSeenByOther == 2},
+		{"replay and old-origin items ignored", ph.DataQuality.IgnoredReplayItems == 1 && ph.DataQuality.IgnoredLegacyItems == 1},
 	}
 	for _, c := range checks {
 		if !c.ok {

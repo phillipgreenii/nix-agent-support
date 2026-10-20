@@ -44,6 +44,10 @@ type QueueRow struct {
 	EventID string
 	At      time.Time
 	Reason  string
+	// Category is the PR's blocked-or-reviewable categorization when the row
+	// names one (payload.metadata.categorization); empty in every row the live
+	// router writes today.
+	Category string
 }
 
 // RunRow is one live run-record row.
@@ -199,11 +203,16 @@ func readQueue(path string) ([]QueueRow, int, error) {
 			EventID string `json:"eventId"`
 			At      string `json:"at"`
 			Reason  string `json:"reason"`
+			Payload struct {
+				Metadata struct {
+					Categorization string `json:"categorization"`
+				} `json:"metadata"`
+			} `json:"payload"`
 		}
 		if json.Unmarshal(b, &r) != nil || r.Op == "" {
 			return
 		}
-		out = append(out, QueueRow{Op: r.Op, EventID: r.EventID, At: parseTS(r.At), Reason: r.Reason})
+		out = append(out, QueueRow{Op: r.Op, EventID: r.EventID, At: parseTS(r.At), Reason: r.Reason, Category: r.Payload.Metadata.Categorization})
 	})
 	return out, mk, err
 }

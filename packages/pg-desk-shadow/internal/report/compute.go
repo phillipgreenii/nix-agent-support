@@ -26,14 +26,28 @@ type interval struct {
 
 func (i interval) overlaps(a, b time.Time) bool { return i.from.Before(b) && i.to.After(a) }
 
+// legacyOrigin is the origin the list-diff collector wrote before the daemon's
+// change feed replaced it. Rows of an older scratch directory still carry it:
+// they load, and no figure counts them.
+const legacyOrigin = "pg-connector"
+
+// isDaemonOrigin reports whether an item came from one of the daemon's two
+// change feeds (the pr instance or the ci instance): only those are the
+// shadow's detections.
+func isDaemonOrigin(o string) bool {
+	return o == schema.OriginDaemonFeed || o == schema.OriginDaemonCIFeed
+}
+
 type shadowItem struct {
-	id     string
-	at     time.Time
-	kinds  []string
-	origin string
-	fields []string
-	updAt  time.Time
-	tick   time.Time
+	id       string
+	at       time.Time
+	kinds    []string
+	origin   string
+	fields   []string
+	updAt    time.Time
+	tick     time.Time
+	seq      int64
+	ciRollup string
 }
 
 func sortedUnique(v []string) []string {
@@ -100,7 +114,7 @@ func Compute(in Input, p Params) PhaseReport {
 
 	// Tick bookkeeping.
 	var firstStart, lastEnd, warmupEnd time.Time
-	var done, executed []schema.Row
+	var done, executed, costRows []schema.Row
 	var items []shadowItem
 	for _, t := range ticks {
 		ts, te := parseTS(t.TickStart), parseTS(t.TickEnd)
@@ -121,6 +135,9 @@ func Compute(in Input, p Params) PhaseReport {
 				warmupEnd = te
 			}
 		}
+		// Every tick row feeds the cost figures: the collector records the
+		// daemon's background spend on a skipped row too.
+		costRows = append(costRows, t)
 		if t.Status == schema.StatusSkippedBudget {
 			dq.SkippedTicks++
 			continue
@@ -134,11 +151,20 @@ func Compute(in Input, p Params) PhaseReport {
 			dq.FailedTicks++
 		}
 		for _, it := range t.Items {
+			switch {
+			case it.Replay:
+				// A reset re-poll replays rows already delivered: not a detection.
+				dq.IgnoredReplayItems++
+				continue
+			case it.Origin == legacyOrigin:
+				dq.IgnoredLegacyItems++
+				continue
+			}
 			at := parseTS(it.At)
 			if at.IsZero() {
 				at = te
 			}
-			items = append(items, shadowItem{id: it.EntityID, at: at, kinds: it.Kinds, origin: it.Origin, fields: it.Fields, updAt: parseTS(it.UpdatedAt), tick: te})
+			items = append(items, shadowItem{id: it.EntityID, at: at, kinds: it.Kinds, origin: it.Origin, fields: it.Fields, updAt: parseTS(it.UpdatedAt), tick: te, seq: it.Seq, ciRollup: it.CIRollup})
 		}
 	}
 	for d, v := range dq.BuildsByDay {
@@ -253,6 +279,12 @@ func Compute(in Input, p Params) PhaseReport {
 	} else if base.SweepRows > 0 {
 		base.HashStatement = fmt.Sprintf("content_hash_changed is true on %.1f percent of live sweep rows.", base.HashChangedShare*100)
 	}
+	if dq.IgnoredReplayItems > 0 {
+		dq.Statements = append(dq.Statements, fmt.Sprintf("%d reset-replay items (replay=true) are ignored by every figure.", dq.IgnoredReplayItems))
+	}
+	if dq.IgnoredLegacyItems > 0 {
+		dq.Statements = append(dq.Statements, fmt.Sprintf("%d items with the old %s origin are ignored by every figure: only the daemon feed origins count as the shadow's detections.", dq.IgnoredLegacyItems, legacyOrigin))
+	}
 	if m.Seeded {
 		dq.Statements = append(dq.Statements,
 			"The REMOTE re-hydration tier is effectively OFF in this phase because hydrated_at is seeded on the scratch store and sweep.max_age is "+m.SweepMaxAge+"; the LOCAL reconcile tier (sweep.reconcile_age "+m.ReconcileAge+") stays ON.",
@@ -277,11 +309,11 @@ func Compute(in Input, p Params) PhaseReport {
 	pr.Misses.Tolerance = T.String()
 	pr.Misses.LateWindow = p.LateWindow.String()
 
-	// Shadow items by id (pg-connector origin).
+	// Shadow items by id (the two daemon feed origins).
 	byID := map[string][]shadowItem{}
 	var others []shadowItem
 	for _, it := range items {
-		if it.origin == "pg-connector" {
+		if isDaemonOrigin(it.origin) {
 			byID[it.id] = append(byID[it.id], it)
 		} else {
 			others = append(others, it)
@@ -485,7 +517,7 @@ func Compute(in Input, p Params) PhaseReport {
 		if it.at.Before(warmupEnd) {
 			continue
 		}
-		if it.origin != "pg-connector" {
+		if !isDaemonOrigin(it.origin) {
 			so.OtherOrigins[it.origin]++
 			if len(it.fields) > 0 {
 				so.OtherReal[it.origin]++
@@ -495,16 +527,18 @@ func Compute(in Input, p Params) PhaseReport {
 		if matchedItems[itemKey(it)] {
 			continue
 		}
-		if len(it.kinds) == 1 && it.kinds[0] == "reconcile" {
-			so.FirstObservation++
-			continue
-		}
 		// Within tolerance of a live event for the id: not shadow-only.
 		near := false
 		for _, e := range liveByID[it.id] {
 			if absDur(it.at.Sub(e)) <= T {
 				near = true
 			}
+		}
+		// A PR first seen by the feed surfaces as exactly ["entered_query"]; with
+		// no live event near it, it is a first observation, counted apart.
+		if len(it.kinds) == 1 && it.kinds[0] == "entered_query" && !near {
+			so.FirstObservation++
+			continue
 		}
 		if near {
 			continue
@@ -526,9 +560,14 @@ func Compute(in Input, p Params) PhaseReport {
 
 	// (d) delay.
 	pr.Delay = Delay{VsLiveEnqueue: MakeDist(pr.samp.dVsLive), ShadowFromUpdate: MakeDist(pr.samp.dShadowUpd), LiveFromUpdate: MakeDist(pr.samp.dLiveUpd), MissedThenDetected: MakeDist(pr.samp.dLate)}
+	pr.Delay.SlotBoundS = p.SlotPeriod.Seconds()
+	pr.Delay.Statement = fmt.Sprintf("A daemon-feed item carries the time of the poll that first observed the change, never a detection time: every shadow figure here is bounded by the slot length of %.0f s.", p.SlotPeriod.Seconds())
+
+	// (h) CI-driven categorization changes.
+	pr.CIDriven = computeCI(items, in.Queue, lab, startOK, lastEnd, T)
 
 	// (e) cost.
-	computeCost(&pr, executed, warmupEnd)
+	computeCost(&pr, costRows, warmupEnd)
 	pr.SkippedBudgetTicks = dq.SkippedTicks
 
 	// (g) optional head SHA.
@@ -715,14 +754,8 @@ func classifyMiss(id, raw string, e time.Time, T time.Duration, firstStart, t0 t
 			return ClassBlindSpot, "a later local/sweep-origin hydration changed only blind-spot fields"
 		}
 	}
-	for _, it := range byID[id] {
-		if it.at.After(e) {
-			if len(it.fields) > 0 && allBlind(it.fields) {
-				return ClassBlindSpot, "the next shadow detection changed only blind-spot fields"
-			}
-			break
-		}
-	}
+	// The daemon's feed sees merge state and CI, so its own items have no blind
+	// fields: the class stays defined and only a local/sweep-origin item reaches it.
 	// live-only artefacts.
 	// Queue event ids carry the per-change `@<hash>` suffix since per-change event
 	// ids landed (older rows are bare). Match on the PR; when both the missed event
@@ -775,7 +808,12 @@ func allBlind(f []string) bool {
 	return len(f) > 0
 }
 
-func computeCost(pr *PhaseReport, executed []schema.Row, warmupEnd time.Time) {
+// computeCost builds the per-hour cost figures from EVERY tick row of the run
+// (executed and skipped): the daemon spends in the background, so a skipped row
+// carries spend and an hour holding only skipped rows still gets a bucket. Tick
+// counts, durations, hydrations and budget readings keep their executed-only
+// meaning.
+func computeCost(pr *PhaseReport, ticks []schema.Row, warmupEnd time.Time) {
 	type acc struct {
 		ticks int
 		hyd   int64
@@ -786,12 +824,13 @@ func computeCost(pr *PhaseReport, executed []schema.Row, warmupEnd time.Time) {
 	}
 	hours := map[string]*acc{}
 	var order []string
-	for _, t := range executed {
+	for _, t := range ticks {
 		te := parseTS(t.TickEnd)
 		if te.Before(warmupEnd) || t.Warmup {
 			continue
 		}
-		if t.DurationMS > 60000 {
+		skipped := t.Status == schema.StatusSkippedBudget
+		if !skipped && t.DurationMS > 60000 {
 			pr.Cost.TicksOver60s++
 		}
 		h := te.Format("2006-01-02T15:00Z")
@@ -801,9 +840,12 @@ func computeCost(pr *PhaseReport, executed []schema.Row, warmupEnd time.Time) {
 			hours[h] = a
 			order = append(order, h)
 		}
+		a.cost += t.GraphQLCostSum
+		if skipped {
+			continue
+		}
 		a.ticks++
 		a.hyd += t.Hydrations
-		a.cost += t.GraphQLCostSum
 		if t.Budget != nil && t.Budget.Known {
 			a.last = t.Budget
 			if !a.minOK || t.Budget.Remaining < a.min {

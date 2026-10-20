@@ -35,6 +35,17 @@ type SynthOptions struct {
 	Phase string
 	// Seeded sets the manifest flag.
 	Seeded bool
+	// CIChanges adds daemon ci-feed items whose CIRollup moves two PRs between
+	// blocked (failure) and reviewable (anything else): three daemon-side
+	// changes in all.
+	CIChanges bool
+	// LiveCategorization adds live queue rows that name a PR's categorization
+	// (payload.metadata.categorization): the live side sees two of the three
+	// CIChanges moves.
+	LiveCategorization bool
+	// IgnoredItems adds items that no figure counts: a reset-replay item and an
+	// old pg-connector origin item, each for the PR of an unexplained miss.
+	IgnoredItems bool
 }
 
 func w(path string, lines []string) error {
@@ -65,7 +76,7 @@ func Synthesize(dir string, o SynthOptions) (Synthetic, error) {
 		return Synthetic{}, err
 	}
 	s := Synthetic{Dir: dir, Slug: synthSlug, T0: t0}
-	for _, n := range []int{101, 102, 103, 104, 105, 106, 107, 108, 109, 110} {
+	for _, n := range []int{101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112} {
 		s.IDs = append(s.IDs, synthID(n))
 	}
 	s.Titles = []string{"Add retry to client", "Fix flaky timeout test", "Rename worker pool"}
@@ -95,17 +106,38 @@ func Synthesize(dir string, o SynthOptions) (Synthetic, error) {
 		kinds  []string
 		origin string
 		fields []string
+		ci     string
+		replay bool
 	}
 	extra := map[time.Time][]item{}
 	add := func(it item) {
 		slot := it.t.Truncate(time.Minute)
 		extra[slot] = append(extra[slot], it)
 	}
-	add(item{synthID(101), at(10, 5, 30), []string{"head_changed"}, "pg-connector", []string{"head_sha"}})
-	add(item{synthID(106), at(10, 50, 20), []string{"reconcile"}, "pg-connector", nil})
-	add(item{synthID(107), at(11, 30, 10), []string{"head_changed"}, "pg-connector", []string{"head_sha"}})
-	add(item{synthID(108), at(10, 10, 5), []string{"reconcile"}, "local-reconcile", nil})
-	add(item{synthID(105), at(11, 20, 5), []string{"reconcile"}, "sweep", []string{"mergeable"}})
+	add(item{id: synthID(101), t: at(10, 5, 30), kinds: []string{"head_changed"}, origin: schema.OriginDaemonFeed, fields: []string{"head_sha"}})
+	add(item{id: synthID(106), t: at(10, 50, 20), kinds: []string{"entered_query"}, origin: schema.OriginDaemonFeed})
+	add(item{id: synthID(107), t: at(11, 30, 10), kinds: []string{"head_changed"}, origin: schema.OriginDaemonFeed, fields: []string{"head_sha"}})
+	add(item{id: synthID(108), t: at(10, 10, 5), kinds: []string{"reconcile"}, origin: "local-reconcile"})
+	add(item{id: synthID(105), t: at(11, 20, 5), kinds: []string{"reconcile"}, origin: "sweep", fields: []string{"mergeable"}})
+	if o.CIChanges {
+		for _, c := range []struct {
+			n      int
+			t      time.Time
+			rollup string
+		}{
+			{111, at(10, 40, 10), "success"},
+			{111, at(11, 0, 10), "failure"},
+			{111, at(11, 20, 10), "success"},
+			{112, at(10, 45, 10), "pending"},
+			{112, at(11, 10, 10), "failure"},
+		} {
+			add(item{id: synthID(c.n), t: c.t, kinds: []string{"ci_changed"}, origin: schema.OriginDaemonCIFeed, ci: c.rollup})
+		}
+	}
+	if o.IgnoredItems {
+		add(item{id: synthID(102), t: at(10, 20, 10), kinds: []string{"head_changed"}, origin: schema.OriginDaemonFeed, fields: []string{"head_sha"}, replay: true})
+		add(item{id: synthID(102), t: at(10, 21, 10), kinds: []string{"head_changed"}, origin: "pg-connector", fields: []string{"head_sha"}})
+	}
 
 	var rows []string
 	rows = append(rows, js(schema.Row{Schema: schema.Version, Kind: schema.KindRunStart, Phase: o.Phase, At: schema.Format(t0)}))
@@ -126,7 +158,7 @@ func Synthesize(dir string, o SynthOptions) (Synthetic, error) {
 		}
 		for _, it := range extra[slot] {
 			row.Hydrations++
-			row.Items = append(row.Items, schema.Item{EntityID: it.id, Kinds: it.kinds, Seq: int64(n), Origin: it.origin, At: schema.Format(it.t), Fields: it.fields, UpdatedAt: schema.Format(it.t.Add(-90 * time.Second))})
+			row.Items = append(row.Items, schema.Item{EntityID: it.id, Kinds: it.kinds, Seq: int64(n), Origin: it.origin, At: schema.Format(it.t), Fields: it.fields, CIRollup: it.ci, Replay: it.replay, UpdatedAt: schema.Format(it.t.Add(-90 * time.Second))})
 		}
 		if slot.Equal(at(10, 15, 0)) {
 			row.Status = schema.StatusSkippedBudget
@@ -183,6 +215,16 @@ func Synthesize(dir string, o SynthOptions) (Synthetic, error) {
 		q("evict", synthID(104), at(10, 39, 30), "reemit"),
 		q("enqueue", synthID(104), at(10, 40, 0), ""),
 		q("enqueue", synthID(101), at(10, 5, 0), ""),
+	}
+	if o.LiveCategorization {
+		qc := func(id string, t time.Time, category string) string {
+			return js(map[string]any{"op": "enqueue", "eventId": "pr.changed:" + id + changeHash, "at": t.In(est).Format(time.RFC3339Nano), "payload": map[string]any{"id": id, "title": s.Titles[0], "metadata": map[string]any{"categorization": category}}})
+		}
+		queue = append(
+			queue,
+			qc(synthID(111), at(10, 40, 30), "reviewable"), qc(synthID(111), at(11, 0, 40), "blocked"), qc(synthID(111), at(11, 20, 40), "reviewable"),
+			qc(synthID(112), at(10, 45, 30), "reviewable"), // never seen blocked by the live side
+		)
 	}
 	if err := w(filepath.Join(l.LiveDir(), "router-queue.jsonl"), queue); err != nil {
 		return s, err
