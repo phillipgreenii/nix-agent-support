@@ -489,8 +489,10 @@ func TestRetryGuardStopsAGraphQLRetryTheGovernorWouldRefuse(t *testing.T) {
 		t.Fatalf("err = %v after %d calls, want a reserve refusal after exactly 1", err, denied.calls)
 	}
 
-	// With room the same retry goes ahead.
-	if err := g.Observe(governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 4000, ResetAt: reset}); err != nil {
+	// With room the same retry goes ahead. The room arrives with the next window:
+	// within one window the origin's remaining only falls, so the governor takes a
+	// higher reading of the same window for a stale answer and ignores it.
+	if err := g.Observe(governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 4000, ResetAt: reset.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	allowed := &sequenceRunner{results: []result{{err: transient}, {out: page}}}

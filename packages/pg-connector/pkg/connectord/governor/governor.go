@@ -215,14 +215,23 @@ func (b *bucketState) expire(now time.Time) {
 }
 
 // accept takes a reading into force. A reading from an earlier window than the
-// one in force (a response that arrived late) is ignored; otherwise the latest
-// reading wins, since the origin's own count is authoritative as of its time.
+// one in force (a response that arrived late) is ignored. Within one window the
+// origin's remaining only falls, so a reading of the same window that is higher
+// than the one in force is an answer generated earlier and settled later (two
+// calls in flight finish in either order); it is ignored too, or it would reopen
+// a reserve that a later answer had closed. Otherwise the latest reading wins,
+// since the origin's own count is authoritative as of its time.
 func (b *bucketState) accept(r Reading) bool {
 	if r.Remaining < 0 {
 		return false
 	}
-	if b.hasReading && !r.ResetAt.IsZero() && !b.reading.ResetAt.IsZero() && r.ResetAt.Before(b.reading.ResetAt) {
-		return false
+	if b.hasReading && !r.ResetAt.IsZero() && !b.reading.ResetAt.IsZero() {
+		if r.ResetAt.Before(b.reading.ResetAt) {
+			return false
+		}
+		if r.ResetAt.Equal(b.reading.ResetAt) && r.Remaining > b.reading.Remaining {
+			return false
+		}
 	}
 	b.reading, b.hasReading, b.since = r, true, 0
 	return true

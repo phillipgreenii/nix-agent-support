@@ -357,6 +357,60 @@ func TestFallingReadingsTightenAdmission(t *testing.T) {
 	}
 }
 
+// Within one window the origin's remaining only falls, so a reading that is
+// higher than what the governor already holds for that window is a response that
+// was generated earlier and settled later (two calls in flight at once finish in
+// either order). It must not relax a reading taken from a later answer: the
+// reserve it closed has to stay closed until the window resets.
+func TestALateHigherReadingOfTheSameWindowDoesNotRelaxAFallenOne(t *testing.T) {
+	g, clk := newGov(t, testConfig(), Options{})
+	reset := t0.Add(time.Hour)
+	refused := func(when string) {
+		t.Helper()
+		err := g.Check(Request{Bucket: BucketGraphQL, Class: ClassInvalidated, Cost: 1})
+		var r *Refusal
+		if !errors.As(err, &r) || r.Kind != RefusedReserve {
+			t.Errorf("%s: err = %v, want a reserve refusal (500 left, reserve 1000)", when, err)
+		}
+		if bs, _ := g.State().Bucket(BucketGraphQL); bs.Remaining != 500 {
+			t.Errorf("%s: state remaining = %d, want 500", when, bs.Remaining)
+		}
+	}
+	clk.Advance(time.Second)
+	if err := g.Observe(Reading{Bucket: BucketGraphQL, Remaining: 500, ResetAt: reset}); err != nil {
+		t.Fatal(err)
+	}
+	refused("after the fallen reading")
+	// The answer generated before it, settling after it.
+	clk.Advance(time.Second)
+	if err := g.Observe(Reading{Bucket: BucketGraphQL, Remaining: 4900, ResetAt: reset}); err != nil {
+		t.Fatal(err)
+	}
+	refused("after the late, higher reading of the same window")
+	// The same through a settled spend, which is how every GraphQL answer arrives.
+	tk, err := g.Admit(Request{Bucket: BucketGraphQL, Class: ClassInteractive, Cost: 1})
+	if err == nil {
+		t.Fatalf("admitted below the reserve: %v", tk)
+	}
+	if err := g.Record(Spend{
+		Bucket: BucketGraphQL, Class: ClassInteractive, Purpose: PurposeInteractive, Cost: 1,
+		Reading: &Reading{Remaining: 4900, ResetAt: reset}, Outcome: "ok",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if bs, _ := g.State().Bucket(BucketGraphQL); bs.Remaining > 500 {
+		t.Errorf("a recorded spend carrying a late higher reading relaxed the state: remaining %d", bs.Remaining)
+	}
+	// A new window does relax it.
+	clk.Advance(time.Second)
+	if err := g.Observe(Reading{Bucket: BucketGraphQL, Remaining: 5000, ResetAt: reset.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Check(Request{Bucket: BucketGraphQL, Class: ClassInvalidated, Cost: 1}); err != nil {
+		t.Errorf("after a fresh window: %v", err)
+	}
+}
+
 type pauseEvent struct {
 	bucket Bucket
 	reason string
