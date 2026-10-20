@@ -38,9 +38,30 @@ func Floor(maxPerPoll, margin int) int {
 	return f
 }
 
+// SourceScratch is the ParseReadings source of the daemon's own event log.
+// That log is read by kind=origin rows only; every other source keeps the old
+// pr-github row format (no kind, with graphql_reset_at).
+const SourceScratch = "scratch"
+
+// ScratchWindow is the GraphQL budget window the origin rows are assigned to:
+// the daemon's origin rows carry no reset time, and the window is hourly.
+const ScratchWindow = time.Hour
+
 // ParseReadings extracts the readings of a connector event log. Rows without
 // graphql_remaining (start and heartbeat rows) are ignored.
+//
+// Source SourceScratch reads the daemon's log: only kind=origin rows of the
+// graphql bucket (or with no bucket) that carry graphql_remaining count, and
+// a row with a missing or unparseable time is skipped. Origin rows have no
+// graphql_reset_at, so every reading of one call gets the same ResetAt, the
+// newest reading's time plus ScratchWindow: they form one window in Decide and
+// the newest wins. Aging is Gather's window alone (a reading older than it is
+// dropped there and never decides a slot). Any other source keeps the old
+// format: rows with no kind and a parseable graphql_reset_at.
 func ParseReadings(r io.Reader, source string) []Reading {
+	if source == SourceScratch {
+		return parseScratch(r, source)
+	}
 	var out []Reading
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
@@ -59,6 +80,41 @@ func ParseReadings(r io.Reader, source string) []Reading {
 			continue
 		}
 		out = append(out, Reading{Time: t.UTC(), Remaining: *row.Remaining, ResetAt: reset.UTC(), Source: source})
+	}
+	return out
+}
+
+func parseScratch(r io.Reader, source string) []Reading {
+	var out []Reading
+	var newest time.Time
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 1<<20), 16<<20)
+	for sc.Scan() {
+		var row struct {
+			Time      string `json:"time"`
+			Kind      string `json:"kind"`
+			Bucket    string `json:"bucket"`
+			Remaining *int   `json:"graphql_remaining"`
+		}
+		if json.Unmarshal(sc.Bytes(), &row) != nil || row.Kind != "origin" || row.Remaining == nil {
+			continue
+		}
+		if row.Bucket != "" && row.Bucket != "graphql" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339Nano, row.Time)
+		if err != nil {
+			continue
+		}
+		t = t.UTC()
+		if t.After(newest) {
+			newest = t
+		}
+		out = append(out, Reading{Time: t, Remaining: *row.Remaining, Source: source})
+	}
+	reset := newest.Add(ScratchWindow)
+	for i := range out {
+		out[i].ResetAt = reset
 	}
 	return out
 }
@@ -127,7 +183,7 @@ func Gather(now time.Time, window time.Duration, livePath, scratchPath string) (
 		}
 	}
 	if scratchPath != "" {
-		if _, err := add(scratchPath, "scratch"); err != nil {
+		if _, err := add(scratchPath, SourceScratch); err != nil {
 			return nil, err
 		}
 	}

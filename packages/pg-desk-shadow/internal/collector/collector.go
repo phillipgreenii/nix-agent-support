@@ -624,9 +624,9 @@ func firstLine(s string) string {
 	return s
 }
 
-// CostInWindow sums graphql_cost of connector log rows whose time falls in
-// [from, to]. It is a LOWER BOUND: older rows lack the field and a show row
-// excludes its metadata read.
+// CostInWindow sums graphql_cost of the daemon event log's kind=origin rows
+// whose time falls in [from, to]. A row of any other kind (a kind=request row,
+// or a row with no kind) adds nothing, so a request is never double-counted.
 func CostInWindow(path string, from, to time.Time) int {
 	b, err := budget.ReadTail(path, 4<<20)
 	if err != nil || len(b) == 0 {
@@ -636,9 +636,10 @@ func CostInWindow(path string, from, to time.Time) int {
 	for _, line := range bytes.Split(b, []byte("\n")) {
 		var r struct {
 			Time string `json:"time"`
+			Kind string `json:"kind"`
 			Cost *int   `json:"graphql_cost"`
 		}
-		if json.Unmarshal(line, &r) != nil || r.Cost == nil {
+		if json.Unmarshal(line, &r) != nil || r.Kind != "origin" || r.Cost == nil {
 			continue
 		}
 		t, err := time.Parse(time.RFC3339Nano, r.Time)

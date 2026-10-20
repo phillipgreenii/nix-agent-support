@@ -139,7 +139,7 @@ func TestTickRecordsItemsHydrationsCostAndChangedFields(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The scratch connector log gains one row inside the tick window.
-		row := fmt.Sprintf(`{"time":%q,"op":"show","graphql_cost":7,"graphql_remaining":3900,"graphql_reset_at":%q}`+"\n", e.clk.t.Add(-2*time.Second).Format(time.RFC3339Nano), e.clk.t.Add(time.Hour).Format(time.RFC3339))
+		row := fmt.Sprintf(`{"time":%q,"kind":"origin","purpose":"show","bucket":"graphql","graphql_cost":7,"graphql_remaining":3900}`+"\n", e.clk.t.Add(-2*time.Second).Format(time.RFC3339Nano))
 		if err := os.WriteFile(e.l.ConnectorLog(), []byte(row), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -393,7 +393,7 @@ func TestKillCriteria(t *testing.T) {
 		e := newEnv(t)
 		e.cfg.KillPointsPerHour = 100
 		e.ex.next = func(int) (runner.Result, error) {
-			row := fmt.Sprintf(`{"time":%q,"op":"list","graphql_cost":60}`+"\n", e.clk.t.Add(-time.Second).Format(time.RFC3339Nano))
+			row := fmt.Sprintf(`{"time":%q,"kind":"origin","purpose":"list","bucket":"graphql","graphql_cost":60}`+"\n", e.clk.t.Add(-time.Second).Format(time.RFC3339Nano))
 			f, _ := os.OpenFile(e.l.ConnectorLog(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 			_, _ = f.WriteString(row)
 			_ = f.Close()
@@ -567,5 +567,31 @@ func TestNextBoundary(t *testing.T) {
 	exact := time.Date(2026, 1, 5, 10, 1, 0, 0, time.UTC)
 	if got := NextBoundary(exact, time.Minute); !got.Equal(exact.Add(time.Minute)) {
 		t.Errorf("a boundary instant must advance to the next slot: %s", got)
+	}
+}
+
+func TestCostInWindowSumsOnlyOriginRows(t *testing.T) {
+	from := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
+	to := from.Add(time.Minute)
+	at := func(d time.Duration) string { return from.Add(d).Format(time.RFC3339Nano) }
+	lines := []string{
+		fmt.Sprintf(`{"time":%q,"kind":"origin","purpose":"list","bucket":"graphql","graphql_cost":5,"graphql_remaining":3000}`, at(time.Second)),
+		fmt.Sprintf(`{"time":%q,"kind":"request","op":"list","graphql_cost":100}`, at(2*time.Second)),
+		fmt.Sprintf(`{"time":%q,"op":"list","graphql_cost":1000}`, at(3*time.Second)), // kind-less (old format)
+		fmt.Sprintf(`{"time":%q,"kind":"origin","purpose":"show","bucket":"graphql","graphql_cost":7}`, at(30*time.Second)),
+		fmt.Sprintf(`{"time":%q,"kind":"origin","purpose":"files","bucket":"rest_core","graphql_cost":0,"rest_requests":3,"rest_remaining":4000}`, at(31*time.Second)),
+		fmt.Sprintf(`{"time":%q,"kind":"origin","purpose":"list","bucket":"graphql","graphql_cost":50}`, at(-time.Second)),  // before the window
+		fmt.Sprintf(`{"time":%q,"kind":"origin","purpose":"list","bucket":"graphql","graphql_cost":60}`, at(2*time.Minute)), // after the window
+		`not json`,
+	}
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := CostInWindow(path, from, to); got != 12 {
+		t.Errorf("CostInWindow = %d, want 12 (5 + 7, origin rows inside the window only)", got)
+	}
+	if got := CostInWindow(filepath.Join(t.TempDir(), "none"), from, to); got != 0 {
+		t.Errorf("missing log = %d, want 0", got)
 	}
 }
