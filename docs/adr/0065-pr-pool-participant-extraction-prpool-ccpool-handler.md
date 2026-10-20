@@ -1,10 +1,17 @@
 # pg-router: participant extraction into `packages/pg-router-ccpool-handler` (Phase 5)
 
-**Status**: Accepted (operator review recorded 2026-09-10, bead `pg2-mf0dx`); the `INV-EVT-2` absorption it asks for is narrowed by 0094 (2026-10-13, bead `pg2-yunrp`)
+**Status**: Accepted (operator review recorded 2026-09-10, bead `pg2-mf0dx`); the `INV-EVT-2` absorption it asks for is narrowed by 0094 (2026-10-13, bead `pg2-yunrp`); the "New module" and "Open question resolved" decisions are amended by the Addendum of 2026-10-20 (the handler split, bead `pg2-12gr4.5`)
 **Date**: 2026-09-10
 **Deciders**: drafted by an implementer agent under Task 5.0's derive-plan mandate; the
 command-executor open question (the Decision's "Open question resolved" section) is this ADR's own to make per that mandate's
 "Freedom boundary" — everything else pins the docket's already-fixed contract verbatim
+
+> **Later note (2026-10-20, bead `pg2-12gr4.5`, the Addendum "the handler split" below):** the one
+> module no longer hosts one binary that picks an executor by role `type`. It builds two adapter
+> binaries, `pg-router-handler-ccpool` and `pg-router-handler-command`, and each role names its own
+> adapter in the core's TOML, so the `Type` field is gone from the handler's role model too, not
+> only from the core's. The "Alternatives Considered" entry that rejected splitting the module is
+> superseded for the binaries, but not for the Go module.
 
 ## Context
 
@@ -394,6 +401,10 @@ trade-off are both approved as written. The derived Phase 5 plan below may now b
   answered by `ADR 0061`, which this ADR builds on).
 - Realization-gap register: `packages/pg-router/docs/behavior/README.md`'s "Realization gaps"
   section, this ADR's own "Register" section's table.
+- The handler split (the Addendum of 2026-10-20) is recorded with `ADR 0085`'s amendment,
+  `DEC-WIRE-3`'s amendment and `DEC-ROLE-1` in `packages/pg-router/docs/decisions`, the behavior
+  rules `INV-ROLE-1` to `INV-ROLE-4` in `packages/pg-router/docs/behavior`, and the two adapter
+  behavior sets under `packages/pg-router-ccpool-handler/docs/behavior`. `ADR 0089` is not changed.
 
 ## Addendum (2026-09-11): rename, and Task 5.2/5.3 fold
 
@@ -499,3 +510,176 @@ preserved, not wiring real production dispatch end to end. `run.go`'s new `postS
 than let it panic, so the gap fails safely rather than crashing `pg-router run` — but it is still a
 gap. Recorded via `bd comment` on `pg2-oju6w.4` and on the docket epic `pg2-oju6w` so a later
 session does not have to rediscover it.
+
+## Addendum (2026-10-20): the handler split, one adapter per role (bead `pg2-12gr4.5`)
+
+The role-environment design (bead `pg2-12gr4`) splits the one handler binary into two **adapter**
+participants and gives every role its own handler, wrap and configuration in the core's TOML. The
+decisions below were made by the operator (Phillip Green II) in the `pg2-12gr4.1` design review on
+2026-10-20 (rulings 23 and 24, quoted where they were given), and they need no separate approval
+(ruling 26), so this Addendum records them as decided. Citations of the other pieces of that design
+are in the "Related Decisions" section's last bullet. The Decision above is amended in three places;
+everything else in it stands.
+
+**What this amends.**
+
+- "New module" — the module "owns every concrete participant implementation", and its binary picks
+  an executor by the role's `type`. Now: the one Go module builds **two** binaries and the role names
+  which one runs it. The `Type` the "Open question resolved" section took out of the core is also
+  gone from the handler's own role model, whose closing paragraph ("its own role model MAY still
+  distinguish 'run ccpool' from 'run this argv'") is superseded.
+- "Open question resolved" — the `command` executor still lives outside the core and still costs a
+  standing process for the simplest role; it is now its own adapter, `pg-router-handler-command`.
+- "Alternatives Considered", the entry that split the module in two — it was rejected "for this pass".
+  It is now decided for the **binaries** (S2) and stays rejected for the **Go module**.
+
+**Operator rulings, verbatim.** Ruling 23: "the rest are ok" (accepting S1, S2, S3, S5 and S6 as the
+review summary proposed them). Ruling 24, in answer to the first S4: "why does handler-wide pool ofr
+triager pools have to change?"; the revised S4 answered it and the operator replied "looks good".
+
+```mermaid
+flowchart LR
+    CORE["pg-router core"]
+    subgraph module["one Go module, one shared internal library"]
+      CMD["pg-router-handler-command"]
+      SES["pg-router-handler-ccpool"]
+    end
+    OLD["pg-router-ccpool-handler (earlier path, deleted in the final cleanup)"]
+    CORE -->|"role sets handler: JSON on stdin carries the role object"| CMD
+    CORE -->|"role sets handler: JSON on stdin carries the role object"| SES
+    CORE -.->|"role does not set handler: shared command plus per-role file"| OLD
+```
+
+### S1. A role's configuration travels on stdin, as a role object
+
+**Decided.** Every core-to-handler request (`dispatch`, `postStartup`, `preShutdown`) gains a `role`
+object, `{ "name": …, "config": {…} }`, where `config` is the role's opaque `[role.config]` table from
+the core's TOML. The core sends it only for a role that sets `handler`. The wire shape is
+`DEC-WIRE-3`'s amendment in `packages/pg-router/docs/decisions/wire.md`, and the keys are
+`DEC-ROLE-1`.
+
+**Why.** It matches `DEC-WIRE-1` ("the request payload is JSON on stdin … arguments are never the
+payload channel"), leaves no per-role runtime file to go stale, and lets `config --show` print exactly
+what is sent. Sending it only for a role that sets `handler` means the earlier handler never sees a
+field it does not know, for the whole compat window.
+
+**Rejected.** A core-rendered file passed as `--role-config` (it goes stale, and it keeps an argument
+as a payload channel); an environment variable (it would leak into the payload's minimal environment).
+
+### S1a. Validation: at build time, plus strict decoding on every call
+
+**Decided.** Each adapter's nix module runs `<adapter> validate-config` over every role's rendered
+config during the build, and the adapter decodes `role.config` strictly on every call. There is no new
+wire message.
+
+**Why, and a correction.** Role handlers never send `register`. The core registers each role's handler
+internally (`RegisterInProcess` in `cmd/pg-router/run.go`) and starts it fresh for each call, so a
+"validate at register time" rule has no step to hang on. A build-time check catches a field dropped
+between the option set and the rendered table before apply, a failure that has already happened once
+(the per-role JSON renderer's explicit field list dropped a field and only warned).
+
+**Rejected.** Register-time validation.
+
+### S2. Two adapter binaries from one Go module
+
+**Decided.** The binaries are `pg-router-handler-ccpool` and `pg-router-handler-command`, following the
+existing `pg-router-source-<x>` names, built from **one** Go module that holds the shared internal
+library (the beads claim and completion helpers, and prompt templating). The session-specific
+subcommands (`origin`, `pool-capacity`, `split`, `query`, `pool-metrics`) move to
+`pg-router-handler-ccpool`. `pg-router-ccpool-handler` keeps building through the compat window,
+because it is what the earlier path runs, and is deleted in the final cleanup. The package directory
+is renamed (to `packages/pg-router-handlers`) in that same cleanup, to avoid path churn mid-migration.
+Alerts and runbooks that name the old binary are renamed when the role family they cover moves over.
+
+**Why.** Future runners are new adapters with no change to the core or to the existing adapters, the
+same shape as `pg-router-source-pg-connector` and `pg-router-source-pg-desk`. The session adapter is
+a **full** participant (dispatch, capacity, pre-shutdown, post-startup reconcile and orphan sweeps),
+because sessions outlive daemon restarts (`ADR 0085`), so this is a split of today's executors, not a
+rewrite.
+
+**Deferred.** The package directory's rename waits for the final cleanup, to avoid path churn
+mid-migration.
+
+### S3. `survivesShutdown` becomes a generic `[[role]]` key
+
+**Decided.** A generic `[[role]]` key, `survives_shutdown` (default `false`, spelled like the existing
+role keys), read directly by the core from its TOML. The adapter's nix helper sets it to `true` for a
+session-backed role, and the module asserts, at evaluation time, that every role using
+`pg-router-handler-ccpool` has it set. The consequences for a dispatch are `ADR 0085`'s, as amended.
+
+**Rejected.** The adapter declaring survival in its `postStartup` reply: the core picks a role's
+cancellable or `WithoutCancel` listener context while it registers roles during boot
+(`cmd/pg-router/run.go`), and `postStartup` runs only after boot, so it would mean reordering boot.
+
+### S4 (revised). Triagers keep the shared handler-wide pool, and nix asserts identical wraps
+
+**Decided.** The three triagers keep the shared handler-wide pool and share one triager launcher.
+Their declarations differ only in handler-side configuration (actor, prompt, completion, tracker
+directory, precheck), none of it payload environment, and none of them does git or origin work, so the
+shared baseline wrap most likely covers all three. Because roles that share a pool then share an
+environment, which strains the rule that **environment is a property of the role**, the session
+handler's nix module **MUST assert that all roles sharing a pool declare identical wrap lists**
+(evaluation fails otherwise). A role that needs a different wrap moves to its own pool through the
+existing per-role pool option, which is a configuration change and not a design change.
+
+**Why.** It answers the operator's question ("why does handler-wide pool ofr triager pools have to
+change?"): nothing about the triagers requires it, and the assertion stops the shared environment from
+drifting silently. The session tool has no per-session launcher override that could replace the pool
+setting.
+
+**Rejected.** Changing the triagers' pool, which the first S4 proposed and the operator questioned:
+it changes pool configuration for no difference in payload environment. **Not available:** a
+per-session launcher override in the session tool.
+
+**Not changed.** `ADR 0089`'s "one pool per tracker" covers the drain roles only, so it is **not**
+touched by this Addendum.
+
+### S5. The core chooses the old or new path per role, and the window ends on an event
+
+**Decided.** A role that sets `handler` uses the per-role path (its own handler, the role object on
+stdin, `survives_shutdown` from the TOML). A role that does not uses the earlier path (the global
+`PG_ROUTER_HANDLER_COMMAND`, `--role-config`, and the JSON `survivesShutdown`). The compat window ends
+**when no role is left on the earlier path**, not on a date. Role families move in this order:
+command-style roles (desk, deciders, probes), then review, then worker and feedback, then the
+triagers, then the drains. Each family's move is one commit in the consuming flake, and reverting that
+commit rolls the family back. Adopting in-flight sessions across the cutover (`ADR 0085`) is tested at
+the review move, the first session-backed family. One cleanup then removes the fallback, the old
+`pg-router-ccpool-handler` binary, the role `type`, the per-role JSON link farm and
+`PG_ROUTER_HANDLER_COMMAND(_DIR)`, and renames the package directory (S2).
+
+**Why.** Each family can be moved, verified with `pg-router run-role`, and rolled back alone, and the
+end of the window is a fact that can be read from the configuration.
+
+**Rejected.** A dated window. The review recorded no other alternative for this point.
+
+### S6. Each role is declared once, joined by name through nix module merging
+
+**Decided.** Today a role is declared twice in the consuming flake: in the pg-router module's role
+list (name, binds, enabled) and in the handler module's per-role set (the JSON file). In the new shape
+the pg-router module owns `roles.<name>` (binds, enabled, handler, wrap, config, `survives_shutdown`).
+The handler module's own `roles.<name>` (actor, pool, prompt, budget, isolation, tool sets, …) fills in
+the matching pg-router role's `handler`, `config` and `survives_shutdown`, and sets up the pool and the
+launcher. The old `type` and per-kind options keep working unchanged through the compat window, **with
+no automatic translation shims**, and are removed in the final cleanup.
+
+**Why.** One declaration per role cannot disagree with itself, and the join is by role name, which both
+modules already use.
+
+**Rejected.** Automatic translation shims from the old options.
+
+### How the split accommodates the four input beads
+
+| Input bead  | Subject                                                                        | How the split accommodates it, or why it is unaffected                                                                                                                                                                                                                                                      |
+| ----------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pg2-q6a96` | script-first execution of work items, the session worker as the fallback       | A script is a role on the command adapter and the fallback is a role on the session adapter, each naming its own handler, so the pair is configuration. How the first yields to the second is that epic's own design, which the split neither constrains nor needs to know.                                 |
+| `pg2-na2nr` | long-running, scheduled runners (autosync, post-land checks, workspace builds) | A runner of a new kind is a new adapter, "with no change to core or the existing adapters" (S2), so the deep dive is free to choose its own shape. Unaffected otherwise.                                                                                                                                    |
+| `pg2-7ieab` | a watched-but-unrouted source declaration, so placeholder no-op roles go away  | It is a `[[query]]`-side marker, and the split changes `[[role]]` keys only, so the two are compatible. If the marker lands first, the placeholder no-op roles are removed and need no migration; if the split lands first, a placeholder role migrates like any command-style role.                        |
+| `pg2-nlnrl` | general worktree pooling and reuse                                             | Worktree creation, prefetch, cleanup and the abandoned-worktree sweeps stay the session adapter's job (the role's `isolation` setting in its config), so the ccpool-side implementation of that design lands in the adapter and needs no core change. The wider design question of that bead stays its own. |
+
+### The consumer checklist
+
+The things the consuming flake keys on today (the role `type`, the handler's name, the per-role JSON
+files, the failure-reason strings and busy exit `9`, in-flight sessions) and the concrete steps for
+the implementation packets of `pg2-12gr4.6` are in
+`docs/runbooks/handler-split-consumer-checklist.md`. The wrap, base environment and wrapper contract
+that the same design adds are a **separate** ADR, landed by `pg2-12gr4.2`, not by this Addendum.

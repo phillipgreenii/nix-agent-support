@@ -68,6 +68,12 @@ occurred to someone, so a missing one shows up as an empty cell instead of as si
   over efficiency**, so it will halt on a `critical` fault and pause rather than push order-dependent
   work unsafely. _(→ `USECASE-CREATE-HANDLER`, `JOURNEY-FLOW`; `INV-PREC-1`.)_
 
+- **`STORY-OP-13`** <!-- uuid: 360e3a0f-9903-45d2-a26f-8a71d5507d8b --> — declare, for each role, the **adapter** that runs it, the
+  **environment** its payload starts from and the role's own **configuration**, so a new kind of
+  runner, or a changed environment, is configuration and never a change to the core. _(→
+  `USECASE-CONFIGURE-WIRING`, `USECASE-CREATE-HANDLER`; `INV-ROLE-1`, `INV-ROLE-2`, `INV-ROLE-3`,
+  `INV-ROLE-4`.)_
+
 **Observer (`ACTOR-OBS`)**
 
 - **`STORY-OBS-1`** <!-- uuid: ce97e9c6-5719-4b18-9de9-fa1900b951bd --> — see throughput, backlog, failures, and liveness through dashboards fed by the
@@ -367,8 +373,15 @@ Extensions:
 **Intent:** build an event handler against `INTF-HANDLER`, and get the **acceptance boundary** right
 — which side owns the work, and which side owns a failure, on each side of the accept.
 _Requires:_ `INV-CONC-1`, `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-4`, `INV-FAIL-1`, `INV-FAIL-2`,
-`INV-INTF-1`, `INV-OBS-1`, `INV-PREC-1`.
+`INV-INTF-1`, `INV-OBS-1`, `INV-PREC-1`, `INV-ROLE-1`, `INV-ROLE-2`.
 _Includes:_ `USECASE-VERIFY-PARTICIPANT`.
+
+**A new kind of runner is a new adapter.** A handler an operator wants to run in a way no existing
+adapter does is built as a new **adapter**: a participant an operator then names on a role
+(`INV-ROLE-1`), so the core and every existing adapter stay unchanged. Such an adapter receives the
+**role object** in the payload of every request and **MUST** reject, on every call, a field in the
+role's configuration table that it does not know (`INV-ROLE-2`); the table is its own contract, and
+the core never reads it.
 
 **Flow — the two reply shapes.** The core hands over **one event** under **one tracking id** and the
 handler answers in exactly one of two ways: a **sync** inline **completion** carrying an outcome (it
@@ -684,7 +697,8 @@ Extensions:
 populated.
 **Intent:** author, or later edit, the configuration the core resolves — the essential participants,
 their **bindings**, and the **wiring** (a routing graph) those bindings form (`INV-WORKFLOW-1`).
-_Requires:_ `INV-CONC-1`, `INV-DISP-1`, `INV-EVT-1`, `INV-EVT-4`, `INV-WORKFLOW-1`.
+_Requires:_ `INV-CONC-1`, `INV-DISP-1`, `INV-EVT-1`, `INV-EVT-4`, `INV-ROLE-1`, `INV-ROLE-2`,
+`INV-ROLE-3`, `INV-ROLE-4`, `INV-WORKFLOW-1`.
 _Includes:_ `USECASE-VERIFY-PARTICIPANT` (an edited binding is re-verified in place by the same role
 or query that verified it when it was added), `USECASE-VALIDATE-CONFIG`.
 
@@ -695,7 +709,11 @@ or query that verified it when it was added), `USECASE-VALIDATE-CONFIG`.
 - **Event sources** (`INTF-SOURCE`) — each **one invocation** plus the event types it emits, never a
   per-tool source kind; and, for a pull source, its **query trigger**: periodic, threshold, or
   manual, which is the core's own when-to-poll decision rather than anything a source dictates.
-- **Event handlers / roles** (`INTF-HANDLER`) — each with its behavior.
+- **Event handlers / roles** (`INTF-HANDLER`) — each declared **once**, with: the command of the
+  **adapter** that runs it (`INV-ROLE-1`); an optional **wrap**, and so the environment its payload
+  starts from (`INV-ROLE-4`); its own opaque **configuration table**, which the core passes to the
+  adapter and never reads (`INV-ROLE-2`); and whether its dispatch **survives the core's shutdown**
+  (`INV-ROLE-3`). A query likewise MAY declare a wrap (`INV-ROLE-4`).
 - **Bindings** — for each handler, the **event-type match** it responds to. `type` MUST match; a
   binding MAY then narrow on a **payload path it names itself**, applied after the type match
   (`INV-DISP-1`). No matchable field comes from the source — matchability is the handler's alone. A
@@ -736,7 +754,7 @@ are **not** a config defect (`INV-WORKFLOW-1`, `USECASE-VALIDATE-CONFIG`).
 flowchart TD
     start["operator authors or edits the deployment config"] --> parts["declare each essential participant: command + mode"]
     parts --> src["event sources INTF-SOURCE: one opaque invocation plus emitted types, pull (periodic tick) or push"]
-    parts --> hdl["event handlers/roles INTF-HANDLER: behavior only, no concurrency ceiling is declared"]
+    parts --> hdl["event handlers/roles INTF-HANDLER: adapter command, optional wrap, opaque config, survives-shutdown; no concurrency ceiling is declared"]
     src --> bind["bindings: type MUST match, then any narrowing payload path the binding names (INV-DISP-1)"]
     hdl --> bind
     bind --> ser["order-dependent types marked to serialize (INV-CONC-1). expiry is not configured, it rides on each event (INV-EVT-1)"]

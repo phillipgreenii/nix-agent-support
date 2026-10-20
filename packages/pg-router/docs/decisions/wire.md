@@ -142,7 +142,7 @@ Its two replies: the **inline completion**
 string** the core stores and never interprets (docket `pg2-oju6w`'s Task 5.4, `ADR 0065`'s "Wire
 contract" section). The core never _branches_ on it, but the event log's `dispatch result`
 `actions` field relays it: an outcome that is a JSON object `{"actions":[{"verb":"…","refs":[…]}]}`
-(what `pg-router-ccpool-handler` returns) logs each handler verb with its refs, and `{"actions":[]}`
+(what a session-backed handler returns) logs each handler verb with its refs, and `{"actions":[]}`
 logs no actions; any other string is logged verbatim as the single verb (bead `pg2-tq9q5`) — and the
 **deferred ack**
 `{ "schemaVersion": "1", "id": "hs-771e", "deferred": true }` — which is itself the acceptance, so
@@ -366,8 +366,8 @@ only differences from `dispatch` are the subcommand name and the call site:
 - `postStartup` fires once, immediately after the core's own boot (`bootCore`) succeeds, for each
   of `run`'s entry points (`run` and `run-until-idle`, including `run-until-idle`'s gated slice).
 - `preShutdown` fires once, at the same point the core used to call the now-deleted
-  `Orchestrator.TeardownAll` — a **zero-behavior-change relocation** of that per-process ccpool
-  session sweep into the handler's own process, not a redesign: `TeardownAll` already fired once
+  `Orchestrator.TeardownAll` — a **zero-behavior-change relocation** of that per-process session
+  sweep into the handler's own process, not a redesign: `TeardownAll` already fired once
   per process invocation (via `defer`, before each entry point returns), never per internal tick.
 
 **Request/reply shape.** Both hooks share one shape family, distinct from `dispatch`'s:
@@ -382,16 +382,15 @@ only differences from `dispatch` are the subcommand name and the call site:
 Unlike `handler.dispatch-reply`, there is no `{ "deferred": true }` branch: these are not queued
 dispatches, so a handler has nothing to defer and `ErrBusy`/exit `9` does not apply once past the
 ordinary lifecycle/malformed-request checks every subcommand shares. Role-identifying context
-travels the SAME way `dispatch` already carries it — the handler process is launched via
-`CommandFor(role)` plus its own `--role-config`/`--config` flags — so neither request schema needs
-a new payload field for "which role is this."
+travels the SAME way for all three requests: see "Role context travels on stdin" below, which
+**replaces** the original `--role-config` file argument for every role that names its own handler.
 
 **No de-duplication across roles sharing one handler process (decision #1).** When two enabled
 roles resolve to the SAME handler command (a shared process backing multiple roles), that process
 receives `postStartup`/`preShutdown` **once per role**, not once. This is deliberate, not an
 oversight: de-duplicating would require the core to know which roles share a process — domain
 knowledge `GOAL-MIN-1` says the core should not hold — and each call's payload already carries
-role-specific config context via `--role-config`, so a second call is redundant work, never a
+role-specific context (the role object, below), so a second call is redundant work, never a
 correctness problem (closing an already-torn-down session is a no-op).
 
 **`postStartup` is built for symmetry, not present need (decision #2).** Nothing consumes its
@@ -405,6 +404,41 @@ principle this decision merely instantiates twice: "a gRPC or in-code transport 
 same message schema conforms equally." `postStartup`/`preShutdown` add two subcommand names and
 two call sites; they introduce no new addressing, authentication, or framing beyond what
 `dispatch` already established.
+
+**Amended (pg2-12gr4.5, handler split decisions S1 and S1a; operator rulings 2026-10-20): role
+context travels on stdin, as a role object, in every request.** The sentence above that said role
+context travels as a `--role-config` file argument is replaced, for every role that names its own
+handler (`DEC-ROLE-1`), by this:
+
+- **The role object.** Every core→handler request (`dispatch`, `postStartup`, `preShutdown`) carries
+  one additional top-level field, `role`: `{ "name": "<role name>", "config": { … } }`. `config` is
+  the role's opaque configuration table, passed through unchanged; the core never reads inside it.
+  This matches `DEC-WIRE-1` ("the request payload is JSON on stdin … arguments are never the payload
+  channel"), leaves no per-role runtime file to go stale, and lets `config --show` print exactly what
+  is sent. An illustrative `dispatch` request:
+
+  ```json
+  {
+    "schemaVersion": "1",
+    "id": "hs-771e",
+    "role": { "name": "review", "config": { "actor": "example-actor" } },
+    "event": { "id": "evt-abc123", "type": "review-requested", "payload": {} }
+  }
+  ```
+
+- **Sent only for roles that set `handler`.** A role without `handler` is on the earlier path (a shared
+  handler command plus a per-role file argument), and its handler never sees the field, so a
+  handler that predates this amendment is unaffected while the compat window of `ADR 0065`'s
+  Addendum (handler split) lasts.
+- **Validation (S1a).** There is **no new wire message** and no register-time validation: a role's
+  handler never registers itself, because the core starts it fresh for every call. The role's
+  `config` is validated **at build time**, by the adapter's own `validate-config` subcommand run over
+  each role's rendered config by the deployment's build, so a field dropped between the deployment's
+  option set and the rendered table fails before apply. The adapter also **decodes `role.config`
+  strictly on every call** and fails the call on an unknown or mistyped field.
+- **Rejected.** A core-rendered file passed by `--role-config` (it goes stale, and it keeps an
+  argument as a payload channel, against `DEC-WIRE-1`); an environment variable (it would leak into the
+  payload's minimal environment, `INV-ROLE-4`).
 
 **Not decided here.** Whether a future handler kind needs its own additional lifecycle hook (a
 mid-life health check, a graceful-drain signal distinct from `preShutdown`) is left open; nothing

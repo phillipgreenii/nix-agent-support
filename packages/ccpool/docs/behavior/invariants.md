@@ -48,6 +48,13 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   that was waiting for a lock file at the moment it was removed MUST NOT proceed as if it held
   the lock, and MUST instead take the lock again on the file that now exists. Failing to remove a
   lock MUST NOT fail the sweep.
+- **`INV-POOL-6`** <!-- uuid: 3d499bd3-7e63-4c2c-a526-25bf37ce83cc --> — **The agent executable a pool launches is opaque to ccpool.**
+  A pool's own configuration names the executable that runs inside each of its sessions. ccpool
+  MUST start exactly that executable, directly, with the agent's arguments passed to it unchanged
+  and in order, and MUST NOT depend on what the executable is: it MUST NOT resolve it through a
+  search path, probe its version, or check it before launching. The same executable is started for
+  a brand-new session and for a resumed one, and it is read from the pool's configuration afresh
+  on each call, so a configuration change takes effect on the next launch or resume.
 
 ## Session lifecycle (`INV-STATE-*`, `INV-SESS-*`, `INV-CCPOOL-CWD-*`)
 

@@ -9,6 +9,15 @@ implementations ... and any deployment-specific behavior" as content that "live[
 deployment set that implements these interfaces" and excludes from its own extent. This set follows
 the behavior-docs method (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`).
 
+**The handler split.** `phillipgreenii-nix-agent-support` ADR 0065's Addendum of 2026-10-20 splits
+this module's one binary into two **adapter** binaries, one per kind of runner, and each adapter
+carries its own set, in the sub-directories `pg-router-handler-command` and `pg-router-handler-ccpool`
+of this directory. This set remains the owner of every rule below **while the compat window lasts**,
+because the earlier binary is what a role without its own `handler` still runs; the session adapter's
+set cites these rules instead of restating them. When the window ends, the rules that belong to one
+adapter move to that adapter's set in the same change that deletes the earlier binary, and this set
+is removed.
+
 Start here, then the [glossary](glossary.md); the rules are in [invariants](invariants.md), the
 boundaries in [interfaces](interfaces.md), the actors in [actors](actors.md), and the stories,
 journeys, and open questions in [journeys](journeys.md).

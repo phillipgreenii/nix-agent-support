@@ -1,0 +1,104 @@
+# pg-router-handler-ccpool — behavior docs
+
+`pg-router-handler-ccpool` is one of two **adapter** participants that run pg-router roles. A role
+that names it as its `handler` runs one agent **session** per dispatched event, through the session
+tool, and keeps supervising that session even when the core restarts. This set follows the
+behavior-docs method (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`) and is the
+**implementer** side of `INTF-HANDLER` for that one kind of runner, as pg-router's own set defines the
+interface (`phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`). Every adapter
+carries its own set (`phillipgreenii-nix-agent-support` ADR 0065's Addendum of 2026-10-20, "the
+handler split"); the other is the command adapter's set
+(`phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior/pg-router-handler-command`).
+
+Start here, then the [glossary](glossary.md); the rules are in [invariants](invariants.md), the
+boundaries in [interfaces](interfaces.md), the actors in [actors](actors.md), and the stories and use
+cases in [journeys](journeys.md).
+
+## The model
+
+```mermaid
+flowchart LR
+    CORE["pg-router core"]
+    subgraph adapter["pg-router-handler-ccpool"]
+      DEC["decode the role object strictly"]
+      LIFE["session lifecycle: capacity, isolation, supervision, sweeps"]
+      DEC --> LIFE
+    end
+    TOOL["the session tool"]
+    LAUNCH["launcher, one per pool"]
+    AGENT["the agent"]
+    OP["operator"] -->|"declares the role: handler, wrap, config"| CORE
+    CORE ==>|"INTF-HANDLER: dispatch, with the role object on stdin"| DEC
+    LIFE -->|"INTF-CCA-SESSION: start or resume, with the dispatch's variables"| TOOL
+    TOOL -->|"INTF-CCA-LAUNCHER: starts the pool's executable"| LAUNCH
+    LAUNCH -->|"keep-list, wrap layers, ready marker"| AGENT
+    adapter -.->|"accept-or-decline reply"| CORE
+```
+
+The adapter is an **Adapter** between the core's handler contract and the session tool. The wrap a role
+declares reaches the agent through a **Decorator** chain inside the launcher, the one place where the
+session tool's own environment building can be controlled, so the session tool needs no wrapper
+concept of its own.
+
+## Scope (extent + floor)
+
+- **Extent (in)** — how this adapter reads its role's own configuration; how a role's wrap and base
+  environment reach the agent, for a new session and for a resume; what a pool shared by several
+  roles requires; and what holds across the move of a role from the earlier combined handler to this
+  adapter.
+- **Extent (out)** — a session's own lifecycle (capacity, isolation, the supervision lease, orphan
+  sweeps, failure signatures, the budget watchdog, completion policy), which the earlier combined
+  handler's set states and this set **cites** (`INV-CCA-1`); the session tool's own behavior; pg-router's
+  dispatch, queue and wiring; and the wrap entry forms, the base-environment list and the wrapper
+  contract, which are the wrap decision's.
+- **Floor** — this set speaks in roles, sessions, pools, launchers, environment variables and the
+  cutover. It names no source path and no command-line flag, and it carries no credential concern.
+
+## Realization gaps
+
+This set's **realization-gap register** (`INV-23`): intended behavior this set's implementation has
+not built yet, one row per gap, each keyed by the element id the gap is against. The intent is
+settled and the build has not caught up (`INV-15`), so none of these is an open question.
+
+| Element     | Intended                                                                                           | Where the implementation stands                                                                                                                                                             | Tracked by    |
+| ----------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `INV-CCA-1` | the adapter is its own full participant, run for each role that names it as `handler`              | the session runner is one of two executors inside the earlier combined handler, chosen by a role `type`; no separate adapter binary exists yet. Its lifecycle rules live in the earlier set | `pg2-12gr4.6` |
+| `INV-CCA-2` | the adapter reads its settings from the role object, strictly, and ships a build-time check        | the settings are read from the earlier per-role file, an unknown field is ignored, and no build-time check exists                                                                           | `pg2-12gr4.6` |
+| `INV-CCA-3` | a role's survival is the role's own TOML key, asserted for every role of this adapter              | the core reads a per-role JSON flag the deployment renders, and nothing asserts that every session-backed role has it                                                                       | `pg2-12gr4.6` |
+| `INV-CCA-4` | a launcher per pool carries the role's wrap to the agent                                           | no launcher exists, and a role's agent starts in whatever environment the session tool gives it                                                                                             | `pg2-12gr4.2` |
+| `INV-CCA-5` | the keep-list is by explicit name, and a test derives it from the session tool's injection         | no keep-list exists                                                                                                                                                                         | `pg2-12gr4.2` |
+| `INV-CCA-6` | a templated wrap entry is a build-time error for a role of this adapter                            | no templated wrap entry exists, so nothing rejects one                                                                                                                                      | `pg2-12gr4.2` |
+| `INV-CCA-7` | every launch and resume re-supplies the dispatch variables, and a missing marker variable is loud  | no marker or dispatch variables exist, and a resume passes only what it passes today                                                                                                        | `pg2-12gr4.2` |
+| `INV-CCA-8` | the deployment asserts identical wraps for roles that share a pool                                 | nothing asserts it, and the shared pool of the triager roles has no wrap                                                                                                                    | `pg2-12gr4.2` |
+| `INV-CCA-9` | a session the earlier handler started is adopted at a cutover, and the alert contract is preserved | the adoption exists for a redelivery to the same handler; a cutover between two binaries is untested                                                                                        | `pg2-12gr4.6` |
+
+## External references
+
+This set follows the behavior-docs method and cites elements pg-router's set, pg-router's decision
+docs, the session tool's set and the earlier combined handler's set define, so a cross-set reference
+resolves by the owner's stable UUID, not by a name that can change.
+
+| Name           | What it is                                                                                                                      | Owner set-path                                                                       | Owner UUID                                                                                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INV-13`       | a set MUST make its scope explicit and define all its actors and interfaces                                                     | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`                     | [94285c70-da89-4402-8ae2-af27925008bd](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)                     |
+| `INV-15`       | the behavior docs set is the source of truth; a realization gap is normal, not a defect                                         | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`                     | [375b542f-2a9f-4cfd-a77e-7aed45a416d5](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)                     |
+| `INV-20`       | a borrowed term at a reference seam MUST be inherited or renamed, never silently redefined                                      | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`                     | [bafdd784-81ed-46fe-88f0-1a8c5fc4caf0](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)                     |
+| `INV-22`       | traceability is a listing obligation on every story, use case and journey, not a coverage section                               | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`                     | [b2502527-1340-4a1f-858c-aaa80c601317](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)                     |
+| `INV-23`       | the realization-gap register is set-level, named `## Realization gaps`, and never an element                                    | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`                     | [f3bba3e7-440f-4109-a4de-9d37daa34bcf](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)                     |
+| `INTF-HANDLER` | dispatch to a handler and its accept-or-decline or deferred-ack reply                                                           | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`                | [10939663-7a48-4d44-8c4a-9a2df8ae4654](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/interfaces.md)                |
+| `INV-ROLE-2`   | the core carries a role's own configuration, as the role object in every request's payload, and never reads it                  | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`                | [68e781f9-ca4a-4713-9ba2-e2839a9d6e6a](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/invariants.md)                |
+| `INV-ROLE-3`   | surviving the core's shutdown is a generic property a role declares in the core's own configuration                             | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`                | [e7fb732e-a4c4-4bd7-a9ad-172d451e48ea](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/invariants.md)                |
+| `INV-ROLE-4`   | a payload starts from a minimal base environment that only its wrap expands                                                     | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`                | [de6d321d-9322-46ff-abd9-36b4024d9b52](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/invariants.md)                |
+| `DEC-WIRE-1`   | the default transport is a CLI invocation carrying JSON, with coarse exit codes                                                 | `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions`               | [6450eed7-228f-4a99-bfd9-6705a6c552ee](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/decisions/wire.md)                     |
+| `DEC-WIRE-3`   | lifecycle hooks, and the role object that rides in every request                                                                | `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions`               | [8a1f2c4d-6e0b-4a5e-9d3c-2b7f1e9a4c60](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/decisions/wire.md)                     |
+| `INV-POOL-6`   | the agent executable a pool launches is opaque to ccpool                                                                        | `phillipgreenii-nix-agent-support · packages/ccpool/docs/behavior`                   | [3d499bd3-7e63-4c2c-a526-25bf37ce83cc](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/ccpool/docs/behavior/invariants.md)                   |
+| `INV-CCH-2`    | a handler session tolerates a duplicate event and supports the deferred-ack form                                                | `phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior` | [af2237aa-da29-47c2-922e-95a3c7cea2c9](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router-ccpool-handler/docs/behavior/invariants.md) |
+| `INV-CCH-6`    | a handler queries pool capacity before preparing isolation or launching                                                         | `phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior` | [e610349b-f6eb-4273-a87a-952bf2821108](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router-ccpool-handler/docs/behavior/invariants.md) |
+| `INV-CCH-9`    | every recorded session or pre-launch failure carries one closed-set failure signature and redacted, bounded evidence            | `phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior` | [07323b67-c77c-417c-8f24-684ca5eabaa9](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router-ccpool-handler/docs/behavior/invariants.md) |
+| `INV-CCH-10`   | a dispatch is declined while its git origin is unavailable                                                                      | `phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior` | [b9cc174c-4c9f-43e0-bc9a-8d36fadbd36e](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router-ccpool-handler/docs/behavior/invariants.md) |
+| `INV-CCH-14`   | the shutdown sweep spares every actively working session                                                                        | `phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior` | [9f2a7d86-926a-41ac-8c26-851e459c40b0](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router-ccpool-handler/docs/behavior/invariants.md) |
+| `INV-CCH-17`   | a settled, quiet session is closed when its dispatch reaches a terminal outcome                                                 | `phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior` | [63bd1585-4262-45c5-b8fe-46f1ffa22d7d](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router-ccpool-handler/docs/behavior/invariants.md) |
+| `INV-CCH-18`   | a launched session never stays unsupervised: a supervision lease and an orphan reconcile                                        | `phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior` | [ac18ca7c-745d-476c-b9a0-f568e673fda6](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router-ccpool-handler/docs/behavior/invariants.md) |
+| `INV-CCH-22`   | a role with a pre-launch precheck declines a dispatch it has proven moot, with a skipped-\* reason                              | `phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior` | [347d82ef-4149-4a35-945b-754ba35a8e6a](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router-ccpool-handler/docs/behavior/invariants.md) |
+| `INV-CCH-28`   | a session that ends unclaimed on a usage limit or an API outage earns no strike                                                 | `phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior` | [dea93749-b558-4331-9b46-5ac4c4d399ae](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router-ccpool-handler/docs/behavior/invariants.md) |
+| `INV-CCH-30`   | every dispatch runs in a fresh session, and one whose bead and role already have one in flight is declined as session-in-flight | `phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior` | [7c2e9f4a-31d8-4b6e-9a05-d2f8e61c4b73](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router-ccpool-handler/docs/behavior/invariants.md) |

@@ -1,6 +1,6 @@
 # A daemon restart leaves ccpool-backed dispatches running
 
-**Status**: Accepted (amends 0083; resolves `pg2-dtigc`); the answer to question 3 is narrowed by 0094 (2026-10-13, bead `pg2-yunrp`)
+**Status**: Accepted (amends 0083; resolves `pg2-dtigc`); the answer to question 3 is narrowed by 0094 (2026-10-13, bead `pg2-yunrp`); Decision 1 is amended by the Addendum of 2026-10-20 (the handler split, bead `pg2-12gr4.5`)
 **Date**: 2026-10-07
 **Deciders**: Phillip Green II
 
@@ -17,6 +17,11 @@
 > that tick, and on 2026-10-12 it stood in front of the re-offer (268.6 s from process start). The
 > re-offered dispatch is still timed from the re-offer: the decision is that the adopting handler
 > reports the dispatch's original start, and it is not built yet.
+
+> **Later note (2026-10-20, bead `pg2-12gr4.5`, the Addendum below):** Decision 1 no longer holds as
+> written. Survival is declared by a generic `[[role]]` key in the core's TOML, `survives_shutdown`,
+> not by a flag in a per-role JSON file. A role that does not set its own `handler` still reads the
+> JSON flag until the handler split's compat window ends (`ADR 0065`'s Addendum).
 
 ## Context
 
@@ -190,3 +195,42 @@ sequenceDiagram
 - Not done here, still available as a stopgap: a pre-apply `SYSTEM_PAUSE` gate that waits for
   `dispatch.busy` to reach 0. It blocks an apply for up to 25-30 minutes and needs a mandatory
   resume, so it is only worth building if the post-deploy verification fails.
+
+## Addendum (2026-10-20): survival is a generic role key, and sessions are adopted across the cutover
+
+The handler split (`ADR 0065`'s Addendum of 2026-10-20, bead `pg2-12gr4.5`) replaces the per-role JSON
+file that Decision 1 reads. The operator accepted the replacement in the `pg2-12gr4.1` design review
+(2026-10-20, ruling 23, "the rest are ok", for S3), and it needs no separate approval (ruling 26).
+
+**Decision 1 is amended.**
+
+1. **A role declares that its dispatch survives a daemon shutdown with a generic `[[role]]` key in the
+   core's own TOML:** `survives_shutdown`, a boolean, default `false`, spelled like the existing role
+   keys. The core reads it directly while it registers roles during boot, which is where it chooses
+   between a cancellable and a `WithoutCancel` listener context for the role (`cmd/pg-router/run.go`).
+   The core still reads only that generic flag, never the role's kind or the handler's name, and the
+   per-role JSON `survivesShutdown` flag is read **only** for a role that does not set `handler` (the
+   earlier path), until the compat window ends.
+2. **The session adapter's nix helper sets the key to `true`**, and its nix module **asserts, at
+   evaluation time, that every role using `pg-router-handler-ccpool` has it set**, so a role cannot
+   silently lose survival.
+3. **Decisions 2 to 6 are unchanged.** The listener context, the drain that waits only for what it will
+   cancel, the SIGPIPE subscription and the lease-aware sweep do not depend on where the flag is read
+   from.
+
+**Rejected.** The adapter declaring survival in its `postStartup` reply: `postStartup` runs only after
+boot, and the context is chosen during boot, so it would mean reordering boot. This also revises the
+Consequences' "Rejected: deciding survival from the handler binary. Command-type and ccpool-type roles
+both run through `pg-router-ccpool-handler`, so the binary cannot tell them apart": with two adapter
+binaries the binary could tell them apart, but the core must not know adapter kinds
+(`GOAL-MIN-1`), so a generic key stays the answer.
+
+**In-flight sessions are adopted across the cutover.** A role moves from the earlier handler to its
+own adapter in one commit of the consuming flake (`ADR 0065`'s Addendum, S5). A session the earlier
+handler launched, and left running because its role survives a shutdown, **MUST** be adopted by the new
+adapter's redelivered dispatch exactly as this ADR's question 3 describes: the new adapter finds the
+live session by the same stable per-bead name, carries the same `external_id` format and the same
+dispatch metadata, and takes over its lease, so no session is launched beside a running one and none is
+orphaned. This is **tested** at the first session-backed move (the review role), against a live
+session started by the earlier handler, and it is a **runbook step** of every session-backed move
+(`docs/runbooks/handler-split-consumer-checklist.md`).

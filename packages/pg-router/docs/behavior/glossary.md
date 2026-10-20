@@ -1,7 +1,7 @@
 # Glossary — pg-router
 
-Vocabulary for pg-router's core. Concrete implementations (ccpool, beads, prometheus, …) define
-their own terms in a downstream deployment set.
+Vocabulary for pg-router's core. Concrete implementations (a session runner, an issue store, a
+metrics backend, …) define their own terms in their own behavior sets.
 
 ## Core
 
@@ -91,8 +91,22 @@ their own terms in a downstream deployment set.
 - **Event handler** — responds to an event it is bound to: it **accepts** the event and owns the run
   from there, reporting its progress and outcome on its **own** surface rather than back to the core,
   and may be capacity-limited — a limit it enforces itself, which nothing declares to the core
-  (`INV-CONC-1`). Its concrete kinds (a "role") are named in a downstream deployment set.
+  (`INV-CONC-1`). A configured handler is a **role**; the participant that runs it is the role's
+  **adapter**.
 - **Handler session** — one run of an event handler against one event, tracked by its tracking id.
+- **Role** — a configured event handler, named by the operator: its **bindings**, the command of its
+  **adapter**, an optional **wrap**, an opaque **configuration table** and an optional
+  **survives-shutdown** property, all declared once in the core's configuration (`INV-ROLE-1`).
+- **Adapter** — the participant a role names to run it: a command the core invokes over the common
+  manager contract, which bridges the core's handler contract to one kind of runner. The core never
+  distinguishes adapters by kind; a new kind of runner is a new adapter, with no change to the core
+  or to any other adapter (`INV-ROLE-1`, `GOAL-MIN-1`).
+- **Role object** — the role's name and its opaque configuration table, which the core sends to the
+  role's adapter in the payload of every request and never reads (`INV-ROLE-2`).
+- **Wrap** — an ordered list of command prefixes, outermost first, that run a role's payload or a
+  query's producer; the only way to expand the **base environment** (`INV-ROLE-4`).
+- **Base environment** — the minimal, documented set of environment variables a role's payload and a
+  query's producer start from (`INV-ROLE-4`).
 - **Monitoring sink** — pulls or pushes a declared subset of the metric catalog.
 - **Storage** — an optional key/value scratch a participant provides for core state; never backs
   delivery.

@@ -219,8 +219,8 @@ This MUST fail with `backing command "<argv[0]>" cannot be invoked` if
 that minimal PATH, and MUST succeed once it is. For a `sh -c` pipeline,
 remember this only proves `sh` resolves — anything the pipeline shells out to
 internally needs to be on the real runtime PATH by construction (this flake's
-own wrapper bundles `bd`, `ccpool`, `pg-pr`, and `jq` for exactly this
-reason — see `default.nix`).
+own wrapper bundles the tools its worked examples shell out to, such as `bd`, `pg-pr` and
+`jq`, for exactly this reason — see `default.nix`).
 
 ## Gates: file-backed gates replaced by the Gate Registry (bead `pg2-h63eu`, `INV-LIFE-2`)
 
@@ -449,26 +449,26 @@ folding every call's `runs`/`sources` together before the same staleness/degrade
 left as a deployment-specific extension (like the Jira example above, this only matters once a
 deploying flake has real repos/PRs to name) rather than expanded inline here.
 
-## Deployment: participant extraction — `pg-router-ccpool-handler` is now required (Phase 5, `docs/adr/0065`)
+## Deployment: participant extraction — the handler participant is now required (Phase 5, `docs/adr/0065`)
 
-Phase 5 (docket `pg2-oju6w`) moved every concrete participant implementation — the ccpool-backed
-and command-backed role executors, the beads-backed pull query, and the tool-naming/connectivity
-pre-flight checks that back them — out of this package and into a new sibling module,
-**`packages/pg-router-ccpool-handler`** (its own binary: `pg-router-ccpool-handler`). This
+Phase 5 (docket `pg2-oju6w`) moved every concrete participant implementation — the session-backed
+and command-backed role executors, the issue-store-backed pull query, and the tool-naming/connectivity
+pre-flight checks that back them — out of this package and into a new sibling module, the **handler
+module** (its own binary). This
 package (`packages/pg-router`) keeps only the generic dispatcher: events, bindings, participants,
-handler sessions, and wiring — it no longer knows about `bd`, `ccpool`, `claude`, or any other
-concrete tool (`docs/adr/0065`'s "Positive consequences"). This is a **breaking deployment
+handler sessions, and wiring — it no longer knows about any concrete tool
+(`docs/adr/0065`'s "Positive consequences"). This is a **breaking deployment
 change**, not an internal refactor:
 
 - **The handler binary must be on `PATH` and running/registered.** Before this change, an
   unconfigured (`.pg-router/config.toml`-less) core fell back to a built-in feedback/worker role
   and query set, running entirely in-process. That built-in fallback is now **gone** (see "Breaking:
   the core ships with no built-in role/query set" below) — so a deployment that has not yet stood
-  up `pg-router-ccpool-handler` alongside its `pg-router` core hits `INV-WORKFLOW-1` check 5's
+  up the handler module alongside its `pg-router` core hits `INV-WORKFLOW-1` check 5's
   backing-command resolution and refuses to start: this is now a **hard startup failure**, not a
   degraded-but-working state. There is no soft landing for an unmigrated upgrade.
-- **`home/programs/pg-router-ccpool-handler`** (new home-manager capability) and
-  **`darwin/modules/pg-router-ccpool-handler`** (its LaunchAgent mirror) deploy the register step
+- **The handler module's home-manager capability** (new) and
+  **its darwin module** (the LaunchAgent mirror) deploy the register step
   against a running `pg-router` core — see their own doc comments for the current, narrower scope
   (registration only; the core spawning `dispatch`/`query`/lifecycle-hook calls into this binary
   for real is docket `pg2-oju6w`'s Task 5.4, an accepted gap as of this change — `docs/adr/0065`'s
@@ -476,16 +476,16 @@ change**, not an internal refactor:
 
 ### Breaking: `[[role]].type` is removed — role kind moves to the handler's own config
 
-Before this change, a `[[role]]` block named its own participant kind and carried that kind's
-config inline:
+Before this change, a `[[role]]` block named its own participant kind (`<kind>` below stands for
+that kind's name) and carried that kind's config inline:
 
 ```toml
 [[role]]
 name = "feedback"
-type = "ccpool"
+type = "<kind>"
 enabled = true
 binds = ["feedback.requested"]
-[role.ccpool]
+[role.<kind>]
 actor = "claude"
 completion = "close-only"
 on_failure = "unclaim"
@@ -494,15 +494,15 @@ authorship_guard = true
 prompt = '''
 ...
 '''
-[role.ccpool.budget]
+[role.<kind>.budget]
 tokens = 0
 cost = 0
 time = "25m0s"
 ```
 
 After this change, `roles.Role` (and its TOML decode, `internal/config/registry.go`'s `roleTOML`)
-carries only `name`, `enabled`, `binds`, and an optional `retry` override — **`type` and
-`ccpool`/`command` are gone entirely**, not narrowed:
+carries only `name`, `enabled`, `binds`, and an optional `retry` override — **`type` and the
+per-kind blocks are gone entirely**, not narrowed:
 
 ```toml
 [[role]]
@@ -511,20 +511,21 @@ enabled = true
 binds = ["feedback.requested"]
 ```
 
-The kind-specific configuration (`type = "ccpool" | "command"`, the `actor`/`completion`/
+The kind-specific configuration (the role's kind, and the `actor`/`completion`/
 `on_failure`/`on_dispatch_fail`/`authorship_guard`/`prompt`/`budget`/`isolation` fields) moves to
-`pg-router-ccpool-handler`'s own role-config JSON file (`--role-config`, or
-`PG_ROUTER_CCPOOL_HANDLER_ROLE`) — see that module's `cmd/pg-router-ccpool-handler/roleconfig.go`
-for the exact JSON shape. There is no automatic TOML-to-JSON converter shipped for this move;
-translate each `[[role]]` block's `type`/`[role.ccpool]`/`[role.command]` fields into the
-equivalent JSON `roleFile` by hand (field names are unchanged, only the container format is).
+the handler module's own role-config JSON file (`--role-config`, or the handler's own environment
+variable for it) — see that module's role-config source for the exact JSON shape. There is no
+automatic TOML-to-JSON converter shipped for this move;
+translate each `[[role]]` block's kind and per-kind fields into the
+equivalent JSON file by hand (field names are unchanged, only the container format is). The
+handler split below replaces this file with the role's own `[role.config]` table.
 
 ### Multi-role dispatch differentiation: `PG_ROUTER_HANDLER_COMMAND_DIR` + the nix `roles` option
 
 Bead `pg2-ymb3v` closed a gap left open by the move above: with only `PG_ROUTER_HANDLER_COMMAND`
 set, every enabled role resolved to the byte-for-byte identical handler argv — a deployment with
 more than one differently-configured role (e.g. `feedback`/`worker`/`review`, each with its own
-ccpool actor/prompt/completion policy) had no way to tell them apart, silently. Setting
+actor/prompt/completion policy) had no way to tell them apart, silently. Setting
 `PG_ROUTER_HANDLER_COMMAND_DIR` to a directory of `<role.Name>.json` files (this package's own
 `roleFile` shape — see the section above) fixes this: the resolved argv threads
 `--role-config <dir>/<role.Name>.json` onto the handler command, so each role dispatches through
@@ -532,15 +533,46 @@ its own participant config. `PG_ROUTER_HANDLER_COMMAND` alone is unaffected — 
 deployment that never sets `PG_ROUTER_HANDLER_COMMAND_DIR` keeps its existing behavior unchanged.
 
 For a nix-managed deployment (bead `pg2-pteab`), hand-authoring these JSON files is unnecessary:
-`home/programs/pg-router-ccpool-handler`'s new `roles` option (attrset keyed by role name,
+the handler module's new `roles` option (attrset keyed by role name,
 shaped like `roleFile`) renders one `pkgs.writeText` per role and joins them into one directory,
 exposed as that module's own `handlerCommandDir` output. Point
 `home/programs/pg-router`'s `daemon`/`periodicDrain.handlerCommandDir` option at it (interpolated
-to a string, e.g. `"${config.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir}"`)
+to a string, e.g. `"${config.phillipgreenii.programs.<handler module>.handlerCommandDir}"`)
 to wire the two modules together — `handlerCommand`/`handlerCommandDir` are otherwise independent
-plain-string options on `pg-router`'s own module, not auto-derived from the ccpool-handler module.
-The darwin LaunchAgent mirrors (`darwin/modules/pg-router`, `darwin/modules/pg-router-ccpool-handler`)
-follow the same shape.
+plain-string options on `pg-router`'s own module, not auto-derived from the handler module.
+The darwin LaunchAgent mirrors (`darwin/modules/pg-router` and the handler module's own darwin
+module) follow the same shape. This is the **earlier path** of the handler split below, which a role
+leaves by setting its own `handler`.
+
+### The handler split: a role names its own handler (the compat window)
+
+Bead `pg2-12gr4.5` records the decisions of the handler split (`docs/adr/0065`'s Addendum, handler
+split; `DEC-ROLE-1`, `DEC-WIRE-3`). This is **additive and per role**: nothing changes for a role
+until it sets `handler`, and the core chooses between the two dispatch paths role by role.
+
+| A role that...                    | is on the...  | reaches its handler through                                                                                      | has its own configuration in                     |
+| --------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| does not set `handler`            | earlier path  | `PG_ROUTER_HANDLER_COMMAND`, plus `--role-config <dir>/<role>.json` when `PG_ROUTER_HANDLER_COMMAND_DIR` is set  | the per-role JSON file                           |
+| sets `handler` (an absolute path) | per-role path | that command, with the **role object** (`{ name, config }`) in the JSON on stdin of every request (`DEC-WIRE-3`) | the role's own `[role.config]` table in the TOML |
+
+To move one role to the per-role path:
+
+1. Declare the role once, in `[[role]]`: set `handler` to the adapter command, move the role's
+   own settings from its JSON file into `[role.config]` (the adapter's behavior docs name its keys;
+   it rejects an unknown one), and set `survives_shutdown = true` for a role whose dispatch must
+   outlive a restart of the core (`docs/adr/0085`'s Decision).
+2. Build. The adapter's `validate-config` runs over the role's rendered table during the build, so
+   a mistake fails before apply.
+3. Exercise the role once with `pg-router run-role <role> '<json>'` against a realistic event, and
+   read an actual outcome, not just an exit code (`CLAUDE.md`'s config-testing rule).
+4. Apply. A session the earlier handler left running at the cutover is adopted by the new adapter
+   (`docs/adr/0085`), so no running dispatch is dropped.
+
+To roll one role back, revert the change that set its `handler`: the role is on the earlier path
+again, with no other state to undo. The window ends when **no** role is left on the earlier path;
+one cleanup then removes `PG_ROUTER_HANDLER_COMMAND`, `PG_ROUTER_HANDLER_COMMAND_DIR` and the
+per-role JSON files. The new keys decode strictly: a wrong-typed value, or a `handler` that is not an
+absolute path, fails the load with exit `3` before anything runs.
 
 ### Breaking: the core ships with no built-in role/query set
 
@@ -552,7 +584,7 @@ configured roles/queries today simply dispatches nothing — there is no equival
 works" state to fall into. Any deployment that never wrote its own `config.toml` MUST author real
 `[[role]]`/`[[query]]` configuration (see `pg-router config --print-defaults` for a
 behaviorally-equivalent starting point, translated to the post-move shape above) and deploy
-`pg-router-ccpool-handler` before upgrading.
+the handler module before upgrading.
 
 ## Additive: `status`/TUI now report dispatch concurrency (`dispatch: { busy, total }`, Task 6.5)
 

@@ -114,7 +114,7 @@ whose text carries the **upstream-killed sentinel** (`scriptout:` with `signal: 
 timeout SIGKILLs a slow `gh` call; those kills are transient GitHub slowness that the 30-minute PR
 sweep heals (21 of 22 failed dispatches were followed by an ok dispatch of the same PR), yet each one
 paged `pg-router-failure-rate`. Both substrings are required because bare `signal: killed` also
-matches an out-of-memory kill of any worker or ccpool session, which MUST keep paging individually.
+matches an out-of-memory kill of any worker or agent session, which MUST keep paging individually.
 The residual rule now excludes `upstream-killed`; a separate rule (`pg-router-upstream-killed`,
 registered in `pg-router-probe`) pages when a role records **10 or more** such errors in a 30-minute
 window (`sum by (role) (increase(...[30m])) >= 10`, `for: 0m` because the window already encodes
@@ -294,7 +294,7 @@ through the queue's signal fan-out.
 (14 roles x 17 latency series), so the cardinality cost is fixed by configuration, not by event
 traffic. No other identifier (event id, session, bead) becomes a label. Existing labels are
 unchanged, including the inconsistent names other metrics use for the same concept (`listener` on
-gate-drops, `participant` on gate-blocked, `pgrouter_role` on ccpool metrics); unifying them is a
+gate-drops, `participant` on gate-blocked, `pgrouter_role` on the session runner's metrics); unifying them is a
 possible follow-up, not part of this decision (settled in `DEC-OBS-7`).
 
 **Latency buckets.** Latency is measured from the event's enqueue instant through the handler's
@@ -343,10 +343,10 @@ They are not four spellings of one concept, so only one is unified:
 - `pg_router_gate_blocked` keeps `participant`. Its value is any registry participant a gate
   stopped, including a polled event **source** as well as a listener, so it is the wider concept
   and `role` would mislabel the source rows.
-- ccpool's `pgrouter_role` keeps its name. It is not emitted by pg-router: it is a
-  ccpool session label (`pgrouter.role`, allowlisted onto ccpool's metrics and exported with an
-  underscore) that identifies the pg-router role a ccpool session was launched for, and the ccpool
-  dashboards select on it.
+- The session runner's `pgrouter_role` keeps its name. It is not emitted by pg-router: it is a
+  session label (`pgrouter.role`, allowlisted onto the session runner's metrics and exported with an
+  underscore) that identifies the pg-router role a session was launched for, and the session
+  runner's dashboards select on it.
   Renaming it would break those dashboards and join expressions for no gain in clarity.
 
 **Bounds.** Unchanged: `role` is config-bounded (`DEC-OBS-5`). The rename swaps a label key; it adds
@@ -441,14 +441,14 @@ event. Four changes make the split computable from live data:
   binary that predates them ignores the unknown kind.
 
 **An adopted dispatch (decided 2026-10-14, bead `pg2-x3zkb`, `DEC-EVENT-5`; the core side is built, bead
-`pg2-dm6de`, and the ccpool handler's report, bead `pg2-m2x35`).** The start
+`pg2-dm6de`, and the session-backed handler's report, bead `pg2-m2x35`).** The start
 instant above is the instant the offer became in-flight, which for a dispatch a restart re-offered is the
 re-offer, not the dispatch's own start: on 2026-10-12 the accept record said 2,696,857 ms, 44.95 min,
 for a dispatch that ran 4,459.52 s, 74.3 min, so 29.4 min of run time was recorded as queue wait. The
 handler that adopts a session an earlier daemon left running reports the dispatch's original start
 in an optional reply field (`startedAt`), and the core uses it, when it lies between the event's enqueue
 instant and the offer's own start, as the start in the accept record's `startedAt`, in the queue-wait and
-run histograms and in the `events.jsonl` row (`started_at`, `duration_ms`). The ccpool handler reports
+run histograms and in the `events.jsonl` row (`started_at`, `duration_ms`). The session-backed handler reports
 an adopted session's launch time; a dispatch timed before that reached an installed handler was timed
 from the re-offer, and the lane fixtures of 2026-10-12 and 2026-10-13 list the starts it moved. No
 metric changes name, labels or buckets.
@@ -515,7 +515,7 @@ or when consumption stays far below generation.
   quiet for the window after its last in-flight scrape, as before. A dispatch that settles inside 3 minutes is processing
   through the throughput clause. **Chosen over** keeping a declined attempt out of the gauge in the daemon
   (a new admission signal from the handler, or a second accepted-dispatch gauge: a change to the queue, the
-  wire protocol and the ccpool handler), because the rule-side test passes the replay of the recorded storm
+  wire protocol and the session-backed handler), because the rule-side test passes the replay of the recorded storm
   at every scrape phase, needs no deployment of a new router, and keeps `listener_in_flight` meaning what
   `DEC-OBS-9` says. **Consequence, by the ruling:** a lane with a backlog now pages for roughly the length of
   each usage-limit or at-capacity window that declines its offers; the verification found the rule not
@@ -625,7 +625,7 @@ of 6 scrapes completes 3 minutes after the re-offer, and `for` is 5). `pg2-x3zkb
 this left (`DEC-EVENT-5`, 2026-10-14): the daemon now makes its first dispatch pass before its first producer
 tick, which on 2026-10-12 had stood in front of the re-offer, so a hole shrinks to the boot and the
 `postStartup` hooks (the 268.6 s of that restart held 6.25 s of boot); and the handler that adopts a surviving
-session is to report the dispatch's original start (decided; the core side is built, the ccpool handler's
+session is to report the dispatch's original start (decided; the core side is built, the session-backed handler's
 report is not yet). The rule's expression needs no
 change for either. The recorded
 `pr.changed` buildup of 2026-09-30 pages as two idle-with-backlog stretches the old rule could not see, and
@@ -643,6 +643,6 @@ its condition for the onset and ends it at about 21:10Z; the live counters read 
 fewer from 21:15Z, inside the counters' first 6 hours, so a cross-check and not a replay).
 `grafana/alerting/rule-tests/` runs the same expressions under `promtool`.
 
-**Not covered, by the ruling.** A wedged session that still counts as in flight (the ccpool session rules,
-`pool-full-idle` and `needs_input`, own it); a type missing from the rule's role table; a born-expired
+**Not covered, by the ruling.** A wedged session that still counts as in flight (the session runner's own
+session rules, `pool-full-idle` and `needs_input`, own it); a type missing from the rule's role table; a born-expired
 lane whose queue empties between a decline and the re-emit (the "A lane whose queue empties" bullet above).

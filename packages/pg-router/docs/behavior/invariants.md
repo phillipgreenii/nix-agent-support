@@ -196,11 +196,9 @@ sequenceDiagram
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-1`). Both sides
   MUST move together — a caller still reading a decline off the
   usage code would invert both readings, taking a decline for a typo and a typo for "re-offer later".
-  A decline a handler makes routinely — a precheck's `skipped-*` reason
-  (`phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior · INV-CCH-22`)
-  or `session-in-flight`
-  (`phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior · INV-CCH-30`)
-  — is excluded from the failures the core's failure-rate alert pages on.
+  A decline a handler makes routinely — a precheck's `skipped-*` reason (`INV-CCH-22`) or
+  `session-in-flight` (`INV-CCH-30`), both declared under External references — is excluded from
+  the failures the core's failure-rate alert pages on.
   **Acceptance means the handler took custody, not that work started.** The core MUST
   NOT infer progress from an accept, and MUST NOT assume an accepting handler is idle or free to
   take more; all an accept settles is that delivery is complete and the core is owed nothing further
@@ -363,6 +361,46 @@ sequenceDiagram
   the warning. This is the boundary that keeps "anything determinable MUST prevent startup" from
   turning an ordinary isolation run into a startup failure.
 
+## Roles (the handler a role runs through, and what the core carries for it)
+
+A role is declared **once**, in the core's configuration. These four rules say what that
+declaration gives the core and what the core owes in return. The key names and the dispatch paths
+that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WIRE-3`.
+
+- **`INV-ROLE-1`** <!-- uuid: 6495b5ef-cb0a-45e2-a43c-300564f30d2c --> — **A role names the adapter that runs it, and the core never
+  distinguishes kinds of role.** Each role declares the command of its own **adapter**, and the core
+  invokes that command, over the common manager contract (`INV-INTF-1`), for every dispatch and
+  lifecycle hook of that role. The core has no field, enumeration or branch that says what kind of
+  work a role does, so a new kind of runner is a new adapter participant, added by configuration,
+  with **no change to the core or to any existing adapter** (`GOAL-MIN-1`, `INV-DISP-2`). The
+  adapter owns everything past acceptance: the work, its capacity, its retries and its outcome
+  (`INV-FAIL-1`, `INV-CONC-1`).
+- **`INV-ROLE-2`** <!-- uuid: 68e781f9-ca4a-4713-9ba2-e2839a9d6e6a --> — **The core carries a role's own configuration and never reads
+  it.** A role declares an opaque configuration table. The core **MUST** send the **role object** —
+  the role's name and that table, unchanged — in the payload of every request it makes of the role's
+  adapter (`dispatch`, `postStartup` and `preShutdown`), and **MUST NOT** carry it by argument,
+  environment variable or file, so nothing about it can go stale between the configuration and a
+  call. It **MUST NOT** interpret, default or validate the table's contents: that is the adapter's,
+  which **MUST** reject a field it does not know or cannot use on every call, and whose deployment
+  **SHOULD** also check each role's table when it builds the configuration, so a mistake surfaces
+  before the configuration is applied. The core **MUST** decode the role keys it does read strictly:
+  a malformed or disallowed value is a pre-flight failure that blocks startup (`INV-WORKFLOW-1`),
+  never a silently ignored key.
+- **`INV-ROLE-3`** <!-- uuid: e7fb732e-a4c4-4bd7-a9ad-172d451e48ea --> — **Surviving the core's shutdown is a generic property a role
+  declares in the core's own configuration.** A role MAY declare that its dispatch survives the
+  core's shutdown (default: it does not). The core reads that one declaration directly when it
+  registers the role, and **MUST NOT** derive it from the adapter's identity, kind or reply. The
+  consequences for an in-flight dispatch are the `stopping` state's (`interfaces.md`, "Lifecycle").
+- **`INV-ROLE-4`** <!-- uuid: de6d321d-9322-46ff-abd9-36b4024d9b52 --> — **A role's payload starts from a minimal, documented base
+  environment, and the role's wrap is the only way to expand it; a query's producer likewise.** A
+  role, and a query, MAY declare a **wrap**: an ordered list of command prefixes, outermost first,
+  each running whatever follows it. Without a wrap the payload sees only the base environment, which
+  is a short documented list and is revisable by decision, so no payload silently inherits the
+  daemon's own environment. The adapter applies a role's wrap to the payload it launches (so the
+  environment reaches the payload itself, not the adapter); the core applies a query's wrap to the
+  producer it runs. What a wrapper itself MUST do is the **wrapper contract**, which is a decision
+  of its own, not restated here.
+
 ## Observability & lifecycle
 
 - **`INV-OBS-1`** <!-- uuid: 1ab39347-6835-40bf-9145-4d5e658780dd --> — The core exposes a declared
@@ -518,8 +556,8 @@ sequenceDiagram
   deployment set states the same requirement from its own side and cites this goal rather than
   restating it.
 
-  The Scope's Floor bullet's adjacent tool-naming clause carries one permanent, named exception
-  (`claude`/`bd`/`ccpool`); that exception is about **naming** a fixed executor stack directly in
-  the contract surface, not about **where** its behavior is realized, so it does not loosen this
-  goal's behind-an-interface requirement — a participant implementation still belongs in a
-  downstream deployment set, exception or not.
+  The Scope's Floor bullet's tool-naming clause carries **no** exception. The earlier permanent
+  exception for a fixed executor stack was withdrawn (operator ruling 2026-10-19/20, ruling 14 of
+  the role-environment design review) once the core had no executor of its own: a role's adapter
+  runs it (`INV-ROLE-1`), so no tool needs naming in the contract surface, and a participant
+  implementation belongs behind an interface in its own behavior set.

@@ -9,7 +9,7 @@ and [journeys](journeys.md) for the flows that exercise these interfaces.
 
 pg-router's core is a **dispatcher**: everything outside it is a pluggable **participant** reached
 through one of the interfaces below. Which concrete implementation fills a participant — a bead
-store, ccpool, prometheus — is uninteresting to the core; only these contracts are. (The concrete
+store, a session runner, prometheus — is uninteresting to the core; only these contracts are. (The concrete
 implementations and any organization-specific workflow live in a downstream deployment set that
 implements these interfaces.)
 
@@ -170,8 +170,8 @@ stateDiagram-v2
 - **`stopping`** — an orderly shutdown is underway. The core stops issuing _new_ requests; in-flight
   deferred work MAY complete on the callback channel or be abandoned. New messages are not accepted.
   A handler whose dispatch supervises its own long-running work independently of the core (a
-  session that lasts far longer than any shutdown budget) MAY declare, in its role's configuration,
-  that its dispatch **survives the core's shutdown**. For such a role the core **MUST NOT** cancel
+  session that lasts far longer than any shutdown budget) MAY declare, in its role's own entry in
+  the core's configuration, that its dispatch **survives the core's shutdown** (`INV-ROLE-3`). For such a role the core **MUST NOT** cancel
   an in-flight dispatch when it stops and **MUST NOT** wait for it to finish; the offer is left
   un-accepted, so the next core re-offers the event (`INV-EVT-1`) in its first offer pass, before
   its first source query (`INV-LIFE-3`), and the handler absorbs the
@@ -336,8 +336,8 @@ sequenceDiagram
 ## `INTF-HANDLER` — event handler <!-- uuid: 10939663-7a48-4d44-8c4a-9a2df8ae4654 -->
 
 - **Counterparty:** `ACTOR-HDL`, a pluggable event handler. **Initiator:** core. **Multiplicity:**
-  one or more. (A handler's concrete kind — a **role** — is named in a downstream deployment set;
-  the core knows only the interface.)
+  one or more. (A configured handler is a **role**, which names the **adapter** that runs it
+  (`INV-ROLE-1`); the core knows only the interface.)
 - **Purpose:** run a handler against one event as a **handler session**, tracked by the request's
   tracking id, and report its outcome.
 
@@ -350,6 +350,16 @@ handler answers in one of exactly two ways:
   never holds an open call across long or paused work, and **the ack is the last thing the core is
   owed** for that dispatch.
 
+**Role context.** A request to a role's adapter carries, besides the event, the **role object**: the
+role's name and its opaque configuration table, exactly as the operator declared them
+(`INV-ROLE-2`). It rides in the request payload of every request that role's adapter receives —
+`dispatch` and both lifecycle hooks below — never in an argument, an environment variable or a file.
+The core does not read the table; the **adapter** decodes it strictly on every call and fails a call
+whose table has a field it does not know, and the deployment checks each role's table when it
+builds the configuration, so a dropped or misspelled field surfaces before apply. Registering is
+not involved: no new message exists for this, and the role's adapter starts fresh for each call. The
+concrete shape is `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-3`.
+
 **An adopted dispatch reports its own start.** A handler that **adopts** a dispatch an earlier core's
 offer started and left running (the `stopping` state) **MAY** carry that dispatch's original
 start in an optional `startedAt` of either reply (an RFC 3339 instant). The core **MUST** use a
@@ -361,9 +371,9 @@ is unaffected (`DEC-EVENT-5`).
 
 **A handler's run status is not part of this contract.** The core's delivery responsibility ends at
 acceptance (`INV-EVT-1`, `INV-FAIL-1`), so how far a handler has got, what it is doing, and how it
-finished are the **handler's** to expose on the **handler's own** surface (for a ccpool-backed
-handler, ccpool's own CLI — which pg-router's implementation already reads directly rather than being
-pushed to, so nothing that works today depended on a status callback). The core keeps only what it
+finished are the **handler's** to expose on the **handler's own** surface (for a session-backed
+handler, the session runner's own CLI — which pg-router's implementation already reads directly
+rather than being pushed to, so nothing that works today depended on a status callback). The core keeps only what it
 needs to route: acceptance per `(event, handler)`, queue depth, and the unconsumed-expired count
 (`INV-OBS-1`).
 
@@ -380,7 +390,7 @@ the **delivery-side** cases only: a **pre-accept decline** (`unavailable`, or a 
 a **dispatch failure** where the core could not hand the event over at all (`INV-OBS-1`).
 The three **post-accept** classes — `retryable`, `resource-limit`, `critical` — pg-router merely **hands
 over**; they are the accepting **handler's own observability concern** and live on the handler's own
-surface (for a ccpool-backed handler, ccpool's own metrics and logs), so their absence from pg-router's
+surface (for a session-backed handler, the session runner's own metrics and logs), so their absence from pg-router's
 metric catalog is the boundary working, not an oversight. The one deliberate exception is a
 `resource-limit` budget stop, whose handler error text carries the budget-stop sentinel below and is
 counted under `handler-error` with `reason="budget-exceeded"` (`DEC-OBS-3`); and a handler error from
@@ -423,7 +433,7 @@ which wraps whatever the killed child reported; that child text is `signal: kill
 but plain `context deadline exceeded` for some, so the deadline text is the same event. The core
 cannot see a handler's own error class across the process boundary, so it matches on this text, and
 it **MUST require `scriptout:`**: `signal: killed` alone is also what an out-of-memory kill of any
-worker or ccpool session looks like, and that **MUST NOT** be tagged `upstream-killed` (nor
+worker or agent session looks like, and that **MUST NOT** be tagged `upstream-killed` (nor
 `deadline exceeded after` without `scriptout:`). Precedence among `handler-error` reasons is
 **triager-failure, then budget-exceeded, then upstream-killed**. The two substrings are a
 **contract**: changing any of the three breaks the core's `reason="upstream-killed"` classification and the
@@ -437,7 +447,7 @@ on an account usage or spend limit or an API outage (the handler's `api-rate-lim
 `session ended on a usage limit or API outage`** (for example `zr-1: session ended on a usage limit
 or API outage before claiming its bead (api-rate-limit; no strike counted)`). The handler exempts
 such an end from its own strike policy
-(`phillipgreenii-nix-agent-support · packages/pg-router-ccpool-handler/docs/behavior · INV-CCH-28`),
+(`INV-CCH-28`, declared under this set's External references),
 so the error is the only signal the core receives; the core cannot see the handler's failure
 signature across the process boundary, so it matches on this text, and it counts the error as a `handler-error` with `reason="usage-limit"`.
 Precedence among `handler-error` reasons is **triager-failure, then budget-exceeded, then
@@ -473,8 +483,8 @@ the core no longer inspects or closes a handler-owned session at all). Both hook
 sync outcome only; **neither has a deferred form** — there is no event to hand back later, so a
 handler has nothing to defer.
 
-A handler sharing one process across several registered roles receives BOTH hooks once per role, not
-once per process: the core holds no cross-role de-duplication state (`GOAL-MIN-1` — this is exactly
+A handler shared by several roles (several roles naming the same adapter command) receives BOTH
+hooks once per role, not once per process: the core holds no cross-role de-duplication state (`GOAL-MIN-1` — this is exactly
 the kind of participant-topology knowledge the core must not carry), so a shared process simply
 answers the identical hook more than once. This is a documented cost, not a defect: a handler's own
 `preShutdown` implementation MUST be safe to invoke redundantly (idempotent), the same tolerance
@@ -966,6 +976,16 @@ event types it emits and, for a pull source, its query trigger — never a per-t
 binding names** for narrowing); and the workflow wiring the core validates (`INV-WORKFLOW-1`). Expiry is **not** declared here — it
 rides on each event as `at` / `expiresAt` (`INV-EVT-1`, `INV-EVT-4`). The **run-scoped selectors**
 above restrict the _active_ subset of this config per run without editing it.
+
+A **role** declares, beside its bindings, the **command of the adapter** that runs it, an optional
+**wrap**, an opaque **configuration table** and an optional **survives-shutdown** property
+(`INV-ROLE-1` to `INV-ROLE-4`); a **query** declares an optional **wrap**. The core reads those
+keys strictly and passes the table through unread (`INV-ROLE-2`). The inspection and smoke-test
+commands (`INTF-CLI`) resolve a role's adapter the same way the running core does, and show each
+role's resolved adapter command, wrap, survives-shutdown property and the table exactly as it is
+sent, plus each role's and each query's composed command, so what a role will run is readable
+without reading the adapter's own files
+(`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-ROLE-1`).
 
 The **full configuration schema** is not yet pinned; it is tracked as an open question
 (`OQ-CONFIG`), with pg-router's existing TOML as prior art.

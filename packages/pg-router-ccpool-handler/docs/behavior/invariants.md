@@ -12,7 +12,7 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   is one-way (`phillipgreenii-nix-agent-support` ADR 0065's "New module" decision); a reverse
   import would put concrete participant behavior back inside the generic core it was extracted
   out of, against `GOAL-MIN-1`.
-- **`INV-CCH-2`** — a handler session MUST tolerate a duplicate event and MUST support the
+- **`INV-CCH-2`** <!-- uuid: af2237aa-da29-47c2-922e-95a3c7cea2c9 --> — a handler session MUST tolerate a duplicate event and MUST support the
   deferred-ack reply form, matching `INTF-HANDLER`'s obligations on every implementer; this module
   states no exception of its own. The core's own de-duplication by event id (`INV-EVT-3`) is bounded
   by its retention and does not lift the obligation. Tolerating a duplicate never means adopting a finished session:
@@ -32,7 +32,7 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   any operator-configured command) anywhere in `packages/pg-router`'s own contract surface (its
   `--help` text, config schema, or wire messages). Naming a backing tool is this module's own
   business, per the Floor stated in both this set's and pg-router's own `## Scope`.
-- **`INV-CCH-6`** — a handler MUST query pool capacity before preparing isolation or
+- **`INV-CCH-6`** <!-- uuid: e610349b-f6eb-4273-a87a-952bf2821108 --> — a handler MUST query pool capacity before preparing isolation or
   launching a session and MUST NOT launch when the pool reports no free slot or cannot be
   read; capacity is the handler's own to enforce (`INV-CONC-1`). It signals this ONLY through the
   transport's pre-accept busy decline (`conformance.ExitBusy`, exit `9` on the default CLI
@@ -78,7 +78,7 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   (`conformance.ExitBusy`, reason `low-disk`), mutating no bead, so the core simply re-offers
   the event later with backoff. This is consistent with `INV-CCH-3`/`INV-CCH-6`: a system-wide
   resource shortage is a pre-accept signal, not a post-accept or per-bead outcome.
-- **`INV-CCH-9`** — whenever this module records why a handler session failed, or why a check
+- **`INV-CCH-9`** <!-- uuid: 07323b67-c77c-417c-8f24-684ca5eabaa9 --> — whenever this module records why a handler session failed, or why a check
   it runs before launching one failed, it MUST name the cause as exactly one failure signature
   from a closed set: `git-auth`, `git-network`, `mount-or-path`, `budget`, `index-lock`,
   `api-transient`, `api-rate-limit`, `api-auth`, `context-limit`, `session-errored`,
@@ -124,7 +124,7 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
     counter. The raw transcript MUST never be logged. There is no new metric or store: "first
     seen" and "how often" are answered from the event log's own timestamps (see
     `docs/runbooks/dispatched-session-failure-signatures.md` in the repo root).
-- **`INV-CCH-10`** — before accepting a dispatch, the handler MUST decline it when the git
+- **`INV-CCH-10`** <!-- uuid: b9cc174c-4c9f-43e0-bc9a-8d36fadbd36e --> — before accepting a dispatch, the handler MUST decline it when the git
   origin the dispatch needs is unavailable, and MUST NOT decline a dispatch for any other
   reason of origin state. Availability is per origin, keyed by a normalized repo key
   `<host>/<org>/<repo>`; a dispatch whose repo root is not a watched origin's repo root has no
@@ -225,7 +225,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   JSON, never via a shell. The reference prompt is `docs/roles/split-triager-prompt.txt`; the
   role, its discovery query (`ready --label needs-split-review --exclude-label human`) and the
   `allowedTools` grant for the `split` subcommand are wired in the deployment config.
-- **`INV-CCH-14`** — when the daemon shuts down (this module's `preShutdown` hook), the handler
+- **`INV-CCH-14`** <!-- uuid: 9f2a7d86-926a-41ac-8c26-851e459c40b0 --> — when the daemon shuts down (this module's `preShutdown` hook), the handler
   MUST SPARE every session that is actively working: a session in `starting`, `ready`, or
   `working` is left alive, and its worktree and anchor branch are left untouched, even if its bead
   has already closed. Only a session closable for another reason is purged (with its worktree and
@@ -287,7 +287,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   intended change (unified diff, or full content for a new file). The notice MUST NOT be sent when
   the session runs under any other permission mode. This invariant does not choose the permission
   mode; that remains a deployment decision.
-- **`INV-CCH-17`** — once a dispatch reaches a terminal outcome (success, an applied failure
+- **`INV-CCH-17`** <!-- uuid: 63bd1585-4262-45c5-b8fe-46f1ffa22d7d --> — once a dispatch reaches a terminal outcome (success, an applied failure
   action, or a budget stop), the handler MUST close, without purging, the settled session it
   launched or absorbed, so a finished session does not hold a counted slot of the pool until
   `ccpool`'s idle timeout. The close applies to that session only, never to another row, and only
@@ -315,7 +315,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   carries a close reason but whose session is still live is a failed teardown, and is closed
   again. A worktree that an earlier dispatch already removed is reported once as already removed,
   not as a failed cleanup left for the sweep.
-- **`INV-CCH-18`** — a session the handler launched MUST NOT stay unsupervised once its handler is
+- **`INV-CCH-18`** <!-- uuid: ac18ca7c-745d-476c-b9a0-f568e673fda6 --> — a session the handler launched MUST NOT stay unsupervised once its handler is
   gone. While a handler is alive it MUST keep a supervision lease on its session: the lease is
   stamped when the session's row is created, before the launch wait (`ccpool new --meta` writes the
   dispatch's metadata at row insert, not once the session is ready; the initial lease covers the

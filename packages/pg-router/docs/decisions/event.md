@@ -177,12 +177,12 @@ The behavior-doc side is `INV-EVT-1`'s "one sanctioned refusal at ingest" paragr
 
 **Decided** (bead `pg2-x3zkb`, 2026-10-14, by the implementing agent on the evidence of `pg2-b1srv`;
 the operator MAY overrule any point). The bead asks two things about a daemon restart that leaves a
-ccpool-backed dispatch running (this repo's ADR 0085: "the next daemon re-offers their events and
+session-backed dispatch running (this repo's ADR 0085: "the next daemon re-offers their events and
 adopts the sessions"): **(a)** who carries the dispatch's original start into the accept record and
 the metrics, and **(b)** whether the new daemon re-offers before its first producer tick, or at least
 reports in-flight truthfully from its first scrape. **(b) is decided and built in this change; (a) is
 decided and left as implementation slices**, because it crosses the wire contract, the core and the
-ccpool handler. Neither changes what `listener_in_flight`, `queue_wait` or `run` measure
+session-backed handler. Neither changes what `listener_in_flight`, `queue_wait` or `run` measure
 (`DEC-OBS-9`): (b) leaves the gauge an outstanding offer, and (a) makes an adopted dispatch measure the
 wait and run they already name.
 
@@ -242,7 +242,7 @@ flowchart LR
   end of the first producer tick; it reads 0 only for the boot and the hooks, and nothing at all for a
   scrape that lands before the queue is built (the "scrape before the queue exists" bullet below).
 - **Residual.** The hole is now the boot plus the `postStartup` hooks. Boot was measured at 6.25 s; the
-  hooks are not measured (the ccpool handler's own `postStartup` does no work beyond starting its
+  hooks are not measured (a session-backed handler's own `postStartup` does no work beyond starting its
   process, but a process start under a host load average of 195 is not free).
 - **A scrape before the queue exists is not a reading at all** (found while building (b), fixed by
   bead `pg2-nzkjl`, 2026-10-14). The daemon starts serving `/metrics` before it boots the core, and
@@ -292,12 +292,12 @@ flowchart LR
   gauge, and every series from the first collect after `bootCore` returns;
   `TestQueueReadyGatesEveryQueueBoundGauge` pins the option in `internal/metrics`.
 
-**(a) Decided and built, the core side (bead `pg2-dm6de`) and the ccpool handler's report (bead
+**(a) Decided and built, the core side (bead `pg2-dm6de`) and the session-backed handler's report (bead
 `pg2-m2x35`): the adopting handler reports the original start.**
 
 - A handler that adopts a session left running by an earlier daemon **MUST** be able to report the
   dispatch's original start in an **optional** `startedAt` field (RFC 3339, UTC) of its dispatch
-  reply, and the ccpool handler **SHOULD**: it already takes the session's recorded launch time
+  reply, and a session-backed handler **SHOULD**: it already takes the session's recorded launch time
   (`pgrouter.launched_at`) as the start of an adopted session's budget, so the same value is the start
   of the dispatch.
 - The core **MUST** use a reported start as the dispatch's start in the accept record's `startedAt`,
@@ -332,7 +332,7 @@ flowchart LR
   reported start and its `duration_ms` is the offer's start minus the reported start plus the offer's
   own run, which is `settle - reported start` and so what the `run` histogram holds. A failed dispatch
   ignores the field. `run-role`'s single-event path is not queue-driven and does not read it. Still
-  **Built in the ccpool handler (bead `pg2-m2x35`, 2026-10-14).** The executor's
+  **Built in the session-backed handler (bead `pg2-m2x35`, 2026-10-14).** The executor's
   adopt path returns the adopted session's `pgrouter.launched_at` as the dispatch result's start, and
   the `dispatch` subcommand writes it as the inline reply's `startedAt` (RFC 3339, UTC, second
   precision). A fresh session, and an adopted session that recorded no launch time (an older build),

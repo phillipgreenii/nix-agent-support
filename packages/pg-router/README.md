@@ -171,14 +171,21 @@ no config file is present, pg-router uses the **built-in feedback, worker, and
 review roles**. Run `pg-router config --print-defaults` to see the full
 schema and the canonical defaults, then copy it and edit.
 
-Roles and queries are typed tagged unions discriminated by a `type` field:
+A query is a tagged union discriminated by a `type` field; a role is not:
 
-- **role `type`**: `ccpool` (dispatch a Claude session) or `command` (run an
-  executable; completion = exit code). A non-zero exit fails the
+- **role**: declared once, with the **adapter** that runs it (`handler`, an absolute path to a
+  command the core invokes over the wire contract, `DEC-WIRE-1`), an optional `wrap` (an ordered
+  list of command prefixes that run the role's payload), an opaque `[role.config]` table and an
+  optional `survives_shutdown`. There is no role `type`: what kind of work a role does is its
+  adapter's business, and a new kind of runner is a new adapter with no change to pg-router
+  (`INV-ROLE-1`; the keys and the two dispatch paths are `DEC-ROLE-1`). For the command-style
+  adapter, completion = exit code: a non-zero exit fails the
   dispatch; the error (and so the `dispatch result` WARN line) ends with
   `: stderr tail: <text>` — the handler's last ~2 KiB of stderr, redacted,
   collapsed to one line (lines joined by `|`), and prefixed `...` when cut.
-  A successful run's stderr is never logged.
+  A successful run's stderr is never logged. A role that does not set `handler` is on the
+  **earlier path** while the migration lasts (`PG_ROUTER_HANDLER_COMMAND`, below); see
+  `MIGRATION.md`'s section on the handler split.
 - **query `type`**: `command` (run an executable that emits items as
   JSON/JSONL — an opaque token pg-router just invokes and never interprets, so
   this is how you wire pg-router to `bd`, `gh`, Jira, or anything else) or
@@ -199,16 +206,10 @@ Roles and queries are typed tagged unions discriminated by a `type` field:
   `failing ×N`/`stale <duration>` rendering every other source uses, no core
   or TUI change required.
 
-A `ccpool` role's behavior is set by code-owned enums: `completion`
-(`close-only` | `close-or-handback` | `close-or-triage` | `close-or-split-triage` |
-`close-or-release`; see ADR `docs/adr/0089-drain-roles-apply-the-shared-pb-drain-one-skill.md`
-for the last), `on_failure` (`unclaim` | `add-human`),
-`on_dispatch_fail` (`unclaim` | `leave`). When `authorship_guard = true`, pg-router
-prepends a **non-editable** safety preamble (assert author is me, branch starts
-with `phillipg.`, never force-push) ahead of the role's task prompt, so
-externalizing the prompt never weakens the guardrails. A role's prompt is inline
-(`prompt`) or an external file (`prompt_file`, resolved relative to the config
-dir) — exactly one.
+A role's own behavior (its completion policy, failure actions, prompt or argv, budgets and
+isolation) is **not** pg-router's: it lives in the role's `[role.config]` table, which pg-router
+carries to the role's adapter on every request and never reads (`INV-ROLE-2`). Each adapter's own
+behavior docs name its keys, so adding a key to a role never changes pg-router.
 
 > **Monorepo config hygiene:** add `.pg-router/` to your monorepo's
 > `.git/info/exclude` so a repo-local pg-router config (and its prompts) is never
@@ -239,18 +240,20 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PG_ROUTER_BUDGET_TOKENS` — per-worker token budget; 0 = unlimited (default 0)
 - `PG_ROUTER_BUDGET_COST` — per-worker cost budget in cents; 0 = unlimited (default 0)
 - `PG_ROUTER_BUDGET_TIME` — per-worker wall-clock budget in seconds (default 1500)
-- `PG_ROUTER_MODEL` — claude model override (default: ccpool's default)
+- `PG_ROUTER_MODEL` — claude model override (default: the handler's own default)
 - `PG_ROUTER_EFFORT` — claude `--effort` value (default `max`)
 - `PG_ROUTER_PERMISSION_MODE` — claude `--permission-mode` for workers (default `dontAsk`: deny-by-default; `bypassPermissions` is the opt-in escape)
 - `PG_ROUTER_ALLOWED_TOOLS` — claude `--allowed-tools` allowlist for workers (default: a conservative set; `git push` excluded. Empty clears the flag)
 - `PG_ROUTER_AUTONOMOUS` — block AskUserQuestion so human-less workers never stall on the picker (default `true`)
-- `PG_ROUTER_HANDLER_COMMAND` — the argv prefix invoked, over the wire (DEC-WIRE-1), for every
-  enabled role's registered handler participant (e.g. `pg-router-ccpool-handler`). No default —
+- `PG_ROUTER_HANDLER_COMMAND` — the **earlier path**: the argv prefix invoked, over the wire
+  (DEC-WIRE-1), for every enabled role that does **not** set `handler` (a role that sets it needs
+  neither this variable nor the next; `DEC-ROLE-1`). No default —
   GOAL-MIN-1's Floor keeps this binary's own contract surface from naming a concrete tool; an
   unconfigured deployment gets a clear per-dispatch error instead of a hardcoded participant name.
-- `PG_ROUTER_HANDLER_COMMAND_DIR` — a directory of per-role JSON files (`<role.Name>.json`) that
+- `PG_ROUTER_HANDLER_COMMAND_DIR` — the earlier path's per-role files: a directory of per-role JSON
+  files (`<role.Name>.json`) that
   lets differently-configured roles sharing one `PG_ROUTER_HANDLER_COMMAND` binary (e.g.
-  `feedback`/`worker`/`review`, each with its own ccpool actor/prompt) dispatch through their own
+  `feedback`/`worker`/`review`, each with its own actor and prompt) dispatch through their own
   participant config instead of all sharing the same one. When set, the resolved argv threads
   `--role-config <dir>/<role.Name>.json` onto the handler command; unset (the default), every
   enabled role resolves to the plain `PG_ROUTER_HANDLER_COMMAND` argv, unchanged from before this
@@ -487,12 +490,12 @@ records now; see `MIGRATION.md`.)
 `handlerCommand`/`handlerCommandDir` (plain strings, both `null` by default) set
 `PG_ROUTER_HANDLER_COMMAND`/`PG_ROUTER_HANDLER_COMMAND_DIR` for that unit — see this file's own
 env-var table above for their runtime contract. `handlerCommandDir` is typically pointed at
-`phillipgreenii.programs.pg-router-ccpool-handler`'s own `handlerCommandDir` output (that sibling
-home-manager module's new `roles` option — keyed by role name, shaped like
-`cmd/pg-router-ccpool-handler/roleconfig.go`'s `roleFile` — renders one JSON file per role and
+the handler participant's own home-manager module's `handlerCommandDir` output (that sibling
+module's `roles` option — keyed by role name — renders one JSON file per role and
 joins them into that directory); interpolate it to a string
-(`"${config.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir}"`), since this
-option takes a plain string, not a package. See `MIGRATION.md`'s "Multi-role dispatch
+(`"${config.phillipgreenii.programs.<handler module>.handlerCommandDir}"`), since this
+option takes a plain string, not a package. Both options serve the **earlier path** only
+(`DEC-ROLE-1`): a role that sets `handler` is configured in the pg-router module's own role entry. See `MIGRATION.md`'s "Multi-role dispatch
 differentiation" section for the full worked contract.
 
 `systemd.user.services`/`systemd.user.timers` are a **darwin no-op** (darwin has no systemd), so
