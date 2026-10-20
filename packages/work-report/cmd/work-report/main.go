@@ -85,32 +85,110 @@ func newRootCmd() *cobra.Command {
 	for _, newCmd := range ctors {
 		root.AddCommand(newCmd())
 	}
+	wireUsageErrors(root)
 	return root
 }
 
 // exitError makes a verb exit with a specific process status. A verb whose
 // output was already written (pull's degraded outcome, for one) returns it
 // with an empty msg, so main exits with code without printing anything more.
+// cause, when set, is what errors.Is and errors.As see through it.
 type exitError struct {
-	code int
-	msg  string
+	code  int
+	msg   string
+	cause error
 }
 
 func (e *exitError) Error() string { return e.msg }
+func (e *exitError) Unwrap() error { return e.cause }
+
+// usageError marks a mistake in how a verb was invoked (a flag, an argument or
+// a bad --range or --output value). report and config exit 2 for it; every
+// other verb keeps the generic 1 (ADR 0042).
+type usageError struct{ err error }
+
+func (e *usageError) Error() string { return e.err.Error() }
+func (e *usageError) Unwrap() error { return e.err }
+
+// usageErrorf builds a usageError from a format.
+func usageErrorf(format string, args ...any) error {
+	return &usageError{err: fmt.Errorf(format, args...)}
+}
+
+// asUsage marks err as a usage error; nil stays nil.
+func asUsage(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &usageError{err: err}
+}
+
+// exitCode maps the error a command returned to the process exit status: the
+// code of an exitError, 2 for a usageError, 1 for anything else (the generic
+// "unexpected" status).
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *exitError
+	if errors.As(err, &ee) {
+		return ee.code
+	}
+	var ue *usageError
+	if errors.As(err, &ue) {
+		return 2
+	}
+	return 1
+}
+
+// usageVerbs are the verbs whose flag and argument errors exit 2. pull keeps 1
+// because it already uses 2 for "some sources degraded", and a scheduled pull
+// with a bad flag must not read as degraded; errors at the root, outside any
+// verb, keep 1 too.
+var usageVerbs = map[string]bool{"report": true, "config": true}
+
+// wireUsageErrors makes the flag errors and the argument errors (cobra's Args
+// validation, including an unknown subcommand) of the usage verbs usage
+// errors. cobra looks the flag-error hook up through the parent chain, so the
+// verb's own subcommands inherit it; Args is per command, so it is wrapped on
+// the whole subtree.
+func wireUsageErrors(root *cobra.Command) {
+	for _, verb := range root.Commands() {
+		if !usageVerbs[verb.Name()] {
+			continue
+		}
+		verb.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return asUsage(err) })
+		wrapArgs(verb)
+	}
+}
+
+func wrapArgs(c *cobra.Command) {
+	orig := c.Args
+	if orig == nil {
+		// A command that only groups subcommands takes no argument of its
+		// own: an unknown subcommand is an argument error.
+		orig = cobra.NoArgs
+	}
+	c.Args = func(cmd *cobra.Command, args []string) error { return asUsage(orig(cmd, args)) }
+	for _, sub := range c.Commands() {
+		wrapArgs(sub)
+	}
+}
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	if err := newRootCmd().ExecuteContext(ctx); err != nil {
+		msg := err.Error()
 		var ee *exitError
 		if errors.As(err, &ee) {
-			if ee.msg != "" {
-				fmt.Fprintln(os.Stderr, ee.msg)
-			}
-			os.Exit(ee.code)
+			msg = ee.msg
 		}
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		if msg != "" {
+			fmt.Fprintln(os.Stderr, msg)
+		}
+		cancel()
+		os.Exit(exitCode(err))
 	}
 }

@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/runner"
 )
 
 // connectorBinary is the one external program work-report execs.
@@ -66,7 +69,7 @@ func newConfigPGRouterQueryCmd() *cobra.Command {
 			cfgPath, rawOut, _ := globalFlags(cmd)
 			format, err := outputFormat(rawOut)
 			if err != nil {
-				return err
+				return asUsage(err)
 			}
 			cfg, err := config.Load(cfgPath)
 			if err != nil {
@@ -212,7 +215,7 @@ func newConfigShowCmd() *cobra.Command {
 			cfgPath, rawOut, storeFlag := globalFlags(cmd)
 			format, err := outputFormat(rawOut)
 			if err != nil {
-				return err
+				return asUsage(err)
 			}
 			cfg, err := config.Load(cfgPath)
 			if err != nil {
@@ -309,79 +312,246 @@ func listText(l []string) string {
 
 // ---- config validate --------------------------------------------------------
 
+// The problem kinds config validate reports besides the ones config.Presets
+// emits (bad_name, bad_command, reserved_name, unknown_generator, bad_range,
+// bad_inputs, bad_output_dir, bad_field).
+const (
+	problemConfigParse    = "config_parse"
+	problemKindsRetired   = "kinds_retired"
+	problemNotFound       = "not_found"
+	problemConfigInvalid  = "config_invalid"
+	problemValidateFailed = "validate_failed"
+	problemDirDirty       = "validate_dir_dirty"
+)
+
+// validateProblemJSON is one problem; Preset is null for a problem not tied to
+// a preset (a config that does not load, a bad generator entry).
+type validateProblemJSON struct {
+	Preset *string `json:"preset"`
+	Kind   string  `json:"kind"`
+	Reason string  `json:"reason"`
+}
+
 type validateJSON struct {
-	OK          bool   `json:"ok"`
-	Error       string `json:"error,omitempty"`
-	ConnectorAt string `json:"pg_connector_path,omitempty"`
-	ExitCode    int    `json:"pg_connector_exit_code"`
-	Output      string `json:"pg_connector_output,omitempty"`
+	OK          bool                  `json:"ok"`
+	Error       string                `json:"error,omitempty"`
+	ConnectorAt string                `json:"pg_connector_path,omitempty"`
+	ExitCode    int                   `json:"pg_connector_exit_code"`
+	Output      string                `json:"pg_connector_output,omitempty"`
+	Problems    []validateProblemJSON `json:"problems"`
+	Warnings    []string              `json:"warnings"`
 }
 
 func newConfigValidateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "validate",
-		Short: "Check the config file and that pg-connector is usable",
-		Long: "Loads and checks the work-report config, confirms pg-connector is on PATH, " +
-			"and runs `pg-connector config validate` for the activity sources.",
+		Short: "Check the config file, the report generators and that pg-connector is usable",
+		Long: "Loads and checks the work-report config, applies the semantic checks of the generators " +
+			"and reports sections, runs every preset's generator in validate mode (one after another, " +
+			"each in a fresh empty temporary directory, under the same environment allowlist as a " +
+			"real run), confirms pg-connector is on PATH and runs `pg-connector config validate` for " +
+			"the activity sources. Every problem is printed, not the first; any problem exits 3.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfgPath, rawOut, _ := globalFlags(cmd)
 			format, err := outputFormat(rawOut)
 			if err != nil {
-				return err
+				return asUsage(err)
 			}
 			res, runErr := validate(cmd, cfgPath)
 			if format == "json" {
 				if err := writeJSON(cmd.OutOrStdout(), res); err != nil {
 					return err
 				}
-			} else if runErr == nil {
-				fmt.Fprintf(cmd.OutOrStdout(), "config ok; %s config validate:\n%s", connectorBinary, res.Output)
+				return runErr
+			}
+			out := cmd.OutOrStdout()
+			for _, p := range res.Problems {
+				name := p.Kind
+				if p.Preset != nil {
+					name = *p.Preset
+				}
+				fmt.Fprintf(out, "%s: %s\n", name, p.Reason)
+			}
+			for _, w := range res.Warnings {
+				fmt.Fprintf(out, "warning: %s\n", w)
+			}
+			if runErr == nil {
+				fmt.Fprintf(out, "config ok; %s config validate:\n%s", connectorBinary, res.Output)
 				if res.Output != "" && !strings.HasSuffix(res.Output, "\n") {
-					fmt.Fprintln(cmd.OutOrStdout())
+					fmt.Fprintln(out)
 				}
 			} else if res.Output != "" {
-				fmt.Fprint(cmd.OutOrStdout(), res.Output)
+				fmt.Fprint(out, res.Output)
 			}
 			return runErr
 		},
 	}
 }
 
-// validate loads the config, finds pg-connector on PATH and runs its
-// `config validate`. A non-nil error means validation failed; the returned
-// result is populated as far as the run got.
+func presetPtr(name string) *string {
+	if name == "" {
+		return nil
+	}
+	return &name
+}
+
+// validate loads the config, applies the generators and reports checks, runs
+// validate mode for every preset, finds pg-connector on PATH and runs its
+// `config validate`. A non-nil error means validation failed (an exitError
+// with status 3); the returned result is populated as far as the run got.
 func validate(cmd *cobra.Command, cfgPath string) (validateJSON, error) {
-	var res validateJSON
-	fail := func(err error) (validateJSON, error) {
-		res.Error = err.Error()
-		return res, err
-	}
+	res := validateJSON{Problems: []validateProblemJSON{}, Warnings: []string{}}
 
-	if _, err := config.Load(cfgPath); err != nil {
-		return fail(err)
-	}
-
-	path, err := exec.LookPath(connectorBinary)
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		return fail(fmt.Errorf("%s not found on PATH: %w", connectorBinary, err))
+		kind := problemConfigParse
+		if errors.Is(err, config.ErrKindsRetired) {
+			kind = problemKindsRetired
+		}
+		res.Problems = append(res.Problems, validateProblemJSON{Kind: kind, Reason: err.Error()})
+		res.Error = err.Error()
+		return res, &exitError{code: 3, msg: err.Error(), cause: err}
 	}
-	res.ConnectorAt = path
 
-	var out bytes.Buffer
-	c := exec.CommandContext(cmd.Context(), path, "config", "validate")
-	c.Stdout = &out
-	c.Stderr = &out
-	runErr := c.Run()
-	res.Output = out.String()
-	if runErr == nil {
+	set := config.Presets(cfg)
+	for _, p := range set.Problems {
+		res.Problems = append(res.Problems, validateProblemJSON{Preset: presetPtr(p.Preset), Kind: p.Kind, Reason: p.Message})
+	}
+	validatePresets(cmd.Context(), set, &res)
+
+	failure := ""
+	path, err := exec.LookPath(connectorBinary)
+	switch {
+	case err != nil:
+		failure = fmt.Sprintf("%s not found on PATH: %v", connectorBinary, err)
+	default:
+		res.ConnectorAt = path
+		var out bytes.Buffer
+		c := exec.CommandContext(cmd.Context(), path, "config", "validate")
+		c.Stdout = &out
+		c.Stderr = &out
+		runErr := c.Run()
+		res.Output = out.String()
+		var exitErr *exec.ExitError
+		switch {
+		case runErr == nil:
+		case errors.As(runErr, &exitErr):
+			res.ExitCode = exitErr.ExitCode()
+			failure = fmt.Sprintf("%s config validate failed (exit %d)", connectorBinary, res.ExitCode)
+		default:
+			failure = fmt.Sprintf("run %s config validate: %v", connectorBinary, runErr)
+		}
+	}
+
+	if failure == "" && len(res.Problems) == 0 {
 		res.OK = true
 		return res, nil
 	}
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
-		res.ExitCode = exitErr.ExitCode()
-		return fail(fmt.Errorf("%s config validate failed (exit %d)", connectorBinary, res.ExitCode))
+	msg := failure
+	if msg == "" {
+		msg = fmt.Sprintf("config validate: %d %s found", len(res.Problems), plural(len(res.Problems), "problem", "problems"))
 	}
-	return fail(fmt.Errorf("run %s config validate: %w", connectorBinary, runErr))
+	res.Error = msg
+	return res, &exitError{code: 3, msg: msg}
+}
+
+// validatePresets runs validate mode for every preset that has an external
+// generator, in name order (the order Presets itself uses), and adds a warning
+// for each generator no preset references whose executable cannot be found.
+func validatePresets(ctx context.Context, set config.PresetSet, res *validateJSON) {
+	rn := runner.New(Version)
+	referenced := map[string]bool{}
+	for _, name := range sortedKeys(set.Presets) {
+		p := set.Presets[name]
+		referenced[p.Generator] = true
+		g := set.Generators[p.Generator]
+		if p.Builtin || g.Builtin {
+			continue
+		}
+		res.Problems = append(res.Problems, validateOne(ctx, rn, p, g)...)
+	}
+	for _, name := range sortedKeys(set.Generators) {
+		g := set.Generators[name]
+		if g.Builtin || referenced[name] || len(g.Command) == 0 {
+			continue
+		}
+		if !resolvable(g.Command[0]) {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("generator %q: no preset references it and its executable %q cannot be found", name, g.Command[0]))
+		}
+	}
+}
+
+// resolvable reports whether argv0 names an executable: a bare name is looked
+// up on PATH, anything with a slash is checked where it is.
+func resolvable(argv0 string) bool {
+	if !strings.Contains(argv0, "/") {
+		_, err := exec.LookPath(argv0)
+		return err == nil
+	}
+	fi, err := os.Stat(argv0)
+	return err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0
+}
+
+// validateOne runs the generator of preset p in validate mode: stdin is
+// { "contract_version": 1, "mode": "validate", "config": ... }, the working
+// directory a fresh empty temporary directory that must still be empty
+// afterwards, and the environment the same allowlist a real run gets.
+func validateOne(ctx context.Context, rn *runner.Runner, p config.Preset, g config.Generator) []validateProblemJSON {
+	problem := func(kind, format string, args ...any) validateProblemJSON {
+		return validateProblemJSON{Preset: presetPtr(p.Name), Kind: kind, Reason: fmt.Sprintf(format, args...)}
+	}
+	dir, err := os.MkdirTemp("", "work-report-validate-")
+	if err != nil {
+		return []validateProblemJSON{problem(problemValidateFailed, "generator %q: cannot create the validate-mode directory: %v", g.Name, err)}
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	stdin, err := json.Marshal(map[string]any{"contract_version": runner.ContractVersion, "mode": runner.ModeValidate, "config": p.Config})
+	if err != nil {
+		return []validateProblemJSON{problem(problemValidateFailed, "generator %q: its config cannot be encoded: %v", g.Name, err)}
+	}
+	r := rn.Exec(ctx, runner.ExecSpec{Argv: g.Command, Dir: dir, Env: rn.Environ(g, runner.ModeValidate), Stdin: stdin, Timeout: g.Timeout})
+
+	var out []validateProblemJSON
+	switch {
+	case r.StartErr != nil && r.NotFound:
+		return []validateProblemJSON{problem(problemNotFound, "generator %q: command %q not found", g.Name, g.Command[0])}
+	case r.StartErr != nil:
+		return []validateProblemJSON{problem(problemValidateFailed, "generator %q could not start: %v", g.Name, r.StartErr)}
+	case r.TimedOut:
+		out = append(out, problem(problemValidateFailed, "generator %q did not finish validate mode within its timeout of %s", g.Name, durationText(g.Timeout)))
+	case r.Cancelled:
+		out = append(out, problem(problemValidateFailed, "generator %q: validate mode was cancelled", g.Name))
+	case r.ExitCode == nil:
+		out = append(out, problem(problemValidateFailed, "generator %q was terminated by %s in validate mode", g.Name, r.Signal))
+	case *r.ExitCode == 3:
+		out = append(out, problem(problemConfigInvalid, "generator %q config invalid: %s", g.Name, reasons(r.Stderr)))
+	case *r.ExitCode != 0:
+		out = append(out, problem(problemValidateFailed, "generator %q exited with status %d in validate mode: %s", g.Name, *r.ExitCode, reasons(r.Stderr)))
+	}
+	if left, err := os.ReadDir(dir); err != nil {
+		out = append(out, problem(problemDirDirty, "generator %q: the validate-mode directory cannot be read afterwards: %v", g.Name, err))
+	} else if len(left) > 0 {
+		names := make([]string, 0, len(left))
+		for _, e := range left {
+			names = append(names, e.Name())
+		}
+		out = append(out, problem(problemDirDirty, "generator %q wrote %s in validate mode, which must not write files", g.Name, strings.Join(names, ", ")))
+	}
+	return out
+}
+
+// reasons turns a generator's stderr, one reason per line, into one line.
+func reasons(stderr string) string {
+	var parts []string
+	for _, l := range strings.Split(stderr, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			parts = append(parts, l)
+		}
+	}
+	if len(parts) == 0 {
+		return "(no reason given on stderr)"
+	}
+	return strings.Join(parts, "; ")
 }

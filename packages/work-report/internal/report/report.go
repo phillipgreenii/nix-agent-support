@@ -24,6 +24,9 @@ type SourceFooter struct {
 	Source        string
 	Count         int
 	LastSuccessAt time.Time // zero = no successful pull yet
+	// LastOutcome is the source's last pull status as the store records it
+	// (succeeded, degraded or disabled); empty when it never pulled.
+	LastOutcome string
 }
 
 // Request is everything a generator receives. Entries are already queried and

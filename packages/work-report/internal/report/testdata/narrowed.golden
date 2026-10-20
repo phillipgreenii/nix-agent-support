@@ -1,7 +1,7 @@
 # Work report
 
 - Range: 2026-03-01 00:00 to 2026-03-03 00:00 UTC
-- Kind: baseline
+- Generator: baseline
 - Narrowing: labels=alpha; sources=backend-one; types=change,review
 
 ## 2026-03-01

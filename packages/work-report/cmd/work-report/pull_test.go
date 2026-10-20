@@ -39,7 +39,7 @@ func fixedNow(t *testing.T) {
 	t.Cleanup(func() { pullNow = old })
 }
 
-func exitCode(t *testing.T, err error) int {
+func exitStatus(t *testing.T, err error) int {
 	t.Helper()
 	if err == nil {
 		return 0
@@ -76,7 +76,7 @@ func TestPullJSONOutputAndExitCode(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "s.db")
 
 	out, err := runCLI(t, "--store", db, "--output", "json", "pull", "--range", "yesterday")
-	if code := exitCode(t, err); code != 2 {
+	if code := exitStatus(t, err); code != 2 {
 		t.Errorf("exit code = %d; want 2 (one degraded source), computed from our rows", code)
 	}
 	var got struct {
@@ -115,7 +115,7 @@ func TestPullHumanOutputIsDefault(t *testing.T) {
 	fixedNow(t)
 	fake.Install(t, fake.Route{Match: []string{"activity"}, Stdout: pullDoc})
 	out, err := runCLI(t, "--store", filepath.Join(t.TempDir(), "s.db"), "pull")
-	if exitCode(t, err) != 2 {
+	if exitStatus(t, err) != 2 {
 		t.Errorf("err = %v", err)
 	}
 	for _, want := range []string{"backend-ok: succeeded (1 stored, 0 unchanged, 1 rejected)", "backend-slow: degraded", "upstream timed out"} {
@@ -155,7 +155,7 @@ func TestPullSourceFlagRepeatsAndAllOmitsSince(t *testing.T) {
 	rec := fake.Install(t, fake.Route{Match: []string{"activity"}, Stdout: `{"sources":[],"items":[]}`})
 	_, err := runCLI(t, "--store", filepath.Join(t.TempDir(), "s.db"), "--output", "json",
 		"pull", "--range", "all", "--source", "backend-a", "--source", "backend-b")
-	if exitCode(t, err) != 3 { // neither pinned source got a row: both degraded
+	if exitStatus(t, err) != 3 { // neither pinned source got a row: both degraded
 		t.Errorf("err = %v", err)
 	}
 	var backends []string
@@ -207,7 +207,7 @@ func TestPullAbsentConnector(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	db := filepath.Join(t.TempDir(), "s.db")
 	out, err := runCLI(t, "--store", db, "--output", "json", "pull", "--range", "yesterday")
-	if exitCode(t, err) != 3 {
+	if exitStatus(t, err) != 3 {
 		t.Errorf("err = %v; want exit 3", err)
 	}
 	if !strings.Contains(out, "could not be run") || !strings.Contains(out, `"source": "pg-connector"`) {
@@ -223,7 +223,7 @@ func TestPullCrashedConnector(t *testing.T) {
 	fixedNow(t)
 	fake.Install(t, fake.Route{Match: []string{"activity"}, Stdout: "", Exit: 1})
 	out, err := runCLI(t, "--store", filepath.Join(t.TempDir(), "s.db"), "--output", "json", "pull")
-	if exitCode(t, err) != 3 || !strings.Contains(out, "exited 1") {
+	if exitStatus(t, err) != 3 || !strings.Contains(out, "exited 1") {
 		t.Errorf("err=%v out=%s", err, out)
 	}
 }
@@ -248,7 +248,7 @@ func TestPullStoreLockedAtOpen(t *testing.T) {
 	t.Cleanup(func() { _ = tx.Rollback(); _ = lock.Close() })
 
 	out, err := runCLI(t, "--store", db, "--output", "json", "pull") // waits out the busy timeout
-	if exitCode(t, err) != 3 || !strings.Contains(out, "store locked") {
+	if exitStatus(t, err) != 3 || !strings.Contains(out, "store locked") {
 		t.Errorf("err=%v out=%s", err, out)
 	}
 	if len(rec.Calls()) != 0 {
@@ -408,7 +408,7 @@ func TestPullPGRouterCrashedConnectorExitsNonZeroAndTouchesNoTracker(t *testing.
 	fixedNow(t)
 	rec := fake.Install(t, fake.Route{Match: []string{"activity"}, Stdout: "", Exit: 1})
 	out, err := runCLI(t, "--store", filepath.Join(t.TempDir(), "s.db"), "--output", "pg-router", "pull")
-	if exitCode(t, err) == 0 {
+	if exitStatus(t, err) == 0 {
 		t.Error("a pg-connector that crashes with no JSON must make pg-router mode exit non-zero")
 	}
 	if strings.TrimSpace(out) != "[]" {
@@ -426,7 +426,7 @@ func TestPullPGRouterAbsentConnectorExitsNonZero(t *testing.T) {
 	fixedNow(t)
 	t.Setenv("PATH", t.TempDir())
 	_, err := runCLI(t, "--store", filepath.Join(t.TempDir(), "s.db"), "--output", "pg-router", "pull")
-	if exitCode(t, err) == 0 {
+	if exitStatus(t, err) == 0 {
 		t.Error("an absent pg-connector must make pg-router mode exit non-zero")
 	}
 }
@@ -450,7 +450,7 @@ func TestPullPGRouterStoreLockedExitsNonZero(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = tx.Rollback(); _ = lock.Close() })
 
-	if _, err := runCLI(t, "--store", db, "--output", "pg-router", "pull"); exitCode(t, err) == 0 {
+	if _, err := runCLI(t, "--store", db, "--output", "pg-router", "pull"); exitStatus(t, err) == 0 {
 		t.Error("a store that stays locked must make pg-router mode exit non-zero")
 	}
 	for _, c := range rec.Calls() {
@@ -489,7 +489,7 @@ func TestPullReconcilesInEveryOutputMode(t *testing.T) {
 			)
 			out, err := runCLI(t, "--store", filepath.Join(t.TempDir(), "s.db"), "--output", mode,
 				"pull", "--range", "last-48h", "--source", "backend-slow")
-			if got := exitCode(t, err); got != 3 {
+			if got := exitStatus(t, err); got != 3 {
 				t.Errorf("exit = %d; the degraded exit scheme must be unchanged outside pg-router mode", got)
 			}
 			if strings.Contains(out, "bd-7") {

@@ -62,22 +62,35 @@ func oneLine(s string) string {
 }
 
 func (baseline) Generate(_ context.Context, r Request) (Result, error) {
-	loc := r.Range.Before.Location()
-	rng := FormatRange(r.Range)
+	return Result{Content: Baseline(r)}, nil
+}
 
-	var b strings.Builder
-	b.WriteString("# Work report\n\n")
-	fmt.Fprintf(&b, "- Range: %s\n", rng)
-	fmt.Fprintf(&b, "- Kind: %s\n", BaselineKind)
-	fmt.Fprintf(&b, "- Narrowing: %s\n", FormatNarrowing(r.Narrowing))
-
-	entries := append([]store.Entry(nil), r.Entries...)
+// SortBaselineOrder sorts entries into the baseline order: by occurrence time,
+// then id. It is the order generators receive entries in.
+func SortBaselineOrder(entries []store.Entry) {
 	sort.SliceStable(entries, func(i, j int) bool {
 		if !entries[i].OccurredAt.Equal(entries[j].OccurredAt) {
 			return entries[i].OccurredAt.Before(entries[j].OccurredAt)
 		}
 		return entries[i].ID < entries[j].ID
 	})
+}
+
+// Baseline renders r as the built-in baseline text. The report command
+// writes it to baseline.md and sends it to generators that ask for the
+// baseline input.
+func Baseline(r Request) string {
+	loc := r.Range.Before.Location()
+	rng := FormatRange(r.Range)
+
+	var b strings.Builder
+	b.WriteString("# Work report\n\n")
+	fmt.Fprintf(&b, "- Range: %s\n", rng)
+	fmt.Fprintf(&b, "- Generator: %s\n", BaselineKind)
+	fmt.Fprintf(&b, "- Narrowing: %s\n", FormatNarrowing(r.Narrowing))
+
+	entries := append([]store.Entry(nil), r.Entries...)
+	SortBaselineOrder(entries)
 
 	if len(entries) == 0 {
 		fmt.Fprintf(&b, "\nNo entries for %s.\n", rng)
@@ -101,7 +114,7 @@ func (baseline) Generate(_ context.Context, r Request) (Result, error) {
 	}
 
 	writeFooter(&b, entries, r.Footer, loc)
-	return Result{Content: b.String()}, nil
+	return b.String()
 }
 
 // writeFooter lists every source named by the request footer or appearing in

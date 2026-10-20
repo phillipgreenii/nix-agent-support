@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -469,13 +470,16 @@ func TestConfigValidateJSONShape(t *testing.T) {
 		ConnectorAt string `json:"pg_connector_path"`
 		ExitCode    int    `json:"pg_connector_exit_code"`
 		Output      string `json:"pg_connector_output"`
+		Problems    []any  `json:"problems"`
+		Warnings    []any  `json:"warnings"`
 	}
 	dec := json.NewDecoder(strings.NewReader(out))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&got); err != nil {
 		t.Fatalf("shape: %v\n%s", err, out)
 	}
-	if !got.OK || got.ExitCode != 0 || !strings.Contains(got.Output, "fine") || !strings.HasSuffix(got.ConnectorAt, "pg-connector") {
+	if !got.OK || got.ExitCode != 0 || !strings.Contains(got.Output, "fine") || !strings.HasSuffix(got.ConnectorAt, "pg-connector") ||
+		got.Problems == nil || len(got.Problems) != 0 || got.Warnings == nil || len(got.Warnings) != 0 {
 		t.Errorf("got %+v", got)
 	}
 }
@@ -487,6 +491,9 @@ func TestConfigValidatePGConnectorMissing(t *testing.T) {
 	_, err := runCLI(t, "config", "validate")
 	if err == nil {
 		t.Fatal("validate must fail when pg-connector is not on PATH")
+	}
+	if exitCode(err) != 3 {
+		t.Errorf("a pg-connector failure exits 3, got %d", exitCode(err))
 	}
 	if !strings.Contains(err.Error(), "pg-connector") {
 		t.Errorf("error %q must name the missing binary", err)
@@ -516,6 +523,9 @@ func TestConfigValidatePGConnectorFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("validate must fail when pg-connector config validate exits non-zero")
 	}
+	if exitCode(err) != 3 {
+		t.Errorf("a pg-connector failure exits 3, got %d", exitCode(err))
+	}
 	if !strings.Contains(err.Error(), "exit 3") {
 		t.Errorf("error %q must carry the exit code", err)
 	}
@@ -532,7 +542,236 @@ func TestConfigValidateChecksConfigFirst(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "schedule.window") {
 		t.Errorf("err = %v, want the invalid window", err)
 	}
+	if exitCode(err) != 3 {
+		t.Errorf("a config that fails to load exits 3 in validate, got %d", exitCode(err))
+	}
 	if _, statErr := os.Stat(argv); statErr == nil {
 		t.Error("pg-connector must not run when the config itself is invalid")
+	}
+}
+
+// ---- validate mode ----------------------------------------------------------
+
+// validateFixture is a fake pg-connector that passes, plus the fake generator.
+func validateFixture(t *testing.T) *reportFixture {
+	t.Helper()
+	f := newReportFixture(t)
+	fakeConnector(t, "all sources ok", 0)
+	return f
+}
+
+type validateOut struct {
+	OK       bool   `json:"ok"`
+	Error    string `json:"error"`
+	Problems []struct {
+		Preset *string `json:"preset"`
+		Kind   string  `json:"kind"`
+		Reason string  `json:"reason"`
+	} `json:"problems"`
+	Warnings []string `json:"warnings"`
+}
+
+func runValidateJSON(t *testing.T, f *reportFixture, body string) (validateOut, string, error) {
+	t.Helper()
+	out, _, err := f.run(body, "--output", "json", "config", "validate")
+	var v validateOut
+	if jerr := json.Unmarshal([]byte(out), &v); jerr != nil {
+		t.Fatalf("stdout is not the validate JSON: %v\n%s", jerr, out)
+	}
+	return v, out, err
+}
+
+func problemFor(v validateOut, preset string) (kind, reason string, ok bool) {
+	for _, p := range v.Problems {
+		if p.Preset != nil && *p.Preset == preset {
+			return p.Kind, p.Reason, true
+		}
+	}
+	return "", "", false
+}
+
+// config validate runs validate mode for each preset in turn, attributes
+// every problem to its preset, prints all of them and exits 3.
+func TestConfigValidateAttributesEachProblemToItsPreset(t *testing.T) {
+	f := validateFixture(t)
+	body := f.generators("") +
+		"  slow:\n    command: [" + fmt.Sprintf("%q", f.exe) + "]\n    timeout: 1s\n    env: [" + envFakeGen + "]\n" +
+		"  ghost:\n    command: [/nonexistent/ghost-generator]\n" +
+		"  lonely:\n    command: [/nonexistent/lonely-generator]\n" +
+		"reports:\n" +
+		"  good:\n    generator: fake\n    config: {fake: ok}\n" +
+		"  rejecting:\n    generator: fake\n    config: {fake: reject}\n" +
+		"  crashing:\n    generator: fake\n    config: {fake: crash}\n" +
+		"  dirty:\n    generator: fake\n    config: {fake: dirty}\n" +
+		"  hanging:\n    generator: slow\n    config: {fake: hang}\n" +
+		"  missing:\n    generator: ghost\n" +
+		"  badrange:\n    generator: fake\n    range: nonsense\n"
+	v, _, err := runValidateJSON(t, f, body)
+	if exitCode(err) != 3 {
+		t.Fatalf("exit %d (%v), want 3", exitCode(err), err)
+	}
+	if v.OK {
+		t.Error("ok must be false")
+	}
+	want := map[string]string{
+		"rejecting": "config_invalid",
+		"crashing":  "validate_failed",
+		"dirty":     "validate_dir_dirty",
+		"hanging":   "validate_failed",
+		"missing":   "not_found",
+		"badrange":  "bad_range",
+	}
+	for preset, kind := range want {
+		got, reason, ok := problemFor(v, preset)
+		if !ok || got != kind {
+			t.Errorf("preset %s: problem kind %q (found %v), want %s; all: %+v", preset, got, ok, kind, v.Problems)
+		}
+		if reason == "" {
+			t.Errorf("preset %s: empty reason", preset)
+		}
+	}
+	if _, _, ok := problemFor(v, "good"); ok {
+		t.Errorf("a valid preset has no problem: %+v", v.Problems)
+	}
+	if len(v.Problems) != len(want) {
+		t.Errorf("%d problems, want %d (every problem, once): %+v", len(v.Problems), len(want), v.Problems)
+	}
+	_, reason, _ := problemFor(v, "rejecting")
+	mustContain(t, "config_invalid reason", reason, `generator "fake" config invalid`, "promptFile: cannot read /nonexistent/addendum.txt", "model: unknown")
+	if len(v.Warnings) != 1 || !strings.Contains(v.Warnings[0], "lonely") {
+		t.Errorf("warnings = %v, want the unreferenced generator with a missing executable", v.Warnings)
+	}
+
+	// The human form prints every problem, led by the preset, example style.
+	out, _, err := f.run(body, "config", "validate")
+	if exitCode(err) != 3 {
+		t.Fatalf("human: exit %d (%v), want 3", exitCode(err), err)
+	}
+	mustContain(t, "human output", out, `rejecting: generator "fake" config invalid: promptFile: cannot read /nonexistent/addendum.txt`,
+		"crashing:", "dirty:", "hanging:", "missing:", "badrange:", "warning: generator \"lonely\"")
+}
+
+// The unreferenced generator check is only for a missing executable: one that
+// exists is not reported, and a referenced one is validated, not warned about.
+func TestConfigValidateOKWithUnreferencedExistingGenerator(t *testing.T) {
+	f := validateFixture(t)
+	body := f.generators("") + "reports:\n  p:\n    generator: fake\n    config: {fake: ok}\n"
+	v, _, err := runValidateJSON(t, f, body)
+	if err != nil || !v.OK || len(v.Problems) != 0 || len(v.Warnings) != 0 {
+		t.Fatalf("err=%v v=%+v", err, v)
+	}
+	// With no preset referencing it, an existing executable gives no warning.
+	v, _, err = runValidateJSON(t, f, f.generators(""))
+	if err != nil || !v.OK || len(v.Warnings) != 0 {
+		t.Fatalf("unreferenced existing generator: err=%v v=%+v", err, v)
+	}
+}
+
+// Validate mode runs under the allowlisted environment of a real run, in a
+// fresh empty temporary directory, with the validate-mode envelope.
+func TestConfigValidateRunsUnderTheRealEnvironmentAllowlist(t *testing.T) {
+	f := validateFixture(t)
+	dump := filepath.Join(t.TempDir(), "dump.json")
+	t.Setenv(envDump, dump)
+	t.Setenv("WR_NOT_ON_THE_ALLOWLIST", "secret")
+	body := f.generators("") + "reports:\n  p:\n    generator: fake\n    config: {fake: ok, model: m}\n"
+	if _, _, err := f.run(body, "config", "validate"); err != nil {
+		t.Fatal(err)
+	}
+	d := readDump(t, dump)
+	env := strings.Join(d.Env, "\n")
+	mustContain(t, "generator environment", env, "WORK_REPORT_MODE=validate", "WORK_REPORT_CONTRACT=1", envFakeGen+"=1")
+	if strings.Contains(env, "WR_NOT_ON_THE_ALLOWLIST") {
+		t.Errorf("a variable outside the allowlist reached the generator:\n%s", env)
+	}
+	if d.Envelope["mode"] != "validate" || d.Envelope["contract_version"].(float64) != 1 {
+		t.Errorf("envelope = %v", d.Envelope)
+	}
+	if cfg := d.Envelope["config"].(map[string]any); cfg["model"] != "m" {
+		t.Errorf("envelope config = %v", cfg)
+	}
+	if _, has := d.Envelope["entries"]; has {
+		t.Error("validate mode sends no entries")
+	}
+	if _, err := os.Stat(d.Cwd); !os.IsNotExist(err) {
+		t.Errorf("the validate-mode directory %s must be removed afterwards (%v)", d.Cwd, err)
+	}
+	if d.Cwd == "" || strings.Contains(d.Cwd, "reports") {
+		t.Errorf("validate mode cwd = %q, want a fresh temporary directory", d.Cwd)
+	}
+}
+
+// A config that fails to load (parse error or the retired kinds key) is a
+// problem too: exit 3, preset null, and pg-connector is not run.
+func TestConfigValidateConfigThatDoesNotLoad(t *testing.T) {
+	cases := []struct {
+		name, body, kind string
+	}{
+		{"unknown key", "bogus: true\n", "config_parse"},
+		{"bad window", "schedule:\n  window: 90m\n", "config_parse"},
+		{"kinds key", "kinds:\n  narrative:\n    model: m\n", "kinds_retired"},
+		{"empty kinds key", "kinds:\n", "kinds_retired"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolate(t)
+			argv := fakeConnector(t, "", 0)
+			cfg := writeCfg(t, tc.body)
+			out, err := runCLI(t, "--config", cfg, "--output", "json", "config", "validate")
+			if exitCode(err) != 3 {
+				t.Fatalf("exit %d (%v), want 3", exitCode(err), err)
+			}
+			var v validateOut
+			if jerr := json.Unmarshal([]byte(out), &v); jerr != nil {
+				t.Fatalf("not JSON: %v\n%s", jerr, out)
+			}
+			if len(v.Problems) != 1 || v.Problems[0].Kind != tc.kind || v.Problems[0].Preset != nil {
+				t.Fatalf("problems = %+v, want one %s with a null preset", v.Problems, tc.kind)
+			}
+			if tc.kind == "kinds_retired" {
+				mustContain(t, "kinds_retired reason", v.Problems[0].Reason, "reports.<name>.generator: narrative", "reports.<name>.config.promptFile")
+				if !errors.Is(err, config.ErrKindsRetired) {
+					t.Errorf("err = %v, want ErrKindsRetired", err)
+				}
+			}
+			if _, statErr := os.Stat(argv); statErr == nil {
+				t.Error("pg-connector must not run when the config does not load")
+			}
+		})
+	}
+}
+
+// Every problem is reported, generator entries and presets alike, and the
+// pg-connector failure is reported with them.
+func TestConfigValidateReportsEveryProblemAndTheConnector(t *testing.T) {
+	isolate(t)
+	fakeConnector(t, "backend x: not ok", 3)
+	cfg := writeCfg(t, "generators:\n  a:\n    command: []\n  b:\n    timeout: soon\nreports:\n  p:\n    generator: nosuch\n  q:\n    generator: baseline\n    range: nonsense\n")
+	out, err := runCLI(t, "--config", cfg, "--output", "json", "config", "validate")
+	if exitCode(err) != 3 {
+		t.Fatalf("exit %d (%v), want 3", exitCode(err), err)
+	}
+	var v struct {
+		validateOut
+		ConnectorOutput string `json:"pg_connector_output"`
+		ConnectorExit   int    `json:"pg_connector_exit_code"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &v); jerr != nil {
+		t.Fatal(jerr)
+	}
+	kinds := map[string]bool{}
+	for _, p := range v.Problems {
+		kinds[p.Kind] = true
+		if p.Preset == nil && (p.Kind == "unknown_generator" || p.Kind == "bad_range") {
+			t.Errorf("a preset problem must name its preset: %+v", p)
+		}
+	}
+	for _, k := range []string{"bad_command", "bad_field", "unknown_generator", "bad_range"} {
+		if !kinds[k] {
+			t.Errorf("problems lack kind %s: %+v", k, v.Problems)
+		}
+	}
+	if v.ConnectorExit != 3 || !strings.Contains(v.ConnectorOutput, "backend x: not ok") {
+		t.Errorf("the pg-connector result is reported alongside: %+v", v)
 	}
 }
