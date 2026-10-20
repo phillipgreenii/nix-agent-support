@@ -63,7 +63,25 @@ type DaemonSample struct {
 	Restarts   int    `json:"restarts"`
 }
 
-// Item is one change record the shadow reported, one per envelope record.
+// Item origins written by the daemon change-feed collector: the instance the
+// row came from. (A recovered row of the old pg-desk store carries that store's
+// own origin word instead.)
+const (
+	// OriginDaemonFeed marks an item read from the pr instance's change feed.
+	OriginDaemonFeed = "daemon-feed"
+	// OriginDaemonCIFeed marks an item read from the ci instance's change feed.
+	OriginDaemonCIFeed = "daemon-ci-feed"
+)
+
+// Item is one change record the shadow reported, one per feed row.
+//
+// For a feed row: EntityID is the pr's reference (the ci instance's pr_id),
+// Kinds and Seq are the row's own, Fields are the names of the row's fields
+// entries, UpdatedAt is the pr entity's updated_at (empty for a ci row), At is
+// the time the shadow first observed the row (the start of the poll that
+// returned it: the wire row carries no detection time), CIRollup is the ci
+// entity's rollup, and Replay marks a row delivered by a reset re-poll after a
+// cursor_expired answer, which a report MUST NOT count as a detection.
 type Item struct {
 	EntityID  string   `json:"entity_id"`
 	Kinds     []string `json:"kinds"`
@@ -72,6 +90,8 @@ type Item struct {
 	At        string   `json:"at"`
 	Fields    []string `json:"fields,omitempty"`
 	UpdatedAt string   `json:"updated_at,omitempty"`
+	CIRollup  string   `json:"ci_rollup,omitempty"`
+	Replay    bool     `json:"replay,omitempty"`
 }
 
 // Source is one consulted watched query of the envelope.

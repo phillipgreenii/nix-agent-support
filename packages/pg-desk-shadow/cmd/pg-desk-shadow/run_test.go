@@ -38,12 +38,11 @@ func TestKillLimit(t *testing.T) {
 	}
 }
 
-// oneTickSpending runs one collector tick whose pg-desk stand-in makes the
+// oneTickSpending runs one collector tick whose stand-in client makes the
 // daemon log a kind=origin row of `cost` points, under the kill ceiling that
 // cmdRun would derive from flagValue and the manifest cap.
 func oneTickSpending(t *testing.T, cost, flagValue, manifestCap int) error {
 	t.Helper()
-	testutil.RequireSQLite(t)
 	root := t.TempDir()
 	l := scratch.Layout{Root: root}
 	if err := l.MkdirAll(); err != nil {
@@ -51,26 +50,23 @@ func oneTickSpending(t *testing.T, cost, flagValue, manifestCap int) error {
 	}
 	live := t.TempDir()
 	m := scratch.Manifest{
-		Phase: "B", CreatedAt: "2026-01-05T09:00:00Z", BDMode: "hermetic", Consumer: "shadow-compare", MaxPerPoll: 50,
+		Phase: "B", CreatedAt: "2026-01-05T09:00:00Z", BDMode: "hermetic", Consumer: "shadow-compare", Queries: []string{"mine"}, MaxPerPoll: 50,
 		DaemonGraphQLPointsPerHour: manifestCap,
 		Live: scratch.LiveSources{
 			RouterEvents: filepath.Join(live, "events.jsonl"), RouterQueue: filepath.Join(live, "queue.jsonl"),
 			RunRecord: filepath.Join(live, "run-record.log"), ConnectorEvents: filepath.Join(live, "conn.jsonl"),
 		},
 	}
-	db := testutil.FakeStore(t, l.StoreDB())
-	if err := db.Exec(context.Background(), `INSERT INTO consumer (name, type, cursor) VALUES ('shadow-compare','pr',0);`); err != nil {
-		t.Fatal(err)
-	}
 	cfg := collector.Config{
 		Layout: l, Manifest: m, Period: time.Minute, TickTimeout: time.Minute, MaxFailedTicks: 10, FloorMargin: 200,
 		KillPointsPerHour: killLimit(flagValue, m), Log: io.Discard,
+		ClientBin: filepath.Join(l.BinDir(), scratch.DaemonBinary), ClientConfig: l.DaemonConfig(),
 		Exec: execFunc(func() (runner.Result, error) {
 			row := fmt.Sprintf(`{"time":%q,"kind":"origin","purpose":"list","bucket":"graphql","graphql_cost":%d}`+"\n", time.Now().UTC().Format(time.RFC3339Nano), cost)
 			if err := os.WriteFile(l.ConnectorLog(), []byte(row), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			return runner.Result{Stdout: `{"contract":"pg-desk.changes/v1","type":"pr","consumer":"shadow-compare","cursor":{"from":0,"to":0},"sources":[],"records":[]}`}, nil
+			return runner.Result{Stdout: `{"protocolVersion":1,"schemaVersion":12,"result":{"sources":[{"backend":"b","status":"succeeded","version":0,"truncated":false,"next_seq":0}],"changes":[],"sources_freshness":[]}}`}, nil
 		}),
 	}
 	c, err := collector.New(cfg)
@@ -81,9 +77,14 @@ func oneTickSpending(t *testing.T, cost, flagValue, manifestCap int) error {
 	return err
 }
 
+// execFunc answers every client call with f's result.
 type execFunc func() (runner.Result, error)
 
 func (f execFunc) Run(context.Context, time.Duration, ...string) (runner.Result, error) { return f() }
+
+func (f execFunc) RunStdin(context.Context, time.Duration, string, []string, ...string) (runner.Result, error) {
+	return f()
+}
 
 func TestARaisedManifestCapIsNotKilledAt1500ButTheDefaultIs(t *testing.T) {
 	if err := oneTickSpending(t, 1600, 0, 3000); err != nil {

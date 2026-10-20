@@ -1,5 +1,6 @@
-// Package collector runs the shadow tick loop: aligned slots, one pg-desk call
-// per slot under the sandbox, bracketed rows, the live-side reader and the kill
+// Package collector runs the shadow tick loop: aligned slots, one change-feed
+// poll per watched query and daemon instance per slot (the daemon's own client
+// mode, under the sandbox), bracketed rows, the live-side reader and the kill
 // criteria.
 package collector
 
@@ -35,9 +36,11 @@ var (
 	ErrAlreadyRunning = errors.New("another collector holds the scratch lock")
 )
 
-// Exec runs a sandboxed child (satisfied by *runner.Runner).
+// Exec runs a sandboxed child (satisfied by *runner.Runner). RunStdin feeds the
+// request on stdin and appends extraEnv to the child environment.
 type Exec interface {
 	Run(ctx context.Context, timeout time.Duration, argv ...string) (runner.Result, error)
+	RunStdin(ctx context.Context, timeout time.Duration, stdin string, extraEnv []string, argv ...string) (runner.Result, error)
 }
 
 // Daemon is the shadow daemon child the run supervises. cmdRun starts it
@@ -58,6 +61,21 @@ type Config struct {
 	Exec     Exec
 	// Daemon is the supervised shadow daemon (nil: none, rows carry no sample).
 	Daemon Daemon
+
+	// ClientBin is the pinned pg-connector-github (the daemon's own client
+	// modes pr and ci are exec'd from it) and ClientConfig its --config file.
+	// ClientEnv is appended to the child environment of every client call (empty
+	// in the real run; the tests point their stand-in at its files with it).
+	ClientBin, ClientConfig string
+	ClientEnv               []string
+	// Queries are the watched query names, each polled on both instances, and
+	// Consumer the change-feed consumer name; both default to the manifest's.
+	Queries  []string
+	Consumer string
+	// AfterRowWrite is a test-only hook called after a tick row is written (and
+	// the highest-seq map saved) and before any acknowledgement; an error from
+	// it ends the tick with no acknowledgement sent, as a crash would.
+	AfterRowWrite func() error
 
 	Period            time.Duration
 	TickTimeout       time.Duration
@@ -92,6 +110,12 @@ type State struct {
 	ShimOffsets  map[string]int64      `json:"shim_offsets"`
 	Spend        []SpendPoint          `json:"spend"`
 	LogScanSince string                `json:"log_scan_since,omitempty"`
+	// CostWindowEnd is the end of the last tick row's cost window (RFC 3339,
+	// nanoseconds): the next row's window starts just after it.
+	CostWindowEnd string `json:"cost_window_end,omitempty"`
+	// HighestSeq maps "pr:<query>" and "ci:<query>" to the highest feed seq a
+	// written tick row already holds, so a redelivered row is not written twice.
+	HighestSeq map[string]int64 `json:"highest_seq,omitempty"`
 }
 
 // SpendPoint is one tick's GraphQL spend (lower bound).
@@ -102,15 +126,17 @@ type SpendPoint struct {
 
 // Collector is one collector instance.
 type Collector struct {
-	cfg  Config
-	st   State
-	prev Projection
-	db   sqlite.DB
-	pol  safety.Policy
-	tl   map[string]*tail.Tailer
+	cfg Config
+	st  State
+	db  sqlite.DB
+	pol safety.Policy
+	tl  map[string]*tail.Tailer
 	// logUnreadable is set when the sandbox denial scan failed once.
 	logUnreadable bool
 	gapWritten    bool
+	// runStart is the start of the current Run (zero outside one): the first
+	// cost window of a run begins there.
+	runStart time.Time
 }
 
 // New builds a collector and loads its state.
@@ -126,6 +152,15 @@ func New(cfg Config) (*Collector, error) {
 	}
 	if cfg.Period <= 0 {
 		cfg.Period = time.Minute
+	}
+	if cfg.Consumer == "" {
+		cfg.Consumer = cfg.Manifest.Consumer
+	}
+	if len(cfg.Queries) == 0 {
+		cfg.Queries = cfg.Manifest.Queries
+	}
+	if cfg.ClientBin == "" || len(cfg.Queries) == 0 || cfg.Consumer == "" {
+		return nil, errors.New("collector: the client binary, the watched queries and the consumer are required")
 	}
 	c := &Collector{cfg: cfg, db: sqlite.DB{Path: cfg.Layout.StoreDB()}}
 	c.pol = cfg.Layout.Policy(cfg.Manifest)
@@ -161,7 +196,7 @@ func sleepUntil(now func() time.Time) func(context.Context, time.Time) error {
 }
 
 func (c *Collector) loadState() error {
-	c.st = State{Tails: map[string]tail.State{}, ShimOffsets: map[string]int64{}}
+	c.st = State{Tails: map[string]tail.State{}, ShimOffsets: map[string]int64{}, HighestSeq: map[string]int64{}}
 	b, err := os.ReadFile(c.cfg.Layout.StateFile())
 	if os.IsNotExist(err) {
 		return nil
@@ -178,11 +213,8 @@ func (c *Collector) loadState() error {
 	if c.st.ShimOffsets == nil {
 		c.st.ShimOffsets = map[string]int64{}
 	}
-	if b, err := os.ReadFile(c.cfg.Layout.ProjectionFile()); err == nil {
-		var p Projection
-		if json.Unmarshal(b, &p) == nil {
-			c.prev = p
-		}
+	if c.st.HighestSeq == nil {
+		c.st.HighestSeq = map[string]int64{}
 	}
 	return nil
 }
@@ -193,14 +225,6 @@ func (c *Collector) saveState() error {
 		return err
 	}
 	return atomicWrite(c.cfg.Layout.StateFile(), b)
-}
-
-func (c *Collector) saveProjection() error {
-	b, err := json.Marshal(c.prev)
-	if err != nil {
-		return err
-	}
-	return atomicWrite(c.cfg.Layout.ProjectionFile(), b)
 }
 
 func atomicWrite(path string, b []byte) error {
@@ -345,6 +369,7 @@ func NextBoundary(t time.Time, period time.Duration) time.Time {
 // context), ErrKill (wrapped) when a kill criterion tripped.
 func (c *Collector) Run(ctx context.Context, resumed bool) error {
 	start := c.cfg.Now()
+	c.runStart = start
 	if err := c.row(schema.Row{Kind: schema.KindRunStart, At: schema.Format(start), Resumed: resumed, Params: map[string]any{
 		"period_s": c.cfg.Period.Seconds(), "kill_points_per_hour": c.cfg.KillPointsPerHour,
 		"max_failed_ticks": c.cfg.MaxFailedTicks, "warmup_exclusion": c.cfg.WarmupExclusion,
@@ -431,100 +456,74 @@ func (c *Collector) Tick(ctx context.Context, slot time.Time) (ran bool, err err
 	}
 	if dec.Skip {
 		c.logf("slot %s skipped_budget remaining=%d floor=%d source=%s", schema.Format(slot), dec.Remaining, floor, dec.Source)
-		return false, c.row(schema.Row{
-			Kind: schema.KindTick, Slot: schema.Format(slot), TickStart: schema.Format(started), TickEnd: schema.Format(c.cfg.Now()),
+		// The daemon spends in background work tied to no call, so a skipped slot
+		// still carries the cost of its window and still feeds the kill criterion.
+		ended := c.cfg.Now()
+		cost := c.costWindow(started, ended)
+		if err := c.row(schema.Row{
+			Kind: schema.KindTick, Slot: schema.Format(slot), TickStart: schema.Format(started), TickEnd: schema.Format(ended),
 			Status: schema.StatusSkippedBudget, SkippedBudget: true, Budget: bud, Warmup: c.inWarmup(), Daemon: dsample,
-		})
+			GraphQLCostSum: cost,
+		}); err != nil {
+			return false, err
+		}
+		c.advanceCostWindow(ended)
+		return false, c.spendKill(ended, cost)
 	}
 
-	cursorFrom, err := c.db.Int(ctx, CursorSQL(m.Consumer))
-	if err != nil {
-		return false, fmt.Errorf("tick: read cursor: %w", err)
-	}
-	hydBefore, err := c.db.Int(ctx, HydrationsSQL)
-	if err != nil {
-		return false, fmt.Errorf("tick: read hydrations: %w", err)
-	}
 	builds := c.builds(m)
-	if err := c.row(schema.Row{Kind: schema.KindTickStart, Slot: schema.Format(slot), TickStart: schema.Format(started), CursorFrom: cursorFrom, Builds: builds, Budget: bud, Warmup: c.inWarmup()}); err != nil {
+	if err := c.row(schema.Row{Kind: schema.KindTickStart, Slot: schema.Format(slot), TickStart: schema.Format(started), CursorFrom: 0, Builds: builds, Budget: bud, Warmup: c.inWarmup()}); err != nil {
 		return false, err
 	}
 
-	argv := []string{filepath.Join(c.cfg.Layout.BinDir(), "pg-desk"), "pr", "changes", "--consumer", m.Consumer, "--json"}
-	res, rerr := c.cfg.Exec.Run(ctx, c.cfg.TickTimeout, argv...)
+	// The change feed: the daemon's own client mode, once per watched query and
+	// instance. Nothing here reads GitHub; the daemon spends, never the harness.
+	polls, perr := c.pollFeed(ctx, started)
 	ended := c.cfg.Now()
-	if errors.Is(rerr, runner.ErrSafety) {
-		return false, fmt.Errorf("%w: %v", ErrKill, rerr)
+	if perr != nil {
+		return false, fmt.Errorf("%w: %v", ErrKill, perr)
 	}
 
 	row := schema.Row{
 		Kind: schema.KindTick, Slot: schema.Format(slot), TickStart: schema.Format(started), TickEnd: schema.Format(ended),
-		DurationMS: ended.Sub(started).Milliseconds(), Builds: builds, Budget: bud, Warmup: c.inWarmup(), CursorFrom: cursorFrom, Daemon: dsample,
+		DurationMS: ended.Sub(started).Milliseconds(), Builds: builds, Budget: bud, Warmup: c.inWarmup(), Daemon: dsample,
 	}
-	exit := res.Exit
-	failed := false
+	denials := 0
+	failedPolls := 0
+	var firstFailure string
+	var cursorSeen []int64
+	for _, p := range polls {
+		row.Items = append(row.Items, p.items...)
+		row.Sources = append(row.Sources, p.src)
+		cursorSeen = append(cursorSeen, p.nextSeqs...)
+		if p.denied {
+			denials++
+		}
+		if p.failed {
+			failedPolls++
+			if firstFailure == "" {
+				firstFailure = p.src.Reason
+			}
+		}
+	}
+	if len(cursorSeen) > 0 {
+		row.CursorFrom, row.CursorTo = cursorSeen[0], cursorSeen[len(cursorSeen)-1]
+	}
+	exit := 0
 	switch {
-	case rerr != nil:
-		failed = true
-		exit = -1
-		row.Error = Scrub(rerr.Error(), m.Scrub)
-	case exit == 1:
-		failed = true
-		row.Error = Scrub(firstLine(res.Stderr), m.Scrub)
+	case failedPolls == 0:
+	case failedPolls == len(polls):
+		exit = 3
+	default:
+		exit = 2
 	}
 	row.ExitCode = schema.ExitPtr(exit)
-
-	var env Envelope
-	if rerr == nil && (exit == 0 || exit == 2 || exit == 3) {
-		var perr error
-		env, perr = ParseEnvelope(res.Stdout)
-		if perr != nil {
-			failed = true
-			row.Error = Scrub(perr.Error(), m.Scrub)
-		}
+	if failedPolls > 0 {
+		row.Error = fmt.Sprintf("%d of %d feed polls failed: %s", failedPolls, len(polls), firstFailure)
 	}
-	if exit == 3 {
-		failed = true
-	}
-	row.CursorTo = env.Cursor.To
-	// A source reason can quote the failing search string (a repo slug, a
-	// login): scrub it like any other text that could leave the scratch tree.
-	for _, src := range env.Sources {
-		src.Reason = Scrub(src.Reason, m.Scrub)
-		row.Sources = append(row.Sources, src)
-	}
-
-	// Projection and its diff.
-	cur, perr := ReadProjection(ctx, c.db)
-	var diff map[string][]string
-	if perr != nil {
-		c.logf("projection: %v", Scrub(perr.Error(), m.Scrub))
-	} else {
-		diff = Diff(c.prev, cur)
-	}
-	for _, r := range env.Records {
-		it := schema.Item{EntityID: r.ID, Kinds: r.Kinds, Seq: r.Seq, Origin: r.Origin, At: r.At}
-		if it.Kinds == nil {
-			it.Kinds = []string{}
-		}
-		it.Fields = diff[r.ID]
-		if p, ok := cur[r.ID]; ok {
-			it.UpdatedAt = p["updated_at"]
-		}
-		row.Items = append(row.Items, it)
-	}
-
-	hydAfter, herr := c.db.Int(ctx, HydrationsSQL)
-	if herr == nil {
-		row.Hydrations = hydAfter - hydBefore
-	}
-	row.GraphQLCostSum = CostInWindow(c.cfg.Layout.ConnectorLog(), started, ended)
+	row.GraphQLCostSum = c.costWindow(started, ended)
 
 	// Safety counters.
-	denials := 0
-	if res.Denied {
-		denials++
-	}
 	if c.cfg.SandboxDenialScan && !c.logUnreadable {
 		n, serr := safety.ScanSystemLog(ctx, started.Add(-2*time.Second), c.cfg.Procs)
 		if serr != nil {
@@ -549,16 +548,20 @@ func (c *Collector) Tick(ctx context.Context, slot time.Time) (ran bool, err err
 		row.Error = fmt.Sprintf("%d shim-rejected call(s) of an unknown verb", unknown)
 	}
 
-	// Status and the warm-up window.
+	// Status and the warm-up window. Status: ok when every query answered,
+	// partial when some failed, failed when all did; any failed query also
+	// counts as a failed tick for --max-failed-ticks.
 	switch {
-	case failed || unknown > 0:
+	case (failedPolls > 0 && failedPolls == len(polls)) || unknown > 0:
 		row.Status = schema.StatusFailed
-		c.st.FailedStreak++
-	case exit == 2:
+	case failedPolls > 0:
 		row.Status = schema.StatusPartial
-		c.st.FailedStreak = 0
 	default:
 		row.Status = schema.StatusOK
+	}
+	if failedPolls > 0 || unknown > 0 {
+		c.st.FailedStreak++
+	} else {
 		c.st.FailedStreak = 0
 	}
 	if row.Warmup && row.Status != schema.StatusFailed {
@@ -577,12 +580,34 @@ func (c *Collector) Tick(ctx context.Context, slot time.Time) (ran bool, err err
 	if werr := c.row(row); werr != nil {
 		return true, werr
 	}
-	if perr == nil {
-		c.prev = cur
-		if err := c.saveProjection(); err != nil {
-			return true, err
+	// The row is on disk (schema.Append syncs): remember how far each key has
+	// been written, so a redelivery after a crash writes nothing twice, then
+	// let the test hook stand in for a crash before the acknowledgements.
+	c.advanceCostWindow(ended)
+	for _, p := range polls {
+		if p.maxSeq > c.st.HighestSeq[p.key] {
+			c.st.HighestSeq[p.key] = p.maxSeq
+		}
+		if p.replayed && p.canAck {
+			// A reset starts a new position: the key's rows up to the
+			// acknowledged one are consumed, whatever the old numbering was.
+			c.st.HighestSeq[p.key] = p.ackSeq
 		}
 	}
+	if serr := c.saveState(); serr != nil {
+		return true, serr
+	}
+	if c.cfg.AfterRowWrite != nil {
+		if herr := c.cfg.AfterRowWrite(); herr != nil {
+			return true, herr
+		}
+	}
+	ackDenied, aerr := c.ackFeed(ctx, polls)
+	if aerr != nil {
+		return true, fmt.Errorf("%w: %v", ErrKill, aerr)
+	}
+	denials += ackDenied
+
 	for name, t := range c.tl {
 		ts := c.st.Tails[name]
 		if _, serr := t.Sync(&ts); serr != nil {
@@ -590,7 +615,7 @@ func (c *Collector) Tick(ctx context.Context, slot time.Time) (ran bool, err err
 		}
 		c.st.Tails[name] = ts
 	}
-	c.logf("slot %s status=%s exit=%d items=%d hydrations=%d cost=%d dur=%dms warmup=%v", schema.Format(slot), row.Status, exit, len(row.Items), row.Hydrations, row.GraphQLCostSum, row.DurationMS, row.Warmup)
+	c.logf("slot %s status=%s exit=%d items=%d polls=%d failed=%d cost=%d dur=%dms warmup=%v", schema.Format(slot), row.Status, exit, len(row.Items), len(polls), failedPolls, row.GraphQLCostSum, row.DurationMS, row.Warmup)
 
 	// Stop conditions.
 	if denials > 0 {
@@ -599,14 +624,49 @@ func (c *Collector) Tick(ctx context.Context, slot time.Time) (ran bool, err err
 	if writes > 0 {
 		return true, fmt.Errorf("%w: %d write verb(s) rejected by the shims", ErrKill, writes)
 	}
-	c.st.Spend = append(c.st.Spend, SpendPoint{At: schema.Format(ended), Cost: row.GraphQLCostSum})
-	if over := c.spendOver(ended); over > c.cfg.KillPointsPerHour && c.cfg.KillPointsPerHour > 0 {
-		return true, fmt.Errorf("%w: shadow spend %d points in the last hour exceeds %d", ErrKill, over, c.cfg.KillPointsPerHour)
+	if err := c.spendKill(ended, row.GraphQLCostSum); err != nil {
+		return true, err
 	}
 	if c.cfg.MaxFailedTicks > 0 && c.st.FailedStreak > c.cfg.MaxFailedTicks {
 		return true, fmt.Errorf("%w: %d consecutive failed ticks", ErrKill, c.st.FailedStreak)
 	}
 	return true, nil
+}
+
+// costWindow is the daemon's GraphQL spend (kind=origin rows of the scratch
+// event log) from just after the previous row's window to ended. The windows of
+// consecutive rows share no instant and leave none out, so no origin row is
+// counted twice or dropped; the first row of a run starts at the run start (a
+// bare Tick, with no run, at the tick start).
+func (c *Collector) costWindow(started, ended time.Time) int {
+	from := started
+	if !c.runStart.IsZero() {
+		from = c.runStart
+	}
+	if prev, ok := schema.Time(c.st.CostWindowEnd); ok {
+		if next := prev.Add(time.Nanosecond); next.After(from) || c.runStart.IsZero() {
+			from = next
+		}
+	}
+	return CostInWindow(c.cfg.Layout.ConnectorLog(), from, ended)
+}
+
+// advanceCostWindow records ended as the end of the window just accounted for.
+func (c *Collector) advanceCostWindow(ended time.Time) {
+	if prev, ok := schema.Time(c.st.CostWindowEnd); ok && !ended.After(prev) {
+		return
+	}
+	c.st.CostWindowEnd = ended.UTC().Format(time.RFC3339Nano)
+}
+
+// spendKill records one row's spend and applies the rolling-hour kill
+// criterion; the skipped-budget row goes through it like an executed one.
+func (c *Collector) spendKill(ended time.Time, cost int) error {
+	c.st.Spend = append(c.st.Spend, SpendPoint{At: schema.Format(ended), Cost: cost})
+	if over := c.spendOver(ended); over > c.cfg.KillPointsPerHour && c.cfg.KillPointsPerHour > 0 {
+		return fmt.Errorf("%w: shadow spend %d points in the last hour exceeds %d", ErrKill, over, c.cfg.KillPointsPerHour)
+	}
+	return nil
 }
 
 // sampleDaemon reads the daemon's health for the slot; nil when the run has no

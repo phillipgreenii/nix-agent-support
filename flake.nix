@@ -5061,7 +5061,11 @@
                 pname = "pg-desk-shadow-go-tests";
                 src = lib.cleanSource ./packages/pg-desk-shadow; # matches default.nix
                 gomod2nixToml = ./packages/pg-desk-shadow/gomod2nix.toml;
-                testDeps = [ pkgs.sqlite ];
+                # jq: the collector tests' stand-in client script reads its request with it.
+                testDeps = [
+                  pkgs.sqlite
+                  pkgs.jq
+                ];
               };
 
               # pg-decider old-vs-new parity gate (bead pg2-v3cti, follow-up of

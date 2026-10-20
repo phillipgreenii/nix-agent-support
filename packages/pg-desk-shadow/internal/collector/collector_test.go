@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,22 +28,81 @@ func (c *clock) sleep(_ context.Context, until time.Time) error {
 	return nil
 }
 
-// fakeExec stands in for the sandboxed pg-desk call.
-type fakeExec struct {
-	clk   *clock
-	calls int
-	// next programs the call: it may mutate the store and returns the result.
-	next func(n int) (runner.Result, error)
-	// advance is how long the call takes on the fake clock.
-	advance time.Duration
-	argv    [][]string
+// clientCall is one request the collector sent to the (fake) client.
+type clientCall struct {
+	instance, op, query string
+	reset               bool
+	nextSeq             int64
 }
 
-func (f *fakeExec) Run(_ context.Context, _ time.Duration, argv ...string) (runner.Result, error) {
-	f.calls++
+// fakeExec stands in for the sandboxed client binary: every RunStdin call is
+// one {op, args} request on one instance.
+type fakeExec struct {
+	clk   *clock
+	calls []clientCall
+	argv  [][]string
+	// client programs the answer; nil answers every poll with an empty
+	// succeeded feed and every acknowledgement with its position.
+	client func(c clientCall) (runner.Result, error)
+	// advance is how long the first poll of a tick takes on the fake clock.
+	advance time.Duration
+	// firstQuery is the query whose pr poll starts a tick.
+	firstQuery string
+}
+
+func (f *fakeExec) Run(context.Context, time.Duration, ...string) (runner.Result, error) {
+	return runner.Result{}, nil
+}
+
+func (f *fakeExec) RunStdin(_ context.Context, _ time.Duration, stdin string, _ []string, argv ...string) (runner.Result, error) {
+	var req struct {
+		Op   string `json:"op"`
+		Args struct {
+			Query   string `json:"query"`
+			Reset   bool   `json:"reset"`
+			NextSeq int64  `json:"next_seq"`
+		} `json:"args"`
+	}
+	if err := json.Unmarshal([]byte(stdin), &req); err != nil {
+		return runner.Result{}, err
+	}
+	c := clientCall{instance: argv[len(argv)-1], op: req.Op, query: req.Args.Query, reset: req.Args.Reset, nextSeq: req.Args.NextSeq}
+	f.calls = append(f.calls, c)
 	f.argv = append(f.argv, argv)
-	f.clk.t = f.clk.t.Add(f.advance)
-	return f.next(f.calls)
+	if c.op == "changes" && c.instance == "pr" && c.query == f.firstQuery {
+		f.clk.t = f.clk.t.Add(f.advance)
+	}
+	if f.client != nil {
+		return f.client(c)
+	}
+	return defaultAnswer(c), nil
+}
+
+func defaultAnswer(c clientCall) runner.Result {
+	if c.op == "changes_ack" {
+		return runner.Result{Stdout: ackAnswer(c.query, c.nextSeq)}
+	}
+	return runner.Result{Stdout: okAnswer(0)}
+}
+
+// polls counts the changes requests (not the acknowledgements).
+func (f *fakeExec) polls() (n int) {
+	for _, c := range f.calls {
+		if c.op == "changes" {
+			n++
+		}
+	}
+	return n
+}
+
+// acks returns the changes_ack requests.
+func (f *fakeExec) acks() (out []clientCall) {
+	for _, c := range f.calls {
+		if c.op == "changes_ack" {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 type env struct {
@@ -54,15 +114,46 @@ type env struct {
 	cfg Config
 }
 
-func envelope(from, to int64, sources string, records ...string) string {
-	return fmt.Sprintf(`{"contract":"pg-desk.changes/v1","type":"pr","consumer":"shadow-compare","cursor":{"from":%d,"to":%d},"sources":%s,"records":[%s]}`, from, to, sources, strings.Join(records, ","))
+// okAnswer is a succeeded changes answer with one source at nextSeq.
+func okAnswer(nextSeq int64, changes ...string) string {
+	return fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":12,"result":{"sources":[{"backend":"b","status":"succeeded","version":0,"truncated":false,"next_seq":%d}],"changes":[%s],"sources_freshness":[]}}`, nextSeq, strings.Join(changes, ","))
 }
 
-func record(seq int64, id, kind, origin, at string) string {
-	return fmt.Sprintf(`{"seq":%d,"type":"pr","id":%q,"title":"t","version":1,"kinds":[%q],"origin":%q,"at":%q}`, seq, id, kind, origin, at)
+// sourceAnswer is a changes answer whose single source has the given status.
+func sourceAnswer(status, reason string, nextSeq int64) string {
+	return fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":12,"result":{"sources":[{"backend":"b","status":%q,"version":0,"truncated":false,"reason":%q,"next_seq":%d}],"changes":[],"sources_freshness":[]}}`, status, reason, nextSeq)
 }
 
-func okSources() string { return `[{"query":"mine","status":"ok"},{"query":"team","status":"ok"}]` }
+func ackAnswer(query string, seq int64) string {
+	return fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":12,"result":{"consumer":"shadow-compare","query":%q,"acked_seq":%d}}`, query, seq)
+}
+
+func errAnswer(code, msg string) string {
+	return fmt.Sprintf(`{"protocolVersion":1,"error":{"code":%q,"message":%q}}`, code, msg)
+}
+
+func fieldsJSON(names []string) string {
+	var parts []string
+	for _, n := range names {
+		parts = append(parts, fmt.Sprintf(`{"name":%q,"before":null,"after":"x"}`, n))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+func kindsJSON(kinds []string) string {
+	b, _ := json.Marshal(kinds)
+	return string(b)
+}
+
+// prChange is one changes[] row of the pr instance.
+func prChange(change, id string, seq int64, kinds []string, fields ...string) string {
+	return fmt.Sprintf(`{"change":%q,"source":"b","entity":{"id":%q,"version":1,"head_sha":"abc","updated_at":"2026-01-05T09:58:00Z","title":"t"},"seq":%d,"kinds":%s,"fields":%s}`, change, id, seq, kindsJSON(kinds), fieldsJSON(fields))
+}
+
+// ciChange is one changes[] row of the ci instance.
+func ciChange(change, prID, rollup string, seq int64, kinds []string, fields ...string) string {
+	return fmt.Sprintf(`{"change":%q,"source":"b","entity":{"pr_id":%q,"rollup":%q,"runs":[],"version":1,"head_sha":"abc"},"seq":%d,"kinds":%s,"fields":%s}`, change, prID, rollup, seq, kindsJSON(kinds), fieldsJSON(fields))
+}
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
@@ -78,19 +169,18 @@ func newEnv(t *testing.T) *env {
 		Builds: map[string]string{"pg-desk": "pg-desk version 0.0.0-test"}, Scrub: []string{"acme/api", "someone"},
 		Live: scratch.LiveSources{RouterEvents: filepath.Join(live, "events.jsonl"), RouterQueue: filepath.Join(live, "queue.jsonl"), RunRecord: filepath.Join(live, "run-record.log"), ConnectorEvents: filepath.Join(live, "conn.jsonl")},
 	}
+	// The scratch pg-desk store only serves Recover now; the feed never reads it.
 	db := testutil.FakeStore(t, l.StoreDB())
 	ctx := context.Background()
-	if err := db.Exec(ctx, fmt.Sprintf(`INSERT INTO entity (repo, entity_type, entity_id, facts, as_of, version, hydrated_at, active, list_fp) VALUES
- ('acme/api','pr','acme/api#1',%s,'x',1,'2026-01-05T09:00:00Z',1,'fp1'),
- ('acme/api','pr','acme/api#2',%s,'x',1,'2026-01-05T09:00:00Z',1,'fp2');
-INSERT INTO consumer (name, type, cursor) VALUES ('shadow-compare','pr',0);`, sqlite.Quote(testutil.FactsJSON("aaa", "OPEN", 1)), sqlite.Quote(testutil.FactsJSON("bbb", "OPEN", 2)))); err != nil {
+	if err := db.Exec(ctx, `INSERT INTO consumer (name, type, cursor) VALUES ('shadow-compare','pr',0);`); err != nil {
 		t.Fatal(err)
 	}
 	clk := &clock{t: time.Date(2026, 1, 5, 9, 59, 30, 0, time.UTC)}
-	ex := &fakeExec{clk: clk, advance: 10 * time.Second}
+	ex := &fakeExec{clk: clk, advance: 10 * time.Second, firstQuery: "mine"}
 	cfg := Config{
 		Layout: l, Manifest: m, Exec: ex, Period: time.Minute, TickTimeout: time.Minute, KillPointsPerHour: 1500, MaxFailedTicks: 10,
 		FloorMargin: 200, WarmupExclusion: true, Now: clk.now, Sleep: clk.sleep,
+		ClientBin: filepath.Join(l.BinDir(), scratch.DaemonBinary), ClientConfig: l.DaemonConfig(), Queries: []string{"mine", "team"}, Consumer: "shadow-compare",
 	}
 	return &env{l: l, m: m, db: db, clk: clk, ex: ex, cfg: cfg}
 }
@@ -124,108 +214,566 @@ func (e *env) ticks(t *testing.T) []schema.Row {
 	return out
 }
 
-func (e *env) hydrate(n int) {
-	if err := e.db.Exec(context.Background(), fmt.Sprintf("INSERT INTO meta (key,value) VALUES ('change_flow.hydrations.pr','%d') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+%d", n, n)); err != nil {
-		panic(err)
-	}
-}
-
-func TestTickRecordsItemsHydrationsCostAndChangedFields(t *testing.T) {
-	e := newEnv(t)
-	e.ex.next = func(n int) (runner.Result, error) {
-		e.hydrate(1)
-		// The hydration changes the entity's head.
-		if err := e.db.Exec(context.Background(), fmt.Sprintf("UPDATE entity SET facts=%s WHERE entity_id='acme/api#1'", sqlite.Quote(testutil.FactsJSON("ccc", "OPEN", 1)))); err != nil {
-			t.Fatal(err)
-		}
-		// The scratch connector log gains one row inside the tick window.
-		row := fmt.Sprintf(`{"time":%q,"kind":"origin","purpose":"show","bucket":"graphql","graphql_cost":7,"graphql_remaining":3900}`+"\n", e.clk.t.Add(-2*time.Second).Format(time.RFC3339Nano))
-		if err := os.WriteFile(e.l.ConnectorLog(), []byte(row), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return runner.Result{Stdout: envelope(0, 1, okSources(), record(1, "acme/api#1", "head_changed", "pg-connector", "2026-01-05T10:00:05Z"))}, nil
-	}
-	c := e.collector(t)
-	if err := c.Recover(context.Background()); err != nil {
+// tickAt runs one Tick at the given slot and fails the test on an error.
+func (e *env) tickAt(t *testing.T, c *Collector, slot time.Time) {
+	t.Helper()
+	if _, err := c.Tick(context.Background(), slot); err != nil {
 		t.Fatal(err)
 	}
-	// Baseline projection first (an earlier tick), so the diff is meaningful.
-	prev, _ := ReadProjection(context.Background(), e.db)
-	c.prev = Projection{"acme/api#1": prev["acme/api#1"], "acme/api#2": prev["acme/api#2"]}
-	c.prev["acme/api#1"] = map[string]string{}
-	for k, v := range prev["acme/api#1"] {
-		c.prev["acme/api#1"][k] = v
+}
+
+var slot0 = time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
+
+// originRow appends one kind=origin row of the daemon event log at t.
+func (e *env) originRow(t *testing.T, at time.Time, cost int) {
+	t.Helper()
+	row := fmt.Sprintf(`{"time":%q,"kind":"origin","purpose":"list","bucket":"graphql","graphql_cost":%d}`+"\n", at.Format(time.RFC3339Nano), cost)
+	f, err := os.OpenFile(e.l.ConnectorLog(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
 	}
-	c.prev["acme/api#1"]["head_sha"] = "aaa"
-	ran, err := c.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC))
-	if err != nil || !ran {
-		t.Fatalf("tick: %v %v", ran, err)
+	if _, err := f.WriteString(row); err != nil {
+		t.Fatal(err)
 	}
-	ts := e.ticks(t)
-	if len(ts) != 1 {
-		t.Fatalf("%d tick rows", len(ts))
+	_ = f.Close()
+}
+
+// standin points the collector at the stand-in client script, run by a real
+// (unsandboxed) runner, with its canned answers in a fresh directory.
+type standin struct {
+	t   *testing.T
+	dir string
+}
+
+func (e *env) useStandin(t *testing.T) *standin {
+	t.Helper()
+	jqDir := testutil.RequireJQ(t)
+	script, err := filepath.Abs(filepath.Join("testdata", "standin-client.sh"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	r := ts[0]
-	if r.Status != schema.StatusOK || r.ExitCode == nil || *r.ExitCode != 0 || r.Hydrations != 1 || r.GraphQLCostSum != 7 {
-		t.Errorf("row = %+v", r)
-	}
-	if len(r.Items) != 1 || r.Items[0].Origin != "pg-connector" || r.Items[0].Kinds[0] != "head_changed" || strings.Join(r.Items[0].Fields, ",") != "head_sha" || r.Items[0].UpdatedAt == "" {
-		t.Errorf("items = %+v", r.Items)
-	}
-	if !r.Warmup {
-		t.Error("the first tick is inside the warm-up window")
-	}
-	// tick_start precedes tick, bracketing the call.
-	var kinds []string
-	for _, row := range e.rows(t) {
-		kinds = append(kinds, row.Kind)
-	}
-	if strings.Join(kinds, ",") != "tick_start,tick" {
-		t.Errorf("row kinds = %v", kinds)
-	}
-	// Argv is the direct pg-desk call with the shadow consumer and --json.
-	want := []string{filepath.Join(e.l.BinDir(), "pg-desk"), "pr", "changes", "--consumer", "shadow-compare", "--json"}
-	if strings.Join(e.ex.argv[0], " ") != strings.Join(want, " ") {
-		t.Errorf("argv = %v", e.ex.argv[0])
+	s := &standin{t: t, dir: t.TempDir()}
+	e.cfg.Exec = testutil.NewRunner(t)
+	e.cfg.ClientBin = script
+	e.cfg.ClientEnv = []string{"STANDIN_DIR=" + s.dir, "TICKS_FILE=" + e.l.TicksFile(), "PATH=" + jqDir + ":/usr/bin:/bin"}
+	return s
+}
+
+// put writes one canned answer file, for example put("pr-changes-mine.json", ...).
+func (s *standin) put(name, body string) {
+	s.t.Helper()
+	if err := os.WriteFile(filepath.Join(s.dir, name), []byte(body), 0o600); err != nil {
+		s.t.Fatal(err)
 	}
 }
 
-func TestExitCodes(t *testing.T) {
+// putQuiet answers every poll of the queries with an empty feed at seq 0 and
+// every acknowledgement with its position.
+func (s *standin) putQuiet(queries ...string) {
+	for _, q := range queries {
+		for _, inst := range []string{"pr", "ci"} {
+			s.put(inst+"-changes-"+q+".json", okAnswer(0))
+			s.put(inst+"-changes_ack-"+q+".json", ackAnswer(q, 0))
+		}
+	}
+}
+
+// log is the stand-in's call log, one line per entry.
+func (s *standin) log() []string {
+	s.t.Helper()
+	b, err := os.ReadFile(filepath.Join(s.dir, "calls.log"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
+
+// ---- the feed poll: mapping, acknowledgement, redelivery, errors -----------
+
+func TestPRFeedRowsMapToItems(t *testing.T) {
 	cases := []struct {
-		name       string
-		res        runner.Result
-		err        error
-		wantStatus string
-		wantExit   int
+		name, change string
+		kinds        []string
+		fields       []string
 	}{
-		{"exit 2 partial keeps the records", runner.Result{Exit: 2, Stdout: envelope(0, 1, `[{"query":"mine","status":"degraded","reason":"hydration_budget; list acme/api#1 failed"}]`, record(1, "acme/api#1", "reconcile", "pg-connector", "2026-01-05T10:00:05Z"))}, nil, schema.StatusPartial, 2},
-		{"exit 3 is a failed tick with an envelope", runner.Result{Exit: 3, Stdout: envelope(4, 4, `[{"query":"mine","status":"failed","reason":"boom"}]`)}, nil, schema.StatusFailed, 3},
-		{"exit 1 has no envelope", runner.Result{Exit: 1, Stderr: "changes: store acme/api is old-schema\nmore"}, nil, schema.StatusFailed, 1},
-		{"a deadline is a failed tick", runner.Result{}, fmt.Errorf("deadline: context deadline exceeded"), schema.StatusFailed, -1},
-		{"garbage output is a failed tick", runner.Result{Stdout: "not json"}, nil, schema.StatusFailed, 0},
+		{"added", "added", []string{"opened"}, nil},
+		{"changed", "changed", []string{"head_changed", "reconcile"}, []string{"head_sha", "state"}},
+		{"removed keeps its row and its kinds", "removed", []string{"closed"}, []string{"state"}},
+		{"a row with no kinds carries an empty array, never null", "changed", []string{}, []string{"label_count"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
-			e.ex.next = func(int) (runner.Result, error) { return c.res, c.err }
+			s := e.useStandin(t)
+			e.cfg.Queries = []string{"mine"}
+			s.putQuiet("mine")
+			s.put("pr-changes-mine.json", okAnswer(7, prChange(c.change, "owner/repo#12", 7, c.kinds, c.fields...)))
 			col := e.collector(t)
-			if _, err := col.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); err != nil {
-				t.Fatal(err)
-			}
+			e.tickAt(t, col, slot0)
 			r := e.ticks(t)[0]
-			if r.Status != c.wantStatus || r.ExitCode == nil || *r.ExitCode != c.wantExit {
-				t.Errorf("status %q exit %v, want %q %d (row %+v)", r.Status, r.ExitCode, c.wantStatus, c.wantExit, r)
+			if r.Status != schema.StatusOK || r.ExitCode == nil || *r.ExitCode != 0 || r.Hydrations != 0 {
+				t.Fatalf("row = %+v", r)
 			}
-			if strings.Contains(r.Error, "acme/api") {
-				t.Errorf("error text leaks the slug: %q", r.Error)
+			if len(r.Items) != 1 {
+				t.Fatalf("items = %+v", r.Items)
+			}
+			it := r.Items[0]
+			want := schema.Item{
+				EntityID: "owner/repo#12", Kinds: c.kinds, Seq: 7, Origin: schema.OriginDaemonFeed, At: "2026-01-05T09:59:30.000Z",
+				Fields: c.fields, UpdatedAt: "2026-01-05T09:58:00Z",
+			}
+			if it.EntityID != want.EntityID || strings.Join(it.Kinds, ",") != strings.Join(want.Kinds, ",") || it.Kinds == nil || it.Seq != 7 ||
+				it.Origin != "daemon-feed" || it.At != want.At || strings.Join(it.Fields, ",") != strings.Join(want.Fields, ",") ||
+				it.UpdatedAt != want.UpdatedAt || it.Replay || it.CIRollup != "" {
+				t.Errorf("item = %+v, want %+v", it, want)
+			}
+			if b, _ := json.Marshal(it); strings.Contains(string(b), `"kinds":null`) {
+				t.Errorf("kinds serialised as null: %s", b)
+			}
+		})
+	}
+}
+
+func TestCIFeedRowMapsTheRollup(t *testing.T) {
+	e := newEnv(t)
+	s := e.useStandin(t)
+	e.cfg.Queries = []string{"mine"}
+	s.putQuiet("mine")
+	s.put("ci-changes-mine.json", okAnswer(4, ciChange("changed", "owner/repo#12", "failure", 4, []string{"checks"}, "rollup", "runs")))
+	col := e.collector(t)
+	e.tickAt(t, col, slot0)
+	r := e.ticks(t)[0]
+	if len(r.Items) != 1 {
+		t.Fatalf("items = %+v", r.Items)
+	}
+	it := r.Items[0]
+	if it.EntityID != "owner/repo#12" || it.Origin != schema.OriginDaemonCIFeed || it.CIRollup != "failure" || it.UpdatedAt != "" ||
+		it.Seq != 4 || strings.Join(it.Kinds, ",") != "checks" || strings.Join(it.Fields, ",") != "rollup,runs" || it.At != "2026-01-05T09:59:30.000Z" {
+		t.Errorf("ci item = %+v", it)
+	}
+	if b, _ := json.Marshal(it); !strings.Contains(string(b), `"ci_rollup":"failure"`) {
+		t.Errorf("item JSON = %s", b)
+	}
+}
+
+func TestSourcesListEveryQueryOnBothInstancesAndTheCursorIsFirstAndLastNextSeq(t *testing.T) {
+	e := newEnv(t)
+	s := e.useStandin(t)
+	s.putQuiet("mine", "team")
+	s.put("pr-changes-mine.json", okAnswer(5))
+	s.put("ci-changes-mine.json", okAnswer(6))
+	s.put("pr-changes-team.json", okAnswer(7))
+	s.put("ci-changes-team.json", sourceAnswer("degraded", "rate limited for acme/api", 9))
+	col := e.collector(t)
+	e.tickAt(t, col, slot0)
+	r := e.ticks(t)[0]
+	var got []string
+	for _, src := range r.Sources {
+		got = append(got, src.Query+"="+src.Status)
+		if strings.Contains(src.Reason, "acme/api") {
+			t.Errorf("source reason leaks: %q", src.Reason)
+		}
+	}
+	want := "mine=succeeded,ci:mine=succeeded,team=succeeded,ci:team=degraded"
+	if strings.Join(got, ",") != want {
+		t.Errorf("sources = %v, want %s", got, want)
+	}
+	if r.CursorFrom != 5 || r.CursorTo != 9 {
+		t.Errorf("cursor %d..%d, want 5..9 (the first and last next_seq seen)", r.CursorFrom, r.CursorTo)
+	}
+	if r.Status != schema.StatusOK {
+		t.Errorf("a degraded source is an answer, not a failure: %+v", r)
+	}
+	// The degraded key is not acknowledged (no succeeded source); the rest are.
+	var acked []string
+	for _, line := range s.log() {
+		if strings.Contains(line, `"op":"changes_ack"`) {
+			acked = append(acked, strings.Fields(line)[0]+":"+line[strings.Index(line, `"query":"`)+9:strings.Index(line, `"query":"`)+13])
+		}
+	}
+	if len(acked) != 3 {
+		t.Errorf("acks = %v, want 3 (the degraded ci:team is not acknowledged)", acked)
+	}
+}
+
+func TestTheAckFollowsTheTickRowOnDisk(t *testing.T) {
+	e := newEnv(t)
+	s := e.useStandin(t)
+	e.cfg.Queries = []string{"mine"}
+	s.putQuiet("mine")
+	s.put("pr-changes-mine.json", okAnswer(3, prChange("changed", "owner/repo#1", 3, []string{"head_changed"}, "head_sha")))
+	s.put("pr-changes_ack-mine.json", ackAnswer("mine", 3))
+	col := e.collector(t)
+	e.tickAt(t, col, slot0)
+	lines := s.log()
+	var acks int
+	for i, line := range lines {
+		if !strings.Contains(line, `"op":"changes_ack"`) {
+			continue
+		}
+		acks++
+		if i+1 >= len(lines) || lines[i+1] != "2" {
+			t.Errorf("after the ack request %q the stand-in saw %v ticks lines, want 2 (tick_start and the tick row)", line, lines[i+1:])
+		}
+	}
+	if acks != 2 {
+		t.Fatalf("%d acks, want 2 (one per instance): %v", acks, lines)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), `"next_seq":3,"query":"mine"`) {
+		t.Errorf("the pr ack must carry next_seq 3: %v", lines)
+	}
+	// Without the ordering the count would be 1 (tick_start only): prove the
+	// observable differs, so the assertion above cannot pass vacuously.
+	if rows := e.rows(t); len(rows) != 2 || rows[1].Kind != schema.KindTick {
+		t.Errorf("rows = %+v", rows)
+	}
+}
+
+func TestAPollWithNoRowsStillAcknowledgesItsNextSeq(t *testing.T) {
+	e := newEnv(t)
+	s := e.useStandin(t)
+	e.cfg.Queries = []string{"mine"}
+	s.putQuiet("mine")
+	s.put("pr-changes-mine.json", okAnswer(11))
+	s.put("ci-changes-mine.json", okAnswer(12))
+	col := e.collector(t)
+	e.tickAt(t, col, slot0)
+	if r := e.ticks(t)[0]; len(r.Items) != 0 {
+		t.Fatalf("items = %+v", r.Items)
+	}
+	log := strings.Join(s.log(), "\n")
+	for _, want := range []string{`pr {"args":{"consumer":"shadow-compare","next_seq":11,"query":"mine"},"op":"changes_ack"}`, `ci {"args":{"consumer":"shadow-compare","next_seq":12,"query":"mine"},"op":"changes_ack"}`} {
+		if !strings.Contains(log, want) {
+			t.Errorf("missing ack %s in:\n%s", want, log)
+		}
+	}
+}
+
+func TestRowsRedeliveredAfterACrashProduceNoDuplicateItem(t *testing.T) {
+	e := newEnv(t)
+	s := e.useStandin(t)
+	e.cfg.Queries = []string{"mine"}
+	s.putQuiet("mine")
+	rows := []string{prChange("changed", "owner/repo#1", 3, []string{"head_changed"}, "head_sha"), prChange("added", "owner/repo#2", 4, []string{"opened"})}
+	s.put("pr-changes-mine.json", okAnswer(4, rows...))
+	crash := errors.New("simulated crash between the row write and the ack")
+	e.cfg.AfterRowWrite = func() error { return crash }
+	col := e.collector(t)
+	if _, err := col.Tick(context.Background(), slot0); !errors.Is(err, crash) {
+		t.Fatalf("tick = %v, want the crash", err)
+	}
+	if strings.Contains(strings.Join(s.log(), "\n"), "changes_ack") {
+		t.Fatalf("no ack may be sent when the tick ended after the row write: %v", s.log())
+	}
+	if got := e.ticks(t); len(got) != 1 || len(got[0].Items) != 2 {
+		t.Fatalf("first row = %+v", got)
+	}
+
+	// A new collector over the same persisted state; the stand-in redelivers the
+	// same two rows and one new one.
+	s.put("pr-changes-mine.2.json", okAnswer(5, append(rows, prChange("changed", "owner/repo#2", 5, []string{"reconcile"}))...))
+	e.cfg.AfterRowWrite = nil
+	e.clk.t = e.clk.t.Add(time.Minute)
+	col2 := e.collector(t)
+	e.tickAt(t, col2, slot0.Add(time.Minute))
+	type key struct {
+		origin, id string
+		seq        int64
+	}
+	seen := map[key]int{}
+	for _, r := range e.ticks(t) {
+		for _, it := range r.Items {
+			seen[key{it.Origin, it.EntityID, it.Seq}]++
+		}
+	}
+	if len(seen) != 3 {
+		t.Errorf("distinct items = %v, want 3", seen)
+	}
+	for k, n := range seen {
+		if n != 1 {
+			t.Errorf("item %+v written %d times", k, n)
+		}
+	}
+	if !strings.Contains(strings.Join(s.log(), "\n"), `"next_seq":5,"query":"mine"},"op":"changes_ack"`) {
+		t.Errorf("the second tick must acknowledge next_seq 5: %v", s.log())
+	}
+}
+
+func TestACursorExpiredAnswerCausesExactlyOneResetRePollWithTheReplayedRowsMarked(t *testing.T) {
+	e := newEnv(t)
+	s := e.useStandin(t)
+	e.cfg.Queries = []string{"mine"}
+	s.putQuiet("mine")
+	s.put("pr-changes-mine.json", errAnswer("invalid_argument", "cursor_expired: the position of this key is no longer retained; re-run with --reset"))
+	s.put("pr-changes-mine.2.json", okAnswer(9, prChange("added", "owner/repo#1", 0, []string{"opened"}), prChange("added", "owner/repo#2", 0, []string{"opened"})))
+	col := e.collector(t)
+	e.tickAt(t, col, slot0)
+	var prPolls []string
+	for _, line := range s.log() {
+		if strings.HasPrefix(line, "pr ") && strings.Contains(line, `"op":"changes"`) {
+			prPolls = append(prPolls, line)
+		}
+	}
+	if len(prPolls) != 2 || strings.Contains(prPolls[0], "reset") || !strings.Contains(prPolls[1], `"reset":true`) {
+		t.Fatalf("pr polls = %v, want a plain poll then exactly one reset poll", prPolls)
+	}
+	r := e.ticks(t)[0]
+	if r.Status != schema.StatusOK || len(r.Items) != 2 {
+		t.Fatalf("row = %+v", r)
+	}
+	for _, it := range r.Items {
+		if !it.Replay || it.Seq != 0 {
+			t.Errorf("a reset row must be marked replay with seq 0: %+v", it)
+		}
+	}
+	if r.Sources[0].Query != "mine" || r.Sources[0].Status != "succeeded" {
+		t.Errorf("a successful re-poll is succeeded: %+v", r.Sources[0])
+	}
+	if !strings.Contains(strings.Join(s.log(), "\n"), `"next_seq":9,"query":"mine"},"op":"changes_ack"`) {
+		t.Errorf("the reset poll's next_seq must be acknowledged: %v", s.log())
+	}
+	if got := col.st.HighestSeq["pr:mine"]; got != 9 {
+		t.Errorf("highest seq after a reset = %d, want the acknowledged position 9", got)
+	}
+	// Replayed rows are never de-duplicated against the map, and a later plain
+	// poll repeating seq 0 is below the new position.
+	e.clk.t = e.clk.t.Add(time.Minute)
+	e.tickAt(t, col, slot0.Add(time.Minute))
+	if r2 := e.ticks(t)[1]; len(r2.Items) != 0 {
+		t.Errorf("rows at or below the position are dropped: %+v", r2.Items)
+	}
+}
+
+func TestAnyOtherErrorAnswerFailsThatQuerysSlotAndTheTick(t *testing.T) {
+	t.Run("every query errors: failed, exit 3, no ack", func(t *testing.T) {
+		e := newEnv(t)
+		s := e.useStandin(t)
+		e.cfg.Queries = []string{"mine"}
+		s.putQuiet("mine")
+		bad := errAnswer("unavailable", "gh failed for acme/api#3 as someone at /Users/someone/x")
+		s.put("pr-changes-mine.json", bad)
+		s.put("ci-changes-mine.json", bad)
+		col := e.collector(t)
+		e.tickAt(t, col, slot0)
+		r := e.ticks(t)[0]
+		if r.Status != schema.StatusFailed || r.ExitCode == nil || *r.ExitCode != 3 || col.st.FailedStreak != 1 {
+			t.Fatalf("row = %+v streak %d", r, col.st.FailedStreak)
+		}
+		for _, src := range r.Sources {
+			if src.Status != "failed" || !strings.Contains(src.Reason, "unavailable") || strings.Contains(src.Reason, "acme/api") || strings.Contains(src.Reason, "someone") {
+				t.Errorf("source = %+v", src)
+			}
+		}
+		if strings.Contains(r.Error, "acme/api") || r.Error == "" {
+			t.Errorf("row error = %q", r.Error)
+		}
+		if strings.Contains(strings.Join(s.log(), "\n"), "changes_ack") {
+			t.Errorf("a failed query is not acknowledged: %v", s.log())
+		}
+	})
+	t.Run("one instance errors: partial, exit 2, the other still acked, the streak counts", func(t *testing.T) {
+		e := newEnv(t)
+		s := e.useStandin(t)
+		e.cfg.Queries = []string{"mine"}
+		s.putQuiet("mine")
+		s.put("ci-changes-mine.json", errAnswer("not_found", "no such thing"))
+		s.put("pr-changes-mine.json", okAnswer(2, prChange("added", "owner/repo#1", 2, []string{"opened"})))
+		col := e.collector(t)
+		e.tickAt(t, col, slot0)
+		r := e.ticks(t)[0]
+		if r.Status != schema.StatusPartial || *r.ExitCode != 2 || len(r.Items) != 1 || col.st.FailedStreak != 1 {
+			t.Fatalf("row = %+v streak %d", r, col.st.FailedStreak)
+		}
+		var acks []string
+		for _, line := range s.log() {
+			if strings.Contains(line, "changes_ack") {
+				acks = append(acks, line)
+			}
+		}
+		if len(acks) != 1 || !strings.HasPrefix(acks[0], "pr ") {
+			t.Errorf("acks = %v, want only the pr one", acks)
+		}
+	})
+}
+
+func TestEveryCallIsTheDaemonClientAndNothingElse(t *testing.T) {
+	e := newEnv(t)
+	e.cfg.MaxTicks = 2
+	c := e.collector(t)
+	if err := c.Run(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.ex.argv) == 0 {
+		t.Fatal("no client call")
+	}
+	for _, a := range e.ex.argv {
+		if len(a) != 4 || a[0] != e.cfg.ClientBin || a[1] != "--config" || a[2] != e.cfg.ClientConfig || (a[3] != "pr" && a[3] != "ci") {
+			t.Errorf("argv = %v, want <client> --config <cfg> pr|ci", a)
+		}
+		if strings.Contains(strings.Join(a, " "), "pg-desk") {
+			t.Errorf("the collector must not run pg-desk: %v", a)
+		}
+	}
+	if got, want := e.ex.polls(), 2*2*2; got != want {
+		t.Errorf("%d polls, want %d (2 ticks x 2 queries x 2 instances)", got, want)
+	}
+	if got, want := len(e.ex.acks()), 2*2*2; got != want {
+		t.Errorf("%d acks, want %d", got, want)
+	}
+}
+
+func TestTheModuleHasNoCompileTimeDependencyOnTheConnector(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"pg-connector", "replace", "nix-agent-support"} {
+		if strings.Contains(string(b), bad) {
+			t.Errorf("go.mod mentions %q: the harness execs the daemon, it never imports it", bad)
+		}
+	}
+}
+
+// ---- cost accounting -------------------------------------------------------
+
+func TestSkippedRowsAndExecutedRowsSumDisjointCostWindows(t *testing.T) {
+	e := newEnv(t)
+	// Tick 1 spans 09:59:30..09:59:40, tick 2 09:59:40..09:59:50, tick 3
+	// 09:59:50..10:00:00 on the fake clock; each row owns (previous end, own end].
+	t0 := e.clk.t
+	e.originRow(t, t0.Add(-time.Millisecond), 1)                 // before the run: nobody's
+	e.originRow(t, t0, 2)                                        // the first instant: row 1
+	e.originRow(t, t0.Add(10*time.Second), 4)                    // exactly row 1's end: row 1
+	e.originRow(t, t0.Add(10*time.Second+time.Millisecond), 8)   // just after: row 2
+	e.originRow(t, t0.Add(20*time.Second), 16)                   // exactly row 2's end: row 2
+	e.originRow(t, t0.Add(20*time.Second+time.Nanosecond), 32)   // a nanosecond after: row 3
+	e.originRow(t, t0.Add(20*time.Second+time.Nanosecond*2), 64) // row 3
+	e.originRow(t, t0.Add(30*time.Second+time.Millisecond), 128) // past row 3's end: row 4
+	col := e.collector(t)
+	for i := 0; i < 3; i++ {
+		e.tickAt(t, col, slot0.Add(time.Duration(i)*time.Minute))
+	}
+	var got []int
+	for _, r := range e.ticks(t) {
+		got = append(got, r.GraphQLCostSum)
+	}
+	if fmt.Sprint(got) != "[6 24 96]" {
+		t.Errorf("cost sums = %v, want [6 24 96] (2+4, 8+16, 32+64): none twice, none dropped between rows", got)
+	}
+	// The window end is persisted for the next row (and the next run).
+	b, err := os.ReadFile(e.l.StateFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st State
+	if err := json.Unmarshal(b, &st); err == nil && st.CostWindowEnd != "" {
+		t.Logf("state on disk: %s", st.CostWindowEnd)
+	}
+	if want := e.clk.t.UTC().Format(time.RFC3339Nano); col.st.CostWindowEnd != want {
+		t.Errorf("cost window end = %q, want %q", col.st.CostWindowEnd, want)
+	}
+	// Row 4 picks up exactly what row 3 left.
+	e.tickAt(t, col, slot0.Add(3*time.Minute))
+	if r := e.ticks(t)[3]; r.GraphQLCostSum != 128 {
+		t.Errorf("row 4 cost = %d, want 128", r.GraphQLCostSum)
+	}
+}
+
+func TestTheFirstRowOfARunStartsAtTheRunStart(t *testing.T) {
+	e := newEnv(t)
+	e.cfg.MaxTicks = 1
+	e.originRow(t, e.clk.t.Add(-time.Second), 100) // before the run started
+	e.originRow(t, e.clk.t.Add(15*time.Second), 7) // inside the first window (the run starts at 09:59:30)
+	c := e.collector(t)
+	if err := c.Run(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.ticks(t)[0]; r.GraphQLCostSum != 7 {
+		t.Errorf("first row cost = %d, want 7", r.GraphQLCostSum)
+	}
+	b, err := os.ReadFile(e.l.StateFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st State
+	if err := json.Unmarshal(b, &st); err != nil || st.CostWindowEnd == "" {
+		t.Errorf("the window end must be persisted: %s %v", b, err)
+	}
+}
+
+func TestASkippedSlotCarriesItsCostAndFeedsTheKillCriterion(t *testing.T) {
+	e := newEnv(t)
+	e.cfg.KillPointsPerHour = 100
+	e.cfg.Queries = []string{"mine"}
+	c := e.collector(t)
+	e.originRow(t, e.clk.t.Add(5*time.Second), 60) // tick 1: 09:59:30..09:59:40
+	e.tickAt(t, c, slot0)
+	if r := e.ticks(t)[0]; r.GraphQLCostSum != 60 || r.SkippedBudget {
+		t.Fatalf("first row = %+v", r)
+	}
+	// The live connector now reports a low budget, so the next slot is skipped,
+	// but the daemon keeps spending during it.
+	reset := slot0.Add(10 * time.Minute)
+	low := fmt.Sprintf(`{"time":%q,"op":"list","graphql_remaining":1500,"graphql_reset_at":%q}`+"\n", e.clk.t.Format(time.RFC3339Nano), reset.Format(time.RFC3339))
+	if err := os.WriteFile(e.m.Live.ConnectorEvents, []byte(low), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.originRow(t, e.clk.t.Add(20*time.Second), 60)
+	e.clk.t = slot0.Add(time.Minute)
+	callsBefore := len(e.ex.calls)
+	ran, err := c.Tick(context.Background(), e.clk.t)
+	if ran || !errors.Is(err, ErrKill) || !strings.Contains(err.Error(), "spend") {
+		t.Fatalf("120 points in the hour, 60 of them during a skipped slot, must kill: ran=%v err=%v", ran, err)
+	}
+	if len(e.ex.calls) != callsBefore {
+		t.Error("a skipped slot makes no client call")
+	}
+	r := e.ticks(t)[1]
+	if !r.SkippedBudget || r.GraphQLCostSum != 60 {
+		t.Errorf("skipped row = %+v, want cost 60", r)
+	}
+	if n := len(c.st.Spend); n != 2 {
+		t.Errorf("spend points = %d, want 2 (the skipped slot appends one)", n)
+	}
+}
+
+// ---- the tick loop ---------------------------------------------------------
+
+func TestFeedFailuresAreFailedTicksWithAScrubbedReason(t *testing.T) {
+	cases := []struct {
+		name string
+		res  runner.Result
+		err  error
+	}{
+		{"an error answer", runner.Result{Exit: 7, Stdout: errAnswer("unavailable", "list acme/api#1 failed for someone")}, nil},
+		{"exit 1 with no answer", runner.Result{Exit: 1, Stderr: "client: store acme/api is old-schema\nmore"}, nil},
+		{"a deadline", runner.Result{}, fmt.Errorf("deadline: context deadline exceeded")},
+		{"garbage output", runner.Result{Stdout: "not json"}, nil},
+		{"a non-zero exit carrying a result", runner.Result{Exit: 4, Stdout: okAnswer(1)}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.ex.client = func(clientCall) (runner.Result, error) { return c.res, c.err }
+			col := e.collector(t)
+			e.tickAt(t, col, slot0)
+			r := e.ticks(t)[0]
+			if r.Status != schema.StatusFailed || r.ExitCode == nil || *r.ExitCode != 3 || len(r.Items) != 0 || len(r.Sources) != 4 {
+				t.Errorf("row = %+v", r)
+			}
+			if strings.Contains(r.Error, "acme/api") || strings.Contains(r.Error, "someone") {
+				t.Errorf("error text leaks: %q", r.Error)
 			}
 			for _, src := range r.Sources {
-				if strings.Contains(src.Reason, "acme/api") {
-					t.Errorf("source reason leaks: %q", src.Reason)
+				if src.Status != "failed" || src.Reason == "" || strings.Contains(src.Reason, "acme/api") || strings.Contains(src.Reason, "someone") {
+					t.Errorf("source = %+v", src)
 				}
 			}
-			if c.wantExit == 2 && (len(r.Items) != 1 || len(r.Sources) != 1) {
-				t.Errorf("exit 2 must keep records and sources: %+v", r)
+			if len(e.ex.acks()) != 0 {
+				t.Errorf("a failed poll is not acknowledged: %v", e.ex.acks())
 			}
 		})
 	}
@@ -233,39 +781,26 @@ func TestExitCodes(t *testing.T) {
 
 func TestWarmupWindowEndsAfterTwoConsecutiveZeroHydrationTicks(t *testing.T) {
 	e := newEnv(t)
-	hyd := []int{3, 0, 1, 0, 0, 0}
-	e.ex.next = func(n int) (runner.Result, error) {
-		e.hydrate(hyd[n-1])
-		return runner.Result{Stdout: envelope(0, 0, okSources())}, nil
-	}
 	c := e.collector(t)
-	slot := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	for i := range hyd {
-		if _, err := c.Tick(context.Background(), slot.Add(time.Duration(i)*time.Minute)); err != nil {
-			t.Fatal(err)
-		}
+	for i := 0; i < 4; i++ {
+		e.tickAt(t, c, slot0.Add(time.Duration(i)*time.Minute))
 	}
 	var got []bool
 	for _, r := range e.ticks(t) {
 		got = append(got, r.Warmup)
 	}
-	want := []bool{true, true, true, true, true, false}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("warm-up flags = %v, want %v (a hydration resets the streak; the window ends after two consecutive zero ticks)", got, want)
+	// The feed hydrates nothing (Hydrations is always 0), so the window ends
+	// after the second tick.
+	if want := []bool{true, true, false, false}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("warm-up flags = %v, want %v", got, want)
 	}
 }
 
 func TestPhaseBHasNoWarmupExclusion(t *testing.T) {
 	e := newEnv(t)
 	e.cfg.WarmupExclusion = false
-	e.ex.next = func(int) (runner.Result, error) {
-		e.hydrate(40)
-		return runner.Result{Stdout: envelope(0, 0, okSources())}, nil
-	}
 	c := e.collector(t)
-	if _, err := c.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatal(err)
-	}
+	e.tickAt(t, c, slot0)
 	if e.ticks(t)[0].Warmup {
 		t.Error("phase B ticks are the measurement and must not be excluded")
 	}
@@ -273,7 +808,6 @@ func TestPhaseBHasNoWarmupExclusion(t *testing.T) {
 
 func TestSlotsAreAlignedAndTicksNeverOverlap(t *testing.T) {
 	e := newEnv(t)
-	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
 	e.cfg.MaxTicks = 4
 	c := e.collector(t)
 	if err := c.Run(context.Background(), false); err != nil {
@@ -299,15 +833,14 @@ func TestSlotsAreAlignedAndTicksNeverOverlap(t *testing.T) {
 		}
 		prevEnd = end
 	}
-	if e.ex.calls != 4 {
-		t.Errorf("%d pg-desk calls", e.ex.calls)
+	if got := e.ex.polls(); got != 16 {
+		t.Errorf("%d feed polls, want 16 (4 ticks x 2 queries x 2 instances)", got)
 	}
 }
 
 func TestOverrunSkipsMissedSlotsAndLogsAGap(t *testing.T) {
 	e := newEnv(t)
 	e.ex.advance = 75 * time.Second // longer than a slot
-	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
 	e.cfg.MaxTicks = 3
 	c := e.collector(t)
 	if err := c.Run(context.Background(), false); err != nil {
@@ -332,10 +865,9 @@ func TestOverrunSkipsMissedSlotsAndLogsAGap(t *testing.T) {
 
 func TestLateWakeRecordsASleepGapAndRealigns(t *testing.T) {
 	e := newEnv(t)
-	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
 	woke := false
 	e.cfg.Sleep = func(ctx context.Context, until time.Time) error {
-		if !woke && e.ex.calls == 1 {
+		if !woke && len(e.ex.calls) > 0 {
 			woke = true
 			e.clk.t = until.Add(3 * time.Hour) // the lid was closed
 			return nil
@@ -360,7 +892,6 @@ func TestLateWakeRecordsASleepGapAndRealigns(t *testing.T) {
 
 func TestBudgetSkipWritesARowAndResumesAfterReset(t *testing.T) {
 	e := newEnv(t)
-	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
 	slot := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
 	e.clk.t = slot
 	reset := slot.Add(2 * time.Minute)
@@ -373,8 +904,8 @@ func TestBudgetSkipWritesARowAndResumesAfterReset(t *testing.T) {
 	if err != nil || ran {
 		t.Fatalf("below the floor the tick must be skipped: ran=%v err=%v", ran, err)
 	}
-	if e.ex.calls != 0 {
-		t.Fatal("pg-desk must not be called when the budget is below the floor")
+	if len(e.ex.calls) != 0 {
+		t.Fatal("the client must not be called when the budget is below the floor")
 	}
 	r := e.ticks(t)[0]
 	if !r.SkippedBudget || r.Status != schema.StatusSkippedBudget || r.Budget == nil || r.Budget.Remaining != 1500 || r.Budget.Floor != 2000 {
@@ -392,12 +923,11 @@ func TestKillCriteria(t *testing.T) {
 	t.Run("spend above the ceiling", func(t *testing.T) {
 		e := newEnv(t)
 		e.cfg.KillPointsPerHour = 100
-		e.ex.next = func(int) (runner.Result, error) {
-			row := fmt.Sprintf(`{"time":%q,"kind":"origin","purpose":"list","bucket":"graphql","graphql_cost":60}`+"\n", e.clk.t.Add(-time.Second).Format(time.RFC3339Nano))
-			f, _ := os.OpenFile(e.l.ConnectorLog(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-			_, _ = f.WriteString(row)
-			_ = f.Close()
-			return runner.Result{Stdout: envelope(0, 0, okSources())}, nil
+		e.ex.client = func(c clientCall) (runner.Result, error) {
+			if c.op == "changes" && c.instance == "pr" && c.query == "mine" {
+				e.originRow(t, e.clk.t.Add(-time.Second), 60)
+			}
+			return defaultAnswer(c), nil
 		}
 		c := e.collector(t)
 		slot := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
@@ -411,7 +941,7 @@ func TestKillCriteria(t *testing.T) {
 	t.Run("consecutive failed ticks", func(t *testing.T) {
 		e := newEnv(t)
 		e.cfg.MaxFailedTicks = 3
-		e.ex.next = func(int) (runner.Result, error) { return runner.Result{Exit: 1, Stderr: "boom"}, nil }
+		e.ex.client = func(clientCall) (runner.Result, error) { return runner.Result{Exit: 1, Stderr: "boom"}, nil }
 		c := e.collector(t)
 		slot := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
 		var err error
@@ -425,8 +955,10 @@ func TestKillCriteria(t *testing.T) {
 	})
 	t.Run("a sandbox denial", func(t *testing.T) {
 		e := newEnv(t)
-		e.ex.next = func(int) (runner.Result, error) {
-			return runner.Result{Stdout: envelope(0, 0, okSources()), Denied: true}, nil
+		e.ex.client = func(c clientCall) (runner.Result, error) {
+			r := defaultAnswer(c)
+			r.Denied = true
+			return r, nil
 		}
 		c := e.collector(t)
 		if _, err := c.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); err == nil || !strings.Contains(err.Error(), "denial") {
@@ -435,9 +967,9 @@ func TestKillCriteria(t *testing.T) {
 	})
 	t.Run("a rejected write verb", func(t *testing.T) {
 		e := newEnv(t)
-		e.ex.next = func(int) (runner.Result, error) {
+		e.ex.client = func(c clientCall) (runner.Result, error) {
 			_ = os.WriteFile(e.l.ShimLog("gh"), []byte(`{"tool":"gh","argv":["pr","merge","1"],"verdict":"reject-write"}`+"\n"), 0o600)
-			return runner.Result{Stdout: envelope(0, 0, okSources())}, nil
+			return defaultAnswer(c), nil
 		}
 		c := e.collector(t)
 		if _, err := c.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); err == nil || !strings.Contains(err.Error(), "write verb") {
@@ -446,21 +978,21 @@ func TestKillCriteria(t *testing.T) {
 	})
 	t.Run("a safety refusal from the runner", func(t *testing.T) {
 		e := newEnv(t)
-		e.ex.next = func(int) (runner.Result, error) {
+		e.ex.client = func(clientCall) (runner.Result, error) {
 			return runner.Result{}, fmt.Errorf("%w: XDG_STATE_HOME is live", runner.ErrSafety)
 		}
 		c := e.collector(t)
-		if _, err := c.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); err == nil {
-			t.Fatal("a safety refusal must stop the run")
+		if _, err := c.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); !errors.Is(err, ErrKill) {
+			t.Fatalf("a safety refusal must stop the run with ErrKill, got %v", err)
 		}
 	})
 }
 
-func TestCrashAndResumeRecoversFromChangeLogWithTheSameCursor(t *testing.T) {
+func TestCrashAndResumeRecoversTheUnfinishedTickFromTheScratchChangeLog(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	// A previous collector wrote tick_start (cursor 0), pg-desk delivered and
-	// advanced the cursor to 2, then the collector died before the tick row.
+	// A previous collector wrote tick_start, the scratch store gained two rows,
+	// then the collector died before the tick row (Recover still reads the store).
 	if err := schema.Append(e.l.TicksFile(), schema.Row{Kind: schema.KindTickStart, Phase: "A", Slot: "2026-01-05T10:00:00.000Z", TickStart: "2026-01-05T10:00:01.000Z", CursorFrom: 0}); err != nil {
 		t.Fatal(err)
 	}
@@ -488,27 +1020,15 @@ UPDATE consumer SET cursor=2 WHERE name='shadow-compare';`); err != nil {
 	if !reasons[schema.GapUnfinish] || !reasons[schema.GapRestart] {
 		t.Errorf("gap reasons = %v", reasons)
 	}
-	// The next tick starts from the SAME cursor (2): no loss, no re-read.
-	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(2, 2, okSources())}, nil }
-	if _, err := c.Tick(ctx, time.Date(2026, 1, 5, 10, 6, 0, 0, time.UTC)); err != nil {
-		t.Fatal(err)
-	}
-	var last schema.Row
-	for _, r := range e.rows(t) {
-		if r.Kind == schema.KindTickStart {
-			last = r
-		}
-	}
-	if last.CursorFrom != 2 {
-		t.Errorf("resumed tick_start cursor = %d, want 2", last.CursorFrom)
-	}
 }
 
 func TestStateSurvivesARestart(t *testing.T) {
 	e := newEnv(t)
-	e.ex.next = func(int) (runner.Result, error) {
-		e.hydrate(1)
-		return runner.Result{Stdout: envelope(0, 0, okSources())}, nil
+	e.ex.client = func(c clientCall) (runner.Result, error) {
+		if c.op == "changes" && c.instance == "pr" && c.query == "mine" {
+			return runner.Result{Stdout: okAnswer(3, prChange("added", "owner/repo#1", 3, []string{"opened"}))}, nil
+		}
+		return defaultAnswer(c), nil
 	}
 	e.cfg.MaxTicks = 1
 	c := e.collector(t)
@@ -520,11 +1040,11 @@ func TestStateSurvivesARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	var st State
-	if err := json.Unmarshal(b, &st); err != nil || st.Executed != 1 || st.LastSlot == "" {
+	if err := json.Unmarshal(b, &st); err != nil || st.Executed != 1 || st.LastSlot == "" || st.HighestSeq["pr:mine"] != 3 || st.CostWindowEnd == "" {
 		t.Fatalf("state = %+v %v", st, err)
 	}
 	c2 := e.collector(t)
-	if c2.st.Executed != 1 || c2.st.LastSlot != st.LastSlot {
+	if c2.st.Executed != 1 || c2.st.LastSlot != st.LastSlot || c2.st.HighestSeq["pr:mine"] != 3 || c2.st.CostWindowEnd != st.CostWindowEnd {
 		t.Errorf("a new collector must load the saved state, got %+v", c2.st)
 	}
 }
@@ -627,13 +1147,10 @@ func TestTickRowsCarryTheDaemonSample(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
-			e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
 			d := &fakeDaemon{samples: []schema.DaemonSample{c.sample}}
 			e.cfg.Daemon = d
 			c2 := e.collector(t)
-			if _, err := c2.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); err != nil {
-				t.Fatal(err)
-			}
+			e.tickAt(t, c2, slot0)
 			r := e.ticks(t)[0]
 			if r.Daemon == nil || *r.Daemon != c.sample {
 				t.Fatalf("row daemon = %+v, want %+v", r.Daemon, c.sample)
@@ -651,7 +1168,6 @@ func TestTickRowsCarryTheDaemonSample(t *testing.T) {
 
 func TestASkippedBudgetRowCarriesTheDaemonSampleToo(t *testing.T) {
 	e := newEnv(t)
-	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
 	slot := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
 	e.clk.t = slot
 	low := fmt.Sprintf(`{"time":%q,"op":"list","graphql_remaining":1500,"graphql_reset_at":%q}`+"\n", slot.Add(-time.Minute).Format(time.RFC3339Nano), slot.Add(2*time.Minute).Format(time.RFC3339))
@@ -673,12 +1189,9 @@ func TestASkippedBudgetRowCarriesTheDaemonSampleToo(t *testing.T) {
 
 func TestASamplerThatNamesNoStateIsRecordedDownNotHealthy(t *testing.T) {
 	e := newEnv(t)
-	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
 	e.cfg.Daemon = &fakeDaemon{samples: []schema.DaemonSample{{}}}
 	c := e.collector(t)
-	if _, err := c.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatal(err)
-	}
+	e.tickAt(t, c, slot0)
 	if r := e.ticks(t)[0]; r.Daemon == nil || r.Daemon.State != schema.DaemonDown {
 		t.Errorf("daemon = %+v, want state down", r.Daemon)
 	}
@@ -686,11 +1199,8 @@ func TestASamplerThatNamesNoStateIsRecordedDownNotHealthy(t *testing.T) {
 
 func TestWithoutADaemonTheRowsCarryNoSample(t *testing.T) {
 	e := newEnv(t)
-	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
 	c := e.collector(t)
-	if _, err := c.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatal(err)
-	}
+	e.tickAt(t, c, slot0)
 	r := e.ticks(t)[0]
 	b, _ := json.Marshal(r)
 	if r.Daemon != nil || strings.Contains(string(b), `"daemon"`) {
@@ -700,7 +1210,6 @@ func TestWithoutADaemonTheRowsCarryNoSample(t *testing.T) {
 
 func TestRunSamplesOncePerSlotAndNeverStartsOrStopsTheChild(t *testing.T) {
 	e := newEnv(t)
-	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
 	e.cfg.MaxTicks = 3
 	d := &fakeDaemon{samples: []schema.DaemonSample{
 		{State: schema.DaemonHealthy, Alive: true},

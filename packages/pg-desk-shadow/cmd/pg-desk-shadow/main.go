@@ -153,7 +153,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	cfg := collector.Config{}
 	fs.StringVar(&root, "scratch", "", "prepared scratch directory")
 	fs.DurationVar(&cfg.Period, "period", time.Minute, "slot length")
-	fs.DurationVar(&cfg.TickTimeout, "tick-timeout", 5*time.Minute, "deadline of one pg-desk call")
+	fs.DurationVar(&cfg.TickTimeout, "tick-timeout", 5*time.Minute, "deadline of one daemon client call (a poll or an acknowledgement)")
 	fs.IntVar(&cfg.KillPointsPerHour, "kill-points-per-hour", 0, "abort when shadow spend in a rolling hour exceeds this (0 = the scratch directory's daemon cap, 1,500 when it records none)")
 	fs.IntVar(&cfg.MaxFailedTicks, "max-failed-ticks", 10, "abort after more than this many consecutive failed ticks")
 	fs.IntVar(&cfg.FloorMargin, "floor-margin", 200, "margin in the budget floor")
@@ -184,6 +184,10 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	}
 	defer func() { _ = logf.Close() }()
 	cfg.Layout, cfg.Manifest, cfg.Exec = l, m, r
+	// The shadow side is the daemon's change feed, read by exec of its own
+	// client mode (the pinned scratch binary and the scratch daemon config).
+	cfg.ClientBin, cfg.ClientConfig = filepath.Join(l.BinDir(), scratch.DaemonBinary), l.DaemonConfig()
+	cfg.Queries, cfg.Consumer = m.Queries, m.Consumer
 	cfg.KillPointsPerHour = killLimit(cfg.KillPointsPerHour, m)
 	cfg.Log = io.MultiWriter(logf, stdout)
 	cfg.WarmupExclusion = m.Seeded

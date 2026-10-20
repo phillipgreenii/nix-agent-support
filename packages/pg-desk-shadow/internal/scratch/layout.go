@@ -32,7 +32,6 @@ func (l Layout) SandboxLog() string      { return l.j("logs", "sandbox-denials.l
 func (l Layout) CollectorDir() string    { return l.j("collector") }
 func (l Layout) TicksFile() string       { return l.j("collector", "ticks.jsonl") }
 func (l Layout) StateFile() string       { return l.j("collector", "state.json") }
-func (l Layout) ProjectionFile() string  { return l.j("collector", "projection.json") }
 func (l Layout) CollectorLog() string    { return l.j("collector", "collector.log") }
 func (l Layout) LockFile() string        { return l.j("collector", "collector.lock") }
 func (l Layout) LiveDir() string         { return l.j("collector", "live") }

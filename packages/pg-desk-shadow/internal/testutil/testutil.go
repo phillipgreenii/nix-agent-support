@@ -28,6 +28,21 @@ func RequireSQLite(t *testing.T) {
 	}
 }
 
+// RequireJQ returns the directory of the jq executable, skipping (or, with
+// PG_DESK_SHADOW_REQUIRE_TOOLS=1, failing) when it is unavailable. The
+// collector's stand-in client script reads its request with jq.
+func RequireJQ(t *testing.T) string {
+	t.Helper()
+	p, err := exec.LookPath("jq")
+	if err != nil {
+		if os.Getenv("PG_DESK_SHADOW_REQUIRE_TOOLS") == "1" {
+			t.Fatalf("jq is required: %v", err)
+		}
+		t.Skip("jq not available")
+	}
+	return filepath.Dir(p)
+}
+
 // Schema is the subset of the version-2 pg-desk store the tool reads or writes.
 const Schema = `
 CREATE TABLE entity (repo TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, facts TEXT NOT NULL, as_of TEXT NOT NULL,
