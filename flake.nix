@@ -4621,6 +4621,12 @@
                   testFlags = [
                     "-tags"
                     "integration"
+                    # internal/effectpolicy (-race, TestVerdictMonotonicity) alone
+                    # runs ~10 min on a loaded host and tripped go test's default
+                    # 10m alarm (pg2-xk3cu), failing the package before later tests
+                    # ran. 30m keeps a hang bounded while clearing that headroom.
+                    "-timeout"
+                    "30m"
                   ];
                 }).overrideAttrs
                   (_: {
