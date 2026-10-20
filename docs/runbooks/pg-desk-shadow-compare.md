@@ -112,13 +112,24 @@ Never copy the scratch store or edit `ticks.jsonl` by hand.
 
 ### Parameters (adjustable here, defaults)
 
-| Flag                     | Default | Meaning                                                            |
-| ------------------------ | ------- | ------------------------------------------------------------------ |
-| `--period`               | `60s`   | Slot length (the production cadence)                               |
-| `--kill-points-per-hour` | `1500`  | Shadow GraphQL spend above this in a rolling hour aborts the run   |
-| `--max-failed-ticks`     | `10`    | Consecutive failed ticks before aborting                           |
-| `--floor-margin`         | `200`   | Margin in the floor `max(2000, 1000 + max_per_poll x 12 + margin)` |
-| `--tick-timeout`         | `5m`    | One `pg-desk` call's deadline (an overrun skips the missed slots)  |
+| Flag                     | Default | Meaning                                                                                                                             |
+| ------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `--period`               | `60s`   | Slot length (the production cadence)                                                                                                |
+| `--kill-points-per-hour` | `0`     | Shadow GraphQL spend above this in a rolling hour aborts the run; `0` uses the daemon cap recorded at prepare time (1500 when none) |
+| `--max-failed-ticks`     | `10`    | Consecutive failed ticks before aborting                                                                                            |
+| `--floor-margin`         | `200`   | Margin in the floor `max(2000, 1000 + max_per_poll x 12 + margin)`                                                                  |
+| `--tick-timeout`         | `5m`    | One `pg-desk` call's deadline (an overrun skips the missed slots)                                                                   |
+
+### The daemon child
+
+`run` starts the scratch `pg-connector-github serve` as its own sandboxed child (same environment
+checks as every other child, output in `<scratch>/logs/daemon.out.log`) and waits until
+`status --json` reports it serving (exit 0 or 2) before the first slot; it refuses to start
+(exit 2, `refusing to start: daemon: ...`) when the daemon never serves or the scratch directory was
+prepared without one. It restarts a child whose process dies (counted) and stops it on exit or
+signal. Every executed and every skipped tick row carries a `daemon` sample (`state` healthy,
+degraded or down from the status exit 0, 2 or 3; `status_exit`; `alive`; cumulative `restarts`). A
+slot with no tick row has no sample and counts as not up.
 
 ## 3. While it runs
 

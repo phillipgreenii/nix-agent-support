@@ -40,11 +40,24 @@ type Exec interface {
 	Run(ctx context.Context, timeout time.Duration, argv ...string) (runner.Result, error)
 }
 
+// Daemon is the shadow daemon child the run supervises. cmdRun starts it
+// before Collector.Run and stops it after; Sample (called once per tick, so
+// once per slot with a tick row) restarts a child whose process died and
+// returns the health reading the row carries. A nil Config.Daemon means the
+// run has no daemon and no row carries a sample.
+type Daemon interface {
+	Start(ctx context.Context) error
+	Sample(ctx context.Context) schema.DaemonSample
+	Stop() error
+}
+
 // Config configures a collector.
 type Config struct {
 	Layout   scratch.Layout
 	Manifest scratch.Manifest
 	Exec     Exec
+	// Daemon is the supervised shadow daemon (nil: none, rows carry no sample).
+	Daemon Daemon
 
 	Period            time.Duration
 	TickTimeout       time.Duration
@@ -399,6 +412,12 @@ func (c *Collector) Tick(ctx context.Context, slot time.Time) (ran bool, err err
 	m := c.cfg.Manifest
 	started := c.cfg.Now()
 
+	// One daemon sample per slot with a tick row, executed or skipped. It is
+	// taken before the budget guard so a skipped slot still carries it; a slot
+	// with no tick row at all (collector down) has none, and the report counts
+	// that as not up.
+	dsample := c.sampleDaemon(ctx)
+
 	// Budget guard.
 	readings, gerr := budget.Gather(started, budget.DefaultWindow, m.Live.ConnectorEvents, c.cfg.Layout.ConnectorLog())
 	if gerr != nil {
@@ -414,7 +433,7 @@ func (c *Collector) Tick(ctx context.Context, slot time.Time) (ran bool, err err
 		c.logf("slot %s skipped_budget remaining=%d floor=%d source=%s", schema.Format(slot), dec.Remaining, floor, dec.Source)
 		return false, c.row(schema.Row{
 			Kind: schema.KindTick, Slot: schema.Format(slot), TickStart: schema.Format(started), TickEnd: schema.Format(c.cfg.Now()),
-			Status: schema.StatusSkippedBudget, SkippedBudget: true, Budget: bud, Warmup: c.inWarmup(),
+			Status: schema.StatusSkippedBudget, SkippedBudget: true, Budget: bud, Warmup: c.inWarmup(), Daemon: dsample,
 		})
 	}
 
@@ -440,7 +459,7 @@ func (c *Collector) Tick(ctx context.Context, slot time.Time) (ran bool, err err
 
 	row := schema.Row{
 		Kind: schema.KindTick, Slot: schema.Format(slot), TickStart: schema.Format(started), TickEnd: schema.Format(ended),
-		DurationMS: ended.Sub(started).Milliseconds(), Builds: builds, Budget: bud, Warmup: c.inWarmup(), CursorFrom: cursorFrom,
+		DurationMS: ended.Sub(started).Milliseconds(), Builds: builds, Budget: bud, Warmup: c.inWarmup(), CursorFrom: cursorFrom, Daemon: dsample,
 	}
 	exit := res.Exit
 	failed := false
@@ -588,6 +607,20 @@ func (c *Collector) Tick(ctx context.Context, slot time.Time) (ran bool, err err
 		return true, fmt.Errorf("%w: %d consecutive failed ticks", ErrKill, c.st.FailedStreak)
 	}
 	return true, nil
+}
+
+// sampleDaemon reads the daemon's health for the slot; nil when the run has no
+// daemon.
+func (c *Collector) sampleDaemon(ctx context.Context) *schema.DaemonSample {
+	if c.cfg.Daemon == nil {
+		return nil
+	}
+	smp := c.cfg.Daemon.Sample(ctx)
+	if smp.State == "" {
+		// A sampler that names no state is not evidence of health.
+		smp.State = schema.DaemonDown
+	}
+	return &smp
 }
 
 func (c *Collector) inWarmup() bool { return c.cfg.WarmupExclusion && !c.st.WarmupDone }

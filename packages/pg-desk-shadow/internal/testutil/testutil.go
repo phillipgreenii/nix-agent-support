@@ -6,8 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
+	"github.com/phillipgreenii/pg-desk-shadow/internal/runner"
+	"github.com/phillipgreenii/pg-desk-shadow/internal/safety"
 	"github.com/phillipgreenii/pg-desk-shadow/internal/sqlite"
 )
 
@@ -48,4 +53,51 @@ func FakeStore(t *testing.T, path string) sqlite.DB {
 // FactsJSON renders the pr_show part of a facts value.
 func FactsJSON(head, state string, comments int) string {
 	return fmt.Sprintf(`{"pr_show":{"head_sha":%q,"state":%q,"updated_at":"2026-01-05T10:00:00Z","comment_count":%d,"review_count":0,"review_decision":"","checks_rollup":"SUCCESS","merge_state_status":"CLEAN","mergeable":"MERGEABLE","connections":{"threads":{"total":0},"comments":{"total":%d},"reviews":{"total":0}},"draft":false,"label_count":1,"age_seconds":99,"as_of":"x"},"as_of":"x"}`, head, state, comments, comments)
+}
+
+// NewRunner returns an UNSANDBOXED runner whose environment passes
+// safety.Verify against a throwaway scratch policy (no daemon variables), for
+// tests that run stand-in executables. It never touches the real sandbox, the
+// real state directories or the network.
+func NewRunner(t *testing.T) *runner.Runner {
+	t.Helper()
+	root := safety.Resolve(t.TempDir())
+	home := safety.Resolve(t.TempDir())
+	p := safety.Policy{
+		Scratch: root, StateHome: filepath.Join(root, "state"), RuntimeDir: filepath.Join(root, "run"), TmpDir: filepath.Join(root, "tmp"),
+		BinDir: filepath.Join(root, "bin"), DeskConfig: filepath.Join(root, "config", "pg-desk.yaml"), PRConfig: filepath.Join(root, "config", "pg-pr.yaml"),
+		Home: home, LiveRoots: []string{filepath.Join(home, ".local", "state")},
+	}
+	for _, d := range []string{p.StateHome, p.RuntimeDir, p.TmpDir, p.BinDir, filepath.Dir(p.PRConfig)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(p.PRConfig, []byte("connector: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return &runner.Runner{Policy: p, Env: safety.ChildEnv(p, "/usr/bin:/bin"), Unsandboxed: true, WorkDir: root}
+}
+
+// WriteScript writes an executable shell script named name under dir and
+// returns its path.
+func WriteScript(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// ProcessGone polls up to two seconds for pid to no longer exist (a zombie
+// awaiting reaping counts as existing) and reports whether it is gone.
+func ProcessGone(pid int) bool {
+	for i := 0; i < 100; i++ {
+		if err := syscall.Kill(pid, 0); err == syscall.ESRCH {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
 }

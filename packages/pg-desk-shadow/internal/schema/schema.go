@@ -42,6 +42,27 @@ const (
 	GapUnfinish = "unfinished-tick"
 )
 
+// Daemon states of a DaemonSample.
+const (
+	DaemonHealthy  = "healthy"
+	DaemonDegraded = "degraded"
+	DaemonDown     = "down"
+)
+
+// DaemonSample is one slot's reading of the shadow daemon child
+// (pg-connector-github): the state its `status --json` exit code maps to (0
+// healthy, 2 degraded, 3 or anything else down), that exit code (-1 when
+// status was not run or could not run), whether the child process was alive
+// when the sample was taken, and the cumulative number of times the harness
+// restarted the child. A slot with no sample is a row whose Daemon is nil: the
+// uptime criterion must count it as not up, never as healthy.
+type DaemonSample struct {
+	State      string `json:"state"`
+	StatusExit int    `json:"status_exit"`
+	Alive      bool   `json:"alive"`
+	Restarts   int    `json:"restarts"`
+}
+
 // Item is one change record the shadow reported, one per envelope record.
 type Item struct {
 	EntityID  string   `json:"entity_id"`
@@ -100,6 +121,9 @@ type Row struct {
 	SandboxDenials int               `json:"sandbox_denials,omitempty"`
 	ShimRejects    int               `json:"shim_rejects,omitempty"`
 	Error          string            `json:"error,omitempty"`
+	// Daemon is the shadow daemon's sample for the slot; it is written on every
+	// executed and every skipped tick row of a run that supervises a daemon.
+	Daemon *DaemonSample `json:"daemon,omitempty"`
 
 	// Gap fields.
 	Reason  string `json:"reason,omitempty"`

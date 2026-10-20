@@ -595,3 +595,133 @@ func TestCostInWindowSumsOnlyOriginRows(t *testing.T) {
 		t.Errorf("missing log = %d, want 0", got)
 	}
 }
+
+// fakeDaemon stands in for the supervised daemon child.
+type fakeDaemon struct {
+	samples       []schema.DaemonSample
+	starts, stops int
+	samplesTaken  int
+	startErr      error
+}
+
+func (d *fakeDaemon) Start(context.Context) error { d.starts++; return d.startErr }
+func (d *fakeDaemon) Stop() error                 { d.stops++; return nil }
+func (d *fakeDaemon) Sample(context.Context) schema.DaemonSample {
+	i := d.samplesTaken
+	d.samplesTaken++
+	if i >= len(d.samples) {
+		i = len(d.samples) - 1
+	}
+	return d.samples[i]
+}
+
+func TestTickRowsCarryTheDaemonSample(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		sample schema.DaemonSample
+	}{
+		{"healthy", schema.DaemonSample{State: schema.DaemonHealthy, StatusExit: 0, Alive: true, Restarts: 0}},
+		{"degraded", schema.DaemonSample{State: schema.DaemonDegraded, StatusExit: 2, Alive: true, Restarts: 1}},
+		{"down", schema.DaemonSample{State: schema.DaemonDown, StatusExit: 3, Alive: true, Restarts: 2}},
+		{"dead process", schema.DaemonSample{State: schema.DaemonDown, StatusExit: -1, Alive: false, Restarts: 3}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
+			d := &fakeDaemon{samples: []schema.DaemonSample{c.sample}}
+			e.cfg.Daemon = d
+			c2 := e.collector(t)
+			if _, err := c2.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); err != nil {
+				t.Fatal(err)
+			}
+			r := e.ticks(t)[0]
+			if r.Daemon == nil || *r.Daemon != c.sample {
+				t.Fatalf("row daemon = %+v, want %+v", r.Daemon, c.sample)
+			}
+			// The sample survives the JSON round trip under the pinned keys.
+			b, _ := json.Marshal(r)
+			for _, key := range []string{`"daemon":{"state":"` + c.sample.State + `"`, `"status_exit":`, `"alive":`, `"restarts":`} {
+				if !strings.Contains(string(b), key) {
+					t.Errorf("row JSON lacks %s: %s", key, b)
+				}
+			}
+		})
+	}
+}
+
+func TestASkippedBudgetRowCarriesTheDaemonSampleToo(t *testing.T) {
+	e := newEnv(t)
+	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
+	slot := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
+	e.clk.t = slot
+	low := fmt.Sprintf(`{"time":%q,"op":"list","graphql_remaining":1500,"graphql_reset_at":%q}`+"\n", slot.Add(-time.Minute).Format(time.RFC3339Nano), slot.Add(2*time.Minute).Format(time.RFC3339))
+	if err := os.WriteFile(e.m.Live.ConnectorEvents, []byte(low), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := schema.DaemonSample{State: schema.DaemonDegraded, StatusExit: 2, Alive: true, Restarts: 1}
+	e.cfg.Daemon = &fakeDaemon{samples: []schema.DaemonSample{want}}
+	c := e.collector(t)
+	ran, err := c.Tick(context.Background(), slot)
+	if err != nil || ran {
+		t.Fatalf("tick: ran=%v err=%v", ran, err)
+	}
+	r := e.ticks(t)[0]
+	if !r.SkippedBudget || r.Daemon == nil || *r.Daemon != want {
+		t.Errorf("skipped row = %+v", r)
+	}
+}
+
+func TestASamplerThatNamesNoStateIsRecordedDownNotHealthy(t *testing.T) {
+	e := newEnv(t)
+	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
+	e.cfg.Daemon = &fakeDaemon{samples: []schema.DaemonSample{{}}}
+	c := e.collector(t)
+	if _, err := c.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.ticks(t)[0]; r.Daemon == nil || r.Daemon.State != schema.DaemonDown {
+		t.Errorf("daemon = %+v, want state down", r.Daemon)
+	}
+}
+
+func TestWithoutADaemonTheRowsCarryNoSample(t *testing.T) {
+	e := newEnv(t)
+	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
+	c := e.collector(t)
+	if _, err := c.Tick(context.Background(), time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	r := e.ticks(t)[0]
+	b, _ := json.Marshal(r)
+	if r.Daemon != nil || strings.Contains(string(b), `"daemon"`) {
+		t.Errorf("a run with no daemon must not write a sample: %s", b)
+	}
+}
+
+func TestRunSamplesOncePerSlotAndNeverStartsOrStopsTheChild(t *testing.T) {
+	e := newEnv(t)
+	e.ex.next = func(int) (runner.Result, error) { return runner.Result{Stdout: envelope(0, 0, okSources())}, nil }
+	e.cfg.MaxTicks = 3
+	d := &fakeDaemon{samples: []schema.DaemonSample{
+		{State: schema.DaemonHealthy, Alive: true},
+		{State: schema.DaemonDown, StatusExit: -1, Restarts: 1},
+		{State: schema.DaemonDegraded, StatusExit: 2, Alive: true, Restarts: 1},
+	}}
+	e.cfg.Daemon = d
+	c := e.collector(t)
+	if err := c.Run(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	ts := e.ticks(t)
+	if len(ts) != 3 || d.samplesTaken != 3 {
+		t.Fatalf("%d tick rows and %d samples, want 3 and 3", len(ts), d.samplesTaken)
+	}
+	for i, r := range ts {
+		if r.Daemon == nil || *r.Daemon != d.samples[i] {
+			t.Errorf("tick %d daemon = %+v, want %+v", i, r.Daemon, d.samples[i])
+		}
+	}
+	if d.starts != 0 || d.stops != 0 {
+		t.Errorf("Run must not start (%d) or stop (%d) the child: cmdRun owns that", d.starts, d.stops)
+	}
+}

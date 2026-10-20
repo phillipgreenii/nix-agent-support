@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-desk-shadow/internal/collector"
+	"github.com/phillipgreenii/pg-desk-shadow/internal/daemon"
 	"github.com/phillipgreenii/pg-desk-shadow/internal/prepare"
 	"github.com/phillipgreenii/pg-desk-shadow/internal/report"
 	"github.com/phillipgreenii/pg-desk-shadow/internal/runner"
@@ -153,7 +154,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&root, "scratch", "", "prepared scratch directory")
 	fs.DurationVar(&cfg.Period, "period", time.Minute, "slot length")
 	fs.DurationVar(&cfg.TickTimeout, "tick-timeout", 5*time.Minute, "deadline of one pg-desk call")
-	fs.IntVar(&cfg.KillPointsPerHour, "kill-points-per-hour", 1500, "abort when shadow spend in a rolling hour exceeds this")
+	fs.IntVar(&cfg.KillPointsPerHour, "kill-points-per-hour", 0, "abort when shadow spend in a rolling hour exceeds this (0 = the scratch directory's daemon cap, 1,500 when it records none)")
 	fs.IntVar(&cfg.MaxFailedTicks, "max-failed-ticks", 10, "abort after more than this many consecutive failed ticks")
 	fs.IntVar(&cfg.FloorMargin, "floor-margin", 200, "margin in the budget floor")
 	fs.IntVar(&cfg.MaxTicks, "max-ticks", 0, "stop after this many executed ticks (0 = run until stopped)")
@@ -183,10 +184,18 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	}
 	defer func() { _ = logf.Close() }()
 	cfg.Layout, cfg.Manifest, cfg.Exec = l, m, r
+	cfg.KillPointsPerHour = killLimit(cfg.KillPointsPerHour, m)
 	cfg.Log = io.MultiWriter(logf, stdout)
 	cfg.WarmupExclusion = m.Seeded
 	cfg.SandboxDenialScan = !*noScan
-	cfg.Procs = []string{"pg-desk", ".pg-desk-wrapped", "pg-connector", ".pg-connector-pr-github-wrapped", "pg-connector-pr-github", "pg-connector-issue-beads", "gh", "bd", "pg-desk-shadow"}
+	cfg.Procs = []string{"pg-desk", ".pg-desk-wrapped", "pg-connector", ".pg-connector-pr-github-wrapped", "pg-connector-pr-github", "pg-connector-issue-beads", "gh", "bd", "pg-desk-shadow", scratch.DaemonBinary, ".pg-connector-github-wrapped"}
+	dm, closeDaemonLog, err := newDaemon(l, m, r, cfg.Log)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: refusing to start: daemon: %s\n", collector.Scrub(err.Error(), m.Scrub))
+		return exitRefuse
+	}
+	defer closeDaemonLog()
+	cfg.Daemon = dm
 	c, err := collector.New(cfg)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: %v\n", err)
@@ -198,6 +207,17 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: refusing to start: %v\n", err)
 		return exitRefuse
 	}
+	// The daemon child: started (and waited for) before the first slot, stopped
+	// when this function returns for any reason, including a signal.
+	if err := dm.Start(ctx); err != nil {
+		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: refusing to start: daemon: %s\n", collector.Scrub(err.Error(), m.Scrub))
+		return exitRefuse
+	}
+	defer func() {
+		if err := dm.Stop(); err != nil {
+			_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: stopping the daemon: %v\n", err)
+		}
+	}()
 	if err := c.Recover(ctx); err != nil {
 		_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: resume: %v\n", err)
 		return exitRefuse
@@ -212,6 +232,40 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	}
 	_, _ = fmt.Fprintf(stderr, "pg-desk-shadow run: %v\n", collector.Scrub(err.Error(), m.Scrub))
 	return exitKill
+}
+
+// killLimit is the run's spend kill ceiling: an explicit --kill-points-per-hour
+// wins; otherwise the scratch directory's daemon cap (so an operator who raised
+// it is not killed at the 1,500 default); otherwise the 1,500 default.
+func killLimit(flagValue int, m scratch.Manifest) int {
+	switch {
+	case flagValue > 0:
+		return flagValue
+	case m.DaemonGraphQLPointsPerHour > 0:
+		return m.DaemonGraphQLPointsPerHour
+	}
+	return scratch.DefaultDaemonPointsPerHour
+}
+
+// newDaemon builds the supervisor of the scratch daemon, a sandboxed child of
+// this run. A scratch directory prepared without a daemon is an error: the run
+// must not go on without it. The returned closer releases the daemon log.
+func newDaemon(l scratch.Layout, m scratch.Manifest, r *runner.Runner, log io.Writer) (*daemon.Supervisor, func(), error) {
+	bin := filepath.Join(l.BinDir(), scratch.DaemonBinary)
+	if m.DaemonGraphQLPointsPerHour <= 0 || !fileExists(bin) || !fileExists(l.DaemonConfig()) {
+		return nil, nil, fmt.Errorf("this scratch directory was prepared without the daemon (no %s, config or cap): run prepare again", scratch.DaemonBinary)
+	}
+	out, err := os.OpenFile(l.DaemonLog(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, nil, err
+	}
+	r.ChildOut = out
+	return &daemon.Supervisor{
+		Runner: r, Binary: bin, Config: l.DaemonConfig(),
+		Logf: func(format string, a ...any) {
+			_, _ = fmt.Fprintf(log, "%s daemon: %s\n", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, a...))
+		},
+	}, func() { _ = out.Close() }, nil
 }
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
