@@ -280,28 +280,6 @@ func TestReportNarrativeStoresAndPrints(t *testing.T) {
 	}
 }
 
-func TestReportNarrativeConfigReachesGenerator(t *testing.T) {
-	isolate(t)
-	rec := claudefake.Install(t, claudefake.Behavior{Stdout: fakeNarrative})
-	promptFile := filepath.Join(t.TempDir(), "prompt.md")
-	if err := os.WriteFile(promptFile, []byte("CUSTOM PROMPT MARKER"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	storePath := seedQueryStore(t)
-	cfg := writeCfg(t, "timezone: UTC\nkinds:\n  narrative:\n    model: test-model\n    systemPromptFile: "+promptFile+"\n")
-	if _, err := runCLI(t, "--config", cfg, "--store", storePath, "report", "--kind", "narrative", "--range", "2026-03-01"); err != nil {
-		t.Fatal(err)
-	}
-	calls := rec.Calls()
-	if len(calls) != 1 {
-		t.Fatalf("calls = %d, want 1", len(calls))
-	}
-	argv := strings.Join(calls[0].Args, "\x00")
-	if !strings.Contains(argv, "--model\x00test-model") || !strings.Contains(argv, "CUSTOM PROMPT MARKER") {
-		t.Errorf("configured model/prompt did not reach claude: %q", calls[0].Args)
-	}
-}
-
 func TestReportNarrativeJSONWrapsContent(t *testing.T) {
 	isolate(t)
 	claudefake.Install(t, claudefake.Behavior{Stdout: fakeNarrative})

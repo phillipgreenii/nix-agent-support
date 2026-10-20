@@ -4,13 +4,15 @@
 // ~/.config/work-report/config.yaml) unless an explicit path is given (the
 // global --config flag). Its keys are exactly: timezone (string), sources (a
 // map from backend name to an object with enable (bool) and labels (list of
-// strings)), schedule (interval and window, strings) and store (path,
-// string), and kinds.narrative (the optional model and systemPromptFile
-// strings the narrative report kind reads). The decode is strict: an unknown
-// key, including any other key under kinds or kinds.narrative and any other
-// kind name, is an error naming the key. Neither narrative option is
-// validated here: a missing systemPromptFile surfaces at generation time and
-// an unset model is left unset.
+// strings)), schedule (interval and window, strings), store (path, string),
+// generators and reports. The decode is strict: an unknown key is an error
+// naming the key. The retired kinds key is rejected first, with the
+// migration text (ErrKindsRetired), whatever it holds.
+//
+// Load decodes generators and reports as raw YAML nodes and checks nothing
+// inside them, so a mistake in those sections cannot fail pull, query or
+// status; Presets (presets.go) parses and checks them and is called only by
+// report, config show and config validate.
 //
 // This package is the only place the other work-report packages read
 // configuration and the store path from; defaulting lives here and nowhere
@@ -54,11 +56,6 @@ type SourceCfg struct {
 	Labels []string
 }
 
-// NarrativeCfg holds the narrative report kind's optional settings. An empty
-// string means unset; the loader neither checks that SystemPromptFile exists
-// nor supplies a default Model.
-type NarrativeCfg struct{ Model, SystemPromptFile string }
-
 // Config is work-report's parsed configuration.
 type Config struct {
 	// Timezone is an IANA zone name; empty means the system zone.
@@ -68,8 +65,10 @@ type Config struct {
 	Sources  map[string]SourceCfg
 	Schedule struct{ Interval, Window string }
 	Store    struct{ Path string }
-	// Kinds holds per-report-kind settings.
-	Kinds struct{ Narrative NarrativeCfg }
+
+	// generators and reports are the raw YAML nodes of those sections, kept
+	// unchecked for Presets to parse.
+	generators, reports yaml.Node
 }
 
 // rawConfig is the on-disk YAML shape. It is separate from Config so the
@@ -85,12 +84,8 @@ type rawConfig struct {
 	Store struct {
 		Path string `yaml:"path"`
 	} `yaml:"store"`
-	Kinds struct {
-		Narrative struct {
-			Model            string `yaml:"model"`
-			SystemPromptFile string `yaml:"systemPromptFile"`
-		} `yaml:"narrative"`
-	} `yaml:"kinds"`
+	Generators yaml.Node `yaml:"generators"`
+	Reports    yaml.Node `yaml:"reports"`
 }
 
 type rawSource struct {
@@ -136,6 +131,10 @@ func Load(path string) (Config, error) {
 	raw.Schedule.Window = c.Schedule.Window
 	raw.Store.Path = c.Store.Path
 
+	if hasTopLevelKey(data, "kinds") {
+		return Config{}, fmt.Errorf("config: %s: %w", path, ErrKindsRetired)
+	}
+
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&raw); err != nil && !errors.Is(err, io.EOF) {
@@ -146,10 +145,8 @@ func Load(path string) (Config, error) {
 	c.Schedule.Interval = raw.Schedule.Interval
 	c.Schedule.Window = raw.Schedule.Window
 	c.Store.Path = raw.Store.Path
-	c.Kinds.Narrative = NarrativeCfg{
-		Model:            raw.Kinds.Narrative.Model,
-		SystemPromptFile: raw.Kinds.Narrative.SystemPromptFile,
-	}
+	c.generators = raw.Generators
+	c.reports = raw.Reports
 	if len(raw.Sources) > 0 {
 		c.Sources = make(map[string]SourceCfg, len(raw.Sources))
 		for name, s := range raw.Sources {
@@ -165,6 +162,40 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("config: %s: %w", path, err)
 	}
 	return c, nil
+}
+
+// KindsMigrationText is the translation text for the retired kinds config key
+// and the retired --kind flag: it tells the operator how to define the preset
+// that replaces the old narrative kind.
+const KindsMigrationText = "--kind was removed; run 'work-report report <preset>'. " +
+	"To keep the old narrative behavior define a preset: reports.<name>.generator: narrative, " +
+	"with kinds.narrative.model becoming reports.<name>.config.model and " +
+	"kinds.narrative.systemPromptFile becoming reports.<name>.config.promptFile " +
+	"(it now replaces only the task section; the injection guard is fixed)."
+
+// ErrKindsRetired is the load error for a config carrying the retired kinds
+// key, whatever its content. Callers recognize it with
+// errors.Is(err, config.ErrKindsRetired); its text is the migration text.
+var ErrKindsRetired = errors.New("the kinds key is retired: " + KindsMigrationText)
+
+// hasTopLevelKey reports whether the YAML document's top-level mapping has the
+// key. A document that is not a mapping, or does not parse, has no such key
+// (the strict decode reports those).
+func hasTopLevelKey(data []byte, key string) bool {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil || len(doc.Content) == 0 {
+		return false
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate checks the values that Load cannot reject structurally: the time

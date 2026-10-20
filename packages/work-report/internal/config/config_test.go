@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -134,9 +135,6 @@ func TestLoadUnknownKeyIsError(t *testing.T) {
 		{"top level", "bogus: 1\n", "bogus"},
 		{"nested", "schedule:\n  cadence: 1h\n", "cadence"},
 		{"source block", "sources:\n  b:\n    enabled: true\n", "enabled"},
-		{"narrative unknown option", "kinds:\n  narrative:\n    bogus: 1\n", "bogus"},
-		{"unknown kind name", "kinds:\n  other:\n    model: m\n", "other"},
-		{"kinds unknown sibling", "kinds:\n  narrative:\n    model: m\n  baseline:\n    model: m\n", "baseline"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load(writeConfig(t, tc.body))
@@ -150,25 +148,41 @@ func TestLoadUnknownKeyIsError(t *testing.T) {
 	}
 }
 
-func TestLoadNarrativeKindOptions(t *testing.T) {
-	c, err := Load(writeConfig(t, "kinds:\n  narrative:\n    model: some-model\n    systemPromptFile: /nonexistent/p.md\n"))
-	if err != nil {
-		t.Fatalf("a narrative config must load (the prompt file is not checked): %v", err)
-	}
-	if got := c.Kinds.Narrative; got.Model != "some-model" || got.SystemPromptFile != "/nonexistent/p.md" {
-		t.Errorf("kinds.narrative = %+v", got)
+func TestLoadRetiredKindsKeyIsError(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"empty mapping", "kinds: {}\n"},
+		{"null", "kinds:\n"},
+		{"narrative options", "kinds:\n  narrative:\n    model: m\n    systemPromptFile: /p.md\n"},
+		{"garbage content is not inspected", "kinds:\n  other:\n    bogus: 1\n"},
+		{"scalar", "kinds: 3\n"},
+		{"with a valid sibling", "timezone: UTC\nkinds: {}\n"},
+		{"with an unknown sibling listed first", "bogus: 1\nkinds: {}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tc.body))
+			if !errors.Is(err, ErrKindsRetired) {
+				t.Fatalf("err = %v, want ErrKindsRetired", err)
+			}
+			for _, want := range []string{"kinds", "reports.<name>.generator: narrative", "reports.<name>.config.model", "reports.<name>.config.promptFile", "work-report report <preset>"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q lacks migration text %q", err, want)
+				}
+			}
+		})
 	}
 }
 
-func TestLoadNarrativeOptionsAreOptional(t *testing.T) {
-	for _, body := range []string{"", "kinds:\n  narrative:\n    model: only-model\n", "kinds:\n  narrative:\n    systemPromptFile: /p.md\n"} {
-		c, err := Load(writeConfig(t, body))
-		if err != nil {
-			t.Fatalf("%q: %v", body, err)
-		}
-		if body == "" && (c.Kinds.Narrative != NarrativeCfg{}) {
-			t.Errorf("absent options must be empty, got %+v", c.Kinds.Narrative)
-		}
+func TestLoadIgnoresGeneratorsAndReportsContent(t *testing.T) {
+	c, err := Load(writeConfig(t, `generators:
+  Bad Name: [1, 2]
+  g: {commnd: [x]}
+reports: 7
+`))
+	if err != nil {
+		t.Fatalf("Load must not look inside generators or reports: %v", err)
+	}
+	if c.Schedule.Window != "48h" {
+		t.Errorf("window = %q", c.Schedule.Window)
 	}
 }
 

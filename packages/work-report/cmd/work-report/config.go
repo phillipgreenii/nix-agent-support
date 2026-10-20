@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -98,12 +99,62 @@ type showJSON struct {
 	Store struct {
 		Path string `json:"path"`
 	} `json:"store"`
-	Kinds struct {
-		Narrative struct {
-			Model            string `json:"model"`
-			SystemPromptFile string `json:"systemPromptFile"`
-		} `json:"narrative"`
-	} `json:"kinds"`
+	Generators map[string]generatorJSON `json:"generators"`
+	Presets    map[string]presetJSON    `json:"presets"`
+	// Problems lists what is wrong in the generators and reports sections;
+	// config show still exits 0.
+	Problems []problemJSON `json:"problems"`
+}
+
+type generatorJSON struct {
+	Builtin bool     `json:"builtin"`
+	Command []string `json:"command"`
+	Timeout string   `json:"timeout"`
+	Inputs  []string `json:"inputs"`
+	Env     []string `json:"env"`
+}
+
+type narrowingJSON struct {
+	Labels  []string `json:"labels"`
+	Sources []string `json:"sources"`
+	Types   []string `json:"types"`
+}
+
+type presetJSON struct {
+	Builtin   bool           `json:"builtin"`
+	Generator string         `json:"generator"`
+	Config    map[string]any `json:"config"`
+	Range     string         `json:"range"`
+	Narrowing narrowingJSON  `json:"narrowing"`
+	Output    struct {
+		Dir string `json:"dir"`
+	} `json:"output"`
+}
+
+type problemJSON struct {
+	Kind      string  `json:"kind"`
+	Generator *string `json:"generator"`
+	Preset    *string `json:"preset"`
+	Message   string  `json:"message"`
+}
+
+// durationText renders a duration the way an operator writes it: 5m, 1h30m.
+func durationText(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
+}
+
+func nonEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // effectiveConfig renders cfg with the store path resolved against the --store
@@ -122,8 +173,33 @@ func effectiveConfig(cfg config.Config, storeFlag string) showJSON {
 	v.Schedule.Interval = cfg.Schedule.Interval
 	v.Schedule.Window = cfg.Schedule.Window
 	v.Store.Path = config.StorePath(cfg, storeFlag)
-	v.Kinds.Narrative.Model = cfg.Kinds.Narrative.Model
-	v.Kinds.Narrative.SystemPromptFile = cfg.Kinds.Narrative.SystemPromptFile
+
+	set := config.Presets(cfg)
+	v.Generators = make(map[string]generatorJSON, len(set.Generators))
+	for name, g := range set.Generators {
+		gj := generatorJSON{Builtin: g.Builtin, Command: g.Command, Inputs: g.Inputs, Env: g.Env}
+		if gj.Command == nil {
+			gj.Command = []string{}
+		}
+		if !g.Builtin {
+			gj.Timeout = durationText(g.Timeout)
+		}
+		v.Generators[name] = gj
+	}
+	v.Presets = make(map[string]presetJSON, len(set.Presets))
+	for name, p := range set.Presets {
+		pj := presetJSON{
+			Builtin: p.Builtin, Generator: p.Generator, Range: p.Range,
+			Config:    config.Redact(p.Config),
+			Narrowing: narrowingJSON{Labels: p.Narrowing.Labels, Sources: p.Narrowing.Sources, Types: p.Narrowing.Types},
+		}
+		pj.Output.Dir = p.OutputDir
+		v.Presets[name] = pj
+	}
+	v.Problems = make([]problemJSON, 0, len(set.Problems))
+	for _, pr := range set.Problems {
+		v.Problems = append(v.Problems, problemJSON{Kind: pr.Kind, Generator: nonEmpty(pr.Generator), Preset: nonEmpty(pr.Preset), Message: pr.Message})
+	}
 	return v
 }
 
@@ -151,14 +227,6 @@ func newConfigShowCmd() *cobra.Command {
 	}
 }
 
-// orUnset renders an empty option value as "(unset)".
-func orUnset(s string) string {
-	if s == "" {
-		return "(unset)"
-	}
-	return s
-}
-
 func writeShowHuman(w io.Writer, v showJSON) error {
 	tz := v.Timezone
 	if tz == "" {
@@ -169,8 +237,6 @@ func writeShowHuman(w io.Writer, v showJSON) error {
 	fmt.Fprintf(&b, "schedule.interval: %s\n", v.Schedule.Interval)
 	fmt.Fprintf(&b, "schedule.window: %s\n", v.Schedule.Window)
 	fmt.Fprintf(&b, "store.path: %s\n", v.Store.Path)
-	fmt.Fprintf(&b, "kinds.narrative.model: %s\n", orUnset(v.Kinds.Narrative.Model))
-	fmt.Fprintf(&b, "kinds.narrative.systemPromptFile: %s\n", orUnset(v.Kinds.Narrative.SystemPromptFile))
 	if len(v.Sources) == 0 {
 		b.WriteString("sources: (none configured; every backend is enabled with no extra labels)\n")
 	} else {
@@ -189,8 +255,56 @@ func writeShowHuman(w io.Writer, v showJSON) error {
 			fmt.Fprintf(&b, "  %s: enable=%t labels=%s\n", name, s.Enable, labels)
 		}
 	}
+	writeShowPresetsHuman(&b, v)
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// writeShowPresetsHuman appends the generators, presets and problems.
+func writeShowPresetsHuman(b *strings.Builder, v showJSON) {
+	b.WriteString("generators:\n")
+	for _, name := range sortedKeys(v.Generators) {
+		g := v.Generators[name]
+		if g.Builtin {
+			fmt.Fprintf(b, "  %s: built in\n", name)
+			continue
+		}
+		fmt.Fprintf(b, "  %s: command=%s timeout=%s inputs=%s env=%s\n",
+			name, listText(g.Command), g.Timeout, listText(g.Inputs), listText(g.Env))
+	}
+	b.WriteString("presets:\n")
+	for _, name := range sortedKeys(v.Presets) {
+		p := v.Presets[name]
+		fmt.Fprintf(b, "  %s: generator=%s range=%s output.dir=%s\n", name, p.Generator, p.Range, p.Output.Dir)
+		fmt.Fprintf(b, "    narrowing: labels=%s sources=%s types=%s\n",
+			listText(p.Narrowing.Labels), listText(p.Narrowing.Sources), listText(p.Narrowing.Types))
+		if len(p.Config) > 0 {
+			cfg, _ := json.Marshal(p.Config)
+			fmt.Fprintf(b, "    config: %s\n", cfg)
+		}
+	}
+	if len(v.Problems) > 0 {
+		b.WriteString("problems:\n")
+		for _, pr := range v.Problems {
+			fmt.Fprintf(b, "  %s: %s\n", pr.Kind, pr.Message)
+		}
+	}
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func listText(l []string) string {
+	if len(l) == 0 {
+		return "-"
+	}
+	return strings.Join(l, ", ")
 }
 
 // ---- config validate --------------------------------------------------------

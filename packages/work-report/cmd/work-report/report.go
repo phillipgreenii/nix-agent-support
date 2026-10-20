@@ -150,12 +150,9 @@ func newReportCmd() *cobra.Command {
 				return &reportOutcome{reason: reason}
 			}
 
-			// The narrative generator is built from the loaded config, so it is
-			// registered per invocation, before the kind lookup.
-			report.Register(narrative.New(narrative.Options{
-				Model:            cfg.Kinds.Narrative.Model,
-				SystemPromptFile: cfg.Kinds.Narrative.SystemPromptFile,
-			}))
+			// The narrative generator keeps its own defaults until the report
+			// rework replaces the --kind path.
+			report.Register(narrative.New(narrative.Options{}))
 
 			gen, ok := report.Lookup(kind)
 			if !ok {

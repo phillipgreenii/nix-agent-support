@@ -9000,15 +9000,15 @@
                       window = "7d";
                     };
                     store.path = "/var/tmp/wr/store.db";
-                    kinds.narrative = {
-                      model = "example-model";
-                      systemPromptFile = "/var/tmp/wr/prompt.md";
-                    };
                   };
-                  hmModelOnly = evalHM {
-                    enable = true;
-                    kinds.narrative.model = "example-model";
-                  };
+                  # The retired kinds options are gone: setting one must fail
+                  # to evaluate.
+                  kindsAttempt =
+                    builtins.tryEval
+                      (evalHM {
+                        enable = true;
+                        kinds.narrative.model = "example-model";
+                      }).phillipgreenii.programs.work-report.schedule.window;
                   # The module option is read-only: defining it must fail to
                   # evaluate.
                   readOnlyAttempt =
@@ -9039,6 +9039,7 @@
                 assert lib.elem pkgs.work-report hmDefaults.home.packages;
                 assert hmDefaults.xdg.configFile ? "work-report/config.yaml";
                 assert !readOnlyAttempt.success;
+                assert !kindsAttempt.success;
                 assert !badWindow.success;
                 assert !badInterval.success;
                 pkgs.runCommand "test-work-report-module-ok"
@@ -9054,13 +9055,13 @@
                     mkdir -p "$HOME"
                     defaults=${hmDefaults.xdg.configFile."work-report/config.yaml".source}
                     custom=${hmCustom.xdg.configFile."work-report/config.yaml".source}
-                    modelonly=${hmModelOnly.xdg.configFile."work-report/config.yaml".source}
 
                     # Defaults: only the schedule is rendered, with 1h / 48h.
                     grep -q '^schedule:' "$defaults"
                     grep -q 'interval: 1h' "$defaults"
                     grep -q 'window: 48h' "$defaults"
-                    ! grep -Eq 'timezone|sources|store:|kinds' "$defaults"
+                    # `!` does not trip errexit, so a leak must exit explicitly.
+                    if grep -Eq 'timezone|sources|store:' "$defaults"; then exit 1; fi
                     got=$(work-report config show --config "$defaults" --output json)
                     [ "$(jq -r .schedule.interval <<<"$got")" = 1h ]
                     [ "$(jq -r .schedule.window <<<"$got")" = 48h ]
@@ -9077,15 +9078,12 @@
                     [ "$(jq -c '.sources["source-one"].labels' <<<"$got")" = '["alpha"]' ]
                     [ "$(jq -r '.sources["source-two"].enable' <<<"$got")" = true ]
                     [ "$(jq -c '.sources["source-two"].labels' <<<"$got")" = '["beta","gamma"]' ]
-                    [ "$(jq -r .kinds.narrative.model <<<"$got")" = example-model ]
-                    [ "$(jq -r .kinds.narrative.systemPromptFile <<<"$got")" = /var/tmp/wr/prompt.md ]
 
-                    # Only the model set: the prompt file stays empty in config show.
-                    grep -q 'model: example-model' "$modelonly"
-                    ! grep -q 'systemPromptFile' "$modelonly"
-                    got=$(work-report config show --config "$modelonly" --output json)
-                    [ "$(jq -r .kinds.narrative.model <<<"$got")" = example-model ]
-                    [ "$(jq -r .kinds.narrative.systemPromptFile <<<"$got")" = "" ]
+                    # No rendered config carries the retired kinds key, and
+                    # config show on each exits 0.
+                    if grep -q 'kinds' "$defaults" "$custom"; then exit 1; fi
+                    work-report config show --config "$defaults" > /dev/null
+                    work-report config show --config "$custom" > /dev/null
 
                     # pgRouterConfigText equals the CLI's own rendering for the
                     # same schedule.* values (defaults and custom).

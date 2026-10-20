@@ -15,28 +15,21 @@ let
     _: s: { inherit (s) enable; } // lib.optionalAttrs (s.labels != [ ]) { inherit (s) labels; }
   ) cfg.sources;
 
-  # The complete rendered document: exactly the keys
+  # The complete rendered document: only keys
   # packages/work-report/internal/config accepts (timezone, sources,
-  # schedule, store.path, kinds.narrative.{model,systemPromptFile}) and no
-  # others, because the loader's decode is strict and rejects an unknown key.
-  # timezone, sources, store.path and each kinds.narrative option are rendered
+  # schedule, store.path), because the loader's decode is strict and rejects
+  # an unknown key. The retired `kinds` key is never rendered: the loader
+  # rejects it in every verb. timezone, sources and store.path are rendered
   # only when set, so the loader's own defaults (system zone, every backend
-  # enabled, $XDG_STATE_HOME/work-report/store.db, no kinds key) apply
-  # otherwise and shells without XDG_STATE_HOME agree with the scheduler.
-  renderedNarrative =
-    lib.optionalAttrs (cfg.kinds.narrative.model != null) { inherit (cfg.kinds.narrative) model; }
-    // lib.optionalAttrs (cfg.kinds.narrative.systemPromptFile != null) {
-      inherit (cfg.kinds.narrative) systemPromptFile;
-    };
-
+  # enabled, $XDG_STATE_HOME/work-report/store.db) apply otherwise and shells
+  # without XDG_STATE_HOME agree with the scheduler.
   renderedConfig =
     lib.optionalAttrs (cfg.timezone != null) { inherit (cfg) timezone; }
     // lib.optionalAttrs (cfg.sources != { }) { sources = renderedSources; }
     // {
       schedule = { inherit (cfg.schedule) interval window; };
     }
-    // lib.optionalAttrs (cfg.store.path != null) { store.path = cfg.store.path; }
-    // lib.optionalAttrs (renderedNarrative != { }) { kinds.narrative = renderedNarrative; };
+    // lib.optionalAttrs (cfg.store.path != null) { store.path = cfg.store.path; };
 in
 {
   # Mirrors home/programs/pg-desk's shape (typed options ->
@@ -113,28 +106,6 @@ in
         loader's default $XDG_STATE_HOME/work-report/store.db applies, so an
         interactive shell and the scheduler agree on the store.
       '';
-    };
-
-    kinds.narrative = {
-      model = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = ''
-          config.yaml's kinds.narrative.model: the value passed to
-          `claude -p --model` by `work-report report --kind narrative`. Rendered
-          only when set; otherwise the loader's default (no --model flag)
-          applies.
-        '';
-      };
-      systemPromptFile = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = ''
-          config.yaml's kinds.narrative.systemPromptFile: a file whose contents
-          override the narrative generator's built-in system prompt. Rendered
-          only when set; otherwise the built-in prompt applies.
-        '';
-      };
     };
 
     pgRouterConfigText = lib.mkOption {

@@ -3,10 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/config"
 )
 
 // runCLI runs the root command with args and returns stdout and the error.
@@ -129,10 +133,24 @@ sources:
     labels: [l2]
 store:
   path: /custom/s.db
-kinds:
+generators:
   narrative:
-    model: some-model
-    systemPromptFile: /tmp/p.md
+    command: [/bin/wr-narrative]
+    timeout: 10m
+    inputs: [baseline]
+    env: [HTTPS_PROXY]
+reports:
+  daily:
+    generator: narrative
+    range: yesterday
+    narrowing: { labels: [l1] }
+    config:
+      model: some-model
+      apiKey: hunter2
+      monkey: { a: 1 }
+      nested: { sortKey: x, keep: y }
+    output:
+      dir: /out/daily
 `)
 	out, err := runCLI(t, "--config", cfg, "--output", "json", "config", "show")
 	if err != nil {
@@ -151,12 +169,26 @@ kinds:
 		Store struct {
 			Path string `json:"path"`
 		} `json:"store"`
-		Kinds struct {
-			Narrative struct {
-				Model            string `json:"model"`
-				SystemPromptFile string `json:"systemPromptFile"`
-			} `json:"narrative"`
-		} `json:"kinds"`
+		Generators map[string]struct {
+			Builtin bool     `json:"builtin"`
+			Command []string `json:"command"`
+			Timeout string   `json:"timeout"`
+			Inputs  []string `json:"inputs"`
+			Env     []string `json:"env"`
+		} `json:"generators"`
+		Presets map[string]struct {
+			Builtin   bool           `json:"builtin"`
+			Generator string         `json:"generator"`
+			Config    map[string]any `json:"config"`
+			Range     string         `json:"range"`
+			Narrowing struct {
+				Labels, Sources, Types []string
+			} `json:"narrowing"`
+			Output struct {
+				Dir string `json:"dir"`
+			} `json:"output"`
+		} `json:"presets"`
+		Problems []map[string]any `json:"problems"`
 	}
 	dec := json.NewDecoder(strings.NewReader(out))
 	dec.DisallowUnknownFields()
@@ -178,13 +210,36 @@ kinds:
 	if got.Store.Path != "/custom/s.db" {
 		t.Errorf("store.path = %q", got.Store.Path)
 	}
-	if n := got.Kinds.Narrative; n.Model != "some-model" || n.SystemPromptFile != "/tmp/p.md" {
-		t.Errorf("kinds.narrative = %+v", n)
+	if len(got.Problems) != 0 {
+		t.Errorf("problems = %v", got.Problems)
+	}
+	n := got.Generators["narrative"]
+	if n.Builtin || len(n.Command) != 1 || n.Command[0] != "/bin/wr-narrative" || n.Timeout != "10m" ||
+		len(n.Inputs) != 1 || n.Inputs[0] != "baseline" || len(n.Env) != 1 || n.Env[0] != "HTTPS_PROXY" {
+		t.Errorf("generators.narrative = %+v", n)
+	}
+	if b := got.Generators["baseline"]; !b.Builtin {
+		t.Errorf("generators.baseline = %+v, want built in", b)
+	}
+	d := got.Presets["daily"]
+	if d.Generator != "narrative" || d.Range != "yesterday" || d.Output.Dir != "/out/daily" ||
+		len(d.Narrowing.Labels) != 1 || d.Narrowing.Sources == nil || d.Narrowing.Types == nil {
+		t.Errorf("presets.daily = %+v", d)
+	}
+	wantCfg := map[string]any{"model": "some-model", "apiKey": "***", "monkey": "***", "nested": map[string]any{"sortKey": "***", "keep": "y"}}
+	if !reflect.DeepEqual(d.Config, wantCfg) {
+		t.Errorf("presets.daily.config = %#v, want %#v", d.Config, wantCfg)
+	}
+	if strings.Contains(out, "hunter2") {
+		t.Errorf("config show leaked a redacted value:\n%s", out)
+	}
+	if b := got.Presets["baseline"]; !b.Builtin || b.Generator != "baseline" || b.Range != "today" {
+		t.Errorf("presets.baseline = %+v", b)
 	}
 }
 
-func TestConfigShowNarrativeUnsetIsEmptyStrings(t *testing.T) {
-	isolate(t)
+func TestConfigShowDefaultsHaveBuiltinBaselineAndNoProblems(t *testing.T) {
+	home := isolate(t)
 	out, err := runCLI(t, "--config", writeCfg(t, ""), "--output", "json", "config", "show")
 	if err != nil {
 		t.Fatal(err)
@@ -193,12 +248,119 @@ func TestConfigShowNarrativeUnsetIsEmptyStrings(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatal(err)
 	}
-	n := got["kinds"].(map[string]any)["narrative"].(map[string]any)
-	if m, ok := n["model"]; !ok || m != "" {
-		t.Errorf("kinds.narrative.model = %v (present=%v), want empty string", m, ok)
+	if _, ok := got["kinds"]; ok {
+		t.Error("config show must not print a kinds key")
 	}
-	if f, ok := n["systemPromptFile"]; !ok || f != "" {
-		t.Errorf("kinds.narrative.systemPromptFile = %v (present=%v), want empty string", f, ok)
+	if probs, ok := got["problems"].([]any); !ok || len(probs) != 0 {
+		t.Errorf("problems = %v, want []", got["problems"])
+	}
+	base := got["presets"].(map[string]any)["baseline"].(map[string]any)
+	if dir := base["output"].(map[string]any)["dir"]; dir != filepath.Join(home, "state", "work-report", "reports", "baseline") {
+		t.Errorf("baseline output.dir = %v", dir)
+	}
+	if cfg, ok := base["config"].(map[string]any); !ok || len(cfg) != 0 {
+		t.Errorf("baseline config = %v, want {}", base["config"])
+	}
+}
+
+func TestConfigShowBrokenSectionsPrintProblemsAndExitZero(t *testing.T) {
+	isolate(t)
+	cfg := writeCfg(t, `timezone: UTC
+generators:
+  Bad Name: {command: [x]}
+  ok: {command: [x]}
+reports:
+  fine: {generator: ok}
+  dangling: {generator: nope}
+`)
+	out, err := runCLI(t, "--config", cfg, "--output", "json", "config", "show")
+	if err != nil {
+		t.Fatalf("config show must exit 0 with problems: %v", err)
+	}
+	var got struct {
+		Presets  map[string]any `json:"presets"`
+		Problems []struct {
+			Kind      string  `json:"kind"`
+			Generator *string `json:"generator"`
+			Preset    *string `json:"preset"`
+		} `json:"problems"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got.Presets["fine"]; !ok {
+		t.Errorf("valid preset missing: %v", got.Presets)
+	}
+	if len(got.Problems) != 2 {
+		t.Fatalf("problems = %+v, want 2", got.Problems)
+	}
+	if p := got.Problems[0]; p.Kind != "bad_name" || p.Generator == nil || *p.Generator != "Bad Name" || p.Preset != nil {
+		t.Errorf("problems[0] = %+v", p)
+	}
+	if p := got.Problems[1]; p.Kind != "unknown_generator" || p.Preset == nil || *p.Preset != "dangling" || p.Generator != nil {
+		t.Errorf("problems[1] = %+v", p)
+	}
+
+	out, err = runCLI(t, "--config", cfg, "config", "show")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"problems:", "bad_name:", "unknown_generator:", "fine: generator=ok range=today"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("human output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// A config carrying the retired kinds key fails Load, so every verb that
+// loads the config exits 1 (an error that is not an exitError) with the
+// migration text.
+func TestRetiredKindsKeyFailsEveryVerb(t *testing.T) {
+	for _, body := range []string{"kinds: {}\n", "kinds:\n  narrative:\n    model: m\n    systemPromptFile: /p.md\n"} {
+		isolate(t)
+		cfg := writeCfg(t, body)
+		storePath := filepath.Join(t.TempDir(), "s.db")
+		for _, args := range [][]string{
+			{"pull", "--range", "today"},
+			{"query"},
+			{"status"},
+			{"report"},
+			{"config", "show"},
+			{"config", "pg-router-query"},
+		} {
+			full := append([]string{"--config", cfg, "--store", storePath}, args...)
+			_, err := runCLI(t, full...)
+			if err == nil {
+				t.Errorf("%v with kinds %q: want an error", args, body)
+				continue
+			}
+			var ee *exitError
+			if errors.As(err, &ee) {
+				t.Errorf("%v: err is an exitError (code %d); want a plain error so main exits 1", args, ee.code)
+			}
+			if !errors.Is(err, config.ErrKindsRetired) {
+				t.Errorf("%v: err = %v, want ErrKindsRetired", args, err)
+			}
+			for _, want := range []string{"reports.<name>.generator: narrative", "reports.<name>.config.promptFile"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%v: error %q lacks migration text %q", args, err, want)
+				}
+			}
+		}
+	}
+}
+
+// A broken generators or reports section must not affect pull, query, status
+// or the baseline report.
+func TestBrokenGeneratorsAndReportsDoNotAffectOtherVerbs(t *testing.T) {
+	isolate(t)
+	cfg := writeCfg(t, "timezone: UTC\ngenerators: [not, a, mapping]\nreports:\n  p: {generator: nope, range: bogus}\n")
+	storePath := seedQueryStore(t)
+	for _, args := range [][]string{{"query"}, {"status"}, {"report", "--range", "2026-03-01"}, {"config", "pg-router-query"}} {
+		full := append([]string{"--config", cfg, "--store", storePath}, args...)
+		if _, err := runCLI(t, full...); err != nil {
+			t.Errorf("%v with broken generators/reports: %v", args, err)
+		}
 	}
 }
 
@@ -242,21 +404,13 @@ func TestConfigShowHuman(t *testing.T) {
 			t.Errorf("human output lacks %q:\n%s", want, out)
 		}
 	}
-	for _, want := range []string{"kinds.narrative.model: (unset)", "kinds.narrative.systemPromptFile: (unset)"} {
+	for _, want := range []string{"generators:", "baseline: built in", "presets:", "baseline: generator=baseline range=today"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("human output lacks %q:\n%s", want, out)
 		}
 	}
-
-	cfg = writeCfg(t, "kinds:\n  narrative:\n    model: some-model\n    systemPromptFile: /tmp/p.md\n")
-	out, err = runCLI(t, "--config", cfg, "config", "show")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"kinds.narrative.model: some-model", "kinds.narrative.systemPromptFile: /tmp/p.md"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("human output lacks %q:\n%s", want, out)
-		}
+	if strings.Contains(out, "kinds") {
+		t.Errorf("human output mentions kinds:\n%s", out)
 	}
 }
 
