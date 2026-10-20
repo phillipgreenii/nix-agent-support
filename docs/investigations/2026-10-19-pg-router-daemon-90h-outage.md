@@ -11,14 +11,14 @@ This repo is public, so the write-up names no organization repo, PR or tracker i
 
 ## Summary
 
-| Question                                        | Answer                                                                                                                                       | Status                |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| Who stopped the daemon at 2026-10-15T21:08:32Z? | The operator, by hand, following step 1 of the workspace-move window "W1" (unload the LaunchAgent with `launchctl bootout`).                 | PROVED (act inferred) |
-| Why did launchd not restart it?                 | It was UNLOADED, not exited. `KeepAlive` applies only to a loaded job; the W1 step that loads it again was never run until a `pn` apply did. | PROVED                |
-| What does `KeepAlive = true` do after exit 0?   | launchd respawns the job (throttled at 10 s). A clean exit is restarted. Only an unload keeps it down.                                       | PROVED                |
-| Change the plist so a clean exit restarts?      | No change. It already does. The plist is pinned by a test instead.                                                                           | RULED INTENDED        |
-| Did an alert exist for "pg-router not up"?      | Yes, `pg-router-liveness-down` (5 min, critical). It fired at 21:15:19Z and was recorded 51 times. It was a banner only, so nobody acted.    | PROVED                |
-| Did the launchd-health "not running" rule fire? | Not delivered. Grafana logged sends to the notifier, the notifier logged nothing. Why is NOT DETERMINED.                                     | NOT DETERMINED        |
+| Question                                        | Answer                                                                                                                                       | Status                    |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| Who stopped the daemon at 2026-10-15T21:08:32Z? | The operator, by hand, following step 1 of the workspace-move window "W1" (unload the LaunchAgent with `launchctl bootout`).                 | PROVED (act inferred)     |
+| Why did launchd not restart it?                 | It was UNLOADED, not exited. `KeepAlive` applies only to a loaded job; the W1 step that loads it again was never run until a `pn` apply did. | PROVED                    |
+| What does `KeepAlive = true` do after exit 0?   | launchd respawns the job (throttled at 10 s). A clean exit is restarted. Only an unload keeps it down.                                       | PROVED                    |
+| Change the plist so a clean exit restarts?      | No change. It already does. The plist is pinned by a test instead.                                                                           | RULED INTENDED            |
+| Did an alert exist for "pg-router not up"?      | Yes, `pg-router-liveness-down` (5 min, critical). It fired at 21:15:19Z and was recorded 51 times. It was a banner only, so nobody acted.    | PROVED                    |
+| Did the launchd-health "not running" rule fire? | It fired but was muted. The rule is `severity=warning` and the critical-only desktop policy mutes it before any webhook call.                | PROVED (bead `pg2-84dj8`) |
 
 ## Timeline
 
@@ -143,9 +143,36 @@ absent otherwise).
 `phillipgreenii-nix-support-apps`). The exporter did report `launchd_service_running = 0` for the
 label from about 21:09Z to 15:33Z on 10-19, and Grafana logged `Sending alerts to local notifier` for
 the rule once a minute from 21:14Z to 21:47Z. The notifier log has NO entry for it in that window.
-Why is NOT DETERMINED: the Grafana log for that window ends at 2026-10-15T23:54 local, there is no
-persisted `alert_instance` row, and the notifier is in another repo. The bead's claim that "none is
-recorded" is correct for this rule and incorrect for the liveness rule.
+The bead's claim that "none is recorded" is correct for this rule and incorrect for the liveness rule.
+
+An earlier revision of this note recorded why as NOT DETERMINED and read the log line as a send to the
+notifier that then went missing for an unknown reason. Both are superseded by bead `pg2-84dj8`, which
+established the cause. The full finding is the amendment headed "Finding, 2026-10-19: a warning-severity
+"daemon not running" alert is silent by design" in `phillipgreenii-nix-support-apps` ADR 0040
+(`docs/adr/0040-host-metrics-and-local-alert-notifier.md` in that repo). In short:
+
+- **Cause: muted by policy, working as ruled.** Every rule rendered for the launchd-health group
+  carries `severity=warning`, and the provisioned notification policy mutes every
+  `severity != critical` notification with the `always` timing. The embedded Alertmanager therefore
+  suppressed the rule's notifications and never called the webhook. This is the 2026-10-08
+  critical-only desktop ruling doing what it was set to do, not a delivery fault. The live
+  provisioning confirmed it: all 64 rules in the launchd-health file carry `severity: warning`, and
+  the rendered policy holds the `mute_time_intervals: [always]` child route.
+- **The log-line inference was wrong.** `Sending alerts to local notifier` (logger
+  `ngalert.sender.router`) is the Grafana scheduler handing an evaluation result to its own embedded
+  Alertmanager, where "local notifier" means the in-process Alertmanager and NOT `grafana-notifier`.
+  It is logged for every firing rule on every evaluation, before routing, muting or the webhook, so it
+  is not a webhook send and proves nothing about the notifier. The Grafana log shows identical
+  once-a-minute lines for other warning rules that also have no notifier entry.
+- **Corroboration.** The last non-critical entry in the notifier log is dated 2026-10-09T04:35Z, and
+  every `notified` entry from 2026-10-10 to 2026-10-19 is `critical`.
+- **What this does not show.** It does not show the desktop path is adequate for a daemon that drives
+  work: `pg-router-liveness-down` (critical) did reach the notifier and, as a passive banner, still
+  went unnoticed (see "Why nobody acted").
+- **Sleep-gap flapping (mechanism unverified).** The same ADR amendment records that the notifier
+  logged `resolved` then `firing` 2 s later for `pg-router liveness is down` after the host woke
+  (2026-10-15T23:53Z and 2026-10-16T01:31Z), and gives the operator's options for it. This note makes
+  no claim about the mechanism.
 
 ## Recommendations
 
@@ -161,9 +188,11 @@ These are policy statements for the owners named. None is implementable in this 
    would resurrect a service the operator just removed). The health check itself needs no change for
    this outage: it already bootstraps a defined, unloaded user agent once per activation, pinned by
    tests in `phillipgreenii-nix-personal`.
-4. `phillipgreenii-nix-support-apps`: the owner SHOULD establish why the launchd-health rule's sends
-   produced no notifier entry. A critical "daemon down" alert for the daemon that drives work SHOULD
-   have a delivery that does not depend on a transient banner, and the notifier SHOULD NOT report a
-   host-sleep gap as `resolved`.
+4. `phillipgreenii-nix-support-apps`: the cause of the missing notifier entry is established (see
+   "What did not fire"), so there is nothing left to establish. A critical "daemon down" alert for the
+   daemon that drives work SHOULD have a delivery that does not depend on a transient banner, and the
+   notifier SHOULD NOT report a host-sleep gap as `resolved`. Which of those to apply is the operator's
+   call, laid out as options in `phillipgreenii-nix-support-apps` ADR 0040's amendment headed "Finding,
+   2026-10-19: a warning-severity "daemon not running" alert is silent by design".
 5. `KeepAlive` for `com.phillipg.pg-router-daemon` MUST remain `true` (guarded by
    `test-pg-router-module`).
