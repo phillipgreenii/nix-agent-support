@@ -93,6 +93,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -285,6 +286,15 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 		return Interpretation{}, fmt.Errorf("interpret: decode pr show: %w", err)
 	}
 
+	// A truncated review read is a partial-data degradation. Gather already
+	// names it in Facts.Degraded; re-derive it from the stored pr show so an
+	// interpret-only re-run over facts gathered without that mark (older
+	// stored facts) is degraded too. The first failure stays the one named.
+	degraded := facts.Degraded
+	if names := pr.truncatedConnections(); len(names) > 0 && degraded == "" {
+		degraded = "pr show truncated: " + strings.Join(names, ", ")
+	}
+
 	commits := decodePRCommits(facts.PRCommits)
 	files := decodePRFiles(facts.PRFiles)
 
@@ -345,7 +355,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 		MatchReasons:   matchReasons,
 		Panel:          panel,
 		ReadyToPromote: readyToPromote,
-		Degraded:       facts.Degraded,
+		Degraded:       degraded,
 		AsOf:           now,
 	}, nil
 }
@@ -414,6 +424,35 @@ type prShow struct {
 	ReviewRequests   []string    `json:"review_requests,omitempty"`
 	Comments         []prComment `json:"comments,omitempty"`
 	Reviews          []prReview  `json:"reviews,omitempty"`
+	// Connections is pg-connector's per-connection truncation report. A
+	// truncated threads/comments/reviews connection means the comment set
+	// above is PARTIAL, so no "no unresolved thread" conclusion may be drawn
+	// from it (pg2-atp37).
+	Connections struct {
+		Threads  prConnectionReport `json:"threads"`
+		Comments prConnectionReport `json:"comments"`
+		Reviews  prConnectionReport `json:"reviews"`
+	} `json:"connections"`
+}
+
+type prConnectionReport struct {
+	Truncated bool `json:"truncated"`
+}
+
+// truncatedConnections names every review-context connection that came back
+// partial, in a fixed order.
+func (p prShow) truncatedConnections() []string {
+	var out []string
+	if p.Connections.Threads.Truncated {
+		out = append(out, "threads")
+	}
+	if p.Connections.Comments.Truncated {
+		out = append(out, "comments")
+	}
+	if p.Connections.Reviews.Truncated {
+		out = append(out, "reviews")
+	}
+	return out
 }
 
 // allComments returns every top-level and review-thread comment on the PR —

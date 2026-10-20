@@ -350,6 +350,12 @@ func (g *Gatherer) Gather(ctx context.Context, entityType, entityID string, chan
 	}
 
 	f := Facts{PRShow: prShowRaw, AsOf: show.AsOf, HeadSHA: show.HeadSHA}
+	// A time-budget- or cap-truncated review read (pg2-vq8ii) succeeds with a
+	// PARTIAL set of threads/comments/reviews; nothing downstream may conclude
+	// "no unresolved thread" from it, so the run is marked degraded.
+	if names := show.Connections.truncated(); len(names) > 0 {
+		f.degrade("pr show truncated: " + strings.Join(names, ", "))
+	}
 
 	if change == ChangeSweep {
 		if prev, seen := g.lastHeadSHA[entityID]; seen && prev == show.HeadSHA {
@@ -686,6 +692,37 @@ type prShowFields struct {
 	Merged  bool   `json:"merged"`
 	HeadSHA string `json:"head_sha"`
 	AsOf    string `json:"as_of"`
+	// Connections is pg-connector's per-connection truncation report
+	// (schema.PRConnections); absent on older connectors, which reads as
+	// "nothing truncated".
+	Connections prConnections `json:"connections"`
+}
+
+// prConnections is the subset of schema.PRConnections gather needs: only
+// whether each connection was returned in full.
+type prConnections struct {
+	Threads  prConnectionReport `json:"threads"`
+	Comments prConnectionReport `json:"comments"`
+	Reviews  prConnectionReport `json:"reviews"`
+}
+
+type prConnectionReport struct {
+	Truncated bool `json:"truncated"`
+}
+
+// truncated names every connection that came back partial, in a fixed order.
+func (c prConnections) truncated() []string {
+	var out []string
+	if c.Threads.Truncated {
+		out = append(out, "threads")
+	}
+	if c.Comments.Truncated {
+		out = append(out, "comments")
+	}
+	if c.Reviews.Truncated {
+		out = append(out, "reviews")
+	}
+	return out
 }
 
 func decodePRShow(raw json.RawMessage) (prShowFields, error) {

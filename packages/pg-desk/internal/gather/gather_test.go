@@ -193,6 +193,31 @@ func prShowFixture(state string, merged bool, headSHA string) string {
 		`"head_sha":"` + headSHA + `","as_of":"` + fixtureAsOf + `"}}`
 }
 
+// prShowConnectionsFixture is prShowFixture with the pg-connector `connections`
+// truncation report (schema.PRConnections) a helper behavior asks for; any
+// other behavior gets the plain fixture, which carries no connections at all.
+func prShowConnectionsFixture(behavior string) string {
+	report := func(truncated bool, total, returned int) string {
+		return `{"truncated":` + boolStr(truncated) + `,"total":` + itoa(total) + `,"returned":` + itoa(returned) + `}`
+	}
+	var conns string
+	switch behavior {
+	case "truncated_threads":
+		conns = `{"reviews":` + report(false, 1, 1) + `,"threads":` + report(true, 1500, 1000) + `,"comments":` + report(false, 3, 3) + `}`
+	case "truncated_comments_reviews":
+		conns = `{"reviews":` + report(true, 40, 30) + `,"threads":` + report(false, 2, 2) + `,"comments":` + report(true, 900, 500) + `}`
+	case "connections_complete":
+		// Exactly at the cap is complete: truncated is false.
+		conns = `{"reviews":` + report(false, 1, 1) + `,"threads":` + report(false, 1000, 1000) + `,"comments":` + report(false, 3, 3) + `}`
+	default:
+		return prShowFixture("open", false, fixtureHeadSHA)
+	}
+	return `{"protocolVersion":1,"schemaVersion":4,"result":{` +
+		`"id":"PR1","repo":"` + fixtureRepo + `","number":` + itoa(fixtureNumber) + `,` +
+		`"state":"open","merged":false,` +
+		`"head_sha":"` + fixtureHeadSHA + `","as_of":"` + fixtureAsOf + `","connections":` + conns + `}}`
+}
+
 // prShowWithTicketsFixture is prShowFixture widened with a
 // branch/title/body carrying fixtureTicketKey1 (branch + title) and
 // fixtureTicketKey2 (body only) — Phase 13's own ticket-key scan input.
@@ -268,10 +293,10 @@ func helperMain() {
 	}
 
 	switch behavior {
-	case "happy", "degraded_ci":
+	case "happy", "degraded_ci", "truncated_threads", "truncated_comments_reviews", "connections_complete":
 		switch verb {
 		case "pr show":
-			writeAndExit(prShowFixture("open", false, fixtureHeadSHA), 0)
+			writeAndExit(prShowConnectionsFixture(behavior), 0)
 		case "pr files":
 			writeAndExit(prFilesFixture(), 0)
 		case "pr commits":
@@ -542,6 +567,38 @@ func TestGather_DegradedInput_RunContinues(t *testing.T) {
 	}
 	if len(facts.PRShow) == 0 || len(facts.PRFiles) == 0 || len(facts.WorkBeads) == 0 || len(facts.Deps) == 0 {
 		t.Fatalf("degradation of one non-critical input must not blank the others: %+v", facts)
+	}
+}
+
+// TestGather_TruncatedConnections pins pg2-atp37: a `pr show` whose
+// connections report a truncated threads/comments/reviews set degrades the run
+// (so no "no unresolved thread" conclusion is drawn from the partial set),
+// while a complete or absent report leaves the run healthy.
+func TestGather_TruncatedConnections(t *testing.T) {
+	cases := []struct {
+		behavior     string
+		wantDegraded string
+	}{
+		{"truncated_threads", "pr show truncated: threads"},
+		{"truncated_comments_reviews", "pr show truncated: comments, reviews"},
+		{"connections_complete", ""},
+		{"happy", ""}, // no connections key at all (older connector)
+	}
+	for _, tc := range cases {
+		t.Run(tc.behavior, func(t *testing.T) {
+			withFactory(t, tc.behavior)
+			g := NewGatherer(testConfig("/configured/beads"), nil)
+			facts, err := g.Gather(context.Background(), "pr", "PR1", ChangeChanged)
+			if err != nil {
+				t.Fatalf("Gather: %v", err)
+			}
+			if facts.Degraded != tc.wantDegraded {
+				t.Fatalf("Degraded = %q, want %q", facts.Degraded, tc.wantDegraded)
+			}
+			if len(facts.PRShow) == 0 || len(facts.PRFiles) == 0 {
+				t.Fatalf("a truncated read must not blank the other inputs: %+v", facts)
+			}
+		})
 	}
 }
 

@@ -1015,6 +1015,48 @@ func TestInterpret_DegradedPassthrough(t *testing.T) {
 	}
 }
 
+// TestInterpret_TruncatedConnectionsDegrade pins pg2-atp37: decoding a real
+// `pr show` JSON carrying a truncated review connection marks the
+// interpretation degraded (attention rules then decline to raise from it,
+// INV-ATTNEVAL-6) instead of reading as a clean "no unresolved thread"; a
+// complete or absent connections report leaves it healthy.
+func TestInterpret_TruncatedConnectionsDegrade(t *testing.T) {
+	prWith := func(connections string) gather.Facts {
+		raw := `{"repo":"o/r","number":1,"title":"x","state":"open","author":"me","head_sha":"deadbeef"`
+		if connections != "" {
+			raw += `,"connections":` + connections
+		}
+		raw += `}`
+		return gather.Facts{PRShow: json.RawMessage(raw), HeadSHA: "deadbeef"}
+	}
+	cases := []struct {
+		name        string
+		connections string
+		preDegraded string
+		want        string
+	}{
+		{"threads truncated", `{"threads":{"truncated":true,"total":1500,"returned":1000},"comments":{"truncated":false},"reviews":{"truncated":false}}`, "", "pr show truncated: threads"},
+		{"all truncated", `{"threads":{"truncated":true},"comments":{"truncated":true},"reviews":{"truncated":true}}`, "", "pr show truncated: threads, comments, reviews"},
+		{"first failure stays named", `{"threads":{"truncated":true}}`, "ci list", "ci list"},
+		{"complete", `{"threads":{"truncated":false,"total":2,"returned":2},"comments":{"truncated":false},"reviews":{"truncated":false}}`, "", ""},
+		{"absent connections", "", "", ""},
+	}
+	cfg := &config.Config{SelfLogin: "me"}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			facts := prWith(tc.connections)
+			facts.Degraded = tc.preDegraded
+			interp, err := Interpret(facts, FixedClock(time.Unix(0, 0)), cfg)
+			if err != nil {
+				t.Fatalf("Interpret: %v", err)
+			}
+			if interp.Degraded != tc.want {
+				t.Fatalf("Degraded = %q, want %q", interp.Degraded, tc.want)
+			}
+		})
+	}
+}
+
 // TestInterpret_DeterministicWithFixedClock is this packet's own pinned
 // acceptance criterion: "same input + same injected time => byte-identical
 // output across two runs."

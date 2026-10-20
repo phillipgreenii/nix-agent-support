@@ -200,6 +200,12 @@ read-time pg-desk view; minting stays in a decider"). Its behavior is specified 
 [`focus.md`](focus.md), "The rank". A hidden entity is not a focus candidate: the rank reads the
 `hidden` annotation exactly as `serve` does and leaves a hidden entity out of the candidate set.
 
+**Partial review reads.** When the stored `pr show` carries `connections.<threads|comments|reviews>.truncated:
+true`, the comments, threads and reviews interpret reads are partial. Interpret MUST mark the
+interpretation `degraded` (naming `pr show truncated: <connections>`, unless gather already named an
+earlier failing input) and MUST NOT present the absence of an unresolved thread in that set as a clean
+conclusion; see [`gather.md`](gather.md), "Degradation".
+
 ## Exit codes, telemetry, and logs
 
 Interpret has no exit code of its own; like gather, it contributes to `run`'s exit code (`0` on

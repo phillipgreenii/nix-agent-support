@@ -44,6 +44,16 @@ the failing input, and the run still exits `0` to pr-pool. A backend answering `
 such a degradation. Only a failure to fetch the triggering entity itself is a hard failure (see
 [`pipeline-run.md`](pipeline-run.md) for the resulting exit code).
 
+A `pr show` that succeeds but reports a truncated review read is a degradation too. The connector
+returns `connections.<threads|comments|reviews>.truncated: true` when its time budget or item cap cut
+the set short, so the returned threads, comments or reviews are PARTIAL. Gather MUST mark the run
+degraded naming `pr show truncated: <connections>`, and interpret MUST derive the same mark from the
+stored `pr show` when the facts lack it. Nothing MAY conclude "no unresolved thread" from a truncated
+set: the degraded interpretation keeps attention rules from raising on it (see
+[`attention.md`](attention.md) INV-ATTNEVAL-6), and a degraded entity hydration keeps the previous
+snapshot and stays due. A connection of exactly the cap, or an absent `connections` report, is
+complete.
+
 **`--change removed` handling.** Gather re-reads the triggering entity with `pr show`, and the
 result decides what "removed" meant: `open` means the PR merely left the named query (only query
 membership and match reasons update); `merged` or `closed` is a confirmed closure; `not_found` is
