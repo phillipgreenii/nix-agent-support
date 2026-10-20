@@ -39309,7 +39309,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/Users/phillipg/phillipg_mbp pg-connector issue show pg2-itxtv"
+        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/opt/ceta-corpus-no-zone pg-connector issue show pg2-itxtv"
       }
     },
     "cwd_path_state": {
@@ -39327,7 +39327,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/Users/phillipg/phillipg_mbp pg-connector issue comment pg2-itxtv --body hi"
+        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/opt/ceta-corpus-no-zone pg-connector issue comment pg2-itxtv --body hi"
       }
     },
     "cwd_path_state": {
@@ -39345,7 +39345,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/Users/phillipg/phillipg_mbp pg-connector issue update pg2-itxtv --add-label human"
+        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/opt/ceta-corpus-no-zone pg-connector issue update pg2-itxtv --add-label human"
       }
     },
     "cwd_path_state": {
@@ -39363,7 +39363,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/Users/phillipg/phillipg_mbp pg-connector issue close pg2-itxtv"
+        "command": "PG_CONNECTOR_ISSUE_BEADS_DIR=/opt/ceta-corpus-no-zone pg-connector issue close pg2-itxtv"
       }
     },
     "cwd_path_state": {
@@ -48895,7 +48895,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "find /Users/phillipg/phillipg_mbp -name '*pg-router-event-model*' -not -path '*/.git/*'"
+        "command": "find /opt/ceta-corpus-no-zone -name '*pg-router-event-model*' -not -path '*/.git/*'"
       }
     },
     "cwd_path_state": {

@@ -916,8 +916,13 @@ func buildRow(relFile, funcName string, idx int, name, cmd string, verdict golde
 		}
 		toolInput[driverKey] = cmd
 	}
+	for k, v := range toolInput {
+		if sv, ok := v.(string); ok {
+			toolInput[k] = stabilizeWorkspaceRoot(sv)
+		}
+	}
 
-	cwd := hm.cwd
+	cwd := stabilizeWorkspaceRoot(hm.cwd)
 	if cwd == "" {
 		cwd = "/repo"
 	}

@@ -117,12 +117,12 @@ Every extracted Bash/Write/Edit/MultiEdit row was run through the SAME productio
 
 - Comparable (Bash or a file-edit tool the adapter models): 2881
 - Not comparable (adapter has no opinion on this tool, or refused the input outright): 72
-- Agreed: 1390
-- Disagreed: 1491
+- Agreed: 1391
+- Disagreed: 1490
 
 Disposition breakdown:
 
-- new too strict: 974
+- new too strict: 973
 - comparison artifact (not a genuine disagreement): 179
 - needs manual review: 338
 
@@ -162,7 +162,7 @@ Disposition breakdown:
 - 15: gitdir: reject -> not-approve
 - 15: primarycommit: not-approve -> approve
 - 14: git: not-approve -> approve
-- 13: engine: not-approve -> approve
+- 12: engine: not-approve -> approve
 - 12: envvars: not-approve -> reject
 - 12: gitdir: reject -> approve
 - 12: pgpr: approve -> not-approve

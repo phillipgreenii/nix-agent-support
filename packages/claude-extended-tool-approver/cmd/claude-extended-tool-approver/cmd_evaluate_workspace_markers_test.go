@@ -156,3 +156,67 @@ func TestCorpusFakeWorkspaceRootRowsGradeCorrect(t *testing.T) {
 		t.Fatalf("rooted=%d controlled=%d; the guard would be vacuous", rooted, controlled)
 	}
 }
+
+// TestLegacyCorpusFakeWorkspaceRootRowsGradeCorrect pins pg2-j6b0b on the
+// GENERATED corpus_legacy.json (the extractor re-roots, never a hand edit): no
+// row names the pre-move workspace root, the rows that used to quote it replay
+// to their own expected verdict through the real engine, and the root they use
+// (/opt/ceta-corpus-no-zone) sits in NO zone.
+//
+// That last property is the point. The legacy `find <root> ...` row is pinned
+// not-approve BECAUSE its root is in no configured zone ("zone unknown"). The
+// control proves the zone choice is load-bearing: the same command under the
+// temp-root zone corpus.json uses (/tmp/ceta-corpus-ws) approves, so re-rooting
+// there would have silently flipped this row's meaning rather than spelling.
+//
+// The four pg-connector EnvVarPrefix rows are NOT asserted to approve: they
+// replay abstain ("unmodeled subcommand issue") whatever the root, an
+// intentional legacy-oracle disagreement, so only their root is pinned here.
+func TestLegacyCorpusFakeWorkspaceRootRowsGradeCorrect(t *testing.T) {
+	const (
+		oldRoot  = "/Users/phillipg/phillipg_mbp"
+		noZone   = "/opt/ceta-corpus-no-zone"
+		tempZone = "/tmp/ceta-corpus-ws"
+	)
+	rows, err := loadCorpusRows([]string{"../../internal/goldencorpus/testdata/corpus_legacy.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, policies, graphPolicies := cmddesc.DefaultRegistry(), effectpolicy.DefaultPolicies(), effectpolicy.DefaultGraphPolicies()
+	replay := func(t *testing.T, row goldencorpus.Row, cmd string) evalcontract.Decision {
+		t.Helper()
+		raw, err := json.Marshal(hookio.BashToolInput{Command: cmd})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := claudecodeadapter.Evaluate(&hookio.HookInput{CWD: row.CWDPathState.CWD, ToolName: "Bash", ToolInput: raw},
+			claudecodeadapter.RequestConfig{ProjectRoot: row.CWDPathState.ProjectRoot}, reg, policies, graphPolicies)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.Decision
+	}
+	rooted, walks := 0, 0
+	for _, row := range rows {
+		cmd, _ := row.ToolInput.ToolInput["command"].(string)
+		if strings.Contains(cmd, oldRoot) || strings.Contains(row.CWDPathState.CWD, oldRoot) {
+			t.Errorf("case %q names the pre-move workspace root; regenerate with cmd/legacyextract", row.Case)
+		}
+		if !strings.Contains(cmd, noZone) {
+			continue
+		}
+		rooted++
+		if strings.HasPrefix(cmd, "find "+noZone) {
+			walks++
+			if got := replay(t, row, cmd); !gradeCorpusRow(row.ExpectedVerdict, got) {
+				t.Errorf("case %q: expected %s, replayed %s", row.Case, row.ExpectedVerdict, got)
+			}
+			if got := replay(t, row, strings.ReplaceAll(cmd, noZone, tempZone)); got != evalcontract.Approve {
+				t.Errorf("case %q under %s: got %s, want approve; the no-zone control is vacuous", row.Case, tempZone, got)
+			}
+		}
+	}
+	if rooted < 5 || walks < 1 {
+		t.Fatalf("rooted=%d walks=%d; the guard would be vacuous", rooted, walks)
+	}
+}
