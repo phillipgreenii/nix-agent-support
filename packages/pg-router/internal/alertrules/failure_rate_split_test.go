@@ -98,7 +98,7 @@ func TestResidualFailureRateRule(t *testing.T) {
 	// ruled not to page, no rule of its own, pg2-e0imq). And the
 	// handler's review-precheck
 	// declines (skipped-*, pg2-5x29j), which are healthy and moot by construction, and
-	// the handler's session-in-flight decline (pg2-qaeb8, INV-CCH-30), routine
+	// the handler's session-in-flight decline (pg2-qaeb8), routine
 	// backpressure like at-capacity. Nothing else.
 	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|session-in-flight|skipped-.+"`) {
 		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure, upstream-killed, usage-limit, session-in-flight and skipped-*: %q", got)
@@ -173,7 +173,7 @@ func TestResidualExcludesUpstreamKilledOnly(t *testing.T) {
 		"at-capacity":        true,
 		"skipped-pr-merged":  true,
 		"usage-limit":        true, // pg2-e0imq: an external usage/spend limit or API outage
-		"session-in-flight":  true, // pg2-qaeb8: routine backpressure (INV-CCH-30)
+		"session-in-flight":  true, // pg2-qaeb8: routine backpressure
 		"low-disk":           false,
 		"command-busy":       false,
 		"":                   false, // plain handler-error, dispatch-failure: keep paging

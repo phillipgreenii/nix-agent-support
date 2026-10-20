@@ -196,8 +196,8 @@ sequenceDiagram
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-1`). Both sides
   MUST move together — a caller still reading a decline off the
   usage code would invert both readings, taking a decline for a typo and a typo for "re-offer later".
-  A decline a handler makes routinely — a precheck's `skipped-*` reason (`INV-CCH-22`) or
-  `session-in-flight` (`INV-CCH-30`), both declared under External references — is excluded from
+  A decline a handler makes routinely — a precheck's `skipped-*` reason or
+  `session-in-flight`, both reasons the handler's own behavior set defines — is excluded from
   the failures the core's failure-rate alert pages on.
   **Acceptance means the handler took custody, not that work started.** The core MUST
   NOT infer progress from an accept, and MUST NOT assume an accepting handler is idle or free to

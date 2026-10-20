@@ -147,7 +147,7 @@ account hit its individual spend limit in three consecutive 5-hour windows (2026
 handler returned an error for each, which the core counted as a plain `handler-error` and so fired
 `pg-router-failure-rate` once per window (`pg2-28t19`, `pg2-291qr`, and a third episode). An
 external limit or an API outage is not a defect of this system. The operator ruled that such a
-session MUST NOT count as a strike (handler `INV-CCH-28`) and MUST be reported under its own reason
+session MUST NOT count as a strike (the handler's own rule) and MUST be reported under its own reason
 so that class stops paging. The residual rule now excludes `usage-limit`. **No sustained-burst rule
 is added**, unlike `upstream-killed` and like `at-capacity`: the operator also ruled to live with
 the spend-limit windows, so a burst rule would only recreate the pages this removes. The count stays

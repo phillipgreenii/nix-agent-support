@@ -579,14 +579,14 @@ groups:
       # upstream-killed.
       #
       # reason=skipped-* is EXCLUDED too (pg2-5x29j): pg-router-ccpool-handler's
-      # review precheck (INV-CCH-22) declines a dispatch it has proven moot at zero
+      # review precheck declines a dispatch it has proven moot at zero
       # model cost -- skipped-bead-closed, skipped-pr-merged, skipped-pending-review.
       # They are re-offered until the event expires, so a sustained nonzero rate is
       # expected and healthy; their per-reason counts stay visible on
       # pg_router_failures_total{class="declined"} for dashboards.
       #
       # reason=session-in-flight is EXCLUDED too (pg2-qaeb8, pg-router-ccpool-
-      # handler INV-CCH-30, ADR 0094): the handler declines a dispatch while an
+      # handler, ADR 0094): the handler declines a dispatch while an
       # earlier attempt of the same bead and role is in flight instead of
       # launching a second session beside it. Like a full pool it is routine
       # backpressure the core re-offers; its per-reason count stays visible on

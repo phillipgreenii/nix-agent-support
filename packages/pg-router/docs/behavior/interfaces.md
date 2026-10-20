@@ -447,7 +447,7 @@ on an account usage or spend limit or an API outage (the handler's `api-rate-lim
 `session ended on a usage limit or API outage`** (for example `zr-1: session ended on a usage limit
 or API outage before claiming its bead (api-rate-limit; no strike counted)`). The handler exempts
 such an end from its own strike policy
-(`INV-CCH-28`, declared under this set's External references),
+(the handler's own no-strike rule for such an end),
 so the error is the only signal the core receives; the core cannot see the handler's failure
 signature across the process boundary, so it matches on this text, and it counts the error as a `handler-error` with `reason="usage-limit"`.
 Precedence among `handler-error` reasons is **triager-failure, then budget-exceeded, then
