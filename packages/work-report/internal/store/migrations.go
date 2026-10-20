@@ -7,7 +7,7 @@ import (
 
 // schemaVersion is the top of the migration ladder below, stored in SQLite's
 // user_version pragma and mirrored into meta's "schema_version" key.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // migrations is the ordered list of DDL applied to reach schemaVersion.
 // Index i migrates user_version i -> i+1. Entries are append-only: nothing in
@@ -86,6 +86,14 @@ WHERE NOT EXISTS (
     WHERE n.id = e.id
       AND (n.occurred_at, n.ingested_at, n.seq) > (e.occurred_at, e.ingested_at, e.seq)
 );
+`,
+	// v1 -> v2: the database stores nothing about reports. Drops the report
+	// table and the last_report meta row; idempotent, and touches neither
+	// entry, entry_label, pull nor any other meta key. One-way: an older
+	// binary refuses a version-2 database. Existing report rows are discarded.
+	`
+DROP TABLE IF EXISTS report;
+DELETE FROM meta WHERE key = 'last_report';
 `,
 }
 

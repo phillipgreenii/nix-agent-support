@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -104,7 +102,7 @@ func strs(in []string) []any {
 // Status reports, per source, the latest pull row (LastStatus, LastReason,
 // LastAt), the time of the latest succeeded pull (LastSuccessAt), the number
 // of latest-wins entries and the newest occurred_at among them; plus the store
-// file size and the latest report row. A source appears if it has a pull row
+// file size. A source appears if it has a pull row
 // or any entry (an entry's source_id is the backend name a pull is recorded
 // under). Sources are ordered by name.
 func (s *Store) Status(ctx context.Context) (StatusData, error) {
@@ -206,29 +204,5 @@ func (s *Store) Status(ctx context.Context) (StatusData, error) {
 		}
 	}
 
-	var (
-		r                          ReportRow
-		since, before, generatedAt string
-	)
-	err = s.sql.QueryRowContext(ctx, `
-		SELECT since, before, kind, narrowing, generated_at, generator, content
-		FROM report ORDER BY generated_at DESC, id DESC LIMIT 1`).
-		Scan(&since, &before, &r.Kind, &r.NarrowingJSON, &generatedAt, &r.Generator, &r.Content)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-	case err != nil:
-		return data, fmt.Errorf("store: status: %w", err)
-	default:
-		if r.Since, err = parseTime(since); err != nil {
-			return data, fmt.Errorf("store: status: %w", err)
-		}
-		if r.Before, err = parseTime(before); err != nil {
-			return data, fmt.Errorf("store: status: %w", err)
-		}
-		if r.GeneratedAt, err = parseTime(generatedAt); err != nil {
-			return data, fmt.Errorf("store: status: %w", err)
-		}
-		data.LastReport = &r
-	}
 	return data, nil
 }

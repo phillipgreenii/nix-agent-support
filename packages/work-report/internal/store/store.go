@@ -1,6 +1,6 @@
 // Package store is work-report's SQLite-backed history store: the durable,
 // append-only record of every activity entry work-report has observed, plus
-// the pull and report logs (design 7.4).
+// the pull log (design 7.4). Nothing about reports is stored.
 //
 // Nothing written here is ever mutated or deleted (INV-APPEND-1): entries are
 // only ever INSERTed, and every read of entries goes through the latest-wins
@@ -34,8 +34,8 @@ const (
 	sqliteLocked = 6
 )
 
-// ErrLocked is returned (wrapped; test with errors.Is) by Open, Append,
-// RecordPull and RecordReport when SQLite stays busy past its busy timeout.
+// ErrLocked is returned (wrapped; test with errors.Is) by Open, Append and
+// RecordPull when SQLite stays busy past its busy timeout.
 var ErrLocked = errors.New("work-report store: locked")
 
 // timeLayout is a fixed-width UTC layout, so stored timestamps sort
@@ -76,14 +76,6 @@ type PullRow struct {
 	Reason                     string
 }
 
-// ReportRow is one rendered report.
-type ReportRow struct {
-	Since, Before       time.Time
-	Kind, NarrowingJSON string
-	GeneratedAt         time.Time
-	Generator, Content  string
-}
-
 // Filter selects entries. Fields combine with AND; the values within one list
 // field combine with OR (WT-D11).
 type Filter struct {
@@ -104,7 +96,6 @@ type SourceStatus struct {
 type StatusData struct {
 	Sources        []SourceStatus
 	StoreSizeBytes int64
-	LastReport     *ReportRow // nil when no report was ever stored
 }
 
 // Store is an open work-report store.
@@ -332,29 +323,6 @@ func (s *Store) RecordPull(ctx context.Context, r PullRow) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: record pull: %w", mapErr(err))
-	}
-	return nil
-}
-
-// RecordReport appends a report row and updates meta's last_report.
-func (s *Store) RecordReport(ctx context.Context, r ReportRow) error {
-	tx, err := s.sql.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("store: record report: %w", mapErr(err))
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO report (since, before, kind, narrowing, generated_at, generator, content)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		optTime(r.Since), optTime(r.Before), r.Kind, r.NarrowingJSON, formatTime(r.GeneratedAt),
-		r.Generator, r.Content); err != nil {
-		return fmt.Errorf("store: record report: %w", mapErr(err))
-	}
-	if err := setMeta(ctx, tx, "last_report", formatTime(r.GeneratedAt)); err != nil {
-		return fmt.Errorf("store: record report: %w", mapErr(err))
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: record report: %w", mapErr(err))
 	}
 	return nil
 }

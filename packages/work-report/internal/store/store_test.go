@@ -75,7 +75,7 @@ func TestOpenCreatesSchemaWALAndVersion(t *testing.T) {
 	if err := s.sql.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
 		t.Fatalf("journal_mode = %q, %v; want wal", mode, err)
 	}
-	for _, tbl := range []string{"entry", "entry_label", "pull", "report", "meta"} {
+	for _, tbl := range []string{"entry", "entry_label", "pull", "meta"} {
 		if rowCount(t, s, tbl) != 0 && tbl != "meta" {
 			t.Errorf("table %s not empty on a fresh store", tbl)
 		}
@@ -87,8 +87,8 @@ func TestOpenCreatesSchemaWALAndVersion(t *testing.T) {
 		}
 	}
 	var v string
-	if err := s.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v); err != nil || v != "1" {
-		t.Errorf("meta schema_version = %q, %v; want 1", v, err)
+	if err := s.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v); err != nil || v != "2" {
+		t.Errorf("meta schema_version = %q, %v; want 2", v, err)
 	}
 	var uv int
 	if err := s.sql.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
@@ -127,6 +127,85 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	_ = db.Close()
 	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "newer") {
 		t.Fatalf("Open of a newer schema: err = %v; want a 'newer' refusal", err)
+	}
+}
+
+// v1 -> v2: the migration drops the report table and the last_report meta row,
+// leaves entry, entry_label, pull and every other meta key untouched, and is
+// idempotent. It also makes an older binary (schemaVersion 1) refuse the file.
+func TestMigrationV2DropsReportStorage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		migrations[0],
+		"PRAGMA user_version = 1",
+		"INSERT INTO meta (key, value) VALUES ('schema_version', '1'), ('last_pull', 'p'), ('last_report', 'r'), ('other', 'o')",
+		`INSERT INTO entry (id, occurred_at, ingested_at, content_hash) VALUES ('e1', 'a', 'b', 'h')`,
+		"INSERT INTO entry_label (seq, label) VALUES (1, 'alpha')",
+		"INSERT INTO pull (source, started_at, ended_at, status) VALUES ('src', 'a', 'b', 'succeeded')",
+		"INSERT INTO report (kind, generated_at) VALUES ('activity', 'g')",
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed %q: %v", stmt, err)
+		}
+	}
+	_ = db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open v1 database: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	snapshot := func() map[string]int {
+		t.Helper()
+		out := map[string]int{}
+		for _, tbl := range []string{"entry", "entry_label", "pull"} {
+			out[tbl] = rowCount(t, s, tbl)
+		}
+		out["meta"] = rowCount(t, s, "meta")
+		return out
+	}
+	check := func(when string) {
+		t.Helper()
+		var n int
+		if err := s.sql.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='report'`).Scan(&n); err != nil || n != 0 {
+			t.Errorf("%s: report table still exists (n=%d, err=%v)", when, n, err)
+		}
+		var uv int
+		if err := s.sql.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 2 {
+			t.Errorf("%s: user_version = %d, %v; want 2", when, uv, err)
+		}
+		for key, want := range map[string]string{"schema_version": "2", "last_pull": "p", "other": "o"} {
+			var v string
+			if err := s.sql.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&v); err != nil || v != want {
+				t.Errorf("%s: meta %s = %q, %v; want %q", when, key, v, err, want)
+			}
+		}
+		var n2 int
+		if err := s.sql.QueryRow(`SELECT COUNT(*) FROM meta WHERE key='last_report'`).Scan(&n2); err != nil || n2 != 0 {
+			t.Errorf("%s: last_report meta row remains (n=%d, err=%v)", when, n2, err)
+		}
+		want := map[string]int{"entry": 1, "entry_label": 1, "pull": 1, "meta": 3}
+		if got := snapshot(); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: row counts = %v; want %v", when, got, want)
+		}
+	}
+	check("after migration")
+
+	// Idempotent: re-running the v2 DDL changes nothing.
+	if _, err := s.sql.Exec(migrations[1]); err != nil {
+		t.Fatalf("re-run migration 2: %v", err)
+	}
+	check("after re-running the migration")
+
+	// An older binary (ladder top 1) refuses a version-2 database.
+	var uv int
+	if err := s.sql.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv <= 1 {
+		t.Fatalf("user_version = %d, %v; want > 1 so a v1 binary refuses it", uv, err)
 	}
 }
 
@@ -521,9 +600,6 @@ func TestLockedSurfacesAsErrLocked(t *testing.T) {
 	if err := s.RecordPull(ctx, PullRow{Source: "x", Status: "succeeded", StartedAt: time.Now(), EndedAt: time.Now()}); !errors.Is(err, ErrLocked) {
 		t.Errorf("RecordPull: err = %v; want ErrLocked", err)
 	}
-	if err := s.RecordReport(ctx, ReportRow{Kind: "k", GeneratedAt: time.Now()}); !errors.Is(err, ErrLocked) {
-		t.Errorf("RecordReport: err = %v; want ErrLocked", err)
-	}
 }
 
 func TestOpenLockedSurfacesAsErrLocked(t *testing.T) {
@@ -542,7 +618,7 @@ func TestOpenLockedSurfacesAsErrLocked(t *testing.T) {
 func TestRecordPullAndStatus(t *testing.T) {
 	s := openTemp(t)
 	st, err := s.Status(ctx)
-	if err != nil || len(st.Sources) != 0 || st.LastReport != nil {
+	if err != nil || len(st.Sources) != 0 {
 		t.Fatalf("empty Status = %+v, %v", st, err)
 	}
 
@@ -575,17 +651,6 @@ func TestRecordPullAndStatus(t *testing.T) {
 	e.SourceID, e.OccurredAt, e.Summary = "src-a", utc(2026, 3, 1, 5, 0, 0), "revised"
 	mustAppend(t, s, e, utc(2026, 3, 2, 13, 0, 0))
 
-	rep := ReportRow{
-		Since: utc(2026, 3, 1, 0, 0, 0), Before: utc(2026, 3, 2, 0, 0, 0), Kind: "activity",
-		NarrowingJSON: `{"labels":["x"]}`, GeneratedAt: utc(2026, 3, 2, 14, 0, 0), Generator: "test:1", Content: "hello",
-	}
-	if err := s.RecordReport(ctx, ReportRow{Kind: "activity", GeneratedAt: utc(2026, 3, 2, 13, 0, 0), Content: "older"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RecordReport(ctx, rep); err != nil {
-		t.Fatal(err)
-	}
-
 	st, err = s.Status(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -616,12 +681,6 @@ func TestRecordPullAndStatus(t *testing.T) {
 	if st.StoreSizeBytes <= 0 {
 		t.Errorf("StoreSizeBytes = %d; want > 0", st.StoreSizeBytes)
 	}
-	if st.LastReport == nil || st.LastReport.Content != "hello" || st.LastReport.Kind != "activity" ||
-		st.LastReport.NarrowingJSON != rep.NarrowingJSON || st.LastReport.Generator != "test:1" ||
-		!st.LastReport.GeneratedAt.Equal(rep.GeneratedAt) || !st.LastReport.Since.Equal(rep.Since) ||
-		!st.LastReport.Before.Equal(rep.Before) {
-		t.Errorf("LastReport = %+v; want the newest report", st.LastReport)
-	}
 
 	// The pull row keeps the open-ended range and every counter.
 	var since string
@@ -645,18 +704,11 @@ func TestRecordPullOpenEndedRangeAndMeta(t *testing.T) {
 	if err := s.sql.QueryRow(`SELECT since FROM pull`).Scan(&since); err != nil || since != "" {
 		t.Errorf("open-ended since = %q, %v; want empty", since, err)
 	}
-	if err := s.RecordReport(ctx, ReportRow{Kind: "activity", GeneratedAt: end.Add(time.Hour)}); err != nil {
-		t.Fatal(err)
-	}
-	for key, want := range map[string]string{"last_pull": formatTime(end), "last_report": formatTime(end.Add(time.Hour))} {
+	for key, want := range map[string]string{"last_pull": formatTime(end)} {
 		var v string
 		if err := s.sql.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&v); err != nil || v != want {
 			t.Errorf("meta %s = %q, %v; want %q", key, v, err, want)
 		}
-	}
-	st, _ := s.Status(ctx)
-	if st.LastReport == nil || !st.LastReport.Since.IsZero() {
-		t.Errorf("LastReport open-ended since = %+v", st.LastReport)
 	}
 }
 

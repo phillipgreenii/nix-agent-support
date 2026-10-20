@@ -30,17 +30,9 @@ type sourceStatusJSON struct {
 	NewestOccurredAt *string         `json:"newest_occurred_at"`
 }
 
-type lastReportJSON struct {
-	GeneratedAt string  `json:"generated_at"`
-	Kind        string  `json:"kind"`
-	Since       *string `json:"since"`
-	Before      *string `json:"before"`
-}
-
 type statusJSON struct {
 	Sources        []sourceStatusJSON `json:"sources"`
 	StoreSizeBytes int64              `json:"store_size_bytes"`
-	LastReport     *lastReportJSON    `json:"last_report"`
 }
 
 // timePtr renders t as RFC3339 UTC; the zero time (none yet, or an open-ended
@@ -67,20 +59,12 @@ func buildStatus(d store.StatusData) statusJSON {
 			NewestOccurredAt: timePtr(s.NewestOccurredAt),
 		})
 	}
-	if r := d.LastReport; r != nil {
-		out.LastReport = &lastReportJSON{
-			GeneratedAt: r.GeneratedAt.UTC().Format(time.RFC3339),
-			Kind:        r.Kind,
-			Since:       timePtr(r.Since),
-			Before:      timePtr(r.Before),
-		}
-	}
 	return out
 }
 
 // newStatusCmd builds `status`: per source, the last pull outcome, last
-// success time, entry count and newest occurred_at, plus store size and the
-// last report. It reads the store only and never execs pg-connector.
+// success time, entry count and newest occurred_at, plus store size. It
+// reads the store only and never execs pg-connector.
 //
 // Status is a health read, not a gate: it exits 0 whatever the sources' state,
 // including on an empty store. It still fails (non-zero) when it cannot run at
@@ -88,9 +72,9 @@ func buildStatus(d store.StatusData) statusJSON {
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show per-source pull health, store size and the last report",
+		Short: "Show per-source pull health and store size",
 		Long: "Prints, per source, the last pull outcome, the last success time, the entry " +
-			"count and the newest occurred_at; plus the store size and the last report. " +
+			"count and the newest occurred_at; plus the store size. " +
 			"It answers \"why is Tuesday empty\". It exits 0 regardless of source health.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -153,18 +137,6 @@ func writeStatusHuman(w io.Writer, d store.StatusData, v statusJSON, loc *time.L
 		}
 	}
 	fmt.Fprintf(&b, "store size: %d bytes\n", v.StoreSizeBytes)
-	if r := d.LastReport; r == nil {
-		b.WriteString("last report: none\n")
-	} else {
-		rng := func(t time.Time) string {
-			if t.IsZero() {
-				return "open"
-			}
-			return at(t)
-		}
-		fmt.Fprintf(&b, "last report: %s generated %s (since %s, before %s)\n",
-			r.Kind, at(r.GeneratedAt), rng(r.Since), rng(r.Before))
-	}
 	_, err := io.WriteString(w, b.String())
 	return err
 }

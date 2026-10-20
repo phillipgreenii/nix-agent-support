@@ -54,8 +54,8 @@ func TestStatusEmptyStoreExitsZeroWithEmptySources(t *testing.T) {
 	if !ok || len(srcs) != 0 {
 		t.Errorf("sources = %#v, want an empty array", v["sources"])
 	}
-	if v["last_report"] != nil {
-		t.Errorf("last_report = %#v, want null", v["last_report"])
+	if _, present := v["last_report"]; present {
+		t.Errorf("status JSON has a last_report key: %#v", v["last_report"])
 	}
 	if size, _ := v["store_size_bytes"].(float64); size <= 0 {
 		t.Errorf("store_size_bytes = %v, want > 0", v["store_size_bytes"])
@@ -65,8 +65,11 @@ func TestStatusEmptyStoreExitsZeroWithEmptySources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("human status on an empty store: %v", err)
 	}
-	if !strings.Contains(human, "none yet") || !strings.Contains(human, "last report: none") {
+	if !strings.Contains(human, "none yet") {
 		t.Errorf("human output lacks the empty-store lines:\n%s", human)
+	}
+	if strings.Contains(human, "last report") {
+		t.Errorf("human output has a last report line:\n%s", human)
 	}
 }
 
@@ -119,8 +122,8 @@ func TestStatusReportsDegradedLastPullAndEarlierSuccess(t *testing.T) {
 	if s["newest_occurred_at"] != "2026-03-01T05:00:00Z" {
 		t.Errorf("newest_occurred_at = %v", s["newest_occurred_at"])
 	}
-	if v["last_report"] != nil {
-		t.Errorf("last_report = %#v, want null before any report", v["last_report"])
+	if _, present := v["last_report"]; present {
+		t.Errorf("status JSON has a last_report key: %#v", v["last_report"])
 	}
 
 	human, err := runCLI(t, "status", "--store", path)
@@ -170,37 +173,6 @@ func TestStatusNeverPulledSourceHasNullTimes(t *testing.T) {
 	ot := by["other-backend"]
 	if ot["newest_occurred_at"] != nil || ot["entry_count"] != float64(0) {
 		t.Errorf("a source with no entries must have null newest_occurred_at and count 0: %#v", ot)
-	}
-}
-
-func TestStatusLastReportPresentAfterStoredReport(t *testing.T) {
-	isolate(t)
-	path := statusStore(t, func(st *store.Store) {
-		if err := st.RecordReport(context.Background(), store.ReportRow{
-			Since: statusAt(2026, 3, 1, 0, 0), Kind: "activity",
-			GeneratedAt: statusAt(2026, 3, 2, 14, 0), Generator: "test:1", Content: "body",
-		}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	out, err := runCLI(t, "status", "--output", "json", "--store", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rep, ok := decodeStatus(t, out)["last_report"].(map[string]any)
-	if !ok {
-		t.Fatalf("last_report missing:\n%s", out)
-	}
-	if rep["kind"] != "activity" || rep["generated_at"] != "2026-03-02T14:00:00Z" ||
-		rep["since"] != "2026-03-01T00:00:00Z" || rep["before"] != nil {
-		t.Errorf("last_report = %#v", rep)
-	}
-	human, err := runCLI(t, "status", "--store", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(human, "last report: activity") || !strings.Contains(human, "before open") {
-		t.Errorf("human output lacks the last report line:\n%s", human)
 	}
 }
 
