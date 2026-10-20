@@ -35,6 +35,15 @@ metrics backend, …) define their own terms in their own behavior sets.
   throughout, so the two readings are never substituted for one another — both are informational,
   never failures.
 
+- **Wrapper contract** — the nine rules every wrap entry and every participant that starts a wrap chain
+  obeys: argv and stdin pass through, the payload's exit status is returned unchanged, nothing is
+  written to stdout, the terminal and foreground process group are kept, signals reach the payload
+  and the chain is cancelled by process group, no prompting, item data only through environment
+  variables or templated argv-form elements, and absolute paths (`INV-ENV-3`).
+- **Ready marker** — the per-dispatch mark that the innermost stage of a wrap chain writes just before
+  starting the payload; a non-zero end without it is a **wrap failure**, with it the payload's own
+  outcome (`INV-ENV-5`).
+
 ## Events and matching
 
 - **Event** — a typed, self-contained fact a source emits and the core routes. Carries an `id`, a

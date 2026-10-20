@@ -67,12 +67,16 @@ occurred to someone, so a missing one shows up as an empty cell instead of as si
 - **`STORY-OP-12`** <!-- uuid: 20a9f5f1-9b4a-4f67-a18b-bb1dedf23153 --> — trust that when the core must trade off, it prefers **safety over continuity
   over efficiency**, so it will halt on a `critical` fault and pause rather than push order-dependent
   work unsafely. _(→ `USECASE-CREATE-HANDLER`, `JOURNEY-FLOW`; `INV-PREC-1`.)_
-
 - **`STORY-OP-13`** <!-- uuid: 360e3a0f-9903-45d2-a26f-8a71d5507d8b --> — declare, for each role, the **adapter** that runs it, the
   **environment** its payload starts from and the role's own **configuration**, so a new kind of
   runner, or a changed environment, is configuration and never a change to the core. _(→
   `USECASE-CONFIGURE-WIRING`, `USECASE-CREATE-HANDLER`; `INV-ROLE-1`, `INV-ROLE-2`, `INV-ROLE-3`,
   `INV-ROLE-4`.)_
+- **`STORY-OP-14`** <!-- uuid: 5e9df2da-69fb-41d8-b543-d9b71749f4d4 --> — trust that every wrap I declare, for a role or a `[[query]]`, obeys one
+  **wrapper contract**, and that a **base environment** only my wraps expand reaches the payload, so
+  a broken wrap fails as its own kind of failure instead of passing for a payload failure. _(→
+  `USECASE-CREATE-HANDLER`, `USECASE-CREATE-SOURCE`; `INV-ENV-1`, `INV-ENV-2`, `INV-ENV-3`,
+  `INV-ENV-4`, `INV-ENV-5`.)_
 
 **Observer (`ACTOR-OBS`)**
 

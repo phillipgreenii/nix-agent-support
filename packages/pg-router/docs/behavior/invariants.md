@@ -255,7 +255,11 @@ sequenceDiagram
   `session ended on a usage limit or API outage`, a session that died on an account usage or spend
   limit or an API outage) is counted with `reason="usage-limit"`, ranking below `triager-failure`, `budget-exceeded` and
   `upstream-killed`; it is excluded from the residual failure-rate alert and **MUST NOT** page at
-  all, remaining visible as its own series (`DEC-OBS-3`, amended). A **second narrow exception is opt-in per
+  all, remaining visible as its own series (`DEC-OBS-3`, amended). A handler error that carries the
+  documented **wrap-failed sentinel** (`interfaces.md`, "Wrap-failed sentinel", `INV-ENV-5`) is counted
+  with `reason="wrap-failed"`, ranking below every reason above; it is excluded from the residual
+  failure-rate alert and **MUST** be routed explicitly so that it pages, because a broken wrap
+  re-fails every dispatch to that role. A **second narrow exception is opt-in per
   role** (`DEC-RETRY-2`): a role MAY declare a small bounded number of re-runs, and the core then
   re-runs a dispatch whose handler failed with a **transient** class (`killed`, `deadline`,
   `unavailable`) — never a deterministic failure — carrying each failed attempt as a pre-accept
@@ -311,6 +315,90 @@ sequenceDiagram
   error to logs and metrics, **never** a silently idle pass. The retry count defaults to **zero**
   (fail fast) unless a deployment opts in (`DEC-RETRY-1`), so an unconfigured source's behavior is
   unchanged.
+
+## Payload environment (wrap, base environment, wrapper contract)
+
+What a role's payload and a `[[query]]` producer run under is a declared, ordered **wrap** list around
+a command, started from a documented minimal **base environment**, under one **wrapper contract**.
+Nothing here changes a gate or `INV-LIFE-2`; a wrap failure is a failure kind, not a gate.
+
+- **`INV-ENV-1`** <!-- uuid: 47e93315-907d-4169-9c6e-9dc779e5da26 --> — **Wrap entries take one of two
+  forms and compose one layer per entry.** The wrap a role, or a `[[query]]` producer, declares
+  (`INV-ROLE-4`) is an ordered list of entries, outermost first, each a command prefix that runs whatever
+  follows it (an environment activation, a tool-path prefix, a variable setter, a time limit, a
+  working-copy stage). A **string entry** is shell-parsed, so a variable expands inside the previous
+  wrapper's environment; it **MUST NOT** contain a template action, and configuration validation
+  **MUST** reject one that does. An **array entry** is argv-form: each element is rendered through the
+  same per-element template the participant already applies to its own argv, and the result is run
+  directly with the rest of the chain appended — it is **never** shell-parsed, so item data cannot
+  become shell code. The chain **MUST** compose as **one layer per entry**: a string layer is a POSIX
+  shell, reading no startup files, that runs its entry with the rest of the chain as positional
+  arguments; an array layer is its rendered elements followed by the rest of the chain, with no
+  shell; the innermost layer's rest is the payload argv. The payload argv therefore arrives unparsed
+  at every layer, and a path variable written in a string entry is expanded inside the environment
+  the previous wrapper produced, so two nested path prefixes **compose** instead of the inner
+  clobbering the outer. The **first word of every string entry and the first element of every array
+  entry MUST be an absolute path**, because the base path is short and a platform's common tools may
+  be missing from it; configuration validation **MUST** check it. A **template action** is allowed
+  only where the participant builds the argv afresh for each dispatch; a participant whose launcher
+  is fixed ahead of any dispatch **MUST** reject a template action in its wrap as a build-time
+  validation error and give wrappers item data through environment variables instead. An empty wrap
+  list is valid.
+- **`INV-ENV-2`** <!-- uuid: 6e2d52e6-b43b-4894-84a4-8e5538d24b47 --> — **The base environment
+  `INV-ROLE-4` names is this list, and only a wrap expands it.** It holds: the **system variables**
+  `HOME`, `USER`, `LOGNAME`, `TMPDIR` and `LANG`, with `PATH` fixed to `/usr/bin:/bin:/usr/sbin:/sbin`;
+  the **terminal variables** the payload's terminal supplies (`TERM` and `COLORTERM`, where set),
+  because an interactive payload needs them; and **the markers the participant injects**, kept by
+  **explicit name, never by prefix** (a prefix would also keep names that are not markers and drop
+  markers that do not share it), the concrete names living in each participant's own docs. A marker
+  the participant deliberately blanks **MUST NOT** be re-introduced by the base. The list is
+  **revisable**. The participant's **own** process (as distinct from the payload it starts) keeps its
+  ambient environment, because its own work still needs it. The base is applied through a
+  **strict-env switch**, **off by default**, which an operator turns on per role family (and per
+  `[[query]]`) as each passes review and which is **removed** once all are on; there is **no
+  permanent fallback** to the daemon's ambient environment. While a switch is off the payload keeps
+  the ambient environment it has today.
+- **`INV-ENV-3`** <!-- uuid: 932ae0f1-b0d4-466f-9971-2fb73a47d74d --> — **The wrapper contract.**
+  Every wrap entry, and every participant that starts a chain, obeys these nine rules.
+  **WC-1** A wrapper **MUST** run the rest of its argv as the payload, with argv and stdin unmodified.
+  **WC-2** It **MUST** return the payload's exit status unchanged; it **MAY** return its own non-zero
+  status only for its own failure, and on an activation failure it **MUST** exit before starting the
+  payload, with the reason on stderr. Exit codes alone cannot tell a wrapper's failure from the
+  payload's (common tools reuse the same small codes, and a handler's `busy` decline has its own), so
+  detection uses the ready marker (`INV-ENV-5`). **WC-3** It **MUST NOT** write to stdout; it **MAY**
+  write to stderr and **SHOULD** prefix its own messages `pg-wrap[<stage>]:`. **WC-4** It **MUST**
+  leave the payload with the same controlling terminal and in the foreground process group.
+  **WC-5** It **MUST** deliver `SIGTERM`, `SIGINT` and `SIGHUP` to the payload, then run its own
+  cleanup and exit (replacing itself with the payload satisfies this). Because cancelling only the
+  direct child orphans the payload behind a wrapper that does not replace itself, the **participant —
+  and the core, for a `[[query]]` producer — MUST start the payload chain in its own process group
+  and cancel by `SIGTERM` to the group, escalating to `SIGKILL`.** **WC-6** It **MUST** work under
+  the base environment alone, reaching its own tools by absolute path, and **MUST NOT** prompt for
+  input. **WC-7** It **SHOULD** replace itself with the payload when it has no cleanup to do.
+  **WC-8** It **MUST** get item data only from environment variables or from templated elements of an
+  array entry (`INV-ENV-1`), never from text interpolated into a string entry. **WC-9** The first word
+  of a string entry and the first element of an array entry **MUST** be an absolute path, checked by
+  the configuration-rendering helpers and by the core's configuration validation.
+- **`INV-ENV-4`** <!-- uuid: 9b643f31-384c-41a5-a6c9-95382b0fa936 --> — **The core applies the
+  environment rules to the `[[query]]` producers it runs itself.** A `[[query]]` carries **`wrap`**
+  (an ordered list, `INV-ROLE-4`, `INV-ENV-1`) and **`strict_base_env`** (a boolean, **default off**,
+  the strict-env switch of `INV-ENV-2`). While `strict_base_env` is off the producer runs under the
+  ambient environment, with its wrap applied; the core starts the producer's chain in its own process
+  group (`INV-ENV-3`, WC-5). A role's wrap is applied by the role's adapter to the payload it launches
+  (`INV-ROLE-4`), under the same rules, and the adapter owns that role's strict-env switch.
+- **`INV-ENV-5`** <!-- uuid: 56c3fe86-ca47-43d8-b659-394c9663c751 --> — **A failure in the wrap
+  chain is told apart from a failure of the payload, and is never a gate.** A participant that starts
+  a chain for a handler session **MUST** append, as the **innermost** layer of every dispatch (even
+  one with an empty wrap list), a **ready-marker** stage: it writes a per-dispatch **ready marker**
+  just before starting the payload, at a path the participant names to the chain through an
+  environment variable it injects. A non-zero end **without** the marker is a **wrap failure**; with
+  the marker it is the payload's own outcome, classified exactly as before. A marker stage started
+  without its variable **MUST** fail loudly (a `pg-wrap[marker]:` message on stderr and a non-zero
+  exit before the payload starts), never skip silently. A participant **MUST** report a wrap failure
+  with the **wrap-failed sentinel** (`interfaces.md`, "Wrap-failed sentinel"), carrying the failing
+  stage's redacted stderr tail, so the core counts it under its own `reason` instead of as a payload
+  failure. Stopping a role that keeps failing its wrap is the **participant's** own concern — core
+  gates and `INV-LIFE-2` are unchanged and **MUST NOT** be used for it.
 
 ## Wiring
 

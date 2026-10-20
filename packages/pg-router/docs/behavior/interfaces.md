@@ -401,7 +401,9 @@ upstream call killed by the connector's exec timeout) is counted with `reason="u
 isolated kills do not page individually (`DEC-OBS-3`, amended); and a handler error carrying the
 **usage-limit sentinel** below (a session that died on an account usage or spend limit or an API
 outage) is counted with `reason="usage-limit"`, an external limit that does not page
-(`DEC-OBS-3`, amended).
+(`DEC-OBS-3`, amended); and a handler error carrying the **wrap-failed sentinel** below (the wrap
+chain failed before the payload started, `INV-ENV-5`) is counted with `reason="wrap-failed"`, which
+pages through its own explicit route rather than the residual series.
 
 | class            | meaning                                                       | response                                            |
 | ---------------- | ------------------------------------------------------------- | --------------------------------------------------- |
@@ -455,6 +457,21 @@ upstream-killed, then usage-limit**. The substring is a **contract**: changing i
 `reason="usage-limit"` classification and the residual failure-rate exclusion built on it
 (`DEC-OBS-3`). An unclaimed end for any other cause carries no such substring and keeps counting
 under the residual failure-rate series.
+
+**Wrap-failed sentinel.** When a handler's wrap chain failed before its payload started (the ready
+marker of `INV-ENV-5` was never written, so the end is a **wrap failure** and not the payload's own
+outcome), the error text it reports **MUST contain the stable substring `wrap failed before the
+payload started`**, followed by the failing stage's redacted stderr tail (for example `role-1: wrap
+failed before the payload started: pg-wrap[require]: missing tool: go`). It **MUST NOT** carry
+prompt or item content. The core cannot see why a chain failed across the process boundary, so it
+matches on this text and counts the error as a `handler-error` with `reason="wrap-failed"`.
+Precedence among `handler-error` reasons is **triager-failure, then budget-exceeded, then
+upstream-killed, then usage-limit, then wrap-failed**. The core **MUST** route a wrap-failed error to
+its own explicit failure-rate route so that it pages, and **MUST NOT** let it fall into the residual
+series, because a wrap that is broken fails every dispatch to its role until someone fixes it. The
+substring is a **contract**: changing it breaks the core's `reason="wrap-failed"` classification and
+the route built on it. A failure of the payload itself, with the ready marker written, carries no such
+substring and is classified exactly as before.
 
 **Obligations.** A handler **MUST tolerate a duplicate event** (be idempotent) and **MUST support
 the deferred form**, so a paused or long-running handler session never pins an open call from the
@@ -522,7 +539,8 @@ sequenceDiagram
     visible rather than averaged away (`DEC-OBS-5`); a handler-reported error (`handler-error`)
     carrying the **budget-stop sentinel** below is additionally labelled `reason="budget-exceeded"`,
     and one carrying the **upstream-killed sentinel** below `reason="upstream-killed"`, and one
-    carrying the **usage-limit sentinel** below `reason="usage-limit"`
+    carrying the **usage-limit sentinel** below `reason="usage-limit"`, and one carrying the
+    **wrap-failed sentinel** below `reason="wrap-failed"`
     (`DEC-OBS-3`). The other post-accept classes are
     **not** counted here — after acceptance the handler owns the work (`INV-FAIL-1`), so classifying
     its outcomes is the handler's own concern on the handler's own surface;
@@ -753,6 +771,16 @@ DEC-CLI-2`).
   nor inspects how, or whether, a participant responds to it. Its concrete spelling (an
   environment variable, and its name) is a realization decision, not restated here:
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.
+- **Composed command and the environment caveat.** Resolving the configuration (`config --show`, and
+  its machine-readable form `config --show --json`) **MUST** print, for each role and each
+  `[[query]]`, the **composed command** — the declared `wrap` entries (`INV-ROLE-4`, `INV-ENV-1`)
+  followed by the command — so an operator reads what a payload or producer will actually run without
+  reconstructing it. **Caveat:** the one-event
+  handler smoke test (`run-role`) runs under the **operator's own shell environment**, not the
+  daemon's, so while a role's strict-env switch is off (`INV-ENV-2`) its run is **not representative**
+  of the environment that role's payload gets under the daemon, and a smoke test that passes there
+  does not prove the payload's environment. (Concrete spelling:
+  `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.)
 - **Run-scoped selectors.** The operator MAY restrict the **active** set of sources and handlers for a
   single run — as an allow-list, a deny-list, or both — **without editing the configuration**
   (`STORY-OP-3`). The restriction scopes which participants that run activates and which a smoke test
@@ -969,8 +997,8 @@ sequenceDiagram
 ## Configuration (an interface the operator authors)
 
 The **configuration structure** is itself a first-class interface — the operator authors it, and
-the CLI resolves it on request. It declares: the participants (each with its command, mode,
-and — for a monitoring sink — its selected metrics); the sources, each as **one invocation** plus the
+the CLI resolves it on request. It declares: the participants (each with its command, mode, any
+**wrap** around that command, and — for a monitoring sink — its selected metrics); the sources, each as **one invocation** plus the
 event types it emits and, for a pull source, its query trigger — never a per-tool source kind
 (`GOAL-MIN-1`); the handlers and their event-type **bindings** (including any **payload path a
 binding names** for narrowing); and the workflow wiring the core validates (`INV-WORKFLOW-1`). Expiry is **not** declared here — it
@@ -986,6 +1014,14 @@ role's resolved adapter command, wrap, survives-shutdown property and the table 
 sent, plus each role's and each query's composed command, so what a role will run is readable
 without reading the adapter's own files
 (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-ROLE-1`).
+
+**Wrap and the base environment in the configuration.** A `[[query]]` MAY carry, beside its optional
+**wrap** (`INV-ROLE-4`), a boolean **`strict_base_env`** that defaults to **off** (`INV-ENV-2`,
+`INV-ENV-4`). A wrap is an ordered list of entries in the string form or the argv form, outermost
+first (`INV-ENV-1`). Validation **MUST** reject a template action in a string entry and a first word
+or element that is not an absolute path. A role's strict-env switch, where the role's adapter has
+one, is that adapter's own, under the same rules (`INV-ENV-2`, `INV-ENV-3`). A `[[query]]` that
+omits `wrap` and `strict_base_env` runs its command exactly as it did before.
 
 The **full configuration schema** is not yet pinned; it is tracked as an open question
 (`OQ-CONFIG`), with pg-router's existing TOML as prior art.
