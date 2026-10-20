@@ -98,7 +98,9 @@ const (
 )
 
 // Names of the PG_CONNECTOR_GITHUB_* environment overrides. They exist for
-// tests and the shadow harness only; every other setting is file-only, and the
+// tests and the shadow harness only (the daemon's one operator-diagnostics
+// variable, PG_CONNECTOR_GITHUB_PPROF_ADDR, is the serve mode's own opt-in and
+// lives in pprof.go); every other setting is file-only, and the
 // daemon never reads the environment of a client's call.
 const (
 	EnvSocket               = "PG_CONNECTOR_GITHUB_SOCKET"

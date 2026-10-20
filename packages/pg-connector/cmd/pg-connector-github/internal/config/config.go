@@ -59,10 +59,13 @@
 //
 // # Environment
 //
-// Exactly five variables are read, and only here: PG_CONNECTOR_GITHUB_SOCKET,
+// Exactly five variables override a setting, and only here: PG_CONNECTOR_GITHUB_SOCKET,
 // _STATE_DIR, _CONFIG and _GH (design "Daemon environment and socket") and
 // _GRAPHQL_POINTS_PER_HOUR. Each overrides the one setting; every other
 // setting is file-only, so a load with an empty environment (env -i) succeeds.
+// The one other variable of the process, PG_CONNECTOR_GITHUB_PPROF_ADDR, is an
+// operator-diagnostics opt-in read by the serve mode alone (not by this loader):
+// it opens a profiling listener only when set and never changes a setting.
 // The daemon-side loader never reads a client's per-call environment: callers
 // pass the daemon's own getenv.
 //

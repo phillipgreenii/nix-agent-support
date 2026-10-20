@@ -15,6 +15,7 @@ cachePackages = [
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
   'github.com/phillipgreenii/x/gittest',
+  'github.com/phillipgreenii/x/pprofserver',
   'github.com/remyoudompheng/bigfft',
   'github.com/spf13/cobra',
   'github.com/spf13/pflag',
@@ -198,8 +199,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261007115411-386c14bc447d'
-    hash = 'sha256-VOmqXfMbGimAQTkO0RdoMtjTnaxO5P3N5+R3xVHtG0w='
+    version = 'v0.0.0-20261015022436-7b4c351b3c34'
+    hash = 'sha256-IgDjbWSCmJEBqaZMa86YVkEXAwWR6M5R6wRvwH3uCRw='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'

@@ -75,7 +75,9 @@ distinction come from the behavior-docs method
   host or process invokes it. Such a backend MUST take everything it needs (the origin's host, the
   paths of its tools, its state directory, its socket path, its queries and its settings) from
   that rendered config file and MUST NOT take any of them from the environment; environment
-  overrides exist only for tests and a shadow-comparison harness, so a daemon started by hand,
+  overrides exist only for tests and a shadow-comparison harness (a backend MAY add an
+  operator-diagnostics opt-in that opens a profiling listener only when set and changes no setting,
+  such as `pg-connector-github`'s `PG_CONNECTOR_GITHUB_PPROF_ADDR`), so a daemon started by hand,
   with an empty environment and the root as working directory, behaves exactly as it does under
   its supervisor. This does not forbid a backend from resolving its OWN credentials or connection
   details independently (e.g. `pg-connector-pr-github`'s `gh`-mediated token,

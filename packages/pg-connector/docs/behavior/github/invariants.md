@@ -40,7 +40,9 @@ restated.
   supervisor wrapper MUST stay minimal (`INTF-GH-SUPERVISION`). The application MUST take every
   setting it needs, including the origin host, the tool paths, the state and socket paths, its
   queries and its settings, from the one rendered config file and MUST NOT take any of them from the
-  environment (`INV-STATE-1`); environment overrides exist only for tests and a comparison harness,
+  environment (`INV-STATE-1`); environment overrides exist only for tests and a comparison harness
+  (the one exception is the operator-diagnostics opt-in `PG_CONNECTOR_GITHUB_PPROF_ADDR`, which opens
+  a profiling listener only when set and changes no setting),
   so a daemon started by hand with an empty environment behaves exactly as it does under its
   supervisor. The daemon MUST reject a peer whose user identity differs from its own and MUST refuse
   to start with a socket path longer than the platform allows, saying so.

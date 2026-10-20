@@ -687,6 +687,20 @@ in
         description = "With `supervisor = \"none\"`, permit the registry rewrite anyway.";
       };
 
+      pprof.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Expose Go's runtime profiler (`net/http/pprof`) for the daemon on a
+          mode-0600 unix socket at `$XDG_STATE_HOME/pg-connector-github/pprof.sock`
+          (the module writes the resolved absolute path into the launchd agent's
+          `PG_CONNECTOR_GITHUB_PPROF_ADDR`). When `false` the variable is absent
+          and the daemon opens no profiling listener. Only the `launchd`
+          supervisor sets the variable. Capture recipe:
+          `docs/go-daemon-profiling-runbook.md` in `phillipg-nix-repo-base`.
+        '';
+      };
+
       host = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
@@ -903,6 +917,15 @@ in
             serviceConfig = {
               StandardOutPath = "${stateDir}/launchd-stdout.log";
               StandardErrorPath = "${stateDir}/launchd-stderr.log";
+            }
+            # Profiling endpoint (github.com/phillipgreenii/x/pprofserver): a 0600
+            # unix socket under the daemon's own state dir (serve creates the
+            # parent), so no port is allocated or exposed. launchd does not expand
+            # $XDG_STATE_HOME in EnvironmentVariables, so the resolved stateDir is
+            # written out. Absent when github.pprof.enable is false. Capture recipe:
+            # docs/go-daemon-profiling-runbook.md in phillipg-nix-repo-base.
+            // lib.optionalAttrs gh.pprof.enable {
+              EnvironmentVariables.PG_CONNECTOR_GITHUB_PPROF_ADDR = "${stateDir}/pprof.sock";
             };
           };
     })

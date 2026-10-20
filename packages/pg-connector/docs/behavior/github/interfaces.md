@@ -166,7 +166,9 @@ Every failure is answered from the parent's seven-value taxonomy (`INV-GH-ERR-1`
   expiry, retention, the settle timeout, the batch size and worker count, and the caps, the reserve and
   the background share per bucket. The queries and the registry entry are rendered from one source,
   so the file and the umbrella's own `backends.<name>` block carry the same config hash.
-- **What must hold.** Nothing the daemon or the client needs comes from the environment, so a daemon
+- **What must hold.** Nothing the daemon or the client needs comes from the environment (the one
+  exception is the operator-diagnostics opt-in `PG_CONNECTOR_GITHUB_PPROF_ADDR`, which opens a
+  profiling listener only when set and changes no setting), so a daemon
   started by hand with an empty environment behaves as it does under its supervisor
   (`INV-GH-PROC-3`, `INV-STATE-1`). The file hard-codes no user, team or organisation. A change takes
   effect by restarting the daemon; there is no live reload. Numeric defaults are decision-doc

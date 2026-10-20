@@ -426,6 +426,34 @@ The writer mechanics the backends share (the common event fields, size-based rot
 rule, call timing) live in `pkg/eventlog`; each backend still owns its log path, its event shape and
 its alert rules. Other external-service connectors are expected to follow the same pattern.
 
+## Profiling (pg-connector-github)
+
+The `pg-connector-github` daemon (`serve` only, never `pr`, `ci` or `status`) can expose Go's runtime
+profiler (`net/http/pprof`) for diagnosing CPU or memory use. It is off unless
+`PG_CONNECTOR_GITHUB_PPROF_ADDR` is set; with it unset the daemon opens no listener. This variable is
+an operator diagnostic, not a setting: no config key reads it, and it is the one environment variable
+the daemon reads besides the five config overrides. The launchd agent sets it by default
+(`phillipgreenii.programs.pg-connector.github.pprof.enable`, default `true`) to the unix socket
+`$XDG_STATE_HOME/pg-connector-github/pprof.sock` (resolved to the absolute path by the Nix module),
+created with mode `0600`. The implementation is the shared package
+`github.com/phillipgreenii/x/pprofserver`.
+
+`go tool pprof` cannot dial a unix socket, so fetch the profile with `curl`, then read the file:
+
+```bash
+SOCK="$XDG_STATE_HOME/pg-connector-github/pprof.sock"
+curl --unix-socket "$SOCK" 'http://pprof/debug/pprof/profile?seconds=30' -o cpu.pb.gz
+go tool pprof -top cpu.pb.gz
+```
+
+Do not send SIGQUIT to get a goroutine dump: this daemon traps only SIGTERM and SIGINT, so on SIGQUIT
+the Go runtime dumps goroutines and exits. Fetch `http://pprof/debug/pprof/goroutine?debug=2` over the
+socket instead.
+
+The runbook `docs/go-daemon-profiling-runbook.md` in `phillipg-nix-repo-base` is the authoritative
+home of how to capture and read a profile. The listener accepts only an absolute socket path or a
+loopback `host:port`; any other value is refused with a line on stderr and the daemon keeps running.
+
 ## Versioning
 
 Per-source content digest (this repo's own "Versioning of Custom Packages" convention):

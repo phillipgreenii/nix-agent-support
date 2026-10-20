@@ -48,6 +48,8 @@ let
 
   # darwin, launchd (the default there), a system scope with an OTel endpoint
   launchdOn = case darwin githubOn osWithObs;
+  # the opt-in pprof endpoint turned off: the variable is absent
+  launchdPprofOff = case darwin (githubOn // { pprof.enable = false; }) osWithObs;
   # darwin without the system scope: a different rendered config (no endpoint)
   launchdOnNoOs = case darwin githubOn null;
   # a different binary: only the package differs
@@ -112,10 +114,38 @@ let
       && e.manageLogs.archiveCount == 1;
     logCollectionDefault = e.logCollection.enable == true;
     logPaths =
+      e.serviceConfig.StandardOutPath == "${stateDir}/launchd-stdout.log"
+      && e.serviceConfig.StandardErrorPath == "${stateDir}/launchd-stderr.log";
+    # the opt-in pprof endpoint (default on): the resolved absolute socket path
+    # under the daemon's state dir, and nothing else in the serviceConfig
+    pprofEnabledByDefault = (ghOpts launchdOn).pprof.enable == true;
+    pprofEnabledSetsSocket =
+      e.serviceConfig.EnvironmentVariables == {
+        PG_CONNECTOR_GITHUB_PPROF_ADDR = "${stateDir}/pprof.sock";
+      }
+      &&
+        e.serviceConfig.EnvironmentVariables.PG_CONNECTOR_GITHUB_PPROF_ADDR
+        == "/example/home/.local/state/pg-connector-github/pprof.sock";
+    pprofEnabledServiceConfigIsExact =
       e.serviceConfig == {
         StandardOutPath = "${stateDir}/launchd-stdout.log";
         StandardErrorPath = "${stateDir}/launchd-stderr.log";
+        EnvironmentVariables.PG_CONNECTOR_GITHUB_PPROF_ADDR = "${stateDir}/pprof.sock";
       };
+    pprofDisabledOmitsVariable =
+      (ghOpts launchdPprofOff).pprof.enable == false
+      && !(entryOf launchdPprofOff).serviceConfig ? EnvironmentVariables
+      &&
+        (entryOf launchdPprofOff).serviceConfig == {
+          StandardOutPath = "${stateDir}/launchd-stdout.log";
+          StandardErrorPath = "${stateDir}/launchd-stderr.log";
+        };
+    pprofDisabledStillRegisters = (entryOf launchdPprofOff).label == e.label;
+    # the variable rides in the entry's serviceConfig, not the command, so
+    # toggling it never changes the rendered config file
+    pprofToggleKeepsConfigAndCommand =
+      (ghOpts launchdPprofOff).configFile == (ghOpts launchdOn).configFile
+      && (entryOf launchdPprofOff).script == script;
     # the supervisor is the default on darwin
     defaultSupervisorRegisters = (entryOf launchdOnDefaultSupervisor).label == e.label;
     noAssertionFailsOnDarwin = failedAssertions launchdOn == [ ];
