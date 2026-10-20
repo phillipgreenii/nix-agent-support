@@ -2786,6 +2786,7 @@
                     nativeBuildInputs = [
                       pkgs.jq
                       pkgs.yq-go
+                      pkgs.pg-connector-scm-git
                     ];
                     glob = o.logSources.pg-task-focus.path;
                   }
@@ -2903,6 +2904,7 @@
                     nativeBuildInputs = [
                       pkgs.jq
                       pkgs.yq-go
+                      pkgs.pg-connector-scm-git
                     ];
                   }
                   ''
@@ -9141,24 +9143,31 @@
                           timeout = "soon";
                         };
                       }).phillipgreenii.programs.work-report.generators.g.timeout;
+                  # (list-valued options: deepSeq forces the element checks.)
                   badGeneratorInput =
-                    builtins.tryEval
-                      (evalHM {
-                        enable = true;
-                        generators.g = {
-                          command = [ "g" ];
-                          inputs = [ "other" ];
-                        };
-                      }).phillipgreenii.programs.work-report.generators.g.inputs;
+                    let
+                      v =
+                        (evalHM {
+                          enable = true;
+                          generators.g = {
+                            command = [ "g" ];
+                            inputs = [ "other" ];
+                          };
+                        }).phillipgreenii.programs.work-report.generators.g.inputs;
+                    in
+                    builtins.tryEval (builtins.deepSeq v v);
                   badGeneratorEnv =
-                    builtins.tryEval
-                      (evalHM {
-                        enable = true;
-                        generators.g = {
-                          command = [ "g" ];
-                          env = [ "NOT A NAME=1" ];
-                        };
-                      }).phillipgreenii.programs.work-report.generators.g.env;
+                    let
+                      v =
+                        (evalHM {
+                          enable = true;
+                          generators.g = {
+                            command = [ "g" ];
+                            env = [ "NOT A NAME=1" ];
+                          };
+                        }).phillipgreenii.programs.work-report.generators.g.env;
+                    in
+                    builtins.tryEval (builtins.deepSeq v v);
                   noGeneratorCommand =
                     builtins.tryEval
                       (evalHM {
@@ -9193,6 +9202,7 @@
                       pkgs.work-report
                       pkgs.jq
                       pkgs.yq-go
+                      pkgs.pg-connector-scm-git
                     ];
                   }
                   ''
@@ -9226,7 +9236,7 @@
                     [ "$(jq -c '.generators.narrative.command' <<<"$got")" = '["${pkgs.work-report}/bin/work-report-narrative"]' ]
                     [ -x "${pkgs.work-report}/bin/work-report-narrative" ]
                     [ "$(jq -c '.generators.narrative.inputs' <<<"$got")" = '["baseline"]' ]
-                    [ "$(jq -r '.generators.narrative.timeout' <<<"$got")" = 10m0s ]
+                    [ "$(jq -r '.generators.narrative.timeout' <<<"$got")" = 10m ]
                     jq -e '.generators.narrative.env | (index("HTTPS_PROXY") != null) and (index("SSL_CERT_FILE") != null) and (index("CLAUDE_CONFIG_DIR") != null)' <<<"$got" > /dev/null
                     [ "$(jq -c '.presets | keys' <<<"$got")" = '["baseline"]' ]
 
@@ -9246,7 +9256,7 @@
                     got=$(work-report config show --config "$presets" --output json)
                     [ "$(jq -c '.problems' <<<"$got")" = '[]' ]
                     # The generator override changed one field only.
-                    [ "$(jq -r '.generators.narrative.timeout' <<<"$got")" = 20m0s ]
+                    [ "$(jq -r '.generators.narrative.timeout' <<<"$got")" = 20m ]
                     [ "$(jq -c '.generators.narrative.inputs' <<<"$got")" = '["baseline"]' ]
                     [ "$(jq -c '.generators["json-dump"].command' <<<"$got")" = '["work-report-json-dump"]' ]
                     [ "$(jq -r '.generators["json-dump"].timeout' <<<"$got")" = 1m30s ]
@@ -9268,16 +9278,26 @@
                     [ "$(jq -r '.presets.dump.range' <<<"$got")" = today ]
                     [ "$(jq -c '.presets.dump.config' <<<"$got")" = '{"flag":true}' ]
                     # Only the keys that are set are rendered.
-                    daily=$(yq -c '.reports["example-daily"] | keys' "$presets")
+                    daily=$(yq -o=json -I=0 '.reports["example-daily"] | keys' "$presets")
                     [ "$daily" = '["generator","range"]' ]
-                    [ "$(yq -c '.generators["json-dump"] | keys' "$presets")" = '["command","timeout"]' ]
-                    [ "$(yq -c '.reports.dump | keys' "$presets")" = '["config","generator"]' ]
+                    [ "$(yq -o=json -I=0 '.generators["json-dump"] | keys' "$presets")" = '["command","timeout"]' ]
+                    [ "$(yq -o=json -I=0 '.reports.dump | keys' "$presets")" = '["config","generator"]' ]
                     # config validate exits 0 for a valid preset: it runs the
                     # package's narrative generator in validate mode. (The
                     # presets file above names json-dump, whose executable
                     # does not exist here, so it is not validated.)
+                    # `config validate` also runs pg-connector's own validate
+                    # against the registry, so give it one real, hermetic
+                    # backend (the local-git scm backend).
+                    printf 'connector:\n  scm: pg-connector-scm-git\n' > "$TMPDIR/registry.yaml"
+                    export PG_PR_CONFIG="$TMPDIR/registry.yaml"
                     work-report config validate --config "$valid" > /dev/null
                     work-report config validate --config "$defaults" > /dev/null
+                    # A preset naming an unregistered generator fails it (the
+                    # module does not check this: the loader does).
+                    bad=$TMPDIR/bad.yaml
+                    printf 'reports:\n  broken:\n    generator: nope\n' > "$bad"
+                    if work-report config validate --config "$bad" > /dev/null 2>&1; then exit 1; fi
 
                     # No rendered config carries the retired kinds key, and
                     # config show on each exits 0.
