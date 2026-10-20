@@ -176,8 +176,8 @@ var (
 	_ gitclient.BranchManager   = (*fakeWorktreeManager)(nil)
 )
 
-func (m *fakeWorktreeManager) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) error {
-	return nil // unused by preShutdown's teardown sweep
+func (m *fakeWorktreeManager) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) (*gitclient.Handle, error) {
+	return nil, nil // unused by preShutdown's teardown sweep
 }
 
 func (m *fakeWorktreeManager) RemoveWorktree(_ context.Context, path string, _ bool) error {

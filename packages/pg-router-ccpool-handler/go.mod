@@ -6,7 +6,7 @@ require (
 	github.com/phillipgreenii/ccpool v0.0.0
 	github.com/phillipgreenii/claude-transcript v0.0.0
 	github.com/phillipgreenii/pg-router v0.0.0
-	github.com/phillipgreenii/x v0.0.0-20260828055400-434334771eea
+	github.com/phillipgreenii/x v0.0.0-20261015022436-7b4c351b3c34
 )
 
 require (

@@ -32,6 +32,7 @@ cachePackages = [
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
   'github.com/phillipgreenii/x/gittest',
+  'github.com/phillipgreenii/x/pprofserver',
   'github.com/prometheus/client_golang/prometheus',
   'github.com/prometheus/client_golang/prometheus/promhttp',
   'github.com/prometheus/client_model/go',
@@ -243,8 +244,8 @@ cachePackages = [
     hash = 'sha256-79URDDFenmGc9JZu+5AXHToMrtTREHb3BC84b/gym9Q='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20260828055400-434334771eea'
-    hash = 'sha256-HlFyPQs0qle76h6Ia3Qi0HhFe+Y+HR26vzlheDUYTA4='
+    version = 'v0.0.0-20261015022436-7b4c351b3c34'
+    hash = 'sha256-IgDjbWSCmJEBqaZMa86YVkEXAwWR6M5R6wRvwH3uCRw='
 
   [mod.'github.com/prometheus/client_golang']
     version = 'v1.24.1'

@@ -69,11 +69,11 @@ type NoopWorktreeManager struct {
 	Calls [][]string
 }
 
-func (m *NoopWorktreeManager) CreateWorktree(_ context.Context, path, branch string, opts gitclient.CreateWorktreeOptions) error {
+func (m *NoopWorktreeManager) CreateWorktree(_ context.Context, path, branch string, opts gitclient.CreateWorktreeOptions) (*gitclient.Handle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Calls = append(m.Calls, []string{"add", path, branch, strconv.FormatBool(opts.ResetBranch)})
-	return nil
+	return nil, nil
 }
 
 func (m *NoopWorktreeManager) RemoveWorktree(_ context.Context, path string, force bool) error {

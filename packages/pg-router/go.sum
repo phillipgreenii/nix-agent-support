@@ -59,8 +59,8 @@ github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
-github.com/phillipgreenii/x v0.0.0-20260828055400-434334771eea h1:t+yy0v/Bq8YfGn+F5ID1TAsvneO0cvt3g/GcaAzRym0=
-github.com/phillipgreenii/x v0.0.0-20260828055400-434334771eea/go.mod h1:uHj9lca/7K2DDU2ezlrGxlXMsmzQ9ZuidUGRNjgd60o=
+github.com/phillipgreenii/x v0.0.0-20261015022436-7b4c351b3c34 h1:4MgO+CC+ZmDoW+Mewi7a6DVWkVpHmUxIoQYs2C8+New=
+github.com/phillipgreenii/x v0.0.0-20261015022436-7b4c351b3c34/go.mod h1:LqAYe6mzlGG8/2vBMyLjlzbfxKh6nL0KJzbQUASCGqw=
 github.com/prometheus/client_golang v1.24.1 h1:JnJkREXzWxUdCuPFpIWZiPispT9xVV59uiuyR2bPlnU=
 github.com/prometheus/client_golang v1.24.1/go.mod h1:F+oSRECHg4sse5ucfYpYDeIv/hu68Zo0uoHKetWnzcE=
 github.com/prometheus/client_model v0.6.2 h1:oBsgwpGs7iVziMvrGhE53c/GrLUsZdHnqNwqPLxwZyk=

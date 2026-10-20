@@ -22,12 +22,12 @@ type recWTM struct {
 	}
 }
 
-func (m *recWTM) CreateWorktree(_ context.Context, path, branch string, opts gitclient.CreateWorktreeOptions) error {
+func (m *recWTM) CreateWorktree(_ context.Context, path, branch string, opts gitclient.CreateWorktreeOptions) (*gitclient.Handle, error) {
 	m.calls = append(m.calls, struct {
 		path, branch string
 		opts         gitclient.CreateWorktreeOptions
 	}{path, branch, opts})
-	return nil
+	return nil, nil
 }
 
 func (m *recWTM) RemoveWorktree(context.Context, string, bool) error { return nil }
@@ -105,8 +105,8 @@ func TestEnsure_reusesExistingWorktree(t *testing.T) {
 // call-recording, which always returns nil.
 type failingCreateWTM struct{ err error }
 
-func (f failingCreateWTM) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) error {
-	return f.err
+func (f failingCreateWTM) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) (*gitclient.Handle, error) {
+	return nil, f.err
 }
 func (failingCreateWTM) RemoveWorktree(context.Context, string, bool) error { return nil }
 func (failingCreateWTM) PruneWorktrees(context.Context) error               { return nil }

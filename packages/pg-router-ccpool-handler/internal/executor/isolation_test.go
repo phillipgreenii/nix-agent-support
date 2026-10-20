@@ -25,9 +25,9 @@ type fakeWTM struct {
 	calls [][]string
 }
 
-func (m *fakeWTM) CreateWorktree(_ context.Context, path, branch string, opts gitclient.CreateWorktreeOptions) error {
+func (m *fakeWTM) CreateWorktree(_ context.Context, path, branch string, opts gitclient.CreateWorktreeOptions) (*gitclient.Handle, error) {
 	m.calls = append(m.calls, []string{"add", path, branch})
-	return nil
+	return nil, nil
 }
 func (m *fakeWTM) RemoveWorktree(context.Context, string, bool) error { return nil }
 func (m *fakeWTM) PruneWorktrees(context.Context) error               { return nil }

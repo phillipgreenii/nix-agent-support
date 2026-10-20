@@ -1627,7 +1627,11 @@ func TestLoad_worktreeReadsThroughToCanonicalConfigViaGitCommonDir(t *testing.T)
 	}
 
 	wtPath := filepath.Join(t.TempDir(), "linked-wt")
-	if err := repo.Client.CreateWorktree(ctx, wtPath, "feature", gitclient.CreateWorktreeOptions{}); err != nil {
+	wtHandle, err := repo.Client.CreateWorktree(ctx, wtPath, "feature", gitclient.CreateWorktreeOptions{})
+	if err == nil {
+		err = wtHandle.Wait()
+	}
+	if err != nil {
 		t.Fatalf("CreateWorktree() error = %v", err)
 	}
 	// The linked worktree has NO .pg-router/ of its own -- proving a resolution

@@ -6610,7 +6610,7 @@
                   };
 
                   evalDarwin =
-                    daemonEnable:
+                    daemonEnable: pprofEnable:
                     (lib.evalModules {
                       specialArgs = { inherit pkgs lib; };
                       modules = [
@@ -6735,6 +6735,13 @@
                                         type = lib.types.nullOr lib.types.str;
                                         default = "/tmp/fake-ccpool-pool";
                                       };
+                                      # pprof.enable stub: same convention -- the darwin
+                                      # module reads daemonCfg.pprof.enable, so a
+                                      # missing attribute here fails evaluation.
+                                      pprof.enable = lib.mkOption {
+                                        type = lib.types.bool;
+                                        default = true;
+                                      };
                                     };
                                   }
                                 );
@@ -6745,6 +6752,7 @@
                         )
                         {
                           home-manager.users.tester.phillipgreenii.programs.pg-router.daemon.enable = daemonEnable;
+                          home-manager.users.tester.phillipgreenii.programs.pg-router.daemon.pprof.enable = pprofEnable;
                           # pg2-02n5o: force obs.enable so both darwinWithDaemon
                           # and darwinWithoutDaemon exercise the
                           # alertRuleFiles/logSources block below (independent of
@@ -6808,8 +6816,10 @@
                   };
                   firedAssertion = lib.findFirst (a: a.assertion == false) null bothEnabled.assertions;
 
-                  darwinWithDaemon = evalDarwin true;
-                  darwinWithoutDaemon = evalDarwin false;
+                  darwinWithDaemon = evalDarwin true true;
+                  darwinWithoutDaemon = evalDarwin false true;
+                  # pprof.enable = false: daemon on, profiling endpoint opted out.
+                  darwinPprofOff = evalDarwin true false;
                 in
                 # Drain unit: run-until-idle, never the bare "drain" alias.
                 assert lib.hasInfix "run-until-idle" drainService.ExecStart;
@@ -6911,6 +6921,21 @@
                   && lib.hasInfix "for: 5m" livenessRule
                   && lib.hasInfix "noDataState: Alerting" livenessRule
                   && lib.hasInfix "expr: pg_router_liveness" livenessRule;
+                # profiling endpoint: pprof.enable (default on) points the daemon at a
+                # 0600 unix socket under its own state dir (an absolute path, never a
+                # TCP address), merged beside the existing EnvironmentVariables; off
+                # leaves the variable out and the rest of the attribute unchanged.
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables.PG_ROUTER_PPROF_ADDR
+                  == "/Users/tester/.local/state/pg-router/pprof.sock";
+                assert
+                  !(
+                    darwinPprofOff.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables
+                      ? PG_ROUTER_PPROF_ADDR
+                  );
+                assert
+                  darwinPprofOff.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables
+                  == { };
                 assert darwinWithoutDaemon.phillipgreenii.system.launchdServices.userAgents == { };
                 # alertRuleFiles (pg2-02n5o): registered whenever obs.enable,
                 # independent of daemonEnable -- both darwinWithDaemon and

@@ -1621,6 +1621,10 @@ func runRun(only, disable []string, metricsAddr string) int {
 	}
 	defer pr.cleanup()
 
+	// Opt-in pprof endpoint (PG_ROUTER_PPROF_ADDR): `run` only, never
+	// run-until-idle or another subcommand. Reports go to stderr.
+	defer startPprofFromEnv(os.Getenv, os.Stderr)()
+
 	if metricsAddr = resolveMetricsAddr(metricsAddr, pr.cfg); metricsAddr != "" {
 		metricsMP, metricsShutdown, err := startMetricsServer(metricsAddr, nil)
 		if err != nil {

@@ -1522,8 +1522,8 @@ func TestCleanupWorktree_removeFailureNeverDeletesBranch(t *testing.T) {
 // TestCleanupWorktree_removeFailureNeverDeletesBranch.
 type failingRemoveWTM struct{}
 
-func (failingRemoveWTM) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) error {
-	return nil
+func (failingRemoveWTM) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) (*gitclient.Handle, error) {
+	return nil, nil
 }
 
 func (failingRemoveWTM) RemoveWorktree(context.Context, string, bool) error {
@@ -2065,8 +2065,8 @@ func TestRun_poolCapacityErrorDeclinesBusy(t *testing.T) {
 // incident: exit 128, stderr naming the OS's out-of-space wording.
 type lowDiskWTM struct{}
 
-func (lowDiskWTM) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) error {
-	return &gitclient.GitError{ExitCode: 128, Stderr: "fatal: Unable to create '/repo/.git/worktrees/zr-w/index.lock': No space left on device"}
+func (lowDiskWTM) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) (*gitclient.Handle, error) {
+	return nil, &gitclient.GitError{ExitCode: 128, Stderr: "fatal: Unable to create '/repo/.git/worktrees/zr-w/index.lock': No space left on device"}
 }
 func (lowDiskWTM) RemoveWorktree(context.Context, string, bool) error { return nil }
 func (lowDiskWTM) PruneWorktrees(context.Context) error               { return nil }

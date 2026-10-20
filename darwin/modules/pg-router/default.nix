@@ -157,7 +157,19 @@ in
           # obs.enable is false or the helper is absent (emitterEnv's own
           # guard above), so this is a no-op merge on a machine without the
           # observability stack.
-          EnvironmentVariables = emitterEnv;
+          #
+          # Profiling endpoint (github.com/phillipgreenii/x/pprofserver): a 0600
+          # unix socket under the daemon's own state dir, so no port is
+          # allocated or exposed. launchd does not expand $XDG_STATE_HOME in
+          # EnvironmentVariables, so the resolved stateHome is written out. The
+          # daemon creates the socket's directory and ignores a bad value.
+          # Absent when daemon.pprof.enable is false. Capture recipe:
+          # docs/go-daemon-profiling-runbook.md in nix-repo-base.
+          EnvironmentVariables =
+            emitterEnv
+            // lib.optionalAttrs daemonCfg.pprof.enable {
+              PG_ROUTER_PPROF_ADDR = "${stateHome}/pg-router/pprof.sock";
+            };
           # ExitTimeOut (pg2-asr8z stopgap; no prior precedent for this key
           # anywhere in this pn-workspace — searched, none found): launchd's
           # own default is 5s, which SIGKILLed this daemon mid-shutdown

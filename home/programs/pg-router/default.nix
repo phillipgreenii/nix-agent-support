@@ -252,6 +252,21 @@ in
           pass has nothing to keep scraping.
         '';
       };
+      pprof.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Expose the daemon's Go profiling endpoint (net/http/pprof) on a unix
+          socket at `$XDG_STATE_HOME/pg-router/pprof.sock` (mode 0600, owner
+          only; never a TCP port). Applies to the darwin launchd agent only
+          (`darwin/modules/pg-router/default.nix` sets `PG_ROUTER_PPROF_ADDR`
+          to that path); the Linux systemd daemon unit is not wired. With the
+          variable unset the daemon opens no listener. The listener comes from
+          the shared `github.com/phillipgreenii/x/pprofserver` package. How to
+          capture a CPU profile or a goroutine dump from that socket is in the
+          runbook `docs/go-daemon-profiling-runbook.md` in `nix-repo-base`.
+        '';
+      };
     };
   };
 

@@ -145,7 +145,14 @@ func Ensure(ctx context.Context, open Opener, worktreeDir, repoRoot, beadID stri
 	// ResetBranch (-B) resets/creates the branch at HEAD; anchored at repoRoot so
 	// the new worktree branches off the monorepo's current commit, then checks
 	// out in isolation.
-	if err := wm.CreateWorktree(ctx, path, branch, gitclient.CreateWorktreeOptions{ResetBranch: true}); err != nil {
+	// CreateWorktree streams (returns a *gitclient.Handle once git has started);
+	// wait for it here, buffered, so a failure surfaces exactly as before. A nil
+	// Handle (a test fake that does no real git work) has nothing to wait on.
+	h, err := wm.CreateWorktree(ctx, path, branch, gitclient.CreateWorktreeOptions{ResetBranch: true})
+	if err == nil && h != nil {
+		err = h.Wait()
+	}
+	if err != nil {
 		if isDiskFull(err) {
 			return "", fmt.Errorf("worktree add %s: %w: %w", path, ErrLowDisk, err)
 		}
