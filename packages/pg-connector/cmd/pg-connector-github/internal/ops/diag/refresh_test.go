@@ -251,21 +251,46 @@ func TestAfterARefreshALaterReadReturnsTheNewHeadOnceTheQueuedFetchCompletes(t *
 		t.Fatalf("a fresh summary was refetched (%d calls, was %d): %v", e.rig.Origin.CallCount(), calls, err)
 	}
 
-	// A caller pushes out of band, then refreshes.
+	// A caller pushes out of band, then refreshes. The origin holds the queued
+	// fetch inside its call, so the invalidated row cannot be refetched, and the
+	// read below cannot race the queued task, until this test lets it go: on a
+	// loaded host the scheduler may otherwise run the fetch before the check of
+	// the invalidated row, or between the read's staleness check and its own
+	// queued fetch (which then makes a second origin call).
 	e.rig.Origin.Update(node, func(p *groupsvctest.PR) { p.HeadRefOid = "head-2" })
+	release, entered := e.rig.Origin.Block()
+	t.Cleanup(release) // runs before the scheduler's shutdown (last in, first out)
 	e.refresh("pr", `{"id":"`+ref.String()+`","groups":["summary"]}`)
+	select {
+	case <-entered:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the queued summary fetch never reached the origin")
+	}
 	row, _ := e.rig.Group(node, groups.Summary)
 	if row.FreshUntil.After(e.rig.Clock.Now()) {
 		t.Fatalf("the refresh left the summary fresh: %+v", row)
 	}
 
-	// The read waits on the queued fetch's flight (single-flight), not a sleep.
+	// Let the queued fetch finish and wait until its row is stored: the settled
+	// state, not a sleep, is what the read is judged against.
+	release()
+	settled := false
+	for deadline := time.Now().Add(20 * time.Second); !settled && time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		row, _ = e.rig.Group(node, groups.Summary)
+		settled = row.FreshUntil.After(e.rig.Clock.Now())
+	}
+	if !settled {
+		t.Fatalf("the queued fetch never stored a fresh summary: %+v", row)
+	}
+
+	// The queued fetch was the one origin call: the read is answered from the
+	// store with the new head and makes none of its own.
 	second, err := e.rig.Svc.Ensure(ctx, node, []string{groups.Summary}, groupsvc.EnsureOptions{})
 	if err != nil || second.Summary.HeadRefOid != "head-2" {
 		t.Fatalf("read after refresh = head %q, %v; want head-2", second.Summary.HeadRefOid, err)
 	}
-	if e.rig.Origin.CallCount() > calls+1 {
-		t.Errorf("%d origin calls after the refresh, want one fetch shared by the queued task and the read", e.rig.Origin.CallCount()-calls)
+	if got := e.rig.Origin.CallCount() - calls; got != 1 {
+		t.Errorf("%d origin calls after the refresh, want exactly the one queued fetch", got)
 	}
 }
 

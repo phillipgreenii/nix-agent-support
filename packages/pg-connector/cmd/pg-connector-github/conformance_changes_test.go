@@ -247,11 +247,36 @@ func TestConformanceChangesResetReplaysTheMembersAsAdded(t *testing.T) {
 	}
 }
 
+// confFirstSightingGroups are the entity groups the daemon fetches in the
+// background for every pull request it sees.
+var confFirstSightingGroups = []string{"summary", "detail", "conversation", "runs"}
+
 // confQuiet waits until the daemon's own background fetches (the first-sighting
-// groups of the fixture pull requests) have stopped calling gh: the call count
-// is unchanged for a full second.
+// groups of the fixture pull requests) are done, so that the call count it
+// returns to is the daemon's resting count. The settle point is the store, the
+// daemon's own account of what it has fetched: every first-sighting group of
+// both fixture pull requests is stored. A silent call log alone cannot say that,
+// because a host under load can leave a fetch unstarted for longer than any
+// quiet period, and that fetch then lands inside the window the caller asserts
+// to be free of origin calls. The call log is then required to be unchanged for
+// a full second, to cover a call that is still being logged.
 func confQuiet(t *testing.T, d *servetest.Daemon) {
 	t.Helper()
+	db := d.OpenStore(t)
+	want := 2 * len(confFirstSightingGroups) // confPRA and confPRB
+	n := 0
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		err := db.QueryRow(`SELECT COUNT(*) FROM entity_group WHERE kind = 'pr' AND fetched_at IS NOT NULL AND group_name IN (?, ?, ?, ?)`,
+			confFirstSightingGroups[0], confFirstSightingGroups[1], confFirstSightingGroups[2], confFirstSightingGroups[3]).Scan(&n)
+		if err == nil && n >= want {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d of the %d first-sighting groups of the fixture pull requests were stored in 60 s (%v)", n, want, err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 	last, stable := -1, 0
 	for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
 		if n := len(d.Shim.Calls()); n == last {
