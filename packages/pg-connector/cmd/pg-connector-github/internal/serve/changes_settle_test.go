@@ -148,16 +148,30 @@ func TestChangesSettle_AGovernorPauseTimesOutTheRowAppendsItAndIsCountedTimeout(
 	requireNoToken(t, d, "")
 }
 
+// failedSettleTimeout is the settle window of the failing-dependent test: far
+// longer than the slowest dependent fetch seen under host load (about 3.7 s at
+// load average 60), so the failure is stored before the deadline.
+const failedSettleTimeout = "15s"
+
 func TestChangesSettle_AFailingDependentAppendsTheRowAtTheDeadlineWithTheGroupLeftStale(t *testing.T) {
 	t.Parallel()
 	// A failed fetch is retried after a second, so the group's later refresh is
 	// within the test's reach once the origin recovers.
-	d := startFilled(t, servetest.Options{Config: settleConfig("3s"), Hooks: "retry_delay=1s"})
+	//
+	// The result word is "failed" only if the failed fetch was STORED (last_error
+	// on the runs row) before the deadline; a fetch that fails after it leaves the
+	// row "timeout", which is the daemon being right about a settle that ran out of
+	// time (pg2-4a0h6: under host load average 60 the 502 was stored 0.5 s after a
+	// 3 s deadline). The test cannot pause the daemon's deadline, so it gives the
+	// settle a window that dwarfs the fetch latency and waits for the failure to be
+	// stored before it waits for the deadline, instead of racing the two.
+	d := startFilled(t, servetest.Options{Config: settleConfig(failedSettleTimeout), Hooks: "retry_delay=1s"})
 	versionBefore := d.EntityVersion(t, "pr", prA.NodeID)
 
-	// The runs fetch answers 502 for the next ten calls; the other dependents
-	// (files and commits) are served.
-	d.Shim.Fail("runs", 502, 10)
+	// The runs fetch answers 502 on every call until the test lets the origin
+	// recover (a count would run out inside the long window, and a recovered fetch
+	// would settle the row); the other dependents (files and commits) are served.
+	d.Shim.Fail("runs", 502, 0)
 	armHeadChange(t, d)
 	d.Shim.Release("runs") // the rest of armHeadChange's hold: the failure is the point
 	var pending servetest.PendingRow
@@ -172,7 +186,16 @@ func TestChangesSettle_AFailingDependentAppendsTheRowAtTheDeadlineWithTheGroupLe
 	if !slices.Contains(pending.Kinds, "head_changed") {
 		t.Fatalf("the pending row = %+v", pending)
 	}
+	until(t, 60*time.Second, "the failed runs fetch to be stored as the group's last_error", func() bool {
+		if len(d.ChangeLog(t)) > 0 {
+			t.Fatalf("the row was appended before the runs fetch failed: %+v", d.ChangeLog(t))
+		}
+		return d.Group(t, prA.NodeID, "runs").LastError != ""
+	})
 	until(t, 60*time.Second, "the row to be appended", func() bool { return len(d.ChangeLog(t)) >= 1 })
+	if now := time.Now(); now.Before(pending.Deadline.Add(-time.Second)) {
+		t.Errorf("the row was appended at %s, long before its deadline %s", now, pending.Deadline)
+	}
 	rows := d.ChangeLog(t)
 	if len(rows) != 1 {
 		t.Fatalf("change log = %+v, want the one row", rows)
