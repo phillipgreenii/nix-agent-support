@@ -7388,7 +7388,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "pb drain isolate --bead pg2-abc12 --repo /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support"
+        "command": "pb drain isolate --bead pg2-abc12 --repo /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -7404,7 +7404,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "pb drain isolate --bead pg2-abc12 --repo /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support && echo EXIT=$?"
+        "command": "pb drain isolate --bead pg2-abc12 --repo /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support && echo EXIT=$?"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -7954,7 +7954,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "cd /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support"
+        "command": "cd /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8044,7 +8044,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "pb drain isolate --bead pg2-abc12 --repo /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support extra"
+        "command": "pb drain isolate --bead pg2-abc12 --repo /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support extra"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8060,7 +8060,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "bd -C /Users/phillipg/phillipg_mbp ready -n 0 --json"
+        "command": "bd -C /tmp/ceta-corpus-ws ready -n 0 --json"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8522,7 +8522,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "bd -C /Users/phillipg/phillipg_mbp update pg2-abc12 --status open --assignee \"\" --append-notes \"[unstick 2026-10-05T00:00:00Z] released: claim dormant; recheck-when: on-change\" --actor sess-unstick"
+        "command": "bd -C /tmp/ceta-corpus-ws update pg2-abc12 --status open --assignee \"\" --append-notes \"[unstick 2026-10-05T00:00:00Z] released: claim dormant; recheck-when: on-change\" --actor sess-unstick"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8552,7 +8552,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "bd -C /Users/phillipg/phillipg_mbp export -o /tmp/bead-unstick-2026-10-05/export.jsonl"
+        "command": "bd -C /tmp/ceta-corpus-ws export -o /tmp/bead-unstick-2026-10-05/export.jsonl"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8582,7 +8582,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support rev-parse --abbrev-ref HEAD"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support rev-parse --abbrev-ref HEAD"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8598,7 +8598,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support/.worktrees/pg2-abc12 rev-parse --abbrev-ref HEAD"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support/.worktrees/pg2-abc12 rev-parse --abbrev-ref HEAD"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8614,7 +8614,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support merge-base --is-ancestor 0123456789abcdef main; echo $?"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support merge-base --is-ancestor 0123456789abcdef main; echo $?"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8630,7 +8630,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support rev-parse drain/pg2-abc12"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support rev-parse drain/pg2-abc12"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8660,7 +8660,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support/.worktrees/pg2-abc12 status --porcelain"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support/.worktrees/pg2-abc12 status --porcelain"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8676,7 +8676,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support cherry -v main drain/pg2-abc12"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support cherry -v main drain/pg2-abc12"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8692,7 +8692,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support range-diff main...drain/pg2-abc12"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support range-diff main...drain/pg2-abc12"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8708,7 +8708,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support log --oneline --since=2026-10-01 -- docs/adr docs/behavior docs/guides"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support log --oneline --since=2026-10-01 -- docs/adr docs/behavior docs/guides"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8724,7 +8724,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support grep -l -i -- 'some term' main -- docs/"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support grep -l -i -- 'some term' main -- docs/"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8740,7 +8740,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support cherry -v main"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support cherry -v main"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8772,7 +8772,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support branch -d drain/pg2-abc12"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support branch -d drain/pg2-abc12"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8892,7 +8892,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support status --porcelain"
+        "command": "git -C /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support status --porcelain"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -8908,7 +8908,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "bd -C /Users/phillipg/phillipg_mbp show pg2-abc12 --json"
+        "command": "bd -C /tmp/ceta-corpus-ws show pg2-abc12 --json"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
@@ -12245,7 +12245,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "git worktree remove /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support/.worktrees/pg2-abc12"
+        "command": "git worktree remove /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support/.worktrees/pg2-abc12"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
