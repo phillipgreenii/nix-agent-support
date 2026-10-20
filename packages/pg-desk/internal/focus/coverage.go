@@ -26,6 +26,27 @@ import (
 // as incomplete, never as complete.
 const StatusUnknown = "unknown"
 
+// StatusNotWatched is the Listing status of a configured watch query of a
+// daemonOwnedTypes type while no change flow is wired for that type (no
+// consumer of the type is registered, so nothing has ever listed it). It is
+// explicit rather than unknown, and it does not make coverage incomplete: the
+// query is simply not watched yet. Once a flow is wired a query that still
+// has no recorded status is StatusUnknown and incomplete again.
+const StatusNotWatched = "not-watched"
+
+// notWatchedReason is the Reason of a StatusNotWatched listing.
+const notWatchedReason = "no change flow wired for this type"
+
+// unknownReason is the Reason of a StatusUnknown listing.
+const unknownReason = "no listing status recorded"
+
+// daemonOwnedTypes are the entity types whose change flow is owned by the
+// daemon cutover (the pr feed) rather than a role that runs
+// `pg-desk <type> changes` today. For these, no registered consumer means
+// "not yet watched", not "watched but unrecorded". issue is absent on
+// purpose: its flow is wired, so a missing status there is a real gap.
+var daemonOwnedTypes = map[string]bool{entityTypePR: true}
+
 // The listing statuses the persisted keys carry (the changes package's
 // StatusOK, StatusDegraded and StatusFailed).
 const (
@@ -64,37 +85,33 @@ func ComputeCoverage(st *store.Store, cfg *config.Config, now time.Time, entitie
 	rep := CoverageReport{State: CoverageState{PerType: map[string]TypeCoverage{}}}
 	known, failed := 0, 0
 	for _, t := range CoverageTypes {
-		queries := cfg.WatchQueries(t)
 		cov := TypeCoverage{
 			Active:     changes.ActiveCount(rows, t),
 			DueBacklog: changes.DueBacklog(rows, t, now, cfg.SweepMaxAge()),
 		}
 		cov.OldestHydratedAt = oldestHydrated(rows, t)
 
-		persisted, err := changes.ReadListingStatuses(st, t)
+		listings, err := QueryListings(st, cfg, t)
 		if err != nil {
-			return CoverageReport{}, fmt.Errorf("focus: read listing statuses: %w", err)
+			return CoverageReport{}, err
 		}
-		byQuery := map[string]changes.ListingStatus{}
-		for _, ls := range persisted {
-			byQuery[ls.Query] = ls
-		}
-		for _, q := range queries {
-			ls, ok := byQuery[q]
-			if !ok {
-				cov.Listings = append(cov.Listings, Listing{Query: q, Status: StatusUnknown, Reason: "no listing status recorded"})
-				rep.State.Reasons = append(rep.State.Reasons, fmt.Sprintf("%s %s listing status unknown", t, q))
+		for _, l := range listings {
+			cov.Listings = append(cov.Listings, l)
+			switch l.Status {
+			case StatusNotWatched:
+				continue
+			case StatusUnknown:
+				rep.State.Reasons = append(rep.State.Reasons, fmt.Sprintf("%s %s listing status unknown", t, l.Query))
 				continue
 			}
-			cov.Listings = append(cov.Listings, Listing{Query: q, Status: ls.Status, Reason: ls.Reason})
 			known++
-			switch ls.Status {
+			switch l.Status {
 			case listingOK:
 			case listingFailed:
 				failed++
-				rep.State.Reasons = append(rep.State.Reasons, listingReason(t, ls))
+				rep.State.Reasons = append(rep.State.Reasons, listingReason(t, l))
 			default:
-				rep.State.Reasons = append(rep.State.Reasons, listingReason(t, ls))
+				rep.State.Reasons = append(rep.State.Reasons, listingReason(t, l))
 			}
 		}
 		if max := cfg.FocusCoverageBacklogMax(cov.Active); cov.DueBacklog > max {
@@ -111,12 +128,51 @@ func ComputeCoverage(st *store.Store, cfg *config.Config, now time.Time, entitie
 	return rep, nil
 }
 
-func listingReason(t string, ls changes.ListingStatus) string {
+func listingReason(t string, ls Listing) string {
 	s := fmt.Sprintf("%s %s listing %s", t, ls.Query, ls.Status)
 	if ls.Reason != "" {
 		s += " (" + ls.Reason + ")"
 	}
 	return s
+}
+
+// QueryListings is the listing status of every configured watch query of
+// entityType, in configured order, read from the persisted statuses only.
+// It is the one resolution behind both `focus show` coverage and `doctor`, so
+// the two agree on the same query. A query with no persisted status is
+// StatusNotWatched when entityType is daemon-owned and no change flow is
+// wired for it (changes.FlowWired), otherwise StatusUnknown. An unreadable
+// consumer table counts as wired: a source that may be missing is shown as
+// incomplete, never as quietly not watched.
+func QueryListings(st *store.Store, cfg *config.Config, entityType string) ([]Listing, error) {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	persisted, err := changes.ReadListingStatuses(st, entityType)
+	if err != nil {
+		return nil, fmt.Errorf("focus: read listing statuses: %w", err)
+	}
+	byQuery := map[string]changes.ListingStatus{}
+	for _, ls := range persisted {
+		byQuery[ls.Query] = ls
+	}
+	wired := true
+	if daemonOwnedTypes[entityType] {
+		if w, werr := changes.FlowWired(st, entityType); werr == nil {
+			wired = w
+		}
+	}
+	var out []Listing
+	for _, q := range cfg.WatchQueries(entityType) {
+		if ls, ok := byQuery[q]; ok {
+			out = append(out, Listing{Query: q, Status: ls.Status, Reason: ls.Reason})
+		} else if !wired {
+			out = append(out, Listing{Query: q, Status: StatusNotWatched, Reason: notWatchedReason})
+		} else {
+			out = append(out, Listing{Query: q, Status: StatusUnknown, Reason: unknownReason})
+		}
+	}
+	return out, nil
 }
 
 // oldestHydrated is the earliest hydrated_at among the active entities of

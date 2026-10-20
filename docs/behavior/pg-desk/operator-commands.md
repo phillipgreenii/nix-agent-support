@@ -189,7 +189,10 @@ has been cut over to the change-flow schema:
 --ids-only --output json`), which touches no change ledger and no consumer cursor and fails when
   `pg-connector` does not recognize the query name. A query that does not resolve fails `doctor`,
   naming the type and the query. A partially degraded answer (some backend down) still counts as
-  resolved: it says nothing about the query name.
+  resolved: it says nothing about the query name. A resolved query also prints its persisted
+  listing status when that is not `ok` (`ok (probe), listing unknown (no listing status recorded)`
+  or `listing not-watched (...)`), the same resolution `focus show` coverage uses; report-only, never
+  a failure.
 - **Stalled consumers.** A registered consumer whose `seen_at` is older than three times its expected
   period fails `doctor`; it is reported, never pruned. The expected period is the timer period of the
   router `[[query]]` whose command names that type and that consumer (`--consumer <name>`), when

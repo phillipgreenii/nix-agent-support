@@ -257,7 +257,9 @@ its mark, tier, deciding key, bead column and `via`), the `epics` block, `new_si
 the active count, the count still due or never hydrated (the shared `changes.ActiveCount` and
 `changes.DueBacklog`), the age of the oldest `hydrated_at`, the persisted listing status of each
 watch query, each epic's count of children the store does not hold yet, and the `rank_inputs`
-counts. A configured watch query with no persisted status is `unknown` and counts as incomplete. A
+counts. A configured watch query with no persisted status is `unknown` and counts as incomplete, except a
+`pr` query while no `pr` change flow is wired (no `pr` consumer is registered in the store): it is
+`not-watched`, listed with a NOTICE line and not incomplete, until a flow is wired. A
 source outside every recorded watch set reads `unwatched` in the bead column.
 
 | Exit | Meaning                                                                                                                                                        |

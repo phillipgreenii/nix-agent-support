@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/classify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/focus"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
@@ -79,7 +80,7 @@ func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *
 		return
 	}
 
-	doctorWatchedQueries(ctx, w, cfg, failures)
+	doctorWatchedQueries(ctx, w, st, cfg, failures)
 	doctorStalledConsumers(w, checkCfg, rc, flow, now, failures)
 	doctorSweepBound(w, checkCfg, rc, flow, failures)
 	doctorRepeatedDegraded(w, flow)
@@ -89,8 +90,15 @@ func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *
 	}
 }
 
-// doctorWatchedQueries probes every configured watched query.
-func doctorWatchedQueries(ctx context.Context, w io.Writer, cfg *config.Config, failures *[]string) {
+// doctorWatchedQueries probes every configured watched query, then reports the
+// persisted listing status of each one that resolves, read through
+// focus.QueryListings (the resolution behind `focus show` coverage), so doctor
+// and focus agree on the same query: a query pg-connector recognizes but whose
+// listing status was never recorded prints "unknown (no listing status
+// recorded)", or "not-watched (...)" while no change flow is wired for its
+// type, never a bare ok. The listing status is report-only: it never adds a
+// failure (the probe verdict alone decides that).
+func doctorWatchedQueries(ctx context.Context, w io.Writer, st *store.Store, cfg *config.Config, failures *[]string) {
 	fmt.Fprintln(w, "  watched queries:")
 	if cfg == nil {
 		fmt.Fprintln(w, "    skipped (config unavailable)")
@@ -99,14 +107,20 @@ func doctorWatchedQueries(ctx context.Context, w io.Writer, cfg *config.Config, 
 	found := false
 	bad := false
 	for _, t := range changes.FlowEntityTypes {
+		listings := map[string]focus.Listing{}
+		if ls, err := focus.QueryListings(st, cfg, t); err == nil {
+			for _, l := range ls {
+				listings[l.Query] = l
+			}
+		}
 		for _, q := range cfg.WatchQueries(t) {
 			found = true
 			if err := doctorProbeQuery(ctx, cfg, t, q); err != nil {
 				bad = true
 				fmt.Fprintf(w, "    %s %q: FAIL (%v)\n", t, q, err)
-			} else {
-				fmt.Fprintf(w, "    %s %q: ok\n", t, q)
+				continue
 			}
+			fmt.Fprintf(w, "    %s %q: %s\n", t, q, probeOKLine(listings[q]))
 		}
 	}
 	if !found {
@@ -115,6 +129,20 @@ func doctorWatchedQueries(ctx context.Context, w io.Writer, cfg *config.Config, 
 	if bad {
 		*failures = append(*failures, "watched queries")
 	}
+}
+
+// probeOKLine is the verdict text of a watched query whose probe succeeded:
+// plain "ok" when its persisted listing status is ok (or could not be read),
+// otherwise "ok (probe), listing <status> (<reason>)".
+func probeOKLine(l focus.Listing) string {
+	if l.Status == "" || l.Status == "ok" {
+		return "ok"
+	}
+	s := "ok (probe), listing " + l.Status
+	if l.Reason != "" {
+		s += " (" + l.Reason + ")"
+	}
+	return s
 }
 
 // doctorStalledConsumers flags a consumer unseen for more than 3x its

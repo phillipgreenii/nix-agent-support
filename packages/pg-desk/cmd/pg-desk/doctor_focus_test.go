@@ -540,3 +540,42 @@ func TestStatusFocusBlockOnAnUnmigratedStore(t *testing.T) {
 		t.Errorf("status lacks 'focus: unmigrated':\n%s", stdout)
 	}
 }
+
+// Doctor and `focus show` read the same persisted listing status of a watched
+// query through focus.QueryListings, so they agree on it at every step: not
+// watched while no pr change flow is wired (show exits 0 with the query
+// listed as not-watched), unknown once a flow is wired but nothing was
+// recorded (show exits 2), ok after a listing is recorded. Runs against a real
+// schema-2 store; only the pg-connector probe is stubbed.
+func TestDoctorAndFocusShowAgreeOnAWatchedQueryListingStatus(t *testing.T) {
+	w := newDoctorFocusWorld(t)
+	w.pr(t, 1, "t", showAt)
+
+	step := func(name, showWant, doctorWant string, exit int) {
+		t.Helper()
+		out, _, err := show(t, "--no-store")
+		if got := focusExitCode(err); got != exit {
+			t.Fatalf("%s: show exit = %d, want %d (err %v)\n%s", name, got, exit, err, out)
+		}
+		mustContain(t, out, showWant)
+		dout, derr := runDoctorCmd(t)
+		if derr != nil {
+			t.Fatalf("%s: doctor: %v\n%s", name, derr, dout)
+		}
+		mustContain(t, dout, doctorWant)
+	}
+
+	step("no flow wired", `mine not-watched (no change flow wired for this type)`,
+		`pr "mine": ok (probe), listing not-watched (no change flow wired for this type)`, 0)
+
+	if err := w.st.RegisterConsumer("pg-router", "pr", changesNow()); err != nil {
+		t.Fatal(err)
+	}
+	step("flow wired, nothing recorded", `mine unknown (no listing status recorded)`,
+		`pr "mine": ok (probe), listing unknown (no listing status recorded)`, 2)
+
+	if err := w.st.SetMeta("change_flow.listing.pr.mine", `{"status":"ok","reason":"","at":"`+showAt+`"}`); err != nil {
+		t.Fatal(err)
+	}
+	step("listing recorded", "coverage: complete", `pr "mine": ok`+"\n", 0)
+}

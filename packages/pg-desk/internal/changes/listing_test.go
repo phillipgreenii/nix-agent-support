@@ -180,3 +180,21 @@ func TestWatchedIDsUnionsTheConfiguredQueriesAndReportsKnown(t *testing.T) {
 		t.Fatalf("ids %v known %v, want the union of a and b", ids, known)
 	}
 }
+
+// FlowWired is true for a type only once a consumer of that type is
+// registered; a consumer of another type does not count.
+func TestFlowWiredIsTrueOnlyForATypeWithARegisteredConsumer(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	if wired, err := FlowWired(st, "pr"); err != nil || wired {
+		t.Fatalf("empty store: wired %v err %v, want false", wired, err)
+	}
+	if err := st.RegisterConsumer("pg-router", "issue", time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if wired, err := FlowWired(st, "pr"); err != nil || wired {
+		t.Fatalf("only an issue consumer: pr wired %v err %v, want false", wired, err)
+	}
+	if wired, err := FlowWired(st, "issue"); err != nil || !wired {
+		t.Fatalf("issue wired %v err %v, want true", wired, err)
+	}
+}

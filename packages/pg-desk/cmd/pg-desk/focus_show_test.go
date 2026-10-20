@@ -801,7 +801,16 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 		{"unknown listing", func(t *testing.T, f *showFixture) {
 			f.pr(t, 1, "a", showAt)
 			f.cfg.Watch.PR.Queries = []string{"never-ran"}
+			// A pr change flow is wired (its consumer is registered), so a
+			// query with no recorded status is a real gap.
+			if err := f.st.RegisterConsumer("pg-router", "pr", time.Date(2026, 10, 10, 11, 0, 0, 0, time.UTC)); err != nil {
+				t.Fatal(err)
+			}
 		}, 2, "never-ran"},
+		{"pr query with no status and no pr flow wired is not watched", func(t *testing.T, f *showFixture) {
+			f.pr(t, 1, "a", showAt)
+			f.cfg.Watch.PR.Queries = []string{"never-ran"}
+		}, 0, ""},
 		{"backlog above the bound", func(t *testing.T, f *showFixture) {
 			// Both entities were hydrated long before the sweep max age.
 			f.hydrated = "2026-10-01T00:00:00Z"

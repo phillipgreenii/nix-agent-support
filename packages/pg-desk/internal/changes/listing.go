@@ -79,3 +79,25 @@ func ReadListingStatuses(st *store.Store, entityType string) ([]ListingStatus, e
 	sort.Slice(out, func(i, j int) bool { return out[i].Query < out[j].Query })
 	return out, nil
 }
+
+// FlowWired reports whether a change flow is wired for entityType: some
+// consumer of that type is registered in the store. Every real
+// `pg-desk <type> changes` call registers its consumer before it lists, and
+// every cursor read does too, so a type with a consumer has run (or is about
+// to run) a flow that records listing statuses, and a type with none has no
+// flow at all (a daemon-owned feed that does not go through pg-desk has no
+// consumer here either). It is the one signal readers use to tell "not yet
+// watched" from "watched, but no status recorded". An unreadable consumer
+// table is an error; the caller decides which way to fail.
+func FlowWired(st *store.Store, entityType string) (bool, error) {
+	consumers, err := st.ListConsumers()
+	if err != nil {
+		return false, err
+	}
+	for _, c := range consumers {
+		if c.Type == entityType {
+			return true, nil
+		}
+	}
+	return false, nil
+}
