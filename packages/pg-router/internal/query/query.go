@@ -47,6 +47,15 @@ type Commander interface {
 	Run(ctx context.Context, argv []string) ([]byte, error)
 }
 
+// EnvCommander is a Commander that can also start the command with an explicit
+// environment (nil inherits). CommandQuery uses it when its Commander offers it,
+// so strict_base_env reaches the real exec path; a Commander without it (a test
+// fake) just receives the composed argv.
+type EnvCommander interface {
+	Commander
+	RunEnv(ctx context.Context, argv []string, env []string) ([]byte, error)
+}
+
 // Env carries the capabilities a query needs. The orchestrator builds it from its
 // own fields in phase 1 (the Deps bag arrives in phase 2).
 //

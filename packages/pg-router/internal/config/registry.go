@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/wrap"
 )
 
 // duration is a TOML-decodable time.Duration ("30m", "25m"), mirroring ccpool's
@@ -196,6 +199,15 @@ type queryTOML struct {
 	// Absent: the emitter blocks on every gate TYPE. The built-in `timer`
 	// emitter ignores gates altogether and needs no list.
 	NonBlockingGates []string `toml:"non_blocking_gates"`
+	// Wrap is the wrap list of a command query (INV-ENV-4): each element a
+	// string entry (shell text, absolute first word) or an array entry
+	// (absolute first element). Held as the raw decoded value; wrap.Decode and
+	// wrap.Validate (templates disallowed) judge it.
+	Wrap any `toml:"wrap"`
+	// StrictBaseEnv switches a command query's chain onto the minimal base
+	// environment (default off). A pointer so a timer query that sets it can be
+	// told apart from one that does not.
+	StrictBaseEnv *bool `toml:"strict_base_env"`
 }
 
 // triggerTOML is a query's firing strategy (Q1). kind selects the concrete
@@ -329,7 +341,7 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	// Build the producer set from [[query]] (design M3). A config with [[role]]
 	// but no [[query]] leaves c.Queries empty; Validate then flags every role's
 	// Binds as an orphan consumer (a clear, aggregated diagnostic).
-	queries, overrides, qerrs := r.buildQueries(md, shape.Queries, *c)
+	queries, overrides, qerrs := r.buildQueries(md, shape.Queries, rawQueryKeys(string(body)), *c)
 	errs = append(errs, qerrs...)
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
@@ -343,7 +355,7 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 // installing its emits + trigger, and collects each query's own explicit
 // expected_interval override (this task) into a name-keyed map. Duplicate
 // query names are rejected.
-func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, c Config) (query.SourceSet, map[string]int64, []error) {
+func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, rawKeys [][]string, c Config) (query.SourceSet, map[string]int64, []error) {
 	var out query.SourceSet
 	overrides := map[string]int64{}
 	var errs []error
@@ -358,6 +370,12 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, c Config) (qu
 			continue
 		}
 		seen[qt.Name] = true
+		if i < len(rawKeys) {
+			if unknown := unknownQueryKeys(rawKeys[i]); len(unknown) > 0 {
+				errs = append(errs, fmt.Errorf("query[%d] %q: unknown key(s) %s (a misspelled key is never silently ignored; known keys: %s)", i, qt.Name, strings.Join(unknown, ", "), strings.Join(knownQueryKeys(), ", ")))
+				continue
+			}
+		}
 		q, err := r.buildQuery(md, qt, c)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("query[%d] %q: %w", i, qt.Name, err))
@@ -373,6 +391,61 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, c Config) (qu
 		}
 	}
 	return out, overrides, errs
+}
+
+// knownQueryKeys lists every key queryTOML consumes, taken from its toml tags
+// so a new field is known automatically.
+func knownQueryKeys() []string {
+	t := reflect.TypeOf(queryTOML{})
+	keys := make([]string, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		if tag := strings.Split(t.Field(i).Tag.Get("toml"), ",")[0]; tag != "" && tag != "-" {
+			keys = append(keys, tag)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// unknownQueryKeys returns the keys of one [[query]] table that queryTOML does
+// not consume, sorted. Core's TOML decode is lenient elsewhere, but a [[query]]
+// key is strict because a misspelled wrap or strict_base_env (wraps,
+// strictBaseEnv) would silently run an unwrapped producer on the ambient
+// environment.
+func unknownQueryKeys(keys []string) []string {
+	known := map[string]bool{}
+	for _, k := range knownQueryKeys() {
+		known[k] = true
+	}
+	var unknown []string
+	for _, k := range keys {
+		if !known[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	sort.Strings(unknown)
+	return unknown
+}
+
+// rawQueryKeys returns, per [[query]] in file order, the direct keys of its
+// table. It is a second, untyped decode of the same body, aligned by index with
+// fileShape.Queries; toml.MetaData.Undecoded() cannot be used for this because
+// its keys carry no array-of-tables index, so it cannot name the offending
+// query. A body that does not decode here already failed the typed decode.
+func rawQueryKeys(body string) [][]string {
+	var raw struct {
+		Queries []map[string]any `toml:"query"`
+	}
+	if _, err := toml.Decode(body, &raw); err != nil {
+		return nil
+	}
+	out := make([][]string, len(raw.Queries))
+	for i, m := range raw.Queries {
+		for k := range m {
+			out[i] = append(out[i], k)
+		}
+	}
+	return out
 }
 
 // ExpectedIntervalMsFor returns, in milliseconds, src's expected tick
@@ -496,7 +569,28 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 	if err != nil {
 		return nil, fmt.Errorf("failure_backoff: %w", err)
 	}
-	return r.queries.Decode(qt.Type, query.Meta{EmitTypes: qt.Emits, Trig: trig, FB: fb}, md, prim)
+	entries, err := wrap.Decode(qt.Wrap)
+	if err != nil {
+		return nil, err
+	}
+	// A query's wrap never carries template actions: templated array entries
+	// exist only for command roles (allowTemplates = false).
+	if err := wrap.Validate(entries, false); err != nil {
+		return nil, err
+	}
+	if qt.Type != "command" && (qt.Wrap != nil || qt.StrictBaseEnv != nil) {
+		return nil, fmt.Errorf("wrap and strict_base_env apply only to a command query; a %q query has no command to wrap", qt.Type)
+	}
+	q, err := r.queries.Decode(qt.Type, query.Meta{EmitTypes: qt.Emits, Trig: trig, FB: fb}, md, prim)
+	if err != nil {
+		return nil, err
+	}
+	if cq, ok := q.(query.CommandQuery); ok {
+		cq.Wrap = entries
+		cq.StrictBaseEnv = qt.StrictBaseEnv != nil && *qt.StrictBaseEnv
+		return cq, nil
+	}
+	return q, nil
 }
 
 // buildBackoffPolicy overlays a [*.retry]-shaped TOML table onto base — the

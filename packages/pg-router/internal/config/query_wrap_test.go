@@ -1,0 +1,162 @@
+package config
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/phillipgreenii/pg-router/internal/query"
+	"github.com/phillipgreenii/pg-router/wrap"
+)
+
+// queryWrapCfg renders a config with one command query carrying extra
+// [[query]]-level lines (wrap, strict_base_env, ...) and one role.
+func queryWrapCfg(extra string) string {
+	return `
+[[query]]
+name = "probe"
+emits = ["e"]
+type = "command"
+` + extra + `
+[query.command]
+argv = ["/bin/true"]
+format = "jsonl"
+
+[[role]]
+name = "r"
+type = "command"
+binds = ["e"]
+[role.command]
+argv = ["x"]
+`
+}
+
+func TestLoad_queryWrapAndStrictBaseEnvDecode(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, queryWrapCfg(`wrap = ["/usr/bin/env WRAPPED=1", ["/usr/bin/nice", "-n", "5"]]
+strict_base_env = true`))
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, ok := c.Queries[0].Query.(query.CommandQuery)
+	if !ok {
+		t.Fatalf("query is %T, want query.CommandQuery", c.Queries[0].Query)
+	}
+	want := []wrap.Entry{{Shell: "/usr/bin/env WRAPPED=1"}, {Argv: []string{"/usr/bin/nice", "-n", "5"}}}
+	if len(q.Wrap) != 2 || q.Wrap[0].Shell != want[0].Shell || strings.Join(q.Wrap[1].Argv, " ") != "/usr/bin/nice -n 5" {
+		t.Fatalf("Wrap = %+v, want %+v", q.Wrap, want)
+	}
+	if !q.StrictBaseEnv {
+		t.Fatal("StrictBaseEnv = false, want true")
+	}
+}
+
+func TestLoad_queryWrapAndStrictBaseEnvDefaultOff(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, queryWrapCfg(``))
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := c.Queries[0].Query.(query.CommandQuery)
+	if len(q.Wrap) != 0 || q.StrictBaseEnv {
+		t.Fatalf("defaults: Wrap=%+v StrictBaseEnv=%v, want none/false", q.Wrap, q.StrictBaseEnv)
+	}
+}
+
+// Every rejected shape fails config load and names the query.
+func TestLoad_queryWrapRejections(t *testing.T) {
+	cases := []struct {
+		name  string
+		extra string
+		want  string
+	}{
+		{"malformed wrap: not a list", `wrap = "/usr/bin/env"`, "wrap"},
+		{"malformed wrap: nested list", `wrap = [["/usr/bin/env", ["x"]]]`, "wrap"},
+		{"malformed wrap: empty array entry", `wrap = [[]]`, "empty array entry"},
+		{"relative string entry", `wrap = ["env WRAPPED=1"]`, "absolute"},
+		{"relative array entry", `wrap = [["env", "WRAPPED=1"]]`, "absolute"},
+		{"template in string entry", `wrap = ["/usr/bin/env X={{ .a }}"]`, "template"},
+		{"template in array entry", `wrap = [["/usr/bin/env", "X={{ .a }}"]]`, "template"},
+		{"misspelled wraps", `wraps = ["/usr/bin/env X=1"]`, "wraps"},
+		{"misspelled strictBaseEnv", `strictBaseEnv = true`, "strictBaseEnv"},
+		{"strict_base_env not a bool", `strict_base_env = "yes"`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			absentGlobalConfig(t)
+			writeCfg(t, queryWrapCfg(tc.extra))
+			_, err := Load()
+			if err == nil {
+				t.Fatal("Load succeeded, want an error")
+			}
+			if tc.name != "strict_base_env not a bool" && !strings.Contains(err.Error(), `"probe"`) {
+				t.Errorf("error does not name the query: %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q lacks %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A wrap or strict_base_env on a timer query (no command) is a load error that
+// names the query.
+func TestLoad_queryWrapOnTimerQueryRejected(t *testing.T) {
+	for _, extra := range []string{`wrap = ["/usr/bin/env X=1"]`, `strict_base_env = true`, `strict_base_env = false`} {
+		t.Run(extra, func(t *testing.T) {
+			absentGlobalConfig(t)
+			writeCfg(t, `
+[[query]]
+name = "tick"
+emits = ["e"]
+type = "timer"
+`+extra+`
+
+[[role]]
+name = "r"
+type = "command"
+binds = ["e"]
+[role.command]
+argv = ["x"]
+`)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), `"tick"`) || !strings.Contains(err.Error(), "command") {
+				t.Fatalf("Load error = %v, want one naming query \"tick\" and the missing command", err)
+			}
+		})
+	}
+}
+
+// Existing [[query]] keys keep loading: strictness covers only keys queryTOML
+// does not consume.
+func TestLoad_queryKnownKeysStillLoad(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, `
+[[query]]
+name = "probe"
+emits = ["e"]
+type = "command"
+description = "d"
+non_blocking_gates = ["LOW_DISK_USAGE"]
+expected_interval = "5m"
+[query.trigger]
+kind = "period"
+every = "1m"
+[query.failure_backoff]
+retries = 1
+[query.command]
+argv = ["/bin/true"]
+format = "jsonl"
+
+[[role]]
+name = "r"
+type = "command"
+binds = ["e"]
+[role.command]
+argv = ["x"]
+`)
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+}

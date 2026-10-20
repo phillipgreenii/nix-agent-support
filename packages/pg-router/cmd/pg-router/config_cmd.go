@@ -9,6 +9,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/query"
+	"github.com/phillipgreenii/pg-router/wrap"
 )
 
 // runConfig implements `pg-router config --print-defaults | --show [--json]`.
@@ -67,6 +68,16 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 			emits = s.Query.Emits()
 		}
 		_, _ = fmt.Fprintf(w, "  - %-14s emits=%v%s\n", s.Name, emits, stub)
+		// A command query shows the command line it actually runs: its argv
+		// under every wrap layer. A role's composed command is not printed here.
+		if s.Query != nil {
+			if cmdline, strict, ok := composedCommand(s.Query); ok {
+				_, _ = fmt.Fprintf(w, "      command: %s\n", cmdline)
+				if strict {
+					_, _ = fmt.Fprintln(w, "      strict_base_env: true")
+				}
+			}
+		}
 	}
 	_, _ = fmt.Fprintln(w, "gates: live state, not configuration — see 'pg-router gate list' (Gate Registry)")
 	_, _ = fmt.Fprintln(w, "dispatch (workers):")
@@ -159,7 +170,13 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 			emits = s.Query.Emits()
 			stub = query.IsStub(s.Query)
 		}
-		out.Queries = append(out.Queries, configShowQuery{Name: s.Name, Emits: emits, Stub: stub, NonBlockingGates: s.NonBlockingGates})
+		cq := configShowQuery{Name: s.Name, Emits: emits, Stub: stub, NonBlockingGates: s.NonBlockingGates}
+		if s.Query != nil {
+			if cmdline, strict, ok := composedCommand(s.Query); ok {
+				cq.Command, cq.StrictBaseEnv = cmdline, strict
+			}
+		}
+		out.Queries = append(out.Queries, cq)
 	}
 	writeJSON(w, out)
 }
@@ -198,6 +215,27 @@ type configShowQuery struct {
 	// NonBlockingGates are the gate TYPEs this emitter declared it does not
 	// block on (Gate Registry); omitted when it blocks on every TYPE.
 	NonBlockingGates []string `json:"nonBlockingGates,omitempty"`
+	// Command is a command query's composed command line (its argv under every
+	// wrap layer, shell-quoted, as config --show prints it); omitted for a
+	// query with no command (the timer).
+	Command string `json:"command,omitempty"`
+	// StrictBaseEnv is the query's strict_base_env switch; omitted when off.
+	StrictBaseEnv bool `json:"strictBaseEnv,omitempty"`
+}
+
+// composedCommand renders a command query's composed command line via the wrap
+// library's display form. ok is false for a query with no command. A
+// composition failure (cannot happen for a loaded config: wrap is validated at
+// load) is shown in place of the line rather than dropped.
+func composedCommand(q query.Query) (line string, strict bool, ok bool) {
+	argv, strict, ok, err := query.ComposedOf(q)
+	if !ok {
+		return "", false, false
+	}
+	if err != nil {
+		return "(wrap does not compose: " + err.Error() + ")", strict, true
+	}
+	return wrap.Display(argv), strict, true
 }
 
 // configShowDispatch mirrors renderConfigShow's "dispatch (workers):" block —
