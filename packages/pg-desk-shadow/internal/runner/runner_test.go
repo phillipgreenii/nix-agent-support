@@ -1,12 +1,14 @@
 package runner_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,27 +66,65 @@ func TestRunStillReportsANonZeroExitAsAResult(t *testing.T) {
 	}
 }
 
+// drainScript is a stand-in long-lived child: it records its pid and a
+// grandchild's, announces "started" only once its trap is installed and both
+// pids are recorded, and drains ("drained", exit 0) on SIGTERM. The group-wide
+// SIGTERM also kills the grandchild, which makes `wait` return before the trap
+// has run, so it waits in a loop: the pending trap then always runs at the next
+// command boundary, whichever signal or child death the shell sees first.
+// "started" also waits for the grandchild to have exec'd sleep: a SIGTERM that
+// lands between the shell's fork and that exec is consumed by the forked
+// shell's inherited trap handler, so the grandchild would survive it (an
+// artefact of the shell stand-in, not of Stop).
+func drainScript(dir string) string {
+	return `echo $$ > "` + dir + `/serve.pid"
+trap 'echo drained; exit 0' TERM
+sleep 300 &
+echo $! > "` + dir + `/grandchild.pid"
+until [ "$(ps -o comm= -p $!)" = sleep ]; do :; done
+echo started
+while :; do wait; done
+`
+}
+
+// syncBuffer is a concurrency-safe io.Writer that is NOT an *os.File, so the
+// runner copies the child's output through a pipe and a copier goroutine.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
 func TestStartRunsALongLivedChildAndStopEndsItOnSIGTERMWithNoOrphan(t *testing.T) {
 	r := testutil.NewRunner(t)
 	dir := t.TempDir()
-	logFile, err := os.Create(filepath.Join(dir, "child.out"))
+	outPath := filepath.Join(dir, "child.out")
+	logFile, err := os.Create(outPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = logFile.Close() }()
 	r.ChildOut = logFile
-	// The stand-in records its own pid and the pid of a grandchild, announces
-	// itself, and exits 0 on SIGTERM.
-	sh := testutil.WriteScript(t, dir, "serve.sh", `echo $$ > "`+dir+`/serve.pid"
-trap 'echo drained; exit 0' TERM
-sleep 300 &
-echo $! > "`+dir+`/grandchild.pid"
-echo started
-wait
-`)
+	sh := testutil.WriteScript(t, dir, "serve.sh", drainScript(dir))
 	c, err := r.Start(context.Background(), sh)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// "started" is written after the trap is installed and both pids are
+	// recorded, so SIGTERM below can only meet a child ready to drain.
+	if got := waitFile(t, outPath); got != "started" {
+		t.Fatalf("first child output = %q, want started", got)
 	}
 	pid := pidOf(t, filepath.Join(dir, "serve.pid"))
 	grand := pidOf(t, filepath.Join(dir, "grandchild.pid"))
@@ -107,12 +147,37 @@ wait
 	if !testutil.ProcessGone(pid) || !testutil.ProcessGone(grand) {
 		t.Errorf("orphan left behind: child %d or grandchild %d still exists", pid, grand)
 	}
-	out, _ := os.ReadFile(logFile.Name())
-	if !strings.Contains(string(out), "started") || !strings.Contains(string(out), "drained") {
+	out, _ := os.ReadFile(outPath)
+	if string(out) != "started\ndrained\n" {
 		t.Errorf("ChildOut = %q: want the child's stdout, including the SIGTERM drain", out)
 	}
 	if err := c.Stop(time.Second); err != nil {
 		t.Errorf("a second Stop must be a no-op, got %v", err)
+	}
+}
+
+// Stop must not return before the child's output has been copied out: the
+// daemon supervisor reads the daemon log after Stop. A non-file ChildOut goes
+// through a copier goroutine, which Wait (and so Done and Stop) must outlast.
+func TestStopReturnsOnlyAfterTheChildOutputIsFullyCopied(t *testing.T) {
+	r := testutil.NewRunner(t)
+	dir := t.TempDir()
+	buf := &syncBuffer{}
+	r.ChildOut = buf
+	sh := testutil.WriteScript(t, dir, "serve.sh", drainScript(dir))
+	c, err := r.Start(context.Background(), sh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFile(t, filepath.Join(dir, "grandchild.pid"))
+	for i := 0; i < 250 && !strings.Contains(buf.String(), "started"); i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := c.Stop(5 * time.Second); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if got := buf.String(); got != "started\ndrained\n" {
+		t.Errorf("output read right after Stop = %q, want everything the child wrote", got)
 	}
 }
 

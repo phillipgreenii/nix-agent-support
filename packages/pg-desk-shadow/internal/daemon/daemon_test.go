@@ -28,7 +28,10 @@ serve)
   echo $$ >> "$dir/serve.pids"
   trap 'exit 0' TERM
   sleep 300 &
-  wait
+  # Not ready until the grandchild has exec'd: a SIGTERM between the shell's
+  # fork and that exec is consumed by the forked shell's trap, leaving it behind.
+  until [ "$(ps -o comm= -p $!)" = sleep ]; do :; done
+  while :; do wait; done
   ;;
 status)
   if [ -f "$dir/status-hang" ]; then exec sleep 30; fi
