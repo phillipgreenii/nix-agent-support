@@ -301,3 +301,16 @@ func TestAStoppedSupervisorIsNeverRestartedBySample(t *testing.T) {
 
 // Compile-time proof that the real runner satisfies the supervisor's seam.
 var _ Process = (*runner.Runner)(nil)
+
+func TestSampleIsNotMadeDownByAShutdownSignalArrivingMidSlot(t *testing.T) {
+	f := newFixture(t, 0)
+	if err := f.sup.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got := f.sup.Sample(ctx)
+	if want := (schema.DaemonSample{State: schema.DaemonHealthy, StatusExit: 0, Alive: true}); got != want {
+		t.Errorf("sample with a cancelled context = %+v, want %+v (the child is up)", got, want)
+	}
+}

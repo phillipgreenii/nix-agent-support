@@ -224,7 +224,10 @@ func (s *Supervisor) Sample(ctx context.Context) schema.DaemonSample {
 		return schema.DaemonSample{State: schema.DaemonDown, StatusExit: -1, Alive: false, Restarts: n}
 	default:
 	}
-	code, err := s.probe(ctx)
+	// The probe is bounded by StatusTimeout and the child is still up, so a
+	// shutdown signal arriving mid-slot must not turn the slot's reading into a
+	// false "down".
+	code, err := s.probe(context.WithoutCancel(ctx))
 	smp := schema.DaemonSample{StatusExit: code, Alive: true, Restarts: n}
 	if err != nil {
 		smp.StatusExit = -1
