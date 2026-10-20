@@ -145,8 +145,12 @@ names from it is infinite recursion; the platform gates the entry's VALUE (`mkIf
 The daemon's alert rules (`packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml`) are
 registered by `darwin/modules/pg-connector-github` ONLY while some `home-manager.users.<u>` sets
 `github.enable` (bead `pg2-bry0w`): the daemon-down rule has `noDataState: Alerting`, so registering it
-without a deployed daemon fires critical forever. The log sources and dashboard follow
-`observability.enable` alone. Check: `test-pg-connector-github-darwin-module`. A new rule is NOT
+without a deployed daemon fires critical forever. While the daemon is not deployed the module registers
+`pg-connector-github-alerts-delete.yaml` (a `deleteRules:`-only file, never loaded alongside the rules
+file) instead, because Grafana keeps a file-provisioned rule live after its file is dropped
+(bead `pg2-susum`); structure rule S8 of `check-alert-structure.sh` pins its uids to the rule uids. The
+log sources and dashboard follow `observability.enable` alone. Checks:
+`test-pg-connector-github-darwin-module`, `test-pg-connector-github-alert-structure`. A new rule is NOT
 escalated to a bead unless its uid is also registered with `pg-router-probe`
 (`docs/investigations/2026-10-19-pg-connector-github-daemon-down-alert.md`).
 

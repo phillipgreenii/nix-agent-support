@@ -100,10 +100,16 @@ in
       # pr-github-alerts.yaml is deliberately NOT listed (it belongs to the old
       # module). Surfaces in the SwiftBar menu through pg-connector-alert-grafana,
       # which lists every firing Grafana alert. Listed only while the daemon is
-      # deployed (see the header comment).
-      alertRuleFiles = lib.optionals daemonDeployed [
-        ../../../packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml
-      ];
+      # deployed (see the header comment); otherwise the deleteRules file below.
+      alertRuleFiles =
+        if daemonDeployed then
+          [ ../../../packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml ]
+        else
+          # Grafana never drops a file-provisioned rule just because its file
+          # disappeared: the seven rules provisioned before pg2-bry0w stayed live
+          # and the daemon-down one kept firing (pg2-susum). While the daemon is
+          # not deployed, register a deleteRules-only file for those uids instead.
+          [ ../../../packages/pg-connector/grafana/alerting/pg-connector-github-alerts-delete.yaml ];
 
       # Same folder title as the alert group ("pg-connector"), so dashboards and
       # alerts converge on one Grafana folder BY TITLE (no folderUid anywhere).

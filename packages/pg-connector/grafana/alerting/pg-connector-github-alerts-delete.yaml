@@ -1,0 +1,39 @@
+# Explicit deletion of the pg-connector-github alert rules (pg2-susum).
+#
+# Grafana's file provisioner only adds/updates rules present in the provisioned
+# YAML: dropping pg-connector-github-alerts.yaml from alertRuleFiles (pg2-bry0w,
+# commit c6e9a742) left the seven already-provisioned rules live
+# (provenance=file) and the critical "pg-connector-github daemon is down" still
+# firing. A rule is removed only by a `deleteRules:` entry for its uid, applied
+# on a provisioning reload/restart (same mechanism as
+# packages/pg-router/grafana/alerting/alerts.yaml, pg2-87bbd, and
+# phillipgreenii-nix-support-apps's reconcile-alert-rules.nix).
+#
+# darwin/modules/pg-connector-github registers THIS file in place of
+# pg-connector-github-alerts.yaml while no home-manager user sets
+# `phillipgreenii.programs.pg-connector.github.enable`; once the daemon is
+# deployed it registers the rules file instead, and the rules are provisioned
+# again (a deleteRules entry for a uid alongside the rule that defines it is
+# never emitted). The two files are therefore never loaded together.
+#
+# The uids MUST equal the rule uids of pg-connector-github-alerts.yaml: rule S8
+# of packages/pg-connector/grafana/check-alert-structure.sh (flake check
+# test-pg-connector-github-alert-structure) pins that. Keep the entries for as
+# long as any Grafana database may still hold the rules; they are harmless once
+# the rules are gone.
+apiVersion: 1
+deleteRules:
+  - orgId: 1
+    uid: pg-conn-github-consumer-stuck
+  - orgId: 1
+    uid: pg-conn-github-daemon-down
+  - orgId: 1
+    uid: pg-conn-github-interactive-slow
+  - orgId: 1
+    uid: pg-conn-github-query-stale
+  - orgId: 1
+    uid: pg-conn-github-settle-failing
+  - orgId: 1
+    uid: pg-conn-github-spend-over-cap
+  - orgId: 1
+    uid: pg-conn-github-store-aside

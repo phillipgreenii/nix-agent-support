@@ -3153,6 +3153,10 @@
                   # a user whose config does not mention pg-connector at all
                   otherUser = evalDarwin true { alice.home.username = "alice"; };
                   alertsFile = ./packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml;
+                  # Registered INSTEAD of alertsFile while the daemon is not deployed
+                  # (pg2-susum): Grafana keeps a file-provisioned rule live after its
+                  # file is dropped, so the seven uids need explicit deleteRules.
+                  deleteFile = ./packages/pg-connector/grafana/alerting/pg-connector-github-alerts-delete.yaml;
                   dashboardFile = ./packages/pg-connector/grafana/pg-connector-github.json;
                   alertingServiceNames = lib.mapAttrsToList (_: s: s.serviceName) (
                     lib.filterAttrs (_: s: s.errorAlert.enable) enabled.logSources
@@ -3172,11 +3176,12 @@
                 # already pages).
                 assert !(lib.elem "pg-connector-github" alertingServiceNames);
                 assert enabled.alertRuleFiles == [ alertsFile ];
-                # Gate: the rules appear only while the daemon is deployed.
+                # Gate: the rules appear only while the daemon is deployed; otherwise
+                # (observability on) the deleteRules file stands in for them, never both.
                 assert disabled.alertRuleFiles == [ ];
-                assert noUsers.alertRuleFiles == [ ];
-                assert noDaemon.alertRuleFiles == [ ];
-                assert otherUser.alertRuleFiles == [ ];
+                assert noUsers.alertRuleFiles == [ deleteFile ];
+                assert noDaemon.alertRuleFiles == [ deleteFile ];
+                assert otherUser.alertRuleFiles == [ deleteFile ];
                 assert lib.attrNames noDaemon.logSources == lib.attrNames enabled.logSources;
                 assert lib.attrNames noDaemon.dashboardProviders == [ "pg-connector-github" ];
                 assert lib.attrNames enabled.dashboardProviders == [ "pg-connector-github" ];
@@ -5352,7 +5357,7 @@
                   '';
 
               # pg-connector-github alert rules file: structure rules S1-S7 over the file and the
-              # metric catalog, then the script's own mutant self-tests. The promtool behavioural
+              # metric catalog, rule S8 over the deleteRules file (pg2-susum), then the script's own mutant self-tests. The promtool behavioural
               # tests of the Prometheus rules are a separate check.
               test-pg-connector-github-alert-structure =
                 pkgs.runCommand "test-pg-connector-github-alert-structure"
@@ -5374,8 +5379,9 @@
                     script=${./packages/pg-connector/grafana/check-alert-structure.sh}
                     alerts=${./packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml}
                     catalog=${./packages/pg-connector/grafana/pg-connector-github-metrics.txt}
-                    bash "$script" "$alerts" "$catalog"
-                    bash "$script" --self-test "$alerts" "$catalog"
+                    deletes=${./packages/pg-connector/grafana/alerting/pg-connector-github-alerts-delete.yaml}
+                    bash "$script" "$alerts" "$catalog" "$deletes"
+                    bash "$script" --self-test "$alerts" "$catalog" "$deletes"
                     touch "$out"
                   '';
 

@@ -2,8 +2,8 @@
 # Structure check for the pg-connector-github alert rules file, plus mutant self-tests
 # proving each rule can fail.
 #
-#   check-alert-structure.sh <alerts.yaml> <metrics-catalog.txt>
-#   check-alert-structure.sh --self-test <alerts.yaml> <metrics-catalog.txt>
+#   check-alert-structure.sh <alerts.yaml> <metrics-catalog.txt> <alerts-delete.yaml>
+#   check-alert-structure.sh --self-test <alerts.yaml> <metrics-catalog.txt> <alerts-delete.yaml>
 #
 # Needs yq (mikefarah), jq, grep, sed, and logcli (grafana-loki) for rule S7.
 #
@@ -20,13 +20,16 @@
 #       _bucket/_sum/_count stripped first)
 #   S7  the Loki expression selects {service_name="pg-connector-github"}, names store_moved_aside
 #       and store_refused, and parses as LogQL offline
+#   S8  the deleteRules file (pg2-susum) is apiVersion 1, has no groups, and its deleteRules
+#       entries are exactly the seven uids of S1 (so, with S1, exactly the rule file's uids),
+#       each once, each with orgId 1
 #
 # Exit codes: 0 consistent (self-test: real inputs pass and every mutant fails with exactly
 # its own rule), 1 a rule failed, 2 usage error or unreadable input or a missing tool.
 set -euo pipefail
 
 usage() {
-  echo "usage: check-alert-structure.sh [--self-test] <alerts.yaml> <metrics-catalog.txt>" >&2
+  echo "usage: check-alert-structure.sh [--self-test] <alerts.yaml> <metrics-catalog.txt> <alerts-delete.yaml>" >&2
   exit 2
 }
 
@@ -35,10 +38,11 @@ if [ "${1:-}" = "--self-test" ]; then
   selftest=1
   shift
 fi
-[ "$#" -eq 2 ] || usage
+[ "$#" -eq 3 ] || usage
 alerts="$1"
 catalog="$2"
-for f in "$alerts" "$catalog"; do
+delfile="$3"
+for f in "$alerts" "$catalog" "$delfile"; do
   if [ ! -r "$f" ] || [ ! -f "$f" ]; then
     echo "check-alert-structure.sh: cannot read $f" >&2
     exit 2
@@ -61,11 +65,13 @@ pg-conn-github-settle-failing
 pg-conn-github-spend-over-cap
 pg-conn-github-store-aside"
 
-# lint <alerts.yaml> <catalog>: prints RULE-Sn lines to stderr, returns 1 when any fired.
+# lint <alerts.yaml> <catalog> <alerts-delete.yaml>: prints RULE-Sn lines to stderr, returns 1
+# when any fired.
 lint() {
-  local file="$1" cat="$2" status=0
-  local json got bad
+  local file="$1" cat="$2" delf="$3" status=0
+  local json got bad deljson
   json="$(yq -o=json '.' "$file")"
+  deljson="$(yq -o=json '.' "$delf")"
 
   # S1
   got="$(jq -r '[.groups[]?.rules[]?.uid] | sort | .[]' <<<"$json")"
@@ -176,11 +182,28 @@ lint() {
     status=1
     ;;
   esac
+
+  # S8
+  if ! jq -e '.apiVersion == 1 and (has("groups") | not)' <<<"$deljson" >/dev/null; then
+    echo "RULE-S8: the deleteRules file must be apiVersion 1 with no groups key" >&2
+    status=1
+  fi
+  got="$(jq -r '[.deleteRules[]?.uid] | sort | .[]' <<<"$deljson")"
+  if [ "$got" != "$want_uids" ]; then
+    echo "RULE-S8: the deleteRules uids are not exactly the seven rule uids, each once:" \
+      "$(diff <(printf '%s\n' "$want_uids") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ')" >&2
+    status=1
+  fi
+  bad="$(jq -r '.deleteRules[]? | select(.orgId != 1) | .uid // "(no uid)"' <<<"$deljson")"
+  if [ -n "$bad" ]; then
+    echo "RULE-S8: deleteRules entry without orgId 1: $(printf '%s' "$bad" | tr '\n' ' ')" >&2
+    status=1
+  fi
   return "$status"
 }
 
 if [ "$selftest" -eq 0 ]; then
-  lint "$alerts" "$catalog"
+  lint "$alerts" "$catalog" "$delfile"
   exit $?
 fi
 
@@ -188,20 +211,29 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 # The real inputs must pass, silently.
-if ! out="$(lint "$alerts" "$catalog" 2>&1)"; then
+if ! out="$(lint "$alerts" "$catalog" "$delfile" 2>&1)"; then
   echo "self-test: the real inputs fail:" >&2
   echo "$out" >&2
   exit 1
 fi
 
 fail=0
-# mutant <rule> <description> <yq-expression-for-alerts> <sed-script-for-catalog>
+# mutant <rule> <description> <yq-expression-for-alerts> <sed-script-for-catalog> [<yq-expression-for-delete-file>]
 # An empty expression leaves that copy unchanged. The mutant must fail with exactly <rule>.
 mutant() {
-  local rule="$1" desc="$2" yexpr="$3" csed="$4" dir ids
+  local rule="$1" desc="$2" yexpr="$3" csed="$4" dexpr="${5:-}" dir ids
   dir="$(mktemp -d "$work/m.XXXXXX")"
   cat "$alerts" >"$dir/alerts.yaml" # not cp: a store input is read-only and cp keeps the mode
   cat "$catalog" >"$dir/catalog.txt"
+  cat "$delfile" >"$dir/delete.yaml"
+  if [ -n "$dexpr" ]; then
+    yq "$dexpr" "$delfile" >"$dir/delete.yaml"
+    if cmp -s "$delfile" "$dir/delete.yaml"; then
+      echo "self-test: mutant $rule ($desc) did not change the delete file" >&2
+      fail=1
+      return
+    fi
+  fi
   if [ -n "$yexpr" ]; then
     yq "$yexpr" "$alerts" >"$dir/alerts.yaml"
     if cmp -s "$alerts" "$dir/alerts.yaml"; then
@@ -218,7 +250,7 @@ mutant() {
       return
     fi
   fi
-  if ids="$(lint "$dir/alerts.yaml" "$dir/catalog.txt" 2>&1 >/dev/null)"; then
+  if ids="$(lint "$dir/alerts.yaml" "$dir/catalog.txt" "$dir/delete.yaml" 2>&1 >/dev/null)"; then
     echo "self-test: mutant $rule ($desc) passed" >&2
     fail=1
     return
@@ -248,5 +280,13 @@ mutant S7 "a Loki expression that no longer names store_refused" \
   "($(rule_of "$loki_uid") | .data[0].model.expr) |= sub(\"store_refused\"; \"store_other\")" ""
 mutant S7 "a Loki expression that does not parse" \
   "($(rule_of "$loki_uid") | .data[0].model.expr) |= sub(\"\\[10m\\]\"; \"[10m\")" ""
+mutant S8 "a deleteRules entry dropped (a rule uid no longer deleted)" "" "" \
+  'del(.deleteRules[] | select(.uid == "pg-conn-github-store-aside"))'
+mutant S8 "a deleteRules uid that is not a rule uid" "" "" \
+  '(.deleteRules[] | select(.uid == "pg-conn-github-query-stale") | .uid) = "pg-conn-github-query-stale-x"'
+mutant S8 "a deleteRules entry for the wrong org" "" "" \
+  '(.deleteRules[] | select(.uid == "pg-conn-github-daemon-down") | .orgId) = 2'
+mutant S8 "a groups key in the deleteRules file" "" "" \
+  '.groups = []'
 
 [ "$fail" -eq 0 ]
