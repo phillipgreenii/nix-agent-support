@@ -38,6 +38,9 @@ reply. It keeps no state between calls.
 
 ## Scope (extent + floor)
 
+This section makes the set's scope explicit (`INV-13`); its actors are in [actors](actors.md) and its
+interfaces in [interfaces](interfaces.md).
+
 - **Extent (in)** — what the adapter does with one dispatched event: how it reads its role's own
   configuration, renders and runs the command, tells a busy command from a failed one, reports a
   failure's evidence, and ends the command when the dispatch is cancelled; and how the role's
@@ -76,7 +79,6 @@ so a cross-set reference resolves by the owner's stable UUID, not by a name that
 | `INV-23`       | the realization-gap register is set-level, named `## Realization gaps`, and never an element                   | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`       | [f3bba3e7-440f-4109-a4de-9d37daa34bcf](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)      |
 | `INTF-HANDLER` | dispatch to a handler and its accept-or-decline or deferred-ack reply                                          | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`  | [10939663-7a48-4d44-8c4a-9a2df8ae4654](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/interfaces.md) |
 | `INV-CONC-1`   | capacity is handler-enforced and declared nowhere, never a core-tracked number                                 | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`  | [20c84e0f-8ffb-428c-9acc-dcaabb4fdf1b](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/invariants.md) |
-| `INV-EVT-2`    | a handler MUST tolerate a duplicate event (be idempotent)                                                      | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`  | [06649d39-2734-409a-8098-f3c2cef44cbe](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/invariants.md) |
 | `INV-FAIL-1`   | failure classes split at the acceptance boundary: a pre-accept decline is the core's to re-offer               | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`  | [2da0d587-f116-42e6-b986-8abf80ed023c](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/invariants.md) |
 | `INV-ROLE-1`   | a role names the adapter that runs it, and the core never distinguishes kinds of role                          | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`  | [6495b5ef-cb0a-45e2-a43c-300564f30d2c](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/invariants.md) |
 | `INV-ROLE-2`   | the core carries a role's own configuration, as the role object in every request's payload, and never reads it | `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`  | [68e781f9-ca4a-4713-9ba2-e2839a9d6e6a](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router/docs/behavior/invariants.md) |

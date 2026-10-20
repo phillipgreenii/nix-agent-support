@@ -9,7 +9,7 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
 
 - **`INV-CMA-1`** <!-- uuid: ef64e56d-1191-4ad5-9057-ebddbfdb281e --> — **The adapter runs every role that names it, and nothing else.** It is a
   participant of its own, invoked by the core for each dispatch and lifecycle hook of a role whose
-  `handler` it is (`INV-ROLE-1`), and it holds no state between calls, so a restart of the core or of
+  `handler` it is (`INV-ROLE-1`, `DEC-ROLE-1`), and it holds no state between calls, so a restart of the core or of
   the adapter loses nothing. A role whose work is a session, rather than a command, names the other
   adapter instead.
 - **`INV-CMA-2`** <!-- uuid: 97a60c63-5ccd-4307-a8c7-44f7636405bc --> — **The adapter reads its configuration from the role object, strictly.**

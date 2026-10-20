@@ -26,10 +26,12 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   dropped or misspelled field before it is applied.
 - **`INV-CCA-3`** <!-- uuid: 3f48ccd2-e5a3-404f-8f15-c902b20773ed --> — **Every role of this adapter survives the core's shutdown, and a role
   cannot silently lose that.** The deployment's helper for this adapter sets the role's
-  `survives_shutdown` (`INV-ROLE-3`), and the deployment **MUST** assert, when it evaluates its
+  shutdown-survival property (`INV-ROLE-3`), and the deployment **MUST** assert, when it evaluates its
   configuration, that every role using this adapter has set it. A session is supervised by this
   adapter for far longer than a shutdown budget, and the next core re-offers the event and adopts the
   session (`phillipgreenii-nix-agent-support` ADR 0085).
+  - **The property's name.** The role setting is spelled `survives_shutdown` in the deployment's
+    configuration.
 
 ## The environment a session starts in
 
@@ -84,7 +86,8 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   combined handler to this adapter in one deployment commit. A session the earlier handler launched
   and left running **MUST** be adopted by this adapter's redelivered dispatch (its stable name, its
   external identifier format and its dispatch metadata are unchanged), so no session is launched beside
-  a running one and none is orphaned. The failure-reason strings the failure-rate alert reads
-  (`usage-limit`, `triager-failure`, `at-capacity`, `session-in-flight` and every `skipped-*`
-  reason) and the coarse busy exit code `9` **MUST** be preserved exactly, because they are a
-  handler-to-alert contract (`INV-CCH-22`, `INV-CCH-28`, `INV-CCH-30`).
+  a running one and none is orphaned. The rules the earlier handler's set states for this are
+  `INV-CCH-22`, `INV-CCH-28` and `INV-CCH-30`.
+  - **The alert contract.** The failure-reason strings the failure-rate alert reads (`usage-limit`,
+    `triager-failure`, `at-capacity`, `session-in-flight` and every `skipped-*` reason) and the coarse
+    busy exit code `9` **MUST** be preserved exactly, because they are a handler-to-alert contract.

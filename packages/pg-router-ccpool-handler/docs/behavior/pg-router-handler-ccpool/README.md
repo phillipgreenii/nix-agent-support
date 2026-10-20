@@ -42,6 +42,9 @@ concept of its own.
 
 ## Scope (extent + floor)
 
+This section makes the set's scope explicit (`INV-13`); its actors are in [actors](actors.md) and its
+interfaces in [interfaces](interfaces.md).
+
 - **Extent (in)** — how this adapter reads its role's own configuration; how a role's wrap and base
   environment reach the agent, for a new session and for a resume; what a pool shared by several
   roles requires; and what holds across the move of a role from the earlier combined handler to this
