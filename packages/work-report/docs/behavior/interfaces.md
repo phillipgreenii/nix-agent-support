@@ -8,35 +8,36 @@ a **minimal schema** where a concrete field-shape crosses (`INV-8`). See the
 [invariants](invariants.md) for the rules, and [journeys](journeys.md) for the flows that exercise
 these interfaces.
 
-| Interface       | Boundary                                            | Counterparty (kind)             | Participation | Initiator                        |
-| --------------- | --------------------------------------------------- | ------------------------------- | ------------- | -------------------------------- |
-| `INTF-CONTROL`  | operator's requests in; pull outcome out            | `ACTOR-OP` (actor)              | essential     | operator                         |
-| `INTF-INGEST`   | entries for a range, from each configured source    | `ACTOR-SOURCE` (implementer)    | essential     | work-report asks; source answers |
-| `INTF-READ`     | resolved entries out, for a query                   | `ACTOR-READER` (actor)          | essential     | reader                           |
-| `INTF-REQUEST`  | operator's report request in; report or outcome out | `ACTOR-OP` (actor)              | essential     | operator                         |
-| `INTF-GENERATE` | entries + narrowing out; rendered report in         | `ACTOR-GENERATOR` (implementer) | optional      | work-report                      |
+| Interface       | Boundary                                                         | Counterparty (kind)             | Participation | Initiator                        |
+| --------------- | ---------------------------------------------------------------- | ------------------------------- | ------------- | -------------------------------- |
+| `INTF-CONTROL`  | operator's requests in; pull outcome out                         | `ACTOR-OP` (actor)              | essential     | operator                         |
+| `INTF-INGEST`   | entries for a range, from each configured source                 | `ACTOR-SOURCE` (implementer)    | essential     | work-report asks; source answers |
+| `INTF-READ`     | resolved entries out, for a query                                | `ACTOR-READER` (actor)          | essential     | reader                           |
+| `INTF-REQUEST`  | operator's report request in; files + run record, or outcome out | `ACTOR-OP` (actor)              | essential     | operator                         |
+| `INTF-GENERATE` | entries + range out; files + description in                      | `ACTOR-GENERATOR` (implementer) | optional      | work-report                      |
 
 `INTF-CONTROL`, `INTF-INGEST`, `INTF-READ`, and `INTF-REQUEST` are **essential**: configuring and
 pulling, having a source, resolving what was pulled into a queryable form, and being asked for a
 report are what work-report is for. The reporting half's own use case reads through `INTF-READ`
-unconditionally — even the baseline kind — which is exactly why `INTF-READ` is essential rather
-than optional now that ingestion and reporting are one product. `INTF-GENERATE` is **optional**:
-the baseline kind renders directly from queried entries, with no generator involved
-(`INV-BASELINE-1`).
+unconditionally — even the baseline generator — which is exactly why `INTF-READ` is essential
+rather than optional now that ingestion and reporting are one product. `INTF-GENERATE` is
+**optional**: the baseline generator is built in and is the default preset, so a report is always
+producible with no externally registered generator involved (`INV-BASELINE-1`); an operator MAY
+add more generators (`INV-GEN-PLUGIN-1`).
 
 ```mermaid
 flowchart LR
     subgraph tool["work-report"]
       ING["ingestion: validate -> append -> resolve -> index"]
-      REP["reporting: query -> select generator -> render"]
+      REP["reporting: query -> narrow -> generate"]
     end
     SRC["source"] -- "INTF-INGEST: entries for a range" --> ING
     OP["operator"] -- "INTF-CONTROL: configure / pull" --> ING
     ING -- "INTF-CONTROL: pull outcome" --> OP
-    OP -- "INTF-REQUEST: range / kind / narrowing" --> REP
-    REP -- "INTF-REQUEST: report or outcome" --> OP
-    REP -- "INTF-GENERATE: entries + narrowing" --> GEN["report generator"]
-    GEN -- "rendered report" --> REP
+    OP -- "INTF-REQUEST: range / preset or generator / narrowing" --> REP
+    REP -- "INTF-REQUEST: files + run record, or outcome" --> OP
+    REP -- "INTF-GENERATE: entries + range" --> GEN["report generator"]
+    GEN -- "files + description" --> REP
     REP -. "INTF-READ: query" .-> ING
     ING -. "INTF-READ: resolved entries" .-> REP
     READER["other reader"] -- "INTF-READ: query" --> ING
@@ -119,32 +120,50 @@ flowchart LR
 
 - **In (operator → work-report)** — a request:
 
-  | Field       | Required | Meaning                                                                                                                                                                         |
-  | ----------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | `range`     | yes      | the range the report should cover                                                                                                                                               |
-  | `kind`      | no       | which kind to render; when omitted, the baseline kind (`INV-BASELINE-1`)                                                                                                        |
-  | `narrowing` | no       | any combination of label, source, and/or type to restrict scope to, each dimension taking one or more values; intersection across dimensions, union within one (`INV-CUSTOM-1`) |
+  | Field       | Required | Meaning                                                                                                                                                                                                              |
+  | ----------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `range`     | no       | the range the report should cover; defaulted from the preset when it binds one (`INV-REPORT-RANGE-1`)                                                                                                                |
+  | `preset`    | no       | which preset to run; when neither a preset nor a generator is named, the default preset, which is the baseline generator (`INV-BASELINE-1`)                                                                          |
+  | `generator` | no       | alternatively, which generator to run directly, with no preset                                                                                                                                                       |
+  | `narrowing` | no       | any combination of label, source, and/or type to restrict scope to, each dimension taking one or more values; intersection across dimensions, union within one (`INV-CUSTOM-1`); overrides what a named preset binds |
 
 - **Out (work-report → operator)** — either a report:
 
-  | Field       | Meaning                                                                       |
-  | ----------- | ----------------------------------------------------------------------------- |
-  | `range`     | the range actually covered (`INV-REPORT-RANGE-1`)                             |
-  | `kind`      | the kind actually rendered                                                    |
-  | `narrowing` | the narrowing actually applied, echoed back                                   |
-  | `content`   | the rendered report; shape is the kind's own concern, out of this set's floor |
+  | Field        | Meaning                                                                                                                                   |
+  | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+  | `range`      | the range actually covered (`INV-REPORT-RANGE-1`)                                                                                         |
+  | `preset`     | the preset actually run, when one was used; otherwise the generator                                                                       |
+  | `narrowing`  | the narrowing actually applied, echoed back                                                                                               |
+  | `files`      | the files the generator produced, all inside the run's output directory (`INV-GEN-CONTAIN-1`); their shape is the generator's own concern |
+  | `run record` | work-report's own description of the run, stating the range and how many entries the generator was given (`INV-REPORT-RANGE-1`)           |
 
-  — or an outcome reporting why no report was produced (e.g. an unrecognized `kind`, or a
-  `narrowing` value the generator could not honor).
+  — or an outcome reporting why no report was produced: an unknown preset or generator named (a
+  usage error); a generator whose configuration is invalid (`INV-GEN-CONFIG-1`); or a generator
+  that failed while running, which is reported as a different outcome from an invalid
+  configuration.
 
-- **Guarantee** — a request whose range matches no entries still yields a report stating the
-  range and that nothing was found, never an error (`INV-REPORT-RANGE-1`).
+- **Guarantee** — a request whose range matches no entries is still a report, never an error:
+  the generator is still given the (empty) set of entries, and work-report states the range and
+  that no entries were found, independently of what the generator produces (`INV-REPORT-RANGE-1`,
+  `INTF-GENERATE`).
 
 ### `INTF-GENERATE` — report generator contract <!-- uuid: 75c6b51d-3b29-499d-a9c7-160b722fa019 -->
 
 - **Out (work-report → generator)** — the entries a request resolved to (queried via
-  `INTF-READ`), the range, and any narrowing to honor.
-- **In (generator → work-report)** — the rendered report content.
-- **Guarantee** — a generator MUST honor any narrowing it is given, and MUST report distinctly
-  when it cannot (`INV-CUSTOM-1`) — never silently ignore it. This interface carries no
-  requirement on the generator's own rendering mechanism (`INV-2`).
+  `INTF-READ`) and narrowed by work-report before the hand-off, and the range. Possibly no entries
+  at all, for a range in which nothing was recorded.
+- **In (generator → work-report)** — a set of files, and a description of them (what each is).
+  Output is not restricted to text.
+- **Guarantee (no filtering)** — a generator MUST NOT filter the entries it is given; work-report
+  has already applied any narrowing (`INV-CUSTOM-1`).
+- **Guarantee (empty range)** — given no entries, a generator MUST still produce at least one
+  non-empty file, and SHOULD state in its files the range and that nothing was recorded in it. It
+  SHOULD state the range in its files in any case, though a non-text output need not
+  (`INV-REPORT-RANGE-1`).
+- **Guarantee (containment)** — every file a generator reports MUST lie inside the run's output
+  directory (`INV-GEN-CONTAIN-1`).
+- **Distinct outcome (generator config invalid)** — work-report reports a generator whose
+  configuration is invalid distinctly from one that failed while running (`INV-GEN-CONFIG-1`),
+  and neither prevents the baseline generator from producing a report (`INV-BASELINE-1`).
+- This interface carries no requirement on the generator's own rendering mechanism, the format of
+  its files, or how the hand-off is carried (`INV-2`).

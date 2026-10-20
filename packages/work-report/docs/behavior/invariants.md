@@ -73,35 +73,43 @@ numbers are legal.
 - **`INV-REPORT-RANGE-1`** <!-- uuid: 98e08691-48c6-4a30-bac3-36aa9273a048 --> — Every report
   request MUST be scoped to an explicit or defaulted range, and every produced report MUST state
   the range it covers — including a range for which no entries were found, which MUST be reported
-  as such rather than omitted or fabricated.
+  as such rather than omitted or fabricated. The range MUST be stated in work-report's own output
+  and in the run record of that report. A generator SHOULD also state it in its files, but that is
+  not required of a non-text output.
 - **`INV-CUSTOM-1`** <!-- uuid: 1fd9c46b-28da-4982-a799-00c57a57923b --> — A report request MAY
   narrow scope by any combination of label, source, and type, giving one or more values within
   each dimension. Narrowings compose as an intersection (AND) across dimensions and a union (OR)
-  within a dimension. A generator MUST honor a narrowing
-  it is asked to apply, and MUST report distinctly when it cannot, rather than silently ignoring
-  it.
+  within a dimension. work-report applies the narrowing itself, before generation: a generator
+  receives only the matching entries and MUST NOT filter.
 
-### Kinds
+### Generators and presets
 
 - **`INV-MULTI-1`** <!-- uuid: c09f47e0-d60d-4a1d-879c-0245f187ab8a --> — work-report MUST offer
-  more than one report kind. Requesting one kind MUST NOT require requesting, or depend on the
-  availability of, another.
-- **`INV-BASELINE-1`** <!-- uuid: 5326f98d-50ff-4859-a9c9-07ab5138e1aa --> — Exactly one kind is
-  the **baseline**: a plain chronological rendering of the queried entries that MUST always be
-  available and MUST NOT depend on any optional or pluggable generator (`INTF-GENERATE`). A
-  report request naming no kind gets the baseline kind. Its
+  more than one generator and preset. Requesting one generator or preset MUST NOT require
+  requesting, or depend on the availability of, another.
+- **`INV-BASELINE-1`** <!-- uuid: 5326f98d-50ff-4859-a9c9-07ab5138e1aa --> — Exactly one generator
+  is the **baseline**: built in, producing a plain chronological rendering of the queried entries,
+  and the default preset. It MUST always be available and MUST NOT depend on any optional or
+  pluggable generator (`INTF-GENERATE`). A report request naming no preset gets the baseline. Its
   purpose is that the operator can always get a plain view of what was ingested, even when every
-  other kind's generator is unavailable or misconfigured.
-- **`INV-GEN-PLUGIN-1`** <!-- uuid: 4987462b-30f4-4f7f-834a-f0e3aa45f8d1 --> — Adding a new report
-  kind (a new `INTF-GENERATE` implementer) MUST NOT require a caller-visible change to any
-  existing kind's request or response shape.
+  other generator or preset is unavailable or misconfigured.
+- **`INV-GEN-PLUGIN-1`** <!-- uuid: 4987462b-30f4-4f7f-834a-f0e3aa45f8d1 --> — Adding a generator
+  (a new `INTF-GENERATE` implementer) is registering a command that meets the contract. It MUST
+  NOT require a caller-visible change to any existing generator's request or response shape.
+- **`INV-GEN-CONTAIN-1`** <!-- uuid: c977cca8-f492-4a8e-8f07-9b24c68145fc --> — Every file a report
+  reports MUST lie inside that run's output directory. A report MUST NOT list, or place, a file
+  anywhere else, and the run record names only files inside it.
+- **`INV-GEN-CONFIG-1`** <!-- uuid: d4d81fca-0d94-447c-8e40-c8e12e658d0e --> — An invalid generator
+  configuration MUST be reported distinctly from a generator that failed while running, so the
+  operator can tell a configuration to fix from a generator to debug. Neither MAY prevent the
+  baseline generator from producing a report (`INV-BASELINE-1`).
 
 ### Goals
 
-- **`GOAL-1`** <!-- uuid: 544ceaa0-e7a9-4580-ab7b-cd9e78e078e9 --> — A narrative-style kind
+- **`GOAL-1`** <!-- uuid: 544ceaa0-e7a9-4580-ab7b-cd9e78e078e9 --> — A narrative-style generator
   SHOULD foreground what happened and what stood out, so it reads as something worth having
   written, rather than enumerating every entry in order. This is a quality expectation of that
-  kind, not a requirement on any particular rendering mechanism (`INV-2`).
+  generator, not a requirement on any particular rendering mechanism (`INV-2`).
 - **`GOAL-2`** <!-- uuid: fc6d527a-3bf9-476b-8f77-03a41a2c9d76 --> — A report SHOULD be
   requestable for any already-ingested range, not only "today", so a week-in-review or retro use
   is not a different capability from a daily one.

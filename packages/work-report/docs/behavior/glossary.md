@@ -52,18 +52,29 @@ least two other places in this set (`INV-14`). See [actors](actors.md) for who u
 
 ## Reporting
 
-- **Report** — the artifact work-report produces for a range, in one of several **kinds**.
-  Requesting one kind never requires requesting another (`INV-MULTI-1`), and every report states
+- **Report** — the artifact work-report produces for a range: a set of files written by one
+  **generator** into one **output directory**, together with a **run record**. Requesting one
+  generator or preset never requires requesting another (`INV-MULTI-1`), and every report states
   the range it covers (`INV-REPORT-RANGE-1`).
-- **Kind** — which rendering a report request asks for; a request naming no kind gets the
-  baseline kind (`INV-BASELINE-1`). The **baseline kind** is a plain
-  chronological listing that always exists and depends on no optional generator
-  (`INV-BASELINE-1`); any further kind (e.g. a narrative-style rendering) is produced by a
-  **report generator**.
-- **Report generator** — the implementer of `INTF-GENERATE`: given queried entries and any
-  narrowing, it renders a report. Its own mechanism (a template, generated prose, anything else)
+- **Generator** — a named producer of a report's files: given the entries a request resolved to
+  and the range, it yields files and a description of them, and it is the implementer of
+  `INTF-GENERATE`. The **baseline generator** is built in: a plain chronological listing that
+  always exists and depends on no externally registered generator (`INV-BASELINE-1`). Any further
+  generator (for example a narrative-style rendering) is added by the operator
+  (`INV-GEN-PLUGIN-1`). A generator's own mechanism (a template, generated prose, anything else)
   is unspecified; work-report states only the contract it must honor.
+- **Preset** — a named, repeatable report request: it binds a generator, that generator's
+  settings, a range, and a narrowing, so a repeatable report is one word. A request naming no
+  preset gets the default preset, which is the baseline generator (`INV-BASELINE-1`). A preset replaces
+  the retired "report kind", which named only the rendering and bound nothing else.
+- **Run record** — work-report's own description of one report run: the range covered, the preset
+  or generator used, the narrowing applied, how many entries the generator was given, and the
+  files the run produced (`INV-REPORT-RANGE-1`, `INV-GEN-CONTAIN-1`). It is the durable record of
+  a report; the store holds no copy of it.
+- **Output directory** — the one directory a single report run writes into. Every file a report
+  reports lies inside it (`INV-GEN-CONTAIN-1`), and the run record is kept with those files.
 - **Narrowing** — restricting a report request to entries matching a label, a source, and/or a
-  type — the same dimensions the store indexes (`INV-INDEX-1`). A request MAY combine narrowings
-  and give several values within one dimension; narrowings compose as an intersection across
-  dimensions and a union within a dimension (`INV-CUSTOM-1`).
+  type — the same dimensions the store indexes (`INV-INDEX-1`). work-report applies it before
+  generation, so a generator only ever receives matching entries. A request MAY combine
+  narrowings and give several values within one dimension; narrowings compose as an intersection
+  across dimensions and a union within a dimension (`INV-CUSTOM-1`).

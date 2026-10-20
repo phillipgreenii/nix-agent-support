@@ -88,8 +88,8 @@ _Requires:_ `INV-PLUGIN-1`.
   want a plain chronological listing of my activity for a range, so I can scan what happened
   without prose. _(→ `USECASE-REP-REPORT`; `INV-BASELINE-1`, `INV-REPORT-RANGE-1`.)_
 - **`STORY-REP-DEBUG`** <!-- uuid: 68de528e-e831-4f2a-9901-c7021929edd9 --> — As the operator, I
-  want a report kind that never depends on any optional generator, so I can always sanity-check
-  what was ingested even when a fancier kind is failing or misconfigured. _(→
+  want a baseline report that never depends on any optional generator, so I can always
+  sanity-check what was ingested even when a fancier generator is failing or misconfigured. _(→
   `USECASE-REP-REPORT`; `INV-BASELINE-1`.)_
 - **`STORY-REP-RANGE`** <!-- uuid: 1b3fa4ac-3a93-4a97-a062-363cbc5715f4 --> — As the operator, I
   want a report for any range I choose — today, a week, a custom span — not only "today", so a
@@ -101,6 +101,14 @@ _Requires:_ `INV-PLUGIN-1`.
 - **`STORY-REP-NARRATIVE`** <!-- uuid: 9c66f09f-544c-43bf-b7fc-e368865982b1 --> — As the operator,
   I want a narrative-style report that foregrounds what mattered, so I get something more useful
   than a raw listing when I want that. _(→ `USECASE-REP-REPORT`; `INV-MULTI-1`, `GOAL-1`.)_
+- **`STORY-REP-CONFIG`** <!-- uuid: 574761b5-1627-45cb-92da-8067f9fc2e8e --> — As the operator, I
+  want to be told when a generator is misconfigured, as something different from a generator
+  that broke while running, so I know whether to fix its settings or debug it. _(→
+  `USECASE-REP-REPORT`, `USECASE-REP-ADD-GENERATOR`; `INV-GEN-CONFIG-1`, `INV-BASELINE-1`.)_
+- **`STORY-REP-CONTAIN`** <!-- uuid: 47f51adb-08c5-45dd-a4ea-0da8e485e08f --> — As the operator, I
+  want everything a report produces to live in one place and nowhere else, so I can find, move,
+  or delete a report without hunting for stray files. _(→ `USECASE-REP-REPORT`;
+  `INV-GEN-CONTAIN-1`.)_
 
 ### Use cases
 
@@ -109,34 +117,49 @@ _Requires:_ `INV-PLUGIN-1`.
 **Primary actor:** `ACTOR-OP`.
 **Level:** user-goal.
 **Preconditions:** none — work-report may hold nothing for the requested range.
-_Requires:_ `INV-REPORT-RANGE-1`, `INV-MULTI-1`, `INV-BASELINE-1`, `INV-CUSTOM-1`.
+_Requires:_ `INV-REPORT-RANGE-1`, `INV-MULTI-1`, `INV-BASELINE-1`, `INV-CUSTOM-1`,
+`INV-GEN-CONTAIN-1`, `INV-GEN-CONFIG-1`.
 _Includes:_ `USECASE-ING-QUERY`.
 
-1. The operator requests a report: a range, an optional kind (the baseline kind when
-   omitted, `INV-BASELINE-1`), and optional narrowing.
+1. The operator requests a report: a range, an optional preset or generator (the baseline
+   generator, as the default preset, when omitted, `INV-BASELINE-1`), and optional narrowing.
 2. work-report queries the store (`USECASE-ING-QUERY`, via `INTF-READ`) for entries matching the
-   range and narrowing.
-3. work-report renders the report: the baseline kind directly from the queried entries, or a
-   further kind by dispatching to its generator (`INTF-GENERATE`).
-4. work-report returns the report, stating the range, kind, and narrowing actually applied.
+   range and narrowing, applying the narrowing itself (`INV-CUSTOM-1`).
+3. work-report hands the matching entries and the range to the generator (`INTF-GENERATE`), which
+   produces files and a description of them.
+4. work-report returns the report: the files, all inside the run's output directory
+   (`INV-GEN-CONTAIN-1`), and the run record, stating the range, the preset or generator, and the
+   narrowing actually applied (`INV-REPORT-RANGE-1`).
 
 Extensions:
 
-- 2a. No entries match: the report says so plainly, rather than fabricating content
+- 2a. No entries match: the generator is still run with no entries, and work-report says so
+  plainly in its own output and in the run record, rather than fabricating content
   (`INV-REPORT-RANGE-1`).
-- 3a. An unrecognized kind is named: reported as an outcome, not a report.
-- 3b. The generator cannot honor a given narrowing: reported distinctly (`INV-CUSTOM-1`).
+- 3a. An unknown preset or generator is named: reported as a usage outcome, not a report.
+- 3b. The generator's configuration is invalid: reported as a configuration outcome, distinct
+  from a generator that failed while running (`INV-GEN-CONFIG-1`); the baseline generator still
+  works (`INV-BASELINE-1`).
+- 3c. The generator fails while running: reported as a failure outcome, distinct from 3b
+  (`INV-GEN-CONFIG-1`).
 
-#### `USECASE-REP-ADD-GENERATOR` — add a new report kind <!-- uuid: 067b3c2f-11d7-45c4-87e9-ff6aa77bb982 -->
+#### `USECASE-REP-ADD-GENERATOR` — add a new generator <!-- uuid: 067b3c2f-11d7-45c4-87e9-ff6aa77bb982 -->
 
 **Primary actor:** `ACTOR-OP` (as integrator).
 **Level:** user-goal.
 **Preconditions:** the new generator implements `INTF-GENERATE`.
-_Requires:_ `INV-GEN-PLUGIN-1`.
+_Requires:_ `INV-GEN-PLUGIN-1`, `INV-GEN-CONFIG-1`.
 
-1. The operator configures a new generator, implementing `INTF-GENERATE`, for a new kind.
-2. work-report dispatches a request naming that kind to it (`USECASE-REP-REPORT`), with no change
-   to any existing kind's request or response shape.
+1. The operator registers a new generator, a command implementing `INTF-GENERATE`, and optionally
+   a preset that binds it.
+2. work-report runs a request naming that generator or preset (`USECASE-REP-REPORT`), with no
+   change to any existing generator's request or response shape.
+
+Extensions:
+
+- 1a. The new generator's configuration is invalid: a request naming it is reported as a
+  configuration outcome, never mistaken for a runtime failure (`INV-GEN-CONFIG-1`), and every
+  other generator and preset keeps working (`INV-MULTI-1`).
 
 ## Journey
 
@@ -145,7 +168,7 @@ _Requires:_ `INV-GEN-PLUGIN-1`.
 Summary level, spanning `ACTOR-OP`, `ACTOR-SOURCE`, `ACTOR-READER`, and `ACTOR-GENERATOR`.
 _Includes:_ `USECASE-ING-PULL`, `USECASE-ING-QUERY`, `USECASE-REP-REPORT`.
 _Requires:_ `INV-DEGRADE-1`, `INV-LATEST-1`, `INV-ENTITY-1`, `INV-REPORT-RANGE-1`,
-`INV-BASELINE-1`.
+`INV-BASELINE-1`, `INV-GEN-CONTAIN-1`, `INV-GEN-CONFIG-1`.
 
 On whatever cadence suits them, the operator pulls fresh activity; entries accrue, append-only.
 One pull's source is temporarily degraded, and the pull still lands whatever the other sources
@@ -155,8 +178,11 @@ later, perhaps from a different source, on the same day — and a later query re
 one entry for that identifier, per latest-wins resolution.
 
 Independently of any pull — sometimes right after one, sometimes days later — the operator
-requests reports: most days a narrative for today, some days the baseline chronological listing
-to sanity-check what is actually there, and at the end of a week a report across the whole range
-narrowed to one label, for a retro. The two halves never share a request: a pull never happens
+requests reports: most days a narrative preset for today, some days the baseline chronological
+listing to sanity-check what is actually there, and at the end of a week a report across the whole
+range narrowed to one label, for a retro. Each report's files land in that run's own output
+directory and nowhere else, described by its run record. One day the narrative generator's
+settings turn out to be invalid; the operator is told that it is a configuration problem rather
+than a failed run, and the baseline listing still comes out. The two halves never share a request: a pull never happens
 because a report was asked for, and a report never triggers a pull — it only ever reads, through
 `INTF-READ`, whatever ingestion has already resolved.

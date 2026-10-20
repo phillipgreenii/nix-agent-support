@@ -2,7 +2,7 @@
 
 work-report **ingests** the operator's own activity from a pluggable set of sources, **stores**
 each observation as an append-only entry, **resolves** which entry is authoritative when more
-than one names the same thing, and **renders**, on request, one or more reports over a range.
+than one names the same thing, and **generates**, on request, one or more reports over a range.
 This set follows the behavior-docs method
 (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`).
 
@@ -31,15 +31,15 @@ not a component diagram.
 flowchart LR
     subgraph tool["work-report"]
       ING["ingestion: validate -> append -> resolve -> index"]
-      REP["reporting: query -> select generator -> render"]
+      REP["reporting: query -> narrow -> generate"]
     end
     SRC["source (git, GitHub, Claude Code sessions, beads, Jira, ...)"] -- "INTF-INGEST: entries for a range" --> ING
     OP["operator"] -- "INTF-CONTROL: configure / pull" --> ING
     ING -- "INTF-CONTROL: pull outcome" --> OP
-    OP -- "INTF-REQUEST: range / kind / narrowing" --> REP
-    REP -- "INTF-REQUEST: report or outcome" --> OP
-    REP -- "INTF-GENERATE: entries + narrowing" --> GEN["report generator"]
-    GEN -- "rendered report" --> REP
+    OP -- "INTF-REQUEST: range / preset or generator / narrowing" --> REP
+    REP -- "INTF-REQUEST: files + run record, or outcome" --> OP
+    REP -- "INTF-GENERATE: entries + range" --> GEN["report generator"]
+    GEN -- "files + description" --> REP
     REP -. "INTF-READ: query" .-> ING
     ING -. "INTF-READ: resolved entries" .-> REP
     READER["other reader"] -- "INTF-READ: query" --> ING
@@ -50,8 +50,9 @@ flowchart LR
 pulling, having a source to pull from, resolving what was pulled into a queryable form, and being
 asked for a report are what work-report is for; the reporting half cannot render anything without
 reading through `INTF-READ`, which is exactly why these two halves are one product rather than
-two. **`INTF-GENERATE` is optional** — the baseline report kind renders directly from queried
-entries, with no generator involved (`INV-BASELINE-1`).
+two. **`INTF-GENERATE` is optional** — the baseline generator is built in and is the default
+preset, so a report is always producible without any externally registered generator
+(`INV-BASELINE-1`); every further generator is one the operator adds (`INV-GEN-PLUGIN-1`).
 
 **Entries are append-only, but reading resolves to one winner per identity.** Nothing already
 written is ever mutated or deleted; a read instead resolves, per unique identifier, to the single
@@ -77,19 +78,25 @@ reads whatever the ingestion half already holds at request time, and states the 
   time; per-type schema validation; indexing for cross-reference and lookup by identifier, type,
   source, and label; a uniform source contract that lets a new source be added without changing an
   existing one's behavior.
-- **Extent (in), reporting** — requesting a report for a range, in a named or default kind; a
-  baseline kind (a plain chronological rendering) that is always available and depends on nothing
-  optional; further, pluggable report kinds; narrowing a report's scope by label, source, or
-  type — the same dimensions the store indexes; adding a new report kind without changing an
-  existing kind's request or response shape.
+- **Extent (in), reporting** — requesting a report for a range, from a named or default preset or
+  a named generator; a built-in baseline generator (a plain chronological rendering) that is the
+  default preset, is always available, and depends on nothing optional; further, pluggable
+  generators; named presets that bind a generator, its settings, a range, and a narrowing;
+  narrowing a report's scope by label, source, or type — the same dimensions the store indexes,
+  applied by work-report before any generator sees an entry; a report's output being a set of
+  files kept inside one output directory, described by a run record; adding a new generator
+  without changing an existing generator's request or response shape; reporting an invalid
+  generator configuration distinctly from a generator that failed while running.
 - **Extent (out)** — the concrete storage engine, index implementation, or configuration
   mechanism; a source's own internal optimization strategy for repeated pulls (`INV-RANGE-1`); the
-  concrete mechanism any report kind uses to render its content — a template, generated prose, or
-  anything else — and any credential or configuration such a mechanism needs; a report's file
-  format or delivery mechanism; how the two halves surface as commands (`INV-10`).
+  concrete mechanism any generator uses to render its content — a template, generated prose, or
+  anything else — and any credential or configuration such a mechanism needs; the format of the
+  files a generator produces; how a generator is invoked and how its files and description are
+  handed back; how the two halves surface as commands (`INV-10`).
 - **Floor** — work-report speaks in entries, identifiers, sources, types, ranges, latest-wins
-  resolution, reports, kinds, and narrowing — never in SQL schemas, index structures, a named
-  storage or rendering engine, or a command-line shape.
+  resolution, reports, generators, presets, run records, and narrowing — never in SQL schemas,
+  index structures, a named storage or rendering engine, a command-line shape, a wire envelope,
+  exit codes, or the paths and names of files on disk.
 
 ## Realization gaps
 
@@ -98,15 +105,15 @@ has not built yet, one row per gap, each keyed by the element id the gap is agai
 question — the intent below is settled and the build has not caught up (`INV-15`). This set has no
 implementation yet, so every use case is presently a gap.
 
-| Element                     | Intended                                                                                                       | Where the implementation stands                                                                                                                                                                                                                                                   |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `USECASE-ING-PULL`          | pulling from a pluggable source set with per-source graceful degradation and source-decided range optimization | not built                                                                                                                                                                                                                                                                         |
-| `USECASE-ING-QUERY`         | querying by range/id/type/label with latest-wins resolution                                                    | not built                                                                                                                                                                                                                                                                         |
-| `USECASE-ING-ADD-SOURCE`    | adding a source with no change to any existing source's or reader's behavior                                   | not built                                                                                                                                                                                                                                                                         |
-| `USECASE-REP-REPORT`        | a report for a range, in a named or default kind, optionally narrowed by label/source/type                     | not built                                                                                                                                                                                                                                                                         |
-| `USECASE-REP-ADD-GENERATOR` | adding a report kind with no change to any existing kind's request or response shape                           | not built                                                                                                                                                                                                                                                                         |
-| `INV-TYPE-1`                | an entry that does not satisfy its declared type's schema is rejected and reported                             | v1 validates the envelope only; the kind-specific shape of `fields` is documented and tested inside each backend and is not checked by work-report. Upgrade path: each backend's `activity_kinds` vocabulary MAY carry a JSON Schema per kind that work-report validates against. |
-| `INV-ENTITY-1`              | entity-typed entries resolve like any other entry                                                              | no phase produces entity entries; the design's "Ranged `list` queries" section specifies how `entity_queries` would, as an optional later phase. Activity entries do not depend on it.                                                                                            |
+| Element                     | Intended                                                                                                            | Where the implementation stands                                                                                                                                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `USECASE-ING-PULL`          | pulling from a pluggable source set with per-source graceful degradation and source-decided range optimization      | not built                                                                                                                                                                                                                                                                         |
+| `USECASE-ING-QUERY`         | querying by range/id/type/label with latest-wins resolution                                                         | not built                                                                                                                                                                                                                                                                         |
+| `USECASE-ING-ADD-SOURCE`    | adding a source with no change to any existing source's or reader's behavior                                        | not built                                                                                                                                                                                                                                                                         |
+| `USECASE-REP-REPORT`        | a report for a range, from a named or default preset or a named generator, optionally narrowed by label/source/type | not built                                                                                                                                                                                                                                                                         |
+| `USECASE-REP-ADD-GENERATOR` | adding a generator with no change to any existing generator's request or response shape                             | not built                                                                                                                                                                                                                                                                         |
+| `INV-TYPE-1`                | an entry that does not satisfy its declared type's schema is rejected and reported                                  | v1 validates the envelope only; the kind-specific shape of `fields` is documented and tested inside each backend and is not checked by work-report. Upgrade path: each backend's `activity_kinds` vocabulary MAY carry a JSON Schema per kind that work-report validates against. |
+| `INV-ENTITY-1`              | entity-typed entries resolve like any other entry                                                                   | no phase produces entity entries; the design's "Ranged `list` queries" section specifies how `entity_queries` would, as an optional later phase. Activity entries do not depend on it.                                                                                            |
 
 ## External references
 

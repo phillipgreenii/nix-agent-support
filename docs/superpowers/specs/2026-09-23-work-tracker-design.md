@@ -779,6 +779,10 @@ honoring `INV-APPEND-1`: nothing written is ever mutated or deleted.
 
 ### 7.4 Store (WT-D4)
 
+> **Amended 2026-10-20.** The `report` table described below is retired: reports are no longer
+> stored in the database; a report's output files and its per-run record are the record. See
+> [work-report: external report generators and report presets](2026-10-20-work-report-generators-design.md).
+
 SQLite in WAL mode at `store.path`, migrated with a version ladder as `pg-desk`'s is.
 
 | Table         | Contents                                                                                                                                                            |
@@ -808,6 +812,11 @@ reader lacks (`ACTOR-READER`). It is also the seam a future `pg-connector-attent
 plugin or a served page would read.
 
 ### 7.6 Reporting — `work-report report` (INTF-REQUEST, INTF-GENERATE)
+
+> **Amended 2026-10-20.** Report kinds (`baseline`, `narrative`) are replaced by external report
+> generators and named report presets, and the generator output is files plus a run record rather
+> than a stored string. This section describes the superseded design; the current one is
+> [work-report: external report generators and report presets](2026-10-20-work-report-generators-design.md).
 
 ```text
 work-report report [--range <spec>] [--kind baseline|narrative] [--label <l>]... [--source <s>]... [--type <t>]... [--out <file>] [--output json]

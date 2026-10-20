@@ -8,7 +8,8 @@ Who interacts with work-report. Everything it integrates with is an actor — hu
 
 - **`ACTOR-OP` — Operator** <!-- uuid: e9af128c-1447-480e-a076-0eadd18bc1dd --> — a **principal —
   a human or an agent** — that configures sources and triggers a pull for a range (ingestion), and
-  that requests a report for a range, in a kind, optionally narrowed (reporting). One operator,
+  that requests a report for a range, from a preset or a generator, optionally narrowed
+  (reporting). One operator,
   the same across both halves; work-report has no notion of an ingestion-side operator distinct
   from a reporting-side one. Works through `INTF-CONTROL` and `INTF-REQUEST`, both drivable by
   either a human or an agent.
@@ -36,8 +37,10 @@ this repository's own deployment concern.
 ### Reporting
 
 - **`ACTOR-GENERATOR` — Report generator** <!-- uuid: f89661d6-350f-4340-9bfd-d497cd696ecb --> —
-  the implementer of `INTF-GENERATE`: given queried entries and any narrowing, it renders a report
-  for a non-baseline kind. Its rendering mechanism is unspecified and out of this set's floor — a
-  new generator MAY be added without changing any existing kind's request or response shape
-  (`INV-GEN-PLUGIN-1`). The baseline kind (`glossary.md` "Kind") requires no generator at all
-  (`INV-BASELINE-1`).
+  the implementer of `INTF-GENERATE`: given the entries a request resolved to and the range, it
+  produces a set of files and a description of them. It receives only entries already narrowed by
+  work-report and filters nothing itself (`INV-CUSTOM-1`). Its rendering mechanism is unspecified
+  and out of this set's floor — a new generator MAY be added by registering a command that meets
+  the contract, without changing any existing generator's request or response shape
+  (`INV-GEN-PLUGIN-1`). The built-in baseline generator (`glossary.md` "Generator") requires no
+  externally registered generator at all (`INV-BASELINE-1`).
