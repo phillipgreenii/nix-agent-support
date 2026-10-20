@@ -72,6 +72,14 @@ func (c *fakeConfirmer) called() []string {
 	return slices.Clone(c.calls)
 }
 
+// set answers node with conf. The scheduler goroutine may be inside Confirm, so
+// the table is only written under mu.
+func (c *fakeConfirmer) set(node string, conf Confirmation) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.by[node] = conf
+}
+
 func (c *fakeConfirmer) setErr(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -387,7 +395,7 @@ func TestMembership_ADepartureFromACompleteListingIsConfirmedOnceAndCarriesTheSt
 		t.Run(state, func(t *testing.T) {
 			r := newEngineRig(t)
 			r.baselined(t, memA, memB, memC)
-			r.conf.by[memC.id] = Confirmation{State: state}
+			r.conf.set(memC.id, Confirmation{State: state})
 			r.list(true, memA, memB)
 			row := r.runKey(t)
 			if calls := r.conf.called(); !slices.Equal(calls, []string{memC.id}) {
@@ -416,7 +424,7 @@ func TestMembership_ADepartureFromACompleteListingIsConfirmedOnceAndCarriesTheSt
 func TestMembership_AGoneConfirmationAppendsNoLeftQuery(t *testing.T) {
 	r := newEngineRig(t)
 	r.baselined(t, memA, memB, memC)
-	r.conf.by[memC.id] = Confirmation{Gone: true}
+	r.conf.set(memC.id, Confirmation{Gone: true})
 	r.list(true, memA, memB)
 	row := r.runKey(t)
 	if calls := r.conf.called(); len(calls) != 1 {
@@ -443,7 +451,7 @@ func TestMembership_AFailedConfirmationFailsTheRunKeepsThePreviousRowAndIsRetrie
 		t.Fatal("setup: no baseline")
 	}
 	r.clk.Advance(2 * time.Minute)
-	r.conf.by[memC.id] = Confirmation{State: "MERGED"}
+	r.conf.set(memC.id, Confirmation{State: "MERGED"})
 	r.conf.setErr(errors.New("confirm: origin said no"))
 	r.list(true, memA, memB)
 	if _, err := r.runner.Fetch(ctx, Key{Name: "mine"}); err == nil || !strings.Contains(err.Error(), "origin said no") {
@@ -729,4 +737,34 @@ func TestMembershipPlan_ReadsTheAliasTableOnceForAllPreviousMembers(t *testing.T
 	if want := []string{"query_membership_unparsable_id", "query_membership_no_alias"}; !slices.Equal(lg.seen(), want) {
 		t.Errorf("log = %v, want %v", lg.seen(), want)
 	}
+}
+
+// The fixtures are swapped by the test goroutine while the scheduler goroutine
+// is inside them (the fake clock's Advance makes a refresh due, and the
+// scheduler's own timer runs it). Both fakes MUST take their lock to swap, or
+// the race detector fires here regardless of scheduling luck.
+func TestFixtures_SwapWhileTheSchedulerGoroutineReadsThem(t *testing.T) {
+	gh := &fakeGH{answer: func(call) ([]byte, error) { return nil, nil }}
+	conf := &fakeConfirmer{by: map[string]Confirmation{}}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_, _ = gh.Run(context.Background(), "-f", "q=x")
+			_, _ = conf.Confirm(context.Background(), memC.id, "")
+		}
+	}()
+	for i := range 500 {
+		gh.setAnswer(func(call) ([]byte, error) { return listBody(true, memA), nil })
+		conf.set(memC.id, Confirmation{State: fmt.Sprint(i)})
+	}
+	close(stop)
+	wg.Wait()
 }
