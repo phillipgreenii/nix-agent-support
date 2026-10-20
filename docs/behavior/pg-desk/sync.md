@@ -41,8 +41,8 @@ claimed review request or cycle is not `open`), for example the list
 `list --type task --title-contains process-feedback: --status open,in_progress,blocked`,
 `list --type task --title-contains review-pr: --status open,in_progress,blocked`
 (`pg-connector-issue-beads` unions a list of expressions by id). `pg-desk doctor`'s
-`work-beads reach` line warns when the listing holds anchors and no child while the ledger holds
-child rows. Beads a worker improvised under an anchor (for example "Human: unblock ...") match no
+`work-beads reach` line, which warned when the listing held anchors and no child while the ledger held
+child rows, was removed with the ledger (`pg2-903lz`). Beads a worker improvised under an anchor (for example "Human: unblock ...") match no
 title shape; they reach the cascade only if the query is widened to every non-closed bead, and the
 `issue-beads-work` change feed that shares the query name would then fire `run issue` for beads
 that are not PR work, which it reports as an error, so such a deployment SHOULD give the feed its

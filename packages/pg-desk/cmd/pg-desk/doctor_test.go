@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -620,81 +623,121 @@ func TestDoctorReportsRepeatedDegradedHydrations(t *testing.T) {
 	}
 }
 
-// reachFixtureFanOut lists one anchor and, when withChild, one open review
-// request for the same PR.
-func reachFixtureFanOut(withChild bool) string {
-	anchor := `{"id":"bd-1","title":"o/r#5: t","state":"open","metadata":{"repo":"o/r","pr_number":"5"}}`
-	if !withChild {
-		return `{"entities":[` + anchor + `]}`
+// bead pg2-903lz: the ledger-based `work-beads reach` check was removed (the
+// cutover drops the ledger, so on a version-2 store it could only ever be
+// skipped). This guards that a cut-over store runs every remaining store
+// check and that none is reported as skipped or fails on a removed table.
+func TestDoctorRunsEveryStoreCheckOnACutOverStore(t *testing.T) {
+	newSchemaDoctor(t, openTestConfig("o/r"))
+
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor on a healthy cut-over store: %v\n%s", err, stdout)
 	}
-	return `{"entities":[` + anchor + `,{"id":"bd-1.2","title":"review-pr: o/r#5","state":"open","parent":"bd-1","metadata":{"repo":"o/r","pr_number":"5"}}]}`
+	for _, want := range []string{"sync_error rows: 0", "stranded cycles: 0", "change_flow:"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
+	}
+	for _, bad := range []string{"skipped", "no such table", "ledger", "work-beads reach"} {
+		if strings.Contains(stdout, bad) {
+			t.Errorf("stdout contains %q, a check read a removed table or was skipped:\n%s", bad, stdout)
+		}
+	}
 }
 
-func seedChildLedgerRow(t *testing.T, seed *store.Store) {
+// bead pg2-903lz: a serve that accepted the connection but is slow is not
+// unreachable, so doctor reports it and exits 0.
+func TestDoctorReportsSlowServeWithoutFailing(t *testing.T) {
+	withDoctorStore(t, "o/r")
+	stubDoctorSeams(t, nil, nil, &serveSlowError{detail: "answered in 4.55s (over 3s)"})
+
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor: %v, want a slow serve to be reported, not failed\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "serve reachable (127.0.0.1:9818): slow (answered in 4.55s") {
+		t.Errorf("stdout does not report the slow serve:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "serve reachable (127.0.0.1:9818): ok") || strings.Contains(stdout, "FAIL") {
+		t.Errorf("slow must be distinct from ok and FAIL:\n%s", stdout)
+	}
+}
+
+// The probe tests below run against a REAL listener with a real delayed
+// handler (bead pg2-903lz); no part of the HTTP client is mocked.
+
+func probeFixtureAddr(t *testing.T, h http.HandlerFunc) string {
 	t.Helper()
-	if err := seed.UpsertLedger(store.LedgerEntry{
-		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#5",
-		Kind: "review-request", BeadID: "bd-1.2",
-	}); err != nil {
-		t.Fatalf("seed ledger: %v", err)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return strings.TrimPrefix(srv.URL, "http://")
+}
+
+func TestProbeServeFastAnswerIsReachable(t *testing.T) {
+	addr := probeFixtureAddr(t, func(w http.ResponseWriter, r *http.Request) {})
+	if err := probeServe(addr, 5*time.Second, 2*time.Second); err != nil {
+		t.Fatalf("probeServe: %v, want nil", err)
 	}
 }
 
-// pg2-6w396: a work-beads listing that carries anchors but no child, while
-// the ledger holds a child row, means the deployed query excludes type task.
-// doctor warns and still exits 0 (an observability line, not a gate).
-func TestDoctorWorkBeadsReachWarnsWhenListingHasNoChildren(t *testing.T) {
-	seed, openFresh := openTestStore(t)
-	withOpenSeams(t, openTestConfig("o/r"), openFresh)
-	stubDoctorSeams(t, nil, nil, nil)
-	doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byte, error) {
-		return []byte(reachFixtureFanOut(false)), nil
-	}
-	seedChildLedgerRow(t, seed)
-
-	stdout, err := runDoctorCmd(t)
-	if err != nil {
-		t.Fatalf("doctor: %v, want a warning only", err)
-	}
-	if !strings.Contains(stdout, "work-beads reach: WARN (1 anchors") || !strings.Contains(stdout, "ledger holds 1 child rows") {
-		t.Errorf("stdout does not warn about the unreachable children: %s", stdout)
+// Any status counts as reachable (serve's 503 gate still means it answered).
+func TestProbeServeAnyStatusIsReachable(t *testing.T) {
+	addr := probeFixtureAddr(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) })
+	if err := probeServe(addr, 5*time.Second, 2*time.Second); err != nil {
+		t.Fatalf("probeServe: %v, want nil for a 503", err)
 	}
 }
 
-func TestDoctorWorkBeadsReachOkWhenListingHasChildren(t *testing.T) {
-	seed, openFresh := openTestStore(t)
-	withOpenSeams(t, openTestConfig("o/r"), openFresh)
-	stubDoctorSeams(t, nil, nil, nil)
-	doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byte, error) {
-		return []byte(reachFixtureFanOut(true)), nil
-	}
-	seedChildLedgerRow(t, seed)
-
-	stdout, err := runDoctorCmd(t)
-	if err != nil {
-		t.Fatalf("doctor: %v", err)
-	}
-	if !strings.Contains(stdout, "work-beads reach: ok (1 anchors, 1 child beads listed)") {
-		t.Errorf("stdout does not report the reachable children: %s", stdout)
+// A daemon that answers, but only after the slow threshold, is slow, not
+// failed: the 4.55 s /metrics response that failed the old 3 s deadline.
+func TestProbeServeLateAnswerIsSlowNotUnreachable(t *testing.T) {
+	addr := probeFixtureAddr(t, func(w http.ResponseWriter, r *http.Request) { time.Sleep(300 * time.Millisecond) })
+	err := probeServe(addr, 5*time.Second, 100*time.Millisecond)
+	var slow *serveSlowError
+	if !errors.As(err, &slow) {
+		t.Fatalf("probeServe: %v, want a *serveSlowError", err)
 	}
 }
 
-// With no child row in the ledger there is nothing to contradict the
-// listing, so an anchor-only listing is not a warning.
-func TestDoctorWorkBeadsReachOkWhenLedgerHasNoChildren(t *testing.T) {
-	_, openFresh := openTestStore(t)
-	withOpenSeams(t, openTestConfig("o/r"), openFresh)
-	stubDoctorSeams(t, nil, nil, nil)
-	doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byte, error) {
-		return []byte(reachFixtureFanOut(false)), nil
+// A daemon that accepted the connection but never answers within the deadline
+// is slow too: the connection was made, so it is not unreachable.
+func TestProbeServeNoAnswerWithinDeadlineIsSlowNotUnreachable(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	addr := probeFixtureAddr(t, func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	})
+	err := probeServe(addr, 200*time.Millisecond, 100*time.Millisecond)
+	var slow *serveSlowError
+	if !errors.As(err, &slow) {
+		t.Fatalf("probeServe: %v, want a *serveSlowError", err)
 	}
+	if !strings.Contains(slow.Error(), "no response within") {
+		t.Errorf("detail %q does not say no response arrived", slow.Error())
+	}
+}
 
-	stdout, err := runDoctorCmd(t)
+// A refused connection is the only unreachable case.
+func TestProbeServeRefusedConnectionIsUnreachable(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("doctor: %v", err)
+		t.Fatal(err)
 	}
-	if !strings.Contains(stdout, "work-beads reach: ok (1 anchors, 0 child beads listed)") {
-		t.Errorf("stdout: %s", stdout)
+	addr := l.Addr().String()
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = probeServe(addr, 5*time.Second, 2*time.Second)
+	if err == nil {
+		t.Fatal("probeServe: nil, want an error for a closed port")
+	}
+	var slow *serveSlowError
+	if errors.As(err, &slow) {
+		t.Fatalf("probeServe: %v, a refused connection must not be reported as slow", err)
 	}
 }
 

@@ -175,7 +175,8 @@ validate` passes; `serve` is reachable; that no row carries a recorded `sync_err
 such row fails `doctor`, and each is listed with its error and its retry indicator — still
 retrying, with retries used out of the bound and the next retry time; exhausted; or
 non-transient — see [`sync.md`](sync.md)'s "Automatic retry"); and the stranded-cycle report
-formerly produced by `pr-pool reconcile`. A `work-beads reach` line (`pg2-6w396`) reports whether the deployed `work-beads` query lists any feedback-cycle or review-request bead: it warns, and never fails `doctor`, when the listing holds anchors and no such bead while the ledger holds child rows, because the query then probably filters to `--type merge-request` and excludes the `task`-typed children sync adopts (see [`sync.md`](sync.md)'s "Adoption"). `pg-connector config validate`'s own
+formerly produced by `pr-pool reconcile`.
+`serve` reachability fails `doctor` only when `serve` is unreachable (a refused connection, or none made before the deadline); a `serve` that accepted the connection but answered slowly, or not before the generous probe deadline, is reported as `slow` and never fails `doctor`, since a loaded host can take several seconds to answer one scrape (`pg2-903lz`). The ledger-based `work-beads reach` line (`pg2-6w396`) was removed with the ledger, which the cutover drops: it guarded sync's adoption and closure cascade, which are removed too, and on a version-2 store it could only be skipped. `pg-connector config validate`'s own
 query-name-coverage check (a config-authoring signal comparing a backend's declared query names
 against its peers of the same type, bead `pg2-2j5ac.28.1`) is informational-only as of
 `pg2-rnnfz` — it does not affect that check's pass/fail verdict, so a query-coverage gap alone

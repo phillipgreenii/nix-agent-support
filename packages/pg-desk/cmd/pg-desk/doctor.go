@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"os/exec"
 	"sort"
@@ -42,17 +43,59 @@ var doctorConfigValidate = func(ctx context.Context) error {
 	return exec.CommandContext(ctx, "pg-connector", "config", "validate").Run()
 }
 
+// Serve probe timing. serve's /metrics handler is cheap, but on a loaded host
+// (a sweep plus other agents) one scrape was measured at 4.55 s, so a short
+// client deadline reported a healthy daemon as failed (bead pg2-903lz).
+// doctorServeTimeout is therefore generous, and doctorServeSlowAfter is the
+// latency above which an answered probe is still reported as slow.
+const (
+	doctorServeTimeout   = 30 * time.Second
+	doctorServeSlowAfter = 3 * time.Second
+)
+
+// serveSlowError means serve ACCEPTED the connection but was slow to answer:
+// either it answered after doctorServeSlowAfter, or it did not answer within
+// the probe deadline. It is distinct from every other probe error (a refused
+// or timed-out connection), which means serve is unreachable. Only the
+// unreachable case fails the check; slow is reported and never gates.
+type serveSlowError struct{ detail string }
+
+func (e *serveSlowError) Error() string { return e.detail }
+
 // doctorServeReachable reports whether an HTTP round trip to addr
 // succeeds — ANY status code counts as reachable (serve's own
 // 503-until-first-interpretation gate still means the process answered);
-// only a connection-level failure counts as unreachable.
+// only a connection-level failure counts as unreachable. A connection that
+// was accepted but answered slowly (or not before the deadline) returns a
+// *serveSlowError, which doctor reports without failing.
 var doctorServeReachable = func(addr string) error {
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("http://" + addr + "/metrics")
+	return probeServe(addr, doctorServeTimeout, doctorServeSlowAfter)
+}
+
+// probeServe is doctorServeReachable's testable core: timeout bounds the whole
+// request and slowAfter is the latency past which a successful answer is
+// still reported as slow.
+func probeServe(addr string, timeout, slowAfter time.Duration) error {
+	connected := false
+	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected = true }}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), http.MethodGet, "http://"+addr+"/metrics", nil)
 	if err != nil {
 		return err
 	}
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if connected && errors.Is(err, context.DeadlineExceeded) {
+			return &serveSlowError{detail: fmt.Sprintf("accepted the connection but sent no response within %s", timeout)}
+		}
+		return err
+	}
 	_ = resp.Body.Close()
+	if elapsed := time.Since(start); elapsed > slowAfter {
+		return &serveSlowError{detail: fmt.Sprintf("answered in %s (over %s)", elapsed.Round(10*time.Millisecond), slowAfter)}
+	}
 	return nil
 }
 
@@ -185,56 +228,6 @@ func doctorStrandedCycles(ctx context.Context, cfg *config.Config, st *store.Sto
 	return stranded, nil
 }
 
-// doctorWorkBeadsReach is the pg2-6w396 guard that the deployed `work-beads`
-// query actually reaches the child beads sync adopts and cascades over. The
-// query is per-machine config, not code, and the design's own example listed
-// only `--type merge-request`, while cycle and review-request beads are
-// created as type task (internal/sync/rules.go): with such a query the
-// listing carries anchors and never a child, so adoption's crash-safety
-// fallback and the closure cascade over improvised children (pg2-kftf9.7)
-// silently depend on the ledger alone.
-//
-// It reads the same fan-out result as doctorStrandedCycles and counts the
-// anchors and the feedback-cycle / review-request beads in it. It reports
-// reached=false (a warning, never a gate) when the listing holds at least one
-// anchor and no child while the ledger holds at least one child row: pg-desk
-// has minted children, yet none appears among the open beads. That can also be
-// a tracker where every child is genuinely closed, which is why this is an
-// observability line and not a failure.
-func doctorWorkBeadsReach(ctx context.Context, cfg *config.Config, st *store.Store) (anchors, children, ledgerChildren int, reached bool, err error) {
-	raw, err := doctorFanOutIssueList(ctx, cfg)
-	if err != nil {
-		return 0, 0, 0, false, err
-	}
-	var fanOut doctorWorkBeadsFanOut
-	if err := json.Unmarshal(raw, &fanOut); err != nil {
-		return 0, 0, 0, false, fmt.Errorf("decode work-beads fan-out: %w", err)
-	}
-	for _, e := range fanOut.Entities {
-		kind, _, _, ok := sync.ClassifyBead(e.Title, e.Metadata)
-		if !ok {
-			continue
-		}
-		switch kind {
-		case sync.KindAnchor:
-			anchors++
-		case sync.KindFeedbackCycle, sync.KindReviewRequest:
-			children++
-		}
-	}
-	rows, err := st.ListLedger()
-	if err != nil {
-		return 0, 0, 0, false, fmt.Errorf("read ledger: %w", err)
-	}
-	for _, r := range rows {
-		if (r.Kind == sync.KindFeedbackCycle || r.Kind == sync.KindReviewRequest) && r.BeadID != "" {
-			ledgerChildren++
-		}
-	}
-	reached = !(anchors > 0 && children == 0 && ledgerChildren > 0)
-	return anchors, children, ledgerChildren, reached, nil
-}
-
 // doctorSyncErrors lists every interpretation row with a non-empty
 // sync_error as "entity: error [retry indicator]" (pg2-kftf9.5; the
 // indicator is bead pg2-xb6fs's, see describeSyncRetry).
@@ -333,7 +326,12 @@ func runDoctor(cmd *cobra.Command) error {
 	if cfg != nil && cfg.Serve.Addr != "" {
 		addr = cfg.Serve.Addr
 	}
-	if err := doctorServeReachable(addr); err != nil {
+	var slow *serveSlowError
+	if err := doctorServeReachable(addr); errors.As(err, &slow) {
+		// Slow is not unreachable: the process accepted the connection, so a
+		// loaded host must not fail doctor (bead pg2-903lz).
+		fmt.Fprintf(w, "serve reachable (%s): slow (%v)\n", addr, slow)
+	} else if err != nil {
 		fmt.Fprintf(w, "serve reachable (%s): FAIL (%v)\n", addr, err)
 		failures = append(failures, "serve reachable")
 	} else {
@@ -370,16 +368,7 @@ func runDoctor(cmd *cobra.Command) error {
 		// unlike stranded cycles this IS a gate (exit 1) so an alert can
 		// hang off the doctor exit code.
 		syncErrs, syncErrCheck := doctorSyncErrors(st)
-		reachAnchors, reachChildren, reachLedger, reachOK, reachErr := doctorWorkBeadsReach(ctx, cfg, st)
 		_ = st.Close()
-		switch {
-		case reachErr != nil:
-			fmt.Fprintf(w, "work-beads reach: skipped (%v)\n", reachErr)
-		case !reachOK:
-			fmt.Fprintf(w, "work-beads reach: WARN (%d anchors and no feedback-cycle or review-request bead listed, though the ledger holds %d child rows; the work-beads query probably excludes type task, so adoption and the closure cascade see only the ledger: see sync.md)\n", reachAnchors, reachLedger)
-		default:
-			fmt.Fprintf(w, "work-beads reach: ok (%d anchors, %d child beads listed)\n", reachAnchors, reachChildren)
-		}
 		if syncErrCheck != nil {
 			fmt.Fprintf(w, "sync_error rows: FAIL (%v)\n", syncErrCheck)
 			failures = append(failures, "sync_error rows")
