@@ -71,8 +71,15 @@ let
   reclaimerStub =
     { lib, ... }:
     {
-      options.phillipgreenii.programs.pg-disk-reclaimer.enable =
-        lib.mkEnableOption "pg-disk-reclaimer (stub)";
+      options.phillipgreenii.programs.pg-disk-reclaimer = {
+        enable = lib.mkEnableOption "pg-disk-reclaimer (stub)";
+        # Packet B: the modules contribute a registry item; the real option's schema
+        # is exercised by tests/tmp-root-registry.nix.
+        registryEntries = lib.mkOption {
+          type = lib.types.listOf lib.types.attrs;
+          default = [ ];
+        };
+      };
     };
 
   # Stubs the real CETA module needs (the same set test-ceta-extra-temp-roots uses).

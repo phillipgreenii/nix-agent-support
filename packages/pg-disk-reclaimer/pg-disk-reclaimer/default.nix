@@ -25,8 +25,21 @@ mkBashScript {
   # the shipped binary). Without this, `check-pg-disk-reclaimer`'s sandboxed
   # bats run has no jq/timeout and every pgdr_* test that shells out to them
   # fails.
+  #
+  # tests/test-pg-disk-reclaimer-tmp-sweep.bats (bead pg2-rym7f) exercises the
+  # REAL find/rm/mv/ps/lsof against throwaway roots, builds a unix socket with
+  # python3, and shellchecks pgdr-tmp-sweep.bash. ps and lsof may be unusable in
+  # a sandbox; the suite then skips the cases that need them (the sweep fails
+  # closed without them), so run it outside the sandbox too.
   testDeps = [
     pkgs.jq
     pkgs.coreutils
-  ];
+    pkgs.findutils
+    pkgs.gnugrep
+    pkgs.gnused
+    pkgs.lsof
+    pkgs.python3
+    pkgs.shellcheck
+  ]
+  ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
 }

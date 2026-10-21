@@ -46,4 +46,19 @@
   level3Default = 60;
   level1Doc = "Default 1440 (24 h): finished temp work, nothing to regenerate.";
   level3Doc = "Default 60 (1 h): build output is regenerable locally but a refill costs recompilation.";
+
+  # Registry item (packet B), consumed by lib/tmp-root.nix. The reasons below are
+  # the justifying comments docs/aggressiveness-scale.md requires for a level
+  # whose choice is not obvious.
+  sweepDepth = 1;
+  sweepLiveness = "none";
+  itemDescription = "top-level temp and build entries idle past the cutoff";
+  # Level 1 (tidy): finished temp work. An entry untouched for the whole idle
+  # period is leftover and nothing needs regenerating.
+  level1Reason = "finished temp work, nothing to regenerate";
+  # Level 3 (deep): build output is regenerable locally but a refill costs
+  # recompilation, the scale's reference case for level 3. It stays at 3, not 4,
+  # because the liveness guards (argv path, cwd, open files, sockets) cover the
+  # concern that the removal touches live state.
+  level3Reason = "build output is regenerable locally but a refill costs recompilation";
 } { inherit config options; }

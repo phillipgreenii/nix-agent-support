@@ -8111,6 +8111,64 @@
                     touch $out
                   '';
 
+              # test-tmp-root-registry (bead pg2-rym7f, packet B of the build_tmp design): the
+              # pg-disk-reclaimer registry items the build-tmp and claude-code-tmp modules
+              # contribute. Eval cases (tests/tmp-root-registry.nix) run against the REAL
+              # pg-disk-reclaimer module; tests/tmp-root-registry.bats then drives the REAL
+              # `pg-disk-reclaimer` CLI (validate, level selection, --apply without a prompt)
+              # against the rendered registry.json files and throwaway roots. The sweep
+              # library itself is tested in the package's own bats suite
+              # (packages/pg-disk-reclaimer/pg-disk-reclaimer/tests). The nix sandbox is
+              # GNU-only and may deny ps/lsof, in which case the bats cases skip (the sweep
+              # fails closed without them); run them outside the sandbox too.
+              test-tmp-root-registry =
+                let
+                  r = import ./tests/tmp-root-registry.nix { inherit lib pkgs; };
+                  hostPathFree = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./lib/tmp-root.nix
+                      ./home/programs/build-tmp
+                      ./home/programs/claude-code-tmp
+                      ./packages/pg-disk-reclaimer/pg-disk-reclaimer/pgdr-tmp-sweep.bash
+                      ./packages/pg-disk-reclaimer/pg-disk-reclaimer/docs
+                    ];
+                  };
+                in
+                pkgs.runCommand "test-tmp-root-registry"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.bash
+                      pkgs.coreutils
+                      pkgs.findutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.jq
+                      pkgs.lsof
+                      pkgs.pg-disk-reclaimer
+                    ]
+                    ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
+                    REG_BOTH = r.artifacts.regBoth;
+                    REG_BUILD = r.artifacts.regBuild;
+                    REG_CLAUDE = r.artifacts.regClaude;
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "tmp-root registry eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
+                      exit 1
+                    ''}
+                    echo "ok: ${toString r.caseCount} eval cases"
+                    # No hard-coded host path in generic code or docs.
+                    if grep -rn '/Volumes/gitrepos' ${hostPathFree}/lib ${hostPathFree}/home ${hostPathFree}/packages; then
+                      echo "a generic file names the host volume path" >&2
+                      exit 1
+                    fi
+                    bats --tap ${./tests/tmp-root-registry.bats} >registry.tap || { cat registry.tap; exit 1; }
+                    cat registry.tap
+                    touch $out
+                  '';
+
               # test-pg-wi-flow-module (bead tc-9ddu3.1.5, extended by
               # tc-9ddu3.1.17): proves home/programs/pg-wi-flow/default.nix's
               # paths.defaults wiring actually evaluates and renders the

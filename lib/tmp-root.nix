@@ -8,7 +8,10 @@
 #   * the activation step that creates the directory (0700) plus its marker,
 #   * the guarded shell snippet that exports the environment variables,
 #   * the CETA contribution (the root as BOTH a temp root and a read-write
-#     root) and the pg-disk-reclaimer registry-dependency assertion.
+#     root) and the pg-disk-reclaimer registry-dependency assertion,
+#   * the pg-disk-reclaimer REGISTRY ITEM (packet B, bead pg2-rym7f): one item per
+#     root, two variants (aggressiveness 1 and 3), whose commands only interpolate
+#     into the one sweep library function (design D13).
 #
 # `mkModule` returns the module body for a module of the form
 #
@@ -108,6 +111,17 @@ let
       level3Default,
       level1Doc,
       level3Doc,
+      # --- the registry item (packet B) ---
+      # tree depth the sweep judges (1: top-level entries; 3: <a>/<b>/<c> units)
+      sweepDepth,
+      # liveness mode of pgdr_tmp_sweep: "none" or "claude-session"
+      sweepLiveness,
+      # one-line description of what the item reclaims
+      itemDescription,
+      # why aggressiveness 1 and 3 are the right levels; rendered into the variant
+      # descriptions AND kept as the justifying comment the scale document demands
+      level1Reason,
+      level3Reason,
     }:
     { config, options }:
     let
@@ -127,6 +141,49 @@ let
         label = name;
         path = rootPath;
         vars = envVars cfg;
+      };
+
+      # The sweep library, sourced by ABSOLUTE store path (launchd has no per-user
+      # profile). It lives in the pg-disk-reclaimer package directory so that
+      # package's bats suite tests it; interpolating the path copies just that file.
+      sweepLib = "${../packages/pg-disk-reclaimer/pg-disk-reclaimer/pgdr-tmp-sweep.bash}";
+
+      # `:` then a ( ) SUBSHELL (design D7): the CLI runs removeCommand by a bare
+      # in-process eval, so a failing guard must not exit the CLI and no assignment
+      # may clobber cmd_reclaim's locals. The idle minutes come from the module
+      # options, so changing an option changes the command.
+      sweepCommand =
+        mode: minutes:
+        ": ; ( . ${lib.escapeShellArg sweepLib} && pgdr_tmp_sweep ${mode} ${lib.escapeShellArg rootPath} ${marker} ${basename} ${toString minutes} ${toString sweepDepth} ${sweepLiveness} )";
+
+      variant = level: minutes: reason: {
+        aggressiveness = level;
+        variantDescription = "idle ${toString minutes} min: ${reason}";
+        dryRunCommand = sweepCommand "dry" minutes;
+        removeCommand = sweepCommand "apply" minutes;
+      };
+
+      registryItem = {
+        id = name;
+        description = "${name}: ${itemDescription}";
+        path = rootPath;
+        # Sizing a root of many thousand entries can outrun the 10 s display / 60 s
+        # size defaults; a timeout labels the size unknown but removal still runs.
+        # The raised ceiling applies to both `list` and `reclaim`. `path` is kept
+        # free of shell metacharacters by the assertion below (it is expanded
+        # unquoted by the CLI).
+        displayCommand = "du -sh ${rootPath}";
+        displayTimeoutSeconds = 600;
+        # `du` measures the whole root, but a sweep removes only what is idle.
+        sizeKind = "upper_bound";
+        sizeMethod = "du-whole-root";
+        sizeBasis = "du -sk over the whole root, which also counts entries that are not idle, are live, or are exempt, so a sweep frees at most this much.";
+        variants = [
+          # Level 1 (tidy): see the module's level1Reason comment
+          (variant 1 cfg.level1Minutes level1Reason)
+          # Level 3 (deep): see the module's level3Reason comment
+          (variant 3 cfg.level3Minutes level3Reason)
+        ];
       };
     in
     {
@@ -168,6 +225,12 @@ let
               message = "${prefix}.path (\"${cfg.path}\") must not contain a '.' or '..' segment.";
             }
             {
+              # The CLI expands `path` unquoted (du, eval); keep it free of spaces
+              # and shell metacharacters.
+              assertion = builtins.match "[A-Za-z0-9_./+@-]+" cfg.path != null;
+              message = "${prefix}.path (\"${cfg.path}\") may only contain letters, digits and _ . / + @ - (the registry expands it unquoted).";
+            }
+            {
               assertion = builtins.baseNameOf cfg.path == basename;
               message = "${prefix}.path (\"${cfg.path}\") must end in \"${basename}\": the sweep refuses any other basename.";
             }
@@ -206,6 +269,14 @@ let
         # CETA's module is imported (its options declared) and this root is
         # enabled; optionalAttrs because a definition of an undeclared option
         # errors even under mkIf false. List options merge with consumer values.
+        # Registry item (packet B, design D14): contributed only when the
+        # pg-disk-reclaimer module is imported (its option declared) and this root
+        # is enabled; the assertion above makes enabling it without the reclaimer
+        # an error. optionalAttrs for the same undeclared-option reason as below.
+        (lib.optionalAttrs hasReclaimer {
+          phillipgreenii.programs.pg-disk-reclaimer.registryEntries = lib.mkIf cfg.enable [ registryItem ];
+        })
+
         (lib.optionalAttrs hasCeta {
           phillipgreenii.programs.claude-extended-tool-approver = lib.mkIf cfg.enable {
             extraTempRoots = [ rootPath ];
