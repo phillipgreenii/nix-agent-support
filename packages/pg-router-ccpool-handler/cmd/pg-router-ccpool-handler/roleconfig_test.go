@@ -47,7 +47,7 @@ func TestLoadConfig_acceptsValidPermissionMode(t *testing.T) {
 }
 
 // TestLoadConfig_ignoresRetiredPRToolKey proves a launch-config JSON written
-// before pg-pr was retired (still carrying the removed "prTool" key) decodes
+// before the PR tool was retired (still carrying the removed "prTool" key) decodes
 // cleanly and adds no Bash(<prTool>:*) grant (bead pg2-k9vmd): the removed
 // field must not turn an un-migrated config into a decode failure.
 func TestLoadConfig_ignoresRetiredPRToolKey(t *testing.T) {

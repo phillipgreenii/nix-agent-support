@@ -250,7 +250,7 @@ func TestHasLabel_fromShow(t *testing.T) {
 }
 
 func TestList_parsesCreatedByAndArgv(t *testing.T) {
-	fr := &fakeRunner{out: `[{"id":"zr-1","created_by":"pgii-pool__worker"},{"id":"zr-2","created_by":"pg-pr daemon"}]`}
+	fr := &fakeRunner{out: `[{"id":"zr-1","created_by":"pgii-pool__worker"},{"id":"zr-2","created_by":"legacy daemon"}]`}
 	got, err := List(context.Background(), fr, "--all")
 	if err != nil {
 		t.Fatal(err)

@@ -83,4 +83,3 @@ Realization gaps for the build's one remaining residual.
 - **`ccpool`** — the CLI a ccpool-backed handler session drives.
 - **`bd` (beads)** — the CLI/store a beads-backed source reads, and a handler session's completion
   policy may write back to.
-- **`pg-pr`** — the CLI a handler session's ACL check consults.

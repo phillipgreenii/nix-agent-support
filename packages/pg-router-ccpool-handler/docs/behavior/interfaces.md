@@ -116,13 +116,10 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   beads-backed source querying `bd` for events, and a handler session's completion policy writing
   a result back to `bd`. **Counterparty:** `bd` (boundary). **Initiator:** this module.
   **Multiplicity:** one query surface plus one write path per handler session that closes a bead.
-- **`INTF-CCH-PGPR`** <!-- uuid: 8676b04d-3f8a-49cb-973d-1607871c1dba --> — a handler session's ACL
-  check consulting `pg-pr`. **Counterparty:** `pg-pr` (boundary). **Initiator:** this module.
-  **Multiplicity:** zero or more per handler session, depending on configuration.
 
-None of these three crossings is declared to pg-router's core in any form — per the boundary
+None of these two crossings is declared to pg-router's core in any form — per the boundary
 principle pg-router's own README states, a `command`-backed handler session's argv is a
-pass-through the core never reads, and these three are exactly the concrete tools that pass-through
-may resolve to once configured. `INTF-CCH-CCPOOL`/`INTF-CCH-BEADS`/`INTF-CCH-PGPR` are this
-module's own decision, not the core's, and adding a fourth backing tool never touches
+pass-through the core never reads, and these two are exactly the concrete tools that pass-through
+may resolve to once configured. `INTF-CCH-CCPOOL`/`INTF-CCH-BEADS` are this
+module's own decision, not the core's, and adding a third backing tool never touches
 `packages/pg-router`.

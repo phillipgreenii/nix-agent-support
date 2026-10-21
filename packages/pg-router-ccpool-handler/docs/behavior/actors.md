@@ -22,4 +22,3 @@ not as a system actor with its own catalog, because its internals are out of thi
   principle" pg-router's own README states, which binds this module the same way it binds the core).
 - **`bd` (beads)** — the issue-tracker CLI/store a beads-backed source queries and a handler
   session's completion policy may write to.
-- **`pg-pr`** — the CLI a handler session's ACL check consults.

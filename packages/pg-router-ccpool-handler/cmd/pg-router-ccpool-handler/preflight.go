@@ -17,8 +17,8 @@ import (
 // checks ahead of it. This module's `query` subcommand runs precheck (bd
 // reachability + prefix match) before it queries beads for real — see
 // query.go's runQuery. The former third R14 check (a `<prTool> config show`
-// self-login lookup) was dead code with no caller and was removed with pg-pr
-// (bead pg2-k9vmd).
+// self-login lookup) was dead code with no caller and was removed with the
+// retired PR tool (bead pg2-k9vmd).
 
 // precheck asserts bd is reachable from repoRoot and resolves the expected
 // store. It does NOT require a local .beads dir at repoRoot: bd is

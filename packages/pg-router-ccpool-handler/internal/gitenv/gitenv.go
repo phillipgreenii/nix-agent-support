@@ -5,7 +5,7 @@
 // exec.Cmd.Dir, or an explicit repository path argument — is NOT scoped to
 // that directory. Git's repository discovery consults the ENVIRONMENT first,
 // so GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE outrank all three. Proven
-// 2026-08-27 (pg2-lx41y for pg-pr; full mechanism write-up on pg2-67h4y)
+// 2026-08-27 (pg2-lx41y; full mechanism write-up on pg2-67h4y)
 // under a leaked GIT_DIR:
 //
 //	git -C <tmpdir> rev-parse --git-dir        -> the LEAKED repo
@@ -48,9 +48,8 @@ import (
 // so a variable this list has never heard of (forgotten today, or invented by
 // a future git release) is excluded automatically. Same allowlist-inversion
 // design already used in this workspace for the identical defect class:
-// pg-pr's internal/gitenv (pg2-lx41y), claude-extended-tool-approver's
-// gh.hermeticGitEnviron (pg2-2pokz), and ccpool's gitfacet.hermeticEnviron
-// (pg2-aqpvr).
+// claude-extended-tool-approver's gh.hermeticGitEnviron (pg2-2pokz) and
+// ccpool's gitfacet.hermeticEnviron (pg2-aqpvr).
 const gitVarPrefix = "GIT_"
 
 // inheritableGitVars is the ALLOWLIST of GIT_-prefixed variables a child

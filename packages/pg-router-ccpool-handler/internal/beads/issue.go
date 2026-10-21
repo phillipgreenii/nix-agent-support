@@ -211,7 +211,7 @@ func UnclaimHeld(ctx context.Context, r Runner, id string) error {
 // — mirroring the legacy beadsbridge's EnsureDraftReviewMineLabel handling of
 // the same transition. Clearing the assignee returns the bead to the pool for
 // a fresh worker. --set-metadata is a per-key merge, so the numeric
-// pr_number/repo keys are preserved and MatchReviewPR keeps matching
+// pr_number/repo keys are preserved, so the bead keeps identifying
 // repo#number.
 func ReopenReview(ctx context.Context, r Runner, id, headSHA, branch, ownership string) error {
 	_, err := r.Run(ctx, "update", id, "--status=open",

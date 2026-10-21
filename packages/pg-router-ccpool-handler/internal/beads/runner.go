@@ -1,5 +1,5 @@
-// Package beads is pg-router's local bd client. It copies pg-pr's Runner/CLIRunner
-// pattern rather than importing pg-pr's heavy module. The CLIRunner's Dir/Env
+// Package beads is pg-router's local bd client. It is a small Runner/CLIRunner
+// pattern rather than a heavyweight module import. The CLIRunner's Dir/Env
 // carry the env scrub (the bash's top-level `unset BEADS_DIR WORKSPACE_ROOT`),
 // so pg-router's own bd resolves the monorepo store from Dir, ignoring any ambient
 // BEADS_DIR/WORKSPACE_ROOT inherited from a parent shell.

@@ -28,7 +28,7 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   into, `packages/pg-router/tests/coverage-thresholds.txt`. The module boundary is also the
   coverage-gate boundary: a bar activated on one side never silently moves the other side's ratchet
   (`phillipgreenii-nix-agent-support` ADR 0065's "New module" decision).
-- **`INV-CCH-5`** — this module MUST NOT name a concrete backing tool (`ccpool`, `bd`, `pg-pr`, or
+- **`INV-CCH-5`** — this module MUST NOT name a concrete backing tool (`ccpool`, `bd`, or
   any operator-configured command) anywhere in `packages/pg-router`'s own contract surface (its
   `--help` text, config schema, or wire messages). Naming a backing tool is this module's own
   business, per the Floor stated in both this set's and pg-router's own `## Scope`.
