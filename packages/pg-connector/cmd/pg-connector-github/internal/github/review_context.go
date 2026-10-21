@@ -54,6 +54,21 @@ import (
 // Total > Returned), exactly like a cap cut, so the later connections still get
 // their first page and the call succeeds with a report that says what is
 // missing. A context with no deadline (a test) has no time bound.
+//
+// Hard share deadline (bead pg2-2hwim). Checking the share only BETWEEN pages
+// was not enough: a single `gh api graphql` page that is still in flight when
+// the call's whole deadline arrives is killed and its error ("list issue
+// comments: ... deadline exceeded") fails the call, however much was already
+// read. 12 desk-pr gathers failed that way after pg2-vq8ii (a thread page that
+// ran long, or a slow comment page on a loaded host, ate the time the later
+// connections were counting on). So a connection now also READS under a context
+// whose deadline is its share's end (pageBound.scope): a page in flight at that
+// point is cancelled, and the read returns what the earlier pages gave as a
+// truncated connection instead of an error. The call's own deadline stays the
+// parent, so a failure that is not the share running out still surfaces. A
+// cut before any page arrived has no connection total to report; it is
+// reported as Truncated with Total = Returned+1 (a lower bound: at least one
+// item went unread).
 const (
 	maxReviews  = 1000
 	maxThreads  = 1000
@@ -80,6 +95,19 @@ const (
 type pageBound struct {
 	until time.Time
 	now   func() time.Time
+	// scope is the context the connection's pages run under (its deadline is
+	// until) and parent the context it was derived from; both nil when the
+	// bound carries no hard deadline.
+	scope  context.Context
+	parent context.Context
+}
+
+// cutBy reports whether err is the connection's own share running out: the
+// scope's deadline has passed while the parent (the call's whole deadline) is
+// still alive. Only such an error turns into a truncated result.
+func (b pageBound) cutBy(err error) bool {
+	return err != nil && b.scope != nil && b.parent != nil &&
+		errors.Is(b.scope.Err(), context.DeadlineExceeded) && b.parent.Err() == nil
 }
 
 // spent reports whether the bound has passed.
@@ -95,7 +123,8 @@ func (b pageBound) spent() bool {
 }
 
 // boundAt returns the bound that is share (0..1) of the way from now to ctx's
-// deadline, or an unbounded one when ctx has no deadline.
+// deadline, or an unbounded one when ctx has no deadline. It carries no hard
+// deadline of its own (see scopeAt).
 func (p *Provider) boundAt(ctx context.Context, share float64) pageBound {
 	now := p.now
 	if now == nil {
@@ -107,6 +136,26 @@ func (p *Provider) boundAt(ctx context.Context, share float64) pageBound {
 	}
 	start := now()
 	return pageBound{until: start.Add(time.Duration(float64(dl.Sub(start)) * share)), now: now}
+}
+
+// scopeAt is boundAt plus the hard deadline: it returns the bound, the context
+// the connection's pages must run under (ctx itself while the bound is
+// unbounded or already spent, so a connection's first page is always tried) and
+// the release func the caller MUST defer. The deadline is set as a timeout of
+// the time left on the bound's own clock, so a test's fake clock needs no
+// matching wall-clock deadline.
+func (p *Provider) scopeAt(ctx context.Context, share float64) (context.Context, pageBound, context.CancelFunc) {
+	b := p.boundAt(ctx, share)
+	if b.until.IsZero() {
+		return ctx, b, func() {}
+	}
+	left := b.until.Sub(b.now())
+	if left <= 0 {
+		return ctx, b, func() {}
+	}
+	scoped, cancel := context.WithTimeout(ctx, left)
+	b.scope, b.parent = scoped, ctx
+	return scoped, b, cancel
 }
 
 // connPage is one page of a GraphQL connection.
@@ -138,6 +187,15 @@ func fetchConnectionBounded[T any](limit int, after string, bound pageBound, fet
 	for {
 		page, err := fetch(after)
 		if err != nil {
+			if bound.cutBy(err) {
+				// The share ran out with a page in flight: hand back what the
+				// earlier pages gave. Total is then at least one more than
+				// that (see the file comment).
+				if total <= len(nodes) {
+					total = len(nodes) + 1
+				}
+				return nodes, total, nil
+			}
 			return nil, 0, err
 		}
 		total = page.TotalCount
@@ -328,7 +386,9 @@ func (p *Provider) reviewsConnection(ctx context.Context, repo string, number in
 		return nil, 0, err
 	}
 	vars := map[string]string{"owner": owner, "name": name}
-	return fetchConnectionBounded(maxReviews, "", p.boundAt(ctx, reviewsTimeShare), func(after string) (connPage[gqlReview], error) {
+	ctx, bound, release := p.scopeAt(ctx, reviewsTimeShare)
+	defer release()
+	return fetchConnectionBounded(maxReviews, "", bound, func(after string) (connPage[gqlReview], error) {
 		var d prQueryEnvelope[struct {
 			Reviews connPage[gqlReview] `json:"reviews"`
 		}]
@@ -584,10 +644,14 @@ func (p *Provider) ListCommentsReport(ctx context.Context, repo string, number i
 		return nil, err
 	}
 	// Both bounds are measured from the same start, so the issue comments'
-	// share is what is left after the threads' (see the file comment).
-	threadsBound := p.boundAt(ctx, threadsTimeShare)
-	issueBound := p.boundAt(ctx, issueCommentsTimeShare)
-	threads, threadTotal, err := p.threadsConnection(ctx, repo, number, threadsBound)
+	// share is what is left after the threads' (see the file comment). Each
+	// also carries the context its pages run under, so a page in flight when
+	// the share ends is cancelled rather than left to eat the next one's time.
+	threadsCtx, threadsBound, releaseThreads := p.scopeAt(ctx, threadsTimeShare)
+	defer releaseThreads()
+	issueCtx, issueBound, releaseIssues := p.scopeAt(ctx, issueCommentsTimeShare)
+	defer releaseIssues()
+	threads, threadTotal, err := p.threadsConnection(threadsCtx, repo, number, threadsBound)
 	if err != nil {
 		return nil, fmt.Errorf("github: list review threads: %w", err)
 	}
@@ -598,7 +662,7 @@ func (p *Provider) ListCommentsReport(ctx context.Context, repo string, number i
 		commentTotal += t.Comments.TotalCount
 		nodes := t.Comments.Nodes
 		if room := maxComments - len(out) - len(nodes); t.Comments.PageInfo.HasNextPage && room > 0 && !threadsBound.spent() {
-			more, merr := p.moreThreadComments(ctx, t, room, threadsBound)
+			more, merr := p.moreThreadComments(threadsCtx, t, room, threadsBound)
 			if merr != nil {
 				return nil, fmt.Errorf("github: list review thread comments: %w", merr)
 			}
@@ -612,7 +676,7 @@ func (p *Provider) ListCommentsReport(ctx context.Context, repo string, number i
 		}
 	}
 
-	issue, issueTotal, err := p.issueCommentsConnection(ctx, repo, number, maxComments-len(out), issueBound)
+	issue, issueTotal, err := p.issueCommentsConnection(issueCtx, repo, number, maxComments-len(out), issueBound)
 	if err != nil {
 		return nil, fmt.Errorf("github: list issue comments: %w", err)
 	}
