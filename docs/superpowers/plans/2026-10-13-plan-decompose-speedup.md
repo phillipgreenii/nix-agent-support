@@ -81,7 +81,7 @@ executed as one bead per step:
 | P5   | `pg2-2npcm` | after P1 and P4 (both edit step 3 and anatomy) |
 | P6   | `pg2-3gizb` | after P4, P5                                   |
 | P7   | `pg2-nb8lf` | after P2, P3b, P6                              |
-| P8   | `pg2-8k0fo` | after P7                                       |
+| P8   | `pg2-8k0fo` | done (see "Measured after")                    |
 
 - P2 ran unchanged. P1 MUST keep the P2 contract paragraph, verbatim, in all three orchestrator
   agent files.
@@ -367,3 +367,109 @@ denied or stalls.
 - Re-reading only "materially" changed packets — current any-edit ⇒ re-read rule kept.
 - phase-plan-verifier by-reference — 6.5 KB prompt; risk not worth it.
 - Background shell-job waiting (`tc-wklt`) — out of scope.
+
+## Measured after (2026-10-21, bead `pg2-8k0fo`)
+
+### Readiness
+
+- Both P7 commits (`deee4728cdd8cb6898c0c4d9037fea7b3525b346`,
+  `dafce73f2a0ec41b3e75f2296754e3e5c243f58b`) are ancestors of the `nix-agent-support`
+  `applied_ref` in `pn workspace info --json` (`559e61316821530e014da944eadf4a63f9fc6b89`;
+  `git merge-base --is-ancestor` exited 0 for both).
+- Post-apply runs are the `plan-decompose:*` subagent transcripts whose tool results contain the
+  SKILL.md provenance line naming ADR 0098 (text that exists only after P7): 9 `plan-decomposer`
+  and 10 `phase-decomposer` runs, started 2026-10-15T01:35Z through 2026-10-21T04:38Z. The
+  provenance line sits in a skill-load or README tool result, never only in the dispatch prompt.
+  Four `phase-decomposer` runs on 2026-10-14/15 lack the line (partial apply) and are excluded.
+
+### Method
+
+Same as Evidence: every `plan-decompose:*` transcript under `~/.claude/projects/**/subagents/`
+(106 decomposer runs), records sorted by timestamp, each gap attributed to the record that ends it.
+Baseline cohort = runs started before 2026-10-13 without the ADR line (40 `plan-decomposer`, 43
+`phase-decomposer`), re-measured with the same scripts so both columns use one method; it
+reproduces Evidence (wall median 51.1 / p90 84.0 and 51.1 / 143.4 min against 49 / 83 and 51 /
+152). The analysis scripts were scratch files and are not committed. Definitions:
+
+- Wall time: first to last record timestamp.
+- Wait overshoot: for each `Bash` `sleep` that started while a dispatched child was running, the
+  time from the first child finishing to the sleep returning; for each mid-run `end_turn`, the time
+  from the first running child finishing to the parent's next record. Children are matched to
+  dispatches through the `agentId` in the async-launch tool result.
+- Sub-dispatch writing time: summed `Agent` prompt characters ÷ 350 per second.
+- Cold-read verdicts: every `Agent` dispatch described "cold-read", final report text, last
+  `executable: yes|no`. Verdicts with no parsable answer are excluded.
+- Curation window: from the first model-written tool input of 3,000 characters or more to the
+  first cold-read dispatch; writing = output characters ÷ 350 per second, thinking = the rest.
+- Acceptance repeated in description: at least half of the acceptance field's lines (25 characters
+  or more, whitespace-normalized) appear in the description. The detector finds 12 of 12, 7 of 7
+  and 3 of 4 on the three dockets Evidence named.
+- Model-written packet text: post-apply, the last `Write` of each draft (`drafts/` or `rest/`)
+  and acceptance file in the run, `@@` directive lines excluded from the verbatim test; baseline
+  dockets, description bytes minus the common preamble plus acceptance bytes (Evidence formula).
+
+### Results
+
+| Metric                                      | Baseline (n)                      | Post-apply (n)          |
+| ------------------------------------------- | --------------------------------- | ----------------------- |
+| `plan-decomposer` wall median / p90 (min)   | 51.1 / 84.0 (40)                  | 33.3 / 77.2 (9)         |
+| `phase-decomposer` wall median / p90 (min)  | 51.1 / 143.4 (43)                 | 16.9 / 32.4 (10)        |
+| wait overshoot, `phase-decomposer`          | 222.9 min in 12 of 43 runs        | 0 min in 0 of 10 runs   |
+| wait overshoot, `plan-decomposer`           | 0.8 min (all runs)                | 0 min                   |
+| fixed-sleep `Bash` calls (runs using any)   | 124 (33 of 83)                    | 7 (4 of 19)             |
+| sub-dispatch prompt chars per run, median   | 121,318 / 32,092 (plan / phase)   | 7,398 / 6,236           |
+| sub-dispatch prompts over 20,000 chars      | 78 of 1,527                       | 0 of 410                |
+| sub-dispatch writing time per run, median   | 5.8 / 1.5 min                     | 0.4 / 0.3 min           |
+| cold-read `executable: no` rate (all runs)  | 441 of 1,105 (39.9%)              | 77 of 374 (20.6%)       |
+| cold-read `no` rate, `plan-decomposer`      | 261 of 492 (53.0%)                | 62 of 225 (27.6%)       |
+| cold-read `no` rate, `phase-decomposer`     | 180 of 613 (29.4%)                | 15 of 149 (10.1%)       |
+| `no` verdicts citing unopenable files       | 183 of 441 (41%)                  | 7 of 77 (9%)            |
+| curation window length, median (min)        | 10.7 / 6.6 (31 / 31 runs)         | 7.8 / 3.7 (6 / 10 runs) |
+| curation window write + think, median (min) | 4.5 + 5.4 / 2.6 + 3.2             | 3.4 + 2.0 / 1.4 + 0.7   |
+| whole-run generation write + think, median  | 13.9 + 16.3 / 6.0 + 9.0           | 4.9 + 7.2 / 3.5 + 4.2   |
+| packets repeating acceptance in description | 61 of 385 (22 of 118 in Evidence) | 0 of 105                |
+
+Notes on the table:
+
+- Wall time: the post-apply set includes short reconcile and resume runs (3.4, 5.8 and 7.1 min). On
+  runs that created packets the medians are 68.6 → 47.7 min (`plan-decomposer`, 14 → 5 runs) and
+  57.1 → 16.9 min (`phase-decomposer`, 28 → 10 runs). The longest post-apply run (98.5 min) curated
+  several dockets in one dispatch.
+- Fix 1: every post-apply run now ends turns mid-run (7 of 9 and 10 of 10 runs; median 26 and 13.5
+  per run against 3.5 and 2.0) and every one is resumed within seconds of a child's hand-back,
+  which is the intended contract. The `phase-decomposer` sleep polling that caused 7.9% of its
+  baseline wall time is gone.
+- Fix 2: the largest single sub-dispatch prompt fell from 124,001 chars to 3,122 (`plan-decomposer`)
+  and from 94,867 to 4,924 (`phase-decomposer`).
+- Fix 3: the cold-readers now report through `SubagentHandback`; the verdict regex covers both
+  forms. The keyword pass for unopenable-file citations is not Evidence's pass (that gave 65%), so
+  compare only the two columns above.
+- Fix 4, packet text: model-written bytes per design byte did not move. Post-apply, three dockets:
+  1.09, 2.39 and 1.53 (82,043, 125,569 and 59,334 bytes against designs of 75,278, 52,602 and
+  38,757 bytes). Pre-apply dockets with a local design, same formula: 1.22, 3.33 and 0.86 (Evidence
+  docket `pg2-0v21t`: 1.74; its design file is not on this machine). Verbatim 8-word-run share of the
+  model-written text: 7.1%, 8.7% and 5.1% post-apply against 3.9%, 13.3% and 4.5% on the pre-apply
+  dockets re-measured here; the 23% in Evidence was one docket and is not reproduced on others.
+  Words now arriving by command: 43–52% of an assembled packet is verbatim design text, written
+  by `assemble-packet.sh` from 33 to 64 `@@` directives per docket, not typed by the model.
+- Fix 4, curation time: the window medians fell, but the `plan-decomposer` mean did not (11.6 →
+  13.8 min, 6 runs).
+- Acceptance placement: all 105 post-apply packets (14 dockets, curated 2026-10-15 onward; the baseline figure covers the 385 pre-apply packets fetched for this check) keep the
+  acceptance block only in the acceptance field.
+
+### Follow-ups
+
+1. Model-written packet size is unchanged by fix 4A: bytes per design byte stayed
+   1.1–2.4 post-apply (worst case: the 22-packet `pg2-8bgxg.2` docket at 2.39, about 5.7 KB per
+   packet). Decide whether a size target for model-written packet text is wanted and, if so, what
+   lever (fewer or smaller packets, shorter Binding decisions) would meet it.
+2. The verbatim-share and bytes-per-design-byte baselines are not reproducible: Evidence's single
+   docket has no local design file. If these two metrics matter, record the design bytes and the
+   draft bytes in the run report so the next measurement needs no reconstruction.
+3. `plan-decomposer` cold-read `no` rate is still 27.6%. The remaining verdicts name unpinned
+   contracts (option types, build invocations, error classification) rather than unopenable files;
+   judge whether a pre-filter for "binding decision names a contract it does not state" is worth it.
+4. Observation, lowest priority: hook-attributed gap minutes per run rose (median 1.4 → 3.3
+   `plan-decomposer`, 1.7 → 3.7 `phase-decomposer`) with a similar hook record count (420 → 362 and
+   284 → 272). The attribution is crude and hooks are outside P1–P7; check only if run time
+   regresses.
