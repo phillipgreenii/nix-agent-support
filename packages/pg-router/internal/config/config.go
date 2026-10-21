@@ -104,16 +104,7 @@ type Config struct {
 	// auto-denied (no human prompt). Empty omits the flag (claude's own default
 	// tool policy applies — used only when an operator deliberately clears it).
 	// SECURITY-SENSITIVE: the default value in Default() requires human sign-off.
-	AllowedTools string
-	// PRTool is the external tool a review role's completion action posts its
-	// review back through, and reads PR facts from (docket pg2-oju6w's Task
-	// 5.13 register-catch-down / GOAL-MIN-1's Floor: pg-router's own contract
-	// surface names no concrete tool). Empty (the default) adds no extra grant
-	// to the built-in AllowedTools default — see defaultAllowedTools below. A
-	// deployment that wants review-post capability sets PG_ROUTER_PR_TOOL (or
-	// configures AllowedTools directly). Unlike AllowedTools, PRTool carries
-	// no [pool] TOML key today — env-only.
-	PRTool        string
+	AllowedTools  string
 	SessionPrefix string
 
 	// HandlerCommand is the argv PREFIX cmd/pg-router invokes (Task 5.4's
@@ -128,7 +119,7 @@ type Config struct {
 	// unconfigured deployment gets a clear per-dispatch error
 	// ("wireclient: resolve command for role ...") rather than this binary
 	// silently invoking a hardcoded participant name. Env-only
-	// (PG_ROUTER_HANDLER_COMMAND), mirroring PRTool's own env-only wiring —
+	// (PG_ROUTER_HANDLER_COMMAND), env-only wiring —
 	// no [pool] TOML key today. Every enabled role resolves to the SAME
 	// command today (DEC-WIRE-3's "shared process backing multiple roles"
 	// is an accepted shape, not a defect this seam needs to solve).
@@ -158,8 +149,7 @@ type Config struct {
 	Autonomous bool
 
 	// SelfLogin is the GitHub login the worker safety preamble asserts authorship
-	// against. From [pool].self_login; falls back to `pg-pr config show` at the
-	// orchestrator/precheck layer when unset.
+	// against. From [pool].self_login; empty when unset.
 	SelfLogin string
 
 	// Roles is the resolved, validated role set (TOML [[role]] or the built-in
@@ -315,23 +305,6 @@ func (c Config) locator() CommandLocator {
 // baseAllowedTools (which has since gained its own pg-connector/ccpool verbs).
 const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*)"
 
-// defaultAllowedTools builds the SECURITY-SENSITIVE AllowedTools default:
-// baseAllowedTools plus, when prTool is configured, a Bash(<prTool>:*) grant.
-// A review role's ONLY completion action is to post its review back through
-// that external tool (which owns the actual write; the review prompt forbids
-// any other write path), so under dontAsk deny-by-default that grant MUST be
-// present or the post-back is auto-denied (pg2-vmbn7). Which tool that is is
-// deployment configuration (PRTool / PG_ROUTER_PR_TOOL) — unlike bd (this
-// pool's own toolbox), it is not a name pg-router's own contract surface
-// bakes in. Empty prTool omits the grant entirely; scoping tool access per
-// role (read-only review vs write-capable worker) is tracked in pg2-f9vcg.
-func defaultAllowedTools(prTool string) string {
-	if prTool == "" {
-		return baseAllowedTools
-	}
-	return baseAllowedTools + ",Bash(" + prTool + ":*)"
-}
-
 // Default returns the built-in defaults (mirrors pg-router.sh's ${VAR:-default}).
 func Default() Config {
 	cwd, _ := os.Getwd()
@@ -359,8 +332,7 @@ func Default() Config {
 		Model:              "",
 		Autonomous:         true,      // workers are human-less; AskUserQuestion is structurally blocked via ccpool --autonomous
 		PermissionMode:     "dontAsk", // deny-by-default: auto-DENY any tool outside AllowedTools, non-interactive. PG_ROUTER_PERMISSION_MODE=bypassPermissions is the opt-in escape for an attended/trusted run.
-		PRTool:             "",        // no review-post grant by default — see defaultAllowedTools's doc comment
-		AllowedTools:       defaultAllowedTools(""),
+		AllowedTools:       baseAllowedTools,
 		HandlerCommand:     "", // no baked-in handler participant name — GOAL-MIN-1's Floor; see HandlerCommand's doc comment
 		SessionPrefix:      "pg-router-",
 		BudgetTokens:       0,                // unlimited until ccpool N3
@@ -400,11 +372,7 @@ func Load() (Config, error) {
 	c.Model = envStr("PG_ROUTER_MODEL", c.Model)
 	c.PermissionMode = envStr("PG_ROUTER_PERMISSION_MODE", c.PermissionMode)
 	c.Autonomous = envBool("PG_ROUTER_AUTONOMOUS", c.Autonomous)
-	// PRTool overlays BEFORE AllowedTools resolves, so a PG_ROUTER_PR_TOOL set
-	// without an explicit PG_ROUTER_ALLOWED_TOOLS still gets its Bash(<tool>:*)
-	// grant folded into the built-in default.
-	c.PRTool = envStr("PG_ROUTER_PR_TOOL", c.PRTool)
-	c.AllowedTools = envStr("PG_ROUTER_ALLOWED_TOOLS", defaultAllowedTools(c.PRTool))
+	c.AllowedTools = envStr("PG_ROUTER_ALLOWED_TOOLS", c.AllowedTools)
 	c.SessionPrefix = envStr("PG_ROUTER_SESSION_PREFIX", c.SessionPrefix)
 	c.HandlerCommand = envStr("PG_ROUTER_HANDLER_COMMAND", c.HandlerCommand)
 	c.HandlerCommandDir = envStr("PG_ROUTER_HANDLER_COMMAND_DIR", c.HandlerCommandDir)

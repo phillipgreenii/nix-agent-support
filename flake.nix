@@ -7322,7 +7322,6 @@
                       repoRoot = "/tmp/pg2-qsred-repo";
                       worktreeDir = "/tmp/pg2-qsred-repo/.worktrees";
                       permissionMode = "plan";
-                      prTool = "pg-pr";
                       # originProbe (pg2-4gi2c): one watched origin plus
                       # non-default scalars, proving the rendered JSON
                       # carries them under the keys the Go decoder reads.
@@ -7631,7 +7630,8 @@
                         [ "$(jq -r .repoRoot "$launchConfigFile")" = /tmp/pg2-qsred-repo ]
                         [ "$(jq -r .worktreeDir "$launchConfigFile")" = /tmp/pg2-qsred-repo/.worktrees ]
                         [ "$(jq -r .permissionMode "$launchConfigFile")" = plan ]
-                        [ "$(jq -r .prTool "$launchConfigFile")" = pg-pr ]
+                        # prTool is retired (pg-pr removal, bead pg2-k9vmd): the launch config no longer renders it.
+                        [ "$(jq -r 'has("prTool")' "$launchConfigFile")" = false ]
                         [ "$(jq -r .beadsPrefix "$launchConfigFile")" = zr ]
                         [ "$(jq -r .autonomous "$launchConfigFile")" = true ]
                         [ "$(jq -r .effort "$launchConfigFile")" = max ]
@@ -7665,7 +7665,7 @@
                         # worktreeDir matches internal/config.Default()'s own
                         # values exactly.
                         [ "$(jq -r .permissionMode "$defaultLaunchConfigFile")" = dontAsk ]
-                        [ "$(jq -r .prTool "$defaultLaunchConfigFile")" = "" ]
+                        [ "$(jq -r 'has("prTool")' "$defaultLaunchConfigFile")" = false ]
                         [ "$(jq -r .model "$defaultLaunchConfigFile")" = "" ]
                         [ "$(jq -r .selfLogin "$defaultLaunchConfigFile")" = "" ]
                         [ "$(jq -r .budgetTokens "$defaultLaunchConfigFile")" -eq 0 ]

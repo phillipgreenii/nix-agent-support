@@ -46,6 +46,30 @@ func TestLoadConfig_acceptsValidPermissionMode(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_ignoresRetiredPRToolKey proves a launch-config JSON written
+// before pg-pr was retired (still carrying the removed "prTool" key) decodes
+// cleanly and adds no Bash(<prTool>:*) grant (bead pg2-k9vmd): the removed
+// field must not turn an un-migrated config into a decode failure.
+func TestLoadConfig_ignoresRetiredPRToolKey(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"prTool":"legacy-pr-tool","permissionMode":"plan"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(p)
+	if err != nil {
+		t.Fatalf("loadConfig with a retired prTool key must still succeed: %v", err)
+	}
+	if cfg.PermissionMode != "plan" {
+		t.Errorf("PermissionMode = %q, want plan (other keys must still decode)", cfg.PermissionMode)
+	}
+	if strings.Contains(cfg.AllowedTools, "legacy-pr-tool") {
+		t.Errorf("AllowedTools = %q, must carry no grant derived from the retired prTool key", cfg.AllowedTools)
+	}
+	if cfg.AllowedTools != config.Default().AllowedTools {
+		t.Errorf("AllowedTools = %q, want the Default() allowlist unchanged", cfg.AllowedTools)
+	}
+}
+
 // TestLoadConfig_emptyPathValidatesDefault proves the empty-path/Default()
 // shortcut is validated too, not skipped.
 func TestLoadConfig_emptyPathValidatesDefault(t *testing.T) {

@@ -275,12 +275,6 @@ func TestDefault_allowedToolsDeniesGoToolchain(t *testing.T) {
 	if !bashPermits(def, "git status") {
 		t.Fatal("positive control failed: bashPermits cannot see the default git status grant")
 	}
-	// With a prTool configured the default still carries no go grant.
-	for _, cmd := range goToolchainCmds {
-		if bashPermits(defaultAllowedTools("some-pr-tool"), cmd) {
-			t.Errorf("defaultAllowedTools(prTool) permits %q", cmd)
-		}
-	}
 }
 
 // TestDefault_allowedToolsDeniesHookRunners (bead pg2-bg9qq): the handler-wide
@@ -289,9 +283,8 @@ func TestDefault_allowedToolsDeniesGoToolchain(t *testing.T) {
 // the helper can see a grant at all, so the denial is not vacuous.
 func TestDefault_allowedToolsDeniesHookRunners(t *testing.T) {
 	for name, def := range map[string]string{
-		"Default":                Default().AllowedTools,
-		"defaultAllowedTools()":  defaultAllowedTools(""),
-		"defaultAllowedTools(p)": defaultAllowedTools("some-pr-tool"),
+		"Default":          Default().AllowedTools,
+		"baseAllowedTools": baseAllowedTools,
 	} {
 		for _, cmd := range hookRunnerCmds {
 			if bashPermits(def, cmd) {

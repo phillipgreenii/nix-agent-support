@@ -5,7 +5,6 @@
   makeWrapper,
   ccpool,
   bd,
-  pg-pr,
   # jq is pkgs.jq (auto via callPackage) — a plain nixpkgs runtime dep, so unlike
   # `bd` it needs no explicit pass at the callPackage site in flake.nix.
   jq,
@@ -72,7 +71,7 @@ mkGoApp {
   # `go test ./...`, including internal/config's git-common-dir tests (pg2-xl659), which build
   # a real throwaway repo + linked worktree via the `git` binary rather than skipping when it
   # is absent. Matches ccpool's own nativeCheckInputs = [ pkgs.git ] (packages/ccpool/default.nix),
-  # which mirrors pg-pr's (packages/pg-pr/default.nix).
+  # which mirrors the other Go packages' (e.g. packages/pg-connector).
   nativeCheckInputs = [ pkgs.git ];
 
   # This list MUST carry the backing command of EVERY source and handler kind
@@ -90,7 +89,6 @@ mkGoApp {
   #             `beads.Command`) plus reconcile/pgrouteracl/orchestrator's direct
   #             `bd` calls. NOT a typed query surface any more (pg2-n75tk removed
   #             `beads-ready`/`beads-list` from the TOML query factory).
-  #   pg-pr  -> `pg-pr config show` self_login resolution and `pg-pr pr list` (reconcile ACL)
   #   jq     -> generic JSON-shaping glue for `command`-type sources, e.g. the
   #             `sh -c 'bd ready ... | jq ...'` pipelines `config --print-defaults`
   #             emits as the built-in defaults' `command` equivalent
@@ -108,7 +106,7 @@ mkGoApp {
   #             inherits pg-router's PATH, so pg-connector's bin dir must be
   #             on THIS wrapper's PATH for the nested exec to resolve (bead
   #             pg2-sh024: the live daemon's own process PATH, captured via
-  #             `ps eww`, had ccpool/bd/pg-pr/jq but no pg-connector bin
+  #             `ps eww`, had ccpool/bd/jq but no pg-connector bin
   #             dir, so every producer tick for those sources failed with
   #             "exec: pg-connector: executable file not found in $PATH").
   #   pg-connector-github/-pr-github/-ci-github-actions/-issue-beads/
@@ -143,7 +141,6 @@ mkGoApp {
       lib.makeBinPath [
         ccpool
         bd
-        pg-pr
         jq
         pg-connector
         pg-connector-github

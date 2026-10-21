@@ -521,11 +521,7 @@ let
 
   # defaultAllowedTools (this bead, pg2-qsred): mirrors
   # internal/config.baseAllowedTools's own literal value exactly.
-  # internal/config.Default() computes its AllowedTools field ONCE, at
-  # PRTool == "" -- it does NOT dynamically recompute when a later JSON
-  # overlay sets a nonempty PRTool -- so this nix default deliberately does
-  # the same (no dynamic Bash(<prTool>:*) append here either); see
-  # launchConfig.allowedTools's own doc comment below.
+  # internal/config.Default() sets its AllowedTools field to that constant.
   #
   # pg-connector issue */ccpool * (bead pg2-s9zh5): widened alongside
   # packages/pg-router-ccpool-handler/internal/config.go's own
@@ -577,7 +573,6 @@ let
         autonomous
         effort
         model
-        prTool
         sessionPrefix
         selfLogin
         ;
@@ -1250,11 +1245,8 @@ in
           `ccpool new --allowed-tools`. Defaults to
           `internal/config.baseAllowedTools`'s own literal value (mirrored
           above as this module's own `defaultAllowedTools`), matching
-          `internal/config.Default()`'s own value exactly: Default() computes
-          this ONCE, with PRTool == "", so setting `prTool` below WITHOUT
-          also overriding this field will NOT automatically grant
-          `Bash(<prTool>:*)` -- the real Go `Default()` this mirrors has the
-          identical gap. A deployment that wants that grant must set both.
+          `internal/config.Default()`'s own value exactly. A deployment that
+          needs further grants adds them through `extraAllowedTools`.
         '';
       };
       extraAllowedTools = lib.mkOption {
@@ -1264,8 +1256,8 @@ in
           Additive tool grants appended (comma-joined) onto `allowedTools`'s
           own value when rendering the launch-config JSON -- each entry is a
           single grant in the same syntax `allowedTools` uses, e.g.
-          `"Bash(pg-pr review:*)"`. Exists (pg2-yybrp) so a deployment that
-          needs a few extra grants (e.g. for `pg-pr`/`pg-connector`/`pg-desk`
+          `"Bash(pg-connector pr review:*)"`. Exists (pg2-yybrp) so a deployment that
+          needs a few extra grants (e.g. for `pg-connector`/`pg-desk`
           CLIs a dispatched role's prompt or skill requires) can add just
           those, rather than restating `allowedTools`'s entire default list
           -- a drift hazard, since a restated copy silently diverges from
@@ -1296,16 +1288,6 @@ in
           Model in the launch config -- forwarded verbatim to `ccpool new`.
           `""` (the default, matching `internal/config.Default()`) omits the
           flag.
-        '';
-      };
-      prTool = lib.mkOption {
-        type = lib.types.str;
-        default = "";
-        description = ''
-          PRTool in the launch config -- the external PR-management tool
-          this module's ACL/preflight shell out to. `""` (the default,
-          matching `internal/config.Default()`) adds no extra grant to
-          `allowedTools`'s own default (see that option's own doc comment).
         '';
       };
       sessionPrefix = lib.mkOption {

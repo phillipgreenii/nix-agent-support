@@ -93,26 +93,11 @@ type Config struct {
 	PermissionMode string
 	AllowedTools   string
 	Autonomous     bool
-	// PRTool is the external PR-management tool this module's preflight
-	// (resolveSelf) shells out to — configuration, never a name compiled
-	// into this module's own contract surface (GOAL-MIN-1's Floor). Empty
-	// (the default) adds no extra grant to the built-in AllowedTools
-	// default; see defaultAllowedTools below. (internal/pgrouteracl, the
-	// other former consumer of this field, was dead code with no caller and
-	// was deleted outright — bead pg2-gidpd.)
-	// This also realizes this module's own INV-CCH-5 (docs/behavior/
-	// invariants.md): pg-pr's name is configuration on THIS side, never
-	// written into packages/pg-router's own contract surface (its --help
-	// text, config schema, or wire messages) — dispatch.go/query.go's wire
-	// replies carry no backing-tool literal.
-	PRTool string
 	// SessionPrefix names the ccpool --name label prefix (Role.DisplayName).
 	SessionPrefix string
 	// SelfLogin is the GitHub login the worker safety preamble asserts
 	// authorship against. Empty until a deployment sets it explicitly —
-	// resolving it automatically (`pg-pr config show self-login`, one of
-	// ADR 0065's R14 checks) moved to this module's own deployment layer,
-	// not built by this task.
+	// resolving it automatically is not built.
 	SelfLogin string
 	// ReminderMsg/WrapUpMsg are the budget-escalation nudge templates
 	// (text/template, {{.BeadID}}).
@@ -337,18 +322,6 @@ func (c Config) WorkerBudget() budget.Budget {
 // run hooks directly.
 const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)"
 
-// defaultAllowedTools builds the AllowedTools default: baseAllowedTools plus,
-// when prTool is configured, a Bash(<prTool>:*) grant — mirrors
-// packages/pg-router/internal/config.defaultAllowedTools's same rationale
-// (a review role's completion action needs that grant under dontAsk
-// deny-by-default; see pg2-vmbn7). Empty prTool omits the grant entirely.
-func defaultAllowedTools(prTool string) string {
-	if prTool == "" {
-		return baseAllowedTools
-	}
-	return baseAllowedTools + ",Bash(" + prTool + ":*)"
-}
-
 // SplitAllowedTools splits an --allowed-tools value into its individual
 // grants. The separator is a comma, but only a comma OUTSIDE parentheses
 // separates grants: a grant such as `Bash(echo a,b:*)` keeps its inner comma.
@@ -428,8 +401,7 @@ func Default() Config {
 		Model:               "",
 		Autonomous:          true,
 		PermissionMode:      "dontAsk",
-		PRTool:              "",
-		AllowedTools:        defaultAllowedTools(""),
+		AllowedTools:        baseAllowedTools,
 		SessionPrefix:       "pg-router-",
 		ReminderMsg:         "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
 		WrapUpMsg:           "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",

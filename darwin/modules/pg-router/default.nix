@@ -77,8 +77,8 @@ let
   # default PATH (`/usr/bin:/bin:/usr/sbin:/sbin` — confirmed live via
   # `launchctl print`), which never includes this profile — unlike an
   # interactive login shell, which always has it. pg-router's own package
-  # wrapper (packages/pg-router/default.nix) already threads ccpool/bd/pg-pr/
-  # jq/pg-connector/pg-connector-*'s own bin dirs onto PATH (bead pg2-sh024),
+  # wrapper (packages/pg-router/default.nix) already threads ccpool/bd/jq/
+  # pg-connector/pg-connector-*'s own bin dirs onto PATH (bead pg2-sh024),
   # but deliberately does NOT and MUST NOT wrap in `gh` there: per
   # packages/pg-connector/pg-connector-pr-github.nix's own comment and the
   # pg2-n75tk boundary ("Core must not know how another tool is configured"),

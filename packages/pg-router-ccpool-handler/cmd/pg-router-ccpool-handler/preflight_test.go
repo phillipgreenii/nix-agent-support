@@ -7,19 +7,6 @@ import (
 	"testing"
 )
 
-func TestParseSelfLogin(t *testing.T) {
-	got, err := parseSelfLogin([]byte(`{"self_login":"phillipg","worktree_root":"/x"}`))
-	if err != nil || got != "phillipg" {
-		t.Fatalf("got %q err %v", got, err)
-	}
-}
-
-func TestParseSelfLogin_empty(t *testing.T) {
-	if _, err := parseSelfLogin([]byte(`{"self_login":""}`)); err == nil {
-		t.Error("empty self_login should error")
-	}
-}
-
 // fakeBR is a fake beads.Runner: it returns canned output keyed by joined
 // args, or a single error for every call. Ported from
 // packages/pg-router/cmd/pg-router/drain_test.go's own fakeBR (docket

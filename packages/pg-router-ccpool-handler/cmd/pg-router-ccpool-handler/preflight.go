@@ -2,55 +2,23 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 )
 
-// precheck/precheckPrefix/resolveSelf/parseSelfLogin/readBeadsPrefix are the
-// three R14 startup pre-flight blockers (bd unreachable, beads-prefix
-// mismatch, pg-pr config show self-login) — MOVED HERE VERBATIM from
+// precheck/precheckPrefix/readBeadsPrefix are the two R14 startup pre-flight
+// blockers (bd unreachable, beads-prefix mismatch) — moved here from
 // packages/pg-router/cmd/pg-router/drain.go (docket pg2-oju6w's Task 5.8,
-// ADR 0065's "Source-side boundary" section, closing register row R14 /
-// bead pg2-d4gvb): pg-router's own pre-runtime validation (INV-WORKFLOW-1's
-// six determinable conditions) no longer runs these three tool-naming/
-// connectivity checks ahead of it. This module's `query` subcommand runs
-// precheck (bd reachability + prefix match) before it queries beads for
-// real — see query.go's runQuery. resolveSelf/parseSelfLogin exist here,
-// tested, ready for whichever call site's own production wiring resolves
-// SelfLogin next (mirroring internal/wireclient.CommandFor's own precedent
-// of an unwired-but-ready seam — cmd/pg-router's bootCore never assigns
-// Orchestrator.Handler either).
-
-// resolveSelf shells out to `<prTool> config show --json` and reads
-// .self_login. prTool is the external PR-management tool this module's own
-// config.Config.PRTool names — a caller wiring this in supplies it rather
-// than this function assuming a fixed binary (GOAL-MIN-1's Floor: no concrete
-// tool compiled into pg-router's own contract surface).
-func resolveSelf(ctx context.Context, prTool string) (string, error) {
-	out, err := exec.CommandContext(ctx, prTool, "config", "show", "--json").Output()
-	if err != nil {
-		return "", fmt.Errorf("%s config show: %w", prTool, err)
-	}
-	return parseSelfLogin(out)
-}
-
-// parseSelfLogin extracts self_login from the PR tool's config JSON.
-func parseSelfLogin(b []byte) (string, error) {
-	var cfg struct {
-		SelfLogin string `json:"self_login"`
-	}
-	if err := json.Unmarshal(b, &cfg); err != nil {
-		return "", fmt.Errorf("parse pr tool config: %w", err)
-	}
-	if cfg.SelfLogin == "" {
-		return "", fmt.Errorf("self_login is empty")
-	}
-	return cfg.SelfLogin, nil
-}
+// ADR 0065's "Source-side boundary" section, closing register row R14 / bead
+// pg2-d4gvb): pg-router's own pre-runtime validation (INV-WORKFLOW-1's six
+// determinable conditions) no longer runs these tool-naming/connectivity
+// checks ahead of it. This module's `query` subcommand runs precheck (bd
+// reachability + prefix match) before it queries beads for real — see
+// query.go's runQuery. The former third R14 check (a `<prTool> config show`
+// self-login lookup) was dead code with no caller and was removed with pg-pr
+// (bead pg2-k9vmd).
 
 // precheck asserts bd is reachable from repoRoot and resolves the expected
 // store. It does NOT require a local .beads dir at repoRoot: bd is

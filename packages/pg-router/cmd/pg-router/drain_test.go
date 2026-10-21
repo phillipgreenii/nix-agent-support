@@ -14,11 +14,11 @@ import (
 	"github.com/phillipgreenii/x/gittest"
 )
 
-// TestParseSelfLogin/TestReadBeadsPrefix_*/TestPrecheckPrefix_*/TestPrecheck_*
+// TestReadBeadsPrefix_*/TestPrecheckPrefix_*/TestPrecheck_*
 // (and their shared fakeBR fixture) moved to
 // packages/pg-router-ccpool-handler/cmd/pg-router-ccpool-handler/
-// preflight_test.go along with the precheck/precheckPrefix/resolveSelf/
-// parseSelfLogin/readBeadsPrefix functions they exercised (docket
+// preflight_test.go along with the precheck/precheckPrefix/
+// readBeadsPrefix functions they exercised (docket
 // pg2-oju6w's Task 5.8 — see drain.go's own doc comment on that move).
 
 // TestWarnTrackedConfig_ignoresLeakedGitDir is the regression pin for

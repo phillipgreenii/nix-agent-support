@@ -257,7 +257,7 @@ func TestBuildDeps_goToolSetReachesOnlyTheDeclaringRole(t *testing.T) {
 	drain := roles.Role{Name: "drain-zr", CCPool: &roles.CCPoolConfig{
 		ExtraAllowedTools: []string{"Skill", "Bash(go test:*)", "Bash(go build:*)", "Bash(gofmt:*)"},
 	}}
-	review := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{ExtraAllowedTools: []string{"Bash(pg-pr review:*)"}}}
+	review := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{ExtraAllowedTools: []string{"Bash(pg-connector pr review:*)"}}}
 	bare := roles.Role{Name: "feedback", CCPool: &roles.CCPoolConfig{}}
 
 	allowed := func(r roles.Role) string { return buildDeps(cfg, r).CC.(*ccpool.CLIRunner).AllowedTools }
@@ -297,7 +297,7 @@ func TestBuildDeps_hooksToolSetReachesOnlyTheDeclaringRole(t *testing.T) {
 	worker := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{
 		ExtraAllowedTools: []string{"Skill", "Bash(prek:*)", "Bash(pre-commit:*)"},
 	}}
-	review := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{ExtraAllowedTools: []string{"Bash(pg-pr review:*)"}}}
+	review := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{ExtraAllowedTools: []string{"Bash(pg-connector pr review:*)"}}}
 	bare := roles.Role{Name: "feedback", CCPool: &roles.CCPoolConfig{}}
 
 	allowed := func(r roles.Role) string { return buildDeps(cfg, r).CC.(*ccpool.CLIRunner).AllowedTools }
