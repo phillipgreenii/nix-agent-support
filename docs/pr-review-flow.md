@@ -221,7 +221,7 @@ The review role reads `repo` / `pr_number` / `branch` / `head_sha` from the
 keyed on the bead ID (`executor/ccpool.go` (`run` → `worktree.Ensure`)).
 
 **Review-input schema.** Every producer of a review payload — the
-`pg-pr-review-*` agent assets, the `pg-router` review-role prompt, a human piping
+`pg-router` review-role prompt, a human piping
 JSON — targets ONE schema, owned by `internal/reviewinput` and rendered verbatim
 into `pg-pr review --help` (both prompts deep-link to that help text).
 `reviewinput.Decode` is the only adapter from it to `reviewstage.Draft`; it
@@ -233,12 +233,9 @@ spanning several lines is expressed as `start_line` + `line` (or a contiguous
 GitHub as one multi-line review comment; a **non-contiguous** run stays an error,
 because GitHub has no representation for a gapped range and both alternatives —
 collapsing to the endpoints, truncating to one entry — silently change the
-finding (`pg2-3c8mo`). Two gates hold
-the schema and its producers together: `reviewinput`'s Go tests plus the
-`cmd/pg-pr` golden test, and the `test-pg-pr-review-input-assets` flake check,
-which feeds each agent asset's documented example to the built binary (the assets
-are markdown outside the Go module's src, so only a repo-level check can see
-them drift).
+finding (`pg2-3c8mo`). The schema is held by `reviewinput`'s Go tests plus the `cmd/pg-pr` golden test
+(the `pg-pr-review-*` agent assets and their repo-level flake check were retired with the
+pg-pr plugin, pg2-yg43t).
 
 ---
 

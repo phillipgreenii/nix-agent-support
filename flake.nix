@@ -1292,9 +1292,8 @@
           };
           inherit (pkgs) lib;
 
-          # This repo's Claude Code marketplace derivation, hoisted so both the
-          # `packages` output and the `test-pg-pr-hook-registered` check (bead
-          # pg2-o3eyk) reference the SAME build (no second builder eval).
+          # This repo's Claude Code marketplace derivation, hoisted so every
+          # consumer in this flake references the SAME build (no second builder eval).
           agentSupportMarketplace =
             (phillipgreenii-nix-base.lib.mkClaudeMarketplaceBuilders { inherit pkgs lib; }).mkClaudeMarketplace
               {
@@ -1695,17 +1694,6 @@
                   touch $out
                 '';
 
-              # pg-pr agent-marker PreToolUse hook (bead pg2-o3eyk). Drives the
-              # fixed script over CC-shaped stdin JSON; gates the tool-name-from-
-              # stdin and byte-escaped-marker fixes (red on the pre-fix behaviour).
-              test-pg-pr-marker-hook = checksHelpers.testBashScripts {
-                package = pkgs.writeShellScriptBin "require-agent-pr-comment-marker" ''
-                  exec ${./claude-marketplace/pg-pr/hooks/require-agent-pr-comment-marker.sh} "$@"
-                '';
-                tests = ./tests/pg-pr-marker.bats;
-                extraInputs = [ pkgs.jq ];
-              };
-
               # `prevent-main-rebase` pre-rebase hook's safe-case auto-allow
               # (pg2-i5t0k). Builds the EXACT SAME `prevent-main-rebase-hook-script`
               # text the `phillipgreenii.pre-commit.extraHooks` entry above installs
@@ -1894,179 +1882,6 @@
                     bats --verbose-run ${./tests/pb-jq-envelope.bats}
                     touch $out
                   '';
-
-              # Structural gate for the "never invoked" bug (pg2-o3eyk): the bats
-              # suite cannot test CC auto-discovery, and mkClaudeMarketplace only
-              # cp's hooks.json (never parses it). Assert the BUILT marketplace
-              # ships a valid-JSON hooks.json with a PreToolUse/Bash matcher whose
-              # command targets the script, and that the script is executable at
-              # the install path. Red on the current tree (no hooks.json) and on
-              # a lost exec bit / rename / wrong matcher the copy would pass silently.
-              test-pg-pr-hook-registered =
-                pkgs.runCommand "test-pg-pr-hook-registered" { nativeBuildInputs = [ pkgs.jq ]; }
-                  ''
-                    hooks="${agentSupportMarketplace}/pg-pr/hooks/hooks.json"
-                    script="${agentSupportMarketplace}/pg-pr/hooks/require-agent-pr-comment-marker.sh"
-
-                    test -f "$hooks" || {
-                      echo "FAIL: pg-pr hooks.json not bundled" >&2
-                      exit 1
-                    }
-                    jq -e . "$hooks" >/dev/null || {
-                      echo "FAIL: hooks.json is not valid JSON" >&2
-                      exit 1
-                    }
-
-                    matcher="$(jq -r '.hooks.PreToolUse[0].matcher' "$hooks")"
-                    [ "$matcher" = "Bash" ] || {
-                      echo "FAIL: PreToolUse matcher != Bash ($matcher)" >&2
-                      exit 1
-                    }
-
-                    cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$hooks")"
-                    case "$cmd" in
-                    *'require-agent-pr-comment-marker.sh') ;;
-                    *)
-                      echo "FAIL: hook command does not target the marker script ($cmd)" >&2
-                      exit 1
-                      ;;
-                    esac
-
-                    test -x "$script" || {
-                      echo "FAIL: hook script not executable at install path" >&2
-                      exit 1
-                    }
-                    touch $out
-                  '';
-
-              # Schema-agreement gate for the review-input shape (bead pg2-cns7a
-              # AC2). internal/reviewinput is the authoritative schema and its Go
-              # tests pin it, but the pg-pr reviewer AGENT assets are markdown
-              # OUTSIDE the Go module's src (pg-pr-go-tests only sees
-              # ./packages/pg-pr), so nothing else can catch the assets drifting
-              # away from the verb — which is exactly how the original bug stayed
-              # invisible. Feed every documented JSON example from the three
-              # reviewer assets to the BUILT pg-pr and assert each finding
-              # round-trips into the staged draft with a non-empty body and its
-              # documented path/line. Red on the pre-fix tree (bodies decode
-              # empty), and red on a drifted asset key, a blank-body example, or a
-              # severity that is not one of the three literal values.
-              test-pg-pr-review-input-assets =
-                pkgs.runCommand "test-pg-pr-review-input-assets"
-                  {
-                    nativeBuildInputs = [
-                      pkgs.pg-pr
-                      pkgs.jq
-                    ];
-                  }
-                  ''
-                    export HOME="$PWD"
-                    export PG_PR_STATE_HOME="$PWD/state"
-                    pr=0
-                    verified=0
-
-                    for asset in \
-                      ${./claude-marketplace/pg-pr/agents/pg-pr-review-code-changes.md} \
-                      ${./claude-marketplace/pg-pr/agents/pg-pr-review-pr-structure.md} \
-                      ${./claude-marketplace/pg-pr/agents/pg-pr-review-jira-alignment.md}; do
-                      name="$(basename "$asset")"
-                      rm -f block-*.json
-
-                      # Split out every fenced ```json example (fences may be
-                      # list-indented; a ```bash fence never matches the opener).
-                      awk '
-                        /^[ \t]*```json[ \t]*$/ { n++; f = "block-" n ".json"; inb = 1; next }
-                        /^[ \t]*```[ \t]*$/     { inb = 0; next }
-                        inb                     { print > f }
-                      ' "$asset"
-
-                      test -e block-1.json || {
-                        echo "FAIL: $name documents no fenced json example" >&2
-                        exit 1
-                      }
-
-                      for block in block-*.json; do
-                        jq -e . "$block" >/dev/null || {
-                          echo "FAIL: $name: $block is not valid JSON" >&2
-                          exit 1
-                        }
-                        # Only the review-payload examples are in scope; a
-                        # subagent envelope without `comments` is not one.
-                        jq -e 'has("comments")' "$block" >/dev/null || continue
-
-                        pr=$((pr + 1))
-                        if ! jq -c '{comments: .comments}' "$block" |
-                          pg-pr review draft "$pr" --repo test/repo >/dev/null; then
-                          echo "FAIL: $name: $block is REJECTED by 'pg-pr review draft'" >&2
-                          echo "      the asset and internal/reviewinput disagree on the schema" >&2
-                          exit 1
-                        fi
-
-                        draft="$PG_PR_STATE_HOME/reviews/test-repo-$pr.json"
-                        # A "lines" array anchors the comment at its LAST line
-                        # (its first becomes start_line), so the documented anchor
-                        # is max(.lines), not .lines[0] (pg2-3c8mo).
-                        want="$(jq -cS '[.comments[]? | {path: (.path // ""), line: ((.line // (if (.lines | type) == "array" then (.lines | max) else null end)) // 0), start_line: (.start_line // (if (.lines | type) == "array" and ((.lines | max) != (.lines | min)) then (.lines | min) else null end) // 0)}]' "$block")"
-                        got="$(jq -cS '[.comments[]? | {path: (.path // ""), line: (.line // 0), start_line: (.start_line // 0)}]' "$draft")"
-                        if [ "$want" != "$got" ]; then
-                          echo "FAIL: $name: $block path/line/start_line did not round-trip" >&2
-                          echo "      documented: $want" >&2
-                          echo "      staged:     $got" >&2
-                          exit 1
-                        fi
-
-                        if ! jq -e 'all(.comments[]?; ((.body // "") | length) > 0)' "$draft" >/dev/null; then
-                          echo "FAIL: $name: $block staged a comment with an EMPTY body" >&2
-                          echo "      (the pg2-cns7a defect: the finding text was dropped)" >&2
-                          exit 1
-                        fi
-                        verified=$((verified + $(jq '.comments | length' "$block")))
-                      done
-                    done
-
-                    # Guard against the gate passing because it extracted nothing:
-                    # one finding per reviewer asset is the documented minimum.
-                    if [ "$verified" -lt 3 ]; then
-                      echo "FAIL: only $verified documented comment(s) verified, expected >= 3" >&2
-                      exit 1
-                    fi
-                    echo "ok: $verified documented agent finding(s) round-trip through 'pg-pr review draft'"
-                    touch $out
-                  '';
-
-              # Shared-reference doc-conformance guard, OUTSIDE the Go module's
-              # src (pg-pr-go-tests only sees ./packages/pg-pr, same structural
-              # gap as test-pg-pr-review-input-assets above) (pg2-4dz88.8.4).
-              #
-              # A prior revision had two Go tests read these files directly via
-              # a repo-root-escaping path, which is exactly this structural gap
-              # and broke under nix flake check's hermetic sandbox (the sandbox
-              # only sees pg-pr-src, i.e. ./packages/pg-pr). Operator ruling
-              # (Phillip, 2026-08-27): a test MUST NOT depend on files existing
-              # outside what its own build packages; content that genuinely IS
-              # the real committed file belongs in a check built from the real
-              # source, as here.
-              test-pg-pr-shared-reference-docs = pkgs.runCommand "test-pg-pr-shared-reference-docs" { } ''
-                shared_path=".local/share/pgii-local-plugins/pg-pr/lib/pr-generation-shared.md"
-
-                for skill in \
-                  ${./claude-marketplace/pg-pr/skills/pg-pr-write-pr-description/SKILL.md} \
-                  ${./claude-marketplace/pg-pr/skills/pg-pr-write-pr-title/SKILL.md}; do
-                  if ! grep -qF "$shared_path" "$skill"; then
-                    echo "FAIL: $skill does not name the shared reference path $shared_path" >&2
-                    exit 1
-                  fi
-                done
-
-                description_skill=${./claude-marketplace/pg-pr/skills/pg-pr-write-pr-description/SKILL.md}
-                if ! grep -qF "# pg-pr write PR description" "$description_skill"; then
-                  echo "FAIL: $description_skill lost its own wire-contract heading" >&2
-                  exit 1
-                fi
-
-                echo "ok: both skills name the shared reference; description skill kept its own heading"
-                touch $out
-              '';
 
               # ccpool-pools Grafana dashboard guard (bead pg2-om899.8): the JSON
               # parses, carries the fixed uid, and every panel query references only
@@ -3835,7 +3650,7 @@
               # module's nix src is rooted at ./packages (Pattern B) — so ccpool's
               # nix modules under home/, darwin/, and nixos/ are outside BOTH that
               # walk and the build sandbox tree, and are unreachable from Go. Same
-              # structural gap as test-pg-pr-review-input-assets above; this check
+              # structural gap as any repo-root asset a Go module sandbox cannot see; this check
               # closes it from the repo root. It found and retired
               # home/programs/ccpool/default.nix's `spec <sign>8.1.1/<sign>14 step 6`.
               #
@@ -5906,8 +5721,7 @@
               # (pg2-dssp6, pg2-n3gez, pg2-k23s6) — see the doc comment on
               # TestIdentifierAllowlistGuard in identifier_allowlist_test.go. If
               # a future widening needs to cover a pg-pr-surface directory
-              # OUTSIDE this Go module (e.g. home/programs/pg-pr,
-              # claude-marketplace/pg-pr), it will need a companion nix check
+              # OUTSIDE this Go module (e.g. home/programs/pg-pr), it will need a companion nix check
               # here, mirroring test-ccpool-surface-spec-citations below.
               pg-pr-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-pr-go-tests";
@@ -5997,10 +5811,9 @@
               #
               # A Go test cannot do this: pg-connector-go-tests above is sandboxed
               # to ./packages/pg-connector alone (this repo's CLAUDE.md "Go test
-              # gate"; the operator ruling recorded on test-pg-pr-shared-reference-docs
-              # below is the same structural point) and never sees pg-pr's source.
-              # So, like test-pg-pr-review-input-assets/test-pg-pr-shared-reference-docs
-              # above, this is a repo-root pkgs.runCommand check that names both
+              # gate"; the operator ruling (Phillip, 2026-08-27): a test MUST NOT depend on
+              # files outside what its own build packages, is the same structural point) and never sees pg-pr's source.
+              # So this is a repo-root pkgs.runCommand check that names both
               # sides' real committed files as explicit nix inputs.
               test-pg-connector-pr-github-pg-pr-sync =
                 let
@@ -6079,7 +5892,7 @@
               # automated gate — `nix build .#pg-connector` succeeding was a
               # manual, easy-to-forget step. One check per derivation
               # (5 total here), matching the bead's own framing rather than
-              # test-pg-pr-review-input-assets' single-package shape: the 5
+              # a single-package shape: the 5
               # pg-connector derivations are independently buildable, unrelated
               # binaries (one umbrella CLI + 4 standalone Tier-2 backends), so
               # a shared check would conflate which of the 5 broke, whereas
@@ -13946,8 +13759,8 @@
             # mkClaudeMarketplace (the same builder pn-workspace-rules uses). The
             # committed `claude-marketplace/` tree holds the marketplace manifest +
             # per-plugin dirs (plugin.json + skills/commands/agents/hooks). Each
-            # plugin's version is stamped `<declared>+<digest>`; pg-pr ships
-            # defaultEnabled=false, the rest default on. Registered into the
+            # plugin's version is stamped `<declared>+<digest>`; each plugin
+            # declares its own defaultEnabled in its plugin.json. Registered into the
             # claude-marketplaces consumer module via marketplaces.nixProvided below.
             phillipgreenii-nix-agent-support-marketplace = agentSupportMarketplace;
 

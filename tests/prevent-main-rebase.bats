@@ -22,7 +22,7 @@
 # built by a nix derivation (checks.<system>.test-prevent-main-rebase-hook),
 # not resolvable on PATH against a plain working-tree checkout, so it MUST
 # stay outside the commit-time `run-unit-tests` hook's `--labels unit` scope
-# (see flake.nix's tests/pg-pr-marker.bats for the identical rationale).
+# (the same rationale as any nix-derivation-built hook binary).
 
 # GFH_LIB is the one required file (tc-4ehow): no filesystem search. The plain
 # (non-exported) copy survives gfh_setup's env scrub for later tests.

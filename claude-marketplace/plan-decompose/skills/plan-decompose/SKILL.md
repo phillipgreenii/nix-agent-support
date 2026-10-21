@@ -11,7 +11,7 @@ description: >-
   "reconcile docket <id>"; "report on docket <id>'s metrics" / "what's the escalation rate for
   docket <id>?". Do NOT use for: designs that would yield fewer than 3 packets (below the
   floor — file the beads directly); sizing one already-scoped bead/task into a handful of
-  children with no design document to cite (that is `pg-pr-break-down-work`); improving
+  children with no design document to cite (file those child beads directly); improving
   EXISTING issues (that is bead-grooming); finding or working ready issues (that is bd ready /
   the drain queue); writing the design itself (brainstorming/writing-plans); a workspace-wide
   metrics rollup (this mode is always scoped to one docket); a design too large to decompose in
@@ -28,10 +28,11 @@ plan-decompose design spec dated 2026-08-27 (provenance only — this skill stan
 excerpt and acceptance rules, and the skill split are recorded in ADR 0098
 (`docs/adr/0098-plan-decompose-waits-by-ending-the-turn-and-hands-sub-agents-files-not-text.md`).
 
-**Boundary with `pg-pr-break-down-work`:** that skill sizes one already-scoped bead/task into
-a handful of children — no design document, no citation requirement, no QA-agent pipeline.
-This skill requires an APPROVED design/plan document to cite and has a 3-packet floor; below
-that floor, or with no design document at all, use `pg-pr-break-down-work` instead.
+**Boundary with directly filed child beads:** sizing one already-scoped bead/task into a
+handful of children needs no design document, no citation requirement and no QA-agent pipeline
+(file the children directly). This skill requires an APPROVED design/plan document to cite and
+has a 3-packet floor; below that floor, or with no design document at all, file the beads
+directly instead.
 
 ## Concepts
 
