@@ -31,6 +31,20 @@ let
     manPage = false;
   };
 
+  replaceAutoMode = mkBashScript {
+    name = "claude-settings-replace-auto-mode";
+    src = ./.;
+    public = false;
+    description = "Replace the nix-owned autoMode lists (environment, allow, soft_deny) in Claude Code settings.json, backing up dropped entries";
+    libraries = [ activation-lib ];
+    runtimeDeps = [
+      pkgs.jq
+      pkgs.coreutils
+    ];
+    # Internal activation script with no --help; skip the help2man man-page step.
+    manPage = false;
+  };
+
   installPlugin = mkBashScript {
     name = "claude-settings-install-plugin";
     src = ./.;
@@ -98,6 +112,7 @@ in
 {
   inherit
     replaceManagedKeys
+    replaceAutoMode
     installPlugin
     registerMarketplace
     gcPluginCache

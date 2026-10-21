@@ -13050,6 +13050,15 @@
                 ];
               };
 
+              test-claude-settings-replace-auto-mode = checksHelpers.testBashScripts {
+                package = claudeSettingsScripts.replaceAutoMode.script;
+                tests = claudeSettingsTestSrc "test_replace_auto_mode.bats";
+                extraInputs = [
+                  pkgs.jq
+                  pkgs.coreutils
+                ];
+              };
+
               test-claude-settings-install-plugin = checksHelpers.testBashScripts {
                 package = claudeSettingsScripts.installPlugin.script;
                 tests = claudeSettingsTestSrc "test_install_plugin.bats";
