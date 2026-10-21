@@ -310,8 +310,8 @@ let
       )
   );
 
-  # The complete rendered document: extraConfig's keys (pg-pr's own,
-  # during the overlap window) plus this module's own connector:/
+  # The complete rendered document: extraConfig's keys (any non-pg-connector
+  # top-level keys a host supplies) plus this module's own connector:/
   # attention:/search:/backends:/state:/configSchemaVersion: keys, each
   # included only when it has something to say -- an empty backends:/
   # state: block is harmless to pg-connector's own unknown-fields-tolerant
@@ -334,13 +334,14 @@ in
     enable = lib.mkEnableOption "pg-connector CLI (unified pluggable connector umbrella CLI)";
     package = lib.mkPackageOption pkgs "pg-connector" { };
 
-    # Phase 7 (pg2-2j5ac.28.5): this module now OWNS the shared config file
-    # pg-connector and pg-pr both read (registry.go's own header comment:
-    # "pg-connector and pg-pr can share a single config.yaml on a host
-    # running both"). connector/backends/state/configSchemaVersion mirror
-    # the shape the design of record's section 4.7/4.8 gives that file;
-    # extraConfig carries every key that belongs to pg-pr (or any other
-    # future co-tenant) rather than to pg-connector itself.
+    # Phase 7 (pg2-2j5ac.28.5): this module OWNS the config file pg-connector
+    # reads. Since pg-pr was retired (pg2-ijsep) pg-connector is its sole
+    # reader; the file keeps its historical path $XDG_CONFIG_HOME/pg-pr/config.yaml
+    # (see the xdg.configFile entry below for why). connector/backends/state/
+    # configSchemaVersion mirror the shape the design of record's section
+    # 4.7/4.8 gives that file; extraConfig carries any other top-level keys a
+    # host wants in the same file (for example `self_login`), which
+    # pg-connector's own decode ignores.
     connector = lib.mkOption {
       type = lib.types.submodule {
         options = {
@@ -770,11 +771,10 @@ in
       description = ''
         Extra top-level keys merged into the rendered shared config file
         verbatim, alongside `connector:`/`backends:`/`state:`/
-        `configSchemaVersion:`. Exists for pg-pr's own keys (`self_login`,
-        `worktree_root`, `review`, `claude_bin`, `repos`, `agents`, etc.)
-        during the overlap window where pg-pr and pg-connector share one
-        config file; pg-connector's own decode ignores everything outside
-        the keys above.
+        `configSchemaVersion:`. Exists for keys a host keeps in the same file that
+        pg-connector does not itself define (for example `self_login`);
+        pg-connector's own decode ignores everything outside the keys
+        above.
       '';
     };
   };
@@ -867,20 +867,19 @@ in
         }
       ];
 
-      # No programs.tldr.customPages entry: unlike pg-pr's own module,
-      # packages/pg-connector/default.nix's postInstall generates only a man
-      # page + completions — it does not copy/generate a tldr page the way
-      # packages/pg-pr/default.nix does from its own committed pg-pr.md — so
-      # there is nothing at ${cfg.package}/share/tldr/pages.common/pg-connector.md
+      # No programs.tldr.customPages entry: packages/pg-connector/default.nix's
+      # postInstall generates only a man page + completions — it does not
+      # copy/generate a tldr page — so there is nothing at ${cfg.package}/share/tldr/pages.common/pg-connector.md
       # to reference yet.
 
-      # The shared config file (pg2-2j5ac.28.5): the path stays "pg-pr/config.yaml"
-      # deliberately -- registry.go's own resolution order ($PG_PR_CONFIG ->
-      # $XDG_CONFIG_HOME/pg-pr/config.yaml -> ~/.config/pg-pr/config.yaml) is
-      # unchanged from pg-pr's own, and pg-pr's decode at the top level is
-      # unknown-fields-tolerant, so this module owning the write is safe for a
-      # host that also enables phillipgreenii.programs.pg-pr (whose own module
-      # renders no config file of its own today).
+      # The config file (pg2-2j5ac.28.5): the path stays "pg-pr/config.yaml"
+      # deliberately, even though pg-pr is retired (pg2-ijsep) and this module is
+      # now the only writer and pg-connector the only reader. registry.go's
+      # resolution order ($PG_PR_CONFIG -> $XDG_CONFIG_HOME/pg-pr/config.yaml ->
+      # ~/.config/pg-pr/config.yaml) is a deployed contract that pg-desk, pg-decider,
+      # work-report and pg-desk-shadow also rely on, and the env var is exported by
+      # consumer-repo services; renaming the path/env var is a coordinated
+      # multi-package change tracked separately, not part of the pg-pr removal.
       xdg.configFile."pg-pr/config.yaml".source =
         (pkgs.formats.yaml { }).generate "pg-pr-config.yaml"
           renderedConfig;

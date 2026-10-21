@@ -16,8 +16,9 @@ import (
 // existing pending review (GetPendingReview), the re-read before each write,
 // the per-PR lock and the body-section merge belong to the callers.
 //
-// It lives apart from github.go on purpose: github.go is hash-pinned against
-// pg-pr's copy (testdata/pg-pr-drift), and none of this exists in pg-pr.
+// It lives apart from github.go on purpose: github.go holds the shared
+// provider core (the former pg-pr drift pin was removed with pg-pr, bead
+// pg2-ijsep).
 //
 // The three primitives:
 //

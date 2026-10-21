@@ -76,8 +76,7 @@ mkGoApp {
 
   subPackages = [ "cmd/pg-connector" ];
 
-  # This package exports its version as `main.Version` (capitalised),
-  # mirroring pg-pr/default.nix.
+  # This package exports its version as `main.Version` (capitalised).
   versionPath = "main.Version";
 
   nativeBuildInputs = [ pkgs.help2man ];
@@ -90,9 +89,7 @@ mkGoApp {
   # added alongside this fix started referencing it. Matches the
   # established convention in this repo's OTHER postInstall shell-completion
   # generation (packages/claude-extended-tool-approver/default.nix has no
-  # `|| true`/`2>/dev/null` guard on its own completion generators) —
-  # pg-pr/default.nix still carries the old guarded form and is out of this
-  # bead's scope, but is the same latent defect.
+  # `|| true`/`2>/dev/null` guard on its own completion generators).
   postInstall = ''
     # Generate man page
     mkdir -p $out/share/man/man1

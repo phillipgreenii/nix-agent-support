@@ -16,7 +16,7 @@ modules designed to be imported by organization or machine-specific flakes.
 
 ## Public Repository — No ZipRecruiter Disclosure
 
-This repo (including the pg-pr Go module) is a standalone PUBLIC nix flake. NEVER hardcode or
+This repo (including its Go modules) is a standalone PUBLIC nix flake. NEVER hardcode or
 disclose ZipRecruiter-specific details — repo names, project/service identifiers, CI workflow
 names, Jira base URL/project keys, Slack workspace/channel IDs, incident semantics, bot
 identities — in code, tests, or docs. All ZR-specific configuration lives in
@@ -29,15 +29,16 @@ user identifier of any kind — real name, login, or handle — other than the o
 hashed) may be committed to this or any repo to enforce it; a short-lived denylist MAY live only
 in this workspace's local, uncommitted `CLAUDE.md` (see its "Workspace Policies").
 
-**Mechanical guard**: `packages/pg-pr/cmd/pg-pr/identifier_allowlist_test.go`
-(`TestIdentifierAllowlistGuard`) inverts the check into a small, committable ALLOWLIST of
+**Mechanical guard**: each Go module that carries fixtures owns a copy of
+`cmd/<name>/identifier_allowlist_test.go` (`TestIdentifierAllowlistGuard`; the reference copy is
+`packages/pg-connector/cmd/pg-connector/identifier_allowlist_test.go`). It inverts the check into a small, committable ALLOWLIST of
 known-safe identifiers (the operator's own identity plus named public bot/product accounts —
 `coderabbitai`, `policy-bot`, `dependabot` — and this module's existing generic test placeholders)
 and flags any other username/login/handle-shaped token found in a structured identity field
 (a JSON `login`/`author`/`reviewer`/`user` key, a `name.name.TICKET-NNN`-shaped branch-name
-component, or a git `Author:`/`Committer:` trailer). It runs automatically as part of
-`checks.<system>.pg-pr-go-tests` in `flake.nix` — no separate check attribute. Guarded scope is a
-RATCHET: today it covers only `packages/pg-pr`'s `testdata/` fixtures, widening as other
+component, or a git `Author:`/`Committer:` trailer). Each copy runs automatically as part of its module's
+`checks.<system>.<name>-go-tests` in `flake.nix` — no separate check attribute. Guarded scope is a
+RATCHET per module: today it covers each module's own `testdata/` fixtures, widening as other
 directories are scrubbed (`pg2-dssp6`, `pg2-n3gez`, `pg2-k23s6`). It does NOT catch a real name
 embedded in free-text prose with no structural marker — that stays a manual-review
 responsibility. See the test file's doc comments for the full scope rationale.
@@ -291,23 +292,25 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
 
 ---
 
-## pg-pr / pg-router Development Rules
+## pg-router Development Rules
 
-- **pg-pr is frozen and going away** (operator ruling, Phillip, 2026-10-03, verbatim: "no further
+- **pg-pr is retired and removed** (operator ruling, Phillip, 2026-10-21: "pg-pr is dead"; removal
+  beads `pg2-v8545`, `pg2-k9vmd`, `pg2-ijsep`; earlier freeze ruling 2026-10-03, verbatim: "no further
   changes are to be made to pg-pr, it is going away. we shoudl consider if the functionality
   should be added to pg-connector or pg-desk. if neither, the we should probably drop the
-  bead."): an agent MUST NOT specify or implement new pg-pr behavior. New functionality MUST be
-  evaluated for pg-connector or pg-desk, and the bead MUST be dropped if it fits neither.
-  Provenance: this ambiguity held `pg2-kftf9.12`/`.13`/`.14`/`.16` as `human` beads until resolved
-  (now retargeted to pg-connector, `.14` folded into `.13`, `.16` dropped).
+  bead."): the package, home module and plugin no longer exist. An agent MUST NOT reintroduce
+  them. New functionality MUST be evaluated for pg-connector or pg-desk, and the bead MUST be
+  dropped if it fits neither. The registry file pg-connector reads still lives at the historical
+  path `$XDG_CONFIG_HOME/pg-pr/config.yaml` (env override `$PG_PR_CONFIG`); that name is a
+  deployed contract owned by the pg-connector module, not a sign that pg-pr is present.
 - **Behavior docs are the source of truth** (working principle, user 2026-07-09): changes to the
-  pg-pr ↔ pg-router system MUST flow through the living docs at `docs/behavior/` first, then derive
+  pg-router system MUST flow through the living docs at `docs/behavior/` first, then derive
   throwaway spec → design → plan → code. The docs are product-level and timeless (stories,
   journeys, invariants in RFC 2119 language); code paths and tool internals stay out of the
   narrative. When review/workflow behavior changes, the relevant `docs/behavior/` doc MUST be
   edited in the SAME change. The old `docs/pr-review-flow.md` is a downstream implementation
   reference — the behavior doc wins on disagreement.
-- **Enrichment is compute-only** (user directive, 2026-06-24): pg-pr PR enrichment
+- **Enrichment is compute-only** (user directive, 2026-06-24): PR enrichment
   (kind/languages/size/urgency) MUST be computed deterministically with NO LLMs; libraries are
   fine, perfection is not required. Any sub-signal genuinely requiring an LLM MUST be deferred to
   a separate LLM-gated bead, never implemented with an LLM. The same rule applies to diff-review's
@@ -384,7 +387,7 @@ Verified against Claude Code 2.1.186:
   auto-discovered with no manifest entry — BUT the marketplace directory-source cache copy SKIPS
   symlinks pointing outside the plugin dir, so a `/nix/store` symlink would be silently dropped.
   The established pattern instead (bead `pg2-sikj3`): the plugin's skill/hook invokes a BARE
-  command, and the binary rides `home.packages` co-gated on `claude.enable` (precedents: pg-pr,
+  command, and the binary rides `home.packages` co-gated on `claude.enable` (precedent:
   claude-extended-tool-approver). No workspace plugin uses `bin/`.
 - **Default-Enabled Plugin ⇒ Default-Enabled Binary invariant** (observed broken 2026-10-05,
   `claude-activity`): a plugin's `defaultEnabled: true` in its `.claude-plugin/plugin.json`

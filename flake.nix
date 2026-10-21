@@ -157,12 +157,9 @@
           # codeburn-menubar: the macOS menubar app as a hash-pinned fetch of upstream's notarized
           # release zip (version follows `codeburn`); consumed by home/programs/codeburn.
           codeburn-menubar = final.callPackage ./packages/codeburn/menubar.nix { };
-          pg-pr = final.callPackage ./packages/pg-pr {
-            inherit (goBuilders) mkGoApp;
-          };
           # pg-connector: the Tier-1 umbrella binary for the unified pluggable
-          # connector architecture (bead pg2-2j5ac.1). Mirrors pg-pr's own
-          # mkGoApp shape immediately above — separate Go module (its own
+          # connector architecture (bead pg2-2j5ac.1). Uses the same
+          # mkGoApp shape as the neighbouring Go packages — separate Go module (its own
           # go.mod/gomod2nix.toml), shared-src/gomod2nixToml convention for
           # the sibling Tier-2 backend binaries a later packet adds under
           # this same module.
@@ -1523,7 +1520,6 @@
               # Pattern A (no local `replace`): flat src at the module dir. One
               # entry per go.mod module without a sibling replace.
               simpleGoLintModules = [
-                "pg-pr"
                 "pb"
                 "claude-extended-tool-approver"
                 "pa-monitor-decorator-scope"
@@ -1545,7 +1541,6 @@
               # Subset of simpleGoLintModules with build-tagged test files
               # today (see the ACCEPTANCE note above `nonUnitGoBuildTags`).
               taggedGoLintModules = [
-                "pg-pr"
                 "pb"
                 "claude-extended-tool-approver"
                 # pg2-04jgw: internal/integration is `integration`-tagged.
@@ -4285,7 +4280,7 @@
               # goCheckHook scopes `go test` to `$subPackages` when set — so the
               # shipped-binary build (and thus `nix flake check` via that build)
               # only tests `cmd/`, leaving every `internal/`+`pkg/` suite ungated
-              # (ceta's rule tests, pg-pr's sync/store/auth seams, …). Since bead
+              # (ceta's rule tests, pg-connector's seams, …). Since bead
               # pg2-pla9d.2 (operator ruling 2026-10-01) repo-base's mkGoApp and
               # mkGoBinary default `doCheck = false`, so a package build runs NO
               # tests at all — not even `cmd/` — whether or not `subPackages` is
@@ -4636,7 +4631,7 @@
               # pg2-xu4aq (the follow-up bead pg2-amzvw's own doc comment
               # named) fixed all four for real: internal/rules/pgccaudit (new
               # module), internal/rules/buildtools' baseApprovedTools
-              # (pg-go-mutate, scripts/create-child-bead.sh), and
+              # (pg-go-mutate; scripts/create-child-bead.sh, since removed with pg-pr), and
               # internal/rules/safecmds' alwaysSafe (shift). None of the four
               # need an --allow entry any more — removing them here is what
               # makes this check catch a regression instead of silently
@@ -5700,36 +5695,6 @@
                   touch $out
                 '';
 
-              # pg-pr — 100+ internal/pkg suites incl. sync/store/auth security
-              # seams. exec is temp-repo git (git on PATH) + in-process httptest
-              # (loopback, sandbox-ok); the github.com URLs in the fixtures are
-              # struct data, not live calls.
-              #
-              # Because this runs `go test ./...` from the module root (mkGoTest
-              # never sets subPackages — see this repo's CLAUDE.md "Go test
-              # gate"), it already exercises
-              # packages/pg-pr/cmd/pg-pr/identifier_allowlist_test.go — the
-              # employer/personal-identifier mechanical guard for bead pg2-tphcc.
-              # No separate check attribute was added for it: unlike the ccpool
-              # section-sign guard below, which needs a SEPARATE nix check
-              # because its non-Go surface (home/programs/ccpool/, etc.) sits
-              # outside the ccpool Go module's own walk, packages/pg-pr's
-              # currently-guarded scope (its own testdata/ fixtures) is entirely
-              # inside this module, so this one check already covers it.
-              # Guarded scope is a RATCHET: it covers only packages/pg-pr's
-              # testdata/ today and widens as other directories are scrubbed
-              # (pg2-dssp6, pg2-n3gez, pg2-k23s6) — see the doc comment on
-              # TestIdentifierAllowlistGuard in identifier_allowlist_test.go. If
-              # a future widening needs to cover a pg-pr-surface directory
-              # OUTSIDE this Go module (e.g. home/programs/pg-pr), it will need a companion nix check
-              # here, mirroring test-ccpool-surface-spec-citations below.
-              pg-pr-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-pr-go-tests";
-                src = ./packages/pg-pr; # matches default.nix (raw ./., no cleanSource)
-                gomod2nixToml = ./packages/pg-pr/gomod2nix.toml;
-                testDeps = [ pkgs.git ];
-              };
-
               # pg-connector — the Tier-1 umbrella module's own suite: the
               # envelope round trip, the sentinel-error mapping, the registry
               # loader's list-vs-single-valued parsing, and the
@@ -5743,7 +5708,7 @@
               # don't, but its packet-required real-git-checkout test
               # (internal/provider_realgit_test.go) execs real git worktree/
               # branch commands against a throwaway fixture repo — matching
-              # pg-pr-go-tests' own testDeps = [ pkgs.git ] pattern.
+              # the git testDeps pattern of the sibling Go test gates.
               pg-connector-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-connector-go-tests";
                 # Deliberately the raw, unfiltered package dir (not default.nix's own
@@ -5779,110 +5744,6 @@
                 ];
               };
 
-              # Sync guard for the pg-pr <-> pg-connector-pr-github GitHub-provider
-              # duplication during the migration window (bead pg2-sxfwd, citing the
-              # operator's pg2-rihc3 framing ruling: the duplication itself is
-              # sanctioned — pg-pr is being migrated into pg-connector on purpose —
-              # only the LACK OF A SYNC GUARD is the defect). 2b93d895 already paid
-              # the cost of fixing both copies once by hand; the pg2-flaes
-              # ReviewID-join fix landed on pg-connector's copy with no pg-pr
-              # counterpart to catch the asymmetry.
-              #
-              # This is a content-hash-pinning guard, not a byte-identity one: the
-              # two copies already, legitimately, differ forever (re-homed import
-              # paths, a "ported from pg-pr" package doc comment, and
-              # pg-connector-only additions like the ReviewID join). So each side's
-              # sha256 is pinned in a checked-in baseline under testdata/pg-pr-drift/
-              # rather than requiring the two files to be identical. A future change
-              # to EITHER side shifts that side's hash away from its pinned value and
-              # fails here — same "recorded reason" pattern as this repo's ratchet
-              # checks elsewhere: review whether the OTHER side needs the same
-              # change, then re-pin both hashes in the SAME change (that re-pin IS
-              # the recorded reason); if the other side needed the fix too and didn't
-              # get it, port it before re-pinning.
-              #
-              # A whole-file `diff -u` snapshot was tried first and discarded: GNU
-              # diffutils (this check's sandbox) and BSD diff (a plain macOS shell)
-              # pick different, EQUALLY VALID line orderings for a heavily-rewritten
-              # file with an ambiguous common anchor line, so a baseline generated
-              # on one disagreed with the other's live diff though neither file had
-              # actually changed — a false positive baked into the tool choice, not
-              # the content. Hashing each side's raw bytes has no such ambiguity.
-              #
-              # A Go test cannot do this: pg-connector-go-tests above is sandboxed
-              # to ./packages/pg-connector alone (this repo's CLAUDE.md "Go test
-              # gate"; the operator ruling (Phillip, 2026-08-27): a test MUST NOT depend on
-              # files outside what its own build packages, is the same structural point) and never sees pg-pr's source.
-              # So this is a repo-root pkgs.runCommand check that names both
-              # sides' real committed files as explicit nix inputs.
-              test-pg-connector-pr-github-pg-pr-sync =
-                let
-                  prGithub = ./packages/pg-pr/pkg/provider/vcs/github;
-                  prGitenv = ./packages/pg-pr/internal/gitenv;
-                  connGithub = ./packages/pg-connector/cmd/pg-connector-pr-github/internal/github;
-                  connGitenv = ./packages/pg-connector/cmd/pg-connector-pr-github/internal/gitenv;
-                  baseline = ./packages/pg-connector/cmd/pg-connector-pr-github/internal/github/testdata/pg-pr-drift;
-                  pair = name: pgPrDir: connDir: {
-                    inherit name;
-                    pgPr = "${pgPrDir}/${name}";
-                    conn = "${connDir}/${name}";
-                    golden = "${baseline}/${name}.sha256pair";
-                  };
-                  pairs = [
-                    (pair "github.go" prGithub connGithub)
-                    (pair "auth.go" prGithub connGithub)
-                    (pair "ghexec.go" prGithub connGithub)
-                    (pair "token.go" prGithub connGithub)
-                    (pair "gitenv.go" prGitenv connGitenv)
-                  ];
-                  # enrich.go/fingerprint.go/pending.go were dropped from this
-                  # pairing (bead pg2-lh3c4): pg-connector-pr-github's copies were
-                  # dead surface (only their own `var _ vcs.*Provider` compile
-                  # checks kept them alive; no design-cited future pg-connector
-                  # verb needs them — see internal/vcs/iface.go's doc comment) and
-                  # were deleted outright rather than carried forward, so there is
-                  # no longer a "conn" side for this check to compare against.
-                  # pg-pr's own originals are untouched and keep working unchanged.
-                  # golden format: two lines, "<sha256>  <label>" each (the familiar
-                  # sha256sum output shape, for a human skimming a diff of the
-                  # baseline file — but compared here by hash value alone, not by
-                  # the label, so a nix store path in the label never matters).
-                  checkPairScript = p: ''
-                    hashA="$(sha256sum ${p.pgPr} | cut -d' ' -f1)"
-                    hashB="$(sha256sum ${p.conn} | cut -d' ' -f1)"
-                    recordedA="$(sed -n '1{s/ .*//;p}' ${p.golden})"
-                    recordedB="$(sed -n '2{s/ .*//;p}' ${p.golden})"
-                    if [ "$hashA" != "$recordedA" ] || [ "$hashB" != "$recordedB" ]; then
-                      echo "FAIL: ${p.name} has drifted from its recorded pg-pr <-> pg-connector-pr-github baseline hashes (testdata/pg-pr-drift/${p.name}.sha256pair)." >&2
-                      echo "  Review whether the OTHER side needs the same change; if it does and doesn't have it, port it first." >&2
-                      echo "  Then re-pin both hashes in this SAME change (that re-pin is the recorded reason):" >&2
-                      echo "    sha256sum ${p.pgPr} ${p.conn}" >&2
-                      echo "  recorded: A=$recordedA B=$recordedB" >&2
-                      echo "  actual:   A=$hashA B=$hashB" >&2
-                      diff -u ${p.pgPr} ${p.conn} >&2 || true
-                      fail=1
-                    fi
-                  '';
-                in
-                pkgs.runCommand "test-pg-connector-pr-github-pg-pr-sync"
-                  {
-                    # diffutils is diagnostic only (the FAIL message's best-effort
-                    # `diff -u ... || true`) — the pass/fail decision above is the
-                    # sha256 comparison alone, so a diff-tool-version difference here
-                    # can never flip this check's result.
-                    nativeBuildInputs = [
-                      pkgs.coreutils
-                      pkgs.diffutils
-                    ];
-                  }
-                  ''
-                    fail=0
-                    ${lib.concatMapStringsSep "\n" checkPairScript pairs}
-                    [ "$fail" -eq 0 ] || exit 1
-                    echo "ok: pg-pr <-> pg-connector-pr-github GitHub-provider copies match their recorded baseline hashes"
-                    touch $out
-                  '';
-
               # Build-forcing guard for pg-connector's own Tier-1 umbrella
               # binary (bead pg2-z28y9): `nix flake check` only realizes
               # checks.*, not packages.* (this repo's CLAUDE.md "Go test
@@ -5896,7 +5757,7 @@
               # pg-connector derivations are independently buildable, unrelated
               # binaries (one umbrella CLI + 4 standalone Tier-2 backends), so
               # a shared check would conflate which of the 5 broke, whereas
-              # pg-pr/pa-monitor each guard exactly one package. Mirrors
+              # pa-monitor guards exactly one package. Mirrors
               # test-pa-monitor-version-stamped's own pattern exactly: probe
               # --version and assert the mkSrcDigest-stamped format
               # (`versionPath = "main.Version"` in default.nix), since a
@@ -6217,8 +6078,7 @@
               # x/gitfixture to spin up real git repo fixtures and exec real
               # `git` commands against them — matching the same testDeps
               # pattern already used by ccpool-go-tests,
-              # claude-extended-tool-approver-go-tests, pb-go-tests and
-              # pg-pr-go-tests above.
+              # claude-extended-tool-approver-go-tests and pb-go-tests above.
               pa-monitor-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pa-monitor-go-tests";
                 src = lib.fileset.toSource {
@@ -6307,7 +6167,7 @@
                   ];
                   # internal/config's git-common-dir tests (pg2-xl659) build a real throwaway
                   # canonical repo + linked worktree via the `git` binary rather than skipping
-                  # when it is absent — matching pg-pr-go-tests' own testDeps = [ pkgs.git ]
+                  # when it is absent — matching the sibling Go test gates' testDeps = [ pkgs.git ]
                   # pattern above.
                   testDeps = [ pkgs.git ];
                 }).overrideAttrs
@@ -13890,7 +13750,6 @@
               claude-extended-tool-approver
               pa-monitor
               pa-monitor-decorator-scope
-              pg-pr
               pg-connector
               pg-connector-github
               pg-connector-pr-github
@@ -13988,24 +13847,8 @@
             # codeburn is a manual-bump npm package (not Go/nix-update); re-exported so
             # `nix build .#codeburn` resolves it via flake.packages.<system>.
             inherit (pkgs) codeburn;
-            # pg-pr SOURCE as a realized store path, for cross-repo gomod2nix
-            # Pattern-B consumers (bead pg2-wtjz). your-private-flake's
-            # modules/pg-pr-zr has a `replace => …/packages/pg-pr` in its go.mod;
-            # a hermetic build there cannot see this sibling repo, so we hand it
-            # the source as a store path it copies into its build sandbox. This
-            # is the WHOLE pg-pr module tree (go.mod + go.sum + gomod2nix.toml +
-            # cmd/internal/pkg) — NOT a built binary. ADR 0008 §Decision.4.
-            pg-pr-src = pkgs.runCommand "pg-pr-src" { } ''
-              mkdir -p $out
-              cp -R ${
-                lib.fileset.toSource {
-                  root = ./packages/pg-pr;
-                  fileset = lib.fileset.fromSource (lib.sources.cleanSource ./packages/pg-pr);
-                }
-              }/. $out/
-            '';
-            # pg-connector SOURCE as a realized store path, mirroring pg-pr-src
-            # above for the same cross-repo gomod2nix Pattern-B reason (bead
+            # pg-connector SOURCE as a realized store path, for the cross-repo gomod2nix
+            # Pattern-B reason (bead
             # pg2-wtjz / phillipg-nix-repo-base ADR 0008 §Decision.4): a
             # hermetic build in a consuming repo cannot see this sibling repo,
             # so we hand it the source as a store path it copies into its
@@ -14077,51 +13920,12 @@
                 go test -tags contract -timeout=0 -p 1 ./...
               '';
             };
-            # pg-pr-contract runs pg-pr's on-demand, build-tagged
-            # (//go:build contract) real-bd suites (pkg/beads/contract_test.go,
-            # internal/sync/contract_test.go) that drive the REAL bd CLI
-            # (embedded-Dolt, isolated per test) rather than fakes, and are
-            # deliberately NOT a flake check / not in CI.
-            #
-            # tc-8myb measured internal/sync's suite at ~475.87s on a quiet
-            # host against go test's implicit 600s default -- only ~21%
-            # headroom. tc-8ydo's follow-up investigated raising that headroom
-            # via t.Parallel() and found it does not help: per-test bd
-            # workspaces ARE genuinely isolated (each is a filesystem copy of
-            # a template using bd's embedded-Dolt mode -- local files only, no
-            # shared server), so no data-corruption risk was found, but a real
-            # run under organic multi-session host contention (the exact
-            # "~10x latency variance under load" tc-8myb's own evidence
-            # warned about) showed a single serial test alone taking 300s+
-            # against its 5-minute per-op ceiling, and a t.Parallel()'d run
-            # (tried and reverted, not landed) still had NOT completed after
-            # 900s -- 50% more time than the 600s reference -- with many
-            # goroutines stuck waiting on concurrent bd subprocess I/O.
-            # Concurrent bd subprocesses compete for the same scarce disk I/O
-            # on a loaded host rather than speeding the suite up, so
-            # parallelizing does not buy headroom and risks making contention
-            # worse. Rather than guess a "big enough" fixed timeout, this
-            # mirrors ccpool-contract/pb-contract's own answer to the same
-            # problem: no cap at all (-timeout=0), so a slow-but-working host
-            # doesn't turn a real pass into a false failure.
-            pg-pr-contract = pkgs.writeShellApplication {
-              name = "pg-pr-contract";
-              runtimeInputs = [
-                pkgs.go
-                pkgs.git
-                (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
-              ];
-              text = ''
-                cd "''${1:-packages/pg-pr}"
-                go test -tags contract -timeout=0 -p 1 ./...
-              '';
-            };
             # pg-connector-contract runs pg-connector's on-demand, build-tagged
             # (//go:build contract) real e2e/contract suite (bead pg2-qp50z),
             # which drives the REAL pg-connector binary and REAL Tier-2 backend
             # binaries -- not hand-mocked fakes -- and is deliberately NOT a
             # flake check / not in CI -- mirroring
-            # ccpool-contract/pb-contract/pg-pr-contract's own answer to the
+            # ccpool-contract/pb-contract's own answer to the
             # same "real external system, driven deliberately and off the
             # sandboxed default" shape (bead pg2-kqft7).
             #
@@ -14150,14 +13954,12 @@
             # dolt-server auto-detection means a run of this CAN land on this
             # machine's SHARED per-user dolt server (org.nixos.beads-dolt-server,
             # 127.0.0.1:25252) whenever one is already up, rather than a
-            # private embedded engine -- unlike pg-pr-contract's workspaces,
-            # which stay isolated in practice (pg2-5ek6b's one observed
-            # exception aside). That is acceptable ONLY because this
+            # private embedded engine. That is acceptable ONLY because this
             # derivation is never part of `nix flake check`'s sandboxed set,
-            # exactly like its three siblings above: nothing SANDBOXED points
+            # exactly like its two siblings above: nothing SANDBOXED points
             # at the shared server, and invoking this one at all is the
             # developer's own deliberate, manual `nix run .#pg-connector-contract`
-            # action, same as ccpool-contract/pb-contract/pg-pr-contract.
+            # action, same as ccpool-contract/pb-contract.
             pg-connector-contract = pkgs.writeShellApplication {
               name = "pg-connector-contract";
               runtimeInputs = [

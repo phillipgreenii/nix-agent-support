@@ -40,7 +40,7 @@ refresh_go_module_with_bump() { (cd "packages/$1" && go get -u ./... && ./update
 # Every OTHER module only gets `go mod tidy` + `gomod2nix generate --with-deps`: a
 # blanket `go get -u` can raise the go directive above pkgs.go and upgrades the
 # targets of local replaces. Do not grow this list without that review.
-GO_GET_U_MODULES=(claude-extended-tool-approver pg-pr pa-monitor pg-connector)
+GO_GET_U_MODULES=(claude-extended-tool-approver pa-monitor pg-connector)
 
 case "${1:-}" in
 --ci)

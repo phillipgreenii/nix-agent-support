@@ -141,7 +141,6 @@ impl_root() {
   packages/ccpool/docs/behavior) printf '%s\n' "packages/ccpool" ;;
   packages/pa-monitor/docs/behavior) printf '%s\n' "packages/pa-monitor" ;;
   packages/pg-connector/docs/behavior) printf '%s\n' "packages/pg-connector" ;;
-  packages/pg-pr/docs/behavior) printf '%s\n' "packages/pg-pr" ;;
   packages/pg-router-ccpool-handler/docs/behavior) printf '%s\n' "packages/pg-router-ccpool-handler" ;;
   packages/pg-router-source-pg-connector/docs/behavior) printf '%s\n' "packages/pg-router-source-pg-connector" ;;
   packages/pg-router/docs/behavior) printf '%s\n' "packages/pg-router" ;;

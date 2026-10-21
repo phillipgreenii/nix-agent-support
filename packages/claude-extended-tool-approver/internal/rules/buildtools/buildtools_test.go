@@ -164,33 +164,6 @@ func TestBuildtools_PgGoMutate_Approve(t *testing.T) {
 	}
 }
 
-// TestBuildtools_CreateChildBeadSh_Approve pins the pg2-xu4aq base-tool
-// approval for create-child-bead.sh — the pg-pr-break-down-work skill's
-// bundled bd-create wrapper (claude-marketplace/pg-pr/skills/
-// pg-pr-break-down-work/scripts/create-child-bead.sh) pg2-amzvw's
-// plugin-conformance-check flagged as unrecognized. Covers the skill's own
-// documented invocation shape: a relative-path call with a parent id, a
-// quoted title/body, and multiple trailing "key: value" context args
-// (one of which interpolates a shell variable, exactly as the skill does
-// with $BRANCH).
-func TestBuildtools_CreateChildBeadSh_Approve(t *testing.T) {
-	r := New(testPE(), zrBuildtoolsConfig(t))
-	commands := []string{
-		`scripts/create-child-bead.sh zr-abc "test: unit tests for processingcycle.go" "Add table-driven tests for FindOpenProcessingCycle + CreateProcessingCycle. Done when the new test passes under nix flake check." "target file: packages/pg-pr/pkg/beads/processingcycle.go" "test file: packages/pg-pr/pkg/beads/processingcycle_test.go (create if absent)" "branch: $BRANCH"`,
-		`scripts/create-child-bead.sh zr-abc "test: unit tests for feedback.go" "Add table-driven tests for CreateFeedback. Done when the new test passes under nix flake check." "target file: packages/pg-pr/pkg/beads/feedback.go" "branch: $BRANCH"`,
-	}
-	for _, cmd := range commands {
-		input := &hookio.HookInput{
-			ToolName:  "Bash",
-			ToolInput: mustJSON(map[string]string{"command": cmd}),
-		}
-		got := hookio.Verdict(r.Evaluate(input))
-		if got.Decision != hookio.Approve {
-			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
-		}
-	}
-}
-
 // TestBuildtools_PgHooks_Approve pins the pg2-pla9d.17 (per-clone hook bundle
 // Task 13) base-tool approval for pg-hooks and its pre-commit-fix alias
 // (phillipg-nix-repo-base modules/pg-hooks). Covers every subcommand of the
@@ -1271,7 +1244,6 @@ func TestBuildtools_EmptyConfig_BaseGenericApproves(t *testing.T) {
 		"cue vet ./x", "jar xf /tmp/a.jar",
 		"gogate", "gogate --pkg ./...", "gogate --quick", "gogate -- -run TestFoo",
 		"pg-go-mutate", "pg-go-mutate ./internal/collect --workers 1",
-		`scripts/create-child-bead.sh zr-abc "t" "b"`,
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {

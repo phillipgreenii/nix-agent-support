@@ -44,26 +44,6 @@ import (
 // same way `go test`/gogate already do — but that is the same cost profile
 // those two entries already carry.
 //
-// create-child-bead.sh (bead pg2-xu4aq, the same plugin-conformance-check
-// follow-up as pg-go-mutate above) is NOT the "consumer project script"
-// case the opening paragraph excludes — it is not a downstream repo's own
-// bespoke local script. It SHIPS as part of this repo's own pg-pr plugin
-// (claude-marketplace/pg-pr/skills/pg-pr-break-down-work/scripts/), so
-// every consumer of that plugin gets the identical file, with identical
-// behavior — the same "FIXED across every consumer" property gogate and
-// pg-go-mutate have. Its own source (55 lines, read in full for this
-// entry) does exactly one thing: build a `bd create --type task --parent
-// <id> --no-inherit-labels [--force] --title <title> --description <desc>`
-// call from its argv and print the new id. Every trailing arg the caller
-// passes becomes `--title`/`--description` TEXT, never additional shell
-// syntax — cmdparse has already tokenized the full Bash tool_input before
-// this rule ever sees the leaf, so an embedded `;`/`&&`/`|` in a context
-// string would already have been split into separate leaves upstream, not
-// smuggled into this one. Its entire effect surface is therefore a strict
-// SUBSET of bare `bd create`, which the already-unconditionally-approved
-// `bd` entry below covers regardless of flags — so approving this basename
-// is no more permissive than that existing entry.
-//
 // pg-hooks and pre-commit-fix (bead pg2-pla9d.17, Task 13 of the per-clone
 // hook bundle plan) belong here for the same "behavior FIXED across every
 // consumer, no more permissive than an already-approved entry" reason.
@@ -83,7 +63,7 @@ import (
 var baseApprovedTools = map[string]bool{
 	"go":     true,
 	"gradle": true, "gradlew": true, "pre-commit": true, "prek": true, "bats": true, "bd": true,
-	"tilt": true, "gogate": true, "pg-go-mutate": true, "create-child-bead.sh": true,
+	"tilt": true, "gogate": true, "pg-go-mutate": true,
 	"pg-hooks": true, "pre-commit-fix": true,
 }
 

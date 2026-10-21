@@ -1,5 +1,10 @@
 # PR review flow — implementation reference (downstream)
 
+**Retirement note (bead `pg2-ijsep`, 2026-10-21):** the `pg-pr` package, home module and Claude
+plugin were removed from this repo. Every `pg-pr` code path, file and test cited below is
+historical (point-in-time) and no longer exists; only the pg-router and pg-connector paths
+remain live.
+
 **Status:** **Downstream implementation reference.** pg-router is a generic orchestrator
 ([`packages/pg-router/docs/behavior/`](../packages/pg-router/docs/behavior/README.md)); the
 **review workflow** built on it — reviewing others' PRs, shepherding my own — is a

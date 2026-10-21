@@ -28,7 +28,7 @@ false`, applied automatically by packet `tc-rjzd3.12`'s graceful-degradation wir
   five hook events are instead contributed to `programs.claude-hook-router.delegates`.
 - `claude-hook-router`, `claude-extended-tool-approver` and `jq` are on `PATH` (they are once the
   HM configuration above is active — both ship via `home.packages`, co-gated on
-  `claude-code.enable`, matching the existing ceta/pg-pr precedent).
+  `claude-code.enable`, matching the existing ceta precedent).
 - A working `claude` CLI and credentials at `$HOME/.claude/.credentials.json`, only needed for
   Step 2 (the Tier-3 check makes a real network request to Claude's backend — see that script's
   own header for why this is deliberate and non-hermetic).

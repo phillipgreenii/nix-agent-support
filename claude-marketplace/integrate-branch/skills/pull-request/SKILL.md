@@ -260,16 +260,6 @@ existing **open** PR whose head is `<FB>`, rather than trusting a caller-supplie
   which prompts); this handler MUST NOT run it, for the same reason PR-3 forbids the
   merge verbs.
 
-- **`pg-pr` present (no `gh`):** consult `pg-connector`'s own listing (e.g.
-  `pg-connector pr list --query <name>`, `<name>` a query already registered
-  for the target repo's own PR backend — JSON is `pg-connector`'s default
-  output mode, no `--json` flag exists; its result is the fan-out envelope
-  `{entities, present_ids, sources}`, so filter `.entities[]` to a head of
-  `<FB>`) for an existing open PR. Found → report `pr-updated`. Not found →
-  `pg-pr pr create --head "$FB" --base "$PRIMARY" --title
-"<derived title>"` (a title is required; derive it from the branch's commit
-  history — e.g. the first commit's subject — or ask the user if the branch mixes
-  unrelated work) and report `pr-opened` with the returned URL.
 - **Another configured forge CLI:** the same pattern — probe for an existing open
   PR on `<FB>` first; only create one if none is found; use whatever base-branch and
   title flags that CLI exposes, targeting `<PRIMARY>`.
@@ -285,9 +275,6 @@ request is framed (e.g. "just land it," "merge if green"). Concretely, this
 handler MUST NOT run, at any point, for any reason:
 
 - `gh pr merge` (with or without `--auto`)
-- `pg-pr pr merge` or `pg-pr pr automerge on` — both of which `pg-pr` itself
-  labels human-only verbs (its own CLI prints `WARNING: merge is a human-only
-verb` / `WARNING: automerge is a human-only verb` if invoked)
 - any other forge CLI's merge or enable-automerge equivalent
 
 If the user wants the PR actually merged, that is a separate action outside
@@ -322,7 +309,7 @@ flowchart TD
     PRES -->|"auth failure"| S9["STOP: stopped:push-auth-failed"]
     PRES -->|"anything else"| S10["STOP: stopped:push-failed — no cause asserted"]
     HOST -->|None| S2[STOP: stopped:no-pr-host]
-    HOST -->|gh / pg-pr / forge CLI| PROBE{"open PR for FB exists?"}
+    HOST -->|gh / forge CLI| PROBE{"open PR for FB exists?"}
     PROBE -->|Yes| UPD["report pr-updated"]
     PROBE -->|No| CREATE["create PR (base = PRIMARY)"] --> OPEN["report pr-opened"]
     UPD --> KEEP["PR-4: keep WT and FB — no cleanup"]
@@ -403,8 +390,8 @@ discipline `ff-merge-to-main` follows for its `landed` report.
 - The handler MUST check for an existing open PR on `<FB>` before creating a new
   one, so re-running this handler updates rather than duplicates a PR.
 - The handler MUST NOT merge the PR, enable PR automerge, or invoke any
-  human-only merge verb (`gh pr merge`, `pg-pr pr merge`, `pg-pr pr automerge on`,
-  or a forge-CLI equivalent) under any circumstance — merging a PR-driven repo in
+  human-only merge verb (`gh pr merge` or a forge-CLI
+  equivalent) under any circumstance — merging a PR-driven repo in
   this workspace requires explicit human action outside this handler.
 - The handler MUST NOT remove, retire, or otherwise clean up `<WT>` or `<FB>` —
   unlike `ff-merge-to-main`'s FF-4, cleanup does not belong to this handler because

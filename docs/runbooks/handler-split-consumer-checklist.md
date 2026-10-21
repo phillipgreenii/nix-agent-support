@@ -26,7 +26,7 @@ is `pg-router-handler-ccpool`.
 - A packet **MUST NOT** change a failure-reason string or the busy exit code (step 6).
 - A packet that touches a role's configuration, a query or a role's wrap **MUST** exercise the changed
   role once with `pg-router run-role` or `run-query` against a realistic event, and read an actual
-  outcome (`CLAUDE.md`, "pg-pr / pg-router Development Rules" section's `run-role` rule).
+  outcome (`CLAUDE.md`, "pg-router Development Rules" section's `run-role` rule).
 - Code **MUST NOT** cite ephemeral design specs; it cites the ADRs and decision entries above.
 - This repo lands first, then the consuming flake's `flake.lock` bump; a family's move is one commit
   in the consuming flake, and reverting that commit rolls the family back (S5).
