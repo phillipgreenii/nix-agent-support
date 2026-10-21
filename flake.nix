@@ -8054,45 +8054,46 @@
                     ];
                   };
                 in
-                pkgs.runCommand "test-tmp-root-registry" {
-                  nativeBuildInputs = [
-                    pkgs.bats
-                    pkgs.bash
-                    pkgs.coreutils
-                    pkgs.findutils
-                    pkgs.gnugrep
-                    pkgs.gnused
-                    pkgs.jq
-                    pkgs.lsof
-                    pkgs.pg-disk-reclaimer
-                  ]
-                  ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
-                  REG_BOTH = r.artifacts.regBoth;
-                  REG_BUILD = r.artifacts.regBuild;
-                  REG_CLAUDE = r.artifacts.regClaude;
-                }
-                //
-                  lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux
+                pkgs.runCommand "test-tmp-root-registry"
+                  (
                     {
+                      nativeBuildInputs = [
+                        pkgs.bats
+                        pkgs.bash
+                        pkgs.coreutils
+                        pkgs.findutils
+                        pkgs.gnugrep
+                        pkgs.gnused
+                        pkgs.jq
+                        pkgs.lsof
+                        pkgs.pg-disk-reclaimer
+                      ]
+                      ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
+                      REG_BOTH = r.artifacts.regBoth;
+                      REG_BUILD = r.artifacts.regBuild;
+                      REG_CLAUDE = r.artifacts.regClaude;
+                    }
+                    // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
                       # A Linux sandbox has a working ps (procps): a sweep case that
                       # cannot run there is a bug, so fail instead of skip (pg2-sbvin).
                       PGDR_REQUIRE_SWEEP_TOOLS = "1";
                     }
-                    ''
-                      ${lib.optionalString (r.failures != [ ]) ''
-                        echo "tmp-root registry eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
-                        exit 1
-                      ''}
-                      echo "ok: ${toString r.caseCount} eval cases"
-                      # No hard-coded host path in generic code or docs.
-                      if grep -rn '/Volumes/gitrepos' ${hostPathFree}/lib ${hostPathFree}/home ${hostPathFree}/packages; then
-                        echo "a generic file names the host volume path" >&2
-                        exit 1
-                      fi
-                      bats --tap ${./tests/tmp-root-registry.bats} >registry.tap || { cat registry.tap; exit 1; }
-                      cat registry.tap
-                      touch $out
-                    '';
+                  )
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "tmp-root registry eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
+                      exit 1
+                    ''}
+                    echo "ok: ${toString r.caseCount} eval cases"
+                    # No hard-coded host path in generic code or docs.
+                    if grep -rn '/Volumes/gitrepos' ${hostPathFree}/lib ${hostPathFree}/home ${hostPathFree}/packages; then
+                      echo "a generic file names the host volume path" >&2
+                      exit 1
+                    fi
+                    bats --tap ${./tests/tmp-root-registry.bats} >registry.tap || { cat registry.tap; exit 1; }
+                    cat registry.tap
+                    touch $out
+                  '';
 
               # test-tmp-sweep (bead pg2-bo3n7, packet C of the build_tmp design): the daily
               # launchd sweep agent of home/programs/tmp-sweep. Eval cases
@@ -8115,47 +8116,48 @@
                     fileset = ./home/programs/tmp-sweep;
                   };
                 in
-                pkgs.runCommand "test-tmp-sweep" {
-                  nativeBuildInputs = [
-                    pkgs.bats
-                    pkgs.bash
-                    pkgs.coreutils
-                    pkgs.findutils
-                    pkgs.gnugrep
-                    pkgs.gnused
-                    pkgs.jq
-                    pkgs.lsof
-                    pkgs.pg-disk-reclaimer
-                  ]
-                  ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
-                  SCRIPT_BOTH = r.artifacts.scriptBoth;
-                  SCRIPT_BUILD = r.artifacts.scriptBuild;
-                  SCRIPT_CLAUDE = r.artifacts.scriptClaude;
-                  REG_BOTH = r.artifacts.regBoth;
-                  REG_BUILD = r.artifacts.regBuild;
-                  REG_CLAUDE = r.artifacts.regClaude;
-                }
-                //
-                  lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux
+                pkgs.runCommand "test-tmp-sweep"
+                  (
                     {
+                      nativeBuildInputs = [
+                        pkgs.bats
+                        pkgs.bash
+                        pkgs.coreutils
+                        pkgs.findutils
+                        pkgs.gnugrep
+                        pkgs.gnused
+                        pkgs.jq
+                        pkgs.lsof
+                        pkgs.pg-disk-reclaimer
+                      ]
+                      ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
+                      SCRIPT_BOTH = r.artifacts.scriptBoth;
+                      SCRIPT_BUILD = r.artifacts.scriptBuild;
+                      SCRIPT_CLAUDE = r.artifacts.scriptClaude;
+                      REG_BOTH = r.artifacts.regBoth;
+                      REG_BUILD = r.artifacts.regBuild;
+                      REG_CLAUDE = r.artifacts.regClaude;
+                    }
+                    // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
                       # See test-tmp-root-registry: fail instead of skip where ps works.
                       PGDR_REQUIRE_SWEEP_TOOLS = "1";
                     }
-                    ''
-                      ${lib.optionalString (r.failures != [ ]) ''
-                        echo "tmp-sweep eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
-                        exit 1
-                      ''}
-                      echo "ok: ${toString r.caseCount} eval cases"
-                      # No hard-coded host path in the generic module.
-                      if grep -rn '/Volumes/gitrepos' ${hostPathFree}/home; then
-                        echo "the tmp-sweep module names the host volume path" >&2
-                        exit 1
-                      fi
-                      bats --tap ${./tests/tmp-sweep.bats} >sweep.tap || { cat sweep.tap; exit 1; }
-                      cat sweep.tap
-                      touch $out
-                    '';
+                  )
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "tmp-sweep eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
+                      exit 1
+                    ''}
+                    echo "ok: ${toString r.caseCount} eval cases"
+                    # No hard-coded host path in the generic module.
+                    if grep -rn '/Volumes/gitrepos' ${hostPathFree}/home; then
+                      echo "the tmp-sweep module names the host volume path" >&2
+                      exit 1
+                    fi
+                    bats --tap ${./tests/tmp-sweep.bats} >sweep.tap || { cat sweep.tap; exit 1; }
+                    cat sweep.tap
+                    touch $out
+                  '';
 
               # test-pg-wi-flow-module (bead tc-9ddu3.1.5, extended by
               # tc-9ddu3.1.17): proves home/programs/pg-wi-flow/default.nix's
