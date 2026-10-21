@@ -45,6 +45,20 @@ let
     manPage = false;
   };
 
+  pruneAllow = mkBashScript {
+    name = "claude-settings-prune-allow";
+    src = ./.;
+    public = false;
+    description = "Delete exact-string entries from permissions.allow in a Claude Code settings file, backing it up first";
+    libraries = [ activation-lib ];
+    runtimeDeps = [
+      pkgs.jq
+      pkgs.coreutils
+    ];
+    # Internal helper script with no --help; skip the help2man man-page step.
+    manPage = false;
+  };
+
   installPlugin = mkBashScript {
     name = "claude-settings-install-plugin";
     src = ./.;
@@ -113,6 +127,7 @@ in
   inherit
     replaceManagedKeys
     replaceAutoMode
+    pruneAllow
     installPlugin
     registerMarketplace
     gcPluginCache

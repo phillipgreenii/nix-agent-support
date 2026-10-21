@@ -13511,6 +13511,15 @@
                 ];
               };
 
+              test-claude-settings-prune-allow = checksHelpers.testBashScripts {
+                package = claudeSettingsScripts.pruneAllow.script;
+                tests = claudeSettingsTestSrc "test_prune_allow.bats";
+                extraInputs = [
+                  pkgs.jq
+                  pkgs.coreutils
+                ];
+              };
+
               test-claude-settings-install-plugin = checksHelpers.testBashScripts {
                 package = claudeSettingsScripts.installPlugin.script;
                 tests = claudeSettingsTestSrc "test_install_plugin.bats";
