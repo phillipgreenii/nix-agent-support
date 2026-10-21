@@ -1,12 +1,14 @@
 # Issue change emission per backend: a lean beads path and a Jira daemon — design
 
-- **Status**: Draft 8 for operator review. Drafts 1 and 2 were a pg-desk-only fix; drafts 3 to 6 applied the
+- **Status**: Draft 9 for operator review. Drafts 1 and 2 were a pg-desk-only fix; drafts 3 to 6 applied the
   GitHub daemon to every issue backend. On 2026-10-20 the operator ruled that the store and the daemon are
   **per implementation**: beads runs locally and needs neither, Jira needs both, and a beads daemon would be
   a separate, optional thing. Draft 7 was rewritten on that ruling; draft 8 folds in an independent review of
-  draft 7 (section 12). Draft 8 has not been reviewed. Nothing here is implemented. No implementation bead is
-  filed.
-- **Date**: 2026-10-20
+  draft 7 (section 12). Draft 9 applies the operator's 2026-10-21 rulings (section 13): the Jira daemon is
+  committed and goes BEFORE the beads path, the 24-hour interim relief and the router selective-drop bead are
+  not filed, and the queue's failure to de-duplicate is measured (section 1). Draft 9 has not been reviewed.
+  Nothing here is implemented. No implementation bead is filed.
+- **Date**: 2026-10-21 (draft 8: 2026-10-20)
 - **Bead**: `pg2-oa1h4` (this design). Closes the root cause of `pg2-izeuu` and `pg2-2f24a`; gates
   `pg2-2j5ac.44.37` (the flip of the issue decider to `apply`).
 - **Delta over**: `docs/superpowers/specs/2026-10-09-pg-connector-github-daemon-design.md` ("the GitHub
@@ -23,16 +25,17 @@ This repository is public. The document names no employer, workspace, channel or
 
 ## 0. Summary
 
-| Topic                   | Decision                                                                                                                                                                                                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| What is wrong           | 2,039 of 2,049 `issue.changed` events enqueued since 2026-10-19 18:52Z carry kind `reconcile` [2,039 / 2,049 = 99.5%]. pg-desk's two age-sweep tiers re-emit every active entity whether or not anything differs; the queue grows by about 113 per hour.                                         |
-| Where the load is       | Beads. `work-beads` held about 167 to 171 entities in the sampled connector ledgers and the focus queries add the rest of the 452 active issues; Jira's `mine` query held 3 to 4. The split is inferred, to be measured (section 1). The flood is fixed by the beads path, not by a Jira daemon. |
-| Operator ruling         | 2026-10-20: emit nothing when nothing differs; do what was done for PRs where it fits; the store and daemon are per implementation: Jira has them, beads does not need them (a beads one would be separate and optional).                                                                        |
-| Beads (no daemon)       | pg-desk keeps its fingerprint list-and-diff. The remote age tier becomes SILENT (it re-hydrates, and appends a row only when the content differs). The local tier becomes an acknowledged retry. A cross-process budget keeps `bd` from being overloaded.                                        |
-| Jira (daemon and store) | A Jira daemon owns a store, tracks every retrieved issue until closed plus 24 hours, evicts it 7 days after closing, and runs on an internal request budget (Jira's own quota signals are limited, section 3.4). pg-desk consumes its change feed.                                               |
-| Order                   | Beads path first: it stops the incident. Jira daemon second: it is quota and freshness work for 3 to 4 entities, and section 10 asks whether it earns its weight. Until it lands, Jira is just another non-owning backend.                                                                       |
-| Decider acknowledgement | REQUIRED before the decider flips to `apply` (section 6, Appendix A).                                                                                                                                                                                                                            |
-| Interim                 | Relaxing the two sweep ages to 24 hours cuts the long-run arrival mean from 177 to about 38 per hour (not a ceiling) without code (section 8). Needs the operator's yes.                                                                                                                         |
+| Topic                   | Decision                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What is wrong           | 2,039 of 2,049 `issue.changed` events enqueued since 2026-10-19 18:52Z carry kind `reconcile` [2,039 / 2,049 = 99.5%]. pg-desk's two age-sweep tiers re-emit every active entity whether or not anything differs; the queue grows by about 113 per hour.                                                                                                                           |
+| Where the load is       | Beads. `work-beads` held about 167 to 171 entities in the sampled connector ledgers and the focus queries add the rest of the 452 active issues; Jira's `mine` query held 3 to 4. The split is inferred, to be measured (section 1). The flood is fixed by the beads path, not by a Jira daemon; the Jira daemon is nevertheless committed and goes first (Order).                 |
+| Operator ruling         | 2026-10-20: emit nothing when nothing differs; do what was done for PRs where it fits; the store and daemon are per implementation: Jira has them, beads does not need them (a beads one would be separate and optional).                                                                                                                                                          |
+| Beads (no daemon)       | pg-desk keeps its fingerprint list-and-diff. The remote age tier becomes SILENT (it re-hydrates, and appends a row only when the content differs). The local tier becomes an acknowledged retry. A cross-process budget keeps `bd` from being overloaded.                                                                                                                          |
+| Jira (daemon and store) | A Jira daemon owns a store, tracks every retrieved issue until closed plus 24 hours, evicts it 7 days after closing, and runs on an internal request budget (Jira's own quota signals are limited, section 3.4). pg-desk consumes its change feed.                                                                                                                                 |
+| Order                   | Operator ruling 2026-10-21: the Jira daemon is necessary and has higher priority than beads, so it goes FIRST. The beads path, which is what stops the flood, follows it; the consequence for the incident is stated in section 8 and section 10. The pieces both need (section 5) land with whichever goes first.                                                                 |
+| Decider acknowledgement | REQUIRED before the decider flips to `apply` (section 6, Appendix A).                                                                                                                                                                                                                                                                                                              |
+| Interim                 | NOT filed (operator ruling 2026-10-21). Relaxing the two sweep ages to 24 hours would cut the long-run arrival mean from 177 to about 38 per hour (not a ceiling) without code (section 8); the operator reads the growing backlog as a larger problem and asked for the de-duplication to be checked first.                                                                       |
+| De-duplication          | Checked 2026-10-21 (section 1): the router de-duplicates by exact event id and the id carries the change-log sequence, so a re-emission is always a new id and nothing is ever de-duplicated; 89.7% of enqueued events are superseded by a later event for the same entity. The emitter fixes of sections 4 and 6 remove the cause; router-side supersession is OPEN (section 10). |
 
 ## 1. Problem, measured
 
@@ -58,6 +61,21 @@ Measured 2026-10-20 06:29Z from the router queue log, `pg-router status --json` 
   count per backend, and the number of hydrations whose fingerprint changed per day (the real-change rate that
   the success criterion of section 7 divides by). The new `fields_changed` rows add events that were
   previously dropped, so the real-change rate is measured against the NEW rule.
+- **The queue does not de-duplicate this load (measured 2026-10-21 02:45Z, answering the operator's question
+  whether the backlog is de-duplicating).** The router drops an enqueue only when its exact event id is still
+  retained (INV-EVT-3 of the router's behavior docs). The id is `issue.changed:<entity>@<max change_log seq>`
+  and every reconcile row appended by pg-desk gets a new sequence, so every re-emission is a new id and the
+  rule can never fire. From the router's queue log: 4,495 `issue.changed` enqueues between 2026-10-20 03:22 and
+  22:36 (UTC-4) carry 4,495 distinct ids for 465 distinct entities, 3 to 12 enqueues per entity (typically 9 to
+  11). 4,030 of 4,495 are superseded by a later event for the same entity [(4,495 - 465) / 4,495 = 89.7%];
+  4,461 of 4,495 carry only kind `reconcile` [4,461 / 4,495 = 99.2%] and 34 are real changes. Every one is
+  born expired (`expiresAt` equal to `enqueuedAt`, 4,495 of 4,495), so even an id match would be inside a
+  window of about one dispatch cycle. Queue depth at 02:42Z was 4,387 against 1,757 at 2026-10-20 06:29Z:
+  growth of about 130 per hour [(4,387 - 1,757) / 20.2h], above the 113 per hour of the first measurement. The
+  duplication is created by the EMITTER, which appends a row and a new id whether or not anything differs;
+  sections 4 and 6 remove that at the source. They do not make the router supersede an older pending event for
+  the same entity, which is the only thing that would stop a backlog from compounding if an emitter regressed
+  (section 10, item 8).
 
 ## 2. Ownership per backend
 
@@ -444,35 +462,52 @@ change to the decider (area vocabulary, priority map) is followed by `pg-desk is
    the `bd` budget defaults; the active count per backend and the real-change rate (section 1); the focus-set
    size; Jira's burst headroom on the shared tenant and `search --expand`; whether the closed-at migration is
    safe for the GitHub store.
-2. **Beads path (stops the incident):** the dispatch surface (INV-ICD-10) and per-entity `backend`; the silent
-   sweep (INV-ICD-7, -8) at 24 hours; `fields_changed`; the retry tier, the decider acknowledgement and the
-   view change (Appendix A), armed as INV-ICD-12 says; the focus-set re-emission; the `bd` budget; the metrics
-   and alerts of section 7; the sweep-bound change; the rewritten tests. The decider's view change touches
-   `pg-decider/internal/view` and its golden drift test, and the decider gains an acknowledge call, so both
-   `pg-desk` and `pg-decider` ship together.
-3. **Jira daemon:** library generalisation (config-declared governor buckets; the feed accepts kind `issue`;
-   the closed-at migration of section 3.2), the daemon, the Jira groups and tracking, the budget, the feed, the
-   umbrella manual-acknowledge mode, pg-desk's feed consumption, `Issue.Version` and the comment summary,
-   observability and packaging (home-manager options and launchd entry with a distinct label, state
-   directory, log name and `service_name`; exact-path `logSources`; the old backend's error alert off to avoid a
-   double page; an absolute `pjira` path because launchd gives no `PATH`; the nix checks mirrored from the
-   GitHub daemon), and the shadow run.
-4. **Cutover for Jira:** install the daemon and register the argv form
+2. **Jira daemon (FIRST, operator ruling 2026-10-21: necessary, and higher priority than beads):** library
+   generalisation (config-declared governor buckets; the feed accepts kind `issue`; the closed-at migration of
+   section 3.2), the daemon, the Jira groups and tracking, the budget, the feed, the umbrella manual-acknowledge
+   mode, pg-desk's feed consumption, `Issue.Version` and the comment summary, observability and packaging
+   (home-manager options and launchd entry with a distinct label, state directory, log name and
+   `service_name`; exact-path `logSources`; the old backend's error alert off to avoid a double page; an
+   absolute `pjira` path because launchd gives no `PATH`; the nix checks mirrored from the GitHub daemon), and
+   the shadow run. The pieces that both backends need LAND HERE, with the first consumer: the dispatch surface
+   (INV-ICD-10) with the per-entity `backend` column, the manual-acknowledge verbs and the failed-ingest side
+   table (INV-ICD-11), and `fields_changed` (INV-ICD-5) in the daemon's classifier and in pg-desk's. The Jira
+   daemon does not stop the flood (section 1, Jira holds 3 to 4 entities); it does not depend on the beads path.
+3. **Cutover for Jira:** install the daemon and register the argv form
    `[pg-connector-issue-jira, --config, <path>, --instance, <name>]` for every list that names the backend
    (the home-manager module rewrites them from one place, as for GitHub); the daemon baselines its queries;
    pg-desk's first feed poll starts at the tail; run `pg-desk issue refresh <id>` once for each active Jira
    issue (3 to 4 entities); clear the umbrella cache and ledger files for the Jira instance, and again at
    rollback. Rollback is the registry switch back to the old instance. `--reset` replays every tracked member
    as `added` and MUST NOT be part of any runbook except after a store move-aside.
+4. **Beads path (stops the flood; follows the Jira daemon by ruling):** the silent sweep (INV-ICD-7, -8) at 24
+   hours; the retry tier, the decider acknowledgement and the view change (Appendix A), armed as INV-ICD-12
+   says; the focus-set re-emission; the `bd` budget; the beads metrics and alerts of section 7; the sweep-bound
+   change; the rewritten tests. The decider's view change touches `pg-decider/internal/view` and its golden
+   drift test, and the decider gains an acknowledge call, so both `pg-desk` and `pg-decider` ship together.
+   **Consequence of the ordering, stated so it is not a surprise:** until this step deploys the flood continues
+   (130 per hour measured 2026-10-21, section 1) and the decider stays in `plan` mode. The operator ruled the
+   24-hour interim relief out (below) and the ordering in, so the queue keeps growing for the duration of steps
+   2 and 3. If that cost proves unacceptable the operator can pull the silent sweep (INV-ICD-7, -8) forward
+   ahead of step 2 as its own packet. Its stated inputs are the normalised comparison (INV-ICD-7) and the
+   no-version-bump write (INV-ICD-8), neither of which names the Jira daemon; the packet that cuts it MUST
+   confirm that against the code before relying on it.
 5. **No migration off `PG_CONNECTOR_ISSUE_BEADS_DIR` is needed**, because beads stays one-shot with
    `--beads-dir` and the environment variable as today; a Jira instance takes its settings from its config file
    and never used the variable. The retired concern of drafts 3 to 6 does not apply.
-6. **Backlog.** The 1,757 queued reconcile events: `pg-router log compact` "never discards a queued event" and
-   no router verb drops queued events, so they drain naturally in `1,757 / 64 = 27` hours at the average drain,
-   and a new real change waits behind them. A selective drop (type and kind) is a pg-router bead and a
-   prerequisite of step 2's deployment; the operator MAY accept the 27 hours.
+6. **Backlog.** The queued reconcile events (1,757 at 2026-10-20 06:29Z, 4,387 at 2026-10-21 02:42Z):
+   `pg-router log compact` "never discards a queued event" and no router verb drops queued events, so they
+   drain naturally. At the 64-per-hour average drain of draft 8 (measured 2026-10-20, not re-measured: the
+   router delivered 109 events in the 28 minutes after its 02:14Z restart, a different and short window) the
+   4,387 take `4,387 / 64 = 69` hours, and a
+   new real change waits behind them; the backlog compounds until step 4 deploys. A selective drop (type and
+   kind), or router-side supersession of pending events per entity (section 10, item 8), is a pg-router bead;
+   **it is NOT filed (operator ruling 2026-10-21: "lets wait on the selective drop for now"), pending the
+   de-duplication question of section 10.**
 
-**Interim relief (no code, needs the operator's yes).** Until step 2 deploys, set `sweep.reconcile_age` and
+**Interim relief (no code; NOT filed, operator ruling 2026-10-21).** The operator declined it, reading the
+growing backlog as a larger problem than the sweep ages and asking for the de-duplication to be checked first
+(section 1). It is kept here as the recorded option. Until step 4 deploys, one could set `sweep.reconcile_age` and
 `sweep.max_age` to 24 hours in the deployment configuration. Each key bounds one tier and `sweep.max_per_poll`
 caps each tier per poll. The long-run MEAN arrival falls from the measured 177 per hour to about
 `(452 / 24h) x 2 = 38` per hour. It is not a ceiling and not a stop to growth: a tier's due time is the
@@ -482,12 +517,17 @@ hours (`452 / 6.7h = 67` per hour); the remote tier's, keyed on a `hydrated_at` 
 hours, over about 11 hours (`452 / 11h = 41` per hour). Together they can exceed the 64-per-hour average drain
 for the first day. The backlog is untouched. The keys are global, so every flow that uses them relaxes,
 failed-run recovery is removed (acceptable only in `plan` mode), and `pg-desk-sweep-bound-violated` goes
-quiet. **Revert is enforced by the beads:** the apply flip is gated on the acknowledgement bead, and the text
-of the operator-run checkpoint `pg2-2j5ac.44.37` MUST be amended so its first step reads the configured
-`reconcile_age` and refuses above 30 minutes. That bead's text also says issue entities "hydrate through
-`pg-desk issue changes`" and sizes the lag budget from `sweep.reconcile_age`; both change with this design.
-`pg2-2j5ac.52.22` (the retired PR-era cutover) is re-scoped. The relief is worth doing only if step 2 is weeks
-away; it is not a fix.
+quiet. **Revert is enforced by the beads, and that part is DONE (2026-10-21, operator ruling "Amend .44.37
+only; fix design section 8 for .52.22"):** the apply flip is gated on the acknowledgement bead, and the body of
+the operator-run checkpoint `pg2-2j5ac.44.37` was amended so its first step (a new step (-1)) reads the
+configured `reconcile_age` and refuses above 30 minutes. That amendment also supersedes the bead's wording
+that issue entities "hydrate through `pg-desk issue changes`" and its sizing of the lag budget from
+`sweep.reconcile_age` (it is now sized from the measured arrival rate of `issue.changed` events).
+`pg2-2j5ac.52.22` is NOT re-scoped: it is already CLOSED, by the operator's 2026-10-14 ruling "A: collapse,
+defer deletions" (bead `pg2-15ja3`), when Phase 10 collapsed into the GitHub design's rollout; nothing was
+shipped under it, so the `.44.37` precondition that the cutover release "shipped" is checked by observing the
+live pg-desk, not by that bead. The relief would be worth doing only if step 4 is weeks away, and it is not a
+fix.
 
 ## 9. Test plan
 
@@ -520,11 +560,14 @@ cutover gate with their own prefix and workspace per test, including two tracker
 
 ## 10. Open questions and risks
 
-1. **Does a Jira daemon earn its weight?** Jira holds 3 to 4 entities. A daemon and a store for that is
-   heavy; the lean alternative is to keep Jira on the same silent sweep as beads. The operator ruled Jira gets
-   the daemon, and the design follows. The case for it: tracking until closed plus 24 hours, a request budget on
-   a shared tenant, local hits for every reader, and consistency with PRs. Section 8 sequences it after the
-   incident fix so the decision costs nothing now.
+1. **RESOLVED 2026-10-21: the Jira daemon is committed and goes first.** Draft 8 asked whether a daemon and a
+   store for 3 to 4 entities earns its weight and offered the lean fallback (Jira on the same silent sweep as
+   beads) with the decision deferred until after the beads path. The operator ruled: "jira daemon is necessary
+   and higher priority than beads." The question is closed, not deferred; the lean fallback is no longer an
+   option of this design (section 11). The case for the daemon stays recorded: tracking until closed plus 24
+   hours, a request budget on a shared tenant, local hits for every reader, and consistency with PRs. The open
+   cost of the ruling is the incident: the flood is a beads flood and the beads path now follows (section 8,
+   step 4).
 2. **Beads daemon.** Not designed (section 2). The signal that would justify one is in section 4.3.
 3. **Decider inputs that are not issue content** (bead state outside the watched set, wall-clock gates,
    decider configuration): the focus set is re-emitted on a timer (section 6) and a configuration change is
@@ -536,6 +579,15 @@ cutover gate with their own prefix and workspace per test, including two tracker
 6. **Closed-at migration** touches the shared store ladder and must be proven safe for the GitHub daemon.
 7. **Where the shadow harness lives** for the Jira daemon (pg-desk-shadow's safety policy pins the tracker
    directory).
+8. **Router-side supersession of pending events (OPEN, for the operator's final review).** The queue does not
+   de-duplicate (section 1: 89.7% of enqueued events are superseded by a later event for the same entity)
+   because the event id carries the change-log sequence. This design removes the CAUSE at the emitter and does
+   not change the router. Router-side supersession (a newer pending event for an entity supersedes older
+   pending ones of the same type) would also bound the backlog if an emitter regressed and would make the
+   existing backlog drain without a separate selective-drop verb; it is a pg-router change and a change to the
+   router's event-identity invariant (INV-EVT-3), so it needs its own behavior-doc change and the operator's
+   decision. The operator asked for the check and ruled the selective-drop bead NOT filed for now; this item
+   is the recorded question, and no bead is filed until it is decided.
 
 ## 11. Alternatives considered
 
@@ -543,11 +595,11 @@ cutover gate with their own prefix and workspace per test, including two tracker
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A daemon and store for every issue backend (drafts 3 to 6)                  | Replaced: beads is local and needs none; one daemon for a local tracker adds a store and a hop with nothing to protect                                                          |
 | Retire the remote tier entirely for beads (draft 7)                         | Replaced: it left a stored entity's recursive dependencies unrefreshed and broke the focus coverage's due-backlog meaning; a silent tier keeps both and emits nothing           |
-| Jira stateless, with the same silent sweep                                  | Not chosen (the operator ruled otherwise); recorded as the lean fallback in section 10                                                                                          |
+| Jira stateless, with the same silent sweep                                  | Rejected (operator ruling 2026-10-21: the Jira daemon is necessary and higher priority than beads); no longer a fallback                                                        |
 | Raise `sweep.max_per_poll` or lengthen `reconcile_age` as the permanent fix | Rejected: arrivals still scale with the watched set (`pg2-2f24a`); the 24-hour setting is interim only                                                                          |
 | Router consumption of the Jira feed directly (the PR shape)                 | Rejected for `issue`: pg-desk is the single emitter and hydrator, which keeps hydration before emission, one event path, ids from its own change log and the menu-bar consumers |
 | Slow full backstop sweep that emits (the PR precedent)                      | Rejected: it re-emits every entity. The silent sweep re-reads without emitting                                                                                                  |
-| Router-side coalescing of pending items for one entity                      | Not rejected, defence in depth, not a substitute: events are still emitted                                                                                                      |
+| Router-side coalescing of pending items for one entity                      | OPEN (section 10, item 8): not rejected; the 2026-10-21 measurement shows the queue never de-duplicates this load, but the emitter is where the duplicates are made             |
 
 ## Appendix A. Decider acknowledgement (required before the flip to `apply`)
 
@@ -589,3 +641,20 @@ backend.
 | 3 to 6 | The operator's end state (the PR design), then four rounds of independent review    | A daemon for every backend. Findings on event identity, hydration, ordering, cutover, recovery, writes, alerts and tests shaped drafts 4 to 6; the parts that survive are sections 3.3, 3.5, 6, 7, 9 and Appendix A                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 7      | The operator, 2026-10-20: the store and daemon are per implementation               | Rewritten around beads without a daemon and Jira with one                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 8      | One independent review of draft 7 (all five dimensions)                             | Two blockers and seven majors, each changing the design: the dispatch surface, a per-entity `backend` and pinned `--backend` (INV-ICD-10); the retired remote tier broke the focus coverage and the dependency refresh, so it is made silent instead (4.2); the acknowledgement mechanics, per-row `seq`, empty-poll acknowledgement and skip-and-record instead of head-of-line blocking (INV-ICD-11); the retry tier armed and staged (INV-ICD-12); the budget's child-process semantics, state directory, write reservation and event fields (INV-ICD-9); the invariant and test rewrite list (5); the closed-at migration and the withdrawn "GitHub store untouched" claim (3.2); the decider view change and write-echo convergence (Appendix A, T-12); honest evidence for the backend split (1); the interim arithmetic (8); Jira source references and the dated API-token exemption (3.4). Draft 8 not yet reviewed |
+| 9      | The operator, 2026-10-21: rulings on the open questions of draft 8                  | Jira daemon committed and first; `pg2-2j5ac.44.37` amended; interim relief and selective-drop bead not filed; queue de-duplication measured (sections 1, 8, 10, 13). Draft 9 not yet reviewed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+## 13. Operator rulings of 2026-10-21
+
+Recorded verbatim on `pg2-oa1h4`; each supersedes the draft 8 text it names.
+
+1. **Jira daemon sequencing.** "jira daemon is necessary and higher priority than beads." Supersedes draft 8's
+   order (beads path first, Jira daemon second, with a go/no-go on whether it earns its weight): the daemon is
+   committed and goes first (sections 0, 8, 10 item 1, 11).
+2. **Bead bodies.** "Amend .44.37 only; fix design section 8 for .52.22." `pg2-2j5ac.44.37` was amended (section
+   8); `pg2-2j5ac.52.22` is closed and is not amended, and section 8's "is re-scoped" sentence is corrected.
+3. **24-hour interim relief.** Not filed. "the fact that the backlog signals to me a larger problem. there aren't
+   that many jira issues or beads that i think it should be needing to pull in. i don't think the backlog is
+   properly deduping. can you check that? that isn't directly related to this planned work, but that every
+   growing backlog is daunting." The check is section 1's last bullet.
+4. **Router selective-drop bead.** Not filed for now. "lets wait on the selective drop for now. see my previous
+   comment about proper dedup" (section 8 step 6, section 10 item 8).
