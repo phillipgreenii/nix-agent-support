@@ -32,7 +32,7 @@ mkGoApp {
 
   # Shell completions (the pa-monitor layout: bash under bash-completion,
   # zsh under site-functions) and the tldr page, flat under
-  # share/tldr/pages.common (the layout wtdone, pg-pr and pg-desk ship; the
+  # share/tldr/pages.common (the layout wtdone, the retired PR tool and pg-desk ship; the
   # home-manager shim wiring registers it through programs.tldr.customPages).
   postInstall = ''
     mkdir -p $out/share/bash-completion/completions

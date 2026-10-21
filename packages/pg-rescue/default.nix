@@ -33,7 +33,7 @@ mkGoApp {
   ];
 
   # The tldr page is a committed pg-rescue.md copied into place the way
-  # packages/pg-pr does it; a home-manager module (a later bead) wires it
+  # the retired PR tool does it; a home-manager module (a later bead) wires it
   # into programs.tldr.customPages from this path.
   postInstall = ''
     mkdir -p $out/share/tldr/pages.common
