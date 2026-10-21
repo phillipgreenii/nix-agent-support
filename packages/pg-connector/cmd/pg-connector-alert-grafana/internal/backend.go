@@ -256,13 +256,15 @@ func lowerOneLevel(s schema.Severity) schema.Severity {
 	}
 }
 
-// severityFromLabel is design 6's closed Grafana table. Anything absent or
-// unrecognized yields "" (omitted, never defaulted).
+// severityFromLabel is design 6's closed Grafana table: the four Grafana alert
+// severity levels (critical, error, warning, info) mapped onto the attention
+// scale. Anything absent or unrecognized yields "" (omitted, never defaulted);
+// that includes "high", which is an attention severity and not a Grafana level.
 func severityFromLabel(v string) schema.Severity {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "critical":
 		return schema.SeverityCritical
-	case "error", "high":
+	case "error":
 		return schema.SeverityHigh
 	case "warning":
 		return schema.SeverityMedium

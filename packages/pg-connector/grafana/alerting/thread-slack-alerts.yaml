@@ -51,8 +51,9 @@
 # provisioning has no such field). Rule uids stay under Grafana's 40-char cap.
 #
 # Surfacing in SwiftBar needs no menubar change: pg-connector-alert-grafana
-# lists every firing Grafana alert and maps labels.severity (error -> high,
-# warning -> medium).
+# lists every firing Grafana alert and maps labels.severity onto its attention
+# scale (critical -> critical, error -> high, warning -> medium, info -> low).
+# The rule's own label MUST be one of critical, error, warning, info.
 apiVersion: 1
 groups:
   - orgId: 1

@@ -336,14 +336,17 @@ func TestSeverityFromLabel_ClosedTable(t *testing.T) {
 	tests := map[string]schema.Severity{
 		"critical": schema.SeverityCritical,
 		"error":    schema.SeverityHigh,
-		"high":     schema.SeverityHigh,
 		"warning":  schema.SeverityMedium,
 		"info":     schema.SeverityLow,
 		"Critical": schema.SeverityCritical,
 		"":         "",
 		"page":     "",
-		"medium":   "",
-		"low":      "",
+		// attention severities are not Grafana levels; the retired "high"
+		// alias is rejected like any other unrecognized value.
+		"high":   "",
+		"HIGH":   "",
+		"medium": "",
+		"low":    "",
 	}
 	for in, want := range tests {
 		if got := severityFromLabel(in); got != want {
