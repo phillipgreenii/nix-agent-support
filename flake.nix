@@ -8252,6 +8252,52 @@
                   touch $out
                 '';
 
+              # test-tmp-root-modules (bead pg2-2qirl, packet A of the build_tmp design):
+              # the build-tmp and claude-code-tmp home-manager modules (shared plumbing in
+              # lib/tmp-root.nix). The eval cases live in tests/tmp-root-modules.nix (options
+              # off by default, activation and snippet rendering, the basename / absolute-path /
+              # pg-disk-reclaimer assertions, exportTmpdir, and the CETA contribution of BOTH
+              # facets against the REAL claude-extended-tool-approver module, absent and
+              # present). The rendered shell snippets and activation scripts are then RUN by
+              # tests/tmp-root-env.bats (bash AND zsh, env -i, a real mktemp directory) and
+              # tests/tmp-root-activation.bats (fixture parent: 0700 + marker, idempotent,
+              # symlink refused, missing parent skipped). No host enables either module.
+              test-tmp-root-modules =
+                let
+                  r = import ./tests/tmp-root-modules.nix { inherit lib pkgs; };
+                in
+                pkgs.runCommand "test-tmp-root-modules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.bash
+                      pkgs.zsh
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.diffutils
+                    ];
+                    SNIPPET_BUILD = r.artifacts.buildSnippet;
+                    SNIPPET_BUILD_TMPDIR = r.artifacts.buildSnippetTmpdir;
+                    SNIPPET_BUILD_SPACE = r.artifacts.buildSnippetSpace;
+                    SNIPPET_CLAUDE = r.artifacts.claudeSnippet;
+                    ACTIVATION_BUILD = r.artifacts.buildActivation;
+                    ACTIVATION_CLAUDE = r.artifacts.claudeActivation;
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "tmp-root eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
+                      exit 1
+                    ''}
+                    echo "ok: ${toString r.caseCount} eval cases"
+                    # A skipped test would hide an unprovided input: none may skip.
+                    bats --tap ${./tests/tmp-root-env.bats} >env.tap || { cat env.tap; exit 1; }
+                    bats --tap ${./tests/tmp-root-activation.bats} >activation.tap || { cat activation.tap; exit 1; }
+                    cat env.tap activation.tap
+                    ! grep -q '# skip' env.tap activation.tap
+                    touch $out
+                  '';
+
               # test-pg-wi-flow-module (bead tc-9ddu3.1.5, extended by
               # tc-9ddu3.1.17): proves home/programs/pg-wi-flow/default.nix's
               # paths.defaults wiring actually evaluates and renders the

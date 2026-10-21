@@ -54,6 +54,8 @@
     ./programs/perles
     ./programs/rtk
     ./programs/pg-disk-reclaimer
+    ./programs/build-tmp
+    ./programs/claude-code-tmp
     ./programs/wtnew
     ./programs/wtdone
     ./programs/pg-wi-flow
