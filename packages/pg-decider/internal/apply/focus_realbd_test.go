@@ -194,7 +194,7 @@ type focusRealWorld struct {
 func focusRealSetup(t *testing.T, bins focusRealBins) *focusRealWorld {
 	t.Helper()
 	root := t.TempDir()
-	w := &focusRealWorld{t: t, bins: bins, dir: filepath.Join(root, "ws"), config: filepath.Join(root, "pg-pr.yaml")}
+	w := &focusRealWorld{t: t, bins: bins, dir: filepath.Join(root, "ws"), config: filepath.Join(root, "pg-connector.yaml")}
 	if err := os.MkdirAll(w.dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

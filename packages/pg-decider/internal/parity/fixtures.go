@@ -13,7 +13,7 @@
 // Both sides are hermetic: a fresh state directory, config, HOME and PATH, with
 // a fixture-driven fake pg-connector first (and only) on PATH. The package
 // maps nothing and diffs nothing; that is the sibling packet's job. It imports
-// neither packages/pg-desk, packages/pg-pr nor any internal/sync, so the tool
+// neither packages/pg-desk nor any internal/sync, so the tool
 // is deleted with internal/sync as one directory.
 package parity
 

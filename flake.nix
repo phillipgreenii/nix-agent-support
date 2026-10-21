@@ -4688,7 +4688,7 @@
               # pg2-xu4aq (the follow-up bead pg2-amzvw's own doc comment
               # named) fixed all four for real: internal/rules/pgccaudit (new
               # module), internal/rules/buildtools' baseApprovedTools
-              # (pg-go-mutate; scripts/create-child-bead.sh, since removed with pg-pr), and
+              # (pg-go-mutate; scripts/create-child-bead.sh, since removed), and
               # internal/rules/safecmds' alwaysSafe (shift). None of the four
               # need an --allow entry any more — removing them here is what
               # makes this check catch a regression instead of silently
@@ -4910,9 +4910,6 @@
 
               # pg-decider (docket pg2-2j5ac.52.18) — whole-module Go test
               # gate. Pattern A: flat src at the module dir, no local replace.
-              # The G8 guard (TestNoPackageImportsPgPr) skips inside this
-              # isolated build (no flake.nix above the module); it is enforced
-              # by the commit-time and pre-land hooks in the checkout.
               pg-decider-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-decider-go-tests";
                 src = lib.cleanSource ./packages/pg-decider; # matches default.nix
@@ -7547,7 +7544,7 @@
                         [ "$(jq -r .repoRoot "$launchConfigFile")" = /tmp/pg2-qsred-repo ]
                         [ "$(jq -r .worktreeDir "$launchConfigFile")" = /tmp/pg2-qsred-repo/.worktrees ]
                         [ "$(jq -r .permissionMode "$launchConfigFile")" = plan ]
-                        # prTool is retired (pg-pr removal, bead pg2-k9vmd): the launch config no longer renders it.
+                        # prTool is retired (bead pg2-k9vmd): the launch config no longer renders it.
                         [ "$(jq -r 'has("prTool")' "$launchConfigFile")" = false ]
                         [ "$(jq -r .beadsPrefix "$launchConfigFile")" = zr ]
                         [ "$(jq -r .autonomous "$launchConfigFile")" = true ]

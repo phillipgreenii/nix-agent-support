@@ -13,45 +13,44 @@ import (
 )
 
 // This file is pg-decider's OWN copy of the mechanical guard for bead
-// pg2-tphcc, mirroring packages/pg-pr/cmd/pg-pr/identifier_allowlist_test.go
-// and packages/pg-connector/cmd/pg-connector/identifier_allowlist_test.go.
+// pg2-tphcc, mirroring
+// packages/pg-connector/cmd/pg-connector/identifier_allowlist_test.go.
 //
 // # Why a copy, not a shared widening — bead pg2-h3db9
 //
-// packages/pg-pr's guard roots itself at a walk-up-to-go.mod that is
-// structurally bounded to packages/pg-pr's own module: packages/pg-decider has
-// its OWN go.mod (a separate Go module, like packages/pg-desk before
-// it), so neither sibling module's test binary ever sees this module's
-// files, in or out of the nix sandbox. Each Go module in this repo
+// The guard roots itself at a walk-up-to-go.mod that is structurally bounded
+// to its own module: packages/pg-decider has its OWN go.mod (a separate Go
+// module, like packages/pg-desk before it), so no sibling module's test
+// binary ever sees this module's files, in or out of the nix sandbox. Each Go module in this repo
 // therefore gets its own copy of the guard, rooted at its own module root
 // — see packages/pg-connector's copy for the fuller rationale.
 //
 // # No checked-in denylist — see the operator ruling this inverts
 //
-// Same ruling as pg-pr's and pg-connector's copies (Phillip, 2026-08-24,
+// Same ruling as pg-connector's copy (Phillip, 2026-08-24,
 // bead pg2-tphcc, recorded in this repo's CLAUDE.md "Public Repository —
 // No ZipRecruiter Disclosure"): no denylist of forbidden tokens, plaintext
 // or hashed, may live in any repo. This guard is the same ALLOWLIST
-// inversion — see pg-pr's copy for the full rationale (why an allowlist,
-// why testdata/ is the guarded scope, and the guard's known limitation
-// against free-text prose).
+// inversion — see pg-connector's copy for the full rationale (why an
+// allowlist, why testdata/ is the guarded scope, and the guard's known
+// limitation against free-text prose).
 //
 // This module's allowlist is deliberately NARROW: it carries only the
 // identifiers packages/pg-decider's own testdata actually uses today (its view
 // fixtures, testdata/pr_view_*.json, use only
-// "teammate" and "review-bot", the generic placeholders below). pg-pr's/
-// pg-connector's other bot/product placeholders (coderabbitai, policy-bot,
+// "teammate" and "review-bot", the generic placeholders below). the other
+// bot/product placeholders in pg-connector's copy (coderabbitai, policy-bot,
 // dependabot, alice) are intentionally NOT pre-added — per the ruling's own
 // logic, adding an entry before it is needed is exactly the speculative
 // list-growth an allowlist exists to avoid forcing. Add one here, with a
-// comment saying why it is safe, the same deliberate way pg-pr's list grew.
+// comment saying why it is safe, the same deliberate way pg-connector's list grew.
 var allowlistedIdentifiers = map[string]struct{}{
 	// the operator's own identity — the one exception the ruling allows.
 	"phillipgreenii":            {},
 	"phillipg@ziprecruiter.com": {},
-	// generic placeholder test identities, carried over from pg-pr's own
-	// pg2-wb9yb scrub (see that file's doc comment) as this module's own
-	// generic-placeholder convention.
+	// generic placeholder test identities (the pg2-wb9yb scrub; see
+	// pg-connector's copy) as this module's own generic-placeholder
+	// convention.
 	"teammate":   {},
 	"review-bot": {},
 }
@@ -62,8 +61,8 @@ func isAllowlistedIdentifier(id string) bool {
 }
 
 // identityFieldPattern, branchLoginPattern and gitTrailerPattern are the
-// same three structured-shape detectors pg-pr's and pg-connector's copies
-// use — see pg-pr's copy for what each matches and why a text scan (not a
+// same three structured-shape detectors pg-connector's copy
+// uses — see that copy for what each matches and why a text scan (not a
 // JSON parse) is the established pattern.
 var identityFieldPattern = regexp.MustCompile(`"(?:login|author|reviewer|user)"\s*:\s*"([^"]*)"`)
 
@@ -103,7 +102,7 @@ func scanTextForIdentifiers(text string) []string {
 
 // underTestdataDir reports whether rel (a path relative to some scan root)
 // has a "testdata" path component — same guarded-scope rationale as
-// pg-pr's/pg-connector's copies (Go's own toolchain treats testdata
+// pg-connector's copy (Go's own toolchain treats testdata
 // specially, and it is exactly where a captured-API-response fixture
 // would live).
 func underTestdataDir(rel string) bool {
@@ -169,8 +168,8 @@ func scanTree(root string) (violations []string, scannedFiles int, err error) {
 }
 
 // pgDeciderModuleRoot walks up from the test's working directory to the
-// directory holding go.mod — mirrors pgPrModuleRoot / pgConnectorModuleRoot
-// in the sibling modules' own copies, so this guard covers the whole
+// directory holding go.mod — mirrors pgConnectorModuleRoot
+// in the sibling module's own copy, so this guard covers the whole
 // packages/pg-decider module regardless of which package under it runs the
 // test.
 func pgDeciderModuleRoot(t *testing.T) string {
@@ -197,8 +196,8 @@ func pgDeciderModuleRoot(t *testing.T) string {
 // it is on allowlistedIdentifiers.
 //
 // Guarded scope, ratchet status and known limitation are identical to
-// pg-pr's own TestIdentifierAllowlistGuard — see that file's doc comment
-// for the full rationale.
+// pg-connector's own TestIdentifierAllowlistGuard — see that file's doc
+// comment for the full rationale.
 func TestIdentifierAllowlistGuard(t *testing.T) {
 	root := pgDeciderModuleRoot(t)
 

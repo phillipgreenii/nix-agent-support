@@ -13,7 +13,7 @@ import (
 )
 
 // anchor.priority is a port of the conflict-priority nudge pg-desk's
-// internal/sync performs (and pg-pr's before it): on the first conflicting
+// internal/sync performs: on the first conflicting
 // check the anchor's pre-conflict priority is stashed in a pbase:<n> label and
 // the priority is nudged (mine and co-owned toward higher priority, team toward
 // lower); a repeated conflicting check does nothing; once the conflict clears
