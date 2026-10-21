@@ -8169,6 +8169,62 @@
                     touch $out
                   '';
 
+              # test-tmp-sweep (bead pg2-bo3n7, packet C of the build_tmp design): the daily
+              # launchd sweep agent of home/programs/tmp-sweep. Eval cases
+              # (tests/tmp-sweep.nix) run the REAL tmp-sweep, build-tmp, claude-code-tmp and
+              # pg-disk-reclaimer modules against the launchd registry STUB
+              # (tests/launchd-registry-stub.nix, which cannot render a real plist): the exact
+              # script line for each enabled-roots combination, label, serviceConfig, and the
+              # assertions. tests/tmp-sweep.bats then runs the rendered script (absolute store
+              # path of the REAL CLI, a bare launchd-like environment) against a fixture
+              # registry and fixture roots; the real registry path is never touched. As in
+              # test-tmp-root-registry, the sweep cases skip where the sandbox denies ps or
+              # lsof (the sweep fails closed without them); run the bats outside the sandbox too.
+              test-tmp-sweep =
+                let
+                  r = import ./tests/tmp-sweep.nix { inherit lib pkgs; };
+                  hostPathFree = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./home/programs/tmp-sweep;
+                  };
+                in
+                pkgs.runCommand "test-tmp-sweep"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.bash
+                      pkgs.coreutils
+                      pkgs.findutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.jq
+                      pkgs.lsof
+                      pkgs.pg-disk-reclaimer
+                    ]
+                    ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
+                    SCRIPT_BOTH = r.artifacts.scriptBoth;
+                    SCRIPT_BUILD = r.artifacts.scriptBuild;
+                    SCRIPT_CLAUDE = r.artifacts.scriptClaude;
+                    REG_BOTH = r.artifacts.regBoth;
+                    REG_BUILD = r.artifacts.regBuild;
+                    REG_CLAUDE = r.artifacts.regClaude;
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "tmp-sweep eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
+                      exit 1
+                    ''}
+                    echo "ok: ${toString r.caseCount} eval cases"
+                    # No hard-coded host path in the generic module.
+                    if grep -rn '/Volumes/gitrepos' ${hostPathFree}/home; then
+                      echo "the tmp-sweep module names the host volume path" >&2
+                      exit 1
+                    fi
+                    bats --tap ${./tests/tmp-sweep.bats} >sweep.tap || { cat sweep.tap; exit 1; }
+                    cat sweep.tap
+                    touch $out
+                  '';
+
               # test-pg-wi-flow-module (bead tc-9ddu3.1.5, extended by
               # tc-9ddu3.1.17): proves home/programs/pg-wi-flow/default.nix's
               # paths.defaults wiring actually evaluates and renders the

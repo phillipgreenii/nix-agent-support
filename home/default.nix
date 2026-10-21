@@ -56,6 +56,7 @@
     ./programs/pg-disk-reclaimer
     ./programs/build-tmp
     ./programs/claude-code-tmp
+    ./programs/tmp-sweep
     ./programs/wtnew
     ./programs/wtdone
     ./programs/pg-wi-flow
