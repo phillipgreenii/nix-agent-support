@@ -473,3 +473,38 @@ Notes on the table:
    `plan-decomposer`, 1.7 → 3.7 `phase-decomposer`) with a similar hook record count (420 → 362 and
    284 → 272). The attribution is crude and hooks are outside P1–P7; check only if run time
    regresses.
+
+### Follow-up decisions (2026-10-21, bead `pg2-i56s4`)
+
+Each follow-up above has one recorded decision.
+
+1. **Packet size target: declined for now.** Bytes per design byte is a cost proxy, not a quality
+   signal. The 2.39 worst case is a 22-packet docket whose packets each restate the contracts
+   their cold-read needs; shrinking them would trade directly against follow-up 3 (unpinned
+   contracts are the dominant `no` reason). Model-written text is also already bounded by the
+   per-packet `pd_read_target` sizing in step 4, and 43–52% of an assembled packet no longer costs
+   writing time at all (`assemble-packet.sh`). The existing evidence cannot set a number: one
+   baseline docket has no design file (follow-up 2). Revisit when at least 10 dockets carry the
+   `measure-sizes.sh` line (follow-up 2) and either the ratio median exceeds 2.0 or the curation
+   window median regresses; the levers then are fewer packets (fold across the reviewer-reject
+   boundary) and shorter Binding decisions, in that order.
+2. **Run-report size fields: accepted and implemented.** `scripts/measure-sizes.sh` prints
+   `design_bytes=N draft_bytes=M drafts=K bytes_per_design_byte=R` from the design file and the
+   scratch `drafts/` and `packets/*.acceptance.md` (the same "model-written packet text" formula
+   as the Method section). Decomposition-report step 10 and the `plan-decomposer` report outline
+   now require pasting that line; `phase-decomposer` inherits it through `plan-decompose`. Tested
+   by `scripts/tests/measure-sizes.bats` against the real script. The verbatim-share figure is not
+   recorded: it is derivable from the same design and drafts when needed, and the design file
+   (the reason the old baseline was lost) is now sized in the report.
+3. **Pre-filter for "binding decision names a contract it does not state": declined.** Step 5 is
+   mechanical, near-zero-cost and gates agent dispatches; "names a contract without stating it"
+   (an option type, a build invocation, an error classification) is a semantic judgment that no
+   grep or script can make without flagging most packets, and the cold-reader exists to make
+   exactly that judgment on stored text. The 27.6% `no` rate is the cold-reader doing its job
+   (those rounds fix real unpinned contracts); only the 9% unopenable-file share was waste, and
+   fix 3 removed it. Revisit if cold-read rounds per packet stay above 2 in the median after the
+   size-line data accumulates; the cheaper first lever then is a one-line anatomy rule ("a
+   Binding decision that names a type, command or classification states its definition or cites
+   where it is defined"), not a script.
+4. **Hook-attributed gap minutes: deferred.** Check only if decomposer run time regresses; the
+   post-apply wall medians fell (33.3 and 16.9 min), so there is no trigger.

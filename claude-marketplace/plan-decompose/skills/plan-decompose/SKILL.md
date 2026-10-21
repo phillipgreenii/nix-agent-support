@@ -439,7 +439,8 @@ deduplication.
     `write-report` the decomposition report: packet index, per-packet fixed-read estimates
     and QA dispatch counts (cold-reads per packet, post-check rounds), each semantic
     post-check round's input bytes (prompt + referenced files), sizing deviations, check outcomes, hoisting flags,
-    not-decomposed records, and an explicit "no uncited content" assertion. Get the
+    not-decomposed records, the size line from `scripts/measure-sizes.sh` (below; design bytes and
+    model-written draft bytes), and an explicit "no uncited content" assertion. Get the
     not-decomposed list right here — it is both what step 1's routing rule reports back to a
     later `find-docket` caller and what decides which of the two `pd_phase` literals gets
     written.
@@ -498,6 +499,11 @@ path, character for character, as the first word of the Bash command, every time
   success. Step 3 ("Exact excerpts") says when a directive is mandatory; run it for all
   drafts in one Bash loop (step 3, "Scratch layout"), and again only for the drafts edited after a
   fix-loop edit. It also builds the round 2+ post-checker design excerpt ("Sub-dispatch templates").
+- `scripts/measure-sizes.sh --design <design.md> --drafts-dir <scratch>/drafts [--acceptance-dir
+<scratch>/packets]` — prints `design_bytes=N draft_bytes=M drafts=K bytes_per_design_byte=R`
+  (read-only; drafts plus acceptance files are what the model typed). Run it ONCE at step 10, after
+  the last fix-loop edit, and paste the line into the decomposition report, so the next size
+  measurement needs no reconstruction. Exit 2 usage, 1 generic.
 - `scripts/create-packet.sh` — this IS the `create-packet` operation for the `beads` binding
   (see `plan-decompose-beads/SKILL.md`'s `create-packet` section): never hand-type a
   `bd create`/`bd defer` pair for a packet yourself. It bakes `--no-inherit-labels` in as the

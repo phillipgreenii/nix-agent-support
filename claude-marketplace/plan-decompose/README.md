@@ -55,6 +55,8 @@ Scripts (`scripts/`, resolved from the skill's base directory):
 
 - `assemble-packet.sh` — expands `@@file`, `@@design-section` and `@@design-table-row`
   directives in a packet draft into the assembled body, copying exact excerpts by command.
+- `measure-sizes.sh` — prints design bytes, model-written draft bytes and their ratio for the
+  decomposition report.
 - `create-packet.sh` — creates one held packet (`--body-file`, `--acceptance-file`).
 - `update-packet.sh` — the only way to rewrite an existing packet's content; it never touches
   metadata.
