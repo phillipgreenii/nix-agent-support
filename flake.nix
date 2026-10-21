@@ -11475,6 +11475,163 @@
                 assert hasSub ".permissions.allow |=" afterExtraSettings;
                 pkgs.runCommand "claude-settings-extra-permissions-allow-ok" { } "touch $out";
 
+              # pg2-6az7r.2: nix-owned autoMode options and activation wiring.
+              # Pure module eval over the generated activation string and the
+              # read-only `autoMode.desiredJson` (parsed with builtins.fromJSON;
+              # NEVER read from a writeText output, which would be
+              # import-from-derivation). The helper's own behavior (merge,
+              # backup, idempotence, invalid JSON) is covered by
+              # test-claude-settings-replace-auto-mode; this check proves the
+              # option set, the ownership gate, layer ordering, byte-exact
+              # carriage of awkward prose, and the placement/guard of the call.
+              test-claude-settings-auto-mode =
+                let
+                  hmLib = lib // {
+                    hm = (lib.hm or { }) // {
+                      dag = (lib.hm.dag or { }) // {
+                        entryAfter = _deps: text: text;
+                      };
+                    };
+                  };
+                  # The stub harness declares only `enable` and `home.activation`,
+                  # so desiredJson MUST be defined outside the module's
+                  # enable-gated block for it to evaluate here.
+                  evalWith =
+                    extraModules:
+                    (lib.evalModules {
+                      specialArgs = {
+                        inherit pkgs inputs;
+                        lib = hmLib;
+                        mkBashBuildersFor =
+                          p:
+                          inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                            pkgs = p;
+                            inherit self;
+                            inherit (p) lib;
+                          };
+                      };
+                      modules = [
+                        ./home/programs/claude-settings/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              home.activation = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        { phillipgreenii.programs.claude-code.enable = true; }
+                      ]
+                      ++ extraModules;
+                    }).config;
+
+                  settingsOf = c: c.phillipgreenii.programs.claude-code.settings;
+                  setAutoMode = am: { phillipgreenii.programs.claude-code.settings.autoMode = am; };
+                  activationOf = c: c.home.activation.claude-settings;
+                  hasSub = needle: haystack: lib.hasInfix needle haystack;
+                  helperName = "claude-settings-replace-auto-mode";
+
+                  # (a) default: manage = false
+                  off = evalWith [ ];
+                  # (b) manage = true, all lists empty
+                  empty = evalWith [ (setAutoMode { manage = true; }) ];
+                  # (c) awkward prose: ' " $ \ * in one entry
+                  awkward = ''user's $defaults \ "q" *'';
+                  awkwardCfg = evalWith [
+                    (setAutoMode {
+                      manage = true;
+                      environment = [ awkward ];
+                    })
+                  ];
+                  # (d) layering: a base module (mkBefore) and a ZR-style module
+                  # (mkAfter), listed in BOTH orders. Both carry a duplicate of
+                  # "shared"; the first occurrence (base) wins.
+                  baseMod = {
+                    phillipgreenii.programs.claude-code.settings.autoMode = {
+                      manage = true;
+                      environment = lib.mkBefore [
+                        "base-1"
+                        "shared"
+                      ];
+                      allow = lib.mkBefore [ "base-allow" ];
+                    };
+                  };
+                  zrMod = {
+                    phillipgreenii.programs.claude-code.settings.autoMode = {
+                      environment = lib.mkAfter [
+                        "zr-1"
+                        "shared"
+                      ];
+                      allow = lib.mkAfter [ "zr-allow" ];
+                    };
+                  };
+                  baseFirst = evalWith [
+                    baseMod
+                    zrMod
+                  ];
+                  zrFirst = evalWith [
+                    zrMod
+                    baseMod
+                  ];
+                  parsed = c: builtins.fromJSON (settingsOf c).autoMode.desiredJson;
+                  layered = {
+                    environment = [
+                      "base-1"
+                      "shared"
+                      "zr-1"
+                    ];
+                    allow = [
+                      "base-allow"
+                      "zr-allow"
+                    ];
+                    soft_deny = [ ];
+                  };
+
+                  # (e) placement: the call follows the settings jq write and is
+                  # guarded with `|| act_warn`.
+                  onActivation = activationOf empty;
+                  afterJq = lib.last (lib.splitString ''mv -f "$SETTINGS.tmp" "$SETTINGS"'' onActivation);
+                  # Everything from the helper invocation to the end of that
+                  # statement (up to the next blank line).
+                  callStmt = lib.head (
+                    lib.splitString "\n\n" (builtins.elemAt (lib.splitString "/bin/${helperName}" afterJq) 1)
+                  );
+                in
+                # (a) manage = false: no helper call, "{}" desiredJson.
+                assert !(hasSub helperName (activationOf off));
+                assert (settingsOf off).autoMode.desiredJson == "{}";
+                assert (settingsOf off).autoMode.manage == false;
+                # (b) manage = true alone (all lists empty) still emits the call,
+                # and desiredJson carries all three keys as empty lists.
+                assert hasSub helperName onActivation;
+                assert
+                  (parsed empty) == {
+                    environment = [ ];
+                    allow = [ ];
+                    soft_deny = [ ];
+                  };
+                # (c) an entry with ' " $ \ * round-trips byte-exact via fromJSON,
+                # and is never inlined into the activation script (store file).
+                assert (parsed awkwardCfg).environment == [ awkward ];
+                assert !(hasSub "user's" (activationOf awkwardCfg));
+                # (d) base-first order and de-duplication in BOTH module orders.
+                assert (parsed baseFirst) == layered;
+                assert (parsed zrFirst) == layered;
+                # (e) the call comes after the jq pipe and is guarded.
+                assert hasSub helperName afterJq;
+                assert hasSub ''"$SETTINGS"'' callStmt;
+                assert hasSub ''"$HOME/.claude"'' callStmt;
+                assert hasSub "|| act_warn" callStmt;
+                # (f) hard_deny is never emitted, in the JSON or the script.
+                assert !(hasSub "hard_deny" (settingsOf awkwardCfg).autoMode.desiredJson);
+                assert !(hasSub "hard_deny" (settingsOf baseFirst).autoMode.desiredJson);
+                assert !(hasSub "hard_deny" onActivation);
+                pkgs.runCommand "claude-settings-auto-mode-ok" { } "touch $out";
+
               # Regression guard for pg2-hpwww: extraSettings is the freeform
               # passthrough escape hatch for any Claude Code setting this module
               # does not enumerate (concrete trigger: skillListingBudgetFraction,

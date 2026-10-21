@@ -158,7 +158,22 @@ let
 
   hasSettings = filters != [ ];
   hasPlugins = cfg.plugins != [ ] && cfg.claudeCodePackage != null;
-  hasAnything = hasSettings || hasPlugins || hasManagedKeys;
+  # autoMode.manage alone triggers the activation block: the helper call must
+  # run even when every list is empty (an empty nix list means `["$defaults"]`).
+  hasAnything = hasSettings || hasPlugins || hasManagedKeys || cfg.autoMode.manage;
+
+  # The three nix-owned autoMode lists, deduplicated (first occurrence wins).
+  # Layer order is decided by the module system's list merge (lib.mkBefore /
+  # default / lib.mkAfter orderings), not by the order modules are imported.
+  autoModeDesired = {
+    environment = lib.unique cfg.autoMode.environment;
+    allow = lib.unique cfg.autoMode.allow;
+    soft_deny = lib.unique cfg.autoMode.soft_deny;
+  };
+  # The JSON is handed to the helper as a STORE FILE (never inlined into a
+  # single-quoted shell/jq string, where an apostrophe in prose would break
+  # quoting).
+  autoModeDesiredFile = pkgs.writeText "claude-auto-mode-desired.json" cfg.autoMode.desiredJson;
 in
 {
   options.phillipgreenii.programs.claude-code.settings = {
@@ -529,137 +544,225 @@ in
         those instead.
       '';
     };
+
+    autoMode = {
+      manage = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Whether nix OWNS the `autoMode.environment`, `autoMode.allow` and
+          `autoMode.soft_deny` keys of `~/.claude/settings.json`. `false`
+          (default) leaves `.autoMode` completely untouched.
+
+          When `true`, every activation rewrites those three keys from the
+          nix-declared lists (an empty list still writes the key, so removing
+          the last nix entry removes its prose), and always puts the literal
+          `$defaults` entry first in each so the built-in classifier rules stay
+          in force. Unrelated `.autoMode` keys (for example `classifyAllShell`
+          and `hard_deny`) are preserved. Ad-hoc entries found in those three
+          keys that nix does not declare are dropped, but first saved to
+          `~/.claude/.claude-settings-removed-*.json` (select them with
+          `jq -e .autoMode`). Re-activation with unchanged config writes no
+          backup and no warning.
+
+          If `settings.json` is not valid JSON, the helper fails loudly, leaves
+          the file byte-identical, and activation WARNS but does not abort the
+          rest of home-manager activation.
+        '';
+      };
+
+      environment = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Prose entries for `autoMode.environment` (trusted infrastructure,
+          source control and domains). Concatenated across modules and
+          deduplicated; use `lib.mkBefore` / `lib.mkAfter` to place a layer
+          before or after the default-ordered entries. Only applied when
+          `autoMode.manage` is `true`, which also owns the automatic
+          `$defaults` entry.
+        '';
+      };
+
+      allow = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Prose entries for `autoMode.allow`. Concatenated across modules and
+          deduplicated. Only applied when `autoMode.manage` is `true`, which
+          also owns the automatic `$defaults` entry; dropped ad-hoc entries are
+          saved to `~/.claude/.claude-settings-removed-*.json`.
+        '';
+      };
+
+      soft_deny = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Prose entries for `autoMode.soft_deny`. Concatenated across modules
+          and deduplicated. Only applied when `autoMode.manage` is `true`, which
+          also owns the automatic `$defaults` entry; dropped ad-hoc entries are
+          saved to `~/.claude/.claude-settings-removed-*.json`.
+        '';
+      };
+
+      desiredJson = lib.mkOption {
+        type = lib.types.str;
+        readOnly = true;
+        internal = true;
+        description = ''
+          The JSON document handed to the activation helper: the three
+          deduplicated lists when `autoMode.manage` is `true`, else `{}`. It
+          carries only the nix lists; the helper adds `$defaults` in front.
+          Defined outside the activation-gating block so it always has a value.
+        '';
+      };
+    };
   };
 
-  config = lib.mkIf (config.phillipgreenii.programs.claude-code.enable && hasAnything) {
-    home.activation.claude-settings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      # Source act_* so the inline status lines below match the chained scripts'
-      # output. Same byte-identical source as the activation-lib mkBashLibrary
-      # those scripts consume (repo-base readFile single source).
-      ${inputs.phillipgreenii-nix-base.lib.activationHelpers}
-      SETTINGS="$HOME/.claude/settings.json"
+  config = lib.mkMerge [
+    {
+      phillipgreenii.programs.claude-code.settings.autoMode.desiredJson =
+        if cfg.autoMode.manage then builtins.toJSON autoModeDesired else "{}";
+    }
+    (lib.mkIf (config.phillipgreenii.programs.claude-code.enable && hasAnything) {
+      home.activation.claude-settings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        # Source act_* so the inline status lines below match the chained scripts'
+        # output. Same byte-identical source as the activation-lib mkBashLibrary
+        # those scripts consume (repo-base readFile single source).
+        ${inputs.phillipgreenii-nix-base.lib.activationHelpers}
+        SETTINGS="$HOME/.claude/settings.json"
 
-      mkdir -p "$HOME/.claude"
-      [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+        mkdir -p "$HOME/.claude"
+        [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
 
-      ${lib.optionalString hasManagedKeys ''
-        ${replaceScript}/bin/claude-settings-replace-managed-keys \
-          "$SETTINGS" \
-          '${builtins.toJSON cfg.enabledPlugins}' \
-          '${builtins.toJSON cfg.extraKnownMarketplaces}' \
-          "$HOME/.claude"
-        act_ok "enabledPlugins and extraKnownMarketplaces replaced"
-      ''}
-
-      ${lib.optionalString hasSettings ''
-        ${pkgs.jq}/bin/jq '
-          ${lib.concatStringsSep " |\n    " filters}
-        ' "$SETTINGS" > "$SETTINGS.tmp" && mv -f "$SETTINGS.tmp" "$SETTINGS"
-        act_ok "settings.json updated"
-      ''}
-
-      ${lib.optionalString hasPlugins ''
-        CLAUDE="${cfg.claudeCodePackage}/bin/claude"
-
-        # This block runs INLINE in the activation script, so it does NOT get the
-        # wrapped scripts' runtimeDeps PATH — and home-manager REPLACES PATH with a
-        # set containing no git (git is home-manager-provided on darwin, so there is
-        # no system fallback). `plugin marketplace update` and `plugin install` both
-        # clone via `git` BY NAME, so without this prepend every github/url-source
-        # marketplace and plugin fails. See bead pg2-ly6a6.
-        PATH="${pkgs.git}/bin:$PATH"
-        export PATH
-
-        act_info "updating marketplaces"
-        # Non-fatal (a transient network failure MUST NOT fail activation), but the
-        # reason is no longer discarded: this previously ran `2>/dev/null || true`,
-        # which hid the git-missing failure above for every github-source
-        # marketplace, silently, for as long as the defect existed.
-        $CLAUDE plugin marketplace update || act_warn "marketplace update failed (non-fatal)"
-
-        ${lib.optionalString (directoryMarketplaces != { }) ''
-          act_info "registering directory marketplaces"
-          ${lib.concatStringsSep "\n" (
-            lib.mapAttrsToList (name: entry: ''
-              ${registerMarketplaceScript}/bin/claude-settings-register-marketplace \
-                "$CLAUDE" \
-                "${name}" \
-                "${entry.source.path}"
-            '') directoryMarketplaces
-          )}
+        ${lib.optionalString hasManagedKeys ''
+          ${replaceScript}/bin/claude-settings-replace-managed-keys \
+            "$SETTINGS" \
+            '${builtins.toJSON cfg.enabledPlugins}' \
+            '${builtins.toJSON cfg.extraKnownMarketplaces}' \
+            "$HOME/.claude"
+          act_ok "enabledPlugins and extraKnownMarketplaces replaced"
         ''}
 
-        # Counterpart to the registration above: a marketplace REMOVED from
-        # nix declarations is never unregistered by anything above, so its
-        # known_marketplaces.json entry lingers pointing at a directory that
-        # no longer exists and fails to refresh on every subsequent apply
-        # (pg2-rjfti). Warns always; only mutates known_marketplaces.json when
-        # CLAUDE_SETTINGS_PRUNE_STALE_MARKETPLACES is set, mirroring
-        # claude-settings-install-plugin's CLAUDE_SETTINGS_PRUNE_STALE_SCOPE
-        # opt-in style. The declared-name set is EVERY extraKnownMarketplaces
-        # name (any source type) for this generation, not just
-        # directoryMarketplaces, so a marketplace whose source type merely
-        # changed is never mistaken for a removed one.
-        ${pruneMarketplacesScript}/bin/claude-settings-prune-marketplaces \
-          "$HOME/.claude/plugins/known_marketplaces.json" \
-          '${builtins.toJSON (builtins.attrNames cfg.extraKnownMarketplaces)}'
+        ${lib.optionalString hasSettings ''
+          ${pkgs.jq}/bin/jq '
+            ${lib.concatStringsSep " |\n    " filters}
+          ' "$SETTINGS" > "$SETTINGS.tmp" && mv -f "$SETTINGS.tmp" "$SETTINGS"
+          act_ok "settings.json updated"
+        ''}
 
-        # Each install is followed, INSIDE the install script, by a re-assert of
-        # this plugin's Nix-declared `enabledPlugins` value — because
-        # `claude plugin install --scope user` sets `.enabledPlugins[spec] =
-        # true` on every successful invocation and so silently overrides the
-        # value replace-managed-keys wrote at the top of this same activation
-        # (pg2-4q1qk; measured behavior and the reasoning are in the install
-        # script's header). The settings path + declared value are passed only
-        # for a plugin that HAS a declaration; a plugin listed for install with
-        # no `enabledPlugins` entry keeps Claude Code's own default. Guarded by
-        # checks.<system>.test-claude-settings-activation-enablement-restore,
-        # which asserts on the generated invocations.
-        ${lib.concatStringsSep "\n" (
-          map (
-            plugin:
-            let
-              # Assembled as a LIST joined with an explicit escaped line
-              # continuation rather than written as an indented Nix string with
-              # a conditional tail: nixfmt reflows the interior indentation of a
-              # multi-line `''…''`, so the generated shell kept shifting. The
-              # arguments are shell-quoted here, once, at the point they are
-              # built.
-              # An env PREFIX on the call (not an `export`): HM runs every
-              # activation entry in one shell, so an export would leak into
-              # later entries. pruneStaleScopeEntries opts in to the prune
-              # that the install script otherwise only warns about.
-              words =
-                lib.optional cfg.pruneStaleScopeEntries "CLAUDE_SETTINGS_PRUNE_STALE_SCOPE=1"
-                ++ [
-                  "${installPluginScript}/bin/claude-settings-install-plugin"
-                  ''"$CLAUDE"''
-                  ''"${plugin}"''
-                  ''"$HOME/.claude/plugins/cache"''
-                ]
-                ++ lib.optionals (builtins.hasAttr plugin cfg.enabledPlugins) [
-                  ''"$SETTINGS"''
-                  ''"${lib.boolToString cfg.enabledPlugins.${plugin}}"''
-                ];
-            in
-            lib.concatStringsSep " \\\n  " words
-          ) cfg.plugins
-        )}
+        ${lib.optionalString cfg.autoMode.manage ''
+          ${scripts.replaceAutoMode.script}/bin/claude-settings-replace-auto-mode \
+            "$SETTINGS" \
+            ${autoModeDesiredFile} \
+            "$HOME/.claude" \
+            || act_warn "autoMode update failed (settings.json left as is; see the message above)"
+        ''}
 
-        # Runs LAST, after every install/update above, so it never collects a
-        # version this same activation just installed (pg2-x3a3t). Keeps, per
-        # <marketplace>/<plugin>: the version reachable from a local nix-built
-        # marketplace under ~/.local/share/pgii-marketplaces (see
-        # home/programs/claude-marketplaces), or — when that cannot be
-        # determined (a non-local marketplace, or an orphaned plugin) — the
-        # newest 2 versions by mtime. Never removes an installed_plugins.json
-        # `installPath` or a directory holding a live `.in_use` lock. Always
-        # non-fatal.
-        act_info "garbage-collecting stale plugin cache versions"
-        ${gcPluginCacheScript}/bin/claude-settings-gc-plugin-cache \
-          "$HOME/.claude/plugins/cache" \
-          "$HOME/.local/share/pgii-marketplaces"
-      ''}
-    '';
-  };
+        ${lib.optionalString hasPlugins ''
+          CLAUDE="${cfg.claudeCodePackage}/bin/claude"
+
+          # This block runs INLINE in the activation script, so it does NOT get the
+          # wrapped scripts' runtimeDeps PATH — and home-manager REPLACES PATH with a
+          # set containing no git (git is home-manager-provided on darwin, so there is
+          # no system fallback). `plugin marketplace update` and `plugin install` both
+          # clone via `git` BY NAME, so without this prepend every github/url-source
+          # marketplace and plugin fails. See bead pg2-ly6a6.
+          PATH="${pkgs.git}/bin:$PATH"
+          export PATH
+
+          act_info "updating marketplaces"
+          # Non-fatal (a transient network failure MUST NOT fail activation), but the
+          # reason is no longer discarded: this previously ran `2>/dev/null || true`,
+          # which hid the git-missing failure above for every github-source
+          # marketplace, silently, for as long as the defect existed.
+          $CLAUDE plugin marketplace update || act_warn "marketplace update failed (non-fatal)"
+
+          ${lib.optionalString (directoryMarketplaces != { }) ''
+            act_info "registering directory marketplaces"
+            ${lib.concatStringsSep "\n" (
+              lib.mapAttrsToList (name: entry: ''
+                ${registerMarketplaceScript}/bin/claude-settings-register-marketplace \
+                  "$CLAUDE" \
+                  "${name}" \
+                  "${entry.source.path}"
+              '') directoryMarketplaces
+            )}
+          ''}
+
+          # Counterpart to the registration above: a marketplace REMOVED from
+          # nix declarations is never unregistered by anything above, so its
+          # known_marketplaces.json entry lingers pointing at a directory that
+          # no longer exists and fails to refresh on every subsequent apply
+          # (pg2-rjfti). Warns always; only mutates known_marketplaces.json when
+          # CLAUDE_SETTINGS_PRUNE_STALE_MARKETPLACES is set, mirroring
+          # claude-settings-install-plugin's CLAUDE_SETTINGS_PRUNE_STALE_SCOPE
+          # opt-in style. The declared-name set is EVERY extraKnownMarketplaces
+          # name (any source type) for this generation, not just
+          # directoryMarketplaces, so a marketplace whose source type merely
+          # changed is never mistaken for a removed one.
+          ${pruneMarketplacesScript}/bin/claude-settings-prune-marketplaces \
+            "$HOME/.claude/plugins/known_marketplaces.json" \
+            '${builtins.toJSON (builtins.attrNames cfg.extraKnownMarketplaces)}'
+
+          # Each install is followed, INSIDE the install script, by a re-assert of
+          # this plugin's Nix-declared `enabledPlugins` value — because
+          # `claude plugin install --scope user` sets `.enabledPlugins[spec] =
+          # true` on every successful invocation and so silently overrides the
+          # value replace-managed-keys wrote at the top of this same activation
+          # (pg2-4q1qk; measured behavior and the reasoning are in the install
+          # script's header). The settings path + declared value are passed only
+          # for a plugin that HAS a declaration; a plugin listed for install with
+          # no `enabledPlugins` entry keeps Claude Code's own default. Guarded by
+          # checks.<system>.test-claude-settings-activation-enablement-restore,
+          # which asserts on the generated invocations.
+          ${lib.concatStringsSep "\n" (
+            map (
+              plugin:
+              let
+                # Assembled as a LIST joined with an explicit escaped line
+                # continuation rather than written as an indented Nix string with
+                # a conditional tail: nixfmt reflows the interior indentation of a
+                # multi-line `''…''`, so the generated shell kept shifting. The
+                # arguments are shell-quoted here, once, at the point they are
+                # built.
+                # An env PREFIX on the call (not an `export`): HM runs every
+                # activation entry in one shell, so an export would leak into
+                # later entries. pruneStaleScopeEntries opts in to the prune
+                # that the install script otherwise only warns about.
+                words =
+                  lib.optional cfg.pruneStaleScopeEntries "CLAUDE_SETTINGS_PRUNE_STALE_SCOPE=1"
+                  ++ [
+                    "${installPluginScript}/bin/claude-settings-install-plugin"
+                    ''"$CLAUDE"''
+                    ''"${plugin}"''
+                    ''"$HOME/.claude/plugins/cache"''
+                  ]
+                  ++ lib.optionals (builtins.hasAttr plugin cfg.enabledPlugins) [
+                    ''"$SETTINGS"''
+                    ''"${lib.boolToString cfg.enabledPlugins.${plugin}}"''
+                  ];
+              in
+              lib.concatStringsSep " \\\n  " words
+            ) cfg.plugins
+          )}
+
+          # Runs LAST, after every install/update above, so it never collects a
+          # version this same activation just installed (pg2-x3a3t). Keeps, per
+          # <marketplace>/<plugin>: the version reachable from a local nix-built
+          # marketplace under ~/.local/share/pgii-marketplaces (see
+          # home/programs/claude-marketplaces), or — when that cannot be
+          # determined (a non-local marketplace, or an orphaned plugin) — the
+          # newest 2 versions by mtime. Never removes an installed_plugins.json
+          # `installPath` or a directory holding a live `.in_use` lock. Always
+          # non-fatal.
+          act_info "garbage-collecting stale plugin cache versions"
+          ${gcPluginCacheScript}/bin/claude-settings-gc-plugin-cache \
+            "$HOME/.claude/plugins/cache" \
+            "$HOME/.local/share/pgii-marketplaces"
+        ''}
+      '';
+    })
+  ];
 }
