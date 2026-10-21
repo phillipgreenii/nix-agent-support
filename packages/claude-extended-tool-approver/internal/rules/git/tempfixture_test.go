@@ -103,3 +103,46 @@ func TestTempFixture_RedirectEnvVar_RealStillAsks(t *testing.T) {
 		t.Errorf("Decision = %v (reason %q), want Ask (unchanged, real redirect)", got.Decision, got.Reason)
 	}
 }
+
+// extraTempRoot is a CETA_EXTRA_TEMP_ROOTS entry (pg2-t0hi5) deliberately
+// outside every built-in temp root. t.TempDir() would NOT work here: it sits
+// under $TMPDIR, itself a built-in root, so the "extra root" case would pass
+// even if the variable were ignored.
+const extraTempRoot = "/etc/pg2-t0hi5-extra-temp"
+
+// TestTempFixture_ExtraTempRoot_CarvedOutLikePrivateTmp: the `--git-dir` /
+// `--work-tree` floor and the redirect-env-var Ask are lifted for a fixture
+// under a CETA_EXTRA_TEMP_ROOTS root exactly as for one under /private/tmp,
+// and a fixture outside every root, or the same one with the variable unset,
+// is not.
+func TestTempFixture_ExtraTempRoot_CarvedOutLikePrivateTmp(t *testing.T) {
+	r := New(nil)
+	flagCmd := "git --git-dir=" + extraTempRoot + "/fx/.git config user.email t@example.com"
+	envCmd := "GIT_DIR=" + extraTempRoot + "/fx/.git git -C " + extraTempRoot + "/fx config user.email t@example.com"
+
+	t.Run("under the extra root: carved out", func(t *testing.T) {
+		t.Setenv("CETA_EXTRA_TEMP_ROOTS", extraTempRoot)
+		if got := hookio.Verdict(r.Evaluate(chdirInputNoZone(flagCmd, "/tmp"))); got.Decision == hookio.Reject {
+			t.Errorf("flag form: Decision = Reject (%s), want NOT Reject", got.Reason)
+		}
+		if got := hookio.Verdict(r.Evaluate(chdirInputNoZone(envCmd, "/tmp"))); got.Decision != hookio.Approve {
+			t.Errorf("env form: Decision = %v (%s), want Approve", got.Decision, got.Reason)
+		}
+	})
+	t.Run("variable unset: not carved out", func(t *testing.T) {
+		t.Setenv("CETA_EXTRA_TEMP_ROOTS", "")
+		if got := hookio.Verdict(r.Evaluate(chdirInputNoZone(flagCmd, "/tmp"))); got.Decision != hookio.Reject {
+			t.Errorf("flag form: Decision = %v, want Reject", got.Decision)
+		}
+		if got := hookio.Verdict(r.Evaluate(chdirInputNoZone(envCmd, "/tmp"))); got.Decision == hookio.Approve {
+			t.Errorf("env form: Decision = Approve, want a refusal/Ask outside every temp root")
+		}
+	})
+	t.Run("sibling sharing a name prefix: not carved out", func(t *testing.T) {
+		t.Setenv("CETA_EXTRA_TEMP_ROOTS", extraTempRoot)
+		cmd := "git --git-dir=" + extraTempRoot + "-other/fx/.git config user.email t@example.com"
+		if got := hookio.Verdict(r.Evaluate(chdirInputNoZone(cmd, "/tmp"))); got.Decision != hookio.Reject {
+			t.Errorf("Decision = %v, want Reject (outside every temp root)", got.Decision)
+		}
+	})
+}

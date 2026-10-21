@@ -266,7 +266,7 @@ func fixture(t *testing.T) (root, home string) {
 
 	home = tempDirUnderRealTmp(t)
 	t.Setenv("HOME", home)
-	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_DENIED_ROOTS", "XDG_DATA_HOME"} {
+	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_EXTRA_TEMP_ROOTS", "CETA_DENIED_ROOTS", "XDG_DATA_HOME"} {
 		t.Setenv(v, "")
 	}
 	real := func(p string) string {

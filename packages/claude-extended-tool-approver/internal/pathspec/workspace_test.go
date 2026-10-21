@@ -68,7 +68,7 @@ func scratchOutsideTemp(t *testing.T) string {
 
 func clearZoneEnv(t *testing.T) {
 	t.Helper()
-	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_DENIED_ROOTS", "MONOREPO_ROOT", "XDG_CACHE_HOME", "GOCACHE", "GOMODCACHE", "GOPATH"} {
+	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_EXTRA_TEMP_ROOTS", "CETA_DENIED_ROOTS", "MONOREPO_ROOT", "XDG_CACHE_HOME", "GOCACHE", "GOMODCACHE", "GOPATH"} {
 		t.Setenv(v, "")
 	}
 }

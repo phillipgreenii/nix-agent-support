@@ -8328,6 +8328,13 @@
                                 type = lib.types.attrsOf lib.types.bool;
                                 default = { };
                               };
+                              # ceta now contributes `assertions` (extraTempRoots
+                              # validation, pg2-t0hi5); home-manager's own base
+                              # modules, which declare it, are not imported here.
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf lib.types.unspecified;
+                                default = [ ];
+                              };
                               warnings = lib.mkOption {
                                 type = lib.types.listOf lib.types.str;
                                 default = [ ];
@@ -10405,6 +10412,13 @@
                                 type = lib.types.listOf lib.types.str;
                                 default = [ ];
                               };
+                              # ceta contributes `assertions` (extraTempRoots
+                              # validation, pg2-t0hi5); stubbed for the same reason
+                              # as `warnings`.
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf lib.types.unspecified;
+                                default = [ ];
+                              };
                             };
                           }
                         )
@@ -10447,6 +10461,186 @@
                 assert lib.all (r: lib.elem r withConsumerExtra) (base ++ [ "/org/extra" ]);
                 assert disabled == [ ];
                 pkgs.runCommand "ceta-extra-readonly-roots-ok" { } "touch $out";
+
+              # Durable check (pg2-t0hi5) for ceta's extraTempRoots option: the option
+              # reaches the hook wrapper as `--suffix CETA_EXTRA_TEMP_ROOTS`, the
+              # default adds no flag, contributions from a second module list-merge,
+              # and the module's assertion rejects a relative root and every
+              # forbidden root (/, /Volumes, /Volumes/gitrepos, /Users, the home
+              # directory, a parent of one). Unlike test-ceta-extra-readonly-roots
+              # this FORCES cfg.package: a STUB package (a script that prints
+              # CETA_EXTRA_TEMP_ROOTS) goes through the module's real symlinkJoin +
+              # makeWrapper, then the wrapper is grepped AND run, so the --suffix
+              # merge-with-existing-value behaviour is observed, not assumed. Also
+              # greps ADR 0059 and temproot.go so neither goes back to claiming the
+              # scratchpad is always under /private/tmp or to citing ADR 0056.
+              test-ceta-extra-temp-roots =
+                let
+                  stubPkg = pkgs.runCommand "ceta-stub-0" { } ''
+                    mkdir -p $out/bin
+                    printf '#!${pkgs.runtimeShell}\necho "CETA_EXTRA_TEMP_ROOTS=$CETA_EXTRA_TEMP_ROOTS"\n' \
+                      > $out/bin/claude-extended-tool-approver
+                    chmod +x $out/bin/claude-extended-tool-approver
+                  '';
+
+                  evalCfg =
+                    extra:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/claude-extended-tool-approver/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.knownAbsentRoots = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
+                                default = [ ];
+                              };
+                              home.homeDirectory = lib.mkOption {
+                                type = lib.types.str;
+                                default = "/home/test";
+                              };
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              warnings = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
+                                default = [ ];
+                              };
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf lib.types.unspecified;
+                                default = [ ];
+                              };
+                            };
+                          }
+                        )
+                        {
+                          phillipgreenii.programs.claude-code.enable = true;
+                          phillipgreenii.programs.claude-extended-tool-approver = {
+                            enable = true;
+                            package = stubPkg;
+                          };
+                        }
+                        extra
+                      ];
+                    }).config;
+
+                  withRoots = roots: {
+                    phillipgreenii.programs.claude-extended-tool-approver.extraTempRoots = roots;
+                  };
+                  hookOf = cfg: lib.head cfg.home.packages;
+                  failedAssertions = cfg: lib.filter (a: !a.assertion) cfg.assertions;
+
+                  defaultCfg = evalCfg { };
+                  twoCfg = evalCfg (withRoots [
+                    "/a"
+                    "/b"
+                  ]);
+                  # A second, independent contributor: definitions list-merge.
+                  mergedCfg = evalCfg {
+                    imports = [
+                      (withRoots [
+                        "/a"
+                        "/b"
+                      ])
+                      (withRoots [ "/c" ])
+                    ];
+                  };
+                  mergedRoots = mergedCfg.phillipgreenii.programs.claude-extended-tool-approver.extraTempRoots;
+
+                  good = evalCfg (withRoots [
+                    "/Volumes/gitrepos/build_tmp"
+                    "/Volumes/gitrepos/claude_code_tmp/"
+                    "/home/test/tmp"
+                    "/a"
+                  ]);
+                  bad = roots: failedAssertions (evalCfg (withRoots roots));
+                  rejected = [
+                    "relative/dir"
+                    ""
+                    "/"
+                    "/Volumes"
+                    "/Volumes/"
+                    "/Volumes/gitrepos"
+                    "/Volumes/gitrepos/"
+                    "/Users"
+                    "/home/test"
+                    "/home/test/"
+                    "/home"
+                    "/a/../b"
+                    "/a:/b"
+                  ];
+                in
+                # Option-level assertions (eval time).
+                assert
+                  lib.sort (x: y: x < y) mergedRoots == [
+                    "/a"
+                    "/b"
+                    "/c"
+                  ];
+                assert failedAssertions good == [ ];
+                assert lib.all (r: lib.length (bad [ r ]) == 1) rejected;
+                assert failedAssertions defaultCfg == [ ];
+                # Wrapper-level assertions (build time) on the real symlinkJoin +
+                # makeWrapper output around the stub.
+                pkgs.runCommand "ceta-extra-temp-roots-ok"
+                  {
+                    adr = ./docs/adr/0059-ceta-temp-repo-carve-out.md;
+                    temprootGo = ./packages/claude-extended-tool-approver/internal/temproot/temproot.go;
+                    defaultHook = hookOf defaultCfg;
+                    twoHook = hookOf twoCfg;
+                    mergedHook = hookOf mergedCfg;
+                  }
+                  ''
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+                    bin=bin/claude-extended-tool-approver
+
+                    # Default: no CETA_EXTRA_TEMP_ROOTS flag (the wrapper still exists for the
+                    # module's base read-only roots, so assert on the variable, not on wrapping).
+                    ! grep -q CETA_EXTRA_TEMP_ROOTS "$defaultHook/$bin" \
+                      || fail "default wrapper mentions CETA_EXTRA_TEMP_ROOTS"
+                    [ "$("$defaultHook/$bin")" = "CETA_EXTRA_TEMP_ROOTS=" ] \
+                      || fail "default run exported CETA_EXTRA_TEMP_ROOTS"
+
+                    # [ /a /b ]: --suffix baked into the wrapper (makeWrapper expands a
+                    # --suffix value into one guarded append per ":"-separated element) ...
+                    grep -F "CETA_EXTRA_TEMP_ROOTS=\$CETA_EXTRA_TEMP_ROOTS'/a'" "$twoHook/$bin" >/dev/null \
+                      || fail "wrapper lacks the /a suffix append"
+                    grep -F "CETA_EXTRA_TEMP_ROOTS=\$CETA_EXTRA_TEMP_ROOTS'/b'" "$twoHook/$bin" >/dev/null \
+                      || fail "wrapper lacks the /b suffix append"
+                    # ... that is a suffix, not a set: an existing value is kept, first.
+                    env -u CETA_EXTRA_TEMP_ROOTS "$twoHook/$bin" | grep -Fx 'CETA_EXTRA_TEMP_ROOTS=/a:/b' >/dev/null \
+                      || fail "unset env should yield exactly /a:/b"
+                    CETA_EXTRA_TEMP_ROOTS=/mine "$twoHook/$bin" | grep -Fx 'CETA_EXTRA_TEMP_ROOTS=/mine:/a:/b' >/dev/null \
+                      || fail "an existing CETA_EXTRA_TEMP_ROOTS must be merged, not replaced"
+
+                    # Second contributor: /c present alongside /a and /b (membership, not order).
+                    got="$(env -u CETA_EXTRA_TEMP_ROOTS "$mergedHook/$bin")"
+                    for r in /a /b /c; do
+                      case ":''${got#CETA_EXTRA_TEMP_ROOTS=}:" in
+                        *":$r:"*) ;;
+                        *) fail "merged wrapper env '$got' lacks $r" ;;
+                      esac
+                    done
+
+                    # Docs/comments: no stale claim, the sanctioned route is named.
+                    flat() { sed 's#^[[:space:]]*//##' "$1" | tr '\n' ' ' | tr -s ' '; }
+                    for f in "$adr" "$temprootGo"; do
+                      if flat "$f" | grep -Eiq 'always a descendant of'; then
+                        fail "$f still claims the scratchpad is always under /private/tmp"
+                      fi
+                      grep -q extraTempRoots "$f" \
+                        || fail "$f does not mention the sanctioned extraTempRoots route"
+                    done
+                    grep -q 'docs/adr/0059-ceta-temp-repo-carve-out.md' "$temprootGo" \
+                      || fail "temproot.go header does not cite ADR 0059"
+                    ! grep -q '0056-ceta-temp-repo-carve-out' "$temprootGo" \
+                      || fail "temproot.go still cites the stale ADR 0056 filename"
+                    touch $out
+                  '';
 
               # Durable eval test (tc-o14i5.8.3, Track X.3): confirms ceta's OWN
               # contribution to programs.claude-hook-router.delegates carries a SIXTH

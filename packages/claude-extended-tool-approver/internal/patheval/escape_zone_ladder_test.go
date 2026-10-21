@@ -72,7 +72,7 @@ func isolateEnv(t *testing.T) {
 	t.Helper()
 	for _, v := range []string{
 		"WORKSPACE_ROOT", "GRADLE_USER_HOME", "XDG_DATA_HOME",
-		"CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS",
+		"CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_EXTRA_TEMP_ROOTS",
 		"MONOREPO_ROOT",
 	} {
 		t.Setenv(v, "")

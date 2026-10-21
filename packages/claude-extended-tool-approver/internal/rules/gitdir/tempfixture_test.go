@@ -144,3 +144,56 @@ func TestTempFixture_AllTempRoot_Relaxed(t *testing.T) {
 		t.Errorf("all-temp: got Reject (%s), want relaxed", got.Reason)
 	}
 }
+
+// extraTempRoot is a CETA_EXTRA_TEMP_ROOTS entry (pg2-t0hi5) deliberately
+// outside every built-in temp root and, like realDir, rooted under /etc so a
+// not-yet-existing child still resolves via the nearest-ancestor fallback.
+// t.TempDir() would NOT work here: it sits under $TMPDIR, itself a built-in
+// root, so the "extra root" case would pass even if the variable were ignored.
+const extraTempRoot = "/etc/pg2-t0hi5-extra-temp"
+
+// TestTempFixture_ExtraTempRoot_CarvedOutLikePrivateTmp: a `.git/` write and a
+// repo-locating env var whose effective directory is under a root named in
+// CETA_EXTRA_TEMP_ROOTS are relaxed exactly like one under /private/tmp, while
+// a sibling sharing only a name prefix, and the same fixture with the variable
+// unset, stay refused.
+func TestTempFixture_ExtraTempRoot_CarvedOutLikePrivateTmp(t *testing.T) {
+	r := New()
+	inRoot := []string{
+		"echo x > .git/config",
+		"GIT_DIR=" + extraTempRoot + "/fx/bare-repo git status",
+	}
+	t.Run("under the extra root: relaxed", func(t *testing.T) {
+		t.Setenv("CETA_EXTRA_TEMP_ROOTS", extraTempRoot)
+		for _, cmd := range inRoot {
+			got := hookio.Verdict(r.Evaluate(bashInputCWD(cmd, extraTempRoot+"/fx")))
+			if got.Decision == hookio.Reject {
+				t.Errorf("cmd %q under extra temp root: got Reject (%s), want relaxed", cmd, got.Reason)
+			}
+		}
+	})
+	t.Run("sibling sharing a name prefix: still refused", func(t *testing.T) {
+		t.Setenv("CETA_EXTRA_TEMP_ROOTS", extraTempRoot)
+		got := hookio.Verdict(r.Evaluate(bashInputCWD("echo x > .git/config", extraTempRoot+"-other/fx")))
+		if got.Decision != hookio.Reject {
+			t.Errorf("Decision = %v, want Reject (outside every temp root)", got.Decision)
+		}
+	})
+	t.Run("variable unset: still refused", func(t *testing.T) {
+		t.Setenv("CETA_EXTRA_TEMP_ROOTS", "")
+		for _, cmd := range inRoot {
+			got := hookio.Verdict(r.Evaluate(bashInputCWD(cmd, extraTempRoot+"/fx")))
+			if got.Decision != hookio.Reject {
+				t.Errorf("cmd %q with no extra temp root: Decision = %v, want Reject", cmd, got.Decision)
+			}
+		}
+	})
+	t.Run("mixed real GIT_DIR and extra-root -C: still refused (R2)", func(t *testing.T) {
+		t.Setenv("CETA_EXTRA_TEMP_ROOTS", extraTempRoot)
+		cmd := "GIT_DIR=" + realDir + "/.git git -C " + extraTempRoot + "/fx config user.email t@example.com"
+		got := hookio.Verdict(r.Evaluate(bashInputCWD(cmd, extraTempRoot+"/fx")))
+		if got.Decision != hookio.Reject {
+			t.Errorf("Decision = %v, want Reject (a real GIT_DIR outranks an extra-root -C)", got.Decision)
+		}
+	})
+}

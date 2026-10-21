@@ -30,7 +30,7 @@ func repoFixture(t *testing.T) string {
 	must(os.Mkdir(filepath.Join(root, "build"), 0o755))
 	must(os.WriteFile(filepath.Join(root, "build", "out"), []byte("x\n"), 0o644))
 	must(os.Mkdir(filepath.Join(root, "sub"), 0o755))
-	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_DENIED_ROOTS", "MONOREPO_ROOT"} {
+	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_EXTRA_TEMP_ROOTS", "CETA_DENIED_ROOTS", "MONOREPO_ROOT"} {
 		t.Setenv(v, "")
 	}
 	r, err := filepath.EvalSymlinks(root)
@@ -78,7 +78,7 @@ func TestClassifyTemp(t *testing.T) {
 	if _, inRepo := patheval.GitRoot(dir); inRepo {
 		t.Skipf("t.TempDir() %s sits inside a git working tree; the temp source cannot be isolated", dir)
 	}
-	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_DENIED_ROOTS", "MONOREPO_ROOT"} {
+	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_EXTRA_TEMP_ROOTS", "CETA_DENIED_ROOTS", "MONOREPO_ROOT"} {
 		t.Setenv(v, "")
 	}
 	// Use dir as the project root so the zone is writable wherever the

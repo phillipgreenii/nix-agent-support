@@ -108,11 +108,27 @@ plus any path listed in `CETA_EXTRA_TEMP_ROOTS` (`:`-separated), mirroring the e
 `CETA_EXTRA_READWRITE_ROOTS`/`CETA_EXTRA_READONLY_ROOTS` escape hatch (`internal/patheval`). The
 Claude Code session scratchpad root is not a fifth hardcoded literal: there is no env var carrying
 it to a hook subprocess as of 2026-08-28, and constructing it from a UID/project-hash pattern would
-itself be the "hardcoded guesswork" this decision forbids. On this deployment it is always a
-descendant of `/private/tmp` (observed pattern
-`/private/tmp/claude-<uid>/<project>/<session>/scratchpad`), so it is already covered by that root.
-If a deployment ever puts it somewhere `/private/tmp` does not reach, `CETA_EXTRA_TEMP_ROOTS` is the
-sanctioned way to add it.
+itself be the "hardcoded guesswork" this decision forbids. By default it is a descendant of
+`/private/tmp` (observed pattern `/private/tmp/claude-<uid>/<project>/<session>/scratchpad`) and so
+is covered by that root, but that is a default, not an invariant: the scratchpad and Go build/test
+temp output MAY live elsewhere (amendment, pg2-t0hi5, 2026-10-21).
+
+**Amendment (pg2-t0hi5, 2026-10-21): the sanctioned route for a root outside the built-ins is the
+nix option `phillipgreenii.programs.claude-extended-tool-approver.extraTempRoots`.** The option
+bakes `CETA_EXTRA_TEMP_ROOTS` into the hook wrapper with `--suffix` (merged with, never replacing, a
+value already in the environment); `CETA_EXTRA_TEMP_ROOTS` is the lower-level mechanism underneath
+it. Roots still come from configuration only. The option asserts every root is absolute and is not
+`/`, `/Volumes`, `/Volumes/gitrepos`, `/Users`, the home directory, or a parent of one of those: a
+too-broad temp root would relax the `.git` write refusals for real repositories.
+
+**Two facets, kept separate.** Temp CLASSIFICATION (this ADR's carve-out, plus `tempKind`, which
+grants only `Delete: Permitted` and no Read/Write opinion) follows `Roots()`. Path-safety READ/WRITE
+for temp comes from `tmpRoot` (`internal/patheval/evaluator.go`) and `osTmpKind`
+(`internal/pathspec/osspec.go`), which are hard-wired to `/tmp` and do NOT follow `Roots()`; that
+is deliberately left unchanged. A root that must be both temp and usable by path-safety is listed in
+BOTH `extraTempRoots` and `extraReadWriteRoots`. Widening a root to read-write is a deliberate
+permission change for disposable, user-owned directories, and a consumer that does it owns that
+decision.
 
 ### Works on a not-yet-a-repo directory (R6)
 

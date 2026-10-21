@@ -59,6 +59,45 @@ let
   # sentence and this mechanical guard together.
   knownAbsentRoots = config.phillipgreenii.programs.claude-code.knownAbsentRoots;
 
+  # extraTempRoots validation (pg2-t0hi5). A too-broad TEMP root would relax the
+  # temp-repo carve-out's `.git` write refusals for REAL repositories, so each
+  # root must be absolute, free of `:` (the join separator) and of `.`/`..`
+  # segments, and must not be -- or be a parent of -- any of the forbidden
+  # roots below (mirrors the forbidden-roots idea of the build-tmp design D5).
+  # A root that is a CHILD of a forbidden root (e.g. /Volumes/gitrepos/build_tmp)
+  # is fine.
+  tempRootForbidden = [
+    "/"
+    "/Volumes"
+    "/Volumes/gitrepos"
+    "/Users"
+    config.home.homeDirectory
+  ];
+  # Collapse repeated and trailing slashes: "/a//b/" -> "/a/b"; "/" -> "/".
+  tempRootNorm = p: "/" + lib.concatStringsSep "/" (lib.filter (x: x != "") (lib.splitString "/" p));
+  tempRootProblem =
+    root:
+    let
+      n = tempRootNorm root;
+      isAncestorOrEqual =
+        f:
+        let
+          nf = tempRootNorm f;
+        in
+        n == "/" || nf == n || lib.hasPrefix "${n}/" nf;
+      segs = lib.splitString "/" root;
+    in
+    if !(lib.hasPrefix "/" root) then
+      "is not absolute"
+    else if lib.hasInfix ":" root then
+      "contains ':' (the CETA_EXTRA_TEMP_ROOTS separator)"
+    else if lib.elem ".." segs || lib.elem "." segs then
+      "contains a '.' or '..' segment"
+    else if lib.any isAncestorOrEqual tempRootForbidden then
+      "is, or is a parent of, a forbidden root (${lib.concatStringsSep ", " tempRootForbidden})"
+    else
+      null;
+
   # wrapProgram flags, contributed only by the settings that are active. The
   # binary is wrapped iff at least one flag is present; otherwise the unwrapped
   # package is used directly.
@@ -79,6 +118,12 @@ let
     ++ lib.optional (
       cfg.extraReadOnlyRoots != [ ]
     ) ''--set CETA_EXTRA_READONLY_ROOTS "${lib.concatStringsSep ":" cfg.extraReadOnlyRoots}"''
+    # --suffix, NOT --set (pg2-t0hi5): --set would silently discard a developer's
+    # own CETA_EXTRA_TEMP_ROOTS from their shell; --suffix merges (existing value
+    # first, ours appended, ":"-separated).
+    ++ lib.optional (
+      cfg.extraTempRoots != [ ]
+    ) ''--suffix CETA_EXTRA_TEMP_ROOTS : "${lib.concatStringsSep ":" cfg.extraTempRoots}"''
     ++ lib.optional (
       knownAbsentRoots != [ ]
     ) ''--set CETA_DENIED_ROOTS "${lib.concatStringsSep ":" knownAbsentRoots}"'';
@@ -193,9 +238,40 @@ in
         additions here are additive on top of that base set.
       '';
     };
+    extraTempRoots = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = ''
+        Additional absolute directory roots under which a path is classified
+        TEMPORARY/disposable (exported as CETA_EXTRA_TEMP_ROOTS, a ":"-separated
+        list, merged with any value already in the environment via the
+        wrapper's `--suffix`). Temp classification drives the temp-repo carve-out
+        (ADR 0059: a git fixture under a temp root is exempt from the `.git`
+        write and repo-locating env-var refusals) and the Delete permission for
+        temp paths. Use it for a Go build/test temp tree or a Claude Code temp
+        tree that does not live under /tmp, /private/tmp or $TMPDIR. Empty by
+        default so this repo stays generic; set org/machine paths in the
+        consuming flake. Definitions list-merge.
+
+        TWO FACETS, kept separate: this option does NOT make the path-safety
+        evaluator treat the root as readable or writable (its /tmp handling is
+        hard-wired). A root that must be BOTH temp and usable by path-safety MUST
+        be listed in BOTH `extraTempRoots` and `extraReadWriteRoots`.
+
+        Every root must be absolute and must not be `/`, `/Volumes`,
+        `/Volumes/gitrepos`, `/Users`, the home directory, or a parent of one of
+        those (a too-broad temp root would relax the `.git` write refusals for
+        real repositories); the module asserts this.
+      '';
+    };
   };
 
   config = lib.mkIf (config.phillipgreenii.programs.claude-code.enable && cfg.enable) {
+
+    assertions = map (root: {
+      assertion = tempRootProblem root == null;
+      message = "phillipgreenii.programs.claude-extended-tool-approver.extraTempRoots: \"${root}\" ${tempRootProblem root}";
+    }) cfg.extraTempRoots;
 
     # Base read-only inspection roots (pg2-t76k8): home dot-files/dirs that are
     # safe to READ for inspection but are deliberately NOT base-code path-safety

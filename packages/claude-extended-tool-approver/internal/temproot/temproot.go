@@ -13,7 +13,7 @@
 // repository, but neither used to distinguish one from a THROWAWAY fixture
 // that exists only under a temporary path — so there was no sanctioned way
 // to build a disposable git fixture and drive the exact failure mode those
-// guards exist to prevent (see docs/adr/0056-ceta-temp-repo-carve-out.md in
+// guards exist to prevent (see docs/adr/0059-ceta-temp-repo-carve-out.md in
 // phillipgreenii-nix-agent-support for the full rationale and the incident
 // that motivated it).
 //
@@ -77,11 +77,24 @@ var CanonicalRepoLocatingEnvVars = map[string]bool{
 	"GIT_OBJECT_DIRECTORY": true,
 }
 
-// extraRootsEnvVar names the escape hatch for a temp-fixture root this
-// package's built-in list does not already cover (a differently-configured
-// session scratchpad, a CI sandbox's own temp mount, ...), mirroring the
-// established CETA_EXTRA_READWRITE_ROOTS/CETA_EXTRA_READONLY_ROOTS pattern
+// extraRootsEnvVar is the lower-level mechanism for a temp-fixture root this
+// package's built-in list does not already cover (a Go build/test temp tree
+// or a Claude Code scratchpad that lives outside /private/tmp, a CI sandbox's
+// own temp mount, ...), mirroring the established
+// CETA_EXTRA_READWRITE_ROOTS/CETA_EXTRA_READONLY_ROOTS pattern
 // (internal/patheval) rather than inventing a new configuration shape.
+//
+// The SANCTIONED route is the nix option
+// `phillipgreenii.programs.claude-extended-tool-approver.extraTempRoots`
+// (pg2-t0hi5), which bakes this variable into the hook wrapper with
+// `--suffix` so it MERGES with a value already present in the environment
+// instead of replacing it. Roots always come from configuration, never from
+// a guessed path.
+//
+// This is the TEMP-CLASSIFICATION facet only (the temp-repo carve-out and
+// the tempKind Delete grant). It does NOT make path-safety read/write follow
+// it: a root that should also be readable/writable by the path-safety
+// evaluator is listed in CETA_EXTRA_READWRITE_ROOTS as well.
 const extraRootsEnvVar = "CETA_EXTRA_TEMP_ROOTS"
 
 // Roots returns the realpath-resolved directories under which a filesystem
@@ -98,13 +111,14 @@ const extraRootsEnvVar = "CETA_EXTRA_TEMP_ROOTS"
 // session scratchpad root is NOT listed as a fifth literal: this package has
 // no reliable, non-guessed way to derive it (no env var carries it to a hook
 // subprocess as of 2026-08-28, and constructing it from a UID/project-hash
-// pattern would be exactly the "hardcoded guesswork" R4 forbids) — and on
-// this deployment it is always a descendant of /private/tmp (observed
-// pattern `/private/tmp/claude-<uid>/<project>/<session>/scratchpad`), so it
-// is already covered by that root without a separately-derived one. If a
-// deployment ever puts it somewhere /private/tmp does not reach,
-// CETA_EXTRA_TEMP_ROOTS is the sanctioned way to add it explicitly rather
-// than teaching this package to guess.
+// pattern would be exactly the "hardcoded guesswork" R4 forbids). It is only
+// covered here when it happens to be a descendant of /private/tmp (the
+// observed default pattern
+// `/private/tmp/claude-<uid>/<project>/<session>/scratchpad`). The scratchpad
+// and Go build temp MAY live elsewhere (pg2-t0hi5); when they do, the
+// deployment names the root through the nix option `extraTempRoots`
+// (CETA_EXTRA_TEMP_ROOTS, ":"-separated, merged by `--suffix`) rather than
+// teaching this package to guess.
 func Roots() []string {
 	var roots []string
 	seen := make(map[string]bool)
