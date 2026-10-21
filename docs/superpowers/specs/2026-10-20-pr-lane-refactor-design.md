@@ -1,10 +1,12 @@
 # PR lane refactor: replace the legacy sync and reconcile lane after the schema-2 cutover
 
-Status: DRAFT v2 for operator approval (bead `pg2-6mo45.2`, epic `pg2-6mo45`). Not approved.
+Status: DRAFT v3 for operator approval (bead `pg2-6mo45.2`, epic `pg2-6mo45`). Not approved.
 Date: 2026-10-20.
-Revision history: v1 written the same day; v2 incorporates a builder check and five independent
-reviews (completeness, correctness, UX, observability, test coverage). Section 15 lists what each
-review changed.
+Revision history: v1 and v2 were written the same day. v2 incorporated a builder check and five
+independent reviews (completeness, correctness, UX, observability, test coverage). v3 applies three
+further operator rulings (8 to 10 in section 2) that remove the sweep, the pin and the second role
+and replace them with a tracked-versus-watched split in the connector. Section 15 lists what each
+revision changed. v3 has NOT been through independent review.
 Owner: the operator. Depends on: the daemon program `pg2-z5fax` (cutover phase `pg2-z5fax.8`).
 Supersedes: the deferral in `pg2-15ja3` (ruling "A: collapse, defer deletions", 2026-10-14), the
 date-based deferral of `pg2-l2wkd`, and the record-path fix `pg2-f6osn`.
@@ -65,10 +67,22 @@ reads the outcome rather than the machinery (section 9).
    work.
 4. Any PR with an open work item MUST keep being tracked and updated until that work item is closed.
    Only after it closes do the daemon's `terminal_ttl` (24 h) and `expiry` (7 d) rules apply.
+   (Ruling 8 generalises this to every referenced PR.)
 5. Mass adoption of existing anchors and a hydration burst are acceptable.
 6. Threads that belong to tracked PRs are in scope and MUST be supported.
 7. Alerts: keep the existing set, remove the four `sync_error` alerts with the lane, add the alerts
    in section 9. The Grafana dashboards MUST be updated in the same change.
+8. Tracking rule. Every PR the connector references (a query result, a direct read, or a watch) is
+   kept locally and refreshed until it closes, then evicted by the normal `terminal_ttl` and
+   `expiry` rules. A direct read has no different tracking rule. There is no manual untrack action
+   and none is needed now.
+9. Watched flag. Tracking and change events are separate. By default nothing is watched. A query in
+   the connector's configuration carries a flag saying whether its results are watched, and a query
+   or lookup MAY opt in to watching at call time. A PR flagged watched in any way stays watched
+   until it closes and is evicted. `pr.changed` events are emitted only for watched PRs. pg-desk
+   consumes only change events from the connector.
+10. Drop reconcile. There is no `pr.reconcile` event and no sweep (`pr-sweep`, `pr-sweep-full`, the
+    anchor sweep) until problems appear without them.
 
 ## 3. Goals, non-goals, anti-goals
 
@@ -78,15 +92,18 @@ Goals:
   view, with no dependence on the ledger or `sync_error`.
 - A PR with an open work item is never silently dropped from tracking.
 - The legacy lane (sync stage, `pg-desk reconcile`, ledger, the deployment `desk-reconcile` tick,
-  the `sync_error` metrics and alerts) is deleted.
+  the sweeps, the `sync_error` metrics and alerts) is deleted.
+- Queries are defined in one place, the connector, and neither pg-router nor pg-desk names them.
 - The next silent stall of PR work is caught by an alert that reads the outcome ("an open PR has no
   anchor") and by a test that fails before a migration reaches production.
 
 Non-goals:
 
-- Changing the daemon's GitHub cost model beyond the open-anchor pin (section 6.3).
+- Changing the daemon's GitHub cost model beyond the tracking rule of ruling 8 (section 6.3 states
+  the cost risk).
 - Repairing `desk-thread`'s Claude usage-limit failures.
 - A new thread change feed before attribution of existing thread links works (section 6.6).
+- Any reconcile or sweep mechanism (ruling 10).
 
 Anti-goals (a technically working result that would still be a failure):
 
@@ -98,6 +115,8 @@ Anti-goals (a technically working result that would still be a failure):
   NOT depend on pg-desk or on the tracker.
 - A flip that mints duplicates: the first `apply` MUST be staged, attributable and reversible
   (section 6.5).
+- Mere reading making a PR produce work: a PR that was only read (tracked, not watched) MUST NOT
+  reach the decider.
 
 ## 4. Current state (verified 2026-10-20)
 
@@ -123,19 +142,26 @@ Anti-goals (a technically working result that would still be a failure):
   gather's `work-beads` query. The deployed query lists only open, in-progress and blocked items and
   only the `merge-request` type plus `process-feedback:` and `review-pr:` tasks. Closed items and
   every `fix-ci` and `resolve-conflict` item are invisible to it (section 6.2).
+- Nothing in pg-desk's interpretation depends on which query returned a PR: ownership comes from
+  config and commit authors, and "match reasons" are recomputed from facts each run. Queries
+  therefore carry no meaning downstream of the connector.
 - The parity gate's old side runs `pg-desk run pr` in sync plan mode and reads the ledger; it cannot
   pass once the sync stage is gone (section 6.7).
 - The router's command executor never reads the stderr of a successful run, so the decider's counters
   line (`pg-decider.run-counters/v1`) never reaches any log except on failures (section 9).
 - Sources: `pr-mine` ticks; `pr-team` and `pr-sweep` fail intermittently under host load (about 6 to
-  25 percent of ticks in the last six hours); those are not constant failures and stay on.
-- The daemon (`pg-connector-github`): change engine, change feed, settle and metrics landed. The
-  shadow run started 2026-10-20 and is healthy; the cutover phase has no packets yet.
-- Daemon keep-alive today: an entity is kept alive while it is a member of a configured query or was
-  accessed within `keepalive_window` (24 h); merged and closed PRs use `terminal_ttl` (24 h);
-  entities are evicted after `expiry` (7 d). The change feed is filtered to the query's members plus
-  the rows of entities that just left it, so a PR outside every query delivers no change row to the
-  query-keyed sources.
+  25 percent of ticks in the last six hours); those are not constant failures and stay on until the
+  phase that replaces them.
+- Today's live backend (`pg-connector-pr-github`) is query-agnostic: each `pr-mine` or `pr-team` poll
+  makes the umbrella run the search and diff the result against a ledger. The daemon
+  (`pg-connector-github`) instead reads its own config (query definitions rendered by nix from the
+  same `backends` options as the umbrella), re-runs the queries on its own clock, keeps the full
+  content of the member PRs in its store, and serves a change feed. The change engine, feed, settle
+  and metrics have landed; the shadow run started 2026-10-20 and is healthy; the cutover phase has no
+  packets yet.
+- The daemon design as written (rev 7) keeps an entity alive while it is a member of a configured
+  query or was accessed within `keepalive_window` (24 h), requires `--query` on `changes`, and so
+  delivers nothing for a PR outside every query. Rulings 8 and 9 amend this (section 6.3).
 
 ## 5. What hydration does and what the decider decides
 
@@ -184,23 +210,22 @@ and needed the dropped ledger to know which work item belonged to which PR.
 
 ```mermaid
 flowchart LR
-  D["daemon: connector pr changes feed"] --> S["sources pr-mine and pr-team"]
+  CFG["connector config: query definitions, each with a watched flag"] --> D
+  GH["GitHub"] --> D["daemon: tracks every referenced PR until closed, then terminal_ttl, then expiry"]
+  RD["any read or query with the watch option"] --> D
+  D -->|"watched PRs only"| FEED["change feed, one consumer cursor"]
+  FEED --> S["source pr-changes"]
   S -->|"pr.changed"| H["role pr-change: refresh then decide"]
-  K["sweep: open anchors"] -->|"pr.reconcile"| R["role pr-reconcile: refresh then decide"]
-  B["pr-sweep-full backstop"] -->|"pr.reconcile"| R
   H --> V["pg-desk store: hydrated view and links"]
-  R --> V
   V --> X["pg-decider apply pr"]
   X --> W["work items: anchor, feedback, review, fix-ci, resolve-conflict"]
-  W --> K
-  K -->|"pin and renew (P2)"| D
 ```
 
-The PR sources stay the connector's `changes` command (`pr-mine`, `pr-team`), served by the daemon
-after P1. The pg-desk pull-through (`pg-desk pr changes` through the `pg-router-source-pg-desk`
-adapter, ADR 0077 S5 and S31 to S34) is NOT used for PR: the daemon design's consumer table marks
-pg-desk's PR change flow "Not used for PRs; retired", because the daemon owns change detection and
-the confirmation read on leaving a query. The pull-through remains the feed for issues.
+Who owns queries: only the connector's configuration defines them (the deployment declares them once
+and nix renders the daemon and umbrella blocks from the same options). pg-router names none: it
+polls the change feed with a consumer name. pg-desk names none after P9 deletes its legacy
+`watch.pr.queries`. Until P1, the old backend is still polled by query name (`pr-mine`, `pr-team`)
+and those two sources keep their current form.
 
 ### 6.1 Hydrate then decide
 
@@ -213,6 +238,9 @@ The decider MUST NOT decide on a view that was not hydrated through the entity-c
   `pg-decider apply pr <id>` in sequence, so ordering is guaranteed by construction and pg-desk stays
   independent of the decider. The command MUST be a packaged, tested binary or script in this
   repository, not a shell snippet in the deployment config, so its exit-code mapping is testable.
+- One role: `pr-change` binds `pr.changed` and nothing else. There is no `pr.reconcile` (ruling 10).
+  The router retries a failed `pr.changed` dispatch (`max_dispatch_retries`), and the feed delivers
+  at least once.
 - Fail closed: the decider (or the composed command) MUST refuse and exit non-zero with a distinct
   code when the view's version is 0, its `hydrated_at` is null, or it is marked stale, so an
   unhydrated view can never mint an anchor.
@@ -225,12 +253,6 @@ The decider MUST NOT decide on a view that was not hydrated through the entity-c
   the decider never runs and its anchor would never close. The composed command MUST handle it: with
   an open anchor it records the condition and raises one `human` escalation (never silently
   nothing). The builder MAY instead add a removed-change path to refresh.
-- Two roles, one command (call): `pr-change` binds `pr.changed` and `pr-reconcile` binds
-  `pr.reconcile`. One role binding both would take a sweep burst (about 88 events for
-  `pr-sweep-full`) ahead of change events, because a handler has one outstanding offer at a time;
-  that is the `pg2-pkwkr` stall. The sweep emits at most a bounded number of events per tick and
-  carries the rest to the next tick. `pr.reconcile` events are born expired, so they are not retried
-  by the router; recovery is the next sweep.
 
 ### 6.2 Work-item visibility
 
@@ -243,48 +265,73 @@ The decider can only avoid duplicates and reopen items it can see.
 - This is a P4 gate item with an end-to-end test (section 10): the second `apply` MUST write nothing
   against a tracker listing that behaves like production.
 
-### 6.3 Open-anchor tracking (ruling 4)
+### 6.3 Tracking and watching (rulings 4, 8 and 9)
 
-Two parts, because the daemon cannot read the tracker and the feed is query-keyed.
+Two independent properties of a PR inside the daemon.
 
-Interim guarantee, available before the daemon cutover (P5): the sweep reads every open anchor's PR
-through `pg-desk pr refresh` at least once per sweep period. A read counts as an access, so the
-daemon's `keepalive_window` rule keeps the PR alive, and the old backend simply refreshes it. The
-sweep period (call: 1 hour) MUST be shorter than the lease or window it renews (24 h). A lapse of the
-sweep is itself alerted (section 9), because this option fails silently otherwise.
+**Tracked** means the daemon keeps the PR's content in its store and refreshes it. Every PR the
+daemon is told about is tracked: a query result, a direct read of one PR, or a watch. A tracked PR
+stays tracked until it is closed or merged; then the existing `terminal_ttl` (24 h) applies, then
+`expiry` (7 d) evicts it. The `keepalive_window` decay of rev 7 is removed, so a direct read has no
+different rule from a query result. There is no manual untrack.
 
-Hardening, with the daemon (P2): an explicit pin.
+**Watched** means the daemon appends change rows for the PR to the change feed. Nothing is watched
+by default. A PR becomes watched when:
 
-- Contract (call): connector ops `pr pin <id> --lease <duration>` and `pr unpin <id>`, forwarded by
-  the umbrella to the daemon like the other `pr` ops. The decider does not call them from a rule;
-  the sweep and the composed command do, driven by the open anchors in the view, so the decider stays
-  tracker-only and the daemon never learns about the tracker.
-- A pin keeps the entity alive and makes it a member of a configured pseudo-query `pinned`, so its
-  changes (including `merged` and `closed`) appear in the change feed of a source `pr-pinned`. A
-  plain pin without feed membership would keep the PR fresh but deliver nothing for a PR outside
-  every watched query, which would make the sweep, not the pin, the only closer.
-- The lease defaults to `keepalive_window` and every sweep renews it, so a crashed sweep cannot pin a
-  PR forever. When the daemon store is moved aside the pins are lost and the first poll of every key
-  returns `cursor_expired`; the operator runs the documented reset and the sweep re-pins within one
-  period. The sweep period is the recovery bound.
-- A hidden PR (`hide`) skips every decider rule including closure. The sweep MUST NOT renew pins for
-  hidden PRs, and the stale-anchor alert excludes them but a separate count reports "hidden PR with
-  an open anchor" so it is visible, not silent.
-- The daemon design amendment ("Keep-alive, revalidation and expiry": an entity with an open work
-  item stays until it closes, then `terminal_ttl` and `expiry` apply, plus the pin op and the
-  `pinned` query) is a deliverable of P2, produced before its implementation.
+- it is a result of a configured query whose configuration carries `watched = true`;
+- it is a result of an ad-hoc query run with the watch option; or
+- it is read directly with the watch option.
 
-### 6.4 Anchor sweep
+Once watched, a PR stays watched until it is closed and evicted. A watched PR that leaves its query
+stays watched, which closes the gap the v2 sweep and pin covered: a PR with an open anchor that stops
+matching every query keeps delivering changes, including its `merged` or `closed` row, so the
+decider closes the anchor. The flag is stored in the daemon's store.
 
-A periodic pg-router source lists open PR anchors from the tracker and emits one `pr.reconcile` event
-per anchor PR (bounded per tick, carried over). The `pr-reconcile` role handles it exactly like a
-change event, so a PR that merged while no query watched it is hydrated, observed as merged and its
-anchor closed. The sweep is load-bearing for three cases: the interim guarantee (6.3), pinning
-anchors that predate pins, and PRs outside every query. `pr-sweep-full` (every 6 h, served from the
-daemon's query cache after P1 at no extra GitHub cost) stays as the backstop for PRs that have no
-anchor yet; with P1 live its period SHOULD be shortened to bound recovery of a failed first run to
-that period (call: 1 hour). Until P1, a PR with no anchor whose first run failed waits for the 6 h
-backstop; that is the stated recovery bound for the interim.
+Feed rules (daemon design amendment, a deliverable of P2, written before the implementation):
+
+- The change feed returns rows for watched PRs only, with one cursor per consumer. `--query` is no
+  longer required; it MAY remain as a filter for compatibility. A PR that was only read is tracked but
+  delivers nothing, so mere reading never reaches the decider.
+- The per-query baseline rule is kept: a query's first complete run appends no rows, so a cold store
+  cannot push every PR into the decider at once. The initial hydration of the active PRs is the paced
+  backfill of section 6.5. A PR that becomes watched later, while already known, appends one `added`
+  row so pg-desk hydrates it.
+- `left_query` rows are no longer needed for tracking; a PR that leaves a query keeps its flag.
+
+Cost risk (accepted by the operator): tracking has no decay, so a PR that someone merely read keeps
+being refreshed until it closes, and an abandoned open PR is refreshed indefinitely. The governor
+already prioritises and ages work, so the budget is protected, but the tracked set can grow. The
+daemon MUST export the tracked and watched entity counts and the governor's backlog, and an alert
+fires when the tracked set exceeds a configured size, so the cost is visible before it hurts. A
+manual untrack operation is deferred until the numbers show it is needed.
+
+Before the daemon is live (until P1) the old backend's query-diff feed applies: it delivers `added`,
+`changed` and `removed` for the members of `mine` and `team`, and `removed` triggers a hydration and
+closure of a merged PR. A PR that left both queries while still open is not followed until P1; that is
+the accepted interim gap.
+
+A moved-aside daemon store loses the watched flags: query members become watched again at the next
+query run, but directly watched PRs do not. With no sweep (ruling 10) nothing re-asserts them; the
+outcome alerts of section 9 are the detection, and a re-assert job is added if it happens.
+
+A hidden PR (`hide`) skips every decider rule including closure, so a hidden PR that merges keeps its
+anchor open. A count of "hidden PR with an open anchor" makes that visible (section 9).
+
+### 6.4 No reconcile (ruling 10)
+
+There is no `pr.reconcile` event type and no sweep. P3b removes `desk-pr`, `pr-sweep` and
+`pr-sweep-full` together, because their events have no remaining consumer (an event with no consumer
+is an orphan producer, which a deployment check rejects). `desk-reconcile` is already removed (P0).
+This means:
+
+- the 6 h backstop for "changes missed without a baseline" is gone, and so is the 30-minute sweep of
+  recently updated PRs. The daemon's own refresh, fingerprint revalidation and hard ages replace
+  them;
+- a failed first run of a PR waits for the next change of that PR, not for a sweep. The router retries
+  the dispatch first; after that a PR with no further change is not retried;
+- the revisit conditions are written down so the decision can be reversed on evidence: an open anchor
+  whose PR is terminal on the forge for more than a day, a PR with no anchor that should have one, or a
+  moved-aside store. Each is visible through the outcome alert (section 9).
 
 ### 6.5 Adoption, backfill and the first apply
 
@@ -340,82 +387,81 @@ re-homed; P9 does not delete it.
 
 ## 7. Phases
 
-Sizes are effort (S, M, L, XL), not time.
+Sizes are effort (S, M, L, XL), not time. P5 (the anchor sweep) is dropped by ruling 10 and its id is
+not reused.
 
-| Id  | Phase                                                                                                               | Repo                            | Size | Needs            |
-| --- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ---- | ---------------- |
-| P0  | Switch off the dead legacy pieces (landed `414f0a27`, not applied)                                                  | deployment repo                 | S    | none             |
-| P0b | Guards: `sync.mode` pin check, schema-2 `run pr` test, interim tripwire alert                                       | both                            | S    | none             |
-| P1  | Daemon cutover without waiting for the shadow run                                                                   | both, operator apply            | L    | shadow report    |
-| P2  | Pin op, lease, `pinned` query and daemon design amendment                                                           | agent-support                   | M    | P1               |
-| P3a | Parity freeze: golden plans from the pre-removal build                                                              | agent-support                   | S    | none             |
-| P3b | Hydrate via `refresh`, composed role, fail-closed, exit mapping, run record                                         | both                            | L    | P3a              |
-| P4  | Decider readiness: work-item visibility, adoption policy, aggregate plan, end-to-end tests                          | agent-support, deployment       | L    | P3b, P5          |
-| P5  | Anchor sweep with keep-alive reads and bounded emit                                                                 | both                            | M    | P3b              |
-| P8a | Pre-flip observability: coverage alert, backlog rule, run-record log source, probe uids, triager prompt, rule tests | all three repos                 | M    | P3b              |
-| P6  | Staged flip to `apply`, rollback drill, live exercise                                                               | deployment repo, operator apply | M    | P3b, P4, P5, P8a |
-| P7  | Thread support for tracked PRs                                                                                      | agent-support                   | L    | P3b              |
-| P8b | Remaining alerts and dashboards (pin alerts, router stall map, dashboard panels)                                    | all three repos                 | M    | P2, P5           |
-| P9  | Delete the legacy machinery                                                                                         | all three repos                 | L    | P6 stable, P1    |
-| P10 | Docs: ADR, behavior docs, operator runbook                                                                          | agent-support                   | S    | all              |
+| Id  | Phase                                                                                                                          | Repo                            | Size | Needs             |
+| --- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- | ---- | ----------------- |
+| P0  | Switch off the dead legacy pieces (landed `414f0a27`, not applied)                                                             | deployment repo                 | S    | none              |
+| P0b | Guards: `sync.mode` pin check, schema-2 `run pr` test, interim tripwire alert                                                  | both                            | S    | none              |
+| P1  | Daemon cutover without waiting for the shadow run                                                                              | both, operator apply            | L    | shadow report     |
+| P2  | Daemon tracking and watched flag: design amendment, query `watched` option, watch option on reads, unified feed, metrics       | agent-support                   | L    | none              |
+| P3a | Parity freeze: golden plans from the pre-removal build                                                                         | agent-support                   | S    | none              |
+| P3b | Hydrate via `refresh`, one composed role, fail-closed, exit mapping, run record; remove `desk-pr`, `pr-sweep`, `pr-sweep-full` | both                            | L    | P3a               |
+| P4  | Decider readiness: work-item visibility, adoption policy, aggregate plan, end-to-end tests                                     | agent-support, deployment       | L    | P3b               |
+| P8a | Pre-flip observability: coverage alert, backlog rule, run-record log source, probe uids, triager prompt, rule tests            | all three repos                 | M    | P3b               |
+| P6  | Staged flip to `apply`, rollback drill, live exercise                                                                          | deployment repo, operator apply | M    | P3b, P4, P8a      |
+| P7  | Thread support for tracked PRs                                                                                                 | agent-support                   | L    | P3b               |
+| P8b | Remaining alerts and dashboards (tracked-set alert, hidden-PR count, router stall map, dashboard panels)                       | all three repos                 | M    | P2                |
+| P9  | Delete the legacy machinery                                                                                                    | all three repos                 | L    | P6 stable, P1, P2 |
+| P10 | Docs: ADR, behavior docs, operator runbook                                                                                     | agent-support                   | S    | all               |
 
 ```mermaid
 flowchart TD
   P0["P0 switch off (landed)"] --> P0b["P0b guards"]
-  P3a["P3a parity freeze"] --> P3b["P3b hydrate and compose"]
-  P3b --> P5["P5 anchor sweep"]
+  P3a["P3a parity freeze"] --> P3b["P3b hydrate and compose, remove sweeps"]
   P3b --> P4["P4 decider readiness"]
-  P5 --> P4
   P3b --> P8a["P8a pre-flip observability"]
   P4 --> P6["P6 staged apply"]
-  P5 --> P6
   P8a --> P6
-  P1["P1 daemon cutover"] --> P2["P2 pin"]
-  P2 --> P8b["P8b alerts and dashboards"]
-  P5 --> P8b
+  P1["P1 daemon cutover"] --> P9["P9 delete"]
+  P2["P2 tracking and watched flag"] --> P8b["P8b alerts and dashboards"]
+  P2 --> P9
+  P6 --> P9
   P3b --> P7["P7 threads"]
-  P6 --> P9["P9 delete"]
-  P1 --> P9
   P9 --> P10["P10 docs"]
 ```
 
-The decider track (P3a to P6) does not wait for the daemon: it reads the existing `pr-mine` and
-`pr-team` feed unchanged, and the interim keep-alive guarantee is the sweep (6.3). The daemon buys
-reliability (the `pr show --fresh` deadline kills under host load) and the pin hardening. This is
-faster than the v1 ordering, which made the flip wait for the daemon; the operator can re-impose that
-order by adding edges from P1 and P2 to P6.
+The decider track (P3a to P6) does not wait for the daemon: before P1 it reads the old backend's
+`pr-mine` and `pr-team` feed unchanged. P1 and P2 switch the feed to the daemon and give the tracked
+and watched behaviour; the operator can re-impose daemon-first ordering by adding edges from P1 and P2
+to P6. P1's registry switch changes the sources: `pr-mine` and `pr-team` are replaced by the single
+`pr-changes` source once P2 exists, and the deployment declares which queries are watched.
 
 Phase 15 checkpoint `pg2-2j5ac.44.37` (focus coverage) needs P3b, and the PR focus rule needs the
 `pr-decider` role re-enabled (it was disabled by P0), which P3b does in plan form.
 
 Deployment changes the plan makes, so they are not discovered late: rewrite the `pr-decider` pins in
 three flake checks (disabled-pin, the six-element argv pin, the focus check) for the composed argv; add
-the new roles and the sweep query to the low-disk non-blocking pairing check; update the
-`pg-router-queue-stalled` role-to-type map (it has `desk-reconcile`, not the new roles); add every new
+the new role to the low-disk non-blocking pairing check and remove the removed ones; update the
+`pg-router-queue-stalled` role-to-type map (it has `desk-reconcile`, not the new role); add every new
 alert uid to both probe lists and the required list; drop the four removed uids; update the escalation
 triager prompt.
 
-## 8. Deletion scope (P9)
+## 8. Deletion scope (P3b and P9)
 
-The `pg2-ei1k8` list plus the extras of `pg2-15ja3`: `pg-desk reconcile`; `internal/sync`; the
-`internal/pipeline` syncer, `Reconcile`, retry and ledger coupling; `internal/store` `sync_retry.go`
-and `ledger.go`; the `sync:` config keys, `review_settle_window` and the home-manager options for
-them; the metrics `pg_desk_sync_error_rows`, `pg_desk_oldest_sync_error_age_seconds`,
+P3b removes `desk-pr`, `pr-sweep`, `pr-sweep-full` and the `pr.reconcile` event type from the
+deployment config and the `sweep` verb's PR use from the router adapter's wiring.
+
+P9 deletes the `pg2-ei1k8` list plus the extras of `pg2-15ja3`: `pg-desk reconcile`; `internal/sync`;
+the `internal/pipeline` syncer, `Reconcile`, retry and ledger coupling; `internal/store`
+`sync_retry.go` and `ledger.go`; the `sync:` config keys, `review_settle_window` and the home-manager
+options for them; the metrics `pg_desk_sync_error_rows`, `pg_desk_oldest_sync_error_age_seconds`,
 `pg_desk_sync_error_retrying_rows`, `pg_desk_sync_error_exhausted_rows`, `pg_desk_sync_errors`,
 `pg_desk_oldest_anchor_check_age_seconds` and the `pg_desk_reconcile_*` gauges, with the sync reads
 removed from the metrics callback that also serves the kept stale and age gauges (one read error
 currently fails the whole callback); the `sync_error` and ledger lines of `pg-desk status` and the
 `sync_error` and retry checks and remedy text of `pg-desk doctor`; the `run pr` command path for PR;
-the PR halves of pg-desk's change flow that the daemon design retires (`pr changes`, the PR part of
-`internal/changes`, `doctor_changeflow`); the old side of the parity harness; the
-`internal/sync` contract checks in the flake; and the behavior-doc sections for reconcile,
-`sync_error` and `run`. In the deployment repo: the `sync` block of the machine config, the alert
-references and probe-uid entries, the evaluation assertion `probeRequiredRuleUids`, the triager prompt
-text, and the retired `pr-sweep` (with P1). Daemon design Rollout step 6 items (moving the
-posted-review sidecar into the store, removing the old backend packages and their darwin module once
-no host registers them) and the docs-only plugin update of ruling 11 are tracked here or in the
-daemon program's cleanup phases, not dropped. `heartbeat` and `heartbeat-item` are NOT deleted
-(section 6.8). Re-derive every item from current source before deleting.
+pg-desk's `watch.pr.queries` and the PR halves of pg-desk's change flow that the daemon design
+retires (`pr changes`, the PR part of `internal/changes`, `doctor_changeflow`); the old side of the
+parity harness; the `internal/sync` contract checks in the flake; and the behavior-doc sections for
+reconcile, `sync_error` and `run`. In the deployment repo: the `sync` block of the machine config, the
+alert references and probe-uid entries, the evaluation assertion `probeRequiredRuleUids`, and the
+triager prompt text. Daemon design Rollout step 6 items (moving the posted-review sidecar into the
+store, removing the old backend packages and their darwin module once no host registers them) and the
+docs-only plugin update of ruling 11 are tracked here or in the daemon program's cleanup phases, not
+dropped. `heartbeat` and `heartbeat-item` are NOT deleted (section 6.8). Re-derive every item from
+current source before deleting.
 
 ## 9. Observability
 
@@ -423,7 +469,8 @@ daemon program's cleanup phases, not dropped. `heartbeat` and `heartbeat-item` a
 
 The outage was visible only through the generic router failure-rate alert; P0 silences even that
 (`desk-pr` exits 0), and nothing then shows that PR work is not being created. The design therefore
-adds an outcome alert before the flip, and a tripwire now.
+adds an outcome alert before the flip, and a tripwire now. With the sweeps gone (ruling 10) the
+outcome alerts are also the only detection of lost tracking.
 
 ### 9.2 Alerts
 
@@ -440,10 +487,10 @@ Add:
 | Alert                                  | Signal (source)                                                                                                                                                                                                                                              | Phase                  |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
 | PR work not created (primary, outcome) | `pg_desk_pr_anchor_coverage` by state (none, one, many) and the age of the oldest hydrated open PR with no anchor, derived from the store at scrape time; `noDataState: Alerting` guarded by pg-desk liveness; `many` also catches duplicates after adoption | P8a                    |
+| Stale anchor                           | open anchors whose PR the store shows as merged or closed for more than a threshold (hidden PRs excluded and counted separately)                                                                                                                             | P8a                    |
 | Hydration backlog                      | the existing `pg_desk_due_backlog` for type pr (a never-hydrated PR counts as due); needs a rule, not a metric                                                                                                                                               | P0b tripwire, P8a rule |
-| Decider and hydrate failures           | one JSON record per run from the composed command (section 9.3), by stage and rule; router series for the new roles                                                                                                                                          | P8a                    |
-| Sweep lapse                            | open anchors with no hydrate within the sweep period, from the run record or a store-derived gauge                                                                                                                                                           | P5                     |
-| Pin and lease health                   | active pins and lease renewal failures (daemon); alert when open anchors exceed active pins for more than one sweep period                                                                                                                                   | P8b                    |
+| Decider and hydrate failures           | one JSON record per run from the composed command (section 9.3), by stage and rule; router series for the new role                                                                                                                                           | P8a                    |
+| Tracked-set size and governor backlog  | the daemon's tracked and watched entity counts and the governor's backlog; alert when the tracked set exceeds a configured size                                                                                                                              | P8b                    |
 | Hidden PR with open anchor             | count from the store; low severity                                                                                                                                                                                                                           | P8b                    |
 
 A throughput dead-man ("`pr.changed` delivered, zero actions") is dropped: an idempotent decider
@@ -458,10 +505,9 @@ investigation commands (`pg-decider plan pr <id>`, `pg-desk pr history`).
 ### 9.3 Run record
 
 The router never reads the stderr of a successful command run, so a counters line on stderr cannot be
-the transport (v1 error). The composed command MUST append one JSON record per run to a state file
-registered as a log source (as `pg-router-events` is): entity, change sequence, hydrate result and
-exit code, decide exit code, per-rule outcome and skip reason, and the failing stage. The sweep writes
-one record per tick (anchors emitted, pins renewed, hidden skipped). With these an operator can answer
+the transport. The composed command MUST append one JSON record per run to a state file registered as
+a log source (as `pg-router-events` is): entity, change sequence, hydrate result and exit code, decide
+exit code, per-rule outcome and skip reason, and the failing stage. With these an operator can answer
 "why was PR X not acted on" without running `plan` against changed state. Gauges derived from the
 store are computed in `pg-desk serve` at scrape time, as the existing change-flow and focus health
 gauges are.
@@ -470,13 +516,13 @@ gauges are.
 
 They live in the support-apps repo under `darwin/modules/observability/dashboards/`: update
 `pg-desk-metrics.json` (remove the panels on removed metrics, add anchor coverage, hydration backlog
-and failures, run and failure rate of the new roles, oldest queue age, pins and leases), update the
-six `sync_error` columns in `pg-desk.json`, and update the dashboard validator, which assumes every
-panel with an id of 10 or more is a focus panel. `pg-router.json` has no reconcile or sync panels.
-`packages/pg-connector/grafana/pg-connector-github.json` gets the pin panels and, if the cap moves at
-cutover, the cap line and matching alert threshold. The "router progress dashboard" named in
-`pg2-kftf9.20` does not exist as a separate file. The panel removal ships in the same change as the
-metric removal (P9), which therefore includes the support-apps repo.
+and failures, run and failure rate of the new role, oldest queue age, tracked and watched counts),
+update the six `sync_error` columns in `pg-desk.json`, and update the dashboard validator, which
+assumes every panel with an id of 10 or more is a focus panel. `pg-router.json` has no reconcile or
+sync panels. `packages/pg-connector/grafana/pg-connector-github.json` gets the tracked and watched
+panels and, if the cap moves at cutover, the cap line and matching alert threshold. The "router
+progress dashboard" named in `pg2-kftf9.20` does not exist as a separate file. The panel removal ships
+in the same change as the metric removal (P9), which therefore includes the support-apps repo.
 
 ### 9.5 Status truthfulness in the interim
 
@@ -490,20 +536,20 @@ Rules: a check of deterministic behavior lives in an automated test against the 
 hermetic environment; a new or changed router query or role is exercised live once with a
 non-trivial outcome; targeted `checks.<system>` builds, never a whole-repo flake check.
 
-| Tier                                       | Test                                                                                                                                                                                                                                                                                                                                                                                                   | Phase       |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------- |
-| Integration, real pg-desk                  | On a migrated schema-2 store (`OpenNewSchemaForTest` plus `migrate --cutover`; plain `OpenForTest` is schema 1), `run pr` with sync off exits 0 and stores entity and interpretation rows                                                                                                                                                                                                              | P0b         |
-| Cross-repo contract (flake check)          | pg-desk exports a verb manifest marking each verb schema-2-safe; one real-binary test runs every listed verb on a schema-2 store; a deployment check reads the rendered role argvs and fails if a role runs a verb not marked safe. This is the test that would have failed before the 2026-10-19 migration                                                                                            | P0b         |
-| Flake check                                | the machine's pg-desk `sync.mode` value is pinned                                                                                                                                                                                                                                                                                                                                                      | P0b         |
-| Golden (flake check)                       | parity gate compares the decider with the frozen old plans; stale expected entries still fail                                                                                                                                                                                                                                                                                                          | P3a         |
-| Table test, real tools                     | refresh exit (0, 1, 2, 3, 4) against decider exit (0, 2, 3) gives the composed command's exit code and stage; a degraded refresh does not decide; not-found with an open anchor escalates                                                                                                                                                                                                              | P3b         |
-| Integration, real binaries, fake connector | seed N open anchors: apply adopts all and mints nothing; a second apply writes nothing against a tracker listing that behaves like production; a closed review or feedback item stays closed for the same head; a merged PR closes anchor and children; a reopened PR reopens them; the fail-closed refusal on an unhydrated view; many anchors with no ledger                                         | P4          |
-| Binding and shape tests                    | the new roles bind `pr.changed` and `pr.reconcile` respectively; the sweep emits one event per open anchor and none for an empty tracker; the per-tick bound holds                                                                                                                                                                                                                                     | P5          |
-| Unit with fake clock                       | pin lease expires at now plus lease; renewal extends it; unpin releases it; a pinned PR survives `terminal_ttl` and `expiry` and then follows the normal rules; a moved-aside store has no pins until re-pinned; the umbrella forwards pin ops; the daemon imports neither pg-desk nor the tracker; the metrics catalog lists the pin gauge                                                            | P2          |
-| Rule tests (`promtool`)                    | per new alert, including a case replaying 2026-10-19: failures present, `sync_error` rows zero, no anchors created, and the outcome alert fires                                                                                                                                                                                                                                                        | P8a         |
-| Metrics test, schema 2                     | anchor coverage and backlog gauges on a migrated store                                                                                                                                                                                                                                                                                                                                                 | P8a         |
-| Unit                                       | the review pre-check treats `unavailable` as retryable (P1); thread fake-connector endpoints and a parity scenario (P7); new fixtures pass the identifier allowlist (P10)                                                                                                                                                                                                                              | P1, P7, P10 |
-| Live exercise                              | 495-PR backfill stays above `graphql_remaining` 3,000; adoption count equals the tracker's open-anchor count; one composed run on a real open anchor then a second run with zero writes; a real merge closes its anchor; a pin survives a daemon restart; a drill per new alert (induce the failure, confirm a bead is filed); a post-apply bead gated on `pn:applied` that asserts a metric condition | P6, P8b     |
+| Tier                                       | Test                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Phase       |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| Integration, real pg-desk                  | On a migrated schema-2 store (`OpenNewSchemaForTest` plus `migrate --cutover`; plain `OpenForTest` is schema 1), `run pr` with sync off exits 0 and stores entity and interpretation rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | P0b         |
+| Cross-repo contract (flake check)          | pg-desk exports a verb manifest marking each verb schema-2-safe; one real-binary test runs every listed verb on a schema-2 store; a deployment check reads the rendered role argvs and fails if a role runs a verb not marked safe. This is the test that would have failed before the 2026-10-19 migration                                                                                                                                                                                                                                                                                                                                                                                    | P0b         |
+| Flake check                                | the machine's pg-desk `sync.mode` value is pinned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | P0b         |
+| Golden (flake check)                       | parity gate compares the decider with the frozen old plans; stale expected entries still fail                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | P3a         |
+| Table test, real tools                     | refresh exit (0, 1, 2, 3, 4) against decider exit (0, 2, 3) gives the composed command's exit code and stage; a degraded refresh does not decide; not-found with an open anchor escalates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | P3b         |
+| Deployment checks                          | `pr-change` binds `pr.changed` only; no event type is produced without a consumer (no `pr.reconcile`); `desk-pr`, `pr-sweep` and `pr-sweep-full` are gone                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | P3b         |
+| Integration, real binaries, fake connector | seed N open anchors: apply adopts all and mints nothing; a second apply writes nothing against a tracker listing that behaves like production; a closed review or feedback item stays closed for the same head; a merged PR closes anchor and children; a reopened PR reopens them; the fail-closed refusal on an unhydrated view; many anchors with no ledger                                                                                                                                                                                                                                                                                                                                 | P4          |
+| Unit with fake clock (daemon)              | a PR that was only read is tracked and delivers no change row; a PR from a `watched = true` query, from a watch-option query and from a watch-option read delivers rows; the flag is sticky after the PR leaves the query; an open tracked PR is still refreshed after 24 h and 7 d; after it closes `terminal_ttl` then `expiry` apply; a query's first complete run appends no rows; a PR becoming watched while known appends one `added` row; a moved-aside store keeps no flags until the queries re-run; the feed works without `--query` and still honours it as a filter; the daemon imports neither pg-desk nor the tracker; the metrics catalog lists the tracked and watched gauges | P2          |
+| Rule tests (`promtool`)                    | per new alert, including a case replaying 2026-10-19: failures present, `sync_error` rows zero, no anchors created, and the outcome alert fires                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | P8a         |
+| Metrics test, schema 2                     | anchor coverage and backlog gauges on a migrated store                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | P8a         |
+| Unit                                       | the review pre-check treats `unavailable` as retryable (P1); thread fake-connector endpoints and a parity scenario (P7); new fixtures pass the identifier allowlist (P10)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | P1, P7, P10 |
+| Live exercise                              | 495-PR backfill stays above `graphql_remaining` 3,000; adoption count equals the tracker's open-anchor count; one composed run on a real open anchor then a second run with zero writes; a real merge closes its anchor through the feed; a watched flag survives a daemon restart; a drill per new alert (induce the failure, confirm a bead is filed); a post-apply bead gated on `pn:applied` that asserts a metric condition                                                                                                                                                                                                                                                               | P6, P8b     |
 
 ## 11. Constraints
 
@@ -522,63 +568,86 @@ non-trivial outcome; targeted `checks.<system>` builds, never a whole-repo flake
 
 Every row MUST map to a phase or be recorded as dropped with a ruling.
 
-| Source decision                                                         | Phase                     |
-| ----------------------------------------------------------------------- | ------------------------- |
-| ADR 0077: pull-through feed for issues; PR feed is the daemon's         | P1                        |
-| ADR 0077: decisions move out of pg-desk into deciders (S2)              | P3b, P6                   |
-| ADR 0077: deciders ship PR rules on day one (S20)                       | P4, P6                    |
-| ADR 0077: derived work-item links replace the ledger (S25)              | P3b, P4                   |
-| ADR 0077: sync stage, ledger, run, heartbeat-item removed at cutover    | P9 (heartbeat stays, 6.8) |
-| ADR 0077: `sync_error` auto-retry deleted (S30)                         | P9                        |
-| ADR 0077 Consequences: rollback by restoring the store backup           | replaced by 6.5           |
-| Daemon spec: consumer table, `pr-sweep` retired                         | P1                        |
-| Daemon spec: `desk-reconcile` "Kept"                                    | replaced by P5 and P9     |
-| Daemon spec: `--fresh` removed from pg-desk `pr` reads                  | P1                        |
-| Daemon spec: keep-alive, revalidation and expiry                        | P2 (amendment), 6.3       |
-| Daemon spec Rollout step 5 rollback (registry back, caches cleared)     | P1                        |
-| Daemon spec Rollout step 6: sidecar, old packages, old darwin module    | P9                        |
-| Daemon spec ruling 11: plugin docs-only update                          | P1 or P9                  |
-| Accepted gap (`pg2-ei1k8`): PR merged after leaving every watched query | P5, 6.3                   |
-| `pg2-l2wkd` deletion scope                                              | P9                        |
-| Phase 15 focus coverage (`pg2-2j5ac.44.37`)                             | P3b                       |
-| Dashboards and alert rule removal                                       | P8a, P8b, P9              |
+| Source decision                                                         | Phase                             |
+| ----------------------------------------------------------------------- | --------------------------------- |
+| ADR 0077: pull-through feed for issues; PR feed is the daemon's         | P1, P2                            |
+| ADR 0077: decisions move out of pg-desk into deciders (S2)              | P3b, P6                           |
+| ADR 0077: deciders ship PR rules on day one (S20)                       | P4, P6                            |
+| ADR 0077: derived work-item links replace the ledger (S25)              | P3b, P4                           |
+| ADR 0077: sync stage, ledger, run, heartbeat-item removed at cutover    | P9 (heartbeat stays, 6.8)         |
+| ADR 0077: `sync_error` auto-retry deleted (S30)                         | P9                                |
+| ADR 0077 Consequences: rollback by restoring the store backup           | replaced by 6.5                   |
+| Daemon spec: consumer table, `pr-sweep` retired                         | P3b                               |
+| Daemon spec: `pr-sweep-full` kept as the 6 h backstop                   | dropped by ruling 10              |
+| Daemon spec: `desk-reconcile` "Kept"                                    | dropped by ruling 10 (P0 removed) |
+| Daemon spec: `--fresh` removed from pg-desk `pr` reads                  | P1                                |
+| Daemon spec: keep-alive, revalidation and expiry; `--query` required    | P2 (amended by rulings 8 and 9)   |
+| Daemon spec Rollout step 5 rollback (registry back, caches cleared)     | P1                                |
+| Daemon spec Rollout step 6: sidecar, old packages, old darwin module    | P9                                |
+| Daemon spec ruling 11: plugin docs-only update                          | P1 or P9                          |
+| Accepted gap (`pg2-ei1k8`): PR merged after leaving every watched query | P2 (watched flag is sticky), 6.3  |
+| `pg2-l2wkd` deletion scope                                              | P9                                |
+| Phase 15 focus coverage (`pg2-2j5ac.44.37`)                             | P3b                               |
+| Dashboards and alert rule removal                                       | P8a, P8b, P9                      |
 
 ## 13. Open questions and risks
 
 Calls already made by the author are marked "call" above; the operator MAY override any of them.
 
-- U1. One composed command with two roles (call), or chained events.
-- U2. Interim keep-alive by sweep with the pin as hardening (call), or the pin before the flip.
+- U1. One composed command in one role (call), or chained events.
 - U3. Threads: attribution first (call), or a thread feed first. Sizes P7.
-- U4. Sweep period 1 hour and `pr-sweep-full` shortened to 1 hour after P1 (calls).
 - U5. Staged first apply with terminal PRs first and a distinct actor (call).
 - U6. Disposition of unadoptable legacy items (the operator chooses per batch in P4).
 - U7. Shadow report: which criteria read NOT MET; each needs its own follow-up bead (ruling 14).
 - U8. Whether the flip may precede P1 and P2 (this design says yes; the operator MAY require otherwise).
+- U9. The names of the watched option on a query config and on a read (`watched` and `--watch` are
+  placeholders; pg-desk's legacy `watch.pr.queries` uses "watch" for something else and is deleted in
+  P9).
+- U10. The size threshold for the tracked-set alert.
 - Risk R1. Until P6, no PR work items are opened or closed; P0 made the failing alert go quiet. The
   tripwire of P0b and a dated time box limit this. The PR focus rule is also off until P3b.
 - Risk R2. The decider has no production history for PR on schema 2; P4's end-to-end tests and P6's
   staged flip are the only evidence.
 - Risk R3. Dead PRs' open work items stay claimable by agents until the terminal-PR stage of P6.
+- Risk R4. Unbounded tracking (ruling 8): the tracked set grows with every PR ever referenced and
+  never shrinks until PRs close. Mitigated by the governor, the tracked-set alert and a deferred manual
+  untrack.
+- Risk R5. No reconcile (ruling 10): if the daemon ever misses a change, or a moved-aside store loses
+  direct watches, nothing re-asserts them. The revisit conditions are in section 6.4.
+- Risk R6. Before P1 a PR that left both queries while open is not followed (the old backend has no
+  watch).
 
 ## 14. What is left to the builder
 
-Package and file layout for the composed command, the pin op and the sweep source; the verb-manifest
-format; exact metric and label names; the dashboard panel queries; test fixtures; the exact
-retirement order inside P9.
+Package and file layout for the composed command and the watched flag; the verb-manifest format;
+exact metric and label names; the dashboard panel queries; test fixtures; the exact retirement order
+inside P9.
 
-## 15. What the five reviews changed
+## 15. What each revision changed
+
+v2, after five independent reviews:
 
 - Completeness: the parity gate and its freeze (6.7), the heartbeat chain staying (6.8), `deleteRules`
-  and the deployment probe lists (9.2), the recovery bound of failed first runs (6.4), the P9 list
-  (section 8), rollback (6.5), and the missing traceability rows.
+  and the deployment probe lists (9.2), the P9 list (section 8), rollback (6.5), and the missing
+  traceability rows.
 - Correctness: unhydrated-view duplicate minting and the fail-closed rule (4, 6.1), work-item
-  visibility of closed and fix-ci items (4, 6.2), the pin needing feed membership (6.3), the corrected
-  P0 facts (4), refresh semantics and exit codes (5, 6.1), head-of-line blocking (6.1), the missing
-  sequencing edges (7).
+  visibility of closed and fix-ci items (4, 6.2), the corrected P0 facts (4), refresh semantics and
+  exit codes (5, 6.1), the missing sequencing edges (7).
 - UX: staged and attributable first apply (6.5), dead PRs' work (R3), `hide` handling (6.3), status
   truthfulness (9.5), escalation bead content (the composed command's stage and the run record).
 - Observability: the transport correction (9.3), the outcome alert (9.2), the interim tripwire and
   P8a before P6, dashboard facts (9.4).
 - Test coverage: the cross-repo contract test and schema-2 `run pr` test (10), the golden parity gate,
-  end-to-end decider tests, pin tests with a fake clock, rule tests that replay this outage.
+  end-to-end decider tests, rule tests that replay this outage.
+
+v3, after operator rulings 8 to 10 (not yet reviewed independently):
+
+- The pin, its lease, the `pinned` pseudo-query, the `pr-pinned` source, the anchor sweep, the
+  hourly renewals, the second role and the `pr.reconcile` event are removed. Tracking and change
+  events are split: every referenced PR is tracked until closed; only watched PRs emit `pr.changed`
+  (6.3, 6.4).
+- Queries are defined only in the connector and carry a watched flag (section 6, 6.3).
+- P2 becomes the daemon tracking-and-watched amendment; P5 is dropped; P3b also removes the sweeps;
+  P9 also needs P2 (7, 8).
+- The alerts and tests for pins, leases and sweeps are replaced by tracked-set and watched-flag ones
+  (9.2, 10); new risks R4 to R6 (13).
