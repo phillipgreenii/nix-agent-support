@@ -3433,7 +3433,7 @@
                         *) fail "rule $i does not parse as LogQL: $parsed" ;;
                       esac
                     done
-                    for field in error_code failure_class failure_stage claude_calls; do
+                    for field in error_code failure_class failure_stage claude_calls item_count num_turns max_num_turns cost_usd; do
                       grep -q "json:\"$field[,\"]" "$eventlogSrc" "$sharedEventlogSrc" || fail "eventlog.Event has no json tag $field"
                     done
                     touch $out

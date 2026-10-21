@@ -79,6 +79,10 @@ type claudeEnvelope struct {
 	// error_during_execution). It is only read on the non-zero-exit path
 	// (see execFailureNote).
 	Subtype string `json:"subtype"`
+	// NumTurns and TotalCostUSD are claude -p's own turn count and cost for
+	// this execution; they are logged on the call's event (bead pg2-xrbik).
+	NumTurns     int     `json:"num_turns"`
+	TotalCostUSD float64 `json:"total_cost_usd"`
 }
 
 // decodeClaudeEnvelope decodes claude -p's own stdout (the outer
@@ -397,6 +401,9 @@ func (b *Backend) runClaude(ctx context.Context, prompt string, jsonSchema strin
 		eventlog.RecordFailure(ctx, eventlog.StageEnvelope, decodeErr.Error())
 		return "", scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: decode envelope: "+decodeErr.Error())
 	}
+	// Recorded before the is_error check: an error_max_turns envelope is the
+	// very case where the turn count matters.
+	eventlog.RecordClaudeResult(ctx, env.NumTurns, env.TotalCostUSD)
 	if env.IsError {
 		eventlog.RecordFailure(ctx, eventlog.StageClaudeError, env.Result)
 		return "", scriptout.WrapError(scriptout.ErrUnavailable, "claude -p reported is_error: "+env.Result)
@@ -427,6 +434,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Thread, error) {
 		eventlog.RecordFailure(ctx, eventlog.StageReplyIncomplete, "")
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: thread reply missing one of id/channel/permalink")
 	}
+	eventlog.RecordItems(ctx, 1)
 	return toSchemaThread(&reply.slackThreadFields, b.clock().UTC()), nil
 }
 
@@ -478,6 +486,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 	for _, e := range entities {
 		ids = append(ids, e.ID)
 	}
+	eventlog.RecordItems(ctx, len(ids))
 	res := &schema.ThreadListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: true}
 	if idsOnly {
 		res.Entities = nil

@@ -339,3 +339,64 @@ func TestSinkFromEnv(t *testing.T) {
 		t.Errorf("sink = %+v", s)
 	}
 }
+
+// Bead pg2-xrbik: list and show rows always carry the four numeric fields
+// (0 included); every other op omits them.
+func TestInstrument_ShapedOpsAlwaysCarryNumbersOthersOmitThem(t *testing.T) {
+	for _, op := range []string{"list", "show", "auth_status"} {
+		sink := &memSink{}
+		tb := Instrument(scriptout.DispatchTable{op: {SchemaVersion: 1, Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+			return nil, nil
+		}}}, sink, "", fakeClock(time.Now(), time.Millisecond))
+		if _, err := tb[op].Handle(context.Background(), nil); err != nil {
+			t.Fatal(err)
+		}
+		line, err := Line(sink.events[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(line, &m); err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range []string{"item_count", "num_turns", "max_num_turns", "cost_usd"} {
+			v, has := m[k]
+			if shaped := op != "auth_status"; has != shaped || (shaped && v != float64(0)) {
+				t.Errorf("op %s: %s = %v (present %v), want present-as-0 only on list/show: %s", op, k, v, has, line)
+			}
+		}
+	}
+}
+
+func TestInstrument_RecordersAccumulateSumAndMax(t *testing.T) {
+	sink := &memSink{}
+	tb := Instrument(table(func(ctx context.Context, _ json.RawMessage) (any, error) {
+		RecordClaudeResult(ctx, 3, 0.5)
+		RecordClaudeResult(ctx, 8, 0.25)
+		RecordClaudeResult(ctx, 2, 0.25)
+		RecordItems(ctx, 4)
+		return nil, nil
+	}), sink, "", fakeClock(time.Now(), time.Millisecond))
+	_, _ = call(t, tb)
+	ev := sink.events[0]
+	if *ev.ItemCount != 4 || *ev.NumTurns != 13 || *ev.MaxNumTurns != 8 || *ev.CostUSD != 1.0 {
+		t.Errorf("event = items %d turns %d max %d cost %v, want 4/13/8/1.0", *ev.ItemCount, *ev.NumTurns, *ev.MaxNumTurns, *ev.CostUSD)
+	}
+}
+
+// TestLine_GoldenWireShapeShapedFields pins the byte shape of the new fields
+// (they follow failure_class).
+func TestLine_GoldenWireShapeShapedFields(t *testing.T) {
+	items, turns, maxTurns, cost := 3, 14, 9, 0.75
+	line, err := Line(Event{
+		Base:      evlog.Base{Time: "2026-10-03T12:00:00.250Z", Level: "info", Msg: "list ok", Service: ServiceName, PID: 42, Op: "list", DurationMS: 250},
+		ItemCount: &items, NumTurns: &turns, MaxNumTurns: &maxTurns, CostUSD: &cost,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const tail = `"item_count":3,"num_turns":14,"max_num_turns":9,"cost_usd":0.75}` + "\n"
+	if !strings.HasSuffix(string(line), tail) {
+		t.Errorf("wire shape changed:\n got %s\nwant suffix %s", line, tail)
+	}
+}

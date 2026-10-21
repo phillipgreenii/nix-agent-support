@@ -343,9 +343,16 @@ failure text looks like an authentication problem; the wire `error_code` stays `
 its `subtype`/`result` text is appended to the error (redacted of credential-like strings and capped
 at 2 KiB) after the stderr tail, so the cause is named even when stderr is empty; empty or non-JSON
 stdout leaves the error text as it was.
+Every `list` and `show` row also carries four numeric fields (bead `pg2-xrbik`; `0` when the call
+returned or spent nothing, so "0" is distinguishable from "not logged"): `item_count` (items the
+call returned: for `list` the deduplicated threads, also when ids-only; for `show` 1 when found),
+`num_turns` (sum of the claude `num_turns` over the call's executions), `max_num_turns` (the largest
+single execution's, the figure to compare with `claude.max_turns`, which caps each execution
+separately) and `cost_usd` (sum of `total_cost_usd`). An `is_error` envelope such as
+`error_max_turns` still logs its turns and cost; a call that failed before claude answered logs 0.
 `packages/pg-connector/grafana/alerting/thread-slack-alerts.yaml` alerts on auth failure and sustained
 `unavailable`. There is deliberately NO quota alert: the backend reads no Slack rate-limit header or
-`Retry-After` (claude's envelope is decoded for `result`/`is_error` only), so it has no quota reading
+`Retry-After` (claude's envelope is decoded for `result`/`is_error`/`num_turns`/`total_cost_usd` only), so it has no quota reading
 to log.
 
 `pg-connector-issue-jira` follows the same pattern: it appends to

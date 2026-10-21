@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -155,4 +156,115 @@ func TestBackendEvents_UninstrumentedBackendIsUnaffected(t *testing.T) {
 	if _, err := b.Show(context.Background(), "1726000000.000100"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// ---------------------------------------------------------------------
+// Bead pg2-xrbik: item count, num_turns and cost on list/show rows.
+// ---------------------------------------------------------------------
+
+// costEnvelope is envelope() plus the claude -p result envelope's own
+// num_turns and total_cost_usd fields.
+func costEnvelope(inner string, turns int, cost string) string {
+	return `{"result":` + toJSONString(inner) + `,"is_error":false,"num_turns":` + strconv.Itoa(turns) + `,"total_cost_usd":` + cost + `}`
+}
+
+// rowOf serializes ev exactly as the file sink does and decodes it back, so
+// the assertions see the numbers a LogQL reader sees.
+func rowOf(t *testing.T, ev eventlog.Event) map[string]any {
+	t.Helper()
+	line, err := eventlog.Line(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(line, &m); err != nil {
+		t.Fatalf("row is not JSON: %v", err)
+	}
+	return m
+}
+
+func wantNumbers(t *testing.T, row map[string]any, want map[string]float64) {
+	t.Helper()
+	for k, w := range want {
+		if got, ok := row[k]; !ok || got != w {
+			t.Errorf("row[%q] = %v (present %v), want %v; row = %v", k, got, ok, w, row)
+		}
+	}
+}
+
+func TestBackendEvents_ShowOkRowCarriesItemCountTurnsAndCost(t *testing.T) {
+	sink := &captureSink{}
+	table := instrumented(New(&fakeRunner{handle: func(string) (string, error) {
+		return costEnvelope(okThread, 7, "0.125"), nil
+	}}), sink)
+	if _, err := table["show"].Handle(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	row := rowOf(t, sink.last(t))
+	if row["op"] != "show" || row["msg"] == nil {
+		t.Fatalf("row = %v", row)
+	}
+	wantNumbers(t, row, map[string]float64{
+		"claude_calls": 1, "item_count": 1, "num_turns": 7, "max_num_turns": 7, "cost_usd": 0.125,
+	})
+}
+
+func TestBackendEvents_ListOkRowSumsAcrossModifiersAndCountsDedupedItems(t *testing.T) {
+	sink := &captureSink{}
+	n := 0
+	table := instrumented(New(&fakeRunner{handle: func(string) (string, error) {
+		n++
+		if n == 1 {
+			return costEnvelope(`{"items":[{"id":"t1","channel":"C1","permalink":"https://x.invalid/1"},{"id":"t2","channel":"C1","permalink":"https://x.invalid/2"}]}`, 5, "0.25"), nil
+		}
+		// t1 repeats across modifiers and the empty id is skipped, so this
+		// call adds exactly one item (t3).
+		return costEnvelope(`{"items":[{"id":"t1","channel":"C1","permalink":"https://x.invalid/1"},{"id":"","channel":"C1","permalink":"https://x.invalid/9"},{"id":"t3","channel":"C2","permalink":"https://x.invalid/3"}]}`, 9, "0.5"), nil
+	}}), sink)
+	res, err := table["list"].Handle(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(res.(*schema.ThreadListResult).Entities); got != 3 {
+		t.Fatalf("entities = %d, want 3", got)
+	}
+	row := rowOf(t, sink.last(t))
+	wantNumbers(t, row, map[string]float64{
+		"claude_calls": 2, "item_count": 3, "num_turns": 14, "max_num_turns": 9, "cost_usd": 0.75,
+	})
+}
+
+// An empty list, and an envelope that predates the fields, still log numeric
+// zeros: a reader must be able to tell "0" from "not logged".
+func TestBackendEvents_ListAndShowRowsLogZeroNotAbsent(t *testing.T) {
+	sink := &captureSink{}
+	table := instrumented(New(&fakeRunner{handle: func(string) (string, error) {
+		return envelope(`{"items":[]}`), nil
+	}}), sink)
+	if _, err := table["list"].Handle(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	wantNumbers(t, rowOf(t, sink.last(t)), map[string]float64{"item_count": 0, "num_turns": 0, "max_num_turns": 0, "cost_usd": 0})
+
+	notFound := instrumented(New(&fakeRunner{handle: func(string) (string, error) {
+		return costEnvelope(`{"found":false}`, 2, "0.01"), nil
+	}}), sink)
+	if _, err := notFound["show"].Handle(context.Background(), nil); !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+	// not_found returned no item but still spent turns and money.
+	wantNumbers(t, rowOf(t, sink.last(t)), map[string]float64{"item_count": 0, "num_turns": 2, "max_num_turns": 2, "cost_usd": 0.01})
+}
+
+// error_max_turns arrives as an is_error envelope: its turn count is the
+// reading the max_turns limit is judged by, so a failed call still logs it.
+func TestBackendEvents_IsErrorEnvelopeStillLogsTurnsAndCost(t *testing.T) {
+	sink := &captureSink{}
+	table := instrumented(New(&fakeRunner{handle: func(string) (string, error) {
+		return `{"result":"max turns","is_error":true,"subtype":"error_max_turns","num_turns":17,"total_cost_usd":0.4}`, nil
+	}}), sink)
+	if _, err := table["show"].Handle(context.Background(), nil); !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+	wantNumbers(t, rowOf(t, sink.last(t)), map[string]float64{"item_count": 0, "num_turns": 17, "max_num_turns": 17, "cost_usd": 0.4})
 }

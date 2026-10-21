@@ -193,7 +193,7 @@ func TestRun_InstrumentWritesOneEventPerCallToTheBackendsOwnLog(t *testing.T) {
 		if failing {
 			return "", errors.New("exit status 1: Not logged in - Please run /login")
 		}
-		return `{"result":"{\"found\":true,\"id\":\"1726000000.000100\",\"channel\":\"C1\",\"permalink\":\"https://example.slack.invalid/p1\"}","is_error":false}`, nil
+		return `{"result":"{\"found\":true,\"id\":\"1726000000.000100\",\"channel\":\"C1\",\"permalink\":\"https://example.slack.invalid/p1\"}","is_error":false,"num_turns":4,"total_cost_usd":0.5}`, nil
 	}})
 	table := instrument(newDispatchTable(backend), getenv)
 
@@ -226,6 +226,12 @@ func TestRun_InstrumentWritesOneEventPerCallToTheBackendsOwnLog(t *testing.T) {
 	}
 	if evs[0]["op"] != "show" || evs[0]["level"] != "info" || evs[0]["service"] != "pg-connector-thread-slack" || evs[0]["claude_calls"] != float64(1) {
 		t.Errorf("success event = %v", evs[0])
+	}
+	// Bead pg2-xrbik: the numbers reach the file row as JSON numbers.
+	for k, want := range map[string]float64{"item_count": 1, "num_turns": 4, "max_num_turns": 4, "cost_usd": 0.5} {
+		if evs[0][k] != want {
+			t.Errorf("success event %s = %v, want %v: %v", k, evs[0][k], want, evs[0])
+		}
 	}
 	if _, has := evs[0]["error_code"]; has {
 		t.Errorf("success event carries error_code: %v", evs[0])

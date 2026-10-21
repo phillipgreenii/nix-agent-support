@@ -151,6 +151,21 @@ type Event struct {
 	// FailureClass is ClassAuth when the claude-reported failure text looks
 	// like an authentication problem; absent otherwise.
 	FailureClass string `json:"failure_class,omitempty"`
+
+	// ItemCount, NumTurns, MaxNumTurns and CostUSD (bead pg2-xrbik) are always
+	// present, as numbers, on list and show rows (0 when the call produced or
+	// spent nothing, so a reader can tell "0" from "not logged"; see
+	// shapedOps), and absent on every other op. ItemCount is the items the call
+	// returned (list: the deduplicated entities, also when ids-only; show: 1
+	// when the thread was found, else 0). NumTurns is the sum of the claude -p
+	// envelope's num_turns over the call's claude executions and MaxNumTurns
+	// the largest single execution's, because claude.max_turns (default 6) caps
+	// each execution separately. CostUSD is the sum of the envelope's
+	// total_cost_usd.
+	ItemCount   *int     `json:"item_count,omitempty"`
+	NumTurns    *int     `json:"num_turns,omitempty"`
+	MaxNumTurns *int     `json:"max_num_turns,omitempty"`
+	CostUSD     *float64 `json:"cost_usd,omitempty"`
 }
 
 // LevelForCode maps a wire error code to a log level (see evlog.LevelForCode).
@@ -173,6 +188,13 @@ type recorder struct {
 	stage  string
 	class  string
 	failed bool
+
+	// Bead pg2-xrbik: what the call returned and what its claude executions
+	// reported.
+	items    int
+	turns    int
+	maxTurns int
+	costUSD  float64
 }
 
 type recorderKey struct{}
@@ -192,6 +214,35 @@ func RecordClaudeCall(ctx context.Context) {
 	}
 	r.mu.Lock()
 	r.calls++
+	r.mu.Unlock()
+}
+
+// RecordClaudeResult adds one claude -p execution's envelope reading
+// (num_turns and total_cost_usd) to the in-flight call's event (bead
+// pg2-xrbik). A no-op when ctx carries no recorder.
+func RecordClaudeResult(ctx context.Context, numTurns int, costUSD float64) {
+	r := recorderFrom(ctx)
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.turns += numTurns
+	if numTurns > r.maxTurns {
+		r.maxTurns = numTurns
+	}
+	r.costUSD += costUSD
+	r.mu.Unlock()
+}
+
+// RecordItems sets how many items the in-flight call returned (bead
+// pg2-xrbik). A no-op when ctx carries no recorder.
+func RecordItems(ctx context.Context, n int) {
+	r := recorderFrom(ctx)
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.items = n
 	r.mu.Unlock()
 }
 
@@ -234,11 +285,19 @@ func Instrument(table scriptout.DispatchTable, sink Sink, version string, now fu
 	})
 }
 
+// shapedOps are the ops whose event rows always carry item_count, num_turns,
+// max_num_turns and cost_usd.
+var shapedOps = map[string]bool{"list": true, "show": true}
+
 func buildEvent(op, version string, start, end time.Time, err error, rec *recorder) Event {
 	ev := Event{Base: evlog.NewBase(ServiceName, op, version, start, end, err)}
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	ev.ClaudeCalls = rec.calls
+	if shapedOps[op] {
+		items, turns, maxTurns, cost := rec.items, rec.turns, rec.maxTurns, rec.costUSD
+		ev.ItemCount, ev.NumTurns, ev.MaxNumTurns, ev.CostUSD = &items, &turns, &maxTurns, &cost
+	}
 	// A failure stage is only meaningful on a failed call: a call that
 	// recovered (none does today) or that ended in a well-formed outcome must
 	// not look like a failure to a LogQL rule.
