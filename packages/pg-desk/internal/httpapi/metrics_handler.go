@@ -118,14 +118,17 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 	}
 
 	// The focus families (daily-focus store-first design, observability) are
-	// computed fresh on every scrape from the stored rows by the SAME function
-	// the alert rules and the doctor block read (focus.ComputeHealth); the
-	// rank is computed at most once per scrape. A store that is not migrated
-	// for the focus tables yields a zero Health, so serve keeps working there
-	// and simply omits these series.
-	focusFn := func() (focus.Health, error) {
+	// computed from the stored rows by the SAME function the alert rules and
+	// the doctor block read (focus.ComputeHealth). That function loads and
+	// ranks the whole store, so it is NOT run on the scrape path (bead
+	// pg2-yer0k: 3-30 s per scrape on a ~1000-entity store, past Prometheus's
+	// 10 s scrape_timeout): metrics.CachedFocus serves the last result and
+	// refreshes it in one background computation once focusHealthTTL old. A
+	// store that is not migrated for the focus tables yields a zero Health, so
+	// serve keeps working there and simply omits these series.
+	focusFn := metrics.CachedFocus(func() (focus.Health, error) {
 		return focus.ComputeHealth(st, cfg, nowUTC())
-	}
+	}, focusHealthTTL)
 	if err := metrics.RegisterFocus(mp, focusFn); err != nil {
 		return nil, fmt.Errorf("httpapi: register focus metrics: %w", err)
 	}
@@ -198,6 +201,12 @@ func syncRetryStats(st *store.Store, interps []store.Interpretation) (retrying, 
 	}
 	return retrying, exhausted, nil
 }
+
+// focusHealthTTL is how old the cached focus health may get before a scrape
+// starts a background refresh (it is served stale meanwhile, so the focus
+// gauges lag by at most one scrape interval plus one computation). A variable
+// only so a test can shorten it.
+var focusHealthTTL = 15 * time.Second
 
 // scrapeTimeout is how long one /metrics scrape may take before it is
 // answered 503. Prometheus's default scrape timeout is 10s; this is

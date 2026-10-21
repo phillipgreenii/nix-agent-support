@@ -148,10 +148,15 @@ scrape; `serve` keeps answering with the dashboard families and MUST NOT refuse 
 
 ### Focus metrics
 
-`/metrics` also exposes the daily-focus families, computed from the store at scrape time by the one
-function (`focus.ComputeHealth`) that the focus alert rules and the `doctor`/`status` focus block
-read, so the three cannot disagree. The scrape reads only stored rows: it MUST NOT call a tracker,
-and the rank behind the candidate and rank-input series is computed at most once per scrape. Every
+`/metrics` also exposes the daily-focus families, computed from the store by the one function
+(`focus.ComputeHealth`) that the focus alert rules and the `doctor`/`status` focus block read, so the
+three cannot disagree. The computation reads only stored rows: it MUST NOT call a tracker, and the
+rank behind the candidate and rank-input series is computed at most once per computation. It loads
+and ranks the whole store, so a scrape MUST NOT run it synchronously once a result exists: the scrape
+serves the last result, and a result older than a short TTL (15 seconds) is refreshed by ONE
+background computation shared by every scrape that arrives meanwhile, so the cost of a scrape does
+not grow with the store and the focus gauges lag by at most one scrape interval plus one
+computation. Only the first scrape after `serve` starts waits for a computation. Every
 family is a gauge with a CLOSED, bounded label set, and NO series carries an entity key or a bead
 id. "The current plan" and "selected rows" mean the rows of the NEWEST period that holds rows,
 never the local day. A focus bead is an issue entity whose own metadata carries `source_id`; an
@@ -215,7 +220,8 @@ carries no comments, so that figure is not available and is never exported.
 
 On a store that is not migrated for the focus tables, or a configuration with no repository, the
 focus families MUST be absent from the scrape and the scrape MUST still succeed. A read failure of
-the store, by contrast, fails the collection rather than reading as an all-clear.
+the store, by contrast, fails the collection (from the scrape after the computation that hit it)
+rather than reading as an all-clear.
 
 Telemetry declaration: the focus verbs emit no OpenTelemetry. This section's families are the
 Prometheus view of the store; the verbs' own record is the `focus_run` row and the structured

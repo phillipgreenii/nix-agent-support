@@ -11,8 +11,9 @@ import (
 )
 
 // The focus catalog (daily-focus store-first design, observability). Every
-// family is a gauge computed from the store at scrape time, like the
-// change-flow families. The label sets are closed and bounded; NO series
+// family is a gauge computed from the store, like the change-flow families,
+// but from the FocusFunc's result: serve wraps it in CachedFocus so a scrape
+// never pays for the full store computation. The label sets are closed and bounded; NO series
 // carries an entity key or a bead id. "Selected rows" and "the current plan"
 // mean the rows of the NEWEST period that holds rows, never the local day.
 const (
@@ -70,7 +71,9 @@ const (
 	MetricFocusJiraStatusCategoryAbsent = "pg_desk_focus_jira_status_category_absent"
 )
 
-// FocusFunc supplies the focus health at collect time (focus.ComputeHealth).
+// FocusFunc supplies the focus health at collect time (focus.ComputeHealth,
+// behind CachedFocus in serve, so it MAY return a recent rather than a fresh
+// result).
 // It MUST return a zero Health (Coverage.PerType empty) for a store that is
 // not migrated for the focus tables: the catalog then emits no focus series
 // rather than failing the scrape.
