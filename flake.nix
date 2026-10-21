@@ -11632,6 +11632,107 @@
                 assert !(hasSub "hard_deny" onActivation);
                 pkgs.runCommand "claude-settings-auto-mode-ok" { } "touch $out";
 
+              # pg2-6az7r.3: the NAS base layer of the auto-mode trust slots.
+              # Pure module eval (same stub harness as the sibling
+              # claude-settings eval checks) reading the option values the
+              # `claude-auto-mode` module contributes. This file holds its OWN
+              # copy of the seven strings so a drive-by edit to the module
+              # fails here.
+              test-claude-auto-mode-base =
+                let
+                  hmLib = lib // {
+                    hm = (lib.hm or { }) // {
+                      dag = (lib.hm.dag or { }) // {
+                        entryAfter = _deps: text: text;
+                      };
+                    };
+                  };
+                  evalWith =
+                    extraModules:
+                    (lib.evalModules {
+                      specialArgs = {
+                        inherit pkgs inputs;
+                        lib = hmLib;
+                        mkBashBuildersFor =
+                          p:
+                          inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                            pkgs = p;
+                            inherit self;
+                            inherit (p) lib;
+                          };
+                      };
+                      modules = [
+                        ./home/programs/claude-settings/default.nix
+                        ./home/programs/claude-auto-mode/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              home.activation = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        { phillipgreenii.programs.claude-code.enable = true; }
+                      ]
+                      ++ extraModules;
+                    }).config;
+
+                  autoModeOf = c: c.phillipgreenii.programs.claude-code.settings.autoMode;
+
+                  enabled = evalWith [ { phillipgreenii.programs.claude-auto-mode.enable = true; } ];
+                  disabled = evalWith [ ];
+
+                  expectedEnvironment = [
+                    "Primary use of Claude Code: software development in the ZipRecruiter monorepo and in the user's personal nix repositories (nix-agent-support, nix-ziprecruiter, nix-repo-base), plus agent-tooling and beads issue-tracking work."
+                    "Host containment: Claude Code runs on an ordinary developer macOS machine with open internet; there is no container, VM or egress allow-list."
+                    "Cloud provider(s): AWS."
+                    "Secrets management: AWS access uses Granted profiles with credential_process in ~/.aws/config (no ~/.aws/credentials file; the SSO token lives in the OS keychain); credential values are never exported, printed or written to files."
+                    "Key internal services: a shared per-user Dolt server for the beads issue tracker listens on 127.0.0.1:25252 (launchd agent org.nixos.beads-dolt-server); local reads and writes through the bd CLI are routine."
+                    "Org-specific CLIs: bd, pn, pg-desk, pg-router, ccpool, pg-disk-reclaimer, session-mode, handoff-create, assume, tuicr, cmux, nb, pa-monitor and glowm are tools the user installed deliberately through nix/home-manager."
+                    "Source control: github.com/ZR-Private/* (the employer organization, ZipRecruiter), github.com/phillipgreenii/* and github.com/phillipgziprecruiter/* (the user's personal accounts) are trusted. The two personal accounts are trusted destinations only for content that originates in the user's nix-* repositories (nix-agent-support, nix-ziprecruiter, nix-repo-base), never for ZR-Private content."
+                  ];
+
+                  entries = (autoModeOf enabled).environment;
+                  forbidden = [
+                    "assume -x"
+                    "bd dolt start"
+                    "darwin-rebuild"
+                    "sudo"
+                    "--no-verify"
+                    "://"
+                  ];
+                  # Every IPv4 literal in an entry; the capture group makes
+                  # builtins.split return the matches as lists.
+                  ipv4Of =
+                    s:
+                    lib.concatLists (
+                      builtins.filter builtins.isList (builtins.split "([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)" s)
+                    );
+                  allIps = lib.concatMap ipv4Of entries;
+                in
+                # (a) exactly the seven strings, in order.
+                assert entries == expectedEnvironment;
+                assert builtins.length entries == 7;
+                assert (autoModeOf enabled).manage == true;
+                # (b) disabled: manage stays false and all three lists are empty.
+                assert (autoModeOf disabled).manage == false;
+                assert (autoModeOf disabled).environment == [ ];
+                assert (autoModeOf disabled).allow == [ ];
+                assert (autoModeOf disabled).soft_deny == [ ];
+                # (c) the base layer contributes no allow and no soft_deny.
+                assert (autoModeOf enabled).allow == [ ];
+                assert (autoModeOf enabled).soft_deny == [ ];
+                # (d) no behavioral prohibition copies and no URL schemes.
+                assert lib.all (e: lib.all (f: !(lib.hasInfix f e)) forbidden) entries;
+                # (e) loopback is the only IPv4 literal (and it is present).
+                assert allIps != [ ];
+                assert lib.all (ip: ip == "127.0.0.1") allIps;
+                pkgs.runCommand "claude-auto-mode-base-ok" { } "touch $out";
+
               # Regression guard for pg2-hpwww: extraSettings is the freeform
               # passthrough escape hatch for any Claude Code setting this module
               # does not enumerate (concrete trigger: skillListingBudgetFraction,
