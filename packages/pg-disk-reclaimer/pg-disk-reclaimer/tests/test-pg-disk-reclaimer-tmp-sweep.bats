@@ -18,6 +18,8 @@
 # re-runs a compact scenario with the BSD tools first when they exist.
 bats_require_minimum_version 1.5.0
 
+load 'sweep-tools'
+
 setup() {
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
     SCRIPTS_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
@@ -45,13 +47,7 @@ teardown() {
 # ----- helpers ----------------------------------------------------------------
 
 need_ps() {
-  local out
-  if ! out="$(ps -axww -o command= 2>/dev/null)" || [[ -z $out ]]; then
-    skip "ps is not usable here (sandbox?): run the suite outside the sandbox too"
-  fi
-  if ! out="$(lsof -n -w -d cwd -Fn 2>/dev/null)" || [[ -z $out ]]; then
-    skip "lsof is not usable here (sandbox?): run the suite outside the sandbox too"
-  fi
+  pgdr_require_sweep_tools
 }
 
 # ts_ago MINUTES: a touch -t timestamp MINUTES ago (GNU date, else BSD date).

@@ -29,8 +29,10 @@ mkBashScript {
   # tests/test-pg-disk-reclaimer-tmp-sweep.bats (bead pg2-rym7f) exercises the
   # REAL find/rm/mv/ps/lsof against throwaway roots, builds a unix socket with
   # python3, and shellchecks pgdr-tmp-sweep.bash. ps and lsof may be unusable in
-  # a sandbox; the suite then skips the cases that need them (the sweep fails
-  # closed without them), so run it outside the sandbox too.
+  # a darwin sandbox; the suite then skips the cases that need them (the sweep
+  # fails closed without them) unless PGDR_REQUIRE_SWEEP_TOOLS=1 (tests/
+  # sweep-tools.bash). The darwin gate that really runs them is the
+  # `pg-disk-reclaimer-tmp-sweep-test` hook (bead pg2-sbvin).
   testDeps = [
     pkgs.jq
     pkgs.coreutils

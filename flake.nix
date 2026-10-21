@@ -1170,6 +1170,63 @@
           require_serial = true;
         };
 
+        # pg2-sbvin: the 46 cases in pg-disk-reclaimer's
+        # tests/test-pg-disk-reclaimer-tmp-sweep.bats drive the REAL sweep library
+        # (pgdr-tmp-sweep.bash) with real find/rm/mv/ps/lsof against mktemp
+        # fixtures (global rule V-3). The darwin nix sandbox denies ps, so inside
+        # `checks.<system>.test-pg-disk-reclaimer` and `test-tmp-root-registry`
+        # those cases skip while the check passes: nothing automated failed when a
+        # sweep guard regressed. DECISION: a path-scoped hook outside the sandbox,
+        # following `ceta-agreement-test` and the `*-contract-test` hooks above
+        # (no full flake check at land, operator ruling 2026-10-01; this runs at
+        # commit and under `pg-hooks run pre-land` over the branch diff). It sets
+        # PGDR_REQUIRE_SWEEP_TOOLS=1 so an unusable ps or lsof FAILS the cases
+        # instead of skipping them, and the script refuses any skip other than "no
+        # BSD userland" and "root". The Linux nix checks set the same variable
+        # (their sandbox has a working ps), so there a skip is a failure too. The
+        # logic lives in scripts/run-tmp-sweep-bats.sh; its regression guard is
+        # tests/run-tmp-sweep-bats.bats and the package's
+        # test-pg-disk-reclaimer-sweep-tools.bats (real bats, global rule V-3).
+        # Cost is about 75 s, paid only on diffs touching the sweep library or its
+        # suite. A missing tool is a LOUD failure, never a skip.
+        pg-disk-reclaimer-tmp-sweep-test = {
+          enable = true;
+          name = "pg-disk-reclaimer-tmp-sweep-test";
+          description = "pg-disk-reclaimer tmp-sweep: run the 46 sweep bats cases outside the nix sandbox, failing (not skipping) when ps/lsof are unusable (pg2-sbvin)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "pg-disk-reclaimer-tmp-sweep-test-hook";
+              runtimeInputs = [
+                pkgs.git
+                pkgs.bats
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.gnugrep
+                pkgs.gnused
+                pkgs.jq
+                pkgs.lsof
+                pkgs.python3
+                pkgs.shellcheck
+              ]
+              ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
+              text = ''
+                # The nix sandbox is the very place the cases cannot run (darwin
+                # denies ps): the Linux checks.* tier covers them there.
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "pg-disk-reclaimer-tmp-sweep-test: inside the nix build sandbox; skipping (the hermetic checks.* tier covers this)" >&2
+                  exit 0
+                fi
+
+                exec bash ${./scripts/run-tmp-sweep-bats.sh} "$@"
+              '';
+            }
+          }/bin/pg-disk-reclaimer-tmp-sweep-test-hook";
+          language = "system";
+          files = "^(packages/pg-disk-reclaimer/pg-disk-reclaimer/(pgdr-tmp-sweep\\.bash|tests/(test-pg-disk-reclaimer-tmp-sweep\\.bats|sweep-tools\\.bash))|scripts/run-tmp-sweep-bats\\.sh)$";
+          pass_filenames = false;
+          require_serial = true;
+        };
+
         # pg2-m146l: prevent main's own history from being rewritten via a
         # direct `git rebase` again. Operator decision 2026-09-07 (bead
         # pg2-m146l comments): main's local reflog showed
@@ -7979,8 +8036,10 @@
               # against the rendered registry.json files and throwaway roots. The sweep
               # library itself is tested in the package's own bats suite
               # (packages/pg-disk-reclaimer/pg-disk-reclaimer/tests). The nix sandbox is
-              # GNU-only and may deny ps/lsof, in which case the bats cases skip (the sweep
-              # fails closed without them); run them outside the sandbox too.
+              # GNU-only and the darwin one denies ps/lsof, in which case the sweep bats cases
+              # skip (the sweep fails closed without them); on Linux they FAIL instead of
+              # skipping (PGDR_REQUIRE_SWEEP_TOOLS, pg2-sbvin). The darwin gate that really
+              # runs the sweep cases is the `pg-disk-reclaimer-tmp-sweep-test` hook.
               test-tmp-root-registry =
                 let
                   r = import ./tests/tmp-root-registry.nix { inherit lib pkgs; };
@@ -7995,39 +8054,45 @@
                     ];
                   };
                 in
-                pkgs.runCommand "test-tmp-root-registry"
-                  {
-                    nativeBuildInputs = [
-                      pkgs.bats
-                      pkgs.bash
-                      pkgs.coreutils
-                      pkgs.findutils
-                      pkgs.gnugrep
-                      pkgs.gnused
-                      pkgs.jq
-                      pkgs.lsof
-                      pkgs.pg-disk-reclaimer
-                    ]
-                    ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
-                    REG_BOTH = r.artifacts.regBoth;
-                    REG_BUILD = r.artifacts.regBuild;
-                    REG_CLAUDE = r.artifacts.regClaude;
-                  }
-                  ''
-                    ${lib.optionalString (r.failures != [ ]) ''
-                      echo "tmp-root registry eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
-                      exit 1
-                    ''}
-                    echo "ok: ${toString r.caseCount} eval cases"
-                    # No hard-coded host path in generic code or docs.
-                    if grep -rn '/Volumes/gitrepos' ${hostPathFree}/lib ${hostPathFree}/home ${hostPathFree}/packages; then
-                      echo "a generic file names the host volume path" >&2
-                      exit 1
-                    fi
-                    bats --tap ${./tests/tmp-root-registry.bats} >registry.tap || { cat registry.tap; exit 1; }
-                    cat registry.tap
-                    touch $out
-                  '';
+                pkgs.runCommand "test-tmp-root-registry" {
+                  nativeBuildInputs = [
+                    pkgs.bats
+                    pkgs.bash
+                    pkgs.coreutils
+                    pkgs.findutils
+                    pkgs.gnugrep
+                    pkgs.gnused
+                    pkgs.jq
+                    pkgs.lsof
+                    pkgs.pg-disk-reclaimer
+                  ]
+                  ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
+                  REG_BOTH = r.artifacts.regBoth;
+                  REG_BUILD = r.artifacts.regBuild;
+                  REG_CLAUDE = r.artifacts.regClaude;
+                }
+                //
+                  lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux
+                    {
+                      # A Linux sandbox has a working ps (procps): a sweep case that
+                      # cannot run there is a bug, so fail instead of skip (pg2-sbvin).
+                      PGDR_REQUIRE_SWEEP_TOOLS = "1";
+                    }
+                    ''
+                      ${lib.optionalString (r.failures != [ ]) ''
+                        echo "tmp-root registry eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
+                        exit 1
+                      ''}
+                      echo "ok: ${toString r.caseCount} eval cases"
+                      # No hard-coded host path in generic code or docs.
+                      if grep -rn '/Volumes/gitrepos' ${hostPathFree}/lib ${hostPathFree}/home ${hostPathFree}/packages; then
+                        echo "a generic file names the host volume path" >&2
+                        exit 1
+                      fi
+                      bats --tap ${./tests/tmp-root-registry.bats} >registry.tap || { cat registry.tap; exit 1; }
+                      cat registry.tap
+                      touch $out
+                    '';
 
               # test-tmp-sweep (bead pg2-bo3n7, packet C of the build_tmp design): the daily
               # launchd sweep agent of home/programs/tmp-sweep. Eval cases
@@ -8038,8 +8103,10 @@
               # assertions. tests/tmp-sweep.bats then runs the rendered script (absolute store
               # path of the REAL CLI, a bare launchd-like environment) against a fixture
               # registry and fixture roots; the real registry path is never touched. As in
-              # test-tmp-root-registry, the sweep cases skip where the sandbox denies ps or
-              # lsof (the sweep fails closed without them); run the bats outside the sandbox too.
+              # test-tmp-root-registry, the sweep cases skip where the darwin sandbox denies ps
+              # or lsof (the sweep fails closed without them) and fail instead on Linux
+              # (pg2-sbvin); the package's own sweep suite runs for real in the
+              # `pg-disk-reclaimer-tmp-sweep-test` hook.
               test-tmp-sweep =
                 let
                   r = import ./tests/tmp-sweep.nix { inherit lib pkgs; };
@@ -8048,42 +8115,47 @@
                     fileset = ./home/programs/tmp-sweep;
                   };
                 in
-                pkgs.runCommand "test-tmp-sweep"
-                  {
-                    nativeBuildInputs = [
-                      pkgs.bats
-                      pkgs.bash
-                      pkgs.coreutils
-                      pkgs.findutils
-                      pkgs.gnugrep
-                      pkgs.gnused
-                      pkgs.jq
-                      pkgs.lsof
-                      pkgs.pg-disk-reclaimer
-                    ]
-                    ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
-                    SCRIPT_BOTH = r.artifacts.scriptBoth;
-                    SCRIPT_BUILD = r.artifacts.scriptBuild;
-                    SCRIPT_CLAUDE = r.artifacts.scriptClaude;
-                    REG_BOTH = r.artifacts.regBoth;
-                    REG_BUILD = r.artifacts.regBuild;
-                    REG_CLAUDE = r.artifacts.regClaude;
-                  }
-                  ''
-                    ${lib.optionalString (r.failures != [ ]) ''
-                      echo "tmp-sweep eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
-                      exit 1
-                    ''}
-                    echo "ok: ${toString r.caseCount} eval cases"
-                    # No hard-coded host path in the generic module.
-                    if grep -rn '/Volumes/gitrepos' ${hostPathFree}/home; then
-                      echo "the tmp-sweep module names the host volume path" >&2
-                      exit 1
-                    fi
-                    bats --tap ${./tests/tmp-sweep.bats} >sweep.tap || { cat sweep.tap; exit 1; }
-                    cat sweep.tap
-                    touch $out
-                  '';
+                pkgs.runCommand "test-tmp-sweep" {
+                  nativeBuildInputs = [
+                    pkgs.bats
+                    pkgs.bash
+                    pkgs.coreutils
+                    pkgs.findutils
+                    pkgs.gnugrep
+                    pkgs.gnused
+                    pkgs.jq
+                    pkgs.lsof
+                    pkgs.pg-disk-reclaimer
+                  ]
+                  ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
+                  SCRIPT_BOTH = r.artifacts.scriptBoth;
+                  SCRIPT_BUILD = r.artifacts.scriptBuild;
+                  SCRIPT_CLAUDE = r.artifacts.scriptClaude;
+                  REG_BOTH = r.artifacts.regBoth;
+                  REG_BUILD = r.artifacts.regBuild;
+                  REG_CLAUDE = r.artifacts.regClaude;
+                }
+                //
+                  lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux
+                    {
+                      # See test-tmp-root-registry: fail instead of skip where ps works.
+                      PGDR_REQUIRE_SWEEP_TOOLS = "1";
+                    }
+                    ''
+                      ${lib.optionalString (r.failures != [ ]) ''
+                        echo "tmp-sweep eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
+                        exit 1
+                      ''}
+                      echo "ok: ${toString r.caseCount} eval cases"
+                      # No hard-coded host path in the generic module.
+                      if grep -rn '/Volumes/gitrepos' ${hostPathFree}/home; then
+                        echo "the tmp-sweep module names the host volume path" >&2
+                        exit 1
+                      fi
+                      bats --tap ${./tests/tmp-sweep.bats} >sweep.tap || { cat sweep.tap; exit 1; }
+                      cat sweep.tap
+                      touch $out
+                    '';
 
               # test-pg-wi-flow-module (bead tc-9ddu3.1.5, extended by
               # tc-9ddu3.1.17): proves home/programs/pg-wi-flow/default.nix's

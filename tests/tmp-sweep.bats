@@ -48,6 +48,12 @@ need_ps() {
   local out
   if ! out="$(ps -axww -o command= 2>/dev/null)" || [ -z "$out" ] ||
     ! out="$(lsof -n -w -d cwd -Fn 2>/dev/null)" || [ -z "$out" ]; then
+    # PGDR_REQUIRE_SWEEP_TOOLS=1 (set by the Linux nix checks, where ps works) makes
+    # this a failure instead of a skip (bead pg2-sbvin).
+    if [ "${PGDR_REQUIRE_SWEEP_TOOLS:-}" = 1 ]; then
+      echo "ps or lsof is not usable here; PGDR_REQUIRE_SWEEP_TOOLS=1 forbids skipping" >&2
+      return 1
+    fi
     skip "ps or lsof is not usable here (sandbox?): the sweep fails closed without them"
   fi
 }
