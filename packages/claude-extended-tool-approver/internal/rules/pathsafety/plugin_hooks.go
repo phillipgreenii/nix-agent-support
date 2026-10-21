@@ -31,7 +31,7 @@ const pluginHooksManifestName = "hooks.json"
 // pluginRootRefPrefix is the one substitution mechanism this carve-out understands
 // for "the scripts a hooks.json names": Claude Code's own `${CLAUDE_PLUGIN_ROOT}`
 // variable, which every real hooks.json on this machine uses to reference its own
-// scripts (verified across pg-pr, claude-extended-tool-approver, claude-plugins-official's
+// scripts (verified across claude-extended-tool-approver, claude-plugins-official's
 // security-guidance, beads, superpowers). A bare command name with no such reference
 // (e.g. "claude-extended-tool-approver", "bd codex-hook SessionStart") names a
 // PATH-resolved binary, not a file inside the plugin tree, and is deliberately not

@@ -12,7 +12,7 @@
 // can never itself become the returned "sub" a verbScoped entry is keyed on. That
 // extension point can therefore never cover this tool, confirmed by reading the code
 // during pg2-o9rcj's investigation — this package is the Go-level fix, following the
-// one-module-per-tool precedent of ghstack/pgpr/pgccaudit/pnwf rather than restructuring
+// one-module-per-tool precedent of ghstack/pgccaudit/pnwf rather than restructuring
 // buildtools' resolver.
 //
 // # Source of the classification
@@ -89,7 +89,7 @@ import (
 type Rule struct{}
 
 // New constructs the rc-preflight rule. It takes no configuration: like
-// pnwf/ghstack/pgpr/pgccaudit, the classification is fixed by rc-preflight.sh's own
+// pnwf/ghstack/pgccaudit, the classification is fixed by rc-preflight.sh's own
 // source and applies uniformly, with no per-consumer data to inject.
 func New() *Rule { return &Rule{} }
 

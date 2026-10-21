@@ -28,7 +28,7 @@ type pluginForm struct {
 // session-wrapup, integrate-branch, pg-go-mutate, pg-ccaudit, pg-wi-flow,
 // claude-extended-tool-approver, bash-scripting, behavior-docs-conformance;
 // claude-activity, bash-lsp and service-daemon-checklist instruct no
-// commands, and pb / pg-pr are excluded by the epic). Approve rows are the
+// commands, and pb is excluded by the epic). Approve rows are the
 // ruling made true; every Abstain/Reject row carries the reason it is a
 // deliberate exception — a ruling collision (guardrail: listed, not
 // overridden), a safety exception (R5: approve only when sure), or a form that

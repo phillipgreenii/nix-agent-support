@@ -29,7 +29,6 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgccaudit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgconnector"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgnixlogwrapped"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgpr"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnwf"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnworkspace"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
@@ -308,15 +307,6 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// uniformly. Ordering relative to its neighbours does not matter:
 		// "pg-ccaudit" is recognized by no other rule in this chain.
 		pgccaudit.New(),
-		// pg-pr approves the read-only half of the first-party pg-pr CLI's `pr
-		// <verb>` command family (bead pg2-lmqy1) -- see that package's doc
-		// comment for the classification and the pg2-xf564 premise-staleness
-		// account (list/view were retired before this bead was filed). Like
-		// pgccaudit/pnwf/ghstack above it takes no consumer config -- the
-		// classification is fixed and applies uniformly. Ordering relative to
-		// its neighbours does not matter: "pg-pr" is recognized by no other
-		// rule in this chain.
-		pgpr.New(),
 		// pg-connector approves the `pg-connector issue show/comment/update/
 		// close` verb family already granted by
 		// PG_ROUTER_CCPOOL_HANDLER_CONFIG's allowedTools (bead pg2-s9zh5),
@@ -324,7 +314,7 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// native --allowedTools text-prefix match, which breaks under the
 		// escalation-triager's prompt-mandated PG_CONNECTOR_ISSUE_BEADS_DIR=
 		// env-var prefix (bead pg2-r848s; see that package's doc comment for
-		// the full root-cause account). Like pgpr/pgccaudit/pnwf above, it
+		// the full root-cause account). Like pgccaudit/pnwf above, it
 		// takes no consumer config -- the classification mirrors a fixed,
 		// already-authorized grant and applies uniformly. Ordering relative
 		// to its neighbours does not matter: "pg-connector" is recognized by
@@ -336,7 +326,7 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// package's doc comment for the full classification and citations,
 		// including why buildtools' verbScopedApprovals structurally cannot
 		// resolve rc-preflight's dash-prefixed "subcommands" as a verb. Like
-		// pgpr/pgccaudit/pnwf/ghstack above, it takes no consumer config -- the
+		// pgccaudit/pnwf/ghstack above, it takes no consumer config -- the
 		// classification is fixed and applies uniformly. Ordering relative to
 		// its neighbours does not matter: "rc-preflight" is recognized by no
 		// other rule in this chain.

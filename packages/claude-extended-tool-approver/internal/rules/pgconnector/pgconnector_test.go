@@ -12,7 +12,7 @@ func mustJSON(cmd string) json.RawMessage {
 	return b
 }
 
-// evalPgConnector is the shared one-command driver, mirroring pgpr's evalPgPR.
+// evalPgConnector is the shared one-command driver.
 func evalPgConnector(t *testing.T, cmd string) hookio.RuleResult {
 	t.Helper()
 	return hookio.Verdict(New().Evaluate(&hookio.HookInput{
@@ -172,7 +172,7 @@ func TestPgConnector_OtherResourcesAndBinaries_Unclaimed(t *testing.T) {
 // TestPgConnector_OutputFlagBeforeResource_StillApprove exercises pg-connector's
 // persistent root --output flag (output.go's addOutputFlag) placed BEFORE the
 // resource/verb path, confirming pgConnectorCommandWordIndexes skips it
-// (mirroring pgpr's own flag-skipping resolver test coverage).
+// (flag-skipping resolver coverage).
 func TestPgConnector_OutputFlagBeforeResource_StillApprove(t *testing.T) {
 	cmds := []string{
 		"pg-connector --output json issue show pg2-itxtv",

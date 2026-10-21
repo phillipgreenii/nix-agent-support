@@ -733,7 +733,7 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment
 // is not one — the operator runs it by hand, which is the remedy the ruling names.
 //
 // FALSE-POSITIVE COST IS ZERO, measured 2026-07-30: the only in-tree callers of
-// `git remote add` are a `pn` workspace smoke script and two pg-pr Go tests, all of
+// `git remote add` are a `pn` workspace smoke script and two (since-removed) Go tests, all of
 // which run the command INSIDE a test binary or a shell script, where the hook
 // never sees the inner command. The Reject reaches only an agent typing `git
 // remote …` as a Bash tool call, which is the intent.

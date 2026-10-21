@@ -64,7 +64,7 @@
 // relying on Claude Code's own raw-text comparison.
 //
 // The fix follows the SAME architecture this hook already uses for every
-// other first-party CLI command family (pgpr, pgccaudit, pnworkspace, pnwf,
+// other first-party CLI command family (pgccaudit, pnworkspace, pnwf,
 // killprobe, rcpreflight, ghstack): a dedicated rule that recognizes the
 // invocation from cmdparse's ALREADY-PARSED leaf (Executable/Args), which
 // cmdparse has already lifted any leading `VAR=value` assignment out of and
@@ -109,7 +109,7 @@ var approvedIssueVerbs = map[string]bool{
 type Rule struct{}
 
 // New constructs the pg-connector rule. It takes no configuration: like
-// pgpr/pgccaudit/pnwf/pnworkspace, the classification mirrors a fixed,
+// pgccaudit/pnwf/pnworkspace, the classification mirrors a fixed,
 // already-authorized allowedTools grant and applies uniformly, with no
 // per-consumer data to inject.
 func New() *Rule { return &Rule{} }
@@ -157,15 +157,14 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // own cobra Find() does when searching for its command path. rest is args
 // with both path words removed (unused today — no verdict above needs it,
 // since every approved verb is argument-blind beyond its path — but returned
-// for symmetry with pgpr.pgprCommandPath/gh.CommandPath).
+// for symmetry with gh.CommandPath).
 //
 // pg-connector registers exactly two flags that could precede/interleave the
 // resource/verb path: root's persistent --output (root.go/output.go's
 // addOutputFlag) and each leaf's own --backend (backend_flag.go's
 // addBackendFlag) — both String flags (always consume a value), never a bool.
 // There is no equivalent of gh's ghNoValueLongFlags no-value exception list
-// for this binary (same conclusion pgpr.go's own doc reaches for pg-pr, for
-// the same reason: nothing here is registered as a no-value flag either).
+// for this binary: nothing here is registered as a no-value flag either.
 func pgConnectorCommandPath(args []string) (resource, subcmd string, rest []string) {
 	words := pgConnectorCommandWordIndexes(args, 2)
 	if len(words) > 0 {
@@ -183,8 +182,7 @@ func pgConnectorCommandPath(args []string) (resource, subcmd string, rest []stri
 // e.g. `-o`) consumes the next token; a short carrying its value in the same
 // token consumes nothing; and nothing after a `--` end-of-options terminator
 // is a command word. A lone `-` is neither flag nor command word and is
-// skipped without consuming anything. Mirrors pgpr.pgprCommandWordIndexes /
-// gh.go's ghCommandWordIndexes.
+// skipped without consuming anything. Mirrors gh.go's ghCommandWordIndexes.
 func pgConnectorCommandWordIndexes(args []string, want int) []int {
 	out := make([]int, 0, want)
 	for i := 0; i < len(args); i++ {
@@ -214,7 +212,7 @@ func pgConnectorCommandWordIndexes(args []string, want int) []int {
 }
 
 // omitIndexes returns args without the tokens at the ASCENDING indexes in
-// drop, identical in shape to pgpr.go/gh.go's own helper of the same name
+// drop, identical in shape to gh.go's own helper of the same name
 // (kept as a separate copy rather than exported/shared: two four-line
 // functions do not justify a new cross-package dependency).
 func omitIndexes(args []string, drop []int) []string {

@@ -128,7 +128,6 @@ func TestBashErrorSitesReportGenuineFailure(t *testing.T) {
 		"pg-nix-log-wrapped": true,
 		"kill-probe":         true,
 		"pg-ccaudit":         true,
-		"pg-pr":              true,
 		"pg-connector":       true,
 		"rc-preflight":       true,
 		"safe-commands":      true,

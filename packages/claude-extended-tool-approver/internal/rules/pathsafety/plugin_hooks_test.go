@@ -94,7 +94,7 @@ func TestPluginHooksDir(t *testing.T) {
 
 func TestResolvePluginHookScripts_RealShapes(t *testing.T) {
 	t.Parallel()
-	t.Run("single quoted CLAUDE_PLUGIN_ROOT reference (pg-pr's shape)", func(t *testing.T) {
+	t.Run("single quoted CLAUDE_PLUGIN_ROOT reference (the common shape)", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		hooksDir := filepath.Join(dir, "hooks")
