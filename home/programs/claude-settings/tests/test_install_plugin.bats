@@ -433,7 +433,7 @@ _installed_plugins_path() {
 @test "regression: the SHORT-CIRCUIT install path also enables, and is also restored" {
   # The already-installed same-version install is NOT a safe path: it enables
   # too (measured). A witness plugin whose version never moved therefore proves
-  # nothing about staying disabled, which is why the earlier pg-pr witness was
+  # nothing about staying disabled, which is why the earlier witness plugin was
   # invalid. No new cache dir here — nothing is pulled — yet the key still flips.
   echo '{"enabledPlugins":{"slack@acme":false}}' > "$SETTINGS"
   _write_manifest "acme" "slack" "19b5ada4caa6" '{"name":"slack"}'

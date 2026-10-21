@@ -1,13 +1,13 @@
 // Locker is pg-desk's cross-process, per-(repo, type, id) mutual-exclusion
-// lock, ported from packages/pg-pr/internal/prlock (this packet's Contract
+// lock, ported from the retired PR tool's internal/prlock (this packet's Contract
 // section: "port internal/prlock's semantics exactly, do not reinvent the
 // locking algorithm"). Built on BSD file locks (flock): the kernel releases
 // the lock when the holding file descriptor closes or the process dies for
 // ANY reason, so there is no crash-recovery protocol to build.
 //
-// Ported rather than imported: packages/pg-desk and packages/pg-pr are
+// Ported rather than imported: packages/pg-desk and the retired PR tool are
 // separate Go modules in this repo (packages/pg-desk/go.mod declares no
-// dependency on packages/pg-pr), and prlock's own package doc already
+// dependency on the retired PR tool), and prlock's own package doc already
 // states it is a standalone primitive not wired to any call site — the
 // same holds here. The design doc's section 7.6 additionally keys the lock
 // by repo ("Rows are keyed by repo so a second repository is additive"),

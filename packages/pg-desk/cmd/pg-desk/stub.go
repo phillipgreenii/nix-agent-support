@@ -13,7 +13,7 @@ import "fmt"
 // and did nothing."
 //
 // Mirrors this repo's existing ErrNotImplemented convention (e.g.
-// packages/pg-pr/pkg/beads/types.go, packages/pg-pr/pkg/provider/cicd/iface.go,
+// The retired PR tool's pkg/beads/types.go, the retired PR tool's pkg/provider/cicd/iface.go,
 // packages/pg-connector/cmd/pg-connector-pr-github/internal/vcs/iface.go):
 // "<name>: not implemented in this phase".
 func notImplemented(name string) error {

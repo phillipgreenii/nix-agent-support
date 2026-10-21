@@ -1,7 +1,7 @@
 # pg-desk — open
 
-`pg-desk open` is a port of `pg-pr open`, reading the store directly with no daemon required —
-`--addr` is therefore dropped, unlike `pg-pr open`. It composes only the existing darwin opener
+`pg-desk open` is a port of the retired PR tool's `open`, reading the store directly with no daemon required —
+`--addr` is therefore dropped, unlike the retired PR tool's `open`. It composes only the existing darwin opener
 and the configured browser (D10's composition rule; `open` itself execs no `pg-connector`
 command).
 

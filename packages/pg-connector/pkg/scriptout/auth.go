@@ -1,8 +1,8 @@
 package scriptout
 
 // AuthState enumerates the standard auth states a backend may return from
-// the auth_status op. Carried over unchanged from pg-pr's existing
-// convention.
+// the auth_status op. Carried over unchanged from the retired PR tool's
+// existing convention.
 type AuthState string
 
 const (
@@ -13,7 +13,7 @@ const (
 )
 
 // AuthStatus is the result payload of the auth_status op — carried over
-// unchanged from pg-pr's existing convention. It travels inside a normal
+// unchanged from the retired PR tool's existing convention. It travels inside a normal
 // Response's Result field, wrapped with the usual protocolVersion +
 // schemaVersion envelope like any other op.
 type AuthStatus struct {

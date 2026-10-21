@@ -20,7 +20,7 @@ import (
 // pg-router's metric catalog — internal/metrics/metrics.go — is already
 // OTel-API-native, so bridging it through OTel's own Prometheus exporter is
 // the natural fit, rather than hand-rolling client_golang instruments the
-// way pg-pr's internal/telemetry/metrics.go does) and starts an HTTP
+// way the retired PR tool's internal/telemetry/metrics.go does) and starts an HTTP
 // listener on addr serving that catalog at /metrics.
 //
 // The exporter registers on its OWN prometheus.Registry, never
@@ -37,7 +37,7 @@ import (
 //
 // onListen, when non-nil, is called with the bound net.Listener before the
 // server starts serving — the same "offer the real listener back to the
-// caller" seam packages/pg-pr/internal/sync/daemon.go's own
+// caller" seam the retired PR tool's internal/sync/daemon.go's own
 // startMetricsServer uses (opts.MetricsListener) so a test can pass
 // "127.0.0.1:0" and read back the actually-bound ephemeral port. Production
 // callers pass nil.

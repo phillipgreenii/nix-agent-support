@@ -146,7 +146,7 @@ func TestOpenWindowErrorsWhenBinaryMissing(t *testing.T) {
 }
 
 // TestOpenWindowConfigBinTakesPrecedenceOverEnvVar pins this package's own
-// deviation from the pg-pr original (see browser.go's package doc comment):
+// deviation from the retired PR tool original (see browser.go's package doc comment):
 // an explicit bin argument — the config-driven open.chrome_bin — wins over
 // BinEnvVar, matching D10's "always a variable read from config" requirement.
 func TestOpenWindowConfigBinTakesPrecedenceOverEnvVar(t *testing.T) {
@@ -179,7 +179,7 @@ func TestOpenWindowConfigBinTakesPrecedenceOverEnvVar(t *testing.T) {
 // under severe CPU contention observing that exit can be delayed past the 5s
 // default, which makes the timeout branch win the select and return nil
 // instead of the stub's real exit-3 error (observed 2026-08-21 under
-// concurrent nix jobs, packages/pg-pr/internal/browser). Widening only the
+// concurrent nix jobs, the retired PR tool's internal/browser). Widening only the
 // test's own copy of the var doesn't change openWindow's production
 // contract — see forwardWait's doc comment.
 func TestOpenWindowReportsNonZeroExit(t *testing.T) {

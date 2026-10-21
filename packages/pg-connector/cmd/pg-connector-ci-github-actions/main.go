@@ -3,7 +3,7 @@
 // scriptout wire protocol (pkg/scriptout.ServeLoop), with no independent
 // human-facing CLI identity (actors.md's ACTOR-BACKEND). It implements
 // pkg/provider/ci.Provider against GitHub Actions by carrying over
-// packages/pg-pr/pkg/provider/cicd/ghactions's existing client
+// the retired PR tool's pkg/provider/cicd/ghactions's existing client
 // (ListRuns/GetLogs/RerunFailed) unchanged in its underlying GitHub calls
 // [contract: carry-over basis], and adds its own AuthChecker via GitHub's
 // existing env-then-gh-auth-token credential chain (INV-AUTH-1).

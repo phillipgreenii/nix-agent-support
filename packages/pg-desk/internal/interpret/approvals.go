@@ -10,7 +10,7 @@ import (
 )
 
 // Bot-verdict tri-state values. Ported from
-// packages/pg-pr/internal/snapshot/indicators.go's BotVerdictApproved/
+// the retired PR tool's internal/snapshot/indicators.go's BotVerdictApproved/
 // BotVerdictDisapproved/BotVerdictNoDecision.
 const (
 	BotVerdictApproved    = "approved"
@@ -36,7 +36,7 @@ const (
 //   - Review-state signal (approver_allowlist logins' pr.Reviews[].State):
 //     a standing CHANGES_REQUESTED from any allowlisted login wins outright
 //     (disapproved); otherwise an allowlisted APPROVED reads
-//     BotVerdictApproved. Mirrors packages/pg-pr/internal/snapshot/
+//     BotVerdictApproved. Mirrors the retired PR tool's internal/snapshot/
 //     indicators.go's botVerdictFor.
 //   - Comment-verdict-grammar signal (verdictClassifier over pr.Comments +
 //     every review-thread comment, packages/pg-desk/internal/verdict): some
@@ -76,7 +76,7 @@ const (
 // WaitingOnMe is populated by interpret.go's caller (computeWaitingOnMe), not
 // here.
 //
-// The per-commit staleness axis (pg-pr's store.Approval.IsStale,
+// The per-commit staleness axis (the retired PR tool's store.Approval.IsStale,
 // INV-APPROVAL-3) is reported SEPARATELY, as Approvals.SelfReviewStale and
 // Approvals.HumanApprovalStanding (computeReviewStaleness, review_staleness.go),
 // because schema.PRReview now carries the commit each review was submitted
@@ -381,7 +381,7 @@ func selfHasReview(pr prShow, self string, states map[string]bool) bool {
 }
 
 // selfSubmittedReviewStates mirrors
-// packages/pg-pr/internal/snapshot/builder.go's selfSubmittedReviewStates
+// the retired PR tool's internal/snapshot/builder.go's selfSubmittedReviewStates
 // (DISMISSED/PENDING deliberately absent — see that file's doc; not
 // representable here anyway, since schema.PRReview carries no dismissal
 // state).
@@ -428,7 +428,7 @@ func computeMatchReasons(pr prShow, teamMembers, watchLabels []string, self stri
 }
 
 // --- panel placement -----------------------------------------------------
-// Adapted from packages/pg-pr/internal/snapshot's mine_panels.go/panels.go
+// Adapted from the retired PR tool's internal/snapshot's mine_panels.go/panels.go
 // (ClassifyMine/ActNow), minus the clauses that need data Facts cannot
 // carry: WIPReadyForPromotion (WIP is a packet-8 read-time join) and any
 // staleness-dependent clause. See interpret.go's package doc for the full

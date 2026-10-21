@@ -1,10 +1,10 @@
 # pg-desk — store and schema
 
 `pg-desk` keeps one SQLite store at `$XDG_STATE_HOME/pg-desk/store.db`, migrated with a version
-ladder the same way `pg-pr`'s store is, plus one explicit schema cutover (see "Schema versions and
+ladder the same way the retired PR tool's store is, plus one explicit schema cutover (see "Schema versions and
 the cutover" below). It MUST be opened in WAL mode with a busy timeout, so
 `serve`, the CLI, and `run` can overlap safely. Every pipeline run MUST take a per-`(type, id)`
-lock (the same per-entity locking discipline `pg-pr` uses today) so a cascaded re-run and a direct
+lock (the same per-entity locking discipline the retired PR tool uses today) so a cascaded re-run and a direct
 run for the same entity serialize rather than race — this will matter once `pr-pool` dispatches
 handlers in parallel. Rows are keyed by `repo`, so a second repository is additive to the schema
 even though Phase 9 supports exactly one (see "Out of scope" below).

@@ -226,7 +226,7 @@ func TestCLICommand_ExcludesLeakedGitDirFamily(t *testing.T) {
 // pg2-ilzq9, ported to this backend: with no resolvable token the gateway
 // hands back NO command at all, so gh cannot have been executed, and the
 // error wraps this copy's local ErrGHAuthInvalid sentinel (not
-// vcs.ErrAuthInvalid — this module has no pg-pr dependency) plus the action
+// vcs.ErrAuthInvalid — this module has no dependency on the retired PR tool) plus the action
 // the user must take.
 func TestCLICommand_NoToken_RefusesBeforeExec(t *testing.T) {
 	marker := ghStubOnPath(t)

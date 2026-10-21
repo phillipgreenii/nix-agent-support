@@ -5,10 +5,10 @@
 // gate (this docket's packet 7 Binding decisions: "503 for every route
 // until the interpretation table has ≥1 row").
 //
-// Ported skeleton: the serve-time freshness-stamping pattern of pg-pr's
-// packages/pg-pr/internal/httpapi/dashboard.go, and the five-panel/root-field
+// Ported skeleton: the serve-time freshness-stamping pattern of the retired PR tool's
+// the retired PR tool's internal/httpapi/dashboard.go, and the five-panel/root-field
 // payload shape plus the match-reason decomposition of
-// packages/pg-pr/internal/snapshot (snapshot.go's Snapshot/MineRow/TeamRow,
+// the retired PR tool's internal/snapshot (snapshot.go's Snapshot/MineRow/TeamRow,
 // builder.go's match-reason constants and hasMatchReason/hasWatchLabelReason
 // helpers) — cited per declaration below.
 //
@@ -36,20 +36,20 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
-// nowUTC is the serve-time clock. Overridable in tests, mirroring pg-pr's
-// packages/pg-pr/internal/httpapi/dashboard.go.
+// nowUTC is the serve-time clock. Overridable in tests, mirroring the retired PR tool's
+// the retired PR tool's internal/httpapi/dashboard.go.
 var nowUTC = func() time.Time { return time.Now().UTC() }
 
 // defaultHeartbeatPeriod is the fallback cadence when Config.HeartbeatPeriod
-// is empty or unparseable, mirroring pg-pr's freshness.DefaultSyncIntervalSeconds
-// (packages/pg-pr/internal/freshness/freshness.go's 60-second default) — the
-// same default cadence, so a config-less pg-desk and a config-less pg-pr fail
+// is empty or unparseable, mirroring the retired PR tool's freshness.DefaultSyncIntervalSeconds
+// (the retired PR tool's internal/freshness/freshness.go's 60-second default) — the
+// same default cadence, so a config-less pg-desk and a config-less retired PR tool would fail
 // closed to the same bound.
 const defaultHeartbeatPeriod = 60 * time.Second
 
 // boundIntervals is how many heartbeat periods a last_heartbeat MAY age
 // before serve flags the payload stale, per the Binding decisions section
-// ("stale: true ... older than TWO heartbeat_periods") — mirrors pg-pr's
+// ("stale: true ... older than TWO heartbeat_periods") — mirrors the retired PR tool's
 // freshness.BoundIntervals.
 const boundIntervals = 2
 
@@ -69,13 +69,13 @@ const (
 	PanelMineAwaitingTeam  = "mine_awaiting_team"
 )
 
-// Match-reason vocabulary, ported verbatim from pg-pr's
-// packages/pg-pr/internal/snapshot/builder.go. The design doc's section 7.4
+// Match-reason vocabulary, ported verbatim from the retired PR tool's
+// the retired PR tool's internal/snapshot/builder.go. The design doc's section 7.4
 // ("Match reasons") recomputes the same membership signals server-side
 // (team-authored, review-requested, watch-label); this package re-derives the
 // three discrete Grafana columns (match_team_authored, match_review_requested,
 // match_has_watch_label) from whatever match_reasons list interpret (this
-// docket's packet 5, not yet landed) writes, exactly as pg-pr's own
+// docket's packet 5, not yet landed) writes, exactly as the retired PR tool's own
 // snapshot.Build already does at build time — a presentation-layer
 // projection, not new interpretation business logic.
 const (
@@ -95,7 +95,7 @@ const (
 // typed columns, never shadowed by same-named blob content. match_reasons is
 // decoded separately (it is a JSON array, not an object) into the raw list
 // plus the three derived booleans described above; both are present only
-// when interpretation.match_reasons is non-empty, matching pg-pr's own
+// when interpretation.match_reasons is non-empty, matching the retired PR tool's own
 // MineRow (no match fields) versus TeamRow (match fields present) split.
 //
 // See this file's package doc comment for why the display facts (title,
@@ -166,8 +166,8 @@ func decodeStringArray(blob string) []string {
 	return out
 }
 
-// hasMatchReason and hasWatchLabelReason are ported verbatim from pg-pr's
-// packages/pg-pr/internal/snapshot/ordering.go (hasMatchReason) and
+// hasMatchReason and hasWatchLabelReason are ported verbatim from the retired PR tool's
+// the retired PR tool's internal/snapshot/ordering.go (hasMatchReason) and
 // builder.go's inline watch-label scan.
 func hasMatchReason(reasons []string, want string) bool {
 	for _, r := range reasons {
@@ -212,7 +212,7 @@ type Payload struct {
 	// DroppedCount is always 0 in Phase 9: nothing in this packet's Consumes
 	// scope (store reads only) computes a drop count — that is gather/
 	// interpret's own concern, a later packet. Deliberately no `omitempty`,
-	// matching pg-pr's own field (it must serialize as the numeral 0, never
+	// matching the retired PR tool's own field (it must serialize as the numeral 0, never
 	// vanish from the payload).
 	DroppedCount int `json:"dropped_count"`
 
@@ -227,7 +227,7 @@ type Payload struct {
 	// decisions section and design doc section 7.4's "Hidden and WIP are NOT
 	// interpreted": serve joins annotation at read time, and a hidden row
 	// leaves the panels entirely rather than being flagged in place — fixing
-	// the live pg-pr defect where hidden rows stayed in the panel arrays.
+	// the live the retired PR tool defect where hidden rows stayed in the panel arrays.
 	Hidden []Row `json:"hidden"`
 
 	// Sources is the per-source data age (docs/behavior/pg-desk/freshness.md):
@@ -396,7 +396,7 @@ func evaluateAttention(st *store.Store, cfg *config.Config, now time.Time) ([]at
 // fails to parse as a positive duration — Binding decisions: "heartbeat_period
 // is a config key ... never a hardcoded duration" governs the STALE BOUND
 // computation; this fallback only covers the degenerate case of a config
-// that omits the key entirely, mirroring pg-pr's own default-cadence pattern.
+// that omits the key entirely, mirroring the retired PR tool's own default-cadence pattern.
 func parseHeartbeatPeriod(cfg *config.Config) time.Duration {
 	if cfg == nil || cfg.HeartbeatPeriod == "" {
 		return defaultHeartbeatPeriod
@@ -408,8 +408,8 @@ func parseHeartbeatPeriod(cfg *config.Config) time.Duration {
 	return d
 }
 
-// parseAsOf, ageSeconds, and isStale mirror pg-pr's
-// packages/pg-pr/internal/freshness/freshness.go (ParseAsOf/AgeSeconds/
+// parseAsOf, ageSeconds, and isStale mirror the retired PR tool's
+// the retired PR tool's internal/freshness/freshness.go (ParseAsOf/AgeSeconds/
 // IsStale) exactly: a zero/unparseable as-of is stale by definition (fail
 // closed), a future as-of (clock skew) is fresh, and "exactly at the bound"
 // is not yet past it.

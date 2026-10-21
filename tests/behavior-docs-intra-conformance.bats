@@ -1075,9 +1075,9 @@ MD
 }
 
 @test "relocation step 5: legitimate prose using 'relocated to' as ACTIVE behavior is NOT flagged" {
-  # The other real false positive: pg-pr's invariants.md states, as a live
+  # The other real false positive: a since-retired tool's invariants.md stated, as a live
   # behavior rule about UUID provenance, that four invariants were "relocated
-  # to" pg-pr from another set. Plain running prose, no note-shaped marker.
+  # to" it from another set. Plain running prose, no note-shaped marker.
   cat >"$SET/invariants.md" <<'MD'
 # Invariants
 

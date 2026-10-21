@@ -250,7 +250,7 @@ func TestIsolate_primaryBranchFromGitConfig(t *testing.T) {
 
 // TestIsolate_corruptedCoreWorktreeDoesNotRedirectRepo guards the confirmed
 // real-world mechanism behind pg2-x4e06 / pg2-12795: an unrelated bug (a
-// git-fixture test-isolation escape in packages/pg-pr, tracked separately as
+// git-fixture test-isolation escape in the retired PR tool, tracked separately as
 // pg2-5ek6b) can leave the CANONICAL clone's own .git/config with
 // core.worktree pointing at some OTHER existing worktree's path. Before this
 // fix, Isolate derived its repo root from `git rev-parse --show-toplevel`,

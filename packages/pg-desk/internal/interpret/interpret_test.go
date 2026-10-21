@@ -12,7 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/verdict"
 )
 
-// --- ownership: ported verbatim from packages/pg-pr/internal/ownership/ownership_test.go ---
+// --- ownership: ported verbatim from the retired PR tool's internal/ownership/ownership_test.go ---
 
 func TestClassifyOwnership(t *testing.T) {
 	tests := []struct {
@@ -46,7 +46,7 @@ func TestOwnershipActsAsMine(t *testing.T) {
 	}
 }
 
-// --- enrichment: ported verbatim from packages/pg-pr/internal/enrich/enrich_test.go ---
+// --- enrichment: ported verbatim from the retired PR tool's internal/enrich/enrich_test.go ---
 
 func TestBucketSize(t *testing.T) {
 	cases := []struct {
@@ -607,7 +607,7 @@ func TestComputeApprovals_HumanChangesRequested(t *testing.T) {
 // e.g. COMMENTED, alongside a separate marker-carrying issue comment) —
 // observed for a real bot in the wild (pg2-2j5ac), reproduced here with a
 // synthetic marker/pattern per this file's own "no real vendor identifiers"
-// convention (see packages/pg-pr/internal/verdict/verdict_test.go's
+// convention (see the retired PR tool's internal/verdict/verdict_test.go's
 // identical note).
 func TestComputeApprovals_CommentVerdictGrammar(t *testing.T) {
 	classifier, err := verdict.New([]verdict.Generation{

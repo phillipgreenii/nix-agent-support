@@ -1,8 +1,8 @@
 // backend.go: Backend implements pkg/provider/issue.Provider against this
 // workspace's own bd tracker — the first Tier-2 Issue backend (interfaces.md's op catalog). Show's read side and Create's write side follow the concrete
-// bd-CLI-wrapper precedent packages/pg-pr/pkg/beads/mergerequest.go and
+// bd-CLI-wrapper precedent the retired PR tool's pkg/beads/mergerequest.go and
 // action.go already establish (exec bd, parse `--json`/parse the returned
-// id); Comment and Transition are new code with no existing pg-pr wrapper
+// id); Comment and Transition are new code with no existing wrapper in the retired PR tool
 // to port, using that same exec-and-parse STYLE as their only precedent
 // [bead: Carry-over basis].
 //
@@ -140,7 +140,7 @@ func (b *Backend) run(ctx context.Context, args ...string) (jsonData []byte, err
 // "P<n>" form bd's own `-p`/`--priority` flag documents as an accepted
 // alias ("Priority (0-4 or P0-P4, 0=highest)") — a faithful round-trippable
 // rendering of bd's actual model rather than an invented High/Medium/Low
-// scale (pg-pr's carried-over api.Issue.Priority convention has no fixed
+// scale (the retired PR tool's carried-over api.Issue.Priority convention has no fixed
 // scale of its own; each backend's Show renders whatever its tracker
 // returns as a string).
 func formatPriority(p int) string {
@@ -254,7 +254,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 // carries over action.go's CreateAction "exec bd create ..., parse the
 // returned id" plumbing [bead: Carry-over basis], adapted to a plain bd
 // issue with none of CreateAction's parent-child/discovered-from wiring —
-// that wiring is specific to pg-pr's review workflow and does not carry
+// that wiring is specific to the retired PR tool's review workflow and does not carry
 // over. --description was added by bead pg2-akfw5 (review finding A-33: Create previously
 // had no way to set one at all). --metadata/--parent were added by bead
 // pg2-2j5ac.28.3 (this bead's own Contract widening IssueInput). Metadata
@@ -309,7 +309,7 @@ func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.I
 }
 
 // Comment implements issue.Provider.Comment via `bd comment <id> <body>
-// --json`. New code (no existing pg-pr wrapper to port), using
+// --json`. New code (no existing wrapper in the retired PR tool to port), using
 // action.go/mergerequest.go's exec-and-parse pattern as its style precedent
 // only.
 //
@@ -331,7 +331,7 @@ func (b *Backend) Comment(ctx context.Context, id, body string) error {
 }
 
 // Transition implements issue.Provider.Transition via `bd update <id>
-// --status <targetState> --json`. New code (no existing pg-pr wrapper to
+// --status <targetState> --json`. New code (no existing wrapper in the retired PR tool to
 // port). Freedom-boundary choice: this method does NOT validate
 // targetState against Vocabulary client-side — it defers entirely to bd
 // update's own rejection (bd's `invalid status "..."` message, classified

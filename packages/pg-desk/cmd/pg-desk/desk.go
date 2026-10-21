@@ -97,8 +97,8 @@ func validDisposition(v string) bool {
 
 // outputEnvVar is pg-desk's own output-mode override [design "Human views
 // and operator commands": "The PG_DESK_OUTPUT=json environment variable
-// overrides the default text rendering"], mirroring pg-pr's PGPR_OUTPUT
-// (packages/pg-pr/internal/output.EnvVar).
+// overrides the default text rendering"], mirroring the retired PR tool's PGPR_OUTPUT
+// (the retired PR tool's internal/output.EnvVar).
 const outputEnvVar = "PG_DESK_OUTPUT"
 
 // resolveJSONOutput reports whether JSON output is selected: either the

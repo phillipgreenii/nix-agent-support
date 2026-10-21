@@ -1,8 +1,8 @@
 // auth_test.go is carried over from
-// packages/pg-pr/pkg/provider/cicd/ghactions/ghauth_test.go
+// the retired PR tool's pkg/provider/cicd/ghactions/ghauth_test.go
 // [contract: "Tests: carry over the existing test files alongside the
 // ported implementation (adapted types)"], adapted to this backend's own
-// internal/github package (no packages/pg-pr dependency, no local vcs
+// internal/github package (no dependency on the retired PR tool, no local vcs
 // package — see internal/github/auth.go's doc comment) and simplified: the
 // original test wrapped a spyCommander around github.CLI.Command to
 // capture the child env a *separate* cliGHRunner (ghactions.go's own type,

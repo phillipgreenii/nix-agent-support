@@ -56,7 +56,7 @@ const ProtocolVersion = 1
 // Common/meta op names, shared across every capability.
 const (
 	// OpAuthStatus is the auth preflight op every backend may answer. Its
-	// AuthStatus result-shape convention carries over unchanged from pg-pr's
+	// AuthStatus result-shape convention carries over unchanged from the retired PR tool's
 	// existing convention.
 	OpAuthStatus = "auth_status"
 	// OpCapabilities is the capability-discovery op; see CapabilitiesResponse.

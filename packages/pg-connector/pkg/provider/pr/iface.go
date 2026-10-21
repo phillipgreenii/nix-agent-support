@@ -2,7 +2,7 @@
 // capability-scoped Go interface (never named after a backend/system)
 // (INV-CAP-1) that a Tier-2 PR backend's concrete provider implements. It
 // matches this repo's existing small-per-capability-interface convention
-// (e.g. vcs.Provider in packages/pg-pr/pkg/provider/vcs) rather than one
+// (e.g. vcs.Provider in the retired PR tool's pkg/provider/vcs) rather than one
 // interface spanning multiple systems (INV-CAP-1).
 //
 // This package sits alongside pkg/schema and pkg/scriptout as part of the

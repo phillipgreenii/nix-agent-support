@@ -7,7 +7,7 @@ import (
 )
 
 // This file pins the `pg-desk open --json` machine-readable contract, ported
-// from packages/pg-pr/cmd/pg-pr/open_json_test.go: the top-level payload is a
+// from the retired PR tool's cmd/open_json_test.go: the top-level payload is a
 // BARE JSON ARRAY of row objects, never an enveloped object, so an empty
 // selection is a well-defined empty array.
 

@@ -124,7 +124,7 @@ let
         type = lib.types.str;
         description = ''
           Bare command the router invokes for this delegate -- never a plugin-relative
-          path, matching the ceta/pg-pr precedent (ADR 0071 §2.7): the command must
+          path, matching the ceta precedent (ADR 0071 §2.7): the command must
           resolve on PATH, typically via this delegate's own `home.packages` entry.
         '';
       };

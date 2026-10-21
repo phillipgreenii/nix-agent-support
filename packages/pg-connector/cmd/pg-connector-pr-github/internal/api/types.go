@@ -1,11 +1,11 @@
-// Package api is a trimmed, local copy of pg-pr's pkg/api types — just the
+// Package api is a trimmed, local copy of the retired PR tool's pkg/api types — just the
 // shapes internal/github's ported GitHub logic needs (Comment, Review; PR
 // lives in pr.go). Copied rather than imported because packages/pg-connector's
-// go.mod MUST NOT depend on packages/pg-pr (layout_convention_test.go). This is an
+// go.mod MUST NOT depend on the retired PR tool (layout_convention_test.go). This is an
 // internal representation only: internal (the backend's pr.Provider glue)
-// maps it to pkg/schema.PR at the Show boundary — pg-pr's own
+// maps it to pkg/schema.PR at the Show boundary — the retired PR tool's own
 // api.Issue/api.BranchInfo are out of scope here since nothing in this
-// backend's ported logic uses them. CIRun (pg-pr's CI-run shape, used only
+// backend's ported logic uses them. CIRun (the retired PR tool's CI-run shape, used only
 // by this backend's own now-deleted EnrichedPR bulk-fetch optimization) was
 // removed as dead surface alongside it [bead pg2-lh3c4] — this backend has
 // no CI-run consumer; pg-connector's `ci` capability has its own
@@ -69,7 +69,7 @@ type Comment struct {
 
 	// ReviewID is the owning review's id for an inline/review-thread comment;
 	// empty for a top-level (issue) comment. Added here (internal/github's
-	// own call-site adaptation, not present on pg-pr's upstream api.Comment)
+	// own call-site adaptation, not present on the retired PR tool's upstream api.Comment)
 	// so this backend's Show can nest a review-thread comment under its
 	// owning PRReview.Comments rather than only ever flattening it into
 	// PR.Comments (interfaces.md's pr op catalog).

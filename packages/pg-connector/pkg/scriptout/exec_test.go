@@ -14,7 +14,7 @@ import (
 )
 
 // --------------------------------------------------------------------
-// Test-helper-process pattern (mirrors pg-pr's pkg/plugin/scriptout).
+// Test-helper-process pattern (mirrors the retired PR tool's pkg/plugin/scriptout).
 // --------------------------------------------------------------------
 
 func TestHelperProcess(t *testing.T) {

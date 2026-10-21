@@ -26,7 +26,7 @@ import (
 // workspace directory.
 //
 // Behind the `contract` build tag on purpose, mirroring
-// packages/pg-pr/pkg/beads/contract_test.go's own resolution to the EXACT
+// the retired PR tool's pkg/beads/contract_test.go's own resolution to the EXACT
 // failure this backend hit while developing this file (bead pg2-5ek6b,
 // closed): `bd init`'s database defaults to the issue prefix, but the
 // *server* it talks to (`bd dolt set database`'s doc: "default: issue
@@ -39,7 +39,7 @@ import (
 // initialized" collision against that shared server (pg2-5ek6b's own
 // diagnosis), so this must stay OFF the default unit-test build (and thus
 // off the pre-commit run-unit-tests hook and the plain
-// checks.pg-connector-go-tests gate) exactly like pg-pr's own contract
+// checks.pg-connector-go-tests gate) exactly like the retired PR tool's own contract
 // split; (2) a FIXED prefix persists as a same-named database on that
 // shared server across separate test runs (t.TempDir()'s cleanup only
 // deletes the local directory, not a server-side database), so prefix

@@ -262,7 +262,7 @@ type prShowFields struct {
 
 // hasConflict ports api.PR.HasConflict()'s exact rule (see
 // internal/gather/gather.go's own hasConflict precedent, and
-// packages/pg-pr/internal/sync/sync.go's original): either mergeability
+// the retired PR tool's internal/sync/sync.go's original): either mergeability
 // enum (CONFLICTING) or merge-state status (DIRTY). UNKNOWN is not a
 // conflict.
 func (p prShowFields) hasConflict() bool {

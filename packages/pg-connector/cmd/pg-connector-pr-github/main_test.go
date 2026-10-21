@@ -175,7 +175,7 @@ func TestNewDispatchTable_CapabilitiesOpsMatchesTableKeys(t *testing.T) {
 // scriptout-level test that this binary's main() correctly wires its op
 // table into the Tier-1 core's generic serve loop
 // (pkg/scriptout.ServeLoop): an end-to-end stdin-JSON-in, stdout-JSON-out
-// exercise, mirroring packages/pg-pr/pkg/plugin/scriptout/scriptout_test.go's
+// exercise, mirroring the retired PR tool's pkg/plugin/scriptout/scriptout_test.go's
 // own style. That file's own runServe test helper is unexported in a
 // different package (pkg/scriptout, a different module's package this one
 // cannot reach into), so this backend's own main() is instead exercised

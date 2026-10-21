@@ -1147,7 +1147,7 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	// package's own non-reentrant mutex on the SECOND recursive entry
 	// (reproduced live: run/run-until-idle hung forever the moment
 	// config.Load()'s first slog.Info call fired, confirmed via a SIGQUIT
-	// goroutine dump). pg-pr's own internal/sync/daemon.go sidesteps this
+	// goroutine dump). The retired PR tool's own internal/sync/daemon.go sidesteps this
 	// the same way (NewTextHandler/NewJSONHandler build a handler directly,
 	// never touch slog.Default()) — mirrored here rather than rediscovered.
 	slog.SetDefault(slog.New(telemetry.Fanout(

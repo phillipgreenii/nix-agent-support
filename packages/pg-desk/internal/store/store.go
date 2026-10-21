@@ -41,14 +41,14 @@ import (
 // busyTimeoutMillis is the SQLite busy_timeout applied on every connection,
 // letting `serve`, the CLI, and `run` overlap without "database is locked"
 // errors. The design doc's section 7.6 states WAL + a busy timeout but no
-// specific value, so this ports pg-pr's own store's existing precedent
-// (packages/pg-pr/internal/store/store.go's Open) verbatim: 5000ms.
+// specific value, so this ports the retired PR tool's own store's existing precedent
+// (the retired PR tool's internal/store/store.go's Open) verbatim: 5000ms.
 const busyTimeoutMillis = 5000
 
 // DefaultPath returns the canonical store file path, honouring
 // XDG_STATE_HOME per the design doc's section 7.6 ("SQLite at
 // $XDG_STATE_HOME/pg-desk/store.db"). Fallback: ~/.local/state/pg-desk/store.db,
-// mirroring pg-pr's internal/store.DefaultPath.
+// mirroring the retired PR tool's internal/store.DefaultPath.
 func DefaultPath() string {
 	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
 		return filepath.Join(xdg, "pg-desk", "store.db")
@@ -90,7 +90,7 @@ type Store struct {
 // Production leaves it EMPTY, so SQLite keeps its default (FULL) and every
 // commit to the store is durably flushed. Tests set it to "OFF" via
 // SetSynchronousForTests (directly, or transitively through OpenForTest),
-// mirroring pg-pr's internal/store — durability is meaningless for a
+// mirroring the retired PR tool's internal/store — durability is meaningless for a
 // database deleted at test exit, and skipping the fsyncs keeps a package
 // with many tests well inside go test's default timeout.
 var synchronousPragma string

@@ -6,7 +6,7 @@
 time, and — when `sync.mode` is `plan` — that PR's own planned sync writes (kind and content
 hash; see [`sync.md`](sync.md)). `--refresh` MUST run the pipeline (see
 [`pipeline-run.md`](pipeline-run.md)) for that id first, then print the resulting interpretation.
-This replaces `pg-pr pr view`'s enrichment display and `pg-pr sync --pr N` as the manual re-check
+This replaces the retired PR tool's `pr view` enrichment display and `sync --pr N` as the manual re-check
 (D20) — the bead-writing call sites this docket's design retargets point here.
 
 Exit codes: `0` on success, including when `--refresh` completes a degraded run (degraded is not

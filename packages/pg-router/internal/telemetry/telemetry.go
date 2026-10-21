@@ -7,8 +7,8 @@
 // pg-router never refuses to start because a local OTel collector is down.
 //
 // This package is a deliberate small duplication of
-// packages/pg-pr/internal/telemetry's Init/NewSlogHandler/Fanout shape:
-// `internal/` packages cannot be imported across the pg-pr/pg-router module
+// the retired PR tool's internal/telemetry's Init/NewSlogHandler/Fanout shape:
+// `internal/` packages cannot be imported across the retired PR tool/pg-router module
 // boundary, so the proven pattern is copied rather than shared. Only the LOG
 // half is copied here — pg-router emits no spans, so there is no trace
 // provider to install (traces were not requested for pg-router). Metrics use
@@ -41,7 +41,7 @@ import (
 )
 
 // scopeName is the OTel instrumentation-scope name NewSlogHandler binds its
-// otelslog bridge to. Mirrors pg-pr's own TracerName constant in spirit
+// otelslog bridge to. Mirrors the retired PR tool's own TracerName constant in spirit
 // (same value shape — the instrumentation library's Go import path) but
 // renamed: pg-router installs no tracer, so calling it "TracerName" here
 // would misdescribe what it is used for.

@@ -1,6 +1,6 @@
 // provider.go: Backend implements pkg/provider/ci.Provider against GitHub
 // Actions by carrying over
-// packages/pg-pr/pkg/provider/cicd/ghactions's existing ListRuns/GetLogs/
+// the retired PR tool's pkg/provider/cicd/ghactions's existing ListRuns/GetLogs/
 // RerunFailed GitHub calls, adapted to ci.Provider's schema.CIRun result
 // type [contract: carry-over basis]. GetLogs' own gh call passes `--repo`,
 // supplied directly by the caller as GetLogs' own repo argument
@@ -33,11 +33,11 @@ import (
 )
 
 // ProviderName tags every CIRun this backend returns, carried over
-// unchanged from packages/pg-pr/pkg/provider/cicd/ghactions.ProviderName.
+// unchanged from the retired PR tool's pkg/provider/cicd/ghactions.ProviderName.
 const ProviderName = "github-actions"
 
 // ghRunner abstracts the gh CLI for tests — the same seam
-// packages/pg-pr/pkg/provider/cicd/ghactions.Provider uses, now satisfied
+// the retired PR tool's pkg/provider/cicd/ghactions.Provider uses, now satisfied
 // directly by *internal/github.CLI (whose Run method already performs the
 // token-first choke point and auth-failure classification), rather than by
 // a second wrapping type the way ghactions.go's own cliGHRunner did

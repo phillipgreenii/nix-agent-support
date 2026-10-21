@@ -100,9 +100,9 @@ groups:
       #   pg_desk_dashboard_stale unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)
       # i.e. drop the stale series whenever ANY SYSTEM_PAUSE series reads 1.
       #   - `on()` matches on no labels, so the differing label sets (job=
-      #     pg-desk/pg-pr vs job=pg-router, instance, ...) cannot make the
+      #     pg-desk/pg-desk-legacy vs job=pg-router, instance, ...) cannot make the
       #     match silently fail and disable the alert; both the job=pg-desk
-      #     and the job=pg-pr duplicate series are suppressed together.
+      #     and the job=pg-desk-legacy duplicate series are suppressed together.
       #   - pg-router exports pg_router_gates_active ONLY for gate types
       #     currently in force (an ObservableGauge with one point per active
       #     gate), so the series is normally ABSENT. An absent or 0 gate
@@ -386,7 +386,7 @@ groups:
       # query) the metric has NO series for that type: no verdict, never a
       # false violation. noDataState: OK treats that absence as Normal.
       #
-      # `max by (type, tier)` collapses the duplicate job=pg-desk / job=pg-pr
+      # `max by (type, tier)` collapses the duplicate job=pg-desk / job=pg-desk-legacy
       # series so each (type, tier) is ONE alert instance. `for: 15m` rides
       # out a transient count spike (the bound is a steady-state sizing
       # property, not a point-in-time fault); warning, because a violated

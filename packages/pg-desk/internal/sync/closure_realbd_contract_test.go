@@ -49,7 +49,7 @@ import (
 // any other beads workspace.
 //
 // Behind the `contract` build tag, like the repo's other real-bd suites
-// (packages/pg-pr/pkg/beads, packages/pg-connector/cmd/pg-connector-issue-
+// (the retired PR tool's pkg/beads, packages/pg-connector/cmd/pg-connector-issue-
 // beads/internal/realbd_test.go): it is skipped when `bd` is not on PATH and
 // is not part of the unit tier. It is wired into the commit-time and
 // pre-land hooks by the `pg-desk-closure-contract-test` hook in flake.nix.
@@ -309,7 +309,7 @@ func TestClosure_RealBD_UntrackedDirectChild_ClosesDepthFirst(t *testing.T) {
 	f := newClosureRealBD(t)
 	anchor := f.create("anchor", "merge-request", "")
 	cycle := f.create("process-feedback cycle", "task", anchor)
-	legacy := f.create("legacy pg-pr child, untracked", "task", anchor)
+	legacy := f.create("legacy child, untracked", "task", anchor)
 	legacyKid := f.create("legacy child's own child", "task", legacy)
 
 	s := f.syncer()

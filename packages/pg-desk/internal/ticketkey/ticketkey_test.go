@@ -9,7 +9,7 @@ import (
 )
 
 // TestCompilePatterns_invalidPatternEmitsWarn mirrors
-// packages/pg-pr/internal/ticketlink's identical test: an invalid regex
+// the retired PR tool's internal/ticketlink's identical test: an invalid regex
 // pattern is skipped, with a slog.Warn naming it, rather than breaking the
 // caller.
 func TestCompilePatterns_invalidPatternEmitsWarn(t *testing.T) {
@@ -36,7 +36,7 @@ func TestCompilePatterns_invalidPatternEmitsWarn(t *testing.T) {
 	}
 }
 
-// TestParse ports packages/pg-pr/internal/ticketlink's own TestParse table
+// TestParse ports the retired PR tool's internal/ticketlink's own TestParse table
 // verbatim (same algorithm, same cases) — this package's Parse is a port,
 // not a reimplementation, and MUST match byte-for-byte.
 func TestParse(t *testing.T) {

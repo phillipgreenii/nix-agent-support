@@ -129,7 +129,7 @@ func TestNewDispatchTable_CapabilitiesOpsMatchesTableKeys(t *testing.T) {
 // (pkg/scriptout.ServeLoop): an end-to-end stdin-JSON-in, stdout-JSON-out
 // exercise, mirroring the sibling pg-connector-pr-github backend's own
 // main_test.go style (itself mirroring
-// packages/pg-pr/pkg/plugin/scriptout/scriptout_test.go's runServe
+// the retired PR tool's pkg/plugin/scriptout/scriptout_test.go's runServe
 // helper, unexported and in a different module's package this one cannot
 // reach into) — the real os.Stdin/os.Stdout ServeLoop always reads,
 // swapped for pipes here, is the only external seam scriptout.ServeLoop

@@ -23,7 +23,7 @@ func main() {
 // not inside main() itself.
 func run() int {
 	// Telemetry (design section 5): called unconditionally, for every
-	// subcommand, mirroring packages/pg-pr/cmd/pg-pr/main.go's own
+	// subcommand, mirroring the retired PR tool's cmd/main.go's own
 	// Init call. Init never returns an error in practice — a missing
 	// OTEL_EXPORTER_OTLP_ENDPOINT installs a no-op LoggerProvider (the
 	// common case for a one-shot operator invocation with no OTLP env set),

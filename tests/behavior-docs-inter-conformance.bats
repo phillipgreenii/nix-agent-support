@@ -705,7 +705,7 @@ MD
   # THE REGRESSION GUARD. Both sets namespace by topic (INV-3 satisfied on both
   # sides) and neither declares a reference to the other, so INV-20 does not
   # require the names to differ. This shape failed `nix flake check` on main:
-  # pa-monitor's busy predicate and pg-pr's approval gate both chose `INV-GATE-1`.
+  # pa-monitor's busy predicate and a since-retired PR tool's approval gate both chose `INV-GATE-1`.
   A="$BATS_TEST_TMPDIR/ua"
   Bd="$BATS_TEST_TMPDIR/ub"
   mkdir -p "$A" "$Bd"
@@ -990,11 +990,11 @@ MD
   mkdir -p "$A"
   cat >"$A/invariants.md" <<'MD'
 # Implementer
-- **`INV-OWN-1`** — satisfies `INTF-CLI` through `pg-pr <id>` and `owner-emit <json>`.
+- **`INV-OWN-1`** — satisfies `INTF-CLI` through `pg-foo <id>` and `owner-emit <json>`.
 MD
   run name-collisions --strict "$A" "$Bd"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q 'asserts `pg-pr` beside'
+  echo "$output" | grep -q 'asserts `pg-foo` beside'
   echo "$output" | grep -q 'asserts `owner-emit` beside'
 }
 

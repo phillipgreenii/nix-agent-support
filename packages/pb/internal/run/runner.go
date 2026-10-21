@@ -1,6 +1,6 @@
 // Package run abstracts external-process execution behind a Runner interface so
 // pb's logic is unit-testable with a FakeRunner (no real pn/bd/git). Mirrors
-// pg-pr's beads.Runner and repo-base's exec.FakeRunner, generalised to name the
+// the retired PR tool's beads.Runner and repo-base's exec.FakeRunner, generalised to name the
 // binary per call.
 package run
 

@@ -81,7 +81,7 @@ const sectionSign = string(rune(0x00a7))
 //
 // pgConnectorModuleRoot is reused, not redefined: identifier_allowlist_test.go
 // (this same package) already declares it, mirroring pgPrModuleRoot in
-// packages/pg-pr/cmd/pg-pr/identifier_allowlist_test.go and ccpoolModuleRoot in
+// the retired PR tool's cmd/identifier_allowlist_test.go and ccpoolModuleRoot in
 // ccpool's own guard.
 //
 // Repo-wide the glyph still appears hundreds of times across other packages'

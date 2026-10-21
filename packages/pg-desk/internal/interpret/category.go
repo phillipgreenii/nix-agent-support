@@ -10,7 +10,7 @@ import "strings"
 //
 // There is no Go source in this repo to port this from — "df-categorize" is
 // today's LLM/ccpool-prompt-driven classifier in the private deployment, not
-// a package under packages/pg-pr (see interpret.go's package doc). This is
+// a package under the retired PR tool (see interpret.go's package doc). This is
 // therefore a new, deterministic, config-vocabulary-driven implementation,
 // not a port — a documented, cited deviation the packet's Validation section
 // explicitly allows.

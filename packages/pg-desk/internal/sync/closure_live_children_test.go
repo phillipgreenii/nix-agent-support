@@ -16,7 +16,7 @@ import (
 // `--change removed` gather (removedFacts) returns no work-beads at all, and
 // the configured work-beads query lists only merge-request beads plus
 // process-feedback:/review-pr: tasks, so a legacy child created by the old
-// pg-pr daemon was invisible to the cascade and bd >= 1.3.1 refused to close
+// the retired PR tool daemon was invisible to the cascade and bd >= 1.3.1 refused to close
 // the anchor ("cannot close X: 1 open child issue(s); close children first").
 // handleClosure therefore reads each closed bead's live children itself
 // (`pg-connector issue children <id>`).

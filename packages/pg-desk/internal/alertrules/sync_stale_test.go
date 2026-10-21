@@ -90,8 +90,8 @@ func TestSyncStaleRuleExprMatchesModel(t *testing.T) {
 	}
 }
 
-// Both the job=pg-desk series and its job=pg-pr duplicate are stale.
-var staleBoth = []series{{"pg-desk", 1}, {"pg-pr", 1}}
+// Both the job=pg-desk series and its job=pg-desk-legacy duplicate are stale.
+var staleBoth = []series{{"pg-desk", 1}, {"pg-desk-legacy", 1}}
 
 func TestStaleWithoutPauseFires(t *testing.T) {
 	cases := map[string][]series{
@@ -107,14 +107,14 @@ func TestStaleWithoutPauseFires(t *testing.T) {
 
 func TestStaleDuringPauseDoesNotFire(t *testing.T) {
 	// The gate series carries job=pg-router while the stale series carry
-	// job=pg-desk/pg-pr: on() must still match across the differing labels.
+	// job=pg-desk/pg-desk-legacy: on() must still match across the differing labels.
 	if firing(evalStaleRule(staleBoth, []series{{"pg-router", 1}})) {
 		t.Fatal("stale snapshot fired during a SYSTEM_PAUSE gate")
 	}
 }
 
 func TestFreshNeverFires(t *testing.T) {
-	fresh := []series{{"pg-desk", 0}, {"pg-pr", 0}}
+	fresh := []series{{"pg-desk", 0}, {"pg-desk-legacy", 0}}
 	for _, gate := range [][]series{nil, {{"pg-router", 1}}} {
 		if firing(evalStaleRule(fresh, gate)) {
 			t.Fatalf("fresh snapshot fired (gate=%v)", gate)

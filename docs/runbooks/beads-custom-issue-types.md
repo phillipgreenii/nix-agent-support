@@ -22,7 +22,7 @@ not been re-probed on 1.3.1).
 
 - `bd config set types.custom <list>` REPLACES the whole list. Passing only the
   new type silently unregisters every other custom type (including
-  `merge-request`, which the retired pg-pr depended on).
+  `merge-request`, which the retired PR tool depended on).
 - The type check that `bd create`/`bd list -t` run is NOT driven by the
   `types.custom` config value alone. bd keeps a separate `custom_types` table
   and validates against it; `bd types` lists that table, and the "invalid issue

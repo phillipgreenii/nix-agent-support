@@ -55,7 +55,7 @@ const (
 	// collapsed "Dropped PR Count" panel's lastNotNull semantics).
 	MetricDropped = "pg_desk_dropped"
 	// MetricSyncErrors counts sync failures for a PR, by repo (Phase 10),
-	// mirroring pg-pr-ops's "Sync errors" panel. Registered and exposed
+	// mirroring the retired PR tool's ops dashboard "Sync errors" panel. Registered and exposed
 	// here (see RecordSyncError) but — like pg-router's own throughput and
 	// dispatch_latency catalog members — with no live production call
 	// site wired from this package: serve never itself runs sync (that

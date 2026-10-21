@@ -1,13 +1,13 @@
 // provider.go: Backend implements pkg/provider/pr.Provider against GitHub,
 // gluing together internal/github's ported GitHub logic ("carries over
-// pg-pr's existing GitHub logic unchanged" — bead pg2-2j5ac's carry-over
+// the retired PR tool's existing GitHub logic unchanged" — bead pg2-2j5ac's carry-over
 // decision) with a live GitHub read on every call — this backend keeps no
 // local store (statelessness, D3; bead pg2-2j5ac.28.7 removed the
 // categorize/feedback_set writes and their backend-local JSON-file store,
 // since category/disposition are re-derived by pg-desk's interpreter
 // rather than persisted here). Backend also implements
 // pkg/provider.AuthChecker via internal/github.Provider.CheckAuth, carried
-// over from pg-pr's existing env-then-gh auth token chain (INV-AUTH-1).
+// over from the retired PR tool's existing env-then-gh auth token chain (INV-AUTH-1).
 package internal
 
 import (

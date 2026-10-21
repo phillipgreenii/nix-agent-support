@@ -13,22 +13,22 @@ import (
 )
 
 // This file is pg-connector's OWN copy of the mechanical guard for bead
-// pg2-tphcc, mirroring packages/pg-pr/cmd/pg-pr/identifier_allowlist_test.go.
+// pg2-tphcc, mirroring the retired PR tool's cmd/identifier_allowlist_test.go.
 //
 // # Why a copy, not a shared widening — bead pg2-h3db9
 //
-// packages/pg-pr's guard (TestIdentifierAllowlistGuard there) roots itself at
+// The retired PR tool's guard (TestIdentifierAllowlistGuard there) roots itself at
 // pgPrModuleRoot, which walks up from the test's working directory to the
-// nearest go.mod. That walk is structurally bounded to packages/pg-pr's own
+// nearest go.mod. That walk is structurally bounded to the retired PR tool's own
 // module: packages/pg-connector has its OWN go.mod (a separate Go module —
 // see checks.<system>.pg-connector-go-tests in flake.nix, whose src is
-// rooted at ./packages/pg-connector, matching pg-pr-go-tests' own
-// ./packages/pg-pr scoping), so pg-pr's test binary never sees this module's
+// rooted at ./packages/pg-connector, matching the retired PR tool's own
+// go-tests check scoping), so the retired PR tool's test binary never sees this module's
 // files at all, in or out of the nix sandbox. Generalizing pgPrModuleRoot to
 // "scan multiple known module roots" would not fix this: the nix check that
-// runs pg-pr-go-tests builds with only packages/pg-pr in its source tree, so
+// runs the retired PR tool's go-tests builds with only that tool's own source tree, so
 // packages/pg-connector's testdata is absent from that sandbox regardless of
-// what root-scanning logic pg-pr's test binary contains.
+// what root-scanning logic the retired PR tool's test binary contains.
 //
 // The fix mirrors the pattern packages/ccpool/cmd/ccpool/spec_citations_test.go
 // already documents for a Go MODULE boundary (as opposed to a same-module
@@ -39,9 +39,9 @@ import (
 // layout_convention_test.go — so this file lives alongside it.
 //
 // packages/pg-connector/cmd/pg-connector-pr-github/internal/github/testdata/
-// carried fixtures ported over from packages/pg-pr's own testdata/ (bead
-// pg2-2j5ac, the pg-pr → pg-connector migration), including the same
-// pg2-wb9yb-scrubbed placeholders ("teammate", "review-bot") pg-pr's own
+// carried fixtures ported over from the retired PR tool's own testdata/ (bead
+// pg2-2j5ac, the retired PR tool → pg-connector migration), including the same
+// pg2-wb9yb-scrubbed placeholders ("teammate", "review-bot") the retired PR tool's own
 // allowlist documents. That fixture (enriched-prs-single.json) and its
 // sibling native-stack-fields.json were deleted as dead surface (bead
 // pg2-lh3c4: they backed this backend's own EnrichedPRsProvider
@@ -53,34 +53,34 @@ import (
 // fixture. This guard exists so that any future carryover, or anything
 // pasted into this module's testdata/ afterward (the concrete near-miss:
 // bead pg2-6hkl5's body carries a real ZR repo/PR pair one paste away from
-// becoming a fixture here), is checked by something. Like pg-pr-go-tests,
+// becoming a fixture here), is checked by something. Like the retired PR tool's go-tests check,
 // no separate flake.nix check attribute is needed: mkGoTest never sets
 // subPackages, so checks.<system>.pg-connector-go-tests' `go test ./...`
 // already exercises this file.
 //
 // # No checked-in denylist — see the operator ruling this inverts
 //
-// Same ruling as pg-pr's copy (Phillip, 2026-08-24, bead pg2-tphcc, recorded
+// Same ruling as the retired PR tool's copy (Phillip, 2026-08-24, bead pg2-tphcc, recorded
 // in this repo's CLAUDE.md "Public Repository — No ZipRecruiter Disclosure"):
 // no denylist of forbidden tokens, plaintext or hashed, may live in any repo.
-// This guard is the same ALLOWLIST inversion pg-pr's copy uses — see that
+// This guard is the same ALLOWLIST inversion the retired PR tool's copy uses — see that
 // file's doc comment for the full rationale (why an allowlist, why testdata/
 // is the guarded scope, and the guard's known limitation against free-text
-// prose). This file's allowlist below is deliberately NARROWER than pg-pr's:
+// prose). This file's allowlist below is deliberately NARROWER than the retired PR tool's:
 // it carries only the identifiers pg-connector's own testdata actually uses
 // today (confirmed 2026-09-06 by re-running this guard's own regexes against
-// every file under packages/pg-connector/**/testdata/). pg-pr's bot/product
+// every file under packages/pg-connector/**/testdata/). The retired PR tool's bot/product
 // placeholders that do not (yet) appear here — coderabbitai, policy-bot,
 // dependabot, alice — are intentionally NOT pre-added; per the ruling's own
 // logic, adding an entry before it is needed is exactly the kind of
 // speculative list-growth an allowlist is meant to avoid forcing. Add one
-// here, with a comment saying why it is safe, the same deliberate way pg-pr's
+// here, with a comment saying why it is safe, the same deliberate way the retired PR tool's
 // list grew.
 var allowlistedIdentifiers = map[string]struct{}{
 	// the operator's own identity — the one exception the ruling allows.
 	"phillipgreenii":            {},
 	"phillipg@ziprecruiter.com": {},
-	// generic placeholder test identities carried over from pg-pr's own
+	// generic placeholder test identities carried over from the retired PR tool's own
 	// pg2-wb9yb scrub (see that file's doc comment). The production fixture
 	// that originally motivated these two (enriched-prs-single.json) was
 	// deleted as dead surface (bead pg2-lh3c4), but
@@ -99,7 +99,7 @@ func isAllowlistedIdentifier(id string) bool {
 }
 
 // identityFieldPattern, branchLoginPattern and gitTrailerPattern are the same
-// three structured-shape detectors pg-pr's copy uses — see that file's doc
+// three structured-shape detectors the retired PR tool's copy uses — see that file's doc
 // comments for what each matches and why a text scan (not a JSON parse) is
 // the established pattern.
 var identityFieldPattern = regexp.MustCompile(`"(?:login|author|reviewer|user)"\s*:\s*"([^"]*)"`)
@@ -139,7 +139,7 @@ func scanTextForIdentifiers(text string) []string {
 }
 
 // underTestdataDir reports whether rel (a path relative to some scan root)
-// has a "testdata" path component — same guarded-scope rationale as pg-pr's
+// has a "testdata" path component — same guarded-scope rationale as the retired PR tool's
 // copy (Go's own toolchain treats testdata specially, and it is exactly
 // where a captured-API-response fixture lives).
 func underTestdataDir(rel string) bool {
@@ -206,7 +206,7 @@ func scanTree(root string) (violations []string, scannedFiles int, err error) {
 
 // pgConnectorModuleRoot walks up from the test's working directory to the
 // directory holding go.mod — mirrors pgPrModuleRoot in
-// packages/pg-pr/cmd/pg-pr/identifier_allowlist_test.go and ccpoolModuleRoot
+// the retired PR tool's cmd/identifier_allowlist_test.go and ccpoolModuleRoot
 // in packages/ccpool/cmd/ccpool/spec_citations_test.go — so the guard covers
 // the whole packages/pg-connector module regardless of which package under
 // it runs the test.
@@ -230,13 +230,13 @@ func pgConnectorModuleRoot(t *testing.T) string {
 
 // TestIdentifierAllowlistGuard is pg-connector's copy of the mechanical guard
 // for bead pg2-tphcc (see this file's package-level doc comment for why a
-// copy, not a widening of pg-pr's own test, is the fix — bead pg2-h3db9):
+// copy, not a widening of the retired PR tool's own test, is the fix — bead pg2-h3db9):
 // packages/pg-connector's testdata/ fixtures may not carry a username/login/
 // handle-shaped token in a structured identity field unless it is on
 // allowlistedIdentifiers.
 //
 // Guarded scope, ratchet status and known limitation are identical to
-// pg-pr's own TestIdentifierAllowlistGuard — see that file's doc comment for
+// the retired PR tool's own TestIdentifierAllowlistGuard — see that file's doc comment for
 // the full rationale. This copy's walk reaches every testdata/ directory
 // under packages/pg-connector, whichever backend or package it lives under
 // (cmd/pg-connector-pr-github/internal/github/testdata/,
@@ -416,7 +416,7 @@ func TestIdentifierAllowlistGuardIgnoresZrNamingFamily(t *testing.T) {
 	// the set never defines.
 	const behaviorID = "INTF-" + "ZR-014"
 	content := `{
-  "module": "pg-pr-zr",
+  "module": "pg-zr-module",
   "envVar": "ZR_TOKEN",
   "behaviorId": "` + behaviorID + `",
   "beadRef": "pg2-zr123",

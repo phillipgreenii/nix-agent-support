@@ -569,7 +569,7 @@ func TestDefault_allowedTools(t *testing.T) {
 
 // TestDefault_allowedToolsIsBaseAndNamesNoPRTool proves the built-in default
 // is exactly baseAllowedTools and carries no grant for a PR-management tool
-// (pg-pr is retired; bead pg2-k9vmd): pg-router's compiled-in allowlist names
+// (the PR tool is retired; bead pg2-k9vmd): pg-router's compiled-in allowlist names
 // none, and the former PG_ROUTER_PR_TOOL knob is gone.
 func TestDefault_allowedToolsIsBaseAndNamesNoPRTool(t *testing.T) {
 	if got := Default().AllowedTools; got != baseAllowedTools {

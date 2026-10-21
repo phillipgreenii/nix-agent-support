@@ -1,7 +1,7 @@
 package interpret
 
 // Ownership is the "can I act?" axis for a tracked PR — a closed 3-value set,
-// ported from packages/pg-pr/internal/ownership.Ownership.
+// ported from the retired PR tool's internal/ownership.Ownership.
 type Ownership string
 
 const (
@@ -15,7 +15,7 @@ const (
 // ownership.Ownership.ActsAsMine.
 func (o Ownership) ActsAsMine() bool { return o == OwnershipMine || o == OwnershipCoOwned }
 
-// classifyOwnership applies pg-pr's exact precedence: authored-by-self wins
+// classifyOwnership applies the retired PR tool's exact precedence: authored-by-self wins
 // (Mine); else a self-authored commit on the PR's branch (CoOwned); else
 // Team. Empty self => Team. Ported from ownership.Classify.
 func classifyOwnership(self, prAuthor string, commitAuthors []string) Ownership {

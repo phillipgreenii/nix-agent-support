@@ -1,7 +1,7 @@
 // Package github is pg-connector-pr-github's GitHub VCS provider — ported
-// unchanged from packages/pg-pr/pkg/provider/vcs/github (bead pg2-2j5ac's
-// "carries over pg-pr's existing GitHub logic unchanged" decision), re-homed
-// here so packages/pg-connector's go.mod need not depend on packages/pg-pr.
+// unchanged from the retired PR tool's pkg/provider/vcs/github (bead pg2-2j5ac's
+// "carries over the retired PR tool's existing GitHub logic unchanged" decision), re-homed
+// here so packages/pg-connector's go.mod need not depend on the retired PR tool.
 // This package is compiler-enforced invisible outside
 // cmd/pg-connector-pr-github (it lives under that binary's own internal/
 // tree).
@@ -11,7 +11,7 @@
 // ghProvider seam) plus the twelve write methods below (ListMyPRs,
 // ListTeamPRs, CreatePR, UpdatePR, SetDraft, SetAutomerge, Merge, Close,
 // AddComment, ReplyToThread, ResolveThread, PostReview), carried over
-// alongside the read paths for parity with pg-pr's own vcs.Provider shape.
+// alongside the read paths for parity with the retired PR tool's own vcs.Provider shape.
 // None of the twelve is called by anything in pg-connector today — only
 // `var _ vcs.Provider = (*Provider)(nil)` below keeps them reachable — but
 // unlike this package's former enrich.go/fingerprint.go/pending.go (deleted
@@ -545,9 +545,9 @@ func (p *Provider) GetFilesGated(ctx context.Context, repo string, number int, g
 
 // ghPRCommit is the JSON shape of one node of the commits connection. Authors
 // carries the commit's git-identity authors (the query asks for the first
-// only); GetCommits uses that first entry's linked login, matching pg-pr's
+// only); GetCommits uses that first entry's linked login, matching the retired PR tool's
 // own existing convention for a commit's "the" author
-// (packages/pg-pr/pkg/provider/vcs.EnrichedPR.CommitAuthors' doc comment:
+// (the retired PR tool's pkg/provider/vcs.EnrichedPR.CommitAuthors' doc comment:
 // "author.user.login"). User is null when the identity has no GitHub account.
 type ghPRCommit struct {
 	Commit struct {
@@ -1953,7 +1953,7 @@ func (p *Provider) CheckAuth(ctx context.Context) error {
 // pg2-7wqkr), but actually decodes the response instead of discarding it —
 // the activity capability scopes to the viewer, and this backend is
 // stateless (D3, no local self_login configuration of its own the way
-// pg-pr's sync layer carries) so it resolves that fresh on every call.
+// the retired PR tool's sync layer carries) so it resolves that fresh on every call.
 func (p *Provider) ViewerLogin(ctx context.Context) (string, error) {
 	raw, err := p.runRead(ctx, readOpts{}, "api", "graphql", "-f", "query={ viewer { login } }")
 	if err != nil {
@@ -1982,8 +1982,8 @@ func (p *Provider) ViewerLogin(ctx context.Context) (string, error) {
 // pg2-2j5ac.30.7). Neither `gh search prs --json` nor `gh pr view --json`
 // support a reviewThreads field (verified live 2026-09-15: both error
 // "Unknown JSON field" and list their full supported field sets, neither
-// containing reviewThreads), so this mirrors pg-pr's own proven mechanism
-// for this exact field (packages/pg-pr/pkg/provider/vcs/github/
+// containing reviewThreads), so this mirrors the retired PR tool's own proven mechanism
+// for this exact field (the retired PR tool's pkg/provider/vcs/github/
 // fingerprint.go's fingerprintQuery requests the identical
 // `reviewThreads { totalCount }` sub-selection with no pagination args),
 // narrowed here to a single PR via the same repository/pullRequest node

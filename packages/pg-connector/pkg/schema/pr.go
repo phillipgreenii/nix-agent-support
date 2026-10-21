@@ -3,13 +3,13 @@
 // pkg/schema placeholder (see doc.go).
 //
 // The field set is carried over from this repo's existing
-// packages/pg-pr/pkg/api.PR/api.Comment/api.Review types, per the design's
+// the retired PR tool's pkg/api.PR/api.Comment/api.Review types, per the design's
 // explicit carry-over decision that pg-connector's PR backend "carries over
-// pg-pr's existing GitHub logic unchanged, reading and writing the same
-// underlying GitHub state pg-pr always has". It is
-// deliberately a SMALLER field set than pg-pr's internal api.PR: this is the
+// the retired PR tool's existing GitHub logic unchanged, reading and writing the same
+// underlying GitHub state the retired PR tool always has". It is
+// deliberately a SMALLER field set than the retired PR tool's internal api.PR: this is the
 // pr capability's generic wire contract (what a `pr show` caller needs —
-// identity and review/feedback state), never pg-pr's own
+// identity and review/feedback state), never the retired PR tool's own
 // sync/dashboard-ingestion shape. Fields specific to that internal use
 // (StackID, MergedAt, enrichment/co-ownership bookkeeping, …) are out of
 // scope here [freedom boundary]. The category/disposition write fields
@@ -145,7 +145,7 @@ var PRListFields = []string{
 // capability's "show" op and carried by pkg/provider/pr.Provider.Show
 // (interfaces.md's pr op catalog).
 type PR struct {
-	// ID is the PR's identity, carried over as-is from pg-pr's existing
+	// ID is the PR's identity, carried over as-is from the retired PR tool's existing
 	// api.Comment.ID string convention (a string, not a numeric id).
 	ID     string   `json:"id"`
 	Repo   string   `json:"repo"`
@@ -162,8 +162,8 @@ type PR struct {
 	Labels []string `json:"labels,omitempty"`
 
 	// AsOf is this read's own as-of time (RFC3339, UTC) — added by bead
-	// pg2-681xo, mirroring the pair pg-pr's own read seams already publish
-	// under packages/pg-pr/docs/behavior/invariants.md's INV-ASOF-1
+	// pg2-681xo, mirroring the pair the retired PR tool's own read seams already publish
+	// under the retired PR tool's docs/behavior/invariants.md's INV-ASOF-1
 	// ("every acted-on read seam MUST carry its own as-of time ... an item
 	// or payload with no usable as-of time MUST be reported stale").
 	// Empty only when a backend has no usable as-of time for this read,
@@ -338,7 +338,7 @@ type PRConnections struct {
 
 // PRComment is one PR-level or review-thread comment/finding. Both ID (on
 // PR itself, above) and CommentID are strings, carried over as-is from
-// pg-pr's existing api.Comment.ID string field.
+// the retired PR tool's existing api.Comment.ID string field.
 type PRComment struct {
 	ID       string `json:"id"`
 	Author   string `json:"author"`

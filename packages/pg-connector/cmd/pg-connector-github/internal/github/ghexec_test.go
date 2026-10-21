@@ -76,7 +76,7 @@ var leakedGitDirFamily = []string{
 	"GIT_INDEX_FILE=/leaked/.git/index",
 	"GIT_COMMON_DIR=/leaked/.git",
 	"GIT_OBJECT_DIRECTORY=/leaked/.git/objects",
-	"GIT_PREFIX=packages/pg-pr/",
+	"GIT_PREFIX=packages/pg-connector/",
 	"GIT_CEILING_DIRECTORIES=/",
 }
 

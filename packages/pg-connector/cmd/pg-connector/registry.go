@@ -1,13 +1,13 @@
 // registry.go: the connector.<type> backend registry loader.
 //
 // Config format, resolution order ($PG_PR_CONFIG -> $XDG_CONFIG_HOME ->
-// ~/.config), and YAML shape carry over unchanged from pg-pr's existing
-// config machinery in packages/pg-pr/internal/config — including the
+// ~/.config), and YAML shape carry over unchanged from the retired PR tool's
+// config machinery — including the
 // literal env-var name $PG_PR_CONFIG, which is NOT renamed even though the
-// binary is now pg-connector. pg-connector and pg-pr can share a single
-// config.yaml on a host running both: pg-connector only looks at the
+// binary is now pg-connector. pg-connector can share a single
+// config.yaml with other readers of that file: pg-connector only looks at the
 // connector: key; everything else in the file is simply ignored (YAML
-// decoding here is unknown-fields-tolerant, matching pg-pr's own decode).
+// decoding here is unknown-fields-tolerant, matching the retired PR tool's own decode).
 package main
 
 import (
@@ -101,7 +101,7 @@ type osEnv struct{}
 func (osEnv) Getenv(k string) string       { return os.Getenv(k) }
 func (osEnv) UserHomeDir() (string, error) { return os.UserHomeDir() }
 
-// LoadRegistry loads the connector.<type> registry using pg-pr's existing
+// LoadRegistry loads the connector.<type> registry using the retired PR tool's
 // config resolution order and YAML shape.
 func LoadRegistry() (*Registry, error) {
 	return loadRegistryFromEnv(osEnv{})
@@ -176,9 +176,9 @@ func parseRegistry(data []byte, path string) (*Registry, error) {
 	var doc registryDoc
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	// KnownFields stays false at THIS (top) level deliberately — see the
-	// file header comment: pg-connector and pg-pr can share one
+	// file header comment: pg-connector can share one
 	// config.yaml, and everything outside the connector: key belongs to
-	// pg-pr, not to us. It would be wrong to reject pg-pr's own keys here.
+	// other readers, not to us. It would be wrong to reject their keys here.
 	dec.KnownFields(false)
 	if err := dec.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("registry: parse %s: %w", path, err)

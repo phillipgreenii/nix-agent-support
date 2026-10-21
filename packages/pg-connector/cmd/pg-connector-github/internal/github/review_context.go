@@ -32,7 +32,7 @@ import (
 // before, first, last). Only PullRequest.comments takes an orderBy, and that
 // accepts only UPDATED_AT, which is not creation order; it is left unused so
 // the three connections behave alike. This was checked for this change against
-// the argument lists above; the pg-pr enrichment query (packages/pg-pr/pkg/
+// the argument lists above; the retired PR tool's enrichment query (its pkg/
 // provider/vcs/github/enrich.go) records the same fact from live use and
 // paginates reviewThreads from creation time for that reason. So pages are
 // read in server order (oldest first in practice) up to the cap and what was

@@ -3,7 +3,7 @@
 // Fanout lets serve keep its existing log-file output while additionally
 // exporting every record over OTLP through the otelslog bridge.
 // NewSlogHandler builds that bridge bound to the global LoggerProvider
-// Init installs. Mirrors pg-pr's internal/telemetry/slog.go exactly — see
+// Init installs. Mirrors the retired PR tool's internal/telemetry/slog.go exactly — see
 // telemetry.go's package doc for why this package otherwise duplicates
 // that proven pattern rather than importing it across the module
 // boundary.

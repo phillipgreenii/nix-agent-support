@@ -149,7 +149,7 @@ directory and never starts a dolt server.
     cannot meet the zero-denial rule.
   - **passthrough.** `beads_dir` is the live workspace, used read-only through the machine `bd`. Kept for
     completeness; expect denials, which stop the run.
-- **pg-connector config.** A copy of the live `pg-pr` config (a read-only nix-store symlink in the
+- **pg-connector config.** A copy of the live the retired PR tool config (a read-only nix-store symlink in the
   live tree; the per-author search split is already live, `pg2-kn9n1`) minus the Jira backend (a Jira
   string, a map key naming it, and a `{name, command}` instance whose name or binary names it), with
   every `--beads-dir` word of a registered instance command (`--beads-dir <dir>` or `--beads-dir=<dir>`)

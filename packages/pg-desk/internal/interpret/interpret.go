@@ -8,16 +8,16 @@
 //
 // # Porting sources and their limits
 //
-// This packet's Contract names packages/pg-pr's internal/{snapshot,
+// This packet's Contract names the retired PR tool's internal/{snapshot,
 // freshness,ownership,agentregistry,enrich,beadsbridge} and
 // pkg/beads/{mergerequest,processingcycle,feedback}.go as porting sources.
-// pg-desk's go.mod does not depend on packages/pg-pr at all (only on
+// pg-desk's go.mod does not depend on the retired PR tool at all (only on
 // packages/pg-connector, for internal/gather's own test suite) — every
 // concept below is therefore RE-IMPLEMENTED against gather.Facts' actual
 // (JSON-only, stateless, single-shot) shape, not imported. Several of
-// pg-pr's ported behaviors depend on data Facts simply does not carry:
+// the retired PR tool's ported behaviors depend on data Facts simply does not carry:
 //
-//   - No revision/approval HISTORY: pg-pr's approval/gate-state staleness
+//   - No revision/approval HISTORY: the retired PR tool's approval/gate-state staleness
 //     (store.Approval.IsStale against a PRIOR head SHA) requires a
 //     persisted per-approver history (internal/snapshot/builder.go's
 //     classifyApprovals, attention.go's NeedsAttention). gather.Facts is one
@@ -43,7 +43,7 @@
 //     (approvals.go's isBotLogin). HumanApprovers/HumanApproved never count
 //     such a login; their approvals feed BotVerdict instead. Any other
 //     reviewer is treated as human.
-//   - No gate-state data: pg-pr's GateState is PROJECTED from a persisted
+//   - No gate-state data: the retired PR tool's GateState is PROJECTED from a persisted
 //     revision's gate verdict, written by internal/sync/revision.go
 //     (gateStateFromSync) — not a Phase 9 porting source, and not derivable
 //     from schema.CIRun either (pkg/schema/ci.go deliberately does not
@@ -59,7 +59,7 @@
 //     output shape (sorted by count desc, name asc), coarser recognition.
 //   - No WIP: annotation-table WIP is a packet-8 read-time join (design
 //     "Hidden and WIP are NOT interpreted"), so ready-to-promote and panel
-//     placement omit the WIP clauses pg-pr's mine_panels.go carries (the
+//     placement omit the WIP clauses the retired PR tool's mine_panels.go carries (the
 //     "wip on"/promotion-blocked-by-WIP shapes) — this package computes the
 //     D15 predicate as it can see it (own PR, draft, checks green, no bot
 //     disapproval, no conflict) and leaves the WIP gate to whatever joins
@@ -74,7 +74,7 @@
 //     carrying issue comment, using a real Review State (APPROVED) only when
 //     clean. approvals.go's computeApprovals now ALSO runs
 //     internal/verdict's comment-body verdict-marker grammar (ported from
-//     packages/pg-pr/internal/verdict, config.VerdictGenerations' consumer)
+//     the retired PR tool's internal/verdict, config.VerdictGenerations' consumer)
 //     over pr.allComments(), merging its Authority reading with the
 //     Review-state signal — disapproved wins across BOTH signals, never
 //     silently overridden by an approval from the other. See approvals.go's
@@ -124,7 +124,7 @@ func (SystemClock) Now() time.Time { return time.Now() }
 // Enrichment is the base (LLM-free) PR enrichment: kind, languages, size,
 // plus the two display facts (Title, URL) a human-readable dashboard row
 // needs to be usable at all. Urgency is scored/reported separately
-// (Urgency below) even though pg-pr's own enrich.Result bundles all four —
+// (Urgency below) even though the retired PR tool's own enrich.Result bundles all four —
 // the store's interpretation table (and this Contract) keeps "enrichment"
 // and "urgency" as two distinct columns.
 //

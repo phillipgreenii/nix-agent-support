@@ -4,10 +4,10 @@
 // like one.
 //
 // This is a NEW package local to packages/pg-desk, porting
-// packages/pg-pr/internal/ticketlink.Parse's exact matching algorithm
-// rather than importing it: packages/pg-pr and packages/pg-desk are
+// the retired PR tool's internal/ticketlink.Parse's exact matching algorithm
+// rather than importing it: the retired PR tool and packages/pg-desk are
 // separate Go modules, and ticketlink sits under an internal/ segment
-// whose visibility is scoped to importers under packages/pg-pr/... — Go's
+// whose visibility is scoped to importers under the retired PR tool's ... — Go's
 // toolchain refuses the cross-module import outright regardless of module
 // boundaries, since internal/ visibility is a directory-tree rule, not a
 // module-boundary one [docket pg2-2j5ac.40's packet "pg-desk run issue for

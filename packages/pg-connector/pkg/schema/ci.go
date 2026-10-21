@@ -5,7 +5,7 @@
 // (INV-REG-1).
 //
 // The field set began as this repo's existing
-// packages/pg-pr/pkg/api.CIRun type, per this repo's general carry-over
+// the retired PR tool's pkg/api.CIRun type, per this repo's general carry-over
 // convention for pg-connector's schemas, and has since grown by additions
 // (PRID, Repo, AsOf, Stale, Attempt; see each field's own doc comment).
 // api.CIRun's Description field is deliberately not carried over here.
@@ -71,7 +71,7 @@ type CIRun struct {
 	Provider   string `json:"provider"`
 
 	// HeadSHA is the commit SHA the run was triggered against, carried over
-	// as-is from packages/pg-pr/pkg/api.CIRun.HeadSHA.
+	// as-is from the retired PR tool's pkg/api.CIRun.HeadSHA.
 	HeadSHA string `json:"head_sha,omitempty"`
 
 	// Repo is this run's owning repo (owner/name form), added by
@@ -116,7 +116,7 @@ type CIRun struct {
 	// AsOf is this read's own as-of time (RFC3339, UTC) — added by bead
 	// pg2-4aoeg, extending the pr capability's own AsOf/Stale contract
 	// (schema.PR.AsOf, bead pg2-681xo — itself following
-	// packages/pg-pr/docs/behavior/invariants.md's INV-ASOF-1: "every
+	// the retired PR tool's docs/behavior/invariants.md's INV-ASOF-1: "every
 	// acted-on read seam MUST carry its own as-of time ... an item or
 	// payload with no usable as-of time MUST be reported stale") onto the
 	// ci capability. Empty only when a backend has no usable as-of time for

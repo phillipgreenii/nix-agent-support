@@ -5,7 +5,7 @@
 // (e.g. pr.Provider in packages/pg-connector/pkg/provider/pr) rather than
 // one interface spanning multiple systems (INV-CAP-1). This interface is
 // named ci.Provider — for the CI CAPABILITY itself — rather than reusing
-// packages/pg-pr/pkg/provider/cicd's old system-shaped "cicd" package name,
+// the retired PR tool's pkg/provider/cicd's old system-shaped "cicd" package name,
 // correcting that under INV-CAP-1's "scoped by capability, never by
 // system" rule (naming_convention_test.go).
 //
@@ -30,8 +30,8 @@ import (
 // one backend that owns the given id) using the targeted exit scheme
 // (0/4/1) (INV-EXIT-1).
 //
-// The method set carries over the shape of pg-pr's existing
-// packages/pg-pr/pkg/provider/cicd.Provider{ListRuns, GetLogs, RerunFailed}
+// The method set carries over the shape of the retired PR tool's existing
+// the retired PR tool's pkg/provider/cicd.Provider{ListRuns, GetLogs, RerunFailed}
 // [carry-over basis, per this packet's contract], translated to this
 // capability's own schema.CIRun result type.
 type Provider interface {

@@ -59,7 +59,7 @@
 #   deliberately narrower than a bare `grep -i "moved to"`: plain prose
 #   legitimately uses those words. Two real false positives this corpus
 #   already contains prove it —
-#     - `packages/pg-pr/docs/behavior/invariants.md` states, as an ACTIVE
+#     - a retired tool's `docs/behavior/invariants.md` states, as an ACTIVE
 #       behavior statement about UUID provenance, that four invariants carry a
 #       UUID "relocated to its correct owner"; and
 #     - USECASE-5's OWN definition illustrates the forbidden note in quotes:

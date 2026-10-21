@@ -11,8 +11,8 @@ import (
 // This file holds the review_pending read path (entity-change-flow contract
 // 9.1a): resolve the acting identity's PENDING review on a PR to a structured
 // record in ONE GraphQL round trip. It lives apart from github.go on purpose:
-// github.go holds the shared provider core (the former pg-pr drift pin was
-// removed with pg-pr, bead pg2-ijsep).
+// github.go holds the shared provider core (the former drift pin against the retired PR tool was
+// removed with it, bead pg2-ijsep).
 //
 // Why GraphQL and not the REST list: REST returns pending-review comments
 // only through a second call (/reviews/{id}/comments) and reports line=null

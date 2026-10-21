@@ -1,8 +1,8 @@
 // backend.go: Backend implements pkg/provider/issue.Provider against a real
 // external Jira integration, the issue capability's second Tier-2 backend.
 // Show's exec-and-decode shape carries over
-// packages/pg-pr/pkg/provider/issues/jira/jira.go's real, landed precedent
-// [carry-over basis: packages/pg-pr/pkg/provider/issues/jira/jira.go],
+// the retired PR tool's pkg/provider/issues/jira/jira.go's real, landed precedent
+// [carry-over basis: the retired PR tool's pkg/provider/issues/jira/jira.go],
 // adapted to schema.Issue's wider field set and to the ACTUAL binary/JSON
 // shape verified live on this machine (2026-09-08):
 //
@@ -141,7 +141,7 @@ var PriorityVocabulary = []string{"Highest", "High", "Medium", "Low", "Lowest"}
 // <KEY>`) this backend needs — verified against
 // phillipg-nix-repo-base/modules/jira/pkg/pjira/model.go (the real tool's
 // own wire shape), not assumed from
-// packages/pg-pr/pkg/provider/issues/jira/jira.go's older, narrower decode
+// the retired PR tool's pkg/provider/issues/jira/jira.go's older, narrower decode
 // (which predates pjira's rename from "jira" and does not carry
 // project/assignee).
 type pjiraIssue struct {

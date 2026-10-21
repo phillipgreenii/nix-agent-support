@@ -1,7 +1,7 @@
-// Package vcs is a local copy of pg-pr's pkg/provider/vcs interface —
+// Package vcs is a local copy of the retired PR tool's pkg/provider/vcs interface —
 // carried over so internal/github's ported Provider still type-checks
 // against the same interface shape it always has , without
-// packages/pg-connector's go.mod depending on packages/pg-pr. Nothing
+// packages/pg-connector's go.mod depending on the retired PR tool. Nothing
 // outside cmd/pg-connector-pr-github ever sees this package: the backend's
 // own pr.Provider glue (internal/provider.go) talks to internal/github's
 // concrete *Provider type directly, not through this interface.
@@ -57,12 +57,12 @@ type AuthChecker interface {
 }
 
 // EnrichedPR/EnrichedPRsProvider and PRFingerprint/FingerprintResult/
-// FingerprintProvider (pg-pr's bulk-fetch optimizations for its own sync
+// FingerprintProvider (the retired PR tool's bulk-fetch optimizations for its own sync
 // snapshot loop) were carried over into this file but never implemented by
 // anything but internal/github's now-deleted enrich.go/fingerprint.go, and
 // never consumed by anything in pg-connector — this backend's Show always
 // performs a live, uncached, per-PR read (provider.go's own doc comment).
-// The design's verb->destination table retires pg-pr's `sync` command group
+// The design's verb->destination table retires the retired PR tool's `sync` command group
 // "without a rewrite target" (pg-router polls the beads connector directly
 // instead), and no design section names either optional capability as a
 // future pg-connector need, so both were removed as dead surface rather
@@ -70,5 +70,5 @@ type AuthChecker interface {
 // `pg-connector pr list` (design Appendix A: still unresolved — live call
 // vs. backend-local store) turns out to need bulk fan-out, re-derive the
 // shape fresh against that verb's actual requirements rather than
-// resurrecting this file: the original was tuned for pg-pr's polling
+// resurrecting this file: the original was tuned for the retired PR tool's polling
 // daemon, a different consumer shape than a one-shot CLI verb.

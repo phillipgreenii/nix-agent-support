@@ -8,7 +8,7 @@
 // STUB in this phase (docket pg2-2j5ac.32, Phase 9): each returns
 // notImplemented (stub.go) until its own later packet in this docket fills
 // it in with real behavior. Registration happens via each subcommand file's
-// own init(), matching packages/pg-pr/cmd/pg-pr's existing pattern (see e.g.
+// own init(), matching the retired PR tool's existing cmd pattern (see e.g.
 // main.go there).
 //
 // Composition rule (D10, docs/behavior/pg-desk/README.md "Composition
@@ -22,7 +22,7 @@
 // declaration" section for the current state. `serve` now wires a real
 // Prometheus metrics catalog and telemetry.Init for OTLP log export
 // (serve.go), but main.go itself still does not, unlike
-// packages/pg-pr/cmd/pg-pr/main.go's global Init: telemetry is scoped to
+// the retired PR tool's cmd/main.go's global Init: telemetry is scoped to
 // `serve` only, since `run`/`run issue` already log structured JSON and
 // stay untouched.
 package main

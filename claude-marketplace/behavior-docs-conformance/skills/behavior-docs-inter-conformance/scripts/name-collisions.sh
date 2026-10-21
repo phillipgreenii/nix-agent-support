@@ -32,10 +32,10 @@
 #      ambiguous at all.
 #
 #      Corpus-global was not a harmless over-reach — it failed `nix flake check` on
-#      main over a non-defect. pa-monitor and pg-pr each namespace by topic (INV-3
+#      main over a non-defect. pa-monitor and a since-retired PR tool each namespace by topic (INV-3
 #      satisfied on BOTH sides) and neither set's docs mention the other anywhere,
 #      yet both legitimately picked the topic `GATE` — pa-monitor for the busy
-#      predicate, pg-pr for the approval gate — so the gate demanded a published ID
+#      predicate, the PR tool for the approval gate — so the gate demanded a published ID
 #      be renamed to satisfy a rule the method does not state. Every future topic
 #      coincidence between unrelated sets would have demanded another rename with
 #      nothing to cite for it.
@@ -430,7 +430,7 @@ for a in "${SETS[@]}"; do
             # NOT an affordance name: a bead id (`pg2-gidpd`): a prefix that ends in
             # a digit and ONE short suffix segment. It is kebab-shaped, so it
             # satisfied TOKPAT, but it is a tracker reference and never an
-            # affordance of the cited set. A real tool name (`pg-pr`, `push-inject`)
+            # affordance of the cited set. A real tool name (`pg-foo`, `push-inject`)
             # has no digit-ended prefix and is unaffected.
             if (tok ~ /^[a-z]+[0-9]+-[a-z0-9]+$/) continue
             # Present anywhere in the cited set => the two sets agree on the name.

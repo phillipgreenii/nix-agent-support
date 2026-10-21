@@ -447,7 +447,7 @@ func parseWorktreePorcelain(out string) []schema.WorktreeInfo {
 // value regardless of which one of the repo's own worktrees cwd happens
 // to sit inside) — purely local git state, with no assumption of any
 // particular remote/hosting convention: scm has no remote-sync concept at
-// all (GOAL-MIN-1), so deriving Repo from a remote's URL (as pg-pr's
+// all (GOAL-MIN-1), so deriving Repo from a remote's URL (as the retired PR tool's
 // own GitHub-flavored `branch detect` does) would reintroduce exactly the
 // remote-awareness this capability is designed without. Base(root) is
 // correct for bare and --separate-git-dir repos too, now that repoRootFor

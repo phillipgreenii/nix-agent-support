@@ -3,7 +3,7 @@
 # Static zsh completion for ccpool's top-level subcommand set (pg2-htmkq).
 # ccpool is a hand-rolled flag.FlagSet dispatcher (packages/ccpool/cmd/ccpool),
 # not a cobra app, so there is no `ccpool completion zsh` generator (contrast
-# with packages/pg-pr, whose completions ARE generated at build time). This
+# with the retired PR tool, whose completions ARE generated at build time). This
 # list is kept in sync with the `subcommands` registry in
 # packages/ccpool/cmd/ccpool/dispatch.go by hand -- if you add/rename/remove a
 # ccpool subcommand there, update this file (and completions/ccpool.bash) in

@@ -68,8 +68,8 @@
           "wtdone"
         ];
       }
-      # Git helper CLIs — human git work. (The pg-pr feature was retired with
-      # the pg-pr package, bead pg2-ijsep; the capability name is kept so any
+      # Git helper CLIs — human git work. (The pr-tools feature was retired with
+      # the PR tool's removal, bead pg2-ijsep; the capability name is kept so any
       # consumer setting `capabilities.pr-tools` keeps evaluating.)
       {
         name = "pr-tools";

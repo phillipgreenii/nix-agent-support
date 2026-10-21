@@ -4,7 +4,7 @@
 derives meaning from them, and serves the operator a triage view and an opener, while signaling
 agent work through beads. It is generic and config-driven, lives at `packages/pg-desk` in this
 repo, and MUST contain no organization identifiers — the ZR repo supplies configuration only,
-exactly as it does for `pg-pr` and `pr-pool` today.
+exactly as it does for the retired PR tool and `pr-pool` today.
 
 **Composition rule (D10).** `pg-desk` MUST compose only `pg-connector` verbs and the configured
 browser. It MUST NOT exec `gh`, `bd`, `pjira`, or any other system client, directly or
@@ -19,7 +19,7 @@ pre-cutover write path (`internal/sync/connector.go`) that the change-flow cutov
 This set describes intended behavior only — no implementation code, no data-structure or
 call-site detail below that floor. It is this docket's (Phase 9 of the pg-desk and connector
 retirement program) own **first packet**, landing ahead of any `pg-desk` code, per this repo's
-rule that behavior docs are the source of truth for the pg-pr/pg-router system and per this
+rule that behavior docs are the source of truth for the retired PR tool/pg-router system and per this
 design's own packet-shaping instruction. Every later packet in this docket implements against
 this set and MUST NOT contradict it without a docket design amendment.
 
@@ -91,7 +91,7 @@ what it logs, so the observability review (`pg2-7kizi`) can decide what the dash
 before Phase 12 deletes the Ops board. The short version, detailed per doc above:
 
 - **OpenTelemetry:** `serve`'s WARN/ERROR-level operational log lines export over OTLP as
-  `{service_name="pg-desk-serve"}` (`internal/telemetry`, mirroring `pg-pr`'s own
+  `{service_name="pg-desk-serve"}` (`internal/telemetry`, mirroring the retired PR tool's own
   `Init`/`NewSlogHandler`/`Fanout` pattern) — resolved by the observability review (`pg2-7kizi`)
   and implemented against this doc. Every other command in this set still emits nothing over
   OpenTelemetry.

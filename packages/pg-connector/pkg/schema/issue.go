@@ -4,8 +4,8 @@
 // packet's own pr.go as its structural precedent.
 //
 // The field set is carried over from this repo's existing
-// packages/pg-pr/pkg/api.Issue struct (ID, Title, State, URL, Priority,
-// Labels, IssueType), which today backs pg-pr's read-only
+// the retired PR tool's pkg/api.Issue struct (ID, Title, State, URL, Priority,
+// Labels, IssueType), which today backs the retired PR tool's read-only
 // issues.Provider.GetIssue. This packet's issue.Provider (see
 // pkg/provider/issue) widens that shape from read-only to read+write
 // (create/comment/transition) so Issue can be a full connector, not just a
@@ -92,7 +92,7 @@ const IssueSchemaVersion = 10
 // issue capability's "show" and "create" ops and carried by
 // pkg/provider/issue.Provider's Show/Create methods.
 type Issue struct {
-	// ID is the issue's identity, a string per pg-pr's existing
+	// ID is the issue's identity, a string per the retired PR tool's existing
 	// api.Issue.ID convention (backends may use anything from a numeric
 	// GitHub Issue number to a Jira key to a beads id).
 	ID    string `json:"id"`

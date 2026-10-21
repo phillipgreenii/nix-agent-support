@@ -17,7 +17,7 @@ import (
 var leakedByAGitHookCommit = []string{
 	"GIT_DIR=/canonical/.git/worktrees/wt",
 	"GIT_INDEX_FILE=/canonical/.git/worktrees/wt/index",
-	"GIT_PREFIX=packages/pg-pr/",
+	"GIT_PREFIX=packages/pg-connector/",
 	"GIT_EXEC_PATH=/nix/store/xxx-git/libexec/git-core",
 	"GIT_AUTHOR_NAME=Someone",
 	"GIT_AUTHOR_EMAIL=someone@example.com",

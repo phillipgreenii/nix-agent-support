@@ -17,7 +17,7 @@
 // Stderr is captured and folded into the error message if the binary
 // produced any. The backend process's own exit code is not consulted
 // independently — the stdout JSON is the contract. This matches (in shape,
-// not capability-specific typing) pg-pr's existing
+// not capability-specific typing) the retired PR tool's existing
 // pkg/plugin/scriptout/exec.go invoke() helper, implementing the same
 // one-shot exec-per-call round trip.
 package scriptout
@@ -115,7 +115,7 @@ func callDetail(ctx context.Context, req Request, elapsed time.Duration) string 
 // response envelope, and returns it. On a wire-level error response, the
 // returned error wraps the matching Err* sentinel via errors.Is so callers
 // don't need to substring-match. Opaque to which capability is being
-// called — matches the shape of pg-pr's existing invoke() helper.
+// called — matches the shape of the retired PR tool's existing invoke() helper.
 //
 // WARNING: Invoke execs the BARE binary name and knows nothing of a
 // registered instance's argv. The umbrella (cmd/pg-connector) MUST NOT call

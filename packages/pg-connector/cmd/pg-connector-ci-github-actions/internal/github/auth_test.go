@@ -59,7 +59,7 @@ func TestIsAuthFailure_MatchesCaseInsensitively(t *testing.T) {
 // TestErrGHAuthInvalid_IsUsableSentinel guards this copy's deliberate
 // divergence from the pr-github sibling's auth.go: here ErrGHAuthInvalid is
 // a plain local sentinel (errors.New), not an alias of pkg/provider/vcs's
-// ErrAuthInvalid — this module has no dependency on packages/pg-pr. It must
+// ErrAuthInvalid — this module has no dependency on the retired PR tool. It must
 // still behave like a normal sentinel: non-nil, with a non-empty message,
 // and detectable via errors.Is once wrapped exactly as ghexec.go's command()
 // wraps it (errors.Join(ErrGHAuthInvalid, err), then fmt.Errorf("%w", ...)).

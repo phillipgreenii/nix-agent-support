@@ -181,7 +181,7 @@ func doctorHasLabel(labels []string, want string) bool {
 // and resolves "self" from pg-desk's OWN PR/review-state model (the
 // store's interpretation.Ownership column, internal/interpret's
 // mine/co-owned values, desk.go's actsAsMine) rather than a parent bead's
-// metadata.author (pg-pr's bd-only convention, unavailable here).
+// metadata.author (the retired PR tool's bd-only convention, unavailable here).
 //
 // Algorithm, ported field-for-field from StrandedSelfCycles: list every
 // bead the fan-out returns; keep only OPEN ones whose title identifies a

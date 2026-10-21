@@ -13,13 +13,13 @@ import (
 )
 
 // This file is pg-desk's OWN copy of the mechanical guard for bead
-// pg2-tphcc, mirroring packages/pg-pr/cmd/pg-pr/identifier_allowlist_test.go
+// pg2-tphcc, mirroring the retired PR tool's cmd/identifier_allowlist_test.go
 // and packages/pg-connector/cmd/pg-connector/identifier_allowlist_test.go.
 //
 // # Why a copy, not a shared widening — bead pg2-h3db9
 //
-// packages/pg-pr's guard roots itself at a walk-up-to-go.mod that is
-// structurally bounded to packages/pg-pr's own module: packages/pg-desk has
+// The retired PR tool's guard roots itself at a walk-up-to-go.mod that is
+// structurally bounded to the retired PR tool's own module: packages/pg-desk has
 // its OWN go.mod (a separate Go module, like packages/pg-connector before
 // it), so neither sibling module's test binary ever sees this module's
 // files, in or out of the nix sandbox. Each Go module in this repo
@@ -28,28 +28,28 @@ import (
 //
 // # No checked-in denylist — see the operator ruling this inverts
 //
-// Same ruling as pg-pr's and pg-connector's copies (Phillip, 2026-08-24,
+// Same ruling as the retired PR tool's and pg-connector's copies (Phillip, 2026-08-24,
 // bead pg2-tphcc, recorded in this repo's CLAUDE.md "Public Repository —
 // No ZipRecruiter Disclosure"): no denylist of forbidden tokens, plaintext
 // or hashed, may live in any repo. This guard is the same ALLOWLIST
-// inversion — see pg-pr's copy for the full rationale (why an allowlist,
+// inversion — see the retired PR tool's copy for the full rationale (why an allowlist,
 // why testdata/ is the guarded scope, and the guard's known limitation
 // against free-text prose).
 //
 // This module's allowlist is deliberately NARROW: it carries only the
 // identifiers packages/pg-desk's own testdata actually uses today (its one
 // fixture, internal/config/testdata/config.example.yaml, uses only
-// "phillipgreenii" and the generic placeholders below). pg-pr's/
+// "phillipgreenii" and the generic placeholders below). The retired PR tool's/
 // pg-connector's other bot/product placeholders (coderabbitai, policy-bot,
 // dependabot, alice) are intentionally NOT pre-added — per the ruling's own
 // logic, adding an entry before it is needed is exactly the speculative
 // list-growth an allowlist exists to avoid forcing. Add one here, with a
-// comment saying why it is safe, the same deliberate way pg-pr's list grew.
+// comment saying why it is safe, the same deliberate way the retired PR tool's list grew.
 var allowlistedIdentifiers = map[string]struct{}{
 	// the operator's own identity — the one exception the ruling allows.
 	"phillipgreenii":            {},
 	"phillipg@ziprecruiter.com": {},
-	// generic placeholder test identities, carried over from pg-pr's own
+	// generic placeholder test identities, carried over from the retired PR tool's own
 	// pg2-wb9yb scrub (see that file's doc comment) as this module's own
 	// generic-placeholder convention.
 	"teammate":   {},
@@ -66,8 +66,8 @@ func isAllowlistedIdentifier(id string) bool {
 }
 
 // identityFieldPattern, branchLoginPattern and gitTrailerPattern are the
-// same three structured-shape detectors pg-pr's and pg-connector's copies
-// use — see pg-pr's copy for what each matches and why a text scan (not a
+// same three structured-shape detectors the retired PR tool's and pg-connector's copies
+// use — see the retired PR tool's copy for what each matches and why a text scan (not a
 // JSON parse) is the established pattern.
 var identityFieldPattern = regexp.MustCompile(`"(?:login|author|reviewer|user)"\s*:\s*"([^"]*)"`)
 
@@ -107,7 +107,7 @@ func scanTextForIdentifiers(text string) []string {
 
 // underTestdataDir reports whether rel (a path relative to some scan root)
 // has a "testdata" path component — same guarded-scope rationale as
-// pg-pr's/pg-connector's copies (Go's own toolchain treats testdata
+// the retired PR tool's/pg-connector's copies (Go's own toolchain treats testdata
 // specially, and it is exactly where a captured-API-response fixture
 // would live).
 func underTestdataDir(rel string) bool {
@@ -202,7 +202,7 @@ func pgDeskModuleRoot(t *testing.T) string {
 // it is on allowlistedIdentifiers.
 //
 // Guarded scope, ratchet status and known limitation are identical to
-// pg-pr's own TestIdentifierAllowlistGuard — see that file's doc comment
+// the retired PR tool's own TestIdentifierAllowlistGuard — see that file's doc comment
 // for the full rationale.
 func TestIdentifierAllowlistGuard(t *testing.T) {
 	root := pgDeskModuleRoot(t)

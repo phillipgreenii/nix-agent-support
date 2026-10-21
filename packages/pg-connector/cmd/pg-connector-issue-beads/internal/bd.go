@@ -1,6 +1,6 @@
 // bd.go: parses `bd ... --json` output into this backend's own bdIssue
 // shape and classifies bd's own error text onto pkg/scriptout's closed
-// error taxonomy. New code — the pg-pr basis packages/pg-pr/pkg/beads never
+// error taxonomy. New code — the retired PR tool's pkg/beads basis never
 // needed this because its mergerequest.go reads bd's metadata-map shape
 // (bdIssue there decodes a `metadata` object into typed
 // MergeRequestFields); a plain issue backend has no metadata map to
@@ -37,7 +37,7 @@ import (
 
 // bdIssue is the subset of bd's `--json` issue shape this backend needs —
 // deliberately small: no comments (this backend has no use for them,
-// unlike packages/pg-pr/pkg/beads.bdIssue). Description,
+// unlike the retired PR tool's pkg/beads.bdIssue). Description,
 // Assignee, Parent, and Dependencies were added by bead pg2-akfw5 (review finding A-33: Show previously
 // dropped all four), verified live against a real `bd show --json` on a
 // child issue with a parent and description/assignee set, not assumed from

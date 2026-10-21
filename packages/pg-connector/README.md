@@ -3,7 +3,7 @@
 `pg-connector` is the unified, pluggable connector umbrella for PR/issue/CI/SCM state: one
 user-facing CLI, backed by a config-driven registry of small backend binaries, so no other tool
 in this repo talks to GitHub/Jira/beads/git directly. It replaces the overlapping GitHub/Jira/beads
-sync and correlation logic that `pg-pr`, `pg-router`, and `work-activity-tracker` each used to
+sync and correlation logic that the retired PR tool, `pg-router`, and `work-activity-tracker` each used to
 reimplement independently.
 
 > **Behavior:** what pg-connector guarantees about the wire protocol, the registry, the CLI's own
@@ -170,8 +170,8 @@ per-backend deadline override).
 | `--output json\|human`                                            | persistent flag on every command above: `json` (default; the stable envelope scripts already parse) or `human` (readable text) |
 | `version`                                                         | print the version and exit                                                                                                     |
 
-`pg-connector pr open <PR#>` from `pg-pr` has no equivalent here yet — `pg-pr` itself has not been
-retired (see the ADR's "Negative" consequences and the design's own Appendix A/B).
+The retired PR tool's `pr open <PR#>` has no equivalent in `pg-connector` (see the ADR's "Negative"
+consequences and the design's own Appendix A/B).
 
 `config show` and `config validate` validate the **whole** registry up front, including the
 `attention.sources`, `search.sources` and `activity.sources` entries: a malformed entry there (a

@@ -4,8 +4,8 @@
 the beads backend; Phase 13, docket `pg2-2j5ac.40`, for Jira) is the design-level rule (see
 [`pipeline-run.md`](pipeline-run.md)): an issue-type entity change re-runs stage 2 (interpret) for
 the PR(s) it is about, without a fresh gather and without re-running sync (the one exception, a
-watched Jira issue also being held as an entity, is "Holding the issue itself" below). This replaces `pg-pr
-changes`'s beads-closing re-interpretation trigger, and its Jira half is the Jira-side
+watched Jira issue also being held as an entity, is "Holding the issue itself" below). This replaces the retired PR tool's `changes`
+beads-closing re-interpretation trigger, and its Jira half is the Jira-side
 counterpart of the same trigger.
 
 ## Which backend: dispatch by shape

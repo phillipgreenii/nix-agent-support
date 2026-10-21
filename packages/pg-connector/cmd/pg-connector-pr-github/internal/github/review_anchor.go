@@ -13,8 +13,8 @@ import (
 // earlier head of the PR (INV-REVHEAD-1..3): the PR's commit list with its
 // base tip, and the per-file patches of the difference between that base tip
 // and the earlier head. Like review_write.go it lives apart from github.go on
-// purpose (github.go is hash-pinned against pg-pr's copy, and none of this
-// exists in pg-pr).
+// purpose (github.go is a ported copy of the retired PR tool's, and none of this
+// exists in the original).
 
 // fullSHARE matches a full 40-character commit sha.
 var fullSHARE = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)

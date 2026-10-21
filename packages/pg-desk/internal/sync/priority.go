@@ -8,16 +8,16 @@ import (
 )
 
 // This file ports the conflict-priority nudge verbatim from
-// packages/pg-pr/pkg/beads/mergerequest.go's mergeRequestPriorityDelta/
+// the retired PR tool's pkg/beads/mergerequest.go's mergeRequestPriorityDelta/
 // nudgedPriority/parsePbase (design section 7.5's Anchor rule: "the
 // conflict-priority nudge and its pbase baseline applied via issue update
-// ... a straight port of the EXISTING pg-pr/beadsbridge logic"). pg-desk's
-// go.mod does not depend on packages/pg-pr (interpret.go's own package doc:
-// every pg-pr concept this docket ports is RE-IMPLEMENTED, never imported),
+// ... a straight port of the EXISTING beadsbridge logic of the retired PR tool"). pg-desk's
+// go.mod does not depend on the retired PR tool (interpret.go's own package doc:
+// every concept this docket ports from the retired PR tool is RE-IMPLEMENTED, never imported),
 // so this is a re-implementation against pg-connector's generic
 // schema.Issue.Priority string (backend-native — "P0".."P4" for the beads
 // backend, per pg-connector-issue-beads/internal/backend.go's
-// PriorityVocabulary) rather than pg-pr's own int scale.
+// PriorityVocabulary) rather than the retired PR tool's own int scale.
 
 // pbaseLabelPrefix stashes the pre-conflict-adjustment priority on an
 // anchor bead, ported verbatim from pkg/beads/mergerequest.go's

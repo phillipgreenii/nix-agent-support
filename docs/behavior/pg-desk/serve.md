@@ -5,7 +5,7 @@
 
 **Soak-port only, this phase (D18, D27).** In Phase 9, `serve` MUST listen only on the soak port
 (default `9819`) behind the ZR `soak.enable` option — never on the primary port `9818`, which
-`pg-pr sync` still owns for both its dashboard and its own `/metrics` until the Phase 11 flip. The
+the retired PR tool's `sync` still owns for both its dashboard and its own `/metrics` until the Phase 11 flip. The
 port move to `9818` as the primary is out of scope for this doc set (see "Out of scope" below).
 
 `serve` reads the store only and reloads its config on `SIGHUP`. It MUST NOT block a request on
@@ -23,7 +23,7 @@ serves `GET /api/v1/dashboard` with today's payload contract — the five named 
 connector source with `source`, `label`, `last_success_at`, `age_seconds` (both `null` for a source
 with no recorded success) and `stale`. The payload's own `generated_at`, `age_seconds` and `stale`
 are PIPELINE LIVENESS, not data age: they derive from `meta.last_heartbeat` with the same
-two-heartbeat-period staleness bound `pg-pr` uses today, so a dead scheduler shows as stale within
+two-heartbeat-period staleness bound the retired PR tool uses today, so a dead scheduler shows as stale within
 two heartbeat periods, whatever the sources say. A stale source never flips them, and a stale
 heartbeat says nothing about how old the data behind it is (`INV-FRESH-5`).
 

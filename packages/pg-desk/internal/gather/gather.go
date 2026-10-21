@@ -160,7 +160,7 @@ type Facts struct {
 	// for the "waiting-on-me" input — the id used is the FIRST work bead
 	// this gather run matched to the triggering PR (see matchWorkBeads);
 	// picking a single anchor id, rather than fetching deps for every
-	// matched bead, mirrors pg-pr's own historical precedent
+	// matched bead, mirrors the retired PR tool's own historical precedent
 	// (pkg/beads.Client.DepTreeUp is called with exactly one root id, the
 	// PR's merge-request bead) — distinguishing which matched KIND of work
 	// bead (merge-request/review-pr/process-feedback) is Sync's own
@@ -436,8 +436,8 @@ func (g *Gatherer) removedFacts(prShowRaw json.RawMessage, notFound bool, err er
 // onto exactly one of open/merged/closed — read verbatim from pg-connector's
 // state vocabulary (its "state" string is "open"/"closed" from the live
 // provider, "merged" folded in here from its own "merged" boolean exactly
-// as this codebase's existing pg-pr precedent already combines them,
-// e.g. packages/pg-pr/internal/sync/sync.go's
+// as this codebase's existing precedent in the retired PR tool already combines them,
+// e.g. the retired PR tool's internal/sync/sync.go's
 // `merged := pr.Merged || pr.State == "merged"` — never a NEW heuristic of
 // gather's own invention) [Binding decisions > "removed"].
 func removedStateFrom(state string, merged bool) string {

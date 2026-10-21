@@ -179,8 +179,8 @@ const maxClosureDepth = 8
 // left a query (closureFromFacts, sync.go, only ever reports isClosure=true
 // from a real `pr show` re-read).
 //
-// The cascade is type-blind, like pg-pr's own cascade-close
-// (packages/pg-pr/internal/beadsbridge/bridge.go's CascadeCloseMergeRequest,
+// The cascade is type-blind, like the retired PR tool's own cascade-close
+// (the retired PR tool's internal/beadsbridge/bridge.go's CascadeCloseMergeRequest,
 // which closed every direct child via ListChildrenOfPR): after the anchor and
 // the two ledger-tracked cycle beads, EVERY other open parent-child
 // dependent of the anchor is closed too (pg2-kftf9.7: improvised children
@@ -316,7 +316,7 @@ func (rc *runContext) closeOpenDescendants(ctx context.Context, parentID string,
 // re-read (the only gather a confirmed closure ever runs) fetches no
 // work-beads at all, and even the ordinary work-beads query lists only
 // merge-request beads and process-feedback:/review-pr: tasks, so a child filed
-// by anything else (a legacy pg-pr bead, an improvised worker bead) was
+// by anything else (a legacy bead from the retired PR tool, an improvised worker bead) was
 // invisible here and bd >= 1.3.1 then refused to close the parent. Closing
 // only what the live read names is safe: it returns the DIRECT, non-closed
 // children of parentID by bd's own parent edge; an entry whose parent field

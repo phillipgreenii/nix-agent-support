@@ -1,10 +1,10 @@
 // runner.go: the bd-CLI exec seam. Re-homed from
-// packages/pg-pr/pkg/beads/runner.go's Runner/CLIRunner (NewCLIRunner) —
+// the retired PR tool's pkg/beads/runner.go's Runner/CLIRunner (NewCLIRunner) —
 // the concrete precedent this packet's bead cites for a bd-CLI-wrapper
 // carry-over — with no behavior change: still shell out to `bd`, still
 // return stdout plus a wrapped error (with a trimmed stderr tail) on
 // failure. This backend's own bd.go/backend.go build on top of it
-// rather than importing packages/pg-pr, which packages/pg-connector's go.mod
+// rather than importing the retired PR tool, which packages/pg-connector's go.mod
 // does not depend on at all (layout_convention_test.go).
 //
 // Workspace resolution is NOT part of that carry-over and was revisited by
@@ -38,7 +38,7 @@ import (
 
 // Runner shells out to `bd`. Production code uses CLIRunner; tests inject a
 // fake runner that returns canned output without spawning a process —
-// mirrors packages/pg-pr/pkg/beads.Runner's identical seam.
+// mirrors the retired PR tool's pkg/beads.Runner's identical seam.
 type Runner interface {
 	// Run invokes `bd args...` and returns stdout. On failure, the returned
 	// error wraps the underlying exec error and includes a trimmed stderr
@@ -96,7 +96,7 @@ const envBeadsDir = "BEADS_DIR"
 // envBDJSONEnvelope is the flag this backend's own bd.go/decodeBDEnvelope
 // strictly requires: unlike the sibling bd-shelling clients in this repo
 // (packages/pg-router-ccpool-handler/internal/beads and
-// packages/pg-pr/pkg/beads, both deliberately tolerant of the legacy bare
+// the retired PR tool's pkg/beads, both deliberately tolerant of the legacy bare
 // array/object shape too), decodeBDEnvelope here has NO bare-shape
 // fallback — a bare `bd --json` response fails to unmarshal into its
 // {"data":...} envelope struct outright. Bead pg2-8o2cg: this backend is

@@ -180,7 +180,7 @@ in
     soak = {
       enable = lib.mkEnableOption ''
         the temporary soak listen port, overriding config's serve.addr via
-        `pg-desk serve --port` while `pg-pr sync` still holds the legacy
+        `pg-desk serve --port` while the retired PR tool's `sync` held the legacy
         port (9818) for both the dashboard and /metrics until the phase 11
         cutover flip [design "Human views and operator commands"; D18,
         D27]. `phillipg-nix-ziprecruiter` (packet 11) enables this in

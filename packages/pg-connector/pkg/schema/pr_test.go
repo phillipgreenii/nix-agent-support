@@ -83,7 +83,7 @@ func TestPR_AsOfAndStale_AlwaysPresentInJSON(t *testing.T) {
 
 func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 	// PR.ID and PRComment.ID must be strings, carried over as-is from
-	// pg-pr's api.Comment.ID string field — a compile-time assertion that
+	// the retired PR tool's api.Comment.ID string field — a compile-time assertion that
 	// these fields are string-typed, not numeric.
 	var _ string = PR{}.ID        //nolint:staticcheck // QF1011: explicit type IS the assertion; omitting it would infer from the field and defeat the check.
 	var _ string = PRComment{}.ID //nolint:staticcheck // QF1011: same as above.

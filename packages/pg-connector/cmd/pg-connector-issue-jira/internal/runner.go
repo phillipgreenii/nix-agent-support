@@ -59,7 +59,7 @@ type Runner interface {
 // Jira CLI binary name — a dedicated, backend-scoped override in the same
 // env-var-driven-config style as pg-connector-issue-beads' own
 // EnvWorkspaceDir, and mirroring
-// packages/pg-pr/pkg/provider/issues/jira/jira.go's PGPR_JIRA_BINARY
+// the retired PR tool's pkg/provider/issues/jira/jira.go's PGPR_JIRA_BINARY
 // (renamed to this backend's own env var per its package/binary name, per
 // this packet's binding decision).
 const EnvBinary = "PG_CONNECTOR_ISSUE_JIRA_BINARY"
@@ -71,7 +71,7 @@ const EnvBinary = "PG_CONNECTOR_ISSUE_JIRA_BINARY"
 // (phillipg-nix-repo-base/modules/jira/cmd/pjira/main.go's NewRootCmd)
 // confirm this is phillipg-nix-repo-base's generic, tenant-agnostic Jira
 // CLI. This is deliberately NOT
-// "jira" — packages/pg-pr/pkg/provider/issues/jira/jira.go's own default —
+// "jira" — the retired PR tool's pkg/provider/issues/jira/jira.go's own default —
 // that name is stale relative to the real tool's current binary name
 // (the tool's module was renamed jira -> pjira; only bin/jira, a dev-only
 // `go run` shim in phillipg-nix-repo-base, still uses the old name, and it

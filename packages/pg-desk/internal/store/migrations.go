@@ -4,7 +4,7 @@ import "fmt"
 
 // schemaVersion is the top of the migration ladder below: the schema Open
 // builds and maintains. Stored in SQLite's user_version pragma (ported
-// convention from packages/pg-pr/internal/store/migrate.go) and mirrored
+// convention from the retired PR tool's internal/store/migrate.go) and mirrored
 // into the meta table's "schema_version" key, since `pg-desk status`
 // (design doc section 7.7) reads the schema version out of meta directly
 // rather than issuing a PRAGMA.

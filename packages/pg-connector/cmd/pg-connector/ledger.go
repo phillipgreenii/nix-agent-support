@@ -9,8 +9,8 @@
 // On-disk layout (freedom boundary — not decided by the design beyond
 // "flock on a sibling lock file" and "temp-file-and-rename"): one JSON file
 // per LedgerKey under $XDG_STATE_HOME/pg-connector/ledger/ (falling back to
-// ~/.local/state/pg-connector/ledger/, matching pg-pr's own DefaultPath
-// convention in packages/pg-pr/internal/store/store.go), named
+// ~/.local/state/pg-connector/ledger/, matching the retired PR tool's own DefaultPath
+// convention in the retired PR tool's internal/store/store.go), named
 // "<type>__<backend>__<query>.json" — a double-underscore separator, since
 // none of type/backend/query's real values contain "__". ListLedgerKeys'
 // decode step below depends on matching this encoding exactly; both
@@ -184,8 +184,8 @@ const (
 )
 
 // ledgerDir resolves the directory every ledger file lives under, honouring
-// XDG_STATE_HOME with the same fallback pg-pr's own store.DefaultPath uses
-// (packages/pg-pr/internal/store/store.go): ~/.local/state/<name>.
+// XDG_STATE_HOME with the same fallback the retired PR tool's own store.DefaultPath uses
+// (the retired PR tool's internal/store/store.go): ~/.local/state/<name>.
 func ledgerDir() (string, error) {
 	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
 		return filepath.Join(xdg, ledgerSubdir, ledgerDirName), nil
@@ -570,7 +570,7 @@ func normalizeMergeableForHash(fields map[string]json.RawMessage) {
 
 // entityID extracts entity's own "id" field — every schema entity type
 // carries one (e.g. schema.PR.ID's own doc comment: "carried over as-is
-// from pg-pr's existing api.Comment.ID string convention") — used to index
+// from the retired PR tool's existing api.Comment.ID string convention") — used to index
 // Ledger.Entries.
 func entityID(entity json.RawMessage) (string, error) {
 	var fields struct {

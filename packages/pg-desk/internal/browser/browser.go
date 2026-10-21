@@ -1,16 +1,16 @@
 // Package browser opens a set of URLs as ONE new desktop-browser window, one
 // tab per URL, in the operator's existing browser profile.
 //
-// Ported from packages/pg-pr/internal/browser (this docket's Contract names
+// Ported from the retired PR tool's internal/browser (this docket's Contract names
 // it as a porting source for `pg-desk open`). The one deliberate change from
-// the pg-pr original: OpenWindow here takes an explicit bin argument — the
+// the retired PR tool original: OpenWindow here takes an explicit bin argument — the
 // operator-configured `open.chrome_bin` (internal/config's OpenConfig) — in
-// addition to pg-pr's own environment-variable override, because D10's
+// addition to the retired PR tool's own environment-variable override, because D10's
 // composition rule (docs/behavior/pg-desk/README.md "Composition rule")
 // requires the configured browser to always be read from a variable, never a
 // Go string literal, at every call site (see cmd/pg-desk/composition_test.go's
 // TestCompositionChokePointAllowsConfigDrivenBrowserExec). Precedence: an
-// explicit non-empty bin argument wins; otherwise the pg-pr-style
+// explicit non-empty bin argument wins; otherwise the retired PR tool's style of
 // BinEnvVar override; otherwise DefaultBin.
 //
 // The implementation is per-GOOS. macOS + Google Chrome is the only supported

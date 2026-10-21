@@ -155,8 +155,8 @@ type PR struct {
 	// CommentCount's issue-level comments) — originally the 8th and final
 	// raw field a future GitHub fingerprint cursor needed (bead
 	// pg2-2j5ac.30.7), via internal/github.Provider.ReviewThreadCount's own
-	// dedicated raw-GraphQL call, mirroring pg-pr's own proven mechanism
-	// for this exact field (packages/pg-pr/pkg/provider/vcs/github/
+	// dedicated raw-GraphQL call, mirroring the retired PR tool's own proven mechanism
+	// for this exact field (the retired PR tool's pkg/provider/vcs/github/
 	// fingerprint.go). List stopped populating this field as of bead
 	// pg2-aehpr (its FingerprintCursor consumer became vestigial), and no
 	// other code path in this module ever populated it. Bead pg2-x3h8c.2

@@ -14,7 +14,7 @@ import (
 )
 
 // ----------------------------------------------------------------------
-// Filtering (ported from packages/pg-pr/cmd/pg-pr/open_test.go)
+// Filtering (ported from the retired PR tool's cmd/open_test.go)
 // ----------------------------------------------------------------------
 
 func openTestRows() []openRow {

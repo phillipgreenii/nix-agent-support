@@ -12,7 +12,7 @@ import (
 )
 
 // --- enrichment: kind, languages, size --------------------------------------
-// Ported from packages/pg-pr/internal/enrich (classifyKind/bucketSize
+// Ported from the retired PR tool's internal/enrich (classifyKind/bucketSize
 // exactly; detectLanguages replaced — see interpret.go's package doc for
 // why go-enry could not be added as a new dependency).
 
@@ -188,7 +188,7 @@ func computeEnrichment(pr prShow, files []prFile, commits []prCommit) Enrichment
 }
 
 // --- CI rollup (checks rollup signal) ---------------------------------------
-// Ported from packages/pg-pr/internal/cirollup.Compute/Classify; the run
+// Ported from the retired PR tool's internal/cirollup.Compute/Classify; the run
 // reading itself now lives in internal/cirun (shared with the links verb).
 // The fan-out payload gather.Facts.CI is decoded directly rather than via
 // pkg/schema (see interpret.go's decode-shape comment). The exclusion set is derived from
@@ -317,13 +317,13 @@ func computeCIRollup(raw json.RawMessage, interpreters []config.CheckInterpreter
 }
 
 // --- base urgency scoring ---------------------------------------------------
-// Ported from packages/pg-pr/internal/enrich.scoreUrgency, made
+// Ported from the retired PR tool's internal/enrich.scoreUrgency, made
 // config-vocabulary-driven per this docket's design (cfg.Urgency.Labels/
 // Keywords/Thresholds — section 7.8's "Urgency configures base urgency
-// scoring"). Falls back to pg-pr's own hardcoded defaults when the config
+// scoring"). Falls back to the retired PR tool's own hardcoded defaults when the config
 // supplies none, so the ported goldens (which assume those defaults) still
 // pass byte-for-byte. Per-signal point weights (label +3, keyword +2,
-// CI-failing +2, bugfix-commit +1) are NOT config keys and stay as pg-pr's
+// CI-failing +2, bugfix-commit +1) are NOT config keys and stay as the retired PR tool's
 // own hardcoded constants. The layered project-health/Jira/Slack signals
 // (scoreUrgencyWithHealth) are Phase 13 and are never computed here.
 

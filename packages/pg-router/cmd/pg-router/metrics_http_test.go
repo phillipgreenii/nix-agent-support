@@ -66,7 +66,7 @@ func TestStartMetricsServer_ServesCatalogMemberOverHTTP(t *testing.T) {
 // "pg_router.backlog") used to come back on the wire with its dot preserved
 // literally, instead of translated to "pg_router_backlog", mismatching the
 // underscore names the pg-router.json Grafana dashboard queries (the same
-// convention pg-pr-ops.json already uses). Registering the real catalog
+// convention the retired PR tool's ops dashboard already used). Registering the real catalog
 // (internal/metrics.New) directly with underscore/legacy-safe names — the
 // fix — sidesteps the negotiation question entirely: there is no dot left to
 // preserve or escape, regardless of which scheme the scraper offers. This
@@ -172,7 +172,7 @@ func TestStartMetricsServer_CatalogSurvivesUTF8EscapingNegotiation(t *testing.T)
 // TestStartMetricsServer_ListenErrorPropagates proves a bind failure (an
 // unparseable address, the cheapest deterministic way to make net.Listen
 // fail without racing a real port) surfaces as an error rather than a
-// silently-nil server, mirroring pg-pr's own daemon.go contract ("a bind
+// silently-nil server, mirroring the retired PR tool's own daemon.go contract ("a bind
 // failure is fatal because metrics is a daemon contract").
 func TestStartMetricsServer_ListenErrorPropagates(t *testing.T) {
 	if _, _, err := startMetricsServer("not-a-valid-address", nil); err == nil {

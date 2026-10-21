@@ -17,7 +17,7 @@ import (
 const wantSweepBoundExpr = `max by (type, tier) (pg_desk_sweep_bound_violated)`
 
 // boundSeries is one sample of pg_desk_sweep_bound_violated: its labels (job
-// differs between the pg-desk and pg-pr scrapes of the same process) and value.
+// differs between the pg-desk and legacy-job scrapes of the same process) and value.
 type boundSeries struct {
 	job, typ, tier string
 	v              float64
@@ -84,13 +84,13 @@ func TestSweepBoundRuleExprMatchesModel(t *testing.T) {
 }
 
 func TestSweepBoundViolationFiresPerTypeAndTier(t *testing.T) {
-	// Both the job=pg-desk series and its job=pg-pr duplicate read 1 for
+	// Both the job=pg-desk series and its job=pg-desk-legacy duplicate read 1 for
 	// pr/local: ONE alert instance. pr/remote holds (0) and issue is fine.
 	res := evalSweepBoundRule([]boundSeries{
 		{"pg-desk", "pr", "local", 1},
-		{"pg-pr", "pr", "local", 1},
+		{"pg-desk-legacy", "pr", "local", 1},
 		{"pg-desk", "pr", "remote", 0},
-		{"pg-pr", "pr", "remote", 0},
+		{"pg-desk-legacy", "pr", "remote", 0},
 		{"pg-desk", "issue", "local", 0},
 		{"pg-desk", "issue", "remote", 0},
 	})

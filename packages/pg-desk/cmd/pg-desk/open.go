@@ -39,7 +39,7 @@ type openFlags struct {
 var opFlags openFlags
 
 // openRow is the normalized view of one selectable PR — the pg-desk analog
-// of pg-pr's cmd/pg-pr/open.go openRow (this packet's porting source), built
+// of the retired PR tool's cmd/open.go openRow (this packet's porting source), built
 // from the STORE directly (buildOpenRows below) instead of a running
 // daemon's dashboard snapshot, since `pg-desk open` has no daemon to poll
 // [docs/behavior/pg-desk/open.md: "reading the store directly with no
@@ -278,7 +278,7 @@ func openRowFrom(st *store.Store, interp store.Interpretation, kvAnnotations boo
 }
 
 // attentionOnly decides whether the needs-attention filter applies. Ported
-// verbatim from pg-pr's cmd/pg-pr/open.go: the default is PER SOURCE — team
+// verbatim from the retired PR tool's cmd/open.go: the default is PER SOURCE — team
 // defaults to attention-only, --mine defaults to everything — overridable in
 // the direction that default forecloses.
 func attentionOnly(f openFlags) bool {
@@ -294,7 +294,7 @@ func attentionOnly(f openFlags) bool {
 
 // validateOpenFlags rejects flag combinations that could only ever match
 // nothing, or that ask for two contradictory things. Ported verbatim from
-// pg-pr's cmd/pg-pr/open.go (pg2-4dz88.7.7's decided rejections).
+// the retired PR tool's cmd/open.go (pg2-4dz88.7.7's decided rejections).
 func validateOpenFlags(f openFlags) error {
 	if f.all && f.needsAttention {
 		return fmt.Errorf("--all and --needs-attention are contradictory: one widens the selection, the other narrows it")
@@ -322,7 +322,7 @@ func validateOpenFlags(f openFlags) error {
 
 // selectRows applies every filter, preserving the input's own ordering. It
 // does NOT apply --max: truncation warns on stderr, which is the caller's
-// job. Ported from pg-pr's cmd/pg-pr/open.go, plus --promotable (new this
+// job. Ported from the retired PR tool's cmd/open.go, plus --promotable (new this
 // phase).
 func selectRows(rows []openRow, f openFlags) []openRow {
 	attention := attentionOnly(f)
@@ -344,7 +344,7 @@ func selectRows(rows []openRow, f openFlags) []openRow {
 }
 
 // hasReason matches want against a row's match reasons as an exact value OR
-// a prefix. Ported verbatim from pg-pr's cmd/pg-pr/open.go.
+// a prefix. Ported verbatim from the retired PR tool's cmd/open.go.
 func hasReason(reasons []string, want string) bool {
 	for _, r := range reasons {
 		if strings.HasPrefix(r, want) {
@@ -363,7 +363,7 @@ func urlsOf(rows []openRow) []string {
 }
 
 // useHyperlinks reports whether the listing should emit OSC 8 hyperlinks.
-// Ported verbatim from pg-pr's cmd/pg-pr/open.go.
+// Ported verbatim from the retired PR tool's cmd/open.go.
 func useHyperlinks(w io.Writer, f openFlags) bool {
 	return !f.noHyperlinks && isTTY(w)
 }
@@ -384,8 +384,8 @@ func hyperlink(url, text string) string {
 	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
 }
 
-// renderOpenRows writes the human listing. Ported verbatim from pg-pr's
-// cmd/pg-pr/open.go.
+// renderOpenRows writes the human listing. Ported verbatim from the retired PR tool's
+// cmd/open.go.
 func renderOpenRows(w io.Writer, rows []openRow, link bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
@@ -419,7 +419,7 @@ func renderOpenRows(w io.Writer, rows []openRow, link bool) error {
 }
 
 // approvedCell reports which classes of reviewer have approved. Ported from
-// pg-pr's cmd/pg-pr/open.go; AgentApprovers is always 0 here (see openRow's
+// the retired PR tool's cmd/open.go; AgentApprovers is always 0 here (see openRow's
 // doc comment) but the rendering is kept shape-identical.
 func approvedCell(r openRow) string {
 	var got []string

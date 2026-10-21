@@ -86,7 +86,7 @@ import (
 // "pg_router.backlog" was exposed to Prometheus verbatim with the dot
 // preserved instead of being translated to "pg_router_backlog" — the
 // pg-router.json Grafana dashboard queries the underscore names (matching
-// the established convention already used by pg-pr-ops.json), so those
+// the established convention the retired PR tool's ops dashboard already used), so those
 // panels rendered empty. Naming the instrument with underscores up front
 // means Prometheus never needs to escape-negotiate a dotted name in the
 // first place, regardless of which scheme the scraper offers.

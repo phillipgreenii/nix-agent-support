@@ -3,7 +3,7 @@
 // asserted via a type-check rather than folded into one monolithic
 // interface — the same small-separately-asserted-interface pattern
 // vcs.Provider/vcs.AuthChecker already use today in
-// packages/pg-pr/pkg/provider/vcs/iface.go.
+// the retired PR tool's pkg/provider/vcs/iface.go.
 //
 // This package intentionally knows nothing about the wire protocol
 // (pkg/scriptout) or any capability's own schema (pkg/schema, or a sibling

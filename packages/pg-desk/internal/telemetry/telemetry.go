@@ -8,7 +8,7 @@
 // pg-desk's real Prometheus metrics catalog lives in the sibling
 // internal/metrics package, built the same OTel-metrics-API way
 // pg-router's own catalog is. Traces are out of scope for pg-desk
-// entirely, so — unlike pg-pr's own internal/telemetry, which this
+// entirely, so — unlike the retired PR tool's own internal/telemetry, which this
 // package otherwise mirrors in shape (Init / NewSlogHandler / Fanout) —
 // there is no tracer provider setup and no exported Tracer here.
 //
@@ -17,7 +17,7 @@
 // LoggerProvider and returns no error. This way pg-desk serve never
 // refuses to start because the local OTel collector is down.
 //
-// The exporter honors the standard OTEL_* env vars, matching pg-pr's own
+// The exporter honors the standard OTEL_* env vars, matching the retired PR tool's own
 // convention:
 //
 //	OTEL_EXPORTER_OTLP_ENDPOINT   (default: not set -> no-op)

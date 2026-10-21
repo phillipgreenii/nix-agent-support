@@ -57,9 +57,9 @@ mkGoApp {
 
     # Static shell completions for the top-level subcommand set (pg2-htmkq).
     # ccpool is a hand-rolled flag.FlagSet dispatcher, not cobra, so unlike
-    # pg-pr's `completion <shell>`-generated files these are committed source
+    # the retired PR tool's `completion <shell>`-generated files these are committed source
     # under ./completions, kept in sync by hand with cmd/ccpool/dispatch.go's
-    # subcommand registry. Installed at the same standard locations pg-pr
+    # subcommand registry. Installed at the same standard locations the retired PR tool
     # uses, which home-manager's zsh/bash completion machinery already
     # scans for every package on PATH -- no extra wiring needed.
     mkdir -p $out/share/zsh/site-functions $out/share/bash-completion/completions

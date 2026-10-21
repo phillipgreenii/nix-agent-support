@@ -2,7 +2,7 @@
 // thin, standalone executable speaking only the scriptout wire protocol
 // (pkg/scriptout.ServeLoop), with no independent human-facing CLI identity
 // (actors.md's ACTOR-BACKEND). It implements pkg/provider/pr.Provider against
-// GitHub by carrying over pg-pr's existing GitHub logic unchanged
+// GitHub by carrying over the retired PR tool's existing GitHub logic unchanged
 // (internal/github) and adds its own AuthChecker via GitHub's existing
 // env-then-gh auth token credential chain (INV-AUTH-1). It keeps no
 // backend-local store (statelessness, D3) — every op is a live GitHub

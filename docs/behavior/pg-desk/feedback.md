@@ -8,7 +8,7 @@ table, attributed to the caller (`--actor`, defaulting to the configured `actor`
 A disposition recorded through `feedback set` MUST be honored by interpret's disposition rule set
 over its own verdict on every later run (see [`interpret.md`](interpret.md)) — it survives a
 re-run and wins. This is the write path the rewritten process-feedback workflow uses in place of
-the retired `pg-pr feedback disposition`.
+the retired PR tool's `feedback disposition`.
 
 ## Typed form
 

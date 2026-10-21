@@ -13,7 +13,7 @@ import (
 // each creation costs several fsyncs (WAL conversion + the schema
 // migration commit + the close checkpoint). Durability is meaningless for
 // a database deleted at test exit, so tests opt out of it — ported
-// convention from packages/pg-pr/internal/store/main_test.go.
+// convention from the retired PR tool's internal/store/main_test.go.
 //
 // A test that needs real durability semantics must restore
 // synchronousPragma to "" for its own duration.

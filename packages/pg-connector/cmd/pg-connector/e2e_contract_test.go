@@ -14,7 +14,7 @@
 // calling any backend's internal.Backend/Provider Go type directly.
 //
 // Behind the `contract` build tag on purpose, the same tag
-// packages/pb/pkg/beads, packages/pg-pr/pkg/beads and this module's own
+// packages/pb/pkg/beads, the retired PR tool's pkg/beads and this module's own
 // cmd/pg-connector-issue-beads/internal/realbd_test.go already use for a
 // real-external-system suite that must stay out of the default
 // `go test ./...` run (and therefore out of checks.pg-connector-go-tests

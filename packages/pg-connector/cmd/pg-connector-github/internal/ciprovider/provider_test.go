@@ -1,5 +1,5 @@
 // provider_test.go is carried over from
-// packages/pg-pr/pkg/provider/cicd/ghactions/ghactions_test.go
+// the retired PR tool's pkg/provider/cicd/ghactions/ghactions_test.go
 // [contract: "Tests: carry over the existing test files alongside the
 // ported implementation (adapted types)"], adapted for ci.Provider's
 // id-only signatures (ListRuns/RerunFailed take a single prID rather than

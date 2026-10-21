@@ -3,7 +3,7 @@
 // (clean | problems | unknown) and Authority (approved | withheld | pending |
 // absent) — dispatched over caller-supplied, config-declared "generations" of
 // the grammar, so a future bot-comment-format change is a config edit, not a
-// Go change. Ported verbatim from packages/pg-pr/internal/verdict (bead
+// Go change. Ported verbatim from the retired PR tool's internal/verdict (bead
 // pg2-4dz88.1.4; generation shape designed in pg2-4dz88.1.3), which
 // originated this classifier and its config.VerdictGeneration shape
 // (mirrored by pg-desk's own config.VerdictGeneration).
@@ -11,7 +11,7 @@
 // A verdict body this package cannot classify under any configured
 // generation surfaces as an observable Unknown/Pending result rather than
 // being silently folded into Clean or Absent — the same non-negotiable
-// property pg-pr's own docs/behavior invariants (`INV-APPROVAL-2`/
+// property the retired PR tool's own docs/behavior invariants (`INV-APPROVAL-2`/
 // `INV-APPROVAL-5`) pin for that package; this port preserves the behavior
 // without asserting pg-desk's own docs/behavior encodes the same invariant
 // IDs.

@@ -2,7 +2,7 @@
 //
 // Resolution order (highest priority first), mirroring
 // packages/pg-connector's own ($PG_PR_CONFIG -> XDG -> ~/.config) and
-// packages/pg-pr's internal/config before it:
+// the retired PR tool's internal/config before it:
 //
 //  1. $PG_DESK_CONFIG (explicit override; missing file is an error).
 //  2. $XDG_CONFIG_HOME/pg-desk/config.yaml.
@@ -24,7 +24,7 @@
 // that table: it bounds the automatic retry of a recorded sync_error (bead
 // pg2-xb6fs; see SyncRetryConfig).
 //
-// Several fields that lived nested under pg-pr's repos[] entries
+// Several fields that lived nested under the retired PR tool's repos[] entries
 // (team_members, watch_labels, ticket_patterns, check_interpreters) are
 // flattened to top-level here: Phase 9 supports exactly one repository (see
 // docs/behavior/pg-desk/README.md's "Scope" section; multi-repo stays under
@@ -121,8 +121,8 @@ type Config struct {
 	// stays as generic as every other pg-connector consumer. Consumed
 	// starting Phase 10; present but unused by this phase's own code.
 	AgentTrackerBackend string `yaml:"agent_tracker_backend,omitempty" json:"agent_tracker_backend,omitempty"`
-	// Actor is the identity pg-desk attributes its own writes to (pg-pr
-	// used a hardcoded "pg-pr daemon"; pg-desk takes it from config
+	// Actor is the identity pg-desk attributes its own writes to (the retired PR tool
+	// used a hardcoded daemon actor name; pg-desk takes it from config
 	// instead).
 	Actor string `yaml:"actor,omitempty" json:"actor,omitempty"`
 
@@ -728,12 +728,12 @@ func validateIssueURLTemplate(tmpl string) error {
 type RepoConfig struct {
 	Remote string `yaml:"remote" json:"remote"`
 	// BeadsDir names which beads workspace gather and sync target for this
-	// repo (provenance: pg-pr's repos[].path).
+	// repo (provenance: the retired PR tool's repos[].path).
 	BeadsDir string `yaml:"beads_dir,omitempty" json:"beads_dir,omitempty"`
 }
 
 // AgentConfig declares one registered agent identity for approvals
-// classification and bot-verdict parsing (provenance: pg-pr's agents and
+// classification and bot-verdict parsing (provenance: the retired PR tool's agents and
 // its agent registry policy block).
 type AgentConfig struct {
 	Login         string `yaml:"login" json:"login"`
@@ -742,11 +742,11 @@ type AgentConfig struct {
 }
 
 // VerdictGeneration describes one generation of the review-comment verdict
-// grammar. Shape mirrors packages/pg-pr/internal/config's field of the same
+// grammar. Shape mirrors the retired PR tool's internal/config's field of the same
 // name; consumed by internal/interpret's computeApprovals (via
 // buildVerdictClassifier, converting to []verdict.Generation and compiling
 // with internal/verdict.New — that package, ported from
-// packages/pg-pr/internal/verdict, is the real grammar parser).
+// the retired PR tool's internal/verdict, is the real grammar parser).
 type VerdictGeneration struct {
 	ID                string   `yaml:"id" json:"id"`
 	BodyMarker        string   `yaml:"body_marker" json:"body_marker"`
@@ -755,9 +755,9 @@ type VerdictGeneration struct {
 }
 
 // CheckInterpreterConfig declares one entry in the check/status interpreter
-// registry (provenance: pg-pr's repos[].check_interpreters, now top-level
+// registry (provenance: the retired PR tool's repos[].check_interpreters, now top-level
 // per Phase 9's single-repo flattening). Shape mirrors
-// packages/pg-pr/internal/config's field of the same name; unconsumed by
+// the retired PR tool's internal/config's field of the same name; unconsumed by
 // this packet's own code.
 type CheckInterpreterConfig struct {
 	Patterns []string `yaml:"patterns,omitempty" json:"patterns,omitempty"`
@@ -1050,7 +1050,7 @@ func parse(data []byte) (*Config, error) {
 // fields. Deliberately minimal for this packet: self_login and at least
 // one repo with a non-empty remote are the only invariants a config-driven,
 // single-repo skeleton needs enforced now. Richer validation (matching
-// pg-pr's `config validate` report shape) is this docket's own later
+// the retired PR tool's `config validate` report shape) is this docket's own later
 // concern, not this packet's.
 func finalize(cfg *Config) error {
 	if cfg == nil {

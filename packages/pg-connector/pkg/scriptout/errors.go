@@ -10,7 +10,7 @@ import (
 // unavailable, unknown_op, version_mismatch, invalid_argument), now seven
 // with ErrQueryNotRecognized (below). A handler wraps one of these via
 // WrapError so callers use errors.Is rather than substring-matching, the
-// same pattern vcs.ErrAuthInvalid already establishes in packages/pg-pr.
+// same pattern vcs.ErrAuthInvalid already establishes in the retired PR tool.
 //
 // ErrInvalidArgument was added (bead pg2-r9iok) to close a real gap: without
 // it, a caller-input-validation failure (an empty required field, a

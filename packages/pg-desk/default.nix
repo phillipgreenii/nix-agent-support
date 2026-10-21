@@ -67,14 +67,14 @@ mkGoApp {
   # name (internal/gather's own `pgConnectorBinary = "pg-connector"` /
   # cmd/pg-desk/doctor.go's `doctorLookPath("pg-connector")`), never a
   # compile-time import — mirroring packages/pg-router/default.nix's own
-  # wrapProgram call for ccpool/bd/pg-pr/jq. Proven post-wrap by this
+  # wrapProgram call for ccpool/bd/jq. Proven post-wrap by this
   # packet's own bats smoke test (packages/pg-desk/tests/composition-rule.bats),
   # which runs the nix-wrapped binary (this wrapper, pointed at a stub
   # pg-connector) against the unwrapped binary under `env -i` as a negative
   # control.
   #
   # The same hook installs the `pg-desk-focus` tldr page (flat under
-  # share/tldr/pages.common, the layout wtdone and pg-pr ship; the home
+  # share/tldr/pages.common, the layout wtdone and the retired PR tool ship; the home
   # module registers it through programs.tldr.customPages) and the shell
   # completions cobra generates, written the way packages/pg-connector does
   # (no `|| true`: a generator failure must fail the build, never ship an

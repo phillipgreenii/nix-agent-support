@@ -7,12 +7,12 @@
 // is a capability-level verb, never a system-specific one. This matches
 // pkg/provider/pr.Provider's identical convention.
 //
-// Unlike today's read-only packages/pg-pr/pkg/provider/issues.Provider
+// Unlike today's read-only the retired PR tool's pkg/provider/issues.Provider
 // (GetIssue only), this Provider is widened to read+write: a Show-style
 // read plus three write ops (Create/Comment/Transition), so Issue can be a
 // full connector rather than a mirror. This package does not import or
-// reuse the pg-pr issues package — packages/pg-connector's go.mod does not
-// depend on packages/pg-pr at all.
+// reuse the retired PR tool's issues package — packages/pg-connector's go.mod does not
+// depend on the retired PR tool at all.
 //
 // This package sits alongside pkg/schema and pkg/scriptout as part of the
 // module's shared surface importable across backend boundaries — see

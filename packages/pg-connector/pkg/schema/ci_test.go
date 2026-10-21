@@ -83,7 +83,7 @@ func TestCIRun_AsOfAndStale_AlwaysPresentInJSON(t *testing.T) {
 
 func TestCIRun_IDAndPRIDAreStrings(t *testing.T) {
 	// CIRun.ID and CIRun.PRID must be strings, carried over as-is from
-	// pg-pr's existing api.CIRun.ID string field — a
+	// the retired PR tool's existing api.CIRun.ID string field — a
 	// compile-time assertion that these fields are string-typed, not
 	// numeric.
 	var _ string = CIRun{}.ID   //nolint:staticcheck // QF1011: explicit type IS the assertion; omitting it would infer from the field and defeat the check.

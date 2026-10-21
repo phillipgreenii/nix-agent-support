@@ -22,7 +22,7 @@ const (
 	// already running, and `open -na` starts a second instance that then fights
 	// the first over the profile lock.
 	//
-	// Ported verbatim from packages/pg-pr/internal/browser/browser_darwin.go.
+	// Ported verbatim from the retired PR tool's internal/browser/browser_darwin.go.
 	// Overridden, in precedence order, by an explicit bin argument to
 	// openWindow (the config-driven open.chrome_bin), then BinEnvVar.
 	DefaultBin = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"

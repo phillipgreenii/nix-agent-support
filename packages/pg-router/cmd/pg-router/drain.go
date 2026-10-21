@@ -79,7 +79,7 @@ func warnStubQueries(cfg config.Config) {
 
 // precheck/precheckPrefix/readBeadsPrefix — the R14 startup pre-flight
 // blockers (bd unreachable, beads-prefix mismatch; the former third check,
-// a self-login lookup, was removed with pg-pr, bead pg2-k9vmd) — MOVED OUT of this file entirely (docket
+// a self-login lookup, was removed with the retired PR tool, bead pg2-k9vmd) — MOVED OUT of this file entirely (docket
 // pg2-oju6w's Task 5.8, ADR 0065's "Source-side boundary" section, closing
 // register row R14 / bead pg2-d4gvb): they were extra checks run ahead
 // of INV-WORKFLOW-1's own closed six-check set (docs/behavior/README.md's

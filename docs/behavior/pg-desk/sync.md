@@ -74,7 +74,7 @@ prompts that read these shapes, in the same change:
 
 - **Anchor** — exactly one per `(repo, number)`, created lazily only when a cycle or review
   request first needs a parent (D8), never eagerly. The conflict-priority nudge (a port of
-  pg-pr's existing `pbase` mechanism: stash the pre-conflict priority on the first conflicting
+  the retired PR tool's existing `pbase` mechanism: stash the pre-conflict priority on the first conflicting
   tick, nudge mine/co-owned toward higher priority and team toward lower, no-op on a repeated
   conflicting tick, restore the baseline once the conflict clears) is applied via `issue update`.
   `last_synced_at` and `last_checked_at` are written together, and only by a content write (the
@@ -93,13 +93,13 @@ prompts that read these shapes, in the same change:
   only on a CONFIRMED closure — a `--change removed` re-read (or an ordinary/sweep `pr show`)
   reporting `merged` or `closed`, or a removed re-read's own `not_found` (a closure with reason
   `gone`) — never because the PR merely left a query. An already-closed anchor is never reopened.
-  The cascade is type-blind, like pg-pr's own cascade-close
+  The cascade is type-blind, like the retired PR tool's own cascade-close
   (`beadsbridge.CascadeCloseMergeRequest`): every open direct child of the anchor (a bead
   filed with `--parent <anchor>`) that the work-beads query returned is closed too, whatever its
   title or type (`pg2-kftf9.7`; e.g. an improvised "Human: unblock ..." bead). Children come
   from two reads, merged: the work-beads results, and a live `pg-connector issue children` read
   of each bead being closed, so a child the ledger and the work-beads query never saw (a legacy
-  child filed by the retired pg-pr daemon; the closure's own `--change removed` re-read gathers no
+  child filed by the retired PR tool daemon; the closure's own `--change removed` re-read gathers no
   work-beads at all) is closed too (`pg2-ubvmh`). A failed live read fails the run rather than
   closing the anchor on a partial view of its children; a backend without that op falls back to
   the work-beads results alone. Each bead's own open descendants (grandchildren and deeper, to a
@@ -110,7 +110,7 @@ prompts that read these shapes, in the same change:
   rate (`pg2-ryexi`).
 - **Feedback cycle** — for every PR with unaddressed feedback (a disposition that is still
   `open`), ensure one open cycle keyed by title and deduplicated by the `fbsum` digest (a port of
-  pg-pr's existing digest computation), carrying the `mine` label only when the PR's ownership
+  the retired PR tool's existing digest computation), carrying the `mine` label only when the PR's ownership
   acts as mine.
 - **Review request** — ported verbatim from pg-router's ACL: every PR with ownership `mine` or
   `co-owned` (draft included), and every non-draft team PR, gets one `review-pr` bead. When the
@@ -190,7 +190,7 @@ update <id> --status open --clear-assignee ...` call (the previous reviewer's cl
   - When the PR is confirmed `merged` or `closed` (or gone), the closure cascade above closes the
     open `review-pr` bead with its anchor, so no `review-pr` bead stays open for a finished PR.
   - Delivery (operator ruling, Phillip, 2026-09-29, recorded on `pg2-kftf9.8`: no new
-    dismiss/finalize command on `pg-pr`): this lifecycle is delivered by the CURRENT pg-desk sync
+    dismiss/finalize command on the retired PR tool): this lifecycle is delivered by the CURRENT pg-desk sync
     (`ensureReviewRequest` reopen, plus the closure cascade) together with `pg-connector pr
 review submit` (`pg2-kftf9.13`, whose replace behavior `pg2-8qui6` supersedes with create-or-append)
     and the deployment's review prompt (`pg2-kftf9.17`). The replacement flow (`pg2-2j5ac.52`, rule `review.head-advanced`, decision

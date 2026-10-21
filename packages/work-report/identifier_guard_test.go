@@ -16,8 +16,8 @@ import (
 //
 // This repository is PUBLIC: no organization identifiers (repos, project keys,
 // actor names, workspace paths) may appear in work-report's code, testdata or
-// docs. The pg-pr module carries an equivalent guard, but that package is
-// frozen and cannot be widened, so work-report owns its own copy of the
+// docs. The retired PR tool module carried an equivalent guard, but that package was
+// frozen and could not be widened, so work-report owns its own copy of the
 // allowlist-inversion design described in the repository CLAUDE.md under
 // "Mechanical guard".
 //
