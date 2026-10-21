@@ -274,6 +274,21 @@ comment`, `issue transition`, `issue update`, `issue close` and `pr review submi
   heard from the origin, never when the umbrella last answered a caller. The backend's own `status`
   exposes the same values.
 
+## Read as-of and staleness
+
+- **`INV-ASOF-1`** <!-- uuid: 39888347-cfb9-45fd-b72e-b465e2337d15 --> — Every acted-on read seam
+  MUST carry its own as-of time: per item on a machine read seam (a wire result carrying an entity
+  or a list of them), or at the payload level on a payload that is not itemized. An item or payload
+  with no usable as-of time MUST be reported **stale**. A consumer MUST NOT act on a read flagged
+  stale — the acting decision is the consumer's, but the flag itself is the answering backend's
+  obligation to raise correctly.
+- **`INV-ASOF-2`** <!-- uuid: db0166e2-c744-4401-a055-f2847c2aed13 --> — **The staleness
+  determination is the answering backend's alone.** The backend that answers a read is the sole
+  computer of the as-of/stale determination on every read seam it publishes; a consumer MUST NOT
+  re-derive its own staleness policy over the same facts — it MUST consume the flag the backend
+  already computed (`INV-ASOF-1`). The bound past which a fact is judged stale is the backend's own
+  tuning, tied to its own sync cadence, never a number this contract pins.
+
 ## Versioning
 
 - **`INV-VER-1`** <!-- uuid: a47b92f1-34ec-451e-93ca-0e41e2f2081d --> — Every wire response MUST

@@ -74,7 +74,7 @@ See the [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md
   issue repeatedly without every reader calling its origin, and be told for each answer whether it
   came from the origin or from a cache entry and how old it is, so a cache never passes stale
   content off as current. _(→ `USECASE-CACHED-READ`; `INV-CACHE-4`, `INV-CACHE-5`,
-  `INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-4`.)_
+  `INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-4`, `INV-ASOF-1`, `INV-ASOF-2`.)_
 - **`STORY-OP-14`** <!-- uuid: a8d513e2-b211-40f8-8d0b-9f13239f48ad --> — see my calendar in the
   attention feed so that a meeting stands out as it nears and while it runs, at a level that
   follows the clock alone and never my guess at its importance. _(→ `USECASE-CALENDAR-ATTENTION`;
@@ -551,7 +551,8 @@ answer whether it came from the origin or from a cache entry and how old it is, 
 passes stale content off as current.
 _Requires:_ `INV-CACHE-1`, `INV-CACHE-2`, `INV-CACHE-3`, `INV-CACHE-4`, `INV-CACHE-5`,
 `INV-CACHE-6`, `INV-CACHE-7`, `INV-CACHE-8`, `INV-CACHE-10`, `INV-LEDGER-FRESH-1`,
-`INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-3`, `INV-LEDGER-FRESH-4`, `INV-EXIT-1`, `INV-OUT-1`.
+`INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-3`, `INV-LEDGER-FRESH-4`, `INV-ASOF-1`, `INV-ASOF-2`,
+`INV-EXIT-1`, `INV-OUT-1`.
 _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 
 **Flow.** The operator runs `show`. A live full-detail cache entry within `read_ttl` answers it
