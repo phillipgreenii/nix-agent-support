@@ -117,6 +117,7 @@ load_lib() {
 }
 
 @test "bg_proc_start and bg_proc_command describe a live pid and are empty for a dead one" {
+  require_ps
   load_lib
   [ -n "$(bg_proc_start $$)" ]
   [ -n "$(bg_proc_command $$)" ]
@@ -128,6 +129,7 @@ load_lib() {
 }
 
 @test "bg_descendants lists every transitive child deepest-first, excluding the root" {
+  require_ps
   load_lib
   bash -c 'bash -c "sleep 30 & wait" & wait' &
   root=$!

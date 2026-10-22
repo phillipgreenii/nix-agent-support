@@ -11,5 +11,8 @@ mkBashLibrary {
   inherit testSupport;
   testDeps = [
     pkgs.coreutils
-  ];
+    pkgs.gawk
+    pkgs.gnused
+  ]
+  ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
 }

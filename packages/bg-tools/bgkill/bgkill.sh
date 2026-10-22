@@ -133,6 +133,7 @@ wait_until() {
     tries=$((tries - 1))
   done
 }
+# shellcheck disable=SC2329 # invoked indirectly: wait_until runs its arguments
 launcher_gone() { ! kill -0 "$PID" 2>/dev/null; }
 
 # Payload tree first: the launcher then sees its payload die, writes the true

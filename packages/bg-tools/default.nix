@@ -27,7 +27,12 @@ let
 
   bgkill = pkgs.callPackage ./bgkill {
     inherit (bashBuilders) mkBashScript;
-    inherit pkgs bg-tools-lib testSupport;
+    inherit
+      pkgs
+      bg-tools-lib
+      bgrun
+      testSupport
+      ;
   };
 in
 {

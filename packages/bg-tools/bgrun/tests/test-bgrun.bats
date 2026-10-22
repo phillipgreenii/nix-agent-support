@@ -124,6 +124,7 @@ fi
 }
 
 @test "meta pins the recorded pid's start time while the job is alive" {
+  require_ps
   create_cmd_wrapper bgrun
   run "$TEST_DIR/run_bgrun" p1 -- sleep 30
   [ "$status" -eq 0 ]

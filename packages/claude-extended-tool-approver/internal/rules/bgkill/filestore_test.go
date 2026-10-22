@@ -50,6 +50,11 @@ func startOf(t *testing.T, pid int) string {
 }
 
 func TestFileStore_Job(t *testing.T) {
+	// The darwin nix sandbox denies ps; the identity probe cannot run there. It
+	// runs on a normal host, in the commit hook and on a Linux builder with procps.
+	if s, err := psField(os.Getpid(), "lstart="); err != nil || s == "" {
+		t.Skipf("ps cannot inspect processes here: %q %v", s, err)
+	}
 	dir := t.TempDir()
 	store := &FileStore{Dir: dir}
 	live := startProc(t, "bgrun-fixture")

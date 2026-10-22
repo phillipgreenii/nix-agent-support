@@ -56,3 +56,10 @@ wait_for_file() {
   done
   [[ -f $file ]]
 }
+
+# Skip a test that inspects processes with ps when ps cannot (the darwin nix
+# sandbox denies it; a normal shell, the commit hook run and a Linux builder
+# with procps all can). The pid-identity logic is exercised wherever ps works.
+require_ps() {
+  [[ -n "$(ps -p $$ -o lstart= 2>/dev/null)" ]] || skip "ps cannot inspect processes in this sandbox"
+}

@@ -13,12 +13,18 @@ else
   source "$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../test-support" && pwd)/test_helper.bash"
 fi
 
-# bgkill's own SCRIPTS_DIR is the bgkill source dir; bgrun lives beside it.
+# Creates $TEST_DIR/run_bgrun: the source tree's bgrun beside bgkill's own when
+# it exists (a local run), else the PACKAGED bgrun on PATH (the nix check puts it
+# there). Never a mock.
 create_bgrun_wrapper() {
-  local saved="$SCRIPTS_DIR"
-  SCRIPTS_DIR="$(cd "$SCRIPTS_DIR/../bgrun" && pwd)"
-  create_cmd_wrapper bgrun
-  SCRIPTS_DIR="$saved"
+  if [[ -f "$SCRIPTS_DIR/../bgrun/bgrun.sh" ]]; then
+    local saved="$SCRIPTS_DIR"
+    SCRIPTS_DIR="$(cd "$SCRIPTS_DIR/../bgrun" && pwd)"
+    create_cmd_wrapper bgrun
+    SCRIPTS_DIR="$saved"
+  else
+    ln -s "$(command -v bgrun)" "$TEST_DIR/run_bgrun"
+  fi
 }
 
 # Bounded wait until PID is gone.
@@ -85,6 +91,7 @@ wait_for_pidfile() {
 }
 
 @test "stops a running job: payload and grandchild die, exit record is the true 143" {
+  require_ps
   create_bgrun_wrapper
   create_cmd_wrapper bgkill
   run "$TEST_DIR/run_bgrun" victim -- bash -c 'sleep 60 & echo $! >"$0"; wait' "$TEST_DIR/grandchild.pid"
@@ -104,6 +111,7 @@ wait_for_pidfile() {
 }
 
 @test "a job that ignores SIGTERM keeps running: exit 6, never escalated" {
+  require_ps
   create_bgrun_wrapper
   create_cmd_wrapper bgkill
   run "$TEST_DIR/run_bgrun" stubborn -- bash -c 'trap "" TERM; echo ready >"$0"; while :; do sleep 0.2; done' "$TEST_DIR/ready"
@@ -121,6 +129,7 @@ wait_for_pidfile() {
 }
 
 @test "refuses a pid that is not a bgrun launcher, and signals nothing" {
+  require_ps
   create_cmd_wrapper bgkill
   mkdir -p "$BG_DIR"
   sleep 60 &
@@ -135,11 +144,13 @@ wait_for_pidfile() {
 }
 
 @test "refuses a recycled pid whose start time differs from the recorded one" {
+  require_ps
   create_bgrun_wrapper
   create_cmd_wrapper bgkill
   run "$TEST_DIR/run_bgrun" recycled -- sleep 60
   [ "$status" -eq 0 ]
   launcher="$(cat "$BG_DIR/recycled.pid")"
+  grep -q '^pidstart: ' "$BG_DIR/recycled.meta" # bgrun recorded a start time to tamper with
   sed -i.bak 's/^pidstart: .*/pidstart: Mon Jan  1 00:00:00 2001/' "$BG_DIR/recycled.meta"
   run "$TEST_DIR/run_bgkill" recycled
   [ "$status" -eq 5 ]
@@ -152,6 +163,7 @@ wait_for_pidfile() {
 }
 
 @test "--dir selects another state directory" {
+  require_ps
   create_bgrun_wrapper
   create_cmd_wrapper bgkill
   alt="$TEST_DIR/alt"
