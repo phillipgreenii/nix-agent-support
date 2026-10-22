@@ -355,9 +355,10 @@ focus activity keeps the shape above.
 
 Volume and telemetry. The line is the decider's only telemetry: it emits nothing over OpenTelemetry
 or Prometheus, and logs the counters line and its error lines on stderr. Once the issue decider role
-binds `<type>.changed`, a run happens for every change of an entity and for every
-`sweep.reconcile_age` pass, so the volume is one line per active entity per `sweep.reconcile_age`,
-idle runs included; a log pipeline MUST expect that rate.
+binds `issue.changed`, a run happens when an issue changes, so the volume is one line per change of
+a watched issue: there is no age-driven pass, and an issue that has not changed is not decided
+again, nor is a failed run re-emitted; a log pipeline MUST expect that rate, which tracks the
+change rate of the watched issues and not their number.
 
 ## Invariants
 

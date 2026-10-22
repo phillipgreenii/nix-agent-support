@@ -10,8 +10,16 @@ read). Two verbs under each type group manage those rows (entity-change-flow des
 For `pr` pg-desk keeps no change log and no consumer rows: the daemon-backed backend owns the
 change feed for `pr` and `ci`, so it owns the consumers' cursors and their retention, and pg-desk's
 own PR change flow is retired (see [`changes.md`](changes.md), "Who owns change detection"). The
-consumer verbs and everything below describe the change log pg-desk itself keeps, which serves the
-types whose backend does not own its changes (`issue`, `thread`).
+consumer verbs and everything below describe the change log pg-desk itself keeps. For `issue` that
+is the log of EVERY backend: pg-desk is the single emitter of the issue change event, so it keeps
+the log and its consumers' cursors whether the backend detects changes by list-and-diff (the beads
+backend) or owns its changes and is consumed through its feed (the Jira backend). The change log
+also serves `thread`.
+
+The feed cursor pg-desk holds with an owning backend's feed is a separate thing from the consumers
+listed here: it is the connector's cursor for the consumer named `pg-desk`, acknowledged only after
+a commit (see [`changes.md`](changes.md), "Feed consumption for a backend that owns its changes").
+It is not a row of this table.
 
 ```mermaid
 flowchart LR
@@ -39,6 +47,10 @@ flowchart LR
   replays the retained log.
 - Neither verb moves a cursor, reads a record, or contacts the network. `list` is read-only;
   `forget` only deletes the one row.
+- The consumer named `pg-desk`, under which pg-desk reads an owning backend's feed, is serialised
+  across the feed fetch AND the commit of the rows it fetched, not only across the delivery step the
+  per-`(type, name)` lock covers for every other consumer. Two concurrent polls therefore cannot
+  fetch the same rows, and one cannot acknowledge a position past rows the other has not committed.
 
 ## Invariants
 
@@ -48,6 +60,8 @@ flowchart LR
 - **INV-CONSUMER-3.** <!-- uuid: 3a3afd38-0838-4d8d-96a1-66c6d6b01f8d --> `list` and `forget` MUST NOT register a consumer or stamp `seen_at`.
 - **INV-CONSUMER-4.** <!-- uuid: ddb69252-819c-4dfe-93d0-1ee5bcacf22c --> For `pr` and `ci`, pg-desk MUST NOT hold a consumer's cursor: the backend that
   owns those changes holds it.
+- **INV-CONSUMER-5.** <!-- uuid: cc386b66-fdc6-4aa0-9112-972655beaae0 --> For `issue`, pg-desk MUST keep the change log and its consumers' cursors for every
+  backend, and the consumer named `pg-desk` MUST be serialised across the feed fetch AND the commit.
 
 ## Old-schema refusal
 
