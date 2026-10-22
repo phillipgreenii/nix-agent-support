@@ -7802,6 +7802,15 @@
                       };
                     };
                   });
+                  # Case 3 (bead pg2-3qx9e): a spec-less ccpool role that resolves to
+                  # neither its own pool nor an enabled handler-wide pool.
+                  wrapUnmanagedFired = wrapFired (evalHM {
+                    enable = true;
+                    roles.unmanaged = {
+                      type = "ccpool";
+                      ccpool = wrapRoleBase;
+                    };
+                  });
                   # A `spec` on a command role.
                   wrapCommandSpecFired = wrapFired (evalHM {
                     enable = true;
@@ -8220,6 +8229,7 @@
                 assert wrapMessageNames wrapDefaultPoolFired "stray" "default pool";
                 assert wrapMessageNames wrapSharedFired "without-spec" "/tmp/pg2-12gr4-shared-pool";
                 assert wrapMessageNames wrapUserBinFired "user-bin" "/tmp/pg2-12gr4-user-bin-pool";
+                assert wrapMessageNames wrapUnmanagedFired "unmanaged" "neither its own pool";
                 assert wrapMessageNames wrapCommandSpecFired "cmd-spec" "command role";
                 assert wrapMessageNames wrapEnvClashFired "clash" "PG_WRAP_SPEC";
                 # pg2-4roho decision item 4: exactly one registry entry,

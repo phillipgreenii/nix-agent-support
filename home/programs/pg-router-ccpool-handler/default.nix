@@ -49,7 +49,9 @@ let
   # `ccpool.pool.enable` is on its own pool; otherwise, with the handler-wide
   # `pool.enable`, it is on the handler-wide pool; otherwise it is on ccpool's
   # default pool, which this module does not manage (so its `claude.bin` is
-  # never `pg-wrap-exec` and a spec role there fails the first check).
+  # never `pg-wrap-exec` and a spec role there fails the first check). A
+  # ccpool role on that unmanaged default pool fails evaluation whether or not
+  # it has a spec (`unmanagedPoolAssertions`, bead pg2-3qx9e).
   pgWrapExecBin = "${pkgs.pg-wrap}/bin/pg-wrap-exec";
 
   # The ten variable names every rendered spec's `keep` carries: the participant
@@ -240,6 +242,20 @@ let
         ]
     ) ccpoolRoles
   );
+  # A ccpool role MUST resolve to a pool this module manages: its own
+  # `ccpool.pool` or the enabled handler-wide `pool` (bead pg2-3qx9e). A role
+  # on ccpool's unmanaged default pool is rejected whether or not it has a
+  # spec, so a role cannot silently share the default pool's cap and reap
+  # cadence with every other ccpool consumer.
+  unmanagedPoolAssertions = lib.mapAttrsToList (name: roleCfg: {
+    assertion = (poolOf roleCfg).managed;
+    message = ''
+      phillipgreenii.programs.pg-router-ccpool-handler.roles.${name}: the role
+      resolves to neither its own pool (`roles.${name}.ccpool.pool.enable`) nor
+      an enabled handler-wide pool (`pool.enable`), so it would run on
+      ${(poolOf roleCfg).dir}. Enable one of them.
+    '';
+  }) ccpoolRoles;
   wrapSpecAssertions = lib.mapAttrsToList (name: roleCfg: {
     assertion = roleCfg.type == "ccpool";
     message = ''
@@ -2282,6 +2298,7 @@ in
       # pg-wrap two-way pool/spec check, spec-on-command-role and
       # role-set-PG_WRAP_SPEC guards (design ruling 30).
       ++ wrapPoolAssertions
+      ++ unmanagedPoolAssertions
       ++ wrapSpecAssertions
       ++ wrapSessionEnvAssertions;
 
