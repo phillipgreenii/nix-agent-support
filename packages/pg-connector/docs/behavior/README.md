@@ -9,10 +9,10 @@ Start here, then the [glossary](glossary.md); the rules are in [invariants](inva
 boundaries in [interfaces](interfaces.md), the actors in [actors](actors.md), the stories,
 use cases, journey, and open questions in [journeys](journeys.md), and the `pg-pr`
 verb→destination map plus its per-table SQLite dispositions in
-[pg-pr retirement](pg-pr-retirement.md). The one backend that is stateful and runs a daemon,
-`pg-connector-github`, has its own behavior-docs set in [github/README.md](github/README.md): it
-owns its cache, its refresh policy and its change decisions, which this set only forwards to
-(`INV-CACHE-9`).
+[pg-pr retirement](pg-pr-retirement.md). The backends that are stateful and run a daemon each have
+their own behavior-docs set: `pg-connector-github` in [github/README.md](github/README.md) and
+`pg-connector-issue-jira` in [jira/README.md](jira/README.md). Each owns its cache, its refresh
+policy and its change decisions, which this set only forwards to (`INV-CACHE-9`).
 
 ## The model
 
@@ -91,10 +91,10 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
   (Jira) and whatever concrete backend or standalone plugin eventually implements `attention`/
   `search` — only the multi-instance targeted-op resolution POLICY those registrations exercise is
   in scope, documented in [invariants](invariants.md)'s `INV-REG-2`, never a named backend as
-  anything but an illustrative example (this set's own Floor). The one backend that is daemon-backed
-  keeps its own set ([github](github/README.md)) for its freshness, change-delivery and budget
-  behavior; this set holds only the umbrella's half of that seam (`INV-CACHE-9`,
-  `INV-LEDGER-FRESH-5`). Tier-3 consumer tooling built on
+  anything but an illustrative example (this set's own Floor). The backends that are daemon-backed
+  keep their own sets ([github](github/README.md), [jira](jira/README.md)) for their freshness,
+  change-delivery and budget behavior; this set holds only the umbrella's half of that seam
+  (`INV-CACHE-9`, `INV-LEDGER-FRESH-5`). Tier-3 consumer tooling built on
   top of these verbs — `pg-desk`, a TUI, a pg-router role — is out categorically regardless of
   whether it has landed (see the [glossary](glossary.md)'s Tiers and roles):
   `phillipg-nix-ziprecruiter`'s `df-attention`/`df-search` (pure clients of `attention list`/
@@ -115,7 +115,8 @@ categorize`/`feedback_set` ops) landed there too but were retired, along with th
 ### Elements this set cites from other sets
 
 One other set owns elements this set's implementation implements, and the rows below declare them:
-the GitHub backend's own set ([github](github/README.md)). It owns the read-answer provenance
+the GitHub backend's own set ([github](github/README.md)). The Jira backend's sibling set
+([jira](jira/README.md)) owns no element cited here. It owns the read-answer provenance
 (`INV-GH-FRESH-8`), the budget governor's hard cap, priority classes, background share and limit
 handling (`INV-GH-BUDGET-1`, `INV-GH-BUDGET-2`, `INV-GH-BUDGET-3`, `INV-GH-BUDGET-5`), and the
 operator verbs that explain and refresh a stale entity (`INV-GH-DIAG-2`, `INV-GH-DIAG-3`). The
