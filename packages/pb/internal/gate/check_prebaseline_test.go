@@ -183,3 +183,33 @@ func TestCheck_gatedCommitNowhereInHistoryStaysBlocked(t *testing.T) {
 	out := preBaselineCheck(t, f)
 	leftAlone(t, f, out)
 }
+
+// TestCheck_baselineEqualToGatedCommitResolvesAfterALaterApply is the pg2-86a7l
+// shape: a hand-made gate whose applied_baseline IS its own gated commit. The
+// baseline..applied_ref range excludes the baseline commit itself, so the gate is
+// found only through the pre-baseline lookup (which scans the baseline's own
+// history, baseline commit included). Once an apply has advanced applied_ref past
+// the baseline it MUST resolve; the observation that such a gate is "silently
+// ignored" does not hold for this case.
+func TestCheck_baselineEqualToGatedCommitResolvesAfterALaterApply(t *testing.T) {
+	dir, pid, _, gated, _, c3 := preBaselineRepo(t)
+	f := preBaselineScenario(dir, pid, gated, c3, "")
+	out := preBaselineCheck(t, f)
+	if len(out.Resolved) != 1 || out.Resolved[0] != "g-1" {
+		t.Fatalf("resolved=%v skipped=%+v blocked=%+v: a gate whose baseline equals its own "+
+			"gated commit must resolve once applied_ref has moved past it", out.Resolved, out.Skipped, out.Blocked)
+	}
+}
+
+// TestCheck_baselineEqualToGatedCommitStaysPendingUntilAnApplyRuns pins the
+// documented, intended other half of pg2-86a7l: with applied_ref still equal to the
+// baseline (== the gated commit) no apply has run since the gate was created, so
+// the gate is simply pending. It is deliberately neither resolved nor reported
+// Skipped/Blocked: a determinable "not yet" must not make `pb gate check` exit
+// non-zero (see CheckResult.Blocked), and packages/pb/README.md states the rule.
+func TestCheck_baselineEqualToGatedCommitStaysPendingUntilAnApplyRuns(t *testing.T) {
+	dir, pid, _, gated, _, _ := preBaselineRepo(t)
+	f := preBaselineScenario(dir, pid, gated, gated, "")
+	out := preBaselineCheck(t, f)
+	leftAlone(t, f, out)
+}
