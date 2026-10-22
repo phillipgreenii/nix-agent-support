@@ -674,6 +674,15 @@
               pkgs = final;
               inherit bashBuilders;
             }).pg-rescue-flake-lock-conflict.script;
+          # pg-rescue-push-branch (docket pg2-q6a96, design D5): the single
+          # audited helper the pg-rescue script roles push a rebased PR branch
+          # from (pinned --force-with-lease, linked worktree only). Single
+          # mkBashScript tool, so it takes `.script` directly.
+          pg-rescue-push-branch =
+            (import ./packages/pg-rescue-push-branch {
+              pkgs = final;
+              inherit bashBuilders;
+            }).pg-rescue-push-branch.script;
           # sync-projects (bead pg2-zr3jf): pg-rescue's first consumer -- rebase
           # every workspace repo under `pg-rescue --chain sync`, then `pn
           # workspace push`. Single mkBashScript tool, so -- same rationale as
@@ -14376,6 +14385,12 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # test-pg-rescue-push-branch (docket pg2-q6a96). Same one-line idiom
+            # as wtdone above: without this the bats suite would run in no gate.
+            // (import ./packages/pg-rescue-push-branch {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
             # test-sync-projects (bead pg2-zr3jf). Same one-line idiom as
             # wtdone above: the overlay attr takes only the script derivation,
             # so without this the bats suite would run in no gate at all.
@@ -14551,6 +14566,10 @@
             # `nix build .#pg-rescue-flake-lock-conflict` resolves via
             # flake.packages.<system>.
             inherit (pkgs) pg-rescue-flake-lock-conflict;
+            # pg-rescue-push-branch is likewise an overlay-only attr (single
+            # mkBashScript tool) -- re-exported so
+            # `nix build .#pg-rescue-push-branch` resolves via flake.packages.<system>.
+            inherit (pkgs) pg-rescue-push-branch;
             # sync-projects is likewise an overlay-only attr (single mkBashScript
             # tool) -- re-exported so `nix build .#sync-projects` resolves via
             # flake.packages.<system>.
