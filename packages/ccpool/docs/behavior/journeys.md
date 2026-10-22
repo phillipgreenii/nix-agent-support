@@ -139,7 +139,8 @@ _Requires:_ `INV-SESS-4`.
 **Level:** subfunction — included by `USECASE-CCP-DISPATCH` and `USECASE-CCP-FIREFORGET`, which is
 what makes it a subfunction rather than a goal of its own.
 **Preconditions:** a session name.
-_Requires:_ `INV-POOL-1`, `INV-POOL-6`, `INV-TRUST-1`, `INV-CCPOOL-CWD-1`.
+_Requires:_ `INV-POOL-1`, `INV-POOL-6`, `INV-POOL-7`, `INV-POOL-8`, `INV-TRUST-1`,
+`INV-CCPOOL-CWD-1`.
 
 1. If the named session is already live, use it as-is.
 2. Otherwise launch it — a fresh session if the name is new, or a resume if a record exists —
@@ -147,7 +148,12 @@ _Requires:_ `INV-POOL-1`, `INV-POOL-6`, `INV-TRUST-1`, `INV-CCPOOL-CWD-1`.
    and launching it in its working directory: the caller's explicit value for a brand-new
    session, or the previously recorded working directory for a resume (`INV-CCPOOL-CWD-1`).
    The executable that runs in the session is the one the pool's configuration names, for a new
-   session and for a resume alike (`INV-POOL-6`).
+   session and for a resume alike (`INV-POOL-6`). The session starts with the listed markers
+   and no others (`INV-POOL-7`).
+3. Wait until the session is ready. If the launched process ends first, the launch fails at once
+   with the exit status or signal and the tail of its output, or as having exited cleanly during
+   launch; a launch that reaches its timeout carries the tail of the session's output
+   (`INV-POOL-8`).
 
 ## Journeys
 

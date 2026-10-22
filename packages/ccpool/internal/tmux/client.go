@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -51,8 +52,10 @@ func (c *Client) tmux(args ...string) ([]byte, error) {
 // on the `claude` child is a grandchild of the pane shell and so invisible to a
 // nudger that reads the pane pid's env. env keys are sorted for deterministic argv.
 //
-// After creation, remain-on-exit is set to "failed" on the new pane (pg2-olchz,
-// follow-up to pg2-5sirm's investigation): without it, the pane — and, since
+// remain-on-exit is set to "failed" on the new pane in the same tmux invocation
+// as the creation, so it is in force before the process can possibly exit (the
+// launch wait's fail-fast depends on that). It was added by pg2-olchz, a
+// follow-up to pg2-5sirm's investigation: without it, the pane — and, since
 // this is always a single-window session, the WHOLE session — is destroyed the
 // instant the foreground `claude` process exits for ANY reason, so a crash
 // leaves zero forensic trail (no stderr, no exit status, nothing to attach to).
@@ -85,13 +88,93 @@ func (c *Client) NewSession(name, cwd string, env map[string]string, argv []stri
 	}
 	args = append(args, "--")
 	args = append(args, argv...)
+	// remain-on-exit is set in the SAME tmux invocation as the creation (a
+	// second command after a ";" separator), so the server runs both before it
+	// can observe the pane's process exit: a payload that fails within
+	// milliseconds still leaves its dead pane, status and output behind. As two
+	// separate tmux calls it could already be gone (and its stderr with it).
+	// Every caller-supplied argument is escaped so none can be read as that
+	// separator.
+	for i := range args {
+		args[i] = escapeSemicolon(args[i])
+	}
+	args = append(args, ";", "set-option", "-t", name, "remain-on-exit", "failed")
 	if _, err := c.tmux(args...); err != nil {
 		return err
 	}
-	if _, err := c.tmux("set-option", "-t", name, "remain-on-exit", "failed"); err != nil {
-		return fmt.Errorf("set remain-on-exit: %w", err)
-	}
 	return nil
+}
+
+// escapeSemicolon protects an argument that ends in ";" from being read by tmux
+// as a command separator: tmux splits a command line on arguments ending in an
+// unescaped ";", and a "\;" ending is the escaped literal.
+func escapeSemicolon(a string) string {
+	if strings.HasSuffix(a, ";") {
+		return a[:len(a)-1] + `\;`
+	}
+	return a
+}
+
+// PaneStatus is what the tmux server knows about a session's pane.
+type PaneStatus struct {
+	// Exists is false when the session is not on the socket at all (a process
+	// that exited with status 0 destroys its session, since remain-on-exit is
+	// "failed", and with it the last window).
+	Exists bool
+	// Dead is true when the session exists but its process has ended (kept by
+	// remain-on-exit failed).
+	Dead bool
+	// Status is the process's exit status (valid when Dead and Signal == 0).
+	Status int
+	// Signal is the signal that ended the process, or 0.
+	Signal int
+}
+
+// PaneStatus reports whether the session exists and, if so, whether its pane's
+// process has ended with which exit status or signal. has-session is queried
+// first and gates the pane query for the reason HasSession documents:
+// display-message does not resolve its target strictly.
+func (c *Client) PaneStatus(name string) (PaneStatus, error) {
+	if name == "" {
+		return PaneStatus{}, nil
+	}
+	if _, err := c.tmux("has-session", "-t", name); err != nil {
+		return PaneStatus{}, nil
+	}
+	out, err := c.tmux("display-message", "-p", "-t", name, "#{pane_dead} #{pane_dead_status} #{pane_dead_signal}")
+	if err != nil {
+		return PaneStatus{}, err
+	}
+	// Split on SINGLE spaces, never Fields: an empty status (a signal death) or
+	// an empty signal (an exit) must keep its position. Absent or empty fields
+	// read as 0.
+	parts := strings.Split(strings.TrimRight(string(out), "\n"), " ")
+	ps := PaneStatus{Exists: true, Dead: parts[0] == "1"}
+	if len(parts) >= 2 {
+		ps.Status, _ = strconv.Atoi(parts[1])
+	}
+	if len(parts) >= 3 {
+		ps.Signal, _ = strconv.Atoi(parts[2])
+	}
+	return ps, nil
+}
+
+// CaptureTail returns the last lines lines of the session's pane output,
+// scrollback included (capture-pane -p -S -<lines>), trailing blank lines
+// trimmed. CapturePane returns only the visible screen.
+func (c *Client) CaptureTail(name string, lines int) (string, error) {
+	if lines <= 0 {
+		lines = 1
+	}
+	out, err := c.tmux("capture-pane", "-p", "-t", name, "-S", "-"+strconv.Itoa(lines))
+	if err != nil {
+		return "", err
+	}
+	all := strings.Split(strings.TrimRight(string(out), " \t\r\n"), "\n")
+	if len(all) > lines {
+		all = all[len(all)-lines:]
+	}
+	return strings.Join(all, "\n"), nil
 }
 
 // SendKeys sends literal key tokens (e.g. "Enter", "Escape") to the session.

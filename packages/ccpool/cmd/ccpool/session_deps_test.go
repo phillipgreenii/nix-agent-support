@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/session"
 )
 
 // TestNewSessionDeps_wiresExister is the regression for CRITICAL #1: every
@@ -29,6 +30,26 @@ func TestNewSessionDeps_wiresExister(t *testing.T) {
 	}
 	if !deps.Exister.Exists(transcript) {
 		t.Errorf("wired production Exister must find the hook-recorded transcript at %q", transcript)
+	}
+}
+
+// TestNewSessionDeps_wiresFailFastLaunchWait: the production Waiter is the
+// launch-aware one (session.LaunchWaiter) with the tmux client as its pane
+// prober and the pool's tmux prefix, so ccpool new and reply's resume fail fast
+// on a dead launch. A plain Waiter would silently wait out the full timeout.
+func TestNewSessionDeps_wiresFailFastLaunchWait(t *testing.T) {
+	var cfg config.Config
+	cfg.Tmux.Prefix = "pfx-"
+	deps := newSessionDeps(cfg, nil, nil)
+	if _, ok := deps.Wait.(session.LaunchWaiter); !ok {
+		t.Fatalf("production Waiter %T is not a session.LaunchWaiter", deps.Wait)
+	}
+	w, ok := deps.Wait.(storeWaiter)
+	if !ok {
+		t.Fatalf("production Waiter is %T, want storeWaiter", deps.Wait)
+	}
+	if w.panes == nil || w.prefix != "pfx-" {
+		t.Errorf("storeWaiter panes=%v prefix=%q, want a pane prober and the pool's prefix", w.panes, w.prefix)
 	}
 }
 

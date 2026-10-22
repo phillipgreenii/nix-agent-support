@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
@@ -14,6 +16,7 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/launch"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
+	"github.com/phillipgreenii/ccpool/internal/tmux"
 	"github.com/phillipgreenii/ccpool/internal/trust"
 	"github.com/phillipgreenii/ccpool/internal/wait"
 )
@@ -179,12 +182,78 @@ type truster struct{ path string }
 
 func (t truster) EnsureTrusted(cwd string) error { return trust.EnsureTrusted(t.path, cwd) }
 
-// storeWaiter adapts the store + wait poll loop to session.Waiter.
+// storeWaiter adapts the store + wait poll loop to session.Waiter. The poller
+// stays store-only; the launch wait (WaitLaunch) additionally gets a liveness
+// check over the session's tmux pane, injected through wait.Opts.
 type storeWaiter struct {
 	st      *store.Store
 	timeout time.Duration
+	// panes and prefix locate the launched session's pane (session.TmuxName).
+	// A nil panes makes WaitLaunch a plain store wait.
+	panes  paneProber
+	prefix string
 }
+
+// paneProber is the tmux surface the launch wait's liveness check reads;
+// *tmux.Client satisfies it.
+type paneProber interface {
+	PaneStatus(name string) (tmux.PaneStatus, error)
+	CaptureTail(name string, lines int) (string, error)
+}
+
+// launchTailLines is how much of the pane's output a launch failure carries.
+const launchTailLines = 40
 
 func (w storeWaiter) Wait(ctx context.Context, name string, since int64) (wait.Outcome, error) {
 	return wait.ForGenerationAdvance(ctx, w.st, name, since, wait.Opts{Timeout: w.timeout})
+}
+
+// WaitLaunch is Wait for a launch or resume (session.LaunchWaiter): it fails at
+// once when the launched process has died, instead of waiting out the timeout.
+func (w storeWaiter) WaitLaunch(ctx context.Context, name string, since int64) (wait.Outcome, error) {
+	o := wait.Opts{Timeout: w.timeout}
+	if w.panes != nil {
+		tmuxName := session.TmuxName(w.prefix, name)
+		o.Liveness = func(context.Context) error { return launchLiveness(w.panes, name, tmuxName) }
+		o.Diagnose = func(context.Context) string { return paneTail(w.panes, tmuxName) }
+	}
+	return wait.ForGenerationAdvance(ctx, w.st, name, since, o)
+}
+
+// launchLiveness reads the launched session's state, in this order: an absent
+// session is dead (a process that exited with status 0 destroys its session,
+// since remain-on-exit keeps only failed panes), then a dead pane is reported
+// with its exit status or signal and its output tail. A tmux read error is not
+// evidence of death; the next poll tries again. It knows nothing about what the
+// launched executable is.
+func launchLiveness(p paneProber, name, tmuxName string) error {
+	ps, err := p.PaneStatus(tmuxName)
+	if err != nil {
+		return nil
+	}
+	if !ps.Exists {
+		return fmt.Errorf("session %q exited cleanly during launch", name)
+	}
+	if !ps.Dead {
+		return nil
+	}
+	how := fmt.Sprintf("exited with status %d", ps.Status)
+	if ps.Signal != 0 {
+		how = fmt.Sprintf("was killed by signal %d (%s)", ps.Signal, syscall.Signal(ps.Signal))
+	}
+	msg := fmt.Sprintf("session %q: the launched process %s before ready", name, how)
+	if tail := paneTail(p, tmuxName); tail != "" {
+		msg += "\n" + tail
+	}
+	return errors.New(msg)
+}
+
+// paneTail renders the pane's output tail for an error message, or "" when
+// there is none (or it cannot be read).
+func paneTail(p paneProber, tmuxName string) string {
+	tail, err := p.CaptureTail(tmuxName, launchTailLines)
+	if err != nil || strings.TrimSpace(tail) == "" {
+		return ""
+	}
+	return "output tail:\n" + tail
 }

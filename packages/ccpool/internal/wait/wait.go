@@ -19,11 +19,20 @@ type Poller interface {
 type Opts struct {
 	Timeout  time.Duration
 	Interval time.Duration
+	// Liveness, when set, is called after every poll that has not advanced. A
+	// non-nil error means the awaited launch can no longer succeed: the wait
+	// ends at once and returns that error instead of waiting out Timeout.
+	Liveness func(ctx context.Context) error
+	// Diagnose, when set, is called once when the wait times out; its text is
+	// returned in Outcome.Detail.
+	Diagnose func(ctx context.Context) string
 }
 
 type Outcome struct {
 	State    store.State
 	TimedOut bool
+	// Detail is Opts.Diagnose's text on a timeout; empty otherwise.
+	Detail string
 }
 
 // ForGenerationAdvance polls until generation > since, the deadline elapses, or
@@ -41,8 +50,17 @@ func ForGenerationAdvance(ctx context.Context, p Poller, name string, since int6
 		if ok && gen > since {
 			return Outcome{State: st}, nil
 		}
+		if o.Liveness != nil {
+			if lerr := o.Liveness(ctx); lerr != nil {
+				return Outcome{State: st}, lerr
+			}
+		}
 		if time.Now().After(deadline) {
-			return Outcome{State: st, TimedOut: true}, nil
+			out := Outcome{State: st, TimedOut: true}
+			if o.Diagnose != nil {
+				out.Detail = o.Diagnose(ctx)
+			}
+			return out, nil
 		}
 		select {
 		case <-ctx.Done():

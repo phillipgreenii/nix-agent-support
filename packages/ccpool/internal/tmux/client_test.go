@@ -24,34 +24,106 @@ func TestClient_NewSession_argv(t *testing.T) {
 		"-L", "ccpool", "new-session", "-d", "-s", "cc-alpha", "-c", "/proj/dir",
 		"-e", "CCPOOL_NAME=alpha", "-e", "PA_MONITOR_NO_NUDGE=1",
 		"--", "claude", "--session-id", "u1",
+		// remain-on-exit=failed (pg2-olchz) is armed in the SAME tmux
+		// invocation (after a ";" separator), so a payload that exits within
+		// milliseconds still leaves an inspectable dead pane. A CLEAN exit is
+		// still not preserved (which would break every HasSession-based liveness
+		// check elsewhere — see client.go's doc comment).
+		";", "set-option", "-t", "cc-alpha", "remain-on-exit", "failed",
 	}
-	if len(got) != 2 || !reflect.DeepEqual(got[0], want) {
-		t.Errorf("argv = %v\nwant %v", got, want)
-	}
-	// NewSession must also arm remain-on-exit=failed on the pane it just created
-	// (pg2-olchz) so a future crash leaves an inspectable dead pane instead of
-	// vanishing, without preserving a CLEAN exit (which would break every
-	// HasSession-based liveness check elsewhere — see client.go's doc comment).
-	wantOpt := []string{"-L", "ccpool", "set-option", "-t", "cc-alpha", "remain-on-exit", "failed"}
-	if len(got) != 2 || !reflect.DeepEqual(got[1], wantOpt) {
-		t.Errorf("argv[1] = %v\nwant %v", got, wantOpt)
+	if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
+		t.Errorf("calls = %v\nwant ONE call %v", got, want)
 	}
 }
 
-// TestClient_NewSession_remainOnExitErrorPropagates: if the follow-up
-// set-option call fails (e.g. tmux dies between the two calls), NewSession
-// must surface the error rather than silently leaving remain-on-exit unset.
-func TestClient_NewSession_remainOnExitErrorPropagates(t *testing.T) {
-	calls := 0
+// TestClient_NewSession_errorPropagates: a failing create-and-arm call surfaces.
+func TestClient_NewSession_errorPropagates(t *testing.T) {
 	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) {
-		calls++
-		if calls == 2 {
-			return []byte("no such option"), fmt.Errorf("boom")
-		}
-		return nil, nil
+		return []byte("duplicate session"), fmt.Errorf("boom")
 	}}
 	if err := c.NewSession("cc-a", "", nil, []string{"claude"}); err == nil {
-		t.Error("NewSession: want error when set-option remain-on-exit fails, got nil")
+		t.Error("NewSession: want error when tmux fails, got nil")
+	}
+}
+
+// An argument ending in ";" must reach tmux escaped, or tmux would read it as a
+// command separator and run the rest as a command of its own.
+func TestClient_NewSession_escapesTrailingSemicolons(t *testing.T) {
+	var got [][]string
+	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) { got = append(got, args); return nil, nil }}
+	err := c.NewSession("cc-a", "", map[string]string{"K": "v;"}, []string{"claude", ";", "x;"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"-L", "ccpool", "new-session", "-d", "-s", "cc-a",
+		"-e", `K=v\;`, "--", "claude", `\;`, `x\;`,
+		";", "set-option", "-t", "cc-a", "remain-on-exit", "failed",
+	}
+	if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
+		t.Errorf("argv = %v\nwant %v", got, want)
+	}
+}
+
+func TestClient_PaneStatus(t *testing.T) {
+	cases := []struct {
+		name       string
+		hasErr     bool
+		display    string
+		want       PaneStatus
+		wantDispls int
+	}{
+		{name: "absent session", hasErr: true, want: PaneStatus{}, wantDispls: 0},
+		{name: "alive", display: "0  \n", want: PaneStatus{Exists: true}, wantDispls: 1},
+		{name: "exit status", display: "1 3 \n", want: PaneStatus{Exists: true, Dead: true, Status: 3}, wantDispls: 1},
+		{name: "signal", display: "1  15\n", want: PaneStatus{Exists: true, Dead: true, Signal: 15}, wantDispls: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			displays := 0
+			c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) {
+				switch args[2] {
+				case "has-session":
+					if tc.hasErr {
+						return nil, fmt.Errorf("can't find session")
+					}
+					return nil, nil
+				case "display-message":
+					displays++
+					return []byte(tc.display), nil
+				}
+				return nil, fmt.Errorf("unexpected %v", args)
+			}}
+			got, err := c.PaneStatus("cc-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Errorf("PaneStatus = %+v, want %+v", got, tc.want)
+			}
+			if displays != tc.wantDispls {
+				t.Errorf("display-message calls = %d, want %d (has-session must gate it)", displays, tc.wantDispls)
+			}
+		})
+	}
+}
+
+func TestClient_CaptureTail(t *testing.T) {
+	var got []string
+	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) {
+		got = args
+		return []byte("one\ntwo\nthree\n\n\n"), nil
+	}}
+	tail, err := c.CaptureTail("cc-a", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-L", "ccpool", "capture-pane", "-p", "-t", "cc-a", "-S", "-2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("argv = %v, want %v", got, want)
+	}
+	if tail != "two\nthree" {
+		t.Errorf("tail = %q, want the last 2 non-blank lines", tail)
 	}
 }
 

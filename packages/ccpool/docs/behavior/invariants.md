@@ -55,6 +55,32 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   search path, probe its version, or check it before launching. The same executable is started for
   a brand-new session and for a resumed one, and it is read from the pool's configuration afresh
   on each call, so a configuration change takes effect on the next launch or resume.
+- **`INV-POOL-7`** <!-- uuid: 7a1e4c52-9d3b-4f68-a2c7-5b0e8d194f36 --> — **The markers ccpool
+  injects into a session's environment are a closed, listed set.** Every session a pool launches or
+  resumes MUST be started with exactly these four markers, set after, and so overriding, any
+  caller-supplied environment, and no others: `CCPOOL_EXTERNAL_ID` (the session's identity, which
+  correlates the session's own signals to its record, so a caller MUST NOT be able to change it);
+  `PA_MONITOR_NO_NUDGE` (always `1`; `INV-POOL-1`); `CCPOOL_POOL` (the pool's directory; present
+  only when the pool is addressed explicitly rather than by default); and `CCPOOL_AUTONOMOUS`
+  (`1`; present only for an autonomous session). Separately, ccpool MUST blank — set to empty, never
+  leave inherited — the five markers an agent uses to flag itself as a nested session
+  (`CLAUDE_CODE_CHILD_SESSION`, `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`,
+  `CLAUDE_CODE_EXECPATH`), so that every session a pool starts is a top-level one whose
+  conversation is recorded. Injecting any further marker is a change to this invariant first.
+- **`INV-POOL-8`** <!-- uuid: e3b86f10-27c4-4a9d-8e51-c90d7a2b64f8 --> — **A launch MUST NOT wait
+  out its full timeout on a launch that has already failed.** While a launch or a resume waits for
+  its session to become ready, ccpool MUST also watch the launched process, and MUST arrange, from
+  the instant the session is created, that a process that fails leaves its exit status and output
+  behind to be read (so one that fails within milliseconds is no different from one that fails
+  later). When the process ends before the session is ready, the launch MUST fail at once, and its
+  message MUST carry the exit status, or the signal that ended it, and the tail of the output it
+  last printed. A process that ended with status 0 before ready leaves nothing to inspect, and
+  MUST be reported as having exited cleanly during launch; a session that has vanished MUST be read
+  the same way. A launch that reaches its timeout MUST also carry the tail of the session's output.
+  A process that is alive but never becomes ready (for example, sitting at a prompt) gives no such
+  signal and ends only at the timeout. A launch that failed in either way leaves the session's
+  record as it was, not ready, for the caller to clear. A resume is a launch for this purpose, and
+  the executable is no more inspected by this watch than elsewhere (`INV-POOL-6`).
 
 ## Session lifecycle (`INV-STATE-*`, `INV-SESS-*`, `INV-CCPOOL-CWD-*`)
 

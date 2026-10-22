@@ -96,11 +96,12 @@ func buildServiceFor(cfg config.Config) (*session.Service, *store.Store, int) {
 // tests that only inspect the wiring; el may be nil (no-op logger).
 func newSessionDeps(cfg config.Config, st *store.Store, el *eventlog.Logger) session.Deps {
 	home, _ := os.UserHomeDir()
+	tc := tmux.NewClient(cfg.Tmux.Socket)
 	return session.Deps{
-		Tmux:                     tmux.NewClient(cfg.Tmux.Socket),
+		Tmux:                     tc,
 		Trust:                    truster{path: filepath.Join(home, ".claude.json")},
 		Store:                    st,
-		Wait:                     storeWaiter{st: st, timeout: time.Duration(cfg.Wait.Timeout)},
+		Wait:                     storeWaiter{st: st, timeout: time.Duration(cfg.Wait.Timeout), panes: tc, prefix: cfg.Tmux.Prefix},
 		Transcript:               transcriptAdapter{},
 		Lock:                     lock.New(cfg.RuntimeDir),
 		Notify:                   notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command),

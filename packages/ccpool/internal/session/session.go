@@ -173,6 +173,15 @@ type Result struct {
 	TimedOut bool
 }
 
+// LaunchWaiter is an optional Waiter extension: WaitLaunch is Wait for a launch
+// or resume, which may also end the wait at once with an error when the launched
+// process has died, and on a timeout fills wait.Outcome.Detail. launchAndWait
+// uses it when the Waiter provides it. Plain Wait stays the turn wait (send),
+// where a missing session has a different meaning.
+type LaunchWaiter interface {
+	WaitLaunch(ctx context.Context, externalID string, since int64) (wait.Outcome, error)
+}
+
 // waitFunc adapts a func to Waiter (used in tests and the default wiring).
 type waitFunc func(ctx context.Context, externalID string, since int64) (wait.Outcome, error)
 
@@ -604,7 +613,11 @@ func (s *Service) launchAndWait(ctx context.Context, externalID, tmuxName, csid,
 		s.recordLaunchOutcome(externalID, route, "error")
 		return Handle{}, fmt.Errorf("tmux new-session: %w", err)
 	}
-	out, err := s.d.Wait.Wait(ctx, externalID, since)
+	waitFn := s.d.Wait.Wait
+	if lw, ok := s.d.Wait.(LaunchWaiter); ok {
+		waitFn = lw.WaitLaunch // fail fast when the launched process dies
+	}
+	out, err := waitFn(ctx, externalID, since)
 	if err != nil {
 		s.recordLaunchOutcome(externalID, route, "error")
 		return Handle{}, fmt.Errorf("wait ready: %w", err)
@@ -612,7 +625,11 @@ func (s *Service) launchAndWait(ctx context.Context, externalID, tmuxName, csid,
 	h := Handle{ExternalID: externalID, ClaudeSessionID: csid, Name: name, TmuxSession: tmuxName, State: out.State}
 	if out.TimedOut {
 		s.recordLaunchOutcome(externalID, route, "timeout")
-		return h, fmt.Errorf("session %q did not reach ready before timeout (state=%s)", externalID, out.State)
+		msg := fmt.Sprintf("session %q did not reach ready before timeout (state=%s)", externalID, out.State)
+		if out.Detail != "" {
+			msg += "\n" + out.Detail
+		}
+		return h, errors.New(msg)
 	}
 	s.recordLaunchOutcome(externalID, route, "success")
 	return h, nil

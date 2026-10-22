@@ -145,6 +145,11 @@ func TestRunNew_usageLimitNotHitIsNotRefused(t *testing.T) {
 	c := &fakeChecker{}
 	useUsageChecker(t, c)
 	_, code := captureStderr(t, func() int { return runNew([]string{"alpha", "--cwd", a.cwd}) })
+	// This launch really starts the (nonexistent) claude binary, so tmux keeps
+	// its failed pane (remain-on-exit is armed atomically with the creation)
+	// and the server it started. Reap it here: the sandbox's cleanup reports
+	// any server still alive as a leak.
+	killTmuxServersUnder(a.tmuxDir)
 	if code == exitUsageLimited {
 		t.Fatalf("runNew exited %d with no limit hit", code)
 	}
