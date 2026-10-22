@@ -149,13 +149,45 @@ func Check(ctx context.Context, d CheckDeps, p CheckParams) (CheckResult, error)
 			// awaited patch-id was independently verified to match that landing commit
 			// exactly (no collision) — the designed behaviour, not a bug.
 			rng := fmt.Sprintf("-n %d %s", p.LastN, repo.AppliedRef)
-			if base := g.Metadata["applied_baseline"]; base != "" && d.PatchID.IsAncestor(ctx, repo.Path, base, repo.AppliedRef) {
+			base := g.Metadata["applied_baseline"]
+			baseIsAncestor := base != "" && d.PatchID.IsAncestor(ctx, repo.Path, base, repo.AppliedRef)
+			if baseIsAncestor {
 				rng = base + ".." + repo.AppliedRef
 			}
 			set, err := d.PatchID.ScanPatchIDCommits(ctx, repo.Path, rng)
 			if err != nil {
 				result.Skipped = append(result.Skipped, Skip{GateID: g.ID, Repo: repoName, Reason: "scan failed: " + err.Error()})
 				continue
+			}
+			// PRE-BASELINE GATED COMMIT (pg2-k7dai). The baseline..applied_ref scan
+			// above assumes the gated commit lands AFTER the baseline. A RE-GATE
+			// breaks that: a gate re-created because an earlier apply did not build
+			// the change from the lock (e.g. pg2-j2omo, gated on 054c32bb8, baseline
+			// 2644adeec4ed, which already CONTAINED 054c32bb8) records a baseline
+			// that is a descendant of the gated commit, so the commit sits BELOW the
+			// range and no later apply could ever surface it — the gate stayed
+			// blocked silently (no Blocked/Skipped entry) after an apply that built
+			// it. When the range misses the patch-id and applied_ref has MOVED PAST
+			// the baseline (an apply ran over a checkout descending from the
+			// baseline, hence containing everything in its history), also look in
+			// the baseline's own recent history. The result then goes through the
+			// same condition 2 as any other hit, so a lock-built repo whose lock
+			// still lacks the commit stays Blocked. When applied_ref == baseline no
+			// apply has happened since the gate was created, so the gate correctly
+			// stays blocked.
+			if baseIsAncestor && base != repo.AppliedRef {
+				if _, found := set[patchID]; !found {
+					below, err := d.PatchID.ScanPatchIDCommits(ctx, repo.Path, fmt.Sprintf("-n %d %s", p.LastN, base))
+					if err != nil {
+						result.Skipped = append(result.Skipped, Skip{GateID: g.ID, Repo: repoName, Reason: "scan failed: " + err.Error()})
+						continue
+					}
+					for id, shas := range below {
+						if _, seen := set[id]; !seen {
+							set[id] = shas
+						}
+					}
+				}
 			}
 			// CONDITION 1 (unchanged): the gated patch-id appears in
 			// applied_baseline..applied_ref, i.e. an apply actually ran over a

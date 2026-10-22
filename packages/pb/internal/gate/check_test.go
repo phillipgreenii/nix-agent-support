@@ -1116,6 +1116,16 @@ func TestCheck_baselineSeveralCommitsBehindResolvingCommitStillResolves(t *testi
 	}
 }
 
+// scriptBelowBaselineMiss scripts the SECOND scan Check runs when the gated
+// patch-id is not in base1..tip (pg2-k7dai: the gated commit may predate the
+// baseline), which finds nothing either. Call it right after the base1..tip
+// patch-id response, so FakeRunner's in-order matching of the repeated
+// `git patch-id` call pairs each response with its own scan.
+func scriptBelowBaselineMiss(f *run.FakeRunner) {
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "-n", "100", "base1"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "below999 belowsha\n"}, nil)
+}
+
 // TestCheck_rawSHARepairResolvesWhenPatchIDAlreadyApplied pins the tc-htcum
 // mechanism fix's happy path: a gate created OUTSIDE `pb gate create` (an ad-hoc
 // `bd gate create --await-id "...:<raw-sha>"`) carries a raw commit SHA instead of
@@ -1135,6 +1145,7 @@ func TestCheck_rawSHARepairResolvesWhenPatchIDAlreadyApplied(t *testing.T) {
 	// The scan finds patch-id "abc123" from the already-landed, REWRITTEN commit
 	// "landedsha" — the same change, under its post-rebase identity.
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 landedsha\n"}, nil)
+	scriptBelowBaselineMiss(f)
 	// tryRawSHA: "deadraw1" still resolves as a commit (not yet pruned) and its
 	// patch-id is the SAME "abc123" — the pre-rebase identity of the same change.
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
@@ -1169,6 +1180,7 @@ func TestCheck_rawSHARepairRewritesAwaitIDWhenNotYetApplied(t *testing.T) {
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
 	// The scan finds an UNRELATED patch-id — this change has not landed yet.
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "other999 othersha\n"}, nil)
+	scriptBelowBaselineMiss(f)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 deadraw1\n"}, nil)
 	f.AddResponse("bd", []string{"-C", "/ws", "update", "g-1", "--await-id", "home:repo-a:abc123"}, run.Result{}, nil)
@@ -1197,6 +1209,7 @@ func TestCheck_rawSHARepairDryRunRecordsWithoutActing(t *testing.T) {
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "other999 othersha\n"}, nil)
+	scriptBelowBaselineMiss(f)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 deadraw1\n"}, nil)
 
@@ -1233,6 +1246,7 @@ func TestCheck_genuinePatchIDNotYetAppliedIsNotTreatedAsRawSHA(t *testing.T) {
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "other999 othersha\n"}, nil)
+	scriptBelowBaselineMiss(f)
 	// deliberately NOT scripting "git show abc123" — a real patch-id is never a
 	// resolvable commitish, so tryRawSHA must not depend on that call succeeding.
 

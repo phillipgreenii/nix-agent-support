@@ -81,6 +81,10 @@ pb gate check [--dry-run] [--strict] [--last-n N] [--stale-handler convert-to-hu
 - **Condition 1 — an apply happened:** the gated patch-id appears in the scan range.
   When a gate's `applied_baseline` is an ancestor of the repo's `applied_ref`, scans
   `baseline..applied_ref`; otherwise scans the last `--last-n` commits (default 100).
+  A re-gate can be created when the gated commit is already inside the baseline, so when
+  the range misses and `applied_ref` has moved past the baseline, the last `--last-n`
+  commits of the baseline are scanned too (condition 2 still applies). While `applied_ref`
+  still equals the baseline, no apply has run since the gate was created and it stays blocked.
 - **Condition 2 — that apply's lock contained the commit:** for a repo the apply resolved
   **through the terminal's `flake.lock`**, the gated commit must be an ancestor of
   `locked_rev` — the rev that lock pinned **at that apply**, published by
