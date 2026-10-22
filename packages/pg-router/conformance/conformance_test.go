@@ -301,3 +301,42 @@ func TestLifecycleNames(t *testing.T) {
 		t.Fatalf("String of an out-of-range Lifecycle = %q, want it to name the value", got)
 	}
 }
+
+// The reference handler serves the optional validate subcommand (docket
+// pg2-12gr4.8): a schema-valid request gets a schema-valid reply with no problems
+// and no warnings, and a request that breaks handler.validate is an error.
+func TestCLIRoundTrip_Validate(t *testing.T) {
+	h := &ReferenceHandler{State: Started}
+	reply, code, err := RoundTrip(h, "validate", loadGolden(t, "handler.validate"))
+	if err != nil || code != ExitOK {
+		t.Fatalf("validate: code=%d err=%v", code, err)
+	}
+	if err := CheckBytes("handler.validate-reply", reply); err != nil {
+		t.Fatalf("reply failed handler.validate-reply: %v", err)
+	}
+	var rv struct{ Problems, Warnings []string }
+	if err := json.Unmarshal(reply, &rv); err != nil || len(rv.Problems) != 0 || len(rv.Warnings) != 0 {
+		t.Fatalf("reply = %s (err %v), want empty problems and warnings", reply, err)
+	}
+	if _, code, _ := RoundTrip(h, "validate", map[string]any{"schemaVersion": "1"}); code != ExitError {
+		t.Fatalf("validate with no id: exit = %d, want %d", code, ExitError)
+	}
+}
+
+// postStartup / preShutdown are the other two subcommands the reference handler
+// serves; each replies outcome ok to a schema-valid request and errors otherwise.
+func TestCLIRoundTrip_LifecycleHooks(t *testing.T) {
+	h := &ReferenceHandler{State: Started}
+	for _, sub := range []string{"postStartup", "preShutdown"} {
+		reply, code, err := RoundTrip(h, sub, loadGolden(t, "handler."+sub))
+		if err != nil || code != ExitOK {
+			t.Fatalf("%s: code=%d err=%v", sub, code, err)
+		}
+		if err := CheckBytes("handler."+sub+"-reply", reply); err != nil {
+			t.Fatalf("%s reply: %v", sub, err)
+		}
+		if _, code, _ := RoundTrip(h, sub, map[string]any{"schemaVersion": "1"}); code != ExitError {
+			t.Fatalf("%s with no id: exit = %d, want %d", sub, code, ExitError)
+		}
+	}
+}
