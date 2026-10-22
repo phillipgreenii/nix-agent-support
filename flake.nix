@@ -8019,6 +8019,11 @@
                         onFailure = "unclaim";
                         onDispatchFail = "leave";
                         promptBody = "k17 live fixture prompt";
+                        # No isolation: the default (a git worktree under a
+                        # worktreeDir) would need a real repo and a worktree dir,
+                        # and the run fails there, before reaching ccpool.
+                        # WORKSPACE_ROOT = the launch config's repoRoot instead.
+                        isolation.type = "none";
                         pool = {
                           enable = true;
                           dir = "/tmp/k17-pool";
