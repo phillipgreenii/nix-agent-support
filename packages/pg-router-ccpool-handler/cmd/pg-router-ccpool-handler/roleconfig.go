@@ -136,12 +136,24 @@ func loadRole(path string) (roles.Role, error) {
 	if err != nil {
 		return roles.Role{}, fmt.Errorf("read role config %s: %w", path, err)
 	}
+	return decodeRole(path, data, true)
+}
+
+// decodeRole is loadRole after the file read: it decodes data (the content of
+// the role file at path, named only in error text) into a roles.Role. The
+// sessionEnv key rules (validateSessionEnv) are applied only when
+// checkSessionEnv is set; the validate subcommand passes false because it
+// reports every offending key itself, one problem per key, rather than the
+// first one only.
+func decodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, error) {
 	var rf roleFile
 	if err := json.Unmarshal(data, &rf); err != nil {
 		return roles.Role{}, fmt.Errorf("decode role config %s: %w", path, err)
 	}
-	if err := validateSessionEnv(rf.SessionEnv); err != nil {
-		return roles.Role{}, fmt.Errorf("role config %s: sessionEnv: %w", path, err)
+	if checkSessionEnv {
+		if err := validateSessionEnv(rf.SessionEnv); err != nil {
+			return roles.Role{}, fmt.Errorf("role config %s: sessionEnv: %w", path, err)
+		}
 	}
 	r := roles.Role{Name: rf.Name, Type: rf.Type, StrictBaseEnv: rf.StrictBaseEnv}
 	if len(rf.SessionEnv) > 0 {

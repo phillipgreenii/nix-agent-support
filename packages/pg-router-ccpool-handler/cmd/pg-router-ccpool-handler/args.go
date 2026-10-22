@@ -1,6 +1,6 @@
 package main
 
-const usageLine = "usage: pg-router-ccpool-handler <register|self-status|dispatch|postStartup|preShutdown|query|pool-capacity|origin|split> [flags]"
+const usageLine = "usage: pg-router-ccpool-handler <register|self-status|dispatch|postStartup|preShutdown|validate|query|pool-capacity|origin|split> [flags]"
 
 const helpText = `pg-router-ccpool-handler — the ccpool/command participant for pg-router.
 
@@ -26,6 +26,19 @@ Subcommands:
                  that sweep now runs HERE instead. Reads the
                  handler.preShutdown request as JSON on stdin, writes
                  handler.preShutdown-reply JSON to stdout.
+  validate      INTF-HANDLER (optional): the one validation entry point, used by
+                 the nix build, pg-router's startup and its doctor. Reads the
+                 handler.validate request as JSON on stdin and writes
+                 handler.validate-reply JSON ({problems, warnings}) to stdout;
+                 exit 0 means it ran (empty problems = valid). Checks the role
+                 JSON strictly (--role-config or PG_ROUTER_CCPOOL_HANDLER_ROLE;
+                 an unknown key or a wrong type is a problem), the sessionEnv
+                 keys (a secret-looking key is a warning), and that each pool
+                 directory (ccpool.poolDir, else CCPOOL_POOL) exists. Runs no
+                 payload and never runs or reads pg-wrap or its spec.
+                 --skip-pool-dirs skips ONLY the pool-directory check, for the
+                 nix build sandbox where the pools do not exist yet; startup and
+                 doctor never pass it. --config is accepted and not checked.
   query         INTF-SOURCE: answer a pull query (reads the source.query
                  request as JSON on stdin, writes source.query-reply JSON to
                  stdout) — answers zero events when unconfigured, or the

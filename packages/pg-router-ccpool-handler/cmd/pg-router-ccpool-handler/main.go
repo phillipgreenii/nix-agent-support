@@ -8,7 +8,8 @@
 // name its filters and repo.
 //
 // Subcommands (interfaces.md's common manager contract plus INTF-HANDLER/
-// INTF-SOURCE): register, self-status, dispatch, query. register/self-status
+// INTF-SOURCE): register, self-status, dispatch, query (and the optional
+// validate, INV-CCH-36). register/self-status
 // are OUTBOUND: this process reaches pg-router's core over DEC-WIRE-2's
 // socket (an injected --socket/--token, or the PG_ROUTER_SOCKET/PG_ROUTER_TOKEN
 // env vars pg-router's own cmd/pg-router uses for the same purpose). dispatch/
@@ -54,6 +55,8 @@ func run(args []string) int {
 		return runPostStartup(args[1:])
 	case "preShutdown":
 		return runPreShutdown(args[1:])
+	case "validate":
+		return runValidate(args[1:])
 	case "pool-capacity":
 		return runPoolCapacity(args[1:])
 	case "origin":
