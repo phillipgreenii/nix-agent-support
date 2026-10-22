@@ -4643,6 +4643,12 @@
                 }).overrideAttrs
                   (old: {
                     PG_ROUTER_CCPOOL_HANDLER_REQUIRE_CCPOOL = "1";
+                    # The module-rendered specs and pool config the strict-spec
+                    # end-to-end test (spec_e2e_realccpool_test.go) reads. The
+                    # reference puts the fixture, and the pg-wrap-exec its
+                    # config.toml names, in this check's closure.
+                    PG_ROUTER_CCPOOL_HANDLER_SPEC_FIXTURE =
+                      self.checks.${system}.pg-router-ccpool-handler-spec-fixtures;
                     # tmux serves each sandboxed pool over a unix socket.
                     __darwinAllowLocalNetworking = true;
                     postBuild = (old.postBuild or "") + ''
@@ -8314,36 +8320,106 @@
                     evalHM
                     ;
                   probe = pkgs.writeShellScript "k17-probe" "${pkgs.coreutils}/bin/env | ${pkgs.coreutils}/bin/sort > /tmp/k17-env.txt; exit 0";
+                  inherit ((evalHM { }).phillipgreenii.programs.pg-router-ccpool-handler) claudeBaseline;
+                  # k20Probe (bead pg2-12gr4.8.15): the `exec` of the k20-a/k20-b roles.
+                  # It records the env the strict spec leaves the payload (one file per
+                  # role, in $K20_ENV_DIR), maps ccpool's `--resume <id>` to
+                  # `--session-id <id>` (fake-claude takes its session id only from
+                  # `--session-id`, and a resumed session must reuse it), then execs the
+                  # fake-claude stub, which fires ccpool's real hooks through PATH.
+                  # Absolute tool paths: the strict PATH need not hold coreutils or bash.
+                  k20Probe = pkgs.writeShellScript "k20-probe" ''
+                    ${pkgs.coreutils}/bin/env | ${pkgs.coreutils}/bin/sort > "''${K20_ENV_DIR:?}/''${PG_ROUTER_ROLE:-unknown}.env"
+                    args=()
+                    while [ $# -gt 0 ]; do
+                      if [ "$1" = "--resume" ] && [ $# -ge 2 ]; then
+                        args+=(--session-id "$2")
+                        shift 2
+                      else
+                        args+=("$1")
+                        shift
+                      fi
+                    done
+                    exec ${pkgs.bash}/bin/bash ${./packages/ccpool/cmd/ccpool/testdata/fake-claude} "''${args[@]}"
+                  '';
+                  k20Role = tag: {
+                    type = "ccpool";
+                    ccpool = {
+                      actor = "k20-${tag}";
+                      completion = "close-only";
+                      onFailure = "unclaim";
+                      onDispatchFail = "unclaim";
+                      promptBody = "k20-${tag} prompt";
+                    };
+                  };
+                  k20Spec = tag: {
+                    keep = claudeBaseline.keep ++ [ "K20_ENV_DIR" ];
+                    wrap = claudeBaseline.wrap ++ [
+                      [
+                        "${pkgs.coreutils}/bin/env"
+                        "K20_SPEC=${tag}"
+                      ]
+                    ];
+                    strictEnv = true;
+                    exec = [ "${k20Probe}" ];
+                  };
                   fixture = evalHM {
                     enable = true;
-                    roles.k17-live = {
-                      type = "ccpool";
-                      ccpool = {
-                        actor = "k17-actor";
-                        completion = "close-only";
-                        onFailure = "unclaim";
-                        onDispatchFail = "leave";
-                        promptBody = "k17 live fixture prompt";
-                        # No isolation: the default (a git worktree under a
-                        # worktreeDir) would need a real repo and a worktree dir,
-                        # and the run fails there, before reaching ccpool.
-                        # WORKSPACE_ROOT = the launch config's repoRoot instead.
-                        isolation.type = "none";
-                        pool = {
-                          enable = true;
-                          dir = "/tmp/k17-pool";
-                          settings = {
-                            claude.plugin_dir = "${pkgs.ccpool}/share/ccpool-plugin";
-                            tmux.socket = "k17sock";
-                            wait.timeout = "10s";
-                          };
+                    # The handler-wide pool the k20 roles share (the strict-spec
+                    # end-to-end test, spec_e2e_realccpool_test.go).
+                    pool = {
+                      enable = true;
+                      dir = "/tmp/k20-pool";
+                      settings = {
+                        claude.plugin_dir = "${pkgs.ccpool}/share/ccpool-plugin";
+                        tmux.socket = "k20sock";
+                        wait.timeout = "30s";
+                      };
+                    };
+                    roles = {
+                      k20-a = k20Role "a" // {
+                        spec = k20Spec "a";
+                      };
+                      k20-b = k20Role "b" // {
+                        spec = k20Spec "b";
+                      };
+                      # The opt-in real-claude case (E2E_REAL_CLAUDE): exec stays at its
+                      # default, the store claude.
+                      k20-real = k20Role "real" // {
+                        spec = {
+                          inherit (claudeBaseline) wrap keep;
+                          strictEnv = true;
                         };
                       };
-                      spec = {
-                        strictEnv = false;
-                        wrap = [ ];
-                        keep = [ ];
-                        exec = [ "${probe}" ];
+                      k17-live = {
+                        type = "ccpool";
+                        ccpool = {
+                          actor = "k17-actor";
+                          completion = "close-only";
+                          onFailure = "unclaim";
+                          onDispatchFail = "leave";
+                          promptBody = "k17 live fixture prompt";
+                          # No isolation: the default (a git worktree under a
+                          # worktreeDir) would need a real repo and a worktree dir,
+                          # and the run fails there, before reaching ccpool.
+                          # WORKSPACE_ROOT = the launch config's repoRoot instead.
+                          isolation.type = "none";
+                          pool = {
+                            enable = true;
+                            dir = "/tmp/k17-pool";
+                            settings = {
+                              claude.plugin_dir = "${pkgs.ccpool}/share/ccpool-plugin";
+                              tmux.socket = "k17sock";
+                              wait.timeout = "10s";
+                            };
+                          };
+                        };
+                        spec = {
+                          strictEnv = false;
+                          wrap = [ ];
+                          keep = [ ];
+                          exec = [ "${probe}" ];
+                        };
                       };
                     };
                   };
