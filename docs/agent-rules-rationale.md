@@ -163,6 +163,23 @@ core: it is a bare prohibition against ANY push/apply/update at ANY moment, not 
 close-out, so it has no session-close-scoped trigger a skill could gate on (Design P1). Trimming
 the reporting duty (U-6) does NOT relax this restraint.
 
+## Local Containers (C-1..C-4)
+
+Origin: docket `pg2-a01hh` (local container monitoring and reclaim). Containers in ANY state pin
+their images and volumes, so a leaked or foreign container silently blocks disk reclaim, and an
+agent that removes what it did not start can destroy another session's work or the operator's data
+(volumes hold data; images cost a network pull to regenerate). The four rules therefore split on
+OWNERSHIP: `C-1` makes the starting agent responsible for cleanup (`--rm`, and a Colima VM it
+started is returned to the state it was found in), `C-2` makes ownership attributable through
+`bead=` and `owner=` labels so a later reader can tell whose container it is, `C-3` is the bare
+prohibition on touching anything not started or created by the agent (including the `prune`
+verbs) and confines `pg-disk-reclaimer reclaim` to a dry run with explicit item ids, leaving any
+`--apply` at level 4 or 5 to the operator, and `C-4` is the one carve-out: a bead that declares a
+container cleanup step lets its agent remove containers labeled with that bead id. The rules have
+no executable trigger a skill could gate on (they apply at any `docker`/`colima` invocation), so
+they stay in the always-on core, one line each. The mechanical CETA guard for `C-3` is a separate
+direct bead (D3), and the workspace `disk-cleanup` skill edit is D1.
+
 ## Integration discipline (R-1..R-9)
 
 R-9: qualified ids are the form the Skill tool documents for plugin skills, and they are

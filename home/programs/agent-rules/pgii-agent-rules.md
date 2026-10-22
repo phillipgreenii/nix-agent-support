@@ -85,6 +85,13 @@ The section `## Rules for Interactive Sessions Only` applies only when working w
 
 - **U-5** MUST NOT `git push`, `pn workspace push|update|apply`, or invoke `/pn-workspace-sync` or `/pn-workspace-update` on own initiative to clear unpushed work; REPORTING is in scope, PUBLISHING is not. (U-1..U-4, U-6: the wrap-up skill.)
 
+### Local Containers
+
+- **C-1** A container an agent starts MUST be removed before the agent finishes (prefer `--rm`); a Colima VM the agent started MUST be left in the state it was found.
+- **C-2** A started container SHOULD carry `--label bead=<bead-id>` and `--label owner=<session-id>`.
+- **C-3** An agent MUST NOT stop, kill or remove a container it did not start, MUST NOT remove images or volumes it did not create (`rmi`, `image rm`, `volume rm`), and MUST NOT run `docker system|container|image|volume prune`. It runs `pg-disk-reclaimer reclaim` only as a dry run with explicit item ids, and asks the operator to run any `--apply` at level 4 or 5.
+- **C-4** A bead MAY declare a container cleanup step; the agent working that bead MAY then remove containers labeled with that bead id.
+
 ### General Guidelines
 
 - Before recommending paid/licensed software, confirm the cost with the user.
