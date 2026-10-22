@@ -18,9 +18,8 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
 
-// Tests for the dispatch_start record (INV-CCH-35, INV-CCA-10, INV-CMA-10): one
-// per accepted dispatch, naming what ran and never an env value of a command
-// payload.
+// Tests for the dispatch_start record (INV-CCH-35): one per accepted dispatch,
+// naming what ran and never an env value of a command payload.
 
 // readRecords returns every record of kind in the JSONL log at path.
 func readRecords(t *testing.T, path, kind string) []map[string]any {

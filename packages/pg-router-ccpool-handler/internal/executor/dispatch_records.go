@@ -2,10 +2,9 @@ package executor
 
 import "sort"
 
-// The event-log kinds of the dispatch records (INV-CCH-35, INV-CCA-10,
-// INV-CMA-10). dispatch_start is written per ACCEPTED dispatch (the executor's
-// own, below), dispatch_decline per pre-accept decline (the cmd layer's, which
-// owns the busyDecline value).
+// The event-log kinds of the dispatch records (INV-CCH-35). dispatch_start is
+// written per ACCEPTED dispatch (the executor's own, below), dispatch_decline per
+// pre-accept decline (the cmd layer's, which owns the busyDecline value).
 const (
 	// DispatchStartKind is the eventlog kind of the per-accepted-dispatch record.
 	DispatchStartKind = "dispatch_start"
