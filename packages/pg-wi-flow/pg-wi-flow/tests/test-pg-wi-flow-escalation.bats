@@ -199,7 +199,22 @@ dep_fixture() {
   [ "$status" -eq 0 ]
   line="$(grep '^update tc-q1' "$MOCK_BD_LOG")"
   [[ "$line" == *"--add-label human"* ]]
+  [[ "$line" == *"--add-label attention"* ]]
   [[ "$line" == *"--remove-label escalated"* ]]
+}
+
+# pg2-ikkpk: the hand-off is ONE update, and the adds are ahead of the removal
+# (a bead with neither the escalated nor the human labels is visible to the
+# normal work queues).
+@test "escalate bump: one update call, human + attention added before escalated is removed" {
+  show_fixture tc-q1b '{"id":"tc-q1b","labels":["question","escalated","q:stall"],"metadata":{}}'
+  run pgwf_cmd_escalate tc-q1b
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^update tc-q1b' "$MOCK_BD_LOG")" -eq 1 ]
+  line="$(grep '^update tc-q1b' "$MOCK_BD_LOG")"
+  before_remove="${line%%--remove-label*}"
+  [[ "$before_remove" == *"--add-label human"* ]]
+  [[ "$before_remove" == *"--add-label attention"* ]]
 }
 
 # --- resolve: q:intent refusal (packet Validation bullet, verbatim) ---

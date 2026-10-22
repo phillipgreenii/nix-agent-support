@@ -41,6 +41,13 @@ func (b *stopBD) Run(_ context.Context, args ...string) (string, error) {
 				b.labels[args[i+1]] = true
 			}
 		}
+		// A removal in the same call lands AFTER the adds (bd applies both; the
+		// hand-off MUST NOT leave a window with neither label, pg2-ikkpk).
+		for i, a := range args {
+			if a == "--remove-label" {
+				delete(b.labels, args[i+1])
+			}
+		}
 	case "show":
 		var ls []string
 		for l := range b.labels {
@@ -378,9 +385,14 @@ func TestEscalate_triageRoleStopGoesToHuman(t *testing.T) {
 				exact := fmt.Sprintf("comment zr-1 budget stops reached threshold %d; escalated to human (triage role"+
 					"; not escalated again). stop sessions: %s. last stop: session=s limit=tokens used=1000 cap=1000",
 					sc.threshold, sc.sessions)
-				lab, cm, un := bd.idx("update zr-1 --add-label human"), bd.idx(exact), bd.idx(unclaim)
+				// The hand-off is the ONE call that writes the strict pair human +
+				// attention and drops escalated (bead pg2-ikkpk).
+				lab, cm, un := bd.idx("update zr-1 --add-label human --add-label attention --remove-label escalated"), bd.idx(exact), bd.idx(unclaim)
 				if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
 					t.Fatalf("lab=%d cm=%d un=%d; calls=%v", lab, cm, un, bd.calls)
+				}
+				if !bd.labels["human"] || !bd.labels["attention"] || bd.labels["escalated"] {
+					t.Errorf("the bead must end with human + attention and without escalated; labels=%v", bd.labels)
 				}
 				if bd.has("update zr-1 --add-label escalated") || bd.has("update zr-1 --add-label needs-split-review") {
 					t.Errorf("a triage role must never put its own bead back on the escalated path; calls=%v", bd.calls)

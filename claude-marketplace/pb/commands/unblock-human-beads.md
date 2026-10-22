@@ -47,6 +47,18 @@ drain resume would recover THIS command's in-progress `human` beads and drive th
 ordinary work — defeating the `human` guard. Refer to your id below as ID, and pass it as
 `--actor "ID"` on every `bd` claim/unclaim/comment/close/defer.
 
+## Label vocabulary (the person queue)
+
+This command's queues are the person queue of the bead label vocabulary
+(`docs/guides/bead-label-vocabulary.md` in `nix-agent-support`, ADR 0105): the single WRITE label
+for "a person is the blocker" is `human`, and a bead the escalation path could not resolve
+carries `human` + `attention` (written in one call by the `hand-to-human` command). The READ set
+`HUMAN_LABELS` is `attention`, `human-focus`, `human-focus-required`, `human`; the queues below
+select on `human` and `human-focus-required` because every handed-off bead carries `human`.
+Planned operator work (verify, checkpoint, decision and handoff beads) stays `human` only, with
+no `attention`; a hand-off the escalation path could not resolve is written ONLY through
+`hand-to-human`, never by hand.
+
 ## Sourcing invariant (deferred-safety by construction — DO NOT REGRESS)
 
 Claim work ONLY via the preview-then-claim sequence in "Template/formula exclusion" below

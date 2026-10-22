@@ -154,7 +154,7 @@ func TestApplySplit_reversedEdgeFailsSafeToHuman(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "lacks blocked-by") {
 		t.Fatalf("want edge verification failure, got %v", err)
 	}
-	if bd.idx("update pg2-p --add-label human") < 0 || bd.idx("update pg2-p --remove-label needs-split-review") < 0 ||
+	if bd.idx("update pg2-p --add-label human --add-label attention --remove-label escalated") < 0 || bd.idx("update pg2-p --remove-label needs-split-review") < 0 ||
 		bd.idx("update pg2-p --status=open --assignee=") < 0 || bd.idx("update pg2-p --add-label was-split") >= 0 {
 		t.Errorf("fail-safe path wrong; calls=%v", bd.calls)
 	}
@@ -166,7 +166,7 @@ func TestApplySplit_createFailureFailsSafe(t *testing.T) {
 	if err == nil || len(ids) != 1 {
 		t.Fatalf("ids=%v err=%v", ids, err)
 	}
-	if bd.idx("update pg2-p --add-label human") < 0 {
+	if bd.idx("update pg2-p --add-label human --add-label attention --remove-label escalated") < 0 {
 		t.Errorf("must fail safe to human; calls=%v", bd.calls)
 	}
 }
@@ -212,7 +212,7 @@ func TestMarkUnsplittable(t *testing.T) {
 	if err := MarkUnsplittable(context.Background(), bd, "pg2-p", "single indivisible refactor"); err != nil {
 		t.Fatal(err)
 	}
-	hum := bd.idx("update pg2-p --add-label human")
+	hum := bd.idx("update pg2-p --add-label human --add-label attention --remove-label escalated")
 	cm := bd.idx("comment pg2-p split-triage: not splittable; escalated to human. reason: single indivisible refactor. budget stops: 3 (sessions: s1, s2, s3)")
 	rel := bd.idx("update pg2-p --status=open --assignee=")
 	rm := bd.idx("update pg2-p --remove-label needs-split-review")

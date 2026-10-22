@@ -55,10 +55,15 @@
 // Every bead this verb creates carries the label "escalated" (the dedup
 // query and the triager both key on it). A Grafana alert rule MAY route its
 // beads straight to the operator, skipping the triager, by setting the
-// alert label escalation="human": the bead is then created with BOTH
-// "escalated" (so dedup still sees it) and "human" (so the triager's
-// `--exclude-label human` dispatch query does not). Recognised values:
-// "human"; absent or anything else is the default, "escalated" only. The
+// alert label escalation="human": the bead is then created with the strict
+// operator pair "human" + "attention" (bead pg2-ikkpk; the label vocabulary
+// is docs/guides/bead-label-vocabulary.md) AND "escalated" (so a dedup query
+// that reads only the escalated label still sees it); "human" is also what
+// keeps the triager's dispatch query away from it. The pair is written in
+// the ONE create call, so there is no window with neither label and the
+// hand-to-human command (which edits an existing bead) is not needed here.
+// Recognised values: "human"; absent or anything else is the default,
+// "escalated" only. The
 // `escalation` label is routing metadata, not identity: it is excluded from
 // the alert fingerprint (fingerprint.go), so adding it to an
 // already-registered rule keeps matching that rule's open beads.
@@ -268,8 +273,9 @@ func newRunCmd() *cobra.Command {
 		Long: `Run the health checks, filing/updating an escalated bd issue on a real finding.
 
 Beads are created with the label "escalated". A firing Grafana alert whose rule
-sets the label escalation="human" is filed with labels "escalated" AND "human"
-instead: it skips the escalation triager and lands in the operator's queue, with
+sets the label escalation="human" is filed with labels "escalated", "human" AND
+"attention" instead: it skips the escalation triager and lands in the operator's
+attention list (the strict pair human + attention), with
 the alert's summary/description rendered as a Remediation: section. The probe
 never closes beads; close one once its alert clears after remediation.`,
 		Args: cobra.NoArgs,
@@ -650,11 +656,12 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 // whose rule sets the label escalation="human" additionally gets "human",
 // which keeps the bead out of the triager's `ready --label escalated
 // --exclude-label human` dispatch query and puts it straight in the
-// operator's queue (pg2-x7ie2). Any other escalation value (or none) is the
-// default, "escalated" only.
+// operator's queue (pg2-x7ie2), plus "attention" (bead pg2-ikkpk): the strict
+// pair human + attention is what puts a bead on the operator's attention list.
+// Any other escalation value (or none) is the default, "escalated" only.
 func escalationLabels(f finding) []string {
 	if f.Kind == kindGrafanaAlert && f.Escalation == escalationHuman {
-		return []string{"escalated", "human"}
+		return []string{"escalated", "human", "attention"}
 	}
 	return []string{"escalated"}
 }

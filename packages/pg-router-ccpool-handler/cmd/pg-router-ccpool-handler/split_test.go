@@ -45,7 +45,7 @@ func TestRunSplit_applyAndUnsplittable(t *testing.T) {
 		t.Fatalf("rc=%d stderr=%s", rc, errb.String())
 	}
 	joined := strings.Join(g.calls, "\n")
-	if !strings.Contains(joined, "update pg2-p --add-label human") || !strings.Contains(joined, "update pg2-p --remove-label needs-split-review") {
+	if !strings.Contains(joined, "update pg2-p --add-label human --add-label attention --remove-label escalated") || !strings.Contains(joined, "update pg2-p --remove-label needs-split-review") {
 		t.Errorf("calls=%v", g.calls)
 	}
 }

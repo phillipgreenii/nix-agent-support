@@ -172,10 +172,12 @@ func TestTerminal_RealBD_TimeBudgetStopAtThresholdOneEscalates(t *testing.T) {
 		role      string
 		wantLabel string
 		notLabels []string
+		wantAlso  []string
 	}{
-		{"drain-pg2", LabelEscalated, []string{LabelNeedsSplitReview, labelHuman}},
-		{"review", LabelEscalated, []string{LabelNeedsSplitReview, labelHuman}},
-		{"pg2-escalation-triager", labelHuman, []string{LabelEscalated, LabelNeedsSplitReview}},
+		{"drain-pg2", LabelEscalated, []string{LabelNeedsSplitReview, labelHuman, "attention"}, nil},
+		{"review", LabelEscalated, []string{LabelNeedsSplitReview, labelHuman, "attention"}, nil},
+		// A triage role's own stop is a hand-off to the operator: human + attention.
+		{"pg2-escalation-triager", labelHuman, []string{LabelEscalated, LabelNeedsSplitReview}, []string{"attention"}},
 	} {
 		t.Run(tc.role, func(t *testing.T) {
 			ctx, r := newRealBD(t)
@@ -193,6 +195,11 @@ func TestTerminal_RealBD_TimeBudgetStopAtThresholdOneEscalates(t *testing.T) {
 			}
 			if !iss.HasLabel(tc.wantLabel) || !iss.HasLabel("budget-stop:s") {
 				t.Errorf("want %q and budget-stop:s on the bead; labels=%v", tc.wantLabel, iss.Labels)
+			}
+			for _, l := range tc.wantAlso {
+				if !iss.HasLabel(l) {
+					t.Errorf("want %q on the bead; labels=%v", l, iss.Labels)
+				}
 			}
 			for _, l := range tc.notLabels {
 				if iss.HasLabel(l) {

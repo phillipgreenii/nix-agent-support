@@ -59,7 +59,7 @@ const acceptanceLabel = "has-acceptance-criteria"
 // the beads-lifecycle skill and plan-decompose's audit-docket-label-leak.sh.
 // acceptanceLabel is not copied either: the child sets it from its own criteria.
 var WorkflowStateLabels = []string{
-	"human", "human-focus-required", "needs-split-review", "escalated", "refactor-campaign",
+	"human", "attention", "human-focus", "human-focus-required", "needs-split-review", "escalated", "refactor-campaign",
 	"worker-ready", "mine", "worktree-review", "auto-session-wrapped",
 	"docket", "phase", "phase-trigger",
 	acceptanceLabel,

@@ -57,7 +57,7 @@ The section `## Rules for Interactive Sessions Only` applies only when working w
 
 ### Beads & Workflow Lifecycle (see `beads-lifecycle` skill)
 
-- Before any state-mutating `bd` command (create/update/close/dep), before parking/re-parking/escalating/releasing/accepting a bead, or before applying/checking/removing the `worktree-review` or `human` labels, MUST invoke the `beads-lifecycle` skill if not already done this session. `B-*`/`D-*`/`F-*`/`P-*`/`W-*` live there.
+- Before any state-mutating `bd` command (create/update/close/dep), before parking/re-parking/escalating/releasing/accepting a bead, or before applying/checking/removing the `worktree-review` or `human` labels, MUST invoke the `beads-lifecycle` skill if not already done this session. `B-*`/`D-*`/`F-*`/`LV-*`/`P-*`/`W-*` live there.
 - **Handoff beads**: before reading, claiming, working, or closing a bead of type `handoff`, or before creating one (e.g. at wrap-up), invoke `beads-lifecycle:handoff-bead` (sole contract; an ambiguous bead is NOT a handoff).
 - **B-1/B-2** Whatever claims a bead MUST release it before ending (every exit path ends `closed` or released); a release MUST clear the assignee in the SAME call: `bd update <id> --status open --assignee ""` (`--status open` alone is NOT a release).
 - **B-5** Every agent/daemon claim (`--claim`, `bd ready --claim`, `--status in_progress`, `--assignee`) MUST carry `--actor "<session-id>[-<role>]"` (or `BEADS_ACTOR`) and MUST NOT resolve to the operator's name.

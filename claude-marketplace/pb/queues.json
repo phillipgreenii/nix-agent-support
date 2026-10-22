@@ -3,14 +3,17 @@
     "name": "drain-claim",
     "args": [
       "--exclude-label",
-      "human,human-focus-required,refactor-campaign",
+      "escalated,attention,human-focus,human-focus-required,human,refactor-campaign",
       "--exclude-type",
       "epic"
     ]
   },
   {
     "name": "drain-termination",
-    "args": ["--exclude-label", "human,human-focus-required,refactor-campaign"]
+    "args": [
+      "--exclude-label",
+      "escalated,attention,human-focus,human-focus-required,human,refactor-campaign"
+    ]
   },
   {
     "name": "unblock-human",

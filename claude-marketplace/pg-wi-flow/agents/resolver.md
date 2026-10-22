@@ -62,7 +62,8 @@ pg-wi-flow escalate <id>
 ```
 
 with no `--question`/`--trigger` (ID already carries the `question` label) — this bumps
-`escalated` → `human` and does nothing else. **Everything goes through the resolver; nothing
+`escalated` → `human` + `attention` in one update (the strict operator pair; label vocabulary:
+`docs/guides/bead-label-vocabulary.md` in nix-agent-support) and does nothing else. **Everything goes through the resolver; nothing
 goes straight to `human`** [design: "Escalation ladder" section, verbatim] — this bump is the
 one sanctioned path from resolver to operator. The item then surfaces to the `/drain --attended`
 loop's interview step on a later iteration.

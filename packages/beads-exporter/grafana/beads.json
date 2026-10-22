@@ -470,7 +470,7 @@
       "id": 8,
       "type": "stat",
       "title": "/drain-beads would claim",
-      "description": "How many beads each database offers to /drain-beads right now. Queue drain-claim: bd ready --exclude-label human,human-focus-required,refactor-campaign --exclude-type epic. Per database, never summed across databases.",
+      "description": "How many beads each database offers to /drain-beads right now. Queue drain-claim: bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign --exclude-type epic. Per database, never summed across databases.",
       "gridPos": {
         "x": 0,
         "y": 6,
@@ -525,7 +525,7 @@
       "id": 9,
       "type": "stat",
       "title": "/drain-beads finishes at 0",
-      "description": "How many beads keep /drain-beads running before it stops. Queue drain-termination: bd ready --exclude-label human,human-focus-required,refactor-campaign. It includes epics, which /drain-beads never claims. Per database, never summed across databases.",
+      "description": "How many beads keep /drain-beads running before it stops. Queue drain-termination: bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign. It includes epics, which /drain-beads never claims. Per database, never summed across databases.",
       "gridPos": {
         "x": 5,
         "y": 6,

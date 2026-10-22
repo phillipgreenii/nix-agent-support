@@ -1,0 +1,10 @@
+#compdef hand-to-human
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '(--bd-dir)--backend[Reach the tracker through this pg-connector backend]:backend:' \
+  '(--backend)--bd-dir[Tracker root to run bd against]:directory:_files -/' \
+  '*--also-remove[Remove one more label in the same call]:label:' \
+  '--actor[Actor for the audit trail (bd only)]:actor:' \
+  '1:bead id:'

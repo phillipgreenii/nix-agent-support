@@ -183,6 +183,12 @@ directly.
 > let pg-router-probe file a duplicate (pg2-imr6o vs pg2-68005). `pg-router-probe` now defaults
 > `--dedup-query` to `escalated-all` (`list --label escalated --status open,in_progress,blocked,deferred`).
 > `ccpool-probe` (pg2-p48mo, 2026-10-01) now does the same: `--dedup-query` defaults to `escalated-all`.
+>
+> Amendment (pg2-ikkpk, 2026-10-22): the triager's hand-off to a person writes the strict pair `human`
+>
+> - `attention` and REMOVES `escalated`, in one update call (`hand-to-human`), so the dedup lookup
+>   MUST read the union of the escalated and human label sets, not `escalated` alone. The vocabulary
+>   and the filters per consumer are in `docs/guides/bead-label-vocabulary.md` (ADR 0105).
 
 **Body template** (mirrors `local-alert-triage`'s own):
 

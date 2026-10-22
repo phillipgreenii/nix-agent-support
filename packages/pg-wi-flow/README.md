@@ -77,7 +77,9 @@ inside Claude Code; an explicit `--actor` override only outside it).
   `originating_item` metadata names `ID` and is followed wherever the question's parent is needed
   (stage, workflow, `WI_PARENT`, `WI_SIBLINGS`). `WI_QUESTIONS` lists the open questions blocking an
   item. With no `--question` at all: `ID` must already be a
-  question -- bumps it from `escalated` to `human` (the resolver could not settle it).
+  question -- bumps it from `escalated` to `human` + `attention` in one update (the resolver could not
+  settle it; bead `pg2-ikkpk`, vocabulary in nix-agent-support `docs/guides/bead-label-vocabulary.md`;
+  the label names come from the workflow config's `labels.human`/`labels.attention`/`labels.escalated`).
 - **`resolve ID (--decision D --rationale R | --answer A | --abandon --reason-code r | --defer d)`**
   -- exactly one outcome. `--decision`/`--answer` record and close (the parent resumes);
   `--decision` refuses a `q:intent` question unless the actor's role is `main`. `--abandon

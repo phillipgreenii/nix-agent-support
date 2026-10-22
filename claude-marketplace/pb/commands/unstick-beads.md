@@ -312,6 +312,10 @@ no child covers`). Beads that need the same action are grouped onto one line. Co
 - Workers inherit the hard prohibitions in their agent definition: no code changes, commits,
   pushes, applies, `sudo`, dolt server starts, or launchd/systemd restarts, and no routing
   around a denied command.
+- The sweep MUST NOT ADD the escalation and operator labels (`escalated`, `human`,
+  `attention`) by hand (removing them is its job): the vocabulary and the single write command (`hand-to-human`) are in
+  `docs/guides/bead-label-vocabulary.md` (`nix-agent-support`) and the `beads-lifecycle` skill
+  (`LV-*`).
 - Every reviewed bead that stays open MUST end the sweep with exactly one marker from this
   run. A closed bead needs none, because its close reason is its record. Pre-filtered beads
   MUST NOT get a marker.

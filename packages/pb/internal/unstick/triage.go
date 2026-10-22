@@ -7,10 +7,12 @@ import (
 	"time"
 )
 
-// ExcludedLabelsCSV is the label set /pb:drain-beads refuses to claim. It is
-// drift-tested against the claim query in drain-beads.md. A ready bead
+// ExcludedLabelsCSV is the label set /pb:drain-beads refuses to claim: every
+// ESCALATED_LABELS and HUMAN_LABELS member of the bead label vocabulary
+// (docs/guides/bead-label-vocabulary.md, bead pg2-ikkpk) plus refactor-campaign.
+// It is drift-tested against the claim query in drain-beads.md. A ready bead
 // carrying any of these labels is not DRAINABLE.
-const ExcludedLabelsCSV = "human,human-focus-required,refactor-campaign"
+const ExcludedLabelsCSV = "escalated,attention,human-focus,human-focus-required,human,refactor-campaign"
 
 // ExcludedLabels returns ExcludedLabelsCSV split into labels.
 func ExcludedLabels() []string { return strings.Split(ExcludedLabelsCSV, ",") }

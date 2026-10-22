@@ -135,7 +135,14 @@ func TestDispatch_budgetStopAtThresholdOne_escalatesBeforeUnclaim(t *testing.T) 
 			if v := verbOf(res); v != report.Unclaimed {
 				t.Errorf("a budget hard stop unclaims its bead, got verb %q", v)
 			}
-			lab := bd.idx("update pg2-x --add-label " + tc.wantLabel)
+			wantCall := "update pg2-x --add-label " + tc.wantLabel
+			if tc.wantLabel == "human" {
+				// A triage role's own stop is a hand-off to the operator: the strict
+				// pair human + attention in ONE call that also drops escalated
+				// (bead pg2-ikkpk).
+				wantCall = "update pg2-x --add-label human --add-label attention --remove-label escalated"
+			}
+			lab := bd.idx(wantCall)
 			un := bd.idx("update pg2-x --status=open --assignee=")
 			if lab < 0 || un < 0 || lab > un {
 				t.Fatalf("%s must be written BEFORE the release; label=%d unclaim=%d calls=%v", tc.wantLabel, lab, un, bd.calls)

@@ -31,6 +31,8 @@ says is context and a source of defaults, never a numbered ruling, and each use 
 the menu bar. It is NOT the pg-router and ccpool "escalation" of
 `docs/superpowers/specs/2026-09-22-pg-router-ccpool-escalation-design.md`, which hands a stuck agent
 bead to a triager. The two share a word and nothing else.
+The bead label vocabulary (`docs/guides/bead-label-vocabulary.md`, ADR 0105) names the `escalated`
+label separately for the same reason.
 
 ## 0. Summary
 

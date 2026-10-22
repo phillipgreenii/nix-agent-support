@@ -39,12 +39,24 @@ claim/unclaim/gate/close so your ownership never collides with another session:
 Refer to it below as ID. (Across a full process restart your id may change; the
 resume step then won't find an earlier-claimed bead.)
 
+## Label vocabulary (escalated and human labels — DO NOT REGRESS)
+
+The claim and goal-check queries below exclude every label of BOTH label sets defined in the
+bead label vocabulary (`docs/guides/bead-label-vocabulary.md` in `nix-agent-support`, ADR 0105):
+`ESCALATED_LABELS` (`escalated`) and `HUMAN_LABELS` (`attention`, `human-focus`,
+`human-focus-required`, `human`). A bead an agent has escalated waits for the escalation
+triager, and a bead handed to a person waits for the operator; neither is drain work. This
+command MUST NOT write those labels by hand: an agent that cannot finish a bead hands it on
+through the lifecycle rules `LV-1` to `LV-6` of the `beads-lifecycle` skill (the
+`hand-to-human` command). The mirror in `claude-marketplace/pb/queues.json` carries the same
+sets.
+
 ## Template/formula exclusion (claim-sourcing safety — DO NOT REGRESS)
 
 `bd ready` does NOT exclude `is_template=true` issues (a molecule TEMPLATE, e.g.
 `merge-request.pr` — title `PR: {{title}}`, unrendered `{{base_branch}}` placeholders), and a
 template's OWN labels need not include `human` — its label set can be anything, or empty — so
-neither `--exclude-label human,human-focus-required,refactor-campaign` nor `--exclude-type epic`
+neither `--exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign` nor `--exclude-type epic`
 reliably excludes one. Once claimed, a template is READ-ONLY: every `bd` write path
 (`bd update`, `bd comment`) refuses it with
 `cannot modify template : templates are read-only; use bd mol pour to create a work item` —
@@ -77,7 +89,7 @@ You are DONE only when a SUCCESSFUL query returns no agent-workable, non-templat
 <!-- pb-queue:drain-termination -->
 
 ```bash
-bd ready --exclude-label human,human-focus-required,refactor-campaign --json -n 10
+bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign --json -n 10
 ```
 
 zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
@@ -247,13 +259,13 @@ proceeding on currently loaded text (direct interactive invocation).`)
       <!-- pb-queue:drain-claim -->
 
    ```bash
-   bd ready --exclude-label human,human-focus-required,refactor-campaign --exclude-type epic --json
+   bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign --exclude-type epic --json
    ```
 
    zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
    refactor spec §3). If the invocation supplied `$ARGUMENTS`, apply them as additional
    NARROWING filters here (see "Optional scope arguments"); they never remove
-   `--exclude-label human,human-focus-required` (nor its campaign counterpart above), the
+   `--exclude-label escalated,attention,human-focus,human-focus-required,human` (nor its campaign counterpart above), the
    `--exclude-type epic` exclusion, or the deferred exclusion.
 
    Filter the result array (`.data[]` under the `{"data":[…]}` envelope, the bare top-level `[]` when `BD_JSON_ENVELOPE` is unset — J-1) client-side, in the returned (priority) order, skipping any entry whose
@@ -375,11 +387,11 @@ proceeding on currently loaded text (direct interactive invocation).`)
       (`--exclude-type epic` again). List WITHOUT `--claim`:
 
       ```bash
-      bd ready --parent <id> --exclude-type epic --exclude-label human,human-focus-required,refactor-campaign --json
+      bd ready --parent <id> --exclude-type epic --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign --json
       ```
 
       Apply the SAME label filters this session's own top-level CLAIM step above uses (drain's
-      `--exclude-label human,human-focus-required,refactor-campaign`; a sibling command
+      `--exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign`; a sibling command
       sourcing work the same way, e.g. `/unblock-human-beads`, substitutes its own mirrored
       filters here instead — see the bead's DESIRED BEHAVIOR for the mapping). Filter the result array (`.data[]` under the `{"data":[…]}` envelope, the bare top-level `[]` when `BD_JSON_ENVELOPE` is unset — J-1)
       client-side, skipping any `is_template=true` entry, then claim the first surviving
@@ -446,7 +458,7 @@ priority, a parent/epic, a type, a specific bead id, or a one-bead /
 N-bead limit ("just one"). Apply it as extra `bd ready` filters on the
 list step of the CLAIM sequence (see "Template/formula exclusion" above). Honor a specific bead
 id via the safe path: confirm the id
-appears in `bd ready --exclude-label human,human-focus-required,refactor-campaign [scope] --json`
+appears in `bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign [scope] --json`
 (ready, in-scope, not deferred, not `human`) AND that its `is_template` field is NOT `true` (a
 template MUST NOT be targeted even by an explicit id, for the same permanently-stranded-claim
 reason as the ordinary claim path), then claim it with
@@ -457,7 +469,7 @@ zr-refactor campaign beads carry their own protocol; excluded here by design (zr
 refactor spec §3).
 
 Arguments may only NARROW the query. They MUST NOT broaden scope and MUST
-NOT remove the safety filters — `--exclude-label human,human-focus-required` (nor its campaign
+NOT remove the safety filters — `--exclude-label escalated,attention,human-focus,human-focus-required,human` (nor its campaign
 counterpart above), `--exclude-type epic`, and the default deferred-exclusion
 always remain. A `--type epic`
 argument would contradict the standing `--exclude-type epic` exclusion and
@@ -520,7 +532,7 @@ distinct actor id; the preview-then-claim sequence's per-id `bd update --claim` 
 bead, so a lost race just means one session's list step picked a candidate a peer claimed
 first — a transient failure to retry, never two sessions holding the same bead. Each session
 stops on its own when a successful
-`bd ready --exclude-label human,human-focus-required,refactor-campaign -n 10` is empty of
+`bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign -n 10` is empty of
 non-template entries (zr-refactor
 campaign beads carry their own protocol; excluded here by design (zr-refactor spec
 §3)). A parked (`human`-labeled) bead,

@@ -229,10 +229,10 @@ func (w *Watchdog) escalate(ctx context.Context, sessionName, beadID string, be 
 	}
 	triage := isTriageRole(be.Role)
 	reason := splitIneligibleReason(be.Role, iss)
-	label, outcome, how := LabelEscalated, OutcomeEscalated, "labelled escalated for the escalation triager"
+	outcome, how := OutcomeEscalated, "labelled escalated for the escalation triager"
 	if triage {
 		reason = "triage role"
-		label, outcome, how = labelHuman, OutcomeHuman, "escalated to human (triage role; not escalated again)"
+		outcome, how = OutcomeHuman, "escalated to human (triage role; not escalated again)"
 	} else if reason != "" {
 		how += " (" + reason + "; not eligible for split review)"
 	}
@@ -243,7 +243,17 @@ func (w *Watchdog) escalate(ctx context.Context, sessionName, beadID string, be 
 		"session": sessionName, "bead": beadID, "role": be.Role, "pool": be.Pool,
 		"outcome": outcome, "reason": reason, "budget_stops": stops, "threshold": w.BudgetStopEscalateAfter,
 	}
-	if err := beads.AddLabel(ctx, w.BD, beadID, label); err != nil {
+	// A triage role's own stop is a hand-off to the operator: the strict pair
+	// human + attention, written through the one-call helper (bead pg2-ikkpk;
+	// docs/guides/bead-label-vocabulary.md). Every other role's stop only
+	// labels the bead escalated for the triager.
+	var labelErr error
+	if triage {
+		labelErr = beads.HandToHuman(ctx, w.BD, beadID)
+	} else {
+		labelErr = beads.AddLabel(ctx, w.BD, beadID, LabelEscalated)
+	}
+	if err := labelErr; err != nil {
 		fields["err"] = err.Error()
 		w.emit("warn", "budget_escalation_failed", "budget escalation failed; plain unclaim", fields)
 		return "", false

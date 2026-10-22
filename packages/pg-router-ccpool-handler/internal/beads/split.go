@@ -117,7 +117,7 @@ func ApplySplit(ctx context.Context, r Runner, parentID string, plan SplitPlan) 
 	var ids []string
 	fail := func(err error) ([]string, error) {
 		msg := fmt.Sprintf("split-triage failed after creating children [%s]: %v; escalated to human", strings.Join(ids, ", "), err)
-		_ = AddHuman(ctx, r, parentID)
+		_ = HandToHuman(ctx, r, parentID)
 		_ = Comment(ctx, r, parentID, msg)
 		_ = releaseIfClaimed(ctx, r, parent)
 		_ = RemoveLabel(ctx, r, parentID, LabelNeedsSplitReview)
@@ -169,7 +169,8 @@ func ApplySplit(ctx context.Context, r Runner, parentID string, plan SplitPlan) 
 	return ids, nil
 }
 
-// MarkUnsplittable executes a NOT-splittable decision: human added, a summary
+// MarkUnsplittable executes a NOT-splittable decision: handed to the operator
+// (human + attention in one call, bead pg2-ikkpk), a summary
 // comment (the triage session's reason plus the deterministic stop history),
 // a held claim released, and needs-split-review removed last.
 func MarkUnsplittable(ctx context.Context, r Runner, parentID, reason string) error {
@@ -183,7 +184,7 @@ func MarkUnsplittable(ctx context.Context, r Runner, parentID, reason string) er
 	if parent.ID == "" {
 		parent.ID = parentID
 	}
-	if err := AddHuman(ctx, r, parentID); err != nil {
+	if err := HandToHuman(ctx, r, parentID); err != nil {
 		return err
 	}
 	comment := fmt.Sprintf("split-triage: not splittable; escalated to human. reason: %s. budget stops: %d (sessions: %s)",

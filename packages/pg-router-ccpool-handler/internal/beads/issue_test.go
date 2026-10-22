@@ -140,6 +140,41 @@ func TestAddHuman_argv(t *testing.T) {
 	}
 }
 
+// HandToHuman (bead pg2-ikkpk) is the Go form of the hand-to-human command: ONE
+// bd update that adds human + attention and removes escalated, adds first.
+func TestHandToHuman_oneCallAddsBeforeRemoval(t *testing.T) {
+	fr := &fakeRunner{}
+	if err := HandToHuman(context.Background(), fr, "zr-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fr.args) != 1 {
+		t.Fatalf("calls = %v, want exactly ONE bd call", fr.args)
+	}
+	want := []string{"update", "zr-1", "--add-label", "human", "--add-label", "attention", "--remove-label", "escalated"}
+	if joinArgs(fr.args[0]) != joinArgs(want) {
+		t.Errorf("argv = %v, want %v", fr.args[0], want)
+	}
+}
+
+func TestHandToHuman_extraRemovalsShareTheCall(t *testing.T) {
+	fr := &fakeRunner{}
+	// human, attention and a repeated escalated are ignored; duplicates collapse.
+	if err := HandToHuman(context.Background(), fr, "zr-1", "needs-split-review", "human", "escalated", "needs-split-review", "attention"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"update", "zr-1", "--add-label", "human", "--add-label", "attention", "--remove-label", "escalated", "--remove-label", "needs-split-review"}
+	if len(fr.args) != 1 || joinArgs(fr.args[0]) != joinArgs(want) {
+		t.Errorf("argv = %v, want ONE call %v", fr.args, want)
+	}
+}
+
+func TestHandToHuman_failureIsReturned(t *testing.T) {
+	fr := &fakeRunner{err: errors.New("bd down")}
+	if err := HandToHuman(context.Background(), fr, "zr-1"); err == nil {
+		t.Fatal("want the bd error returned")
+	}
+}
+
 func TestAddHumanAndUnclaim_commentThenOneUpdate(t *testing.T) {
 	fr := &fakeRunner{}
 	if err := AddHumanAndUnclaim(context.Background(), fr, "zr-1", "why it was parked"); err != nil {

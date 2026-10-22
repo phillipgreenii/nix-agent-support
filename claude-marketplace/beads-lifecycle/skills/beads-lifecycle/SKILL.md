@@ -355,6 +355,52 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   on its FIRST park, not only after a person has said so once. `pb:drain-stuck`'s DEFER-ON-EVENT
   exit is the operational form of this rule.
 
+## Escalation and Operator-Attention Labels (LV-1 to LV-6)
+
+> The vocabulary is defined ONCE, in `docs/guides/bead-label-vocabulary.md` in
+> `nix-agent-support` (ADR 0105; bead `pg2-ikkpk`; operator rulings, Phillip, 2026-10-21 and
+> 2026-10-22). This section is the agent-facing rule set. Two label SETS exist: `ESCALATED_LABELS`
+> (`escalated`) and `HUMAN_LABELS` (`attention`, `human-focus`, `human-focus-required`, `human`).
+> Writes are strict (one label per role); reads are wide (every label of the set), so beads
+> labeled by historical habit or by a bug still filter correctly.
+
+- **LV-1** An agent MUST write only the single canonical label per role: `escalated` for "an
+  agent or system hit a problem and the escalation triager should look at it", `human` for "a
+  person is the blocker" (D-1), and the pair `human` + `attention` for "the escalation path could
+  not resolve it and the operator must act". An agent MUST NOT invent or guess another label for
+  these roles, and MUST NOT write `human-focus` (a historical spelling that is read, never
+  written). `human-focus-required` MAY be added, together with `human`, to mark a bead that
+  needs the operator interactively.
+- **LV-2** Planned operator work (verify, checkpoint, decision and handoff beads) MUST carry
+  `human` ONLY. `attention` MUST be applied only at an escalation hand-off, never to planned
+  work: it is what puts a bead on the operator's attention list.
+- **LV-3** To hand a bead to the operator because automation could not resolve it, an agent MUST
+  use the `hand-to-human` command and MUST NOT hand-write the labels:
+
+  ```bash
+  hand-to-human <id> --actor "ID"                       # bd, against the current tracker
+  hand-to-human <id> --bd-dir <tracker-root>            # a specific tracker root (BF-1)
+  hand-to-human <id> --backend <pg-connector-backend>   # a session that reaches bd through pg-connector
+  hand-to-human <id> --also-remove needs-split-review   # more labels dropped in the same call
+  ```
+
+  The command adds `human` and `attention`, removes `escalated`, does all of it in ONE update
+  call and reads the bead back (exit 4 names a disagreement).
+
+- **LV-4** ORDER IS LOAD-BEARING (the same reasoning as D-5): a bead carrying neither the
+  escalated nor the human labels is visible to the normal work queues, so the human labels MUST be
+  on the bead no later than the escalated removal. The one-call form above satisfies it. A path
+  that cannot make one call (a different tracker tool) MUST add the human labels first and remove
+  `escalated` second, and MUST NOT remove `escalated` first.
+- **LV-5** Read filters follow the sets. Normal work queues (drain, workers, pb commands) MUST
+  exclude every label of both sets. The escalation handler MUST include `ESCALATED_LABELS` and
+  exclude `HUMAN_LABELS`, so a bead carrying both is never handled by the handler. The person
+  queue includes the human labels. A dedup lookup keyed on `escalated` MUST read the union of both
+  sets, because the hand-off removes `escalated`.
+- **LV-6** The word "escalation" in `docs/superpowers/specs/2026-10-10-escalations-design.md` names
+  a menu-bar reminder item, not the `escalated` label. When both could be meant, say "the
+  escalated label" or "the menu-bar escalation".
+
 ## Misfiled Beads: Recreate and Verify (BF-3, BF-4)
 
 BF-1/BF-2 (file in the tracker of the repo where the fix lands; never fall back to another

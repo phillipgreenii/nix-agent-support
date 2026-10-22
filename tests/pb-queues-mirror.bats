@@ -92,7 +92,7 @@ delete_line() {
 }
 
 @test "mutant: changed label value in markdown fails" {
-  mutate "$work/drain-beads.md" "--exclude-label human,human-focus-required,refactor-campaign --exclude-type epic --json" "--exclude-label human,refactor-campaign --exclude-type epic --json"
+  mutate "$work/drain-beads.md" "--exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign --exclude-type epic --json" "--exclude-label human,refactor-campaign --exclude-type epic --json"
   check
   [ "$status" -ne 0 ]
   [[ "$output" == *"drain-claim"* ]]
@@ -118,10 +118,49 @@ delete_line() {
   [[ "$output" == *"unblock-human-focus"* ]]
 }
 
+# Bead label vocabulary (bead pg2-ikkpk; docs/guides/bead-label-vocabulary.md): the normal
+# work queues (drain) MUST exclude every ESCALATED_LABELS and HUMAN_LABELS member, so a bead
+# an agent has escalated or handed to a person is never claimed. The person queues (the
+# unblock-human ones) are selected by the human labels and are not subject to this.
+@test "vocabulary: both drain queues exclude every escalated and human label" {
+  for q in drain-claim drain-termination; do
+    run jq -e --arg q "$q" '
+      (.[] | select(.name == $q) | .args) as $a
+      | ($a | index("--exclude-label")) as $i
+      | ($a[$i + 1] | split(",")) as $ex
+      | ["escalated","attention","human-focus","human-focus-required","human"] - $ex | length == 0
+    ' "$work/queues.json"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "vocabulary: the person queues still select on the human labels" {
+  run jq -e '
+    (.[] | select(.name == "unblock-human") | .args | index("human")) != null
+    and (.[] | select(.name == "unblock-human-focus") | .args | index("human-focus-required")) != null
+  ' "$work/queues.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "mutant: dropping escalated from a drain queue in the markdown fails" {
+  mutate "$work/drain-beads.md" "--exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign --exclude-type epic --json" "--exclude-label attention,human-focus,human-focus-required,human,refactor-campaign --exclude-type epic --json"
+  check
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"drain-claim"* ]]
+}
+
+@test "mutant: dropping attention from a drain queue in queues.json fails" {
+  jq '(.[] | select(.name == "drain-termination") | .args[1]) |= (split(",") | map(select(. != "attention")) | join(","))' "$work/queues.json" >"$work/q.new"
+  mv "$work/q.new" "$work/queues.json"
+  check
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"drain-termination"* ]]
+}
+
 # --- mutants that MUST pass ----------------------------------------------------------------
 
 @test "reordered flags pass" {
-  mutate "$work/drain-beads.md" "--exclude-label human,human-focus-required,refactor-campaign --exclude-type epic --json" "--exclude-type epic --exclude-label refactor-campaign,human,human-focus-required --json"
+  mutate "$work/drain-beads.md" "--exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign --exclude-type epic --json" "--exclude-type epic --exclude-label refactor-campaign,human,human-focus-required,human-focus,attention,escalated --json"
   check
   [ "$status" -eq 0 ]
 }
@@ -153,8 +192,8 @@ delete_line() {
 
 @test "wrapped lines with backslash continuations pass" {
   awk '
-    !done && index($0, "bd ready --exclude-label human,human-focus-required,refactor-campaign --exclude-type epic --json") {
-      print "   bd ready --exclude-label human,human-focus-required,refactor-campaign \\"
+    !done && index($0, "bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign --exclude-type epic --json") {
+      print "   bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign \\"
       print "     --exclude-type epic \\"
       print "     --json"
       done = 1; next

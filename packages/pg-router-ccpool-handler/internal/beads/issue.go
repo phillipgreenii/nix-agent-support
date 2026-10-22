@@ -234,6 +234,41 @@ func AddHuman(ctx context.Context, r Runner, id string) error {
 	return nil
 }
 
+// Label vocabulary (bead pg2-ikkpk; docs/guides/bead-label-vocabulary.md and ADR
+// 0105 in nix-agent-support). The single WRITE label per role. A bead handed to
+// the operator because automation could not resolve it carries the pair human +
+// attention; the escalated marker is dropped in the SAME update.
+const (
+	LabelEscalated = "escalated"
+	LabelAttention = "attention"
+)
+
+// HandToHuman hands a bead to the operator: ONE
+// `bd update <id> --add-label human --add-label attention --remove-label
+// escalated [--remove-label <extra>]...` call. It is the Go form of the
+// hand-to-human command (packages/hand-to-human) and MUST stay equivalent to
+// it: the adds are in the SAME call as the removal, so the bead never carries
+// neither the escalated nor the human labels (a bead with neither is visible to
+// the normal work queues). Removing a label the bead does not carry is a no-op
+// on bd's side. extraRemove lists further labels to drop in the same call (for
+// example needs-split-review); human, attention and a repeated escalated are
+// ignored.
+func HandToHuman(ctx context.Context, r Runner, id string, extraRemove ...string) error {
+	args := []string{"update", id, "--add-label", LabelHuman, "--add-label", LabelAttention, "--remove-label", LabelEscalated}
+	seen := map[string]bool{LabelHuman: true, LabelAttention: true, LabelEscalated: true}
+	for _, l := range extraRemove {
+		if seen[l] {
+			continue
+		}
+		seen[l] = true
+		args = append(args, "--remove-label", l)
+	}
+	if _, err := r.Run(ctx, args...); err != nil {
+		return fmt.Errorf("hand-to-human %s: %w", id, err)
+	}
+	return nil
+}
+
 // DefaultParkNote is the comment AddHumanAndUnclaim writes when its caller
 // supplied none, so no park of a bead as human is ever silent.
 const DefaultParkNote = "Handler park note: this bead was parked as human by the pg-router-ccpool-handler, not by a person; " +

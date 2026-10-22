@@ -1247,7 +1247,8 @@ pgwf_resolve_actor_role() {
 #    (pgwf_tracker_item_parent) exactly as they follow .parent. The check-then-create race is
 #    ACCEPTED, not prevented [rev7] -- no locking is added here.
 # 2. No --question given at all: ID must already carry the question label
-#    -- the resolver, unable to settle it, bumps escalated -> human [design:
+#    -- the resolver, unable to settle it, bumps escalated -> human + attention
+#    in one update [bead pg2-ikkpk; design:
 #    Components table escalate row, "on a question: escalated -> human";
 #    the escalation-ladder diagram's "resolver -> operator" hop]. No new
 #    question, no fingerprint work.
@@ -1294,12 +1295,21 @@ pgwf_cmd_escalate() {
       echo "pg-wi-flow: escalate: --question is required (or ID must already be a question, to bump escalated -> human)" >&2
       return 1
     fi
-    local stage actor human_label escalated_label
+    local stage actor human_label attention_label escalated_label
     stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
     actor="$(pgwf_current_actor "$stage")" || return 1
     human_label="$(pgwf_config_label "$config_json" human human)"
+    attention_label="$(pgwf_config_label "$config_json" attention attention)"
     escalated_label="$(pgwf_config_label "$config_json" escalated escalated)"
-    local -a bump_args=(--add-label "$human_label")
+    # The resolver's hand-off to the operator writes the strict pair human +
+    # attention and drops escalated in ONE update (bead pg2-ikkpk; the label
+    # vocabulary is docs/guides/bead-label-vocabulary.md in nix-agent-support).
+    # This is the hand-to-human contract realized in this package's own tracker
+    # layer rather than by invoking the command: the label NAMES come from the
+    # workflow config (labels.human / labels.attention / labels.escalated), which
+    # the command's fixed canonical names cannot honor. The adds are in the SAME
+    # call as the removal, so no agent ever sees the item with neither label.
+    local -a bump_args=(--add-label "$human_label" --add-label "$attention_label")
     if pgwf_tracker_has_label "$id" "$escalated_label"; then
       bump_args+=(--remove-label "$escalated_label")
     fi

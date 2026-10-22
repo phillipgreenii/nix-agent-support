@@ -17,10 +17,10 @@ pg-router-ccpool-handler split apply {{.BeadID}} <<'SPLIT_PLAN_EOF'
 {"rationale": "<why this is splittable>", "children": [{"title": "<child 1>", "description": "<self-contained description>", "acceptance": "<acceptance criteria>"}, {"title": "<child 2>", "description": "...", "acceptance": "..."}]}
 SPLIT_PLAN_EOF
 
-3b. NOT splittable: run the command below with a short reason on stdin (why it cannot be split; what the stopped sessions achieved). It adds human with a summary comment that includes the stop history, releases any claim, and removes needs-split-review.
+3b. NOT splittable: run the command below with a short reason on stdin (why it cannot be split; what the stopped sessions achieved). It hands the bead to the operator with a summary comment that includes the stop history (the command writes the strict label pair human + attention in one call, per the bead label vocabulary in nix-agent-support docs/guides/bead-label-vocabulary.md; you never write those labels by hand), releases any claim, and removes needs-split-review.
 
 pg-router-ccpool-handler split unsplittable {{.BeadID}} <<'SPLIT_REASON_EOF'
 <why this is not splittable>
 SPLIT_REASON_EOF
 
-Rules: run exactly one of 3a or 3b, once. If the command reports an error, do not retry with a different shape and do not edit labels by hand; stop, and the bead fails safe to human. You MUST NOT modify any budget or budget setting, change the bead's priority, implement any of the work yourself, or split a bead that carries was-split or split-from:* labels (use 3b). If your own session runs out of budget the watchdog sends the bead to human; you never re-enter the split path.
+Rules: run exactly one of 3a or 3b, once. If the command reports an error, do not retry with a different shape and do not edit labels by hand; stop, and the bead fails safe to the operator (human + attention). You MUST NOT modify any budget or budget setting, change the bead's priority, implement any of the work yourself, or split a bead that carries was-split or split-from:* labels (use 3b). If your own session runs out of budget the watchdog hands the bead to the operator (human + attention); you never re-enter the split path.

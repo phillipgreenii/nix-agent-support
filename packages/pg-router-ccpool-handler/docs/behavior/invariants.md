@@ -195,7 +195,9 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   unclaim, put the bead on the escalated path (operator ruling, Phillip, 2026-10-14, bead
   `pg2-cty80`: "a session which fails due to time should immediatly go to escalated", read as the
   existing `*-escalated-work` path): (a) a bead dispatched to a triage role (role name containing
-  `triage`) is the one exception and MUST go to a human — add `human`, remove `needs-split-review`
+  `triage`) is the one exception and MUST go to a human — in ONE update add `human` and
+  `attention` and remove `escalated` (the strict operator pair, bead `pg2-ikkpk`; vocabulary in
+  nix-agent-support `docs/guides/bead-label-vocabulary.md`), remove `needs-split-review`
   (bead `pg2-47rsh`) and comment `budget stops reached threshold <t>; escalated to human (triage
 role; not escalated again). stop sessions: <ids>. last stop: session=<id> limit=<kind> used=<n>
 cap=<n>`, because a triager MUST NOT escalate its own bead back to itself; (b) every other bead,
@@ -232,9 +234,10 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   `blocks` type) and verifies the edges with `bd dep list <parent>`, adds `was-split`, comments the
   decomposition, releases a held claim (status open + assignee cleared in one update), and removes
   `needs-split-review` LAST. It refuses a closed, `was-split` or `split-from:*` parent, writing
-  nothing. (b) `split unsplittable <id>` (reason on stdin) adds `human`, comments the reason plus
+  nothing. (b) `split unsplittable <id>` (reason on stdin) hands the bead to the operator (one update adds `human`
+  and `attention` and removes `escalated`, bead `pg2-ikkpk`), comments the reason plus
   the stop history, releases a held claim, and removes `needs-split-review` last. If a split fails
-  after children exist, the parent fails safe to `human` (label removed, claim released) rather than
+  after children exist, the parent fails safe to `human` + `attention` (label removed, claim released) rather than
   being retried. A triage session that hits its own budget is the one stop routed to `human` by `INV-CCH-12`
   and, additionally, has `needs-split-review` removed; it never re-enters the split path. No part
   of this role changes any budget. All bead text reaches `bd` as discrete argv elements from stdin

@@ -697,6 +697,21 @@
               inherit bashBuilders;
               beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
             }).handoff-create.script;
+          # hand-to-human (bead pg2-ikkpk): hands a bead to the operator by
+          # writing the strict label pair human + attention and removing
+          # escalated in ONE update call (the label vocabulary lives in
+          # docs/guides/bead-label-vocabulary.md, ADR 0105). Single
+          # mkBashScript tool, so -- same rationale as handoff-create -- it
+          # takes `result.hand-to-human.script` directly. `bd` and
+          # `pg-connector` are resolved from the ambient machine PATH at
+          # runtime; the beads package is for the test check's real-bd
+          # throwaway-database fixture only.
+          hand-to-human =
+            (import ./packages/hand-to-human {
+              pkgs = final;
+              inherit bashBuilders;
+              beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
+            }).hand-to-human.script;
           # session-mode (bead pg2-gzrn2): per-session "which loop is running"
           # tracking (drain-beads / unblock-human-beads / wrap-up-session /
           # ...), consumed by the pb marketplace's commands, its SessionEnd
@@ -14147,6 +14162,14 @@
               bashBuilders = pkgs._agentSupportBashBuilders;
               beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
             }).checks
+            # test-hand-to-human (bead pg2-ikkpk). Same one-line idiom as
+            # handoff-create above: without this the suite (incl. the real-bd
+            # throwaway-DB tests) would run in no gate at all.
+            // (import ./packages/hand-to-human {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+              beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
+            }).checks
             # test-git-branch-maintenance / test-git-branch-status /
             # test-git-choose-branch (bead pg2-ly46t). Same one-line idiom as
             # pg-disk-reclaimer above: without this the suite ran in no gate
@@ -14307,6 +14330,10 @@
             # tool holding just the script derivation) -- re-exported so
             # `nix build .#handoff-create` resolves via flake.packages.<system>.
             inherit (pkgs) handoff-create;
+            # hand-to-human is likewise an overlay-only attr (single mkBashScript
+            # tool) -- re-exported so `nix build .#hand-to-human` resolves via
+            # flake.packages.<system>.
+            inherit (pkgs) hand-to-human;
             # codeburn is a manual-bump npm package (not Go/nix-update); re-exported so
             # `nix build .#codeburn` resolves it via flake.packages.<system>.
             inherit (pkgs) codeburn;

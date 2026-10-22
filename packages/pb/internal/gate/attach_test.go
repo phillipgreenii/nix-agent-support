@@ -359,7 +359,7 @@ func TestChildLabels(t *testing.T) {
 		{
 			"workflow-state labels are dropped",
 			[]string{
-				"agent-support", "human", "human-focus-required", "needs-split-review", "escalated",
+				"agent-support", "human", "attention", "human-focus", "human-focus-required", "needs-split-review", "escalated",
 				"worker-ready", "mine", "worktree-review", "docket", "pb",
 			},
 			[]string{"agent-support", "has-acceptance-criteria", "pb"},

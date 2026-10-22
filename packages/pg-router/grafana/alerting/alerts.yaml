@@ -48,9 +48,11 @@ groups:
     rules:
       # Conventions (pg2-x7ie2): the optional rule label `escalation` routes the
       # bead pg-router-probe files for a firing instance of a rule it watches.
-      # Recognised value: `human` -- the bead gets the labels escalated AND human
-      # (it skips the triager and lands in the operator's queue, with this rule's
-      # summary/description rendered as a Remediation: section). Absent (the
+      # Recognised value: `human` -- the bead gets the labels escalated, human AND
+      # attention (the strict operator pair human + attention, plus escalated for
+      # dedup; it skips the triager and lands in the operator's attention list,
+      # with this rule's summary/description rendered as a Remediation: section;
+      # label vocabulary: docs/guides/bead-label-vocabulary.md). Absent (the
       # default) means escalated only, for the triager. `escalation` is routing
       # metadata, not identity: the probe excludes it from the alert fingerprint,
       # so adding it to a registered rule keeps matching that rule's open beads.

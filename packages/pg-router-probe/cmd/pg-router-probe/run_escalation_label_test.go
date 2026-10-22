@@ -9,8 +9,8 @@ import (
 )
 
 // Subject: the `escalation` alert label -- how a rule routes its bead
-// straight to the operator (labels escalated + human), and that the routing
-// never changes the alert's identity or dedup behavior (pg2-x7ie2).
+// straight to the operator (labels escalated + the strict pair human +
+// attention), and that the routing never changes the alert's identity or dedup behavior (pg2-x7ie2).
 
 const originFP = "pg-router-origin-unavailable|__alert_rule_uid__=pg-router-origin-unavailable,severity=warning"
 
@@ -37,7 +37,7 @@ func originSpy(escalation string) *spyDeps {
 	}
 }
 
-func TestEscalationHumanCreatesEscalatedAndHumanBead(t *testing.T) {
+func TestEscalationHumanCreatesEscalatedHumanAndAttentionBead(t *testing.T) {
 	opts := episodeOpts(t)
 	spy := originSpy("human")
 	if err := tick(t, opts, spy, t0); err != nil {
@@ -46,8 +46,8 @@ func TestEscalationHumanCreatesEscalatedAndHumanBead(t *testing.T) {
 	if len(spy.created) != 1 {
 		t.Fatalf("expected one create, got %+v", spy.created)
 	}
-	if got := spy.created[0].labels; !slices.Equal(got, []string{"escalated", "human"}) {
-		t.Fatalf("labels = %v, want [escalated human]", got)
+	if got := spy.created[0].labels; !slices.Equal(got, []string{"escalated", "human", "attention"}) {
+		t.Fatalf("labels = %v, want [escalated human attention] (the strict operator pair plus the dedup label)", got)
 	}
 	body := spy.created[0].body
 	for _, want := range []string{"Remediation:", "origin is unavailable", "renew the step cert in an interactive shell", "Close this bead once the alert clears"} {

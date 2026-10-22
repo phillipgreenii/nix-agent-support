@@ -122,7 +122,8 @@ Commands:
       its own child) -- its "originating_item" metadata names ID instead,
       and context follows that link as the question's parent. With no
       --question at all: ID must already be a question -- bumps it from
-      escalated to human (the resolver could not settle it).
+      escalated to human + attention in one update (the resolver could not
+      settle it).
       --concern NAME records the originating concern (for example
       destructive-actions) in the question's "originating_concern"
       metadata; an already-open reused question with none recorded adopts

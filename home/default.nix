@@ -34,6 +34,7 @@
     ./programs/bg-tools
     ./programs/session-mode
     ./programs/handoff-create
+    ./programs/hand-to-human
     ./programs/pg-connector
     ./programs/pg-rescue
     ./programs/pg-task-focus
