@@ -262,3 +262,40 @@ func TestInstrument_DisabledLeavesTableAlone(t *testing.T) {
 		t.Errorf("disabled event log wrote files: %v", entries)
 	}
 }
+
+// TestServeOne_ListEmitsOnlyCanonicalIDs (bead pg2-pl2jk): over the wire, a
+// list reply whose model-supplied item carries a bare Slack ts (no channel in
+// the id) reaches the consumer as a canonical <CHANNEL>_<ts> id, in both the
+// entities and present_ids; an item whose channel cannot be recovered is not
+// emitted at all.
+func TestServeOne_ListEmitsOnlyCanonicalIDs(t *testing.T) {
+	inner := `{"items":[` +
+		`{"id":"1792576755.052579","channel":"C09TZ5M5NER","permalink":"https://example.slack.invalid/archives/C09TZ5M5NER/p1792576755052579","text":"bare ts"},` +
+		`{"id":"1792576755.052581","channel":"","permalink":"https://example.slack.invalid/x","text":"no channel anywhere"}]}`
+	backend := internal.New(&fakeRunner{handle: func(string) (string, error) {
+		env, err := json.Marshal(map[string]any{"result": inner, "is_error": false})
+		return string(env), err
+	}})
+
+	var out bytes.Buffer
+	code := scriptout.ServeOne(newDispatchTable(backend),
+		strings.NewReader(`{"op":"list","args":{"query":"mine"},"config":{"queries":{"mine":"to:@me"}}}`), &out)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stdout=%s", code, out.Bytes())
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil || resp.Error != nil {
+		t.Fatalf("response = %s (err %v)", out.Bytes(), err)
+	}
+	var got struct {
+		Entities   []struct{ ID string } `json:"entities"`
+		PresentIDs []string              `json:"present_ids"`
+	}
+	if err := json.Unmarshal(resp.Result, &got); err != nil {
+		t.Fatalf("decode result %s: %v", resp.Result, err)
+	}
+	want := "C09TZ5M5NER_1792576755.052579"
+	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != want || len(got.Entities) != 1 || got.Entities[0].ID != want {
+		t.Fatalf("result = %s, want exactly the one repaired id %q", resp.Result, want)
+	}
+}

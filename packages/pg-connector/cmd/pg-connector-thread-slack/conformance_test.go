@@ -20,9 +20,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,5 +120,61 @@ func TestConformance_RealBinary_FakeClaudeOnEnvOverride(t *testing.T) {
 	// future change to the path resolution cannot silently re-open the leak.
 	if info, err := os.Stat(eventsFile); err != nil || info.Size() == 0 {
 		t.Errorf("child wrote no events to %s (err=%v): event-log redirect is not effective", eventsFile, err)
+	}
+}
+
+// writeFakeClaudeListing is writeFakeClaude's counterpart for a `list` call:
+// the fake answers every prompt with a claude -p envelope whose inner result
+// is the given list reply (the model's own JSON, as a string).
+func writeFakeClaudeListing(t *testing.T, listReply string) string {
+	t.Helper()
+	envelope, err := json.Marshal(map[string]any{"result": listReply, "is_error": false})
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	dir := t.TempDir()
+	payload := filepath.Join(dir, "reply.json")
+	if err := os.WriteFile(payload, envelope, 0o644); err != nil {
+		t.Fatalf("write reply: %v", err)
+	}
+	path := filepath.Join(dir, "claude")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\ncat >/dev/null\ncat '"+payload+"'\n"), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	return path
+}
+
+// TestRealBinary_ListEmitsOnlyCanonicalIDs (bead pg2-pl2jk): the real compiled
+// binary, a fake claude on the env override (the only fake: the LLM/Slack
+// subprocess boundary), and a `list` request over stdin. The model reports a
+// channel-less bare ts; the wire answer carries only canonical
+// <CHANNEL>_<ts> ids, so `thread show` can resolve every id `list` hands out.
+func TestRealBinary_ListEmitsOnlyCanonicalIDs(t *testing.T) {
+	bin := buildThreadSlackBinary(t)
+	reply := `{"items":[` +
+		`{"id":"1792576755.052579","channel":"C09TZ5M5NER","permalink":"https://example.slack.invalid/archives/C09TZ5M5NER/p1792576755052579","text":"bare ts"},` +
+		`{"id":"1792576755.052581","channel":"","permalink":"https://example.slack.invalid/x","text":"unrepairable"}]}`
+	t.Setenv(internal.EnvBinary, writeFakeClaudeListing(t, reply))
+	t.Setenv(eventlog.EnvPath, filepath.Join(t.TempDir(), "events.jsonl"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin)
+	cmd.Stdin = strings.NewReader(`{"op":"list","args":{"query":"mine"},"config":{"queries":{"mine":"to:@me"}}}`)
+	stdout, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("run %s: %v\nstdout: %s", bin, err, stdout)
+	}
+	var resp struct {
+		Result struct {
+			PresentIDs []string `json:"present_ids"`
+		} `json:"result"`
+		Error *struct{ Code, Message string } `json:"error"`
+	}
+	if err := json.Unmarshal(stdout, &resp); err != nil || resp.Error != nil {
+		t.Fatalf("response = %s (err %v)", stdout, err)
+	}
+	if want := []string{"C09TZ5M5NER_1792576755.052579"}; !reflect.DeepEqual(resp.Result.PresentIDs, want) {
+		t.Fatalf("present_ids = %v, want %v (response %s)", resp.Result.PresentIDs, want, stdout)
 	}
 }

@@ -256,6 +256,13 @@ does not change an issue's fingerprint while a status or other content change st
 unchanged entity fingerprints identically across calls; a change to any field outside the exclusions
 changes it. Slack `thread` listings carry no fingerprint.
 
+A Slack `thread` listing emits only canonical thread ids, `<channel id>_<root ts>` (for example
+`C01ABCDEFGH_1700000000.000100`), because `thread show` resolves a thread only from an id that names
+its channel. A listed item whose id is a bare timestamp is repaired with the channel id the same
+listing carries (its `channel` field, else the channel in its permalink); an item whose id is not
+canonical and whose channel cannot be recovered is omitted from both `entities` and `present_ids`,
+so every id `list` hands out is one `show` can be asked for.
+
 The `pr` list summary is deliberately cheap: it carries identity, state, body, labels, head SHA,
 the checks rollup, `mergeable`, `review_decision`, and the totals `comment_count`, `review_count`,
 `review_thread_count` and `label_count` (the connector's `PRListFields` names the exact set). Every

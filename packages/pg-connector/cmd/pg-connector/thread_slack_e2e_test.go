@@ -51,12 +51,14 @@ const (
 		"mcp__slack__slack_read_thread,mcp__slack__slack_read_channel,mcp__slack__slack_read_user_profile"
 
 	// Canned replies, as the model's final JSON text. The list reply carries
-	// an item with no id, which the backend must drop.
+	// an item with a bare ts (which the backend must repair to a canonical
+	// <CHANNEL>_<ts> id from the reply's own channel, bead pg2-pl2jk), an item
+	// already in canonical form, and an item with no id, which it must drop.
 	slackE2EListReply = `{"items":[` +
-		`{"id":"1700000000.000100","channel":"C0TEST1","permalink":"https://slack.example.invalid/p1","started_by":"U0TEST1","participants":["U0TEST1","U0TEST2"],"last_reply_at":"1700000100.000200","reply_count":2,"text":"first canned thread","mentions_me":true},` +
-		`{"id":"1700000500.000300","channel":"C0TEST2","permalink":"https://slack.example.invalid/p2","reply_count":0,"text":"second canned thread","mentions_me":false},` +
-		`{"channel":"C0TEST3","permalink":"https://slack.example.invalid/p3","text":"no id, dropped"}]}`
-	slackE2EShowReply = `{"found":true,"id":"1700000000.000100","channel":"C0TEST1","permalink":"https://slack.example.invalid/p1","reply_count":2,"text":"first canned thread","mentions_me":true}`
+		`{"id":"1700000000.000100","channel":"C01TESTAAAA","permalink":"https://slack.example.invalid/p1","started_by":"U0TEST1","participants":["U0TEST1","U0TEST2"],"last_reply_at":"1700000100.000200","reply_count":2,"text":"first canned thread","mentions_me":true},` +
+		`{"id":"C01TESTBBBB_1700000500.000300","channel":"C01TESTBBBB","permalink":"https://slack.example.invalid/p2","reply_count":0,"text":"second canned thread","mentions_me":false},` +
+		`{"channel":"C01TESTCCCC","permalink":"https://slack.example.invalid/p3","text":"no id, dropped"}]}`
+	slackE2EShowReply = `{"found":true,"id":"C01TESTAAAA_1700000000.000100","channel":"C01TESTAAAA","permalink":"https://slack.example.invalid/p1","reply_count":2,"text":"first canned thread","mentions_me":true}`
 )
 
 // slackE2EEnvelope wraps a model reply in claude -p's --output-format json
@@ -271,12 +273,12 @@ func TestThreadSlackE2E_ConfiguredClaudeThroughRealBinaries(t *testing.T) {
 	if len(list.Sources) != 1 || list.Sources[0].Status != SourceSucceeded || list.Sources[0].Count != 2 {
 		t.Fatalf("sources = %+v, want one succeeded source with count 2", list.Sources)
 	}
-	wantIDs := []string{"1700000000.000100", "1700000500.000300"}
+	wantIDs := []string{"C01TESTAAAA_1700000000.000100", "C01TESTBBBB_1700000500.000300"}
 	if len(list.PresentIDs) != 2 || list.PresentIDs[0] != wantIDs[0] || list.PresentIDs[1] != wantIDs[1] {
-		t.Fatalf("present_ids = %v, want %v (the id-less item dropped)", list.PresentIDs, wantIDs)
+		t.Fatalf("present_ids = %v, want %v (the id-less item dropped, the bare ts repaired)", list.PresentIDs, wantIDs)
 	}
 	first := list.Entities[0]
-	if first.ID != wantIDs[0] || first.Channel != "C0TEST1" || first.ReplyCount != 2 || !first.MentionsMe ||
+	if first.ID != wantIDs[0] || first.Channel != "C01TESTAAAA" || first.ReplyCount != 2 || !first.MentionsMe ||
 		first.Permalink != "https://slack.example.invalid/p1" || first.Text != "first canned thread" || first.AsOf == "" {
 		t.Fatalf("entities[0] = %+v, want the first canned thread parsed into Thread v1", first)
 	}
@@ -371,7 +373,7 @@ func TestThreadSlackE2E_ConfiguredClaudeThroughRealBinaries(t *testing.T) {
 	if err := scriptout.Decode(resp.Result, &th); err != nil {
 		t.Fatalf("decode Thread: %v", err)
 	}
-	if th.ID != wantIDs[0] || th.Channel != "C0TEST1" || th.ReplyCount != 2 || !th.MentionsMe {
+	if th.ID != wantIDs[0] || th.Channel != "C01TESTAAAA" || th.ReplyCount != 2 || !th.MentionsMe {
 		t.Fatalf("shown thread = %+v", th)
 	}
 	// The show child was configured exactly like the list child: the config

@@ -284,6 +284,13 @@ func runRepo(cfg *config.Config) string {
 	return cfg.Repos[0].Remote
 }
 
+// exitDecline is the exit code of a deliberate pre-accept decline: the
+// command-role "not right now" signal pg-router reads as a decline to re-offer
+// with backoff (pg-router's busy exit code), never as a handler failure. `run`
+// uses it only where runThread documents it; it is pg-desk's own signal, never
+// a forwarded pg-connector exit code.
+const exitDecline = 9
+
 // runThread implements run thread's Slack half (docket pg2-2j5ac.40, Phase
 // 13, [design: 7.2, 8]): fetch the triggering thread via a single
 // `pg-connector thread show` call (runThreadShow, this file's own
@@ -318,11 +325,22 @@ func runRepo(cfg *config.Config) string {
 // show` re-read, there is no `--change removed` special case here: this
 // command has no stored "is this thread already known" state of its own to
 // consult, so every change kind treats an unfetchable thread the same way
-// [freedom boundary].
+// [freedom boundary] — with ONE exception (bead pg2-pl2jk): a not_found
+// answer for an `added` thread is a skipped decline, not a failure. An id the
+// connector's list handed out that its own show cannot resolve is not a
+// handler fault, and failing it made pg-router count a failure and re-offer
+// it about every 30 minutes forever. The decline is the command-role busy
+// signal (exitDecline), which pg-router treats as a pre-accept decline: it
+// re-offers the event with its decline backoff while the event is unexpired,
+// and counts it as a decline, not a handler failure. `changed`, `removed`
+// and `sweep` for an unfetchable thread still fail.
 func runThread(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config, st *store.Store, threadID string, change gather.ChangeKind) error {
 	repo := runRepo(cfg)
 
 	fields, notFound, err := runThreadShow(ctx, threadID)
+	if notFound && change == gather.ChangeAdded {
+		return newExitError(exitDecline, fmt.Errorf("run thread %s: thread not found for an added thread: declining so pg-router re-offers it with backoff", threadID))
+	}
 	if notFound {
 		return fmt.Errorf("run thread %s: fetch thread: pg-connector reports not_found", threadID)
 	}

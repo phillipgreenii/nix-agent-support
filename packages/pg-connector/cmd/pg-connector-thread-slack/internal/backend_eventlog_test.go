@@ -215,11 +215,11 @@ func TestBackendEvents_ListOkRowSumsAcrossModifiersAndCountsDedupedItems(t *test
 	table := instrumented(New(&fakeRunner{handle: func(string) (string, error) {
 		n++
 		if n == 1 {
-			return costEnvelope(`{"items":[{"id":"t1","channel":"C1","permalink":"https://x.invalid/1"},{"id":"t2","channel":"C1","permalink":"https://x.invalid/2"}]}`, 5, "0.25"), nil
+			return costEnvelope(`{"items":[{"id":"C01AAAAAAAA_1726000000.000100","channel":"C01AAAAAAAA","permalink":"https://x.invalid/1"},{"id":"C01AAAAAAAA_1726000000.000200","channel":"C01AAAAAAAA","permalink":"https://x.invalid/2"}]}`, 5, "0.25"), nil
 		}
-		// t1 repeats across modifiers and the empty id is skipped, so this
-		// call adds exactly one item (t3).
-		return costEnvelope(`{"items":[{"id":"t1","channel":"C1","permalink":"https://x.invalid/1"},{"id":"","channel":"C1","permalink":"https://x.invalid/9"},{"id":"t3","channel":"C2","permalink":"https://x.invalid/3"}]}`, 9, "0.5"), nil
+		// the first id repeats across modifiers and the empty id is skipped, so this
+		// call adds exactly one item (the C01BBBBBBBB one).
+		return costEnvelope(`{"items":[{"id":"C01AAAAAAAA_1726000000.000100","channel":"C01AAAAAAAA","permalink":"https://x.invalid/1"},{"id":"","channel":"C01AAAAAAAA","permalink":"https://x.invalid/9"},{"id":"C01BBBBBBBB_1726000000.000300","channel":"C01BBBBBBBB","permalink":"https://x.invalid/3"}]}`, 9, "0.5"), nil
 	}}), sink)
 	res, err := table["list"].Handle(context.Background(), nil)
 	if err != nil {

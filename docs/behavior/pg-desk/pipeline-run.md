@@ -40,8 +40,10 @@ A sync failure is recorded as `sync_error` (the diagnostic, kept for the dashboa
 later successful run clears `sync_error` and its retry state. Every failed run of a PR that has a
 recorded `sync_error` counts one attempt toward its automatic-retry bound; which failures
 `reconcile` retries, how often, and how many times is [`sync.md`](sync.md)'s "Automatic retry".
-`run` MUST NEVER exit `9` or return a raw
-`pg-connector` exit code.
+`run` MUST NEVER return a raw
+`pg-connector` exit code, and MUST NOT exit `9` except for the one deliberate decline `run thread`
+documents (an `added` thread `pg-connector` reports `not_found`: [`run-thread.md`](run-thread.md)'s
+"Exit codes"), which is pg-desk's own signal, never a forwarded `pg-connector` code.
 
 ## Telemetry and logs
 

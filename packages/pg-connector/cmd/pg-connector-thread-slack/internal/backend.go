@@ -350,6 +350,53 @@ func absolutizeAfter(modifier string, now time.Time) string {
 	})
 }
 
+// Thread ids. Show resolves a thread only from an id that names its channel,
+// so List MUST emit only the canonical form <CHANNEL>_<ts> (for example
+// C09TZ5M5NER_1792467759.577819) and never the bare message timestamp a model
+// tends to report (bead pg2-pl2jk: a bare ts reaches Show, the model cannot
+// resolve it, and every consumer retries it as not_found indefinitely).
+var (
+	// canonicalThreadIDRe matches the canonical id: a Slack channel id, an
+	// underscore, then the thread root's ts.
+	canonicalThreadIDRe = regexp.MustCompile(`^[CDG][A-Z0-9]{8,}_[0-9]+\.[0-9]+$`)
+	// bareThreadTSRe matches a channel-less id: just a ts.
+	bareThreadTSRe = regexp.MustCompile(`^[0-9]+\.[0-9]+$`)
+	// slackChannelIDRe matches a Slack channel id (never a display name such
+	// as "#general", which is not a stable part of an id).
+	slackChannelIDRe = regexp.MustCompile(`^[CDG][A-Z0-9]{8,}$`)
+	// permalinkChannelRe pulls the channel id out of a Slack message
+	// permalink (https://<workspace>/archives/<CHANNEL>/p<ts>).
+	permalinkChannelRe = regexp.MustCompile(`/archives/([CDG][A-Z0-9]{8,})/`)
+)
+
+// canonicalThreadID returns the canonical <CHANNEL>_<ts> id for a list item,
+// and false when none can be derived (the caller drops the item).
+//
+// An id already in canonical form is kept as is. A bare ts is repaired with
+// the channel id the same list reply carries: the item's own channel field
+// when it is a channel id, else the channel in its permalink. Anything else,
+// including a bare ts with no recoverable channel, is not an id Show can
+// resolve, so it is not emitted: dropping it is better than handing consumers
+// an id that can never be fetched.
+func canonicalThreadID(f *slackThreadFields) (string, bool) {
+	id := strings.TrimSpace(f.ID)
+	if canonicalThreadIDRe.MatchString(id) {
+		return id, true
+	}
+	if !bareThreadTSRe.MatchString(id) {
+		return "", false
+	}
+	channel := strings.TrimSpace(f.Channel)
+	if !slackChannelIDRe.MatchString(channel) {
+		m := permalinkChannelRe.FindStringSubmatch(f.Permalink)
+		if m == nil {
+			return "", false
+		}
+		channel = m[1]
+	}
+	return channel + "_" + id, true
+}
+
 // listPrompt builds the claude -p prompt for List's one search-modifier
 // expression — carries the configured search modifier and instructs a
 // full, from-the-oldest search rather than an incremental one [design:
@@ -369,6 +416,8 @@ Respond with ONLY one JSON object, no prose, no markdown code fence, matching ex
 {"items": [{"id": <string>, "channel": <string>, "permalink": <string>, "started_by": <string>, "participants": [<string>, ...], "last_reply_at": <string>, "reply_count": <int>, "text": <string>, "mentions_me": <bool>}, ...]}
 
 If nothing matches, respond with exactly {"items": []}.
+
+Every item's "id" MUST be the thread root's Slack channel id, an underscore, then the thread root's message timestamp, for example "C01ABCDEFGH_1700000000.000100" — never the bare timestamp alone. "channel" MUST be the Slack channel id (not the channel name).
 
 Report every field of every item as a plain fact taken directly from the Slack MCP tool's own response for that thread. Never infer, summarize, paraphrase, or guess a value.`, modifier)
 }
@@ -448,7 +497,9 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Thread, error) {
 // issue.Provider.List's own no-cursor shape). Each expression's matches
 // are unioned, deduplicated by thread id (design's "run each, union
 // results deduplicated by id" rule) — an item with an empty id is
-// silently skipped rather than failing the whole call, mirroring
+// silently skipped rather than failing the whole call (and so is any item
+// whose id is not canonical and cannot be repaired — see canonicalThreadID),
+// mirroring
 // cmd/pg-connector-issue-jira/internal.Backend.List's identical
 // leniency for a malformed individual search-result element.
 func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.ThreadListResult, error) {
@@ -475,10 +526,15 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		asOf := b.clock().UTC()
 		for i := range reply.Items {
 			item := reply.Items[i]
-			if item.ID == "" || seen[item.ID] {
+			// Only canonical ids leave List (see canonicalThreadID): a bare ts
+			// is repaired from the reply's own channel, an unrepairable item is
+			// dropped.
+			id, ok := canonicalThreadID(&item)
+			if !ok || seen[id] {
 				continue
 			}
-			seen[item.ID] = true
+			seen[id] = true
+			item.ID = id
 			entities = append(entities, *toSchemaThread(&item, asOf))
 		}
 	}

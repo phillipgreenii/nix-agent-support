@@ -668,3 +668,57 @@ func TestRunCmdThread_FetchFailure_ReturnsClearError(t *testing.T) {
 		t.Fatalf("run thread missing-thread: error = %q, want it to mention not_found", runErr.Error())
 	}
 }
+
+// runThreadNotFound drives `run thread` for a thread pg-connector answers
+// not_found for, under the given --change, and returns the error RunE gives.
+func runThreadNotFound(t *testing.T, change string) error {
+	t.Helper()
+	_, _ = setupRunThreadTest(t, issueTestCfg(), threadShowResult{}, true, nil)
+	origChange := runF.change
+	t.Cleanup(func() { runF.change = origChange })
+	runF.change = change
+
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("rootCmd has no run subcommand: %v", err)
+	}
+	return cmd.RunE(cmd, []string{"thread", "1792576755.052579"})
+}
+
+// TestRunCmdThread_NotFoundForAddedThread_IsADecline (bead pg2-pl2jk): an id the
+// connector's list handed out but its show cannot resolve is not a handler
+// failure. For an `added` thread `run thread` exits with the decline code
+// (pg-router's pre-accept decline: re-offered with backoff, not counted as a
+// handler failure) instead of the generic failure code 1.
+func TestRunCmdThread_NotFoundForAddedThread_IsADecline(t *testing.T) {
+	runErr := runThreadNotFound(t, "added")
+	if runErr == nil {
+		t.Fatal("run thread (added, not_found): expected a decline error, got nil (exit 0 would drop the event)")
+	}
+	if got := exitCodeFor(runErr); got != exitDecline {
+		t.Fatalf("run thread (added, not_found): exit code = %d, want the decline code %d (error: %v)", got, exitDecline, runErr)
+	}
+	if !strings.Contains(runErr.Error(), "not found") {
+		t.Fatalf("decline error = %q, want it to say the thread was not found", runErr.Error())
+	}
+}
+
+// TestRunCmdThread_NotFoundForOtherChanges_StillFails: the decline is only for
+// `added`. A changed, removed or swept thread that cannot be fetched is still a
+// failure (exit 1, never the decline code), as run-thread.md documents.
+func TestRunCmdThread_NotFoundForOtherChanges_StillFails(t *testing.T) {
+	for _, change := range []string{"changed", "removed", "sweep"} {
+		t.Run(change, func(t *testing.T) {
+			runErr := runThreadNotFound(t, change)
+			if runErr == nil {
+				t.Fatalf("run thread (%s, not_found): expected an error, got nil", change)
+			}
+			if got := exitCodeFor(runErr); got != 1 {
+				t.Fatalf("run thread (%s, not_found): exit code = %d, want 1 (error: %v)", change, got, runErr)
+			}
+			if !strings.Contains(runErr.Error(), "not_found") {
+				t.Fatalf("run thread (%s, not_found): error = %q, want it to mention not_found", change, runErr.Error())
+			}
+		})
+	}
+}

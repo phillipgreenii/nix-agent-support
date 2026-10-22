@@ -15,10 +15,11 @@ feed wiring (this docket's ZR-wiring sibling packet), which is what actually tri
 live system.
 
 `--change`'s four values (`added`/`changed`/`removed`/`sweep`) are accepted uniformly: none of
-them changes this command's own dispatch. The flag exists only so the caller can still log or
-route on it, and there is no `--change removed` special case here — this command has no stored
-"is this thread already known" state of its own to consult (unlike gather's `pr show` re-read), so
-a thread `pg-connector` cannot fetch is treated as a hard failure regardless of `--change`.
+them changes this command's own dispatch, with one exception (see "Exit codes"): a `not_found`
+thread under `--change added` is a decline, not a failure. There is no `--change removed` special
+case here — this command has no stored "is this thread already known" state of its own to consult
+(unlike gather's `pr show` re-read), so a thread `pg-connector` cannot fetch is otherwise treated
+as a hard failure regardless of `--change`.
 
 ## Cross-referencing (thread -> PR)
 
@@ -60,8 +61,16 @@ one does not skip the rest.
 Same contract as every other `run` invocation (see [`pipeline-run.md`](pipeline-run.md)): exit `0`
 on success, on a degraded re-interpretation, or on the "no reference at all" no-op case; exit `1`
 when the triggering thread cannot be fetched at all, an xref write or lookup fails, a linked PR's
-re-interpretation fails, or the store cannot be read/written; MUST NEVER exit `9` or return a raw
+re-interpretation fails, or the store cannot be read/written; MUST NEVER return a raw
 `pg-connector` exit code.
+
+The one exception is a **decline**: when `--change added` names a thread `pg-connector` reports
+`not_found` (an id its own `thread list` handed out but `thread show` cannot resolve), `run thread`
+MUST exit `9`, the command-role pre-accept decline. pg-router re-offers the event with its decline
+backoff while it is unexpired and counts it as a decline, not a handler failure, so an unresolvable
+id no longer raises the failure counter on every re-emission. Exit `9` here is pg-desk's own signal,
+never a forwarded `pg-connector` code, and no other case exits `9`: a `not_found` thread under
+`changed`, `removed` or `sweep` still exits `1`.
 
 ## Telemetry and logs (D24)
 

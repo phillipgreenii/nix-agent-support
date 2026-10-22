@@ -192,10 +192,10 @@ func TestBackend_List_UnionsAndDedupesAcrossModifiers(t *testing.T) {
 		calls++
 		switch {
 		case strings.Contains(prompt, `"in:#general"`):
-			return envelope(`{"items":[{"id":"t1","channel":"C1","permalink":"https://x.invalid/1","text":"a"},{"id":"t2","channel":"C1","permalink":"https://x.invalid/2","text":"b"}]}`), nil
+			return envelope(`{"items":[{"id":"C01AAAAAAAA_1726000000.000100","channel":"C01AAAAAAAA","permalink":"https://x.invalid/1","text":"a"},{"id":"C01AAAAAAAA_1726000000.000200","channel":"C01AAAAAAAA","permalink":"https://x.invalid/2","text":"b"}]}`), nil
 		case strings.Contains(prompt, `"in:#random"`):
-			// t1 repeats across both modifiers and must be deduplicated.
-			return envelope(`{"items":[{"id":"t1","channel":"C1","permalink":"https://x.invalid/1","text":"a"},{"id":"t3","channel":"C2","permalink":"https://x.invalid/3","text":"c"}]}`), nil
+			// the first id repeats across both modifiers and must be deduplicated.
+			return envelope(`{"items":[{"id":"C01AAAAAAAA_1726000000.000100","channel":"C01AAAAAAAA","permalink":"https://x.invalid/1","text":"a"},{"id":"C01BBBBBBBB_1726000000.000300","channel":"C01BBBBBBBB","permalink":"https://x.invalid/3","text":"c"}]}`), nil
 		}
 		t.Fatalf("unexpected prompt: %q", prompt)
 		return "", nil
@@ -217,7 +217,7 @@ func TestBackend_List_UnionsAndDedupesAcrossModifiers(t *testing.T) {
 
 func TestBackend_List_IDsOnlyOmitsEntities(t *testing.T) {
 	b := New(&fakeRunner{handle: func(prompt string) (string, error) {
-		return envelope(`{"items":[{"id":"t1","channel":"C1","permalink":"https://x.invalid/1","text":"a"}]}`), nil
+		return envelope(`{"items":[{"id":"C01AAAAAAAA_1726000000.000100","channel":"C01AAAAAAAA","permalink":"https://x.invalid/1","text":"a"}]}`), nil
 	}})
 	got, err := b.List(context.Background(), schema.QueryExpr{"in:#general"}, true)
 	if err != nil {
@@ -226,7 +226,7 @@ func TestBackend_List_IDsOnlyOmitsEntities(t *testing.T) {
 	if got.Entities != nil {
 		t.Fatalf("Entities = %+v, want nil when idsOnly is true", got.Entities)
 	}
-	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != "t1" {
+	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != "C01AAAAAAAA_1726000000.000100" {
 		t.Fatalf("PresentIDs = %v", got.PresentIDs)
 	}
 }
@@ -247,14 +247,75 @@ func TestBackend_List_EmptyModifierSkipped(t *testing.T) {
 
 func TestBackend_List_ItemWithEmptyIDSkippedSilently(t *testing.T) {
 	b := New(&fakeRunner{handle: func(prompt string) (string, error) {
-		return envelope(`{"items":[{"id":"","channel":"C1","permalink":"https://x.invalid/1","text":"a"},{"id":"t1","channel":"C1","permalink":"https://x.invalid/1","text":"b"}]}`), nil
+		return envelope(`{"items":[{"id":"","channel":"C01AAAAAAAA","permalink":"https://x.invalid/1","text":"a"},{"id":"C01AAAAAAAA_1726000000.000100","channel":"C01AAAAAAAA","permalink":"https://x.invalid/1","text":"b"}]}`), nil
 	}})
 	got, err := b.List(context.Background(), schema.QueryExpr{"in:#general"}, false)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(got.Entities) != 1 || got.Entities[0].ID != "t1" {
+	if len(got.Entities) != 1 || got.Entities[0].ID != "C01AAAAAAAA_1726000000.000100" {
 		t.Fatalf("Entities = %+v, want exactly the one item with a non-empty id", got.Entities)
+	}
+}
+
+// TestBackend_List_EmitsOnlyCanonicalIDs (bead pg2-pl2jk): Show cannot resolve a
+// channel-less Slack ts, so List repairs a bare ts with the channel its own
+// reply carries (the channel field, else the permalink's channel), keeps an
+// already-canonical id, and drops an item whose id is not canonical and whose
+// channel cannot be recovered. PresentIDs carries exactly the emitted ids.
+func TestBackend_List_EmitsOnlyCanonicalIDs(t *testing.T) {
+	items := `{"items":[` +
+		`{"id":"1792576755.052579","channel":"C09TZ5M5NER","permalink":"https://x.invalid/archives/C09TZ5M5NER/p1792576755052579","text":"bare ts, channel field"},` +
+		`{"id":"1792576755.052580","channel":"#general","permalink":"https://x.invalid/archives/C09TZ5M5NER/p1792576755052580","text":"bare ts, channel name, permalink carries the id"},` +
+		`{"id":"C09TZ5M5NER_1792467759.577819","channel":"C09TZ5M5NER","permalink":"https://x.invalid/3","text":"already canonical"},` +
+		`{"id":"1792576755.052581","channel":"","permalink":"https://x.invalid/4","text":"bare ts, no recoverable channel"},` +
+		`{"id":"1792576755.052582","channel":"#general","permalink":"","text":"bare ts, channel name only"},` +
+		`{"id":"not-a-thread-id","channel":"C09TZ5M5NER","permalink":"https://x.invalid/5","text":"not a ts at all"}]}`
+	b := New(&fakeRunner{handle: func(string) (string, error) { return envelope(items), nil }})
+	want := []string{
+		"C09TZ5M5NER_1792576755.052579",
+		"C09TZ5M5NER_1792576755.052580",
+		"C09TZ5M5NER_1792467759.577819",
+	}
+
+	got, err := b.List(context.Background(), schema.QueryExpr{"in:#general"}, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.PresentIDs) != len(want) {
+		t.Fatalf("PresentIDs = %v, want %v", got.PresentIDs, want)
+	}
+	for i, id := range want {
+		if got.PresentIDs[i] != id {
+			t.Fatalf("PresentIDs = %v, want %v", got.PresentIDs, want)
+		}
+		if got.Entities[i].ID != id {
+			t.Fatalf("Entities[%d].ID = %q, want %q (entity id must match PresentIDs)", i, got.Entities[i].ID, id)
+		}
+	}
+}
+
+// TestBackend_List_RepairedIDDedupesAgainstCanonical: a bare ts repaired to an id
+// another item already carries in canonical form is one thread, not two.
+func TestBackend_List_RepairedIDDedupesAgainstCanonical(t *testing.T) {
+	b := New(&fakeRunner{handle: func(string) (string, error) {
+		return envelope(`{"items":[{"id":"C09TZ5M5NER_1792576755.052579","channel":"C09TZ5M5NER","permalink":"https://x.invalid/1","text":"a"},{"id":"1792576755.052579","channel":"C09TZ5M5NER","permalink":"https://x.invalid/1","text":"a"}]}`), nil
+	}})
+	got, err := b.List(context.Background(), schema.QueryExpr{"in:#general"}, true)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != "C09TZ5M5NER_1792576755.052579" {
+		t.Fatalf("PresentIDs = %v, want the one canonical id", got.PresentIDs)
+	}
+}
+
+// TestBackend_ListPrompt_AsksForCanonicalIDs: the prompt tells the model the id
+// form List will accept, so repair is the fallback and not the common path.
+func TestBackend_ListPrompt_AsksForCanonicalIDs(t *testing.T) {
+	p := listPrompt("in:#general")
+	if !strings.Contains(p, "channel id, an underscore") {
+		t.Fatalf("listPrompt does not state the <channel>_<ts> id form: %q", p)
 	}
 }
 
@@ -356,7 +417,7 @@ func TestBackend_List_AbsolutizesRelativeAfterInPrompt(t *testing.T) {
 func TestBackend_ClockStampsAsOf(t *testing.T) {
 	b := New(&fakeRunner{handle: func(prompt string) (string, error) {
 		if strings.Contains(prompt, "search Slack threads") {
-			return envelope(`{"items":[{"id":"t1","channel":"C1","permalink":"https://x.invalid/1","text":"a"}]}`), nil
+			return envelope(`{"items":[{"id":"C01AAAAAAAA_1726000000.000100","channel":"C01AAAAAAAA","permalink":"https://x.invalid/1","text":"a"}]}`), nil
 		}
 		return envelope(`{"found":true,"id":"t1","channel":"C1","permalink":"https://x.invalid/1"}`), nil
 	}})
