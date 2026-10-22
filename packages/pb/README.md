@@ -234,6 +234,55 @@ pb drain isolate --bead <id> --repo <abs-path> [--json] [--git-timeout <duration
 pb drain isolate --bead pg2-1qcro.7 --repo "$PN_WORKSPACE_ROOT/nix-repo-base"
 ```
 
+## `pb drain reclaim`
+
+The clean-up step for a bead a drain session ends **without landing** (a `pb:drain-stuck` park,
+defer, dependency wiring, or a release). It is a Guard-clause wrapper around `wtdone`: it removes
+the bead's isolation worktree only when the worktree holds nothing, and says so on the bead
+(operator ruling, 2026-10-22: an idle worktree is waste, the branch MAY remain, and the bead gets a
+note that a clean-up pass ran).
+
+```
+pb drain reclaim --bead <id> --repo <abs-path> --actor <actor> [--branch <work-branch>] [--json] [--git-timeout <duration>]
+```
+
+```mermaid
+flowchart TD
+    A["worktree with the work branch checked out?"] -->|no| N["outcome=none: nothing to do, no note"]
+    A -->|yes| B["git status --porcelain empty?"]
+    B -->|no| D["outcome=kept-dirty: untouched, no note"]
+    B -->|yes| C["rev-list --count primary..branch is 0?"]
+    C -->|no| K["outcome=kept-commits: untouched, no note"]
+    C -->|yes| W["wtdone branch --cc repo (never forced)"]
+    W -->|refused or failed| F["exit 1: worktree left in place, no note"]
+    W -->|removed| M["bd comment bead note --actor actor"]
+    M --> R["outcome=removed"]
+```
+
+- `--bead`, `--repo` (absolute, the canonical clone) and `--actor` are required; `--branch`
+  defaults to `drain/<bead>`. The worktree is found by asking `git worktree list` which one has the
+  branch checked out, so a caller with its own layout works too. The canonical clone itself is
+  refused.
+- Both legs are read at the instant of the call and a failed read is an error, never a guess:
+  drain runs unattended and cannot inherit an earlier proof. A WIP commit made by
+  `pb:drain-stuck` step 1 therefore keeps the worktree (`kept-commits`).
+- `wtdone` deletes the zero-commit branch with a plain `git branch -d` (lossless); a later
+  `pb drain isolate --bead <id>` recreates it off the primary branch. `wtdone` refuses a worktree
+  a live shell or editor is anchored in; that refusal is exit `1`, never forced, and the caller
+  carries on with the park.
+- Output: `outcome=<removed|none|kept-dirty|kept-commits> worktree=<abs> branch=<b> [reason=...]`;
+  `--json` adds the `note` text for `removed`.
+
+| Exit | Meaning                                                                                                           |
+| ---- | ----------------------------------------------------------------------------------------------------------------- |
+| `0`  | Handled: removed, or deliberately left alone (see `outcome`).                                                     |
+| `1`  | Failure (bad flags, unreadable state, `wtdone` refused). The worktree is left in place and the bead gets NO note. |
+| `4`  | The worktree WAS removed but `bd comment` failed; the error carries the note text for the caller to post.         |
+
+```bash
+pb drain reclaim --bead pg2-1qcro.7 --repo "$PN_WORKSPACE_ROOT/nix-repo-base" --actor "$CLAUDE_SESSION_ID-drain"
+```
+
 ## `pb unstick`
 
 The deterministic stages of the `/pb:unstick-beads` sweep (inventory, triage, clustering,

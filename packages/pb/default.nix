@@ -4,6 +4,7 @@
   makeWrapper,
   bd,
   git,
+  wtdone,
 }:
 
 mkGoApp {
@@ -23,9 +24,15 @@ mkGoApp {
   nativeBuildInputs = [ makeWrapper ];
 
   # Real-git unit tests run in the build sandbox; bd/pn tests t.Skip when absent.
-  nativeCheckInputs = [ git ];
+  # wtdone: `pb drain reclaim` removes a clean worktree through it, and its
+  # tests drive the real script against a real fixture repository.
+  nativeCheckInputs = [
+    git
+    wtdone
+  ];
 
-  # Runtime PATH deps wrapped: bd (gates) + git (patch-id/history). `pn` is NOT
+  # Runtime PATH deps wrapped: bd (gates) + git (patch-id/history) + wtdone
+  # (`pb drain reclaim`'s guarded worktree teardown). `pn` is NOT
   # wrapped — it is an ambient runtime dep (see Global Constraints; agent-support
   # is standalone/no-external-flake-deps so it cannot reference repo-base's pn).
   # pn is present on the apply-env PATH (spec Component 3) and on dev PATHs.
@@ -34,6 +41,7 @@ mkGoApp {
       lib.makeBinPath [
         bd
         git
+        wtdone
       ]
     }
   '';

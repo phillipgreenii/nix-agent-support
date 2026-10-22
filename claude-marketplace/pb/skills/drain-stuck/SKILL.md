@@ -44,8 +44,10 @@ are all OTHER BEADS leaves via **CONVERT-TO-DEPENDENCY**, and a bead whose only
 live blocker is a LIVE EXTERNAL EVENT that no person or bead can force leaves via
 **DEFER-ON-EVENT**. Reaching step 4 means a person really is the blocker.
 
-1. PARK the change (do NOT discard it). KEEP the isolated worktree/branch — do NOT
-   clean it up; the park IS leaving it in place. If the WIP commits cleanly, commit
+1. PARK the change (do NOT discard it). KEEP the isolated worktree/branch while it holds
+   anything — do NOT clean it up; the park IS leaving the work in place. (The ONE
+   exception is an isolation that holds NOTHING: **RECLAIM** below removes it just before the
+   claim is released.) If the WIP commits cleanly, commit
    it on branch `<work-branch>` with a `WIP (parked): <id> <why>` message; if
    pre-commit hooks block the commit, leave the changes uncommitted in the retained
    worktree (do NOT use `--no-verify`).
@@ -189,14 +191,52 @@ live blocker is a LIVE EXTERNAL EVENT that no person or bead can force leaves vi
    bd update <id> --add-label human,stale-precondition --actor "ID"
    ```
 
-8. UNCLAIM — do this LAST, only after the label (and any step-3 dependency edge) is
-   applied, so no other session can grab it in an unlabeled, unblocked `open` window:
+8. RECLAIM, then UNCLAIM — do these LAST, only after the label (and any step-3 dependency
+   edge) is applied, so no other session can grab it in an unlabeled, unblocked `open` window.
+   Run **RECLAIM** first (it is a no-op unless the isolation is empty), then release:
 
    ```bash
    bd update <id> --assignee "" --status open --actor "ID"
    ```
 
-9. Do NOT clean up the parked worktree/branch. Done — return to the caller.
+9. Do NOT clean up a parked worktree/branch that holds work (RECLAIM, at step 8, removed
+   it only if it held nothing). Done — return to the caller.
+
+## RECLAIM (an idle isolation, before the claim is released)
+
+Operator ruling (Phillip, 2026-10-22, bead `pg2-v3hsj`, verbatim): "if the worktree has no
+changes, then remove it and add a note to each bead that a clean up pass ran and since there were
+no changes, the work tree was removed. the branch can remain, but have a bunch of worktrees doing
+nothing is wasteful."
+
+This is a Guard Clause on every exit that releases the claim while leaving the bead unlanded:
+PARK (STUCK step 8), CONVERT-TO-DEPENDENCY (step 3), DEFER-ON-EVENT (step 4), and `pb:drain-one`'s
+STAMP REFUSAL. CLOSE-AS-MOOT has its own isolation check (its step 4), and CONTAINER PARK has no
+isolation, so neither runs this. A coordinated workforest set is out of scope: skip RECLAIM for a
+bead isolated as a set.
+
+- The agent MUST run it BEFORE the release call, with its shell's working directory OUTSIDE the
+  worktree (`wtdone`'s liveness guard refuses a worktree the calling shell stands in):
+
+  ```bash
+  pb drain reclaim --bead <id> --repo <abs-canonical-clone-path> --actor "ID" [--branch <work-branch>]
+  ```
+
+  `--branch` is needed only when `<work-branch>` is not `drain/<id>`.
+
+- The tool decides, never the agent: it removes the worktree (through `wtdone`, never forced) ONLY
+  when `git status --porcelain` is empty AND the branch has zero commits the primary branch lacks,
+  and then adds the clean-up note to the bead itself. Reading `outcome=`: `removed` (worktree gone,
+  bead noted; `wtdone` also deletes the zero-commit branch, which loses nothing and which
+  `pb drain isolate` recreates on resume), `kept-dirty`, `kept-commits` and `none` (all left exactly
+  as found, no note).
+- The agent MUST NOT add its own note, and MUST NOT remove a worktree by hand, whatever the
+  outcome. A WIP commit from STUCK step 1 makes the branch `kept-commits`, so a parked bead with
+  real work is never touched.
+- A non-zero exit MUST NOT block the release: exit 1 means the worktree is still in place (for
+  example `wtdone` refused because a process is anchored in it) and no note was written, so
+  carry on and mention it in the return; exit 4 means the worktree WAS removed but the note failed,
+  so post the note text from the error with `bd comment <id> "<note>" --actor "ID"`.
 
 ## CLOSE-AS-MOOT (STUCK step 2 disproved the premise)
 
@@ -302,8 +342,8 @@ label a dependency edge clears ITSELF. Full contract: the `beads-lifecycle` skil
    BLOCKED-BY-BEADS: <blocker-id>[, <blocker-id>…]" --actor "ID"
    ```
 
-3. RELEASE in ONE call — no `human` label, `status=open`, assignee cleared (**B-2**,
-   **B-3**, **D-6**). `--remove-label human` belongs in this same call whenever the bead
+3. RECLAIM (below), then RELEASE in ONE call — no `human` label, `status=open`, assignee
+   cleared (**B-2**, **B-3**, **D-6**). `--remove-label human` belongs in this same call whenever the bead
    already carries it (from an earlier park) — a safe no-op otherwise:
 
    ```bash
@@ -316,8 +356,9 @@ label a dependency edge clears ITSELF. Full contract: the `beads-lifecycle` skil
    stored `blocked` status is a value nothing recomputes, so it would strand the bead
    after the dependency resolved.
 
-4. Do NOT clean up the parked worktree/branch — the work resumes there once the blockers
-   clear. Done — return to the caller.
+4. Do NOT clean up a parked worktree/branch that holds work — the work resumes there once the
+   blockers clear (RECLAIM, at step 3, removed it only if it held nothing). Done — return to
+   the caller.
 
 **MIXED blocker (a bead AND a person) — both apply; do not let either fall through**
 (**D-7**). Do step 1 above for the bead half, then go BACK to STUCK step 4 and finish the
@@ -375,8 +416,8 @@ required".
    DERIVED-FROM: <repo>@<sha> — <path(s) you read>" --actor "ID"
    ```
 
-4. DEFER, with NO `human` label — remove it in the SAME call if the bead already carries it
-   from an earlier, mis-applied park:
+4. RECLAIM (below), then DEFER, with NO `human` label — remove it in the SAME call if the
+   bead already carries it from an earlier, mis-applied park:
 
    ```bash
    bd update <id> --defer +7d --remove-label human --status open --assignee "" --actor "ID"
@@ -388,8 +429,9 @@ required".
    having to remember to remove anything, and it never reaches `/unblock-human-beads`'
    `--label human` queue at all.
 
-5. Do NOT clean up the parked worktree/branch — the work resumes there once the event has
-   occurred. Done — return to the caller.
+5. Do NOT clean up a parked worktree/branch that holds work — the work resumes there once the
+   event has occurred (RECLAIM, at step 4, removed it only if it held nothing). Done — return
+   to the caller.
 
 ## CONTAINER PARK (a container hit under release policy `park`)
 

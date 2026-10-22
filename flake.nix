@@ -5019,7 +5019,12 @@
                 pname = "pb-go-tests";
                 src = lib.cleanSource ./packages/pb; # matches default.nix
                 gomod2nixToml = ./packages/pb/gomod2nix.toml;
-                testDeps = [ pkgs.git ];
+                # wtdone: the real teardown script `pb drain reclaim` runs (its
+                # tests use the real script against a real fixture repository).
+                testDeps = [
+                  pkgs.git
+                  pkgs.wtdone
+                ];
               };
 
               # pg-ccaudit — the ingest / query / store / lock suites plus the

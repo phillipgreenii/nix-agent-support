@@ -47,7 +47,7 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   implemented by any path that pass (the UNCURATED fallback covers only an
   unavailable agent or an unusable report), is released DEFERRED with the assignee cleared in
   the same call (`bd update <id> --status deferred --assignee "" --actor "ID"`, B-2/B-3/B-4 —
-  never `--status open`), and gets no `human` label: a `plan-decompose` reconcile (or its
+  never `--status open`) after `pb drain reclaim` has removed an empty worktree, and gets no `human` label: a `plan-decompose` reconcile (or its
   stamp catch-up) clears it. See step 4's STAMP REFUSAL (`pg2-wceuh`).
 - A handoff bead is dispositioned at UNDERSTAND via
   `beads-lifecycle:handoff-bead` — never isolated, delegated, or executed as an

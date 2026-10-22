@@ -70,6 +70,9 @@ Return exactly one of:
 - `released` — claim released with the assignee cleared, by `pb:drain-stuck`
   (PARK, CONVERT-TO-DEPENDENCY, DEFER-ON-EVENT), by step 4's STAMP REFUSAL
   (`--status deferred --assignee ""`), or by step 6's pinned-session release.
+  Every `released` path except step 6's pinned-session release (which has committed work, so
+  nothing to reclaim) first runs `pb drain reclaim` through `pb:drain-stuck`'s RECLAIM section,
+  so no idle worktree outlives a bead that ended without landing.
 - `container-hit` — release policy `release` only: the probe fired and you STILL
   HOLD the claim. Include the evidence the probe collected. The caller owns the
   release, the consecutive-hit budget and the demotion.
@@ -254,7 +257,9 @@ released, no label).
 
 Invoke the `pb:drain-stuck` skill with: the bead id, your actor ID, the
 worktree/branch location (`<work-branch>`), and what you tried. Follow it exactly — it runs the
-freshness probes first and exits by exactly one of PARK (labeled `human`,
+freshness probes first, runs its RECLAIM step (`pb drain reclaim`) before every release so an
+EMPTY isolation (clean tree, zero commits) is removed and the bead noted while an isolation holding
+anything is kept, and exits by exactly one of PARK (labeled `human`,
 claim released), CLOSE-AS-MOOT (with extraction), CONVERT-TO-DEPENDENCY
 (edges wired, claim released, no label), or DEFER-ON-EVENT (deferred, claim
 released, no label — a live external event, not a person or a bead, is the

@@ -57,7 +57,10 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
    and returns the packet to the open pool, where every queue consumer claims, checks, and
    releases it in an endless cross-session spin (the `plan-decompose` skill's
    `references/reconcile.md`, "Stamp-mismatch releases"). Instead:
-   1. Release it DEFERRED, in ONE call that also clears the assignee (B-2/B-3, and B-4: a move
+   1. Run `pb drain reclaim --bead <id> --repo <abs-canonical-clone-path> --actor "ID"` first
+      (the RECLAIM section of `pb:drain-stuck`): a refused packet usually left an empty
+      worktree, which it removes and notes; a worktree holding anything is left alone. Then
+      release it DEFERRED, in ONE call that also clears the assignee (B-2/B-3, and B-4: a move
       out of `in_progress` to `deferred` is a release too, so it MUST clear the assignee):
 
       ```bash
