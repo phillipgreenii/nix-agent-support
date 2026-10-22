@@ -1360,17 +1360,17 @@ text". R8, section 5.1 and section 6.1 were amended to match.
 
 ## 15. Follow-up beads
 
-| #   | Bead                                                                                                                                                  | Depends on                       |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| 1   | `pg-rescue` wrapper: contract, display, run directory, run log, `result` and `check`                                                                  | none                             |
-| 2   | Handlers: `pg-rescue-claude`, `pg-rescue-bead` (including `--annotate` and dedup), `pg-rescue-notify`, `pg-rescue-flake-lock-conflict`                | 1                                |
-| 3   | Home-manager module and default instances                                                                                                             | 1, 2                             |
-| 4   | sync-projects chore                                                                                                                                   | 3                                |
-| 5   | In-place consumer for deferral items (state left in place). Needs a design.                                                                           | 2                                |
-| 6   | `resolve-conflict` script-first routing in pg-router                                                                                                  | Phase 8 of `pg2-2j5ac.52`, and 2 |
-| 7   | `fix-ci` rerun-once rung                                                                                                                              | 6                                |
-| 8   | Evaluate `pg-rescue` for `/pn-workspace-sync` and `/pn-workspace-update`                                                                              | 4                                |
-| 9   | Ship `runs.jsonl` to Loki (a darwin `logSources.pg-rescue` entry; the default glob already matches), plus Grafana panels for the rates in section 7.2 | 1                                |
-| 10  | `pg-rescue runs`, `pg-rescue show RUN_ID`, `--replay RUN_ID` and a `check` at home-manager build time                                                 | 1                                |
+| #   | Bead                                                                                                                                                            | Depends on                       |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| 1   | `pg-rescue` wrapper: contract, display, run directory, run log, `result` and `check`                                                                            | none                             |
+| 2   | Handlers: `pg-rescue-claude`, `pg-rescue-bead` (including `--annotate` and dedup), `pg-rescue-notify`, `pg-rescue-flake-lock-conflict`                          | 1                                |
+| 3   | Home-manager module and default instances                                                                                                                       | 1, 2                             |
+| 4   | sync-projects chore                                                                                                                                             | 3                                |
+| 5   | In-place consumer for deferral items (state left in place). Needs a design.                                                                                     | 2                                |
+| 6   | `resolve-conflict` script-first routing in pg-router Designed in docs/superpowers/specs/2026-10-22-pg-router-script-first-routing-design.md (docket pg2-q6a96). | Phase 8 of `pg2-2j5ac.52`, and 2 |
+| 7   | `fix-ci` rerun-once rung Designed in docs/superpowers/specs/2026-10-22-pg-router-script-first-routing-design.md (docket pg2-q6a96).                             | 6                                |
+| 8   | Evaluate `pg-rescue` for `/pn-workspace-sync` and `/pn-workspace-update`                                                                                        | 4                                |
+| 9   | Ship `runs.jsonl` to Loki (a darwin `logSources.pg-rescue` entry; the default glob already matches), plus Grafana panels for the rates in section 7.2           | 1                                |
+| 10  | `pg-rescue runs`, `pg-rescue show RUN_ID`, `--replay RUN_ID` and a `check` at home-manager build time                                                           | 1                                |
 
 Beads 1-4 form one implementation plan. Beads 5-10 are separate.
