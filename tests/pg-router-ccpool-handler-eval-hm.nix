@@ -70,6 +70,9 @@ let
       specialArgs = {
         pkgs = hmPkgs;
         lib = hmLib;
+        # The module system does not honour a module function's `osConfig ? null`
+        # default for an argument missing here (standalone home-manager passes null).
+        osConfig = null;
       };
       modules = [
         ../home/programs/pg-router-ccpool-handler/default.nix
