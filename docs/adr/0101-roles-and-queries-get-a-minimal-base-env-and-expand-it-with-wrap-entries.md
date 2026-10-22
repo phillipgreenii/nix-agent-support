@@ -1,6 +1,6 @@
 # Roles and queries get a minimal base env and expand it with wrap entries
 
-**Status**: Accepted (operator-approved in the pg2-12gr4.1 review and rulings 20 to 28; extends ADR 0065 and ADR 0085, which pg2-12gr4.5 amends for the split)
+**Status**: Superseded by [0103](0103-wrapping-is-a-standalone-tool-and-a-pre-ready-failure-is-a-decline.md) (was: Accepted, operator-approved in the pg2-12gr4.1 review and rulings 20 to 28; extended ADR 0065 and ADR 0085, which pg2-12gr4.5 amends for the split)
 **Date**: 2026-10-20
 **Deciders**: Phillip Green II
 

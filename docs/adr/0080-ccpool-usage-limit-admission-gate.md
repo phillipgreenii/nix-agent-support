@@ -35,7 +35,11 @@ pa-monitor already holds the authoritative reading (ADR 0021): the status-line's
    failure-rate alert deliberately excludes that reason. The handler logs which window and until
    when. If the window fills between the capacity check and `ccpool new` (exit 8), the handler
    treats it as the same decline: it reclaims the abandoned session and worktree and does NOT stamp
-   `pool-launch-fail` or escalate the bead to `human`.
+   `pool-launch-fail` or escalate the bead to `human`. _Superseded by 0103
+   (`0103-wrapping-is-a-standalone-tool-and-a-pre-ready-failure-is-a-decline.md`) for failures before
+   the session is ready:_ a failure before `ccpool new` returns ready is a pre-accept decline, and the
+   `pool-launch-fail` stamp and its escalation to `human` are retired outright, so the carve-out above
+   is no longer needed. The usage-limit busy decline itself is unchanged.
 4. **The gate fails open.** A missing monitor binary, an unreachable daemon, malformed output, a
    window with no percentage, or a hit window with no usable reset instant is "unknown", logged at
    warn level and read as not blocked. A hit window with no reset cannot be said to clear, so

@@ -1,6 +1,6 @@
 # pg-router: participant extraction into `packages/pg-router-ccpool-handler` (Phase 5)
 
-**Status**: Accepted (operator review recorded 2026-09-10, bead `pg2-mf0dx`); the `INV-EVT-2` absorption it asks for is narrowed by 0094 (2026-10-13, bead `pg2-yunrp`); the "New module" and "Open question resolved" decisions are amended by the Addendum of 2026-10-20 (the handler split, bead `pg2-12gr4.5`)
+**Status**: Accepted (operator review recorded 2026-09-10, bead `pg2-mf0dx`); the `INV-EVT-2` absorption it asks for is narrowed by 0094 (2026-10-13, bead `pg2-yunrp`); the "New module" and "Open question resolved" decisions are amended by the Addendum of 2026-10-20 (the handler split, bead `pg2-12gr4.5`), whose wrap text is superseded by 0103 (2026-10-22)
 **Date**: 2026-09-10
 **Deciders**: drafted by an implementer agent under Task 5.0's derive-plan mandate; the
 command-executor open question (the Decision's "Open question resolved" section) is this ADR's own to make per that mandate's
@@ -514,7 +514,9 @@ session does not have to rediscover it.
 ## Addendum (2026-10-20): the handler split, one adapter per role (bead `pg2-12gr4.5`)
 
 The role-environment design (bead `pg2-12gr4`) splits the one handler binary into two **adapter**
-participants and gives every role its own handler, wrap and configuration in the core's TOML. The
+participants and gives every role its own handler and configuration in the core's TOML (this said
+"handler, wrap and configuration"; superseded by 0103, which moves wrapping out to the standalone
+pg-wrap tool, so a role has no wrap). The
 decisions below were made by the operator (Phillip Green II) in the `pg2-12gr4.1` design review on
 2026-10-20 (rulings 23 and 24, quoted where they were given), and they need no separate approval
 (ruling 26), so this Addendum records them as decided. Citations of the other pieces of that design
@@ -568,8 +570,8 @@ as a payload channel); an environment variable (it would leak into the payload's
 
 ### S1a. Validation: at build time, plus strict decoding on every call
 
-**Decided.** Each adapter's nix module runs `<adapter> validate-config` over every role's rendered
-config during the build, and the adapter decodes `role.config` strictly on every call. There is no new
+**Decided.** Each adapter's nix module runs `<adapter> validate` (superseded wording: this said
+`validate-config`; the subcommand is now `validate`, the adapter's one validation entry point, per 0103) over every role's rendered config during the build, and the adapter decodes `role.config` strictly on every call. There is no new
 wire message.
 
 **Why, and a correction.** Role handlers never send `register`. The core registers each role's handler
@@ -613,14 +615,20 @@ cancellable or `WithoutCancel` listener context while it registers roles during 
 
 ### S4 (revised). Triagers keep the shared handler-wide pool, and nix asserts identical wraps
 
+> **Superseded by 0103 (`docs/adr/0103-wrapping-is-a-standalone-tool-and-a-pre-ready-failure-is-a-decline.md`)
+> for the wrap assertion.** A role has no wrap list, so the "identical wrap lists" assertion below is
+> withdrawn; a ccpool role is wrapped through its pool's `claude.bin` and its `sessionEnv`. The
+> shared handler-wide pool for the triagers stands. The text below is kept as history.
+
 **Decided.** The three triagers keep the shared handler-wide pool and share one triager launcher.
 Their declarations differ only in handler-side configuration (actor, prompt, completion, tracker
 directory, precheck), none of it payload environment, and none of them does git or origin work, so the
 shared baseline wrap most likely covers all three. Because roles that share a pool then share an
-environment, which strains the rule that **environment is a property of the role**, the session
+environment, which strains the rule that **environment is a property of the role**, ~~the session
 handler's nix module **MUST assert that all roles sharing a pool declare identical wrap lists**
-(evaluation fails otherwise). A role that needs a different wrap moves to its own pool through the
-existing per-role pool option, which is a configuration change and not a design change.
+(evaluation fails otherwise)~~ (struck, superseded by 0103). A role that needs a different wrap moves
+to its own pool through the existing per-role pool option, which is a configuration change and not a
+design change.
 
 **Why.** It answers the operator's question ("why does handler-wide pool ofr triager pools have to
 change?"): nothing about the triagers requires it, and the assertion stops the shared environment from
@@ -656,7 +664,8 @@ end of the window is a fact that can be read from the configuration.
 
 **Decided.** Today a role is declared twice in the consuming flake: in the pg-router module's role
 list (name, binds, enabled) and in the handler module's per-role set (the JSON file). In the new shape
-the pg-router module owns `roles.<name>` (binds, enabled, handler, wrap, config, `survives_shutdown`).
+the pg-router module owns `roles.<name>` (binds, enabled, handler, config, `survives_shutdown`; an
+earlier draft of this line listed `wrap` among them, superseded by 0103, since a role has no wrap).
 The handler module's own `roles.<name>` (actor, pool, prompt, budget, isolation, tool sets, …) fills in
 the matching pg-router role's `handler`, `config` and `survives_shutdown`, and sets up the pool and the
 launcher. The old `type` and per-kind options keep working unchanged through the compat window, **with
@@ -681,5 +690,7 @@ modules already use.
 The things the consuming flake keys on today (the role `type`, the handler's name, the per-role JSON
 files, the failure-reason strings and busy exit `9`, in-flight sessions) and the concrete steps for
 the implementation packets of `pg2-12gr4.6` are in
-`docs/runbooks/handler-split-consumer-checklist.md`. The wrap, base environment and wrapper contract
-that the same design adds are a **separate** ADR, landed by `pg2-12gr4.2`, not by this Addendum.
+`docs/runbooks/handler-split-consumer-checklist.md`. The base environment that the same design adds is
+a **separate** ADR (0101, landed by `pg2-12gr4.2`), not this Addendum; this line also named "the wrap
+and wrapper contract" as part of it, which 0103 supersedes: wrapping is now the standalone pg-wrap
+tool, and ADR 0103 supersedes ADR 0101.
