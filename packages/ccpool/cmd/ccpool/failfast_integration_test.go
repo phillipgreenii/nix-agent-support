@@ -88,7 +88,10 @@ func (p *ffPool) writeConfig(claudeBin, timeout string) {
 	p.t.Helper()
 	cfg := "[tmux]\nsocket = \"" + p.socket + "\"\n" +
 		"[claude]\nbin = \"" + claudeBin + "\"\nplugin_dir = \"/unused-in-fake\"\n" +
-		"[wait]\ntimeout = \"" + timeout + "\"\n"
+		"[wait]\ntimeout = \"" + timeout + "\"\n" +
+		// The usage gate shells out to the machine's monitor (seconds per call,
+		// and a real account at its limit would refuse every launch): off.
+		"[usage_gate]\nenabled = false\n"
 	if err := os.WriteFile(p.cfgFile, []byte(cfg), 0o600); err != nil {
 		p.t.Fatal(err)
 	}
@@ -166,7 +169,7 @@ func TestFailFast_signalExit(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("new exited 0:\n%s", out)
 	}
-	if !strings.Contains(out, "killed by signal 15") {
+	if !strings.Contains(out, "killed by signal") || strings.Contains(out, "exited with status") {
 		t.Errorf("message lacks the signal:\n%s", out)
 	}
 	if took > 30*time.Second {

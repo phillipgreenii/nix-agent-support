@@ -42,9 +42,14 @@ func TestLaunchLiveness(t *testing.T) {
 			wantErr: []string{"exited with status 1", "output tail:", "boom on stderr"},
 		},
 		{
-			name:    "signal wins over status",
-			panes:   fakePanes{status: tmux.PaneStatus{Exists: true, Dead: true, Signal: 15}},
-			wantErr: []string{"killed by signal 15"},
+			name:    "signal by name",
+			panes:   fakePanes{status: tmux.PaneStatus{Exists: true, Dead: true, Signal: "term"}},
+			wantErr: []string{"killed by signal term"},
+		},
+		{
+			name:    "signal by number",
+			panes:   fakePanes{status: tmux.PaneStatus{Exists: true, Dead: true, Signal: "15"}},
+			wantErr: []string{"killed by signal 15 (terminated)"},
 		},
 		{
 			name:    "dead pane with no output has no tail section",

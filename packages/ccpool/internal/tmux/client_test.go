@@ -76,7 +76,7 @@ func TestClient_PaneStatus(t *testing.T) {
 		{name: "absent session", hasErr: true, want: PaneStatus{}, wantDispls: 0},
 		{name: "alive", display: "0  \n", want: PaneStatus{Exists: true}, wantDispls: 1},
 		{name: "exit status", display: "1 3 \n", want: PaneStatus{Exists: true, Dead: true, Status: 3}, wantDispls: 1},
-		{name: "signal", display: "1  15\n", want: PaneStatus{Exists: true, Dead: true, Signal: 15}, wantDispls: 1},
+		{name: "signal", display: "1  term\n", want: PaneStatus{Exists: true, Dead: true, Signal: "term"}, wantDispls: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,7 +112,7 @@ func TestClient_CaptureTail(t *testing.T) {
 	var got []string
 	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) {
 		got = args
-		return []byte("one\ntwo\nthree\n\n\n"), nil
+		return []byte("\n\none\ntwo\nthree\n\n\n"), nil
 	}}
 	tail, err := c.CaptureTail("cc-a", 2)
 	if err != nil {

@@ -126,8 +126,10 @@ type PaneStatus struct {
 	Dead bool
 	// Status is the process's exit status (valid when Dead and Signal == 0).
 	Status int
-	// Signal is the signal that ended the process, or 0.
-	Signal int
+	// Signal names the signal that ended the process, as tmux reports it (a
+	// lowercase name such as "term" on current tmux, a number on older ones),
+	// or "" when the process exited.
+	Signal string
 }
 
 // PaneStatus reports whether the session exists and, if so, whether its pane's
@@ -154,13 +156,13 @@ func (c *Client) PaneStatus(name string) (PaneStatus, error) {
 		ps.Status, _ = strconv.Atoi(parts[1])
 	}
 	if len(parts) >= 3 {
-		ps.Signal, _ = strconv.Atoi(parts[2])
+		ps.Signal = strings.TrimSpace(parts[2])
 	}
 	return ps, nil
 }
 
 // CaptureTail returns the last lines lines of the session's pane output,
-// scrollback included (capture-pane -p -S -<lines>), trailing blank lines
+// scrollback included (capture-pane -p -S -<lines>), blank lines at both ends
 // trimmed. CapturePane returns only the visible screen.
 func (c *Client) CaptureTail(name string, lines int) (string, error) {
 	if lines <= 0 {
@@ -170,7 +172,9 @@ func (c *Client) CaptureTail(name string, lines int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	all := strings.Split(strings.TrimRight(string(out), " \t\r\n"), "\n")
+	// The capture is the whole screen plus scrollback: trim the blank rows
+	// around the text so the tail is the output itself.
+	all := strings.Split(strings.Trim(string(out), " \t\r\n"), "\n")
 	if len(all) > lines {
 		all = all[len(all)-lines:]
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -223,7 +224,8 @@ func (w storeWaiter) WaitLaunch(ctx context.Context, name string, since int64) (
 // launchLiveness reads the launched session's state, in this order: an absent
 // session is dead (a process that exited with status 0 destroys its session,
 // since remain-on-exit keeps only failed panes), then a dead pane is reported
-// with its exit status or signal and its output tail. A tmux read error is not
+// with its exit status, or the signal when one ended it (a signal death has no
+// status), and its output tail. A tmux read error is not
 // evidence of death; the next poll tries again. It knows nothing about what the
 // launched executable is.
 func launchLiveness(p paneProber, name, tmuxName string) error {
@@ -238,8 +240,11 @@ func launchLiveness(p paneProber, name, tmuxName string) error {
 		return nil
 	}
 	how := fmt.Sprintf("exited with status %d", ps.Status)
-	if ps.Signal != 0 {
-		how = fmt.Sprintf("was killed by signal %d (%s)", ps.Signal, syscall.Signal(ps.Signal))
+	if ps.Signal != "" {
+		how = "was killed by signal " + ps.Signal
+		if n, err := strconv.Atoi(ps.Signal); err == nil { // older tmux reports a number
+			how = fmt.Sprintf("was killed by signal %d (%s)", n, syscall.Signal(n))
+		}
 	}
 	msg := fmt.Sprintf("session %q: the launched process %s before ready", name, how)
 	if tail := paneTail(p, tmuxName); tail != "" {
