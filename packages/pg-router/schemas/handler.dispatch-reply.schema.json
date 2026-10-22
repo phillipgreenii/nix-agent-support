@@ -1,7 +1,7 @@
 {
   "$id": "handler.dispatch-reply",
-  "title": "INTF-HANDLER dispatch reply (sync outcome OR deferred ack)",
-  "description": "A handler's reply to one dispatch: an inline outcome, or a deferred ack. Either shape MAY carry startedAt (DEC-EVENT-5), the instant the dispatch ran or is running began, which a handler that ADOPTED a dispatch an earlier core's offer started reports so the core times the dispatch from there and not from the re-offer. It is OPTIONAL and advisory: an absent one means the offer's own start, and the core IGNORES (and logs) one that is not an RFC3339 instant, one earlier than the event's own enqueue instant, and one later than the offer's own start. Like the event's instants it is constrained to RFC3339 SHAPE by a `pattern` (fractional seconds optional, `Z` or a numeric offset); the semantic parse is the core's wireclient job.",
+  "title": "INTF-HANDLER dispatch reply (sync outcome, deferred ack OR pre-accept decline)",
+  "description": "A handler's reply to one dispatch: an inline outcome, or a deferred ack. Either shape MAY carry startedAt (DEC-EVENT-5), the instant the dispatch ran or is running began, which a handler that ADOPTED a dispatch an earlier core's offer started reports so the core times the dispatch from there and not from the re-offer. It is OPTIONAL and advisory: an absent one means the offer's own start, and the core IGNORES (and logs) one that is not an RFC3339 instant, one earlier than the event's own enqueue instant, and one later than the offer's own start. Like the event's instants it is constrained to RFC3339 SHAPE by a `pattern` (fractional seconds optional, `Z` or a numeric offset); the semantic parse is the core's wireclient job. The third shape is the pre-accept decline body a participant MAY send with exit 9 (busy): a required `reason` tag, an OPTIONAL `kind` (busy | fault | neutral; absent means busy) and an OPTIONAL, bounded, redacted free-text `detail`. The core reads the body leniently and never validates against this schema; the kind is what its progress gauges count, and `detail` is observability text only.",
   "oneOf": [
     {
       "type": "object",
@@ -29,6 +29,17 @@
           "type": "string",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
         }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "reason"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "reason": { "type": "string" },
+        "kind": { "enum": ["busy", "fault", "neutral"] },
+        "detail": { "type": "string", "maxLength": 512 }
       }
     }
   ]

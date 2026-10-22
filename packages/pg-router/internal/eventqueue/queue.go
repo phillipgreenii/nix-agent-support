@@ -67,6 +67,13 @@ type OfferResult struct {
 	// busy-decline reason tag verbatim, opaque to this package) sets this
 	// instead — the queue never interprets what it means, only forwards it.
 	DeclineDetail string
+	// DeclineKind is the OPTIONAL kind the participant's pre-accept decline body
+	// sent (busy | fault | neutral), held exactly as the body sent it, and ""
+	// when the body carried none (or no body). Like DeclineDetail the queue's own
+	// re-offer treatment never reads it; it is what the progress gauges count. A
+	// consumer maps "" and an unknown value to busy (an absent kind means busy);
+	// this field does not.
+	DeclineKind string
 	// StartedAt is the instant the dispatch this ACCEPTED offer ran actually
 	// began, for a Listener whose handler ADOPTED a dispatch an earlier core's
 	// offer started and left running (DEC-EVENT-5, bead pg2-dm6de): the handler

@@ -98,8 +98,16 @@ var ErrBusy = errors.New("wireclient: handler busy")
 // errors.Is(err, ErrBusy) keeps matching it via the Is method below — no
 // EXISTING caller (roleListener.Offer, the only wireclient.ErrBusy check in
 // this module today) needs to change unless it wants Reason too.
+//
+// Kind and Detail are the body's two OPTIONAL refinements (the decline-body
+// branch of handler.dispatch-reply.schema.json). Kind is the raw text the body
+// sent ("busy", "fault" or "neutral" from a conforming participant), "" when
+// absent; this package does not map absent or unknown to busy, that is the
+// consumer's job. Detail is bounded, redacted free text for observability only.
 type BusyDecline struct {
 	Reason string
+	Kind   string
+	Detail string
 }
 
 func (e *BusyDecline) Error() string {
@@ -230,11 +238,26 @@ type dispatchReply struct {
 	// instant, can be ignored with a warning (reportedStart) instead of failing
 	// the whole reply decode and with it a dispatch that worked.
 	StartedAt json.RawMessage `json:"startedAt,omitempty"`
-	// Reason is the OPTIONAL busy-decline body's own field (bead pg2-j4uwg;
-	// see BusyDecline's doc) — read ONLY on exit 9, alongside Error, which a
-	// participant's OTHER non-zero exits already used before this field
-	// existed.
-	Reason string `json:"reason,omitempty"`
+}
+
+// decodeDeclineBody decodes the OPTIONAL exit-9 reply body (bead pg2-j4uwg; see
+// BusyDecline's doc), decoded LENIENTLY: a body that is absent, empty, not JSON
+// or not an object yields the zero value, and each of reason, kind and detail is
+// decoded on its own, so a field of the wrong JSON type is dropped without
+// losing the others. Unknown fields are ignored.
+func decodeDeclineBody(stdout []byte) BusyDecline {
+	var fields map[string]json.RawMessage
+	if len(stdout) == 0 || json.Unmarshal(stdout, &fields) != nil {
+		return BusyDecline{}
+	}
+	str := func(key string) string {
+		var v string
+		if raw, ok := fields[key]; ok && json.Unmarshal(raw, &v) == nil {
+			return v
+		}
+		return ""
+	}
+	return BusyDecline{Reason: str("reason"), Kind: str("kind"), Detail: str("detail")}
 }
 
 // SchemaVersion is the wire envelope version this client stamps on every
@@ -303,15 +326,10 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 		// opportunistically, exactly the same "peek at stdout on a non-zero
 		// exit" pattern the default branch below already uses for its own
 		// Error field. An absent/empty/malformed body still declines with
-		// Reason == "" — DEC-WIRE-1's "no body required" stays fully legal.
-		var reason string
-		if len(stdout) > 0 {
-			var reply dispatchReply
-			if err := json.Unmarshal(stdout, &reply); err == nil {
-				reason = reply.Reason
-			}
-		}
-		return Reply{}, &BusyDecline{Reason: reason}
+		// every field "" — DEC-WIRE-1's "no body required" stays fully legal,
+		// and an unknown or wrong-typed field never fails the decline.
+		bd := decodeDeclineBody(stdout)
+		return Reply{}, &bd
 	default:
 		if len(stdout) > 0 {
 			var reply dispatchReply

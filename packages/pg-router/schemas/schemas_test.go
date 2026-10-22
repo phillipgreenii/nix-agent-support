@@ -356,3 +356,40 @@ func TestPushInjectRefResolves(t *testing.T) {
 		t.Fatal("push-inject accepted the legacy duration-valued ttl field")
 	}
 }
+
+// DeclineDetailMaxLen is the Go-side copy of the decline body's detail bound
+// that an adapter imports; it MUST equal the schema file's own maxLength.
+func TestDeclineDetailMaxLenMatchesSchema(t *testing.T) {
+	root, ok := registry["handler.dispatch-reply"]
+	if !ok || len(root.OneOf) != 3 {
+		t.Fatalf("handler.dispatch-reply: want 3 oneOf branches, got %+v", root)
+	}
+	detail := root.OneOf[2].Properties["detail"]
+	if detail == nil || detail.MaxLength == nil {
+		t.Fatalf("decline branch has no detail.maxLength: %+v", detail)
+	}
+	if *detail.MaxLength != DeclineDetailMaxLen {
+		t.Fatalf("schema maxLength = %d, DeclineDetailMaxLen = %d", *detail.MaxLength, DeclineDetailMaxLen)
+	}
+}
+
+func TestValidator_MaxLengthCountsRunesNotBytes(t *testing.T) {
+	s := decode(t, `{"type":"string","maxLength":3}`)
+	res := func(string) (*schema, bool) { return nil, false }
+	for _, ok := range []string{"", "abc", "é€😀"} { // 3 runes, 9 bytes
+		if err := s.validate(ok, "$", res); err != nil {
+			t.Errorf("%q rejected: %v", ok, err)
+		}
+	}
+	if err := s.validate("abcd", "$", res); err == nil {
+		t.Error("4-character string accepted under maxLength 3")
+	}
+	// maxLength binds by keyword presence, like pattern, without a declared type.
+	typeless := decode(t, `{"maxLength":1}`)
+	if err := typeless.validate("ab", "$", res); err == nil {
+		t.Error("typeless maxLength not enforced")
+	}
+	if err := typeless.validate(float64(12345), "$", res); err != nil {
+		t.Errorf("maxLength applied to a non-string: %v", err)
+	}
+}

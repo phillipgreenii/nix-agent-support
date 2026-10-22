@@ -18,6 +18,12 @@ var files embed.FS
 // reply carries (interfaces.md "common manager contract").
 const SchemaVersion = "1"
 
+// DeclineDetailMaxLen is the schema's maxLength for the optional "detail" of a
+// pre-accept decline body (handler.dispatch-reply's third branch), counted in
+// Unicode code points. An adapter truncates its detail to this bound before
+// writing it; a test asserts it equals the schema file's own maxLength.
+const DeclineDetailMaxLen = 512
+
 // ErrValidation is returned for a message that fails its schema.
 var ErrValidation = errors.New("schema validation failed")
 

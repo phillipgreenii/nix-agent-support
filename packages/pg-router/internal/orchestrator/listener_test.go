@@ -142,6 +142,50 @@ func TestListenerOffer_HandlerBusyWithReasonForwardsDeclineDetail(t *testing.T) 
 	}
 }
 
+// TestListenerOffer_HandlerBusyCarriesDeclineKind proves Offer copies a
+// *wireclient.BusyDecline's Kind verbatim into OfferResult.DeclineKind ("" when
+// the body sent none, an unknown value untouched) on every busy decline, while
+// Decline stays DeclineBusy, DeclineDetail keeps carrying the reason, and the
+// body's free-text detail is not forwarded.
+func TestListenerOffer_HandlerBusyCarriesDeclineKind(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want eventqueue.OfferResult
+	}{
+		"fault": {
+			&wireclient.BusyDecline{Reason: "launch-failed", Kind: "fault", Detail: "free text"},
+			eventqueue.OfferResult{Decline: eventqueue.DeclineBusy, DeclineDetail: "launch-failed", DeclineKind: "fault"},
+		},
+		"neutral": {
+			&wireclient.BusyDecline{Reason: "r", Kind: "neutral"},
+			eventqueue.OfferResult{Decline: eventqueue.DeclineBusy, DeclineDetail: "r", DeclineKind: "neutral"},
+		},
+		"no kind": {
+			&wireclient.BusyDecline{Reason: "r"},
+			eventqueue.OfferResult{Decline: eventqueue.DeclineBusy, DeclineDetail: "r"},
+		},
+		"unknown kind stays raw": {
+			&wireclient.BusyDecline{Kind: "explode"},
+			eventqueue.OfferResult{Decline: eventqueue.DeclineBusy, DeclineKind: "explode"},
+		},
+		"bare sentinel": {
+			wireclient.ErrBusy,
+			eventqueue.OfferResult{Decline: eventqueue.DeclineBusy},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := fastCfg(t)
+			o := newOrch(cfg, testQuerySet(nil, nil))
+			o.Handler = &fakeHandler{err: tc.err}
+			l := o.NewListener(context.Background(), roles.Role{Name: "cmdrole", Binds: []string{"work-ready"}})
+			evt := discover.ToQueueEvent(event.NewItemEvent("work-ready", "t", item.Item{ID: "zr-w1"}))
+			if got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt}); got != tc.want {
+				t.Fatalf("Offer() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestListenerOffer_UnavailableSelfStatusDeclines is Task 2.3's required RED
 // test (Step 2.3.3): a role whose registry entry self-reports `unavailable`
 // must make Offer decline BEFORE doing any dispatch work at all (no wire

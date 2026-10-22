@@ -403,12 +403,17 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 		// the tag means (GOAL-MIN-1: the core stays agnostic of any one
 		// handler's own busy-decline vocabulary); it only relays a string a
 		// downstream consumer (metrics/status) may show as-is.
-		var detail string
+		//
+		// DeclineKind is the body's optional kind, verbatim ("" when absent);
+		// the body's free-text detail is observability text and is not
+		// forwarded into the result (it MUST NOT become a metric label).
+		var detail, kind string
 		var bd *wireclient.BusyDecline
 		if errors.As(err, &bd) {
 			detail = bd.Reason
+			kind = bd.Kind
 		}
-		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy, DeclineDetail: detail}
+		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy, DeclineDetail: detail, DeclineKind: kind}
 	}
 	if err != nil && l.ctx.Err() != nil {
 		// The run context was cancelled while the handler ran: this daemon is

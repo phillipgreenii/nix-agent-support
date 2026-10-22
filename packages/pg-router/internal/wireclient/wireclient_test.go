@@ -325,3 +325,48 @@ func TestOSRunner_forwardsHandlerStderr(t *testing.T) {
 		t.Fatalf("stderr leaked into reply stdout: %q", out)
 	}
 }
+
+func dispatchDecline(t *testing.T, body string) *BusyDecline {
+	t.Helper()
+	run := &fakeRunner{stdout: []byte(body), exitCode: 9}
+	c := &Client{Runner: run, Command: fixedCommand("h")}
+	_, err := c.Dispatch(context.Background(), roles.Role{Name: "r"}, eventqueue.Event{ID: "e", Type: "t"})
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrBusy)", err)
+	}
+	var bd *BusyDecline
+	if !errors.As(err, &bd) {
+		t.Fatalf("err = %v, want errors.As(err, *BusyDecline)", err)
+	}
+	return bd
+}
+
+// TestDispatch_exitCode9DeclineBodyCarriesKindAndDetail pins the decline-body
+// parse: reason, kind and detail are each read from an exit-9 body, an absent
+// kind stays "" (the consumer maps it to busy), and a bad field never fails the
+// decline nor loses the others.
+func TestDispatch_exitCode9DeclineBodyCarriesKindAndDetail(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body string
+		want BusyDecline
+	}{
+		"kind and detail":       {`{"schemaVersion":"1","reason":"x","kind":"fault","detail":"d"}`, BusyDecline{Reason: "x", Kind: "fault", Detail: "d"}},
+		"no kind":               {`{"schemaVersion":"1","reason":"x"}`, BusyDecline{Reason: "x"}},
+		"unknown kind kept raw": {`{"schemaVersion":"1","reason":"x","kind":"explode"}`, BusyDecline{Reason: "x", Kind: "explode"}},
+		"unknown field":         {`{"schemaVersion":"1","reason":"x","kind":"neutral","surprise":1}`, BusyDecline{Reason: "x", Kind: "neutral"}},
+		"non-string kind":       {`{"reason":"x","kind":5,"detail":"d"}`, BusyDecline{Reason: "x", Detail: "d"}},
+		"non-string detail":     {`{"reason":"x","kind":"fault","detail":{"a":1}}`, BusyDecline{Reason: "x", Kind: "fault"}},
+		"non-string reason":     {`{"reason":5,"kind":"fault","detail":"d"}`, BusyDecline{Kind: "fault", Detail: "d"}},
+		"null fields":           {`{"reason":null,"kind":null,"detail":null}`, BusyDecline{}},
+		"empty body":            {``, BusyDecline{}},
+		"malformed body":        {`{"reason":"x","kind":`, BusyDecline{}},
+		"not an object":         {`["reason"]`, BusyDecline{}},
+		"plain text":            {`busy right now`, BusyDecline{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := *dispatchDecline(t, tc.body); got != tc.want {
+				t.Fatalf("BusyDecline = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}

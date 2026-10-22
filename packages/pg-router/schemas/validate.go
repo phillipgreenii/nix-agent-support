@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // schema is the decoded form of one JSON Schema document (the subset we support).
@@ -45,6 +46,7 @@ type schema struct {
 	Maximum              *float64           `json:"maximum"`
 	OneOf                []*schema          `json:"oneOf"`
 	Pattern              string             `json:"pattern"`
+	MaxLength            *int               `json:"maxLength"`
 
 	// hasConst records whether "const" was present (nil is a legal const value).
 	hasConst bool
@@ -160,6 +162,9 @@ func (s *schema) validate(value any, path string, resolve resolver) error {
 		if err := s.checkPattern(str, path); err != nil {
 			return err
 		}
+		if err := s.checkMaxLength(str, path); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -174,6 +179,19 @@ func (s *schema) checkPattern(str, path string) error {
 	}
 	if !s.pattern.MatchString(str) {
 		return fmt.Errorf("%s: value %q does not match pattern %q", path, str, s.Pattern)
+	}
+	return nil
+}
+
+// checkMaxLength applies the "maxLength" keyword, by keyword presence like
+// checkPattern. Per JSON Schema the length is counted in Unicode code points
+// (runes), not bytes.
+func (s *schema) checkMaxLength(str, path string) error {
+	if s.MaxLength == nil {
+		return nil
+	}
+	if n := utf8.RuneCountInString(str); n > *s.MaxLength {
+		return fmt.Errorf("%s: string has %d characters, want <= %d", path, n, *s.MaxLength)
 	}
 	return nil
 }

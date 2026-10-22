@@ -13,8 +13,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/schemas"
 )
 
 // Result is the outcome of one conformance case Run executes: a static
@@ -104,6 +106,7 @@ func Run(ctx context.Context, target Target) []Result {
 	for _, mt := range conformance.MessageTypes() {
 		results = append(results, goldenCase(mt), negativeGenericCase(mt))
 	}
+	results = append(results, positiveMatrixCases()...)
 	results = append(results, negativeMatrixCases()...)
 	results = append(results, invokeMonRead(target.MonRead), invokeQuery(target.Query), invokeCommand(ctx, target.Command), invokeStore(target.Store))
 	return results
@@ -138,6 +141,28 @@ func negativeGenericCase(mt string) Result {
 	return Result{Name: name}
 }
 
+// positiveMatrixCases runs each positiveMatrix row: a hand-written message that
+// is NOT a type's single golden (a type has one golden file) but must validate.
+func positiveMatrixCases() []Result {
+	var results []Result
+	for mt, cases := range positiveMatrix {
+		for _, c := range cases {
+			name := "positive-matrix/" + mt + "/" + c.desc
+			var v any
+			if err := json.Unmarshal([]byte(c.json), &v); err != nil {
+				results = append(results, Result{Name: name, Err: fmt.Errorf("bad test json: %w", err)})
+				continue
+			}
+			if err := conformance.Check(mt, v); err != nil {
+				results = append(results, Result{Name: name, Err: fmt.Errorf("%s: %s was REJECTED but should validate: %w", mt, c.desc, err)})
+				continue
+			}
+			results = append(results, Result{Name: name})
+		}
+	}
+	return results
+}
+
 // negativeMatrixCases reproduces TestNegative_Matrix: each independently
 // violable constraint (required-field-missing, wrong-type,
 // enum-out-of-range, …) has a rejecting case.
@@ -161,6 +186,19 @@ func negativeMatrixCase(mt string, c negativeCase) Result {
 		return Result{Name: name, Err: fmt.Errorf("%s: %s was ACCEPTED but should be rejected", mt, c.desc)}
 	}
 	return Result{Name: name}
+}
+
+// positiveMatrix holds messages that must validate but are not the type's
+// golden. handler.dispatch-reply's golden is the deferred ack, so the third
+// branch (the pre-accept decline body, INTF-HANDLER) is covered here.
+var positiveMatrix = map[string][]negativeCase{
+	"handler.dispatch-reply": {
+		{"decline body with only a reason", `{"schemaVersion":"1","reason":"capacity"}`},
+		{"decline body with a kind and detail", `{"schemaVersion":"1","reason":"launch-failed","kind":"fault","detail":"claude exited 1"}`},
+		{"decline body with the busy kind", `{"schemaVersion":"1","reason":"r","kind":"busy"}`},
+		{"decline body with the neutral kind", `{"schemaVersion":"1","reason":"r","kind":"neutral"}`},
+		{"decline body with a detail at the maxLength", `{"schemaVersion":"1","reason":"r","detail":"` + strings.Repeat("d", schemas.DeclineDetailMaxLen) + `"}`},
+	},
 }
 
 // negativeCase is one row of negativeMatrix: a description and the raw JSON
@@ -206,6 +244,16 @@ var negativeMatrix = map[string][]negativeCase{
 		{"startedAt of the wrong type", `{"schemaVersion":"1","id":"h","outcome":"ok","startedAt":900}`},
 		{"startedAt that is not an RFC3339 instant", `{"schemaVersion":"1","id":"h","outcome":"ok","startedAt":"yesterday"}`},
 		{"deferred ack with a startedAt lacking a date", `{"schemaVersion":"1","id":"h","deferred":true,"startedAt":"23:03:46Z"}`},
+		// The pre-accept decline body: reason is required, kind is a closed enum,
+		// detail is bounded text, and nothing else is allowed.
+		{"decline body without a reason", `{"schemaVersion":"1","kind":"fault"}`},
+		{"decline body with an unknown kind", `{"schemaVersion":"1","reason":"r","kind":"explode"}`},
+		{"decline body with a non-string kind", `{"schemaVersion":"1","reason":"r","kind":5}`},
+		{"decline body with a non-string detail", `{"schemaVersion":"1","reason":"r","detail":5}`},
+		{"decline body with an over-long detail", `{"schemaVersion":"1","reason":"r","detail":"` + strings.Repeat("d", schemas.DeclineDetailMaxLen+1) + `"}`},
+		{"decline body with an extra field", `{"schemaVersion":"1","reason":"r","extra":"x"}`},
+		{"decline body with a non-string reason", `{"schemaVersion":"1","reason":5}`},
+		{"decline body with the wrong schemaVersion", `{"schemaVersion":"2","reason":"r"}`},
 	},
 	"handler.postStartup": {
 		{"missing id", `{"schemaVersion":"1"}`},
