@@ -18,7 +18,7 @@ import (
 )
 
 // runValidate implements the optional `validate` INTF-HANDLER subcommand
-// (INV-CCH-36, INV-CCA-8): the adapter's ONE validation entry point, called by
+// (INV-CCH-36): the adapter's ONE validation entry point, called by
 // the nix build on every rendered role JSON, by pg-router at startup and by its
 // doctor. It checks the role JSON strictly, the sessionEnv keys, and that each
 // pool directory the role references exists. It runs no payload, never runs or
