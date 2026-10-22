@@ -6826,157 +6826,10 @@
               # disabled, since `repoRoot`/`worktreeDir` carry no default.
               test-pg-router-ccpool-handler-module =
                 let
-                  hmAssertionSubmodule = lib.types.submodule {
-                    options = {
-                      assertion = lib.mkOption { type = lib.types.bool; };
-                      message = lib.mkOption { type = lib.types.str; };
-                    };
-                  };
-
-                  # hmLib (pg2-1p4yp): the module's new `pool.enable`
-                  # activation step calls `lib.hm.dag.entryAfter`
-                  # (home-manager's extended lib, absent from the bare
-                  # nixpkgs `lib` this hand-rolled `lib.evalModules` call
-                  # would otherwise pass) -- stub it to return the raw
-                  # activation text, exactly like
-                  # test-claude-settings-activation-marketplace-add's own
-                  # `hmLib` does, so the generated script can be inspected
-                  # without a full HM harness.
-                  hmLib = lib // {
-                    hm = (lib.hm or { }) // {
-                      dag = (lib.hm.dag or { }) // {
-                        entryAfter = _deps: text: text;
-                      };
-                    };
-                  };
-
-                  # HM-side eval: stub exactly what
-                  # home/programs/pg-router-ccpool-handler/default.nix
-                  # reads/writes -- home.packages, home.homeDirectory (the
-                  # `pool.dir` option's default),
-                  # home.activation (the `pool.enable` bootstrap step,
-                  # pg2-1p4yp), systemd.user.{services,timers}, assertions
-                  # (mirroring test-pg-router-module's own evalHM).
-                  # `phillipgreenii.programs.ccpool.enable` (bead pg2-mr0sl):
-                  # stubbed `true` -- this module's OWN "ccpool.enable
-                  # required" assertion reads it, and unlike before this
-                  # bead (when nothing here ever forced `.assertions` at
-                  # all), the new `firedPoolMetricsAssertion`/
-                  # `firedMissingDirAssertion` bindings below use
-                  # `lib.findFirst` over the WHOLE assertions list, which
-                  # evaluates every earlier assertion's own `.assertion`
-                  # field along the way -- an unstubbed option here would
-                  # throw "attribute missing" the first time that happens,
-                  # not merely stay unforced.
-                  evalHM =
-                    ccpoolHandler:
-                    (lib.evalModules {
-                      specialArgs = {
-                        inherit pkgs;
-                        lib = hmLib;
-                      };
-                      modules = [
-                        ./home/programs/pg-router-ccpool-handler/default.nix
-                        (
-                          { lib, ... }:
-                          {
-                            options = {
-                              home = {
-                                packages = lib.mkOption {
-                                  type = lib.types.listOf lib.types.package;
-                                  default = [ ];
-                                };
-                                homeDirectory = lib.mkOption {
-                                  type = lib.types.str;
-                                  default = "/home/tester";
-                                };
-                                activation = lib.mkOption {
-                                  type = lib.types.attrsOf lib.types.anything;
-                                  default = { };
-                                };
-                              };
-                              systemd.user.services = lib.mkOption {
-                                type = lib.types.attrsOf lib.types.anything;
-                                default = { };
-                              };
-                              systemd.user.timers = lib.mkOption {
-                                type = lib.types.attrsOf lib.types.anything;
-                                default = { };
-                              };
-                              assertions = lib.mkOption {
-                                type = lib.types.listOf hmAssertionSubmodule;
-                                default = [ ];
-                              };
-                              # pg2-4roho decision item 4: this module now
-                              # appends to pg-disk-reclaimer's own registry
-                              # option -- stubbed here with the SAME shape
-                              # `home/programs/pg-disk-reclaimer/default.nix`
-                              # itself declares (not the real module, mirroring
-                              # this harness's own convention of hand-stubbing
-                              # every bare option this module reads/writes
-                              # rather than importing upstream modules), so a
-                              # real type mismatch in the appended entry is
-                              # still caught here.
-                              phillipgreenii.programs.ccpool.enable = lib.mkOption {
-                                type = lib.types.bool;
-                                default = true;
-                              };
-                              phillipgreenii.programs.pg-disk-reclaimer.registryEntries = lib.mkOption {
-                                type = lib.types.listOf (
-                                  lib.types.submodule {
-                                    options = {
-                                      id = lib.mkOption { type = lib.types.str; };
-                                      description = lib.mkOption { type = lib.types.str; };
-                                      path = lib.mkOption { type = lib.types.str; };
-                                      displayCommand = lib.mkOption { type = lib.types.str; };
-                                      displayTimeoutSeconds = lib.mkOption {
-                                        type = lib.types.nullOr lib.types.ints.positive;
-                                        default = null;
-                                      };
-                                      sizeCommand = lib.mkOption {
-                                        type = lib.types.nullOr lib.types.str;
-                                        default = null;
-                                      };
-                                      sizeKind = lib.mkOption {
-                                        type = lib.types.nullOr lib.types.str;
-                                        default = null;
-                                      };
-                                      sizeMethod = lib.mkOption {
-                                        type = lib.types.nullOr lib.types.str;
-                                        default = null;
-                                      };
-                                      sizeBasis = lib.mkOption {
-                                        type = lib.types.nullOr lib.types.str;
-                                        default = null;
-                                      };
-                                      heldSizeCommand = lib.mkOption {
-                                        type = lib.types.nullOr lib.types.str;
-                                        default = null;
-                                      };
-                                      variants = lib.mkOption {
-                                        type = lib.types.listOf (
-                                          lib.types.submodule {
-                                            options = {
-                                              aggressiveness = lib.mkOption { type = lib.types.ints.unsigned; };
-                                              variantDescription = lib.mkOption { type = lib.types.str; };
-                                              dryRunCommand = lib.mkOption { type = lib.types.str; };
-                                              removeCommand = lib.mkOption { type = lib.types.str; };
-                                            };
-                                          }
-                                        );
-                                        default = [ ];
-                                      };
-                                    };
-                                  }
-                                );
-                                default = [ ];
-                              };
-                            };
-                          }
-                        )
-                        { phillipgreenii.programs.pg-router-ccpool-handler = ccpoolHandler; }
-                      ];
-                    }).config;
+                  inherit (import ./tests/pg-router-ccpool-handler-eval-hm.nix { inherit lib pkgs llm-agents; })
+                    evalHM
+                    claudeBin
+                    ;
 
                   # Two differently-configured roles (acceptance criterion
                   # 1): "feedback" is a ccpool role, "worker" is a command
@@ -7520,6 +7373,192 @@
                     daemon.enable = true;
                   };
 
+                  # pg-wrap wiring (design ruling 30, bead pg2-12gr4.8.12): a spec role's
+                  # session env and pool, the rendered spec, and the two-way
+                  # pool/spec evaluation failures. `exec` is left at its default in
+                  # `wrapped` (pkgs.llm-agentsPkgs.claude-code) and set to a fake
+                  # absolute path elsewhere; nothing here runs a spec.
+                  wrapRoleBase = {
+                    actor = "wrap-actor";
+                    completion = "close-only";
+                    onFailure = "unclaim";
+                    onDispatchFail = "leave";
+                    promptBody = "wrap prompt";
+                  };
+                  pgWrapExecPath = "${pkgs.pg-wrap}/bin/pg-wrap-exec";
+                  wrapClaudeBin = claudeBin;
+                  wrapFired = cfg: lib.findFirst (a: a.assertion == false) null cfg.assertions;
+                  wrapMod = cfg: cfg.phillipgreenii.programs.pg-router-ccpool-handler;
+
+                  # `wrapped` (own pool, default exec, strict, a sessionEnv extra and
+                  # a duplicated keep name), `plain` (own pool, no spec) and a command
+                  # role with strictBaseEnv: no assertion may fire.
+                  wrapOwnPool = evalHM {
+                    enable = true;
+                    roles = {
+                      wrapped = {
+                        type = "ccpool";
+                        ccpool = wrapRoleBase // {
+                          pool = {
+                            enable = true;
+                            dir = "/tmp/pg2-12gr4-wrapped-pool";
+                            settings.pool.max_sessions = 1;
+                          };
+                        };
+                        sessionEnv.EXTRA_VAR = "extra";
+                        spec = {
+                          strictEnv = true;
+                          keep = [
+                            "MY_KEEP"
+                            "BEADS_ACTOR"
+                          ];
+                        };
+                      };
+                      plain = {
+                        type = "ccpool";
+                        ccpool = wrapRoleBase // {
+                          pool = {
+                            enable = true;
+                            dir = "/tmp/pg2-12gr4-plain-pool";
+                            settings.pool.max_sessions = 1;
+                          };
+                        };
+                      };
+                      cmd = {
+                        type = "command";
+                        command.argv = [ "cmd-bin" ];
+                        strictBaseEnv = true;
+                      };
+                    };
+                  };
+                  wrapOwnPoolFired = wrapFired wrapOwnPool;
+                  wrapOwnPoolDir = (wrapMod wrapOwnPool).handlerCommandDir;
+                  wrapOwnPoolSpec = (wrapMod wrapOwnPool).specFiles.wrapped;
+                  wrapOwnPoolConfig = (wrapMod wrapOwnPool).poolConfigFiles.wrapped;
+                  wrapPlainPoolConfig = (wrapMod wrapOwnPool).poolConfigFiles.plain;
+
+                  # Two spec roles sharing the handler-wide pool (the triager shape),
+                  # one with a mixed string/list `wrap`: no assertion may fire, and the
+                  # handler pool's config.toml carries claude.bin.
+                  wrapHandlerPool = evalHM {
+                    enable = true;
+                    pool = {
+                      enable = true;
+                      dir = "/tmp/pg2-12gr4-handler-pool";
+                    };
+                    roles = {
+                      triage-a = {
+                        type = "ccpool";
+                        ccpool = wrapRoleBase;
+                        spec = {
+                          exec = [ "/nix/store/fake/bin/claude" ];
+                          wrap = [
+                            "/nix/store/fake/bin/prefix --flag"
+                            [
+                              "/nix/store/fake/bin/other"
+                              "arg one"
+                            ]
+                          ];
+                        };
+                      };
+                      triage-b = {
+                        type = "ccpool";
+                        ccpool = wrapRoleBase;
+                        spec.exec = [ "/nix/store/fake/bin/claude" ];
+                      };
+                    };
+                  };
+                  wrapHandlerPoolFired = wrapFired wrapHandlerPool;
+                  wrapHandlerPoolDir = (wrapMod wrapHandlerPool).handlerCommandDir;
+                  wrapHandlerPoolSpecA = (wrapMod wrapHandlerPool).specFiles.triage-a;
+                  wrapHandlerPoolConfig = (wrapMod wrapHandlerPool).poolConfigFiles.handler;
+
+                  # Case 1: a spec role whose pool's `settings.claude.bin` is overridden.
+                  wrapOverriddenFired = wrapFired (evalHM {
+                    enable = true;
+                    roles.overridden = {
+                      type = "ccpool";
+                      ccpool = wrapRoleBase // {
+                        pool = {
+                          enable = true;
+                          dir = "/tmp/pg2-12gr4-overridden-pool";
+                          settings.claude.bin = "/usr/bin/claude";
+                        };
+                      };
+                      spec.exec = [ "/nix/store/fake/bin/claude" ];
+                    };
+                  });
+                  # Case 1: a spec role on ccpool's unmanaged default pool.
+                  wrapDefaultPoolFired = wrapFired (evalHM {
+                    enable = true;
+                    roles.stray = {
+                      type = "ccpool";
+                      ccpool = wrapRoleBase;
+                      spec.exec = [ "/nix/store/fake/bin/claude" ];
+                    };
+                  });
+                  # Case 2: a no-spec role sharing the handler-wide pool with a spec
+                  # role (the three-triagers-on-one-pool shape).
+                  wrapSharedFired = wrapFired (evalHM {
+                    enable = true;
+                    pool = {
+                      enable = true;
+                      dir = "/tmp/pg2-12gr4-shared-pool";
+                    };
+                    roles = {
+                      with-spec = {
+                        type = "ccpool";
+                        ccpool = wrapRoleBase;
+                        spec.exec = [ "/nix/store/fake/bin/claude" ];
+                      };
+                      without-spec = {
+                        type = "ccpool";
+                        ccpool = wrapRoleBase;
+                      };
+                    };
+                  });
+                  # Case 2: a user-set pg-wrap-exec on a pool whose only role has no spec.
+                  wrapUserBinFired = wrapFired (evalHM {
+                    enable = true;
+                    roles.user-bin = {
+                      type = "ccpool";
+                      ccpool = wrapRoleBase // {
+                        pool = {
+                          enable = true;
+                          dir = "/tmp/pg2-12gr4-user-bin-pool";
+                          settings.claude.bin = pgWrapExecPath;
+                        };
+                      };
+                    };
+                  });
+                  # A `spec` on a command role.
+                  wrapCommandSpecFired = wrapFired (evalHM {
+                    enable = true;
+                    roles.cmd-spec = {
+                      type = "command";
+                      command.argv = [ "cmd-bin" ];
+                      spec.exec = [ "/nix/store/fake/bin/claude" ];
+                    };
+                  });
+                  # A role that sets PG_WRAP_SPEC itself AND has a spec.
+                  wrapEnvClashFired = wrapFired (evalHM {
+                    enable = true;
+                    roles.clash = {
+                      type = "ccpool";
+                      ccpool = wrapRoleBase // {
+                        pool = {
+                          enable = true;
+                          dir = "/tmp/pg2-12gr4-clash-pool";
+                        };
+                      };
+                      sessionEnv.PG_WRAP_SPEC = "/elsewhere.toml";
+                      spec.exec = [ "/nix/store/fake/bin/claude" ];
+                    };
+                  });
+                  wrapMessageNames =
+                    fired: role: dir:
+                    fired != null && lib.hasInfix role fired.message && lib.hasInfix dir fired.message;
+
                   # File-content verification is done at BUILD time via a
                   # runCommand + jq (code-file-standards' "Structured Data
                   # Files MUST use jq" rule), not via builtins.readFile at
@@ -7528,8 +7567,20 @@
                   renderCheck =
                     pkgs.runCommand "test-pg-router-ccpool-handler-module-render"
                       {
-                        nativeBuildInputs = [ pkgs.jq ];
+                        nativeBuildInputs = [
+                          pkgs.jq
+                          pkgs.python3
+                        ];
                         inherit
+                          pgWrapExecPath
+                          wrapClaudeBin
+                          wrapOwnPoolDir
+                          wrapOwnPoolSpec
+                          wrapOwnPoolConfig
+                          wrapPlainPoolConfig
+                          wrapHandlerPoolDir
+                          wrapHandlerPoolSpecA
+                          wrapHandlerPoolConfig
                           handlerCommandDir
                           emptyHandlerCommandDir
                           launchConfigFile
@@ -7704,6 +7755,51 @@
                         grep -qF -- "--pool handler=/tmp/pg2-h5vno/pg-router-ccpool" "$poolMetricsScript"
                         grep -qF -- "--pool handler=/tmp/pg2-h5vno/pg-router-ccpool" "$handlerPoolOnlyScript"
                         ! grep -qF -- "--pool review=" "$handlerPoolOnlyScript"
+
+                        # pg-wrap wiring (design ruling 30, bead pg2-12gr4.8.12).
+                        toml2json() {
+                          python3 -c 'import json, sys, tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))))' "$1"
+                        }
+                        # A spec role's JSON: sessionEnv carries PG_WRAP_SPEC (the
+                        # specFiles entry) plus the role's own entries, and no
+                        # strictBaseEnv; a no-spec ccpool role's sessionEnv is empty.
+                        [ "$(jq -r .sessionEnv.PG_WRAP_SPEC "$wrapOwnPoolDir/wrapped.json")" = "$wrapOwnPoolSpec" ]
+                        [ "$(jq -r .sessionEnv.EXTRA_VAR "$wrapOwnPoolDir/wrapped.json")" = extra ]
+                        jq -e 'has("strictBaseEnv") | not' "$wrapOwnPoolDir/wrapped.json" >/dev/null
+                        [ "$(jq -c .sessionEnv "$wrapOwnPoolDir/plain.json")" = '{}' ]
+                        # A command role: strictBaseEnv renders, sessionEnv and spec never do.
+                        [ "$(jq -r .strictBaseEnv "$wrapOwnPoolDir/cmd.json")" = true ]
+                        jq -e 'has("sessionEnv") | not' "$wrapOwnPoolDir/cmd.json" >/dev/null
+                        jq -e 'has("spec") | not' "$wrapOwnPoolDir/cmd.json" >/dev/null
+                        # The rendered spec: version, strict_env, default exec = claude,
+                        # keep = the ten module-owned names + the role's own keep + its
+                        # sessionEnv extra, de-duplicated, and no child-session marker.
+                        spec_json="$(toml2json "$wrapOwnPoolSpec")"
+                        [ "$(jq -r .schema_version <<<"$spec_json")" = 1 ]
+                        [ "$(jq -r .strict_env <<<"$spec_json")" = true ]
+                        [ "$(jq -c .exec <<<"$spec_json")" = "[\"$wrapClaudeBin\"]" ]
+                        [ "$(jq -c .wrap <<<"$spec_json")" = '[]' ]
+                        jq -e '
+                          (.keep | sort) == ([
+                            "BEADS_ACTOR","BEADS_DIR","WORKSPACE_ROOT","PG_ROUTER_ROLE",
+                            "PG_ROUTER_ITEM_ID","PG_ROUTER_ITEM_TYPE","CCPOOL_EXTERNAL_ID",
+                            "PA_MONITOR_NO_NUDGE","CCPOOL_POOL","CCPOOL_AUTONOMOUS",
+                            "MY_KEEP","EXTRA_VAR"] | sort)' <<<"$spec_json" >/dev/null
+                        jq -e '.keep | index("CLAUDECODE") == null and index("CLAUDE_CODE_CHILD_SESSION") == null' \
+                          <<<"$spec_json" >/dev/null
+                        # A mixed string/list wrap survives rendering and strict_env
+                        # defaults to false.
+                        spec_a_json="$(toml2json "$wrapHandlerPoolSpecA")"
+                        [ "$(jq -c .wrap <<<"$spec_a_json")" = '["/nix/store/fake/bin/prefix --flag",["/nix/store/fake/bin/other","arg one"]]' ]
+                        [ "$(jq -r .strict_env <<<"$spec_a_json")" = false ]
+                        [ "$(jq -r .sessionEnv.PG_WRAP_SPEC "$wrapHandlerPoolDir/triage-a.json")" = "$wrapHandlerPoolSpecA" ]
+                        # Pools: claude.bin = pg-wrap-exec exactly where a spec role runs
+                        # (own pool, handler-wide pool); the user's other settings still
+                        # merge; a no-spec pool carries no claude.bin.
+                        [ "$(toml2json "$wrapOwnPoolConfig" | jq -r .claude.bin)" = "$pgWrapExecPath" ]
+                        [ "$(toml2json "$wrapOwnPoolConfig" | jq -r .pool.max_sessions)" = 1 ]
+                        [ "$(toml2json "$wrapHandlerPoolConfig" | jq -r .claude.bin)" = "$pgWrapExecPath" ]
+                        toml2json "$wrapPlainPoolConfig" | jq -e '(.claude // {}) | has("bin") | not' >/dev/null
                         touch $out
                       '';
                 in
@@ -7812,6 +7908,25 @@
                 assert handlerPoolOnlyFailedAssertion == null;
                 assert firedMissingDirAssertion != null;
                 assert lib.hasInfix "ccpool.pool.dir" firedMissingDirAssertion.message;
+                # pg-wrap wiring (design ruling 30, bead pg2-12gr4.8.12): the outputs
+                # exist, the positive shapes fire no assertion, and each evaluation
+                # failure names the role and the pool.
+                assert builtins.isFunction (wrapMod wrapOwnPool).lib.renderWrapSpec;
+                assert lib.attrNames (wrapMod wrapOwnPool).specFiles == [ "wrapped" ];
+                assert
+                  lib.attrNames (wrapMod wrapOwnPool).poolConfigFiles == [
+                    "plain"
+                    "wrapped"
+                  ];
+                assert lib.attrNames (wrapMod wrapHandlerPool).poolConfigFiles == [ "handler" ];
+                assert wrapOwnPoolFired == null;
+                assert wrapHandlerPoolFired == null;
+                assert wrapMessageNames wrapOverriddenFired "overridden" "/tmp/pg2-12gr4-overridden-pool";
+                assert wrapMessageNames wrapDefaultPoolFired "stray" "default pool";
+                assert wrapMessageNames wrapSharedFired "without-spec" "/tmp/pg2-12gr4-shared-pool";
+                assert wrapMessageNames wrapUserBinFired "user-bin" "/tmp/pg2-12gr4-user-bin-pool";
+                assert wrapMessageNames wrapCommandSpecFired "cmd-spec" "command role";
+                assert wrapMessageNames wrapEnvClashFired "clash" "PG_WRAP_SPEC";
                 # pg2-4roho decision item 4: exactly one registry entry,
                 # scoped to this handler's own configured worktreeDir, with
                 # exactly one variant.
@@ -7873,6 +7988,71 @@
                     darwinWithoutRoles.phillipgreenii.observability.logSources ? pg-router-ccpool-handler-pool-metrics
                   );
                 renderCheck;
+
+              # pg-router-ccpool-handler-spec-fixtures (bead pg2-12gr4.8.12): the module
+              # evaluated as test-pg-router-ccpool-handler-module does, with its rendered
+              # role JSON, pg-wrap specs and pool config.toml files laid out for a LIVE
+              # run (the packet's `pg-router run-role` trigger) and for the packets that
+              # extend it. Output layout (pinned; later packets add roles here):
+              #   $out/roles/<role>.json
+              #   $out/specs/<role>.toml            (the module's `specFiles`)
+              #   $out/pools/<pool-name>/config.toml (the role name for a per-role
+              #                                      pool, `handler` for the
+              #                                      handler-wide pool)
+              # `k17-live` is the one fixture role: its spec's `exec` is a probe that
+              # writes its environment to the fixed path /tmp/k17-env.txt (it runs in a
+              # tmux pane whose TMPDIR may differ from the caller's) and exits, so a
+              # live run proves pg-wrap-exec ran the spec's `exec`.
+              pg-router-ccpool-handler-spec-fixtures =
+                let
+                  inherit (import ./tests/pg-router-ccpool-handler-eval-hm.nix { inherit lib pkgs llm-agents; })
+                    evalHM
+                    ;
+                  probe = pkgs.writeShellScript "k17-probe" "${pkgs.coreutils}/bin/env | ${pkgs.coreutils}/bin/sort > /tmp/k17-env.txt; exit 0";
+                  fixture = evalHM {
+                    enable = true;
+                    roles.k17-live = {
+                      type = "ccpool";
+                      ccpool = {
+                        actor = "k17-actor";
+                        completion = "close-only";
+                        onFailure = "unclaim";
+                        onDispatchFail = "leave";
+                        promptBody = "k17 live fixture prompt";
+                        pool = {
+                          enable = true;
+                          dir = "/tmp/k17-pool";
+                          settings = {
+                            claude.plugin_dir = "${pkgs.ccpool}/share/ccpool-plugin";
+                            tmux.socket = "k17sock";
+                            wait.timeout = "10s";
+                          };
+                        };
+                      };
+                      spec = {
+                        strictEnv = false;
+                        wrap = [ ];
+                        keep = [ ];
+                        exec = [ "${probe}" ];
+                      };
+                    };
+                  };
+                  m = fixture.phillipgreenii.programs.pg-router-ccpool-handler;
+                in
+                pkgs.linkFarm "pg-router-ccpool-handler-spec-fixtures" (
+                  (lib.mapAttrsToList (name: _: {
+                    name = "roles/${name}.json";
+                    path = "${m.handlerCommandDir}/${name}.json";
+                  }) m.roles)
+                  ++ (lib.mapAttrsToList (name: file: {
+                    name = "specs/${name}.toml";
+                    path = file;
+                  }) m.specFiles)
+                  ++ (lib.mapAttrsToList (name: file: {
+                    name = "pools/${name}/config.toml";
+                    path = file;
+                  }) m.poolConfigFiles)
+                );
 
               # test-pg-disk-reclaimer-hm-registry (bead pg2-tfckf): the HM module's
               # optional per-item `displayTimeoutSeconds` / `sizeCommand` / size-contract fields render into

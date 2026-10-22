@@ -25,7 +25,171 @@ let
   # lets its cap be raised WITHOUT touching the shared default pool's cap for
   # every other ccpool consumer (interactive use, other handlers).
   tomlFormat = pkgs.formats.toml { };
-  poolConfigFile = tomlFormat.generate "pg-router-ccpool-handler-pool-config.toml" cfg.pool.settings;
+
+  # pg-wrap wiring for ccpool roles (design ruling 30; bead pg2-12gr4.8.12).
+  #
+  # pg-wrap is a STANDALONE wrapper, mutually unaware of pg-router and ccpool.
+  # ccpool passes env to claude through tmux's `-e` flags, so wrapping the
+  # adapter or `ccpool new` would never reach claude INSIDE tmux. This module
+  # therefore wraps a ccpool role through ccpool's own opaque `claude.bin`:
+  #
+  #   * `claude.bin = pg-wrap-exec` in the config.toml of every pool it manages
+  #     that hosts a role with a `spec`;
+  #   * a rendered pg-wrap spec per such role (`exec` = claude by default);
+  #   * `PG_WRAP_SPEC=<spec>` in that role's `sessionEnv`;
+  #   * evaluation FAILS in both directions: a spec role on a pool whose
+  #     rendered `claude.bin` is not `pg-wrap-exec` (claude would run
+  #     unwrapped), and a role WITHOUT a spec on a `pg-wrap-exec` pool (every
+  #     launch there would decline).
+  #
+  # Pool resolution mirrors the handler's own dispatch: a ccpool role with
+  # `ccpool.pool.enable` is on its own pool; otherwise, with the handler-wide
+  # `pool.enable`, it is on the handler-wide pool; otherwise it is on ccpool's
+  # default pool, which this module does not manage (so its `claude.bin` is
+  # never `pg-wrap-exec` and a spec role there fails the first check).
+  pgWrapExecBin = "${pkgs.pg-wrap}/bin/pg-wrap-exec";
+
+  # The ten variable names every rendered spec's `keep` carries: the participant
+  # markers, the item context and ccpool's four injected markers. The
+  # child-session markers ccpool blanks (`CLAUDE_CODE_CHILD_SESSION`,
+  # `CLAUDECODE`, ...) are deliberately NOT here: they MUST NOT survive.
+  wrapSpecOwnedKeep = [
+    "BEADS_ACTOR"
+    "BEADS_DIR"
+    "WORKSPACE_ROOT"
+    "PG_ROUTER_ROLE"
+    "PG_ROUTER_ITEM_ID"
+    "PG_ROUTER_ITEM_TYPE"
+    "CCPOOL_EXTERNAL_ID"
+    "PA_MONITOR_NO_NUDGE"
+    "CCPOOL_POOL"
+    "CCPOOL_AUTONOMOUS"
+  ];
+
+  # renderWrapSpec: `{ wrap, keep, strictEnv, exec } -> <spec file derivation>`,
+  # the pg-wrap spec as TOML (`schema_version = 1` plus the four keys). `keep`
+  # is the caller's own extra names; the ten module-owned names are always
+  # added and the result is de-duplicated, so a caller (a `claudeBaseline`
+  # helper, a command role) may list some of them again harmlessly. Exposed as
+  # `lib.renderWrapSpec` so command-role specs reuse it.
+  renderWrapSpec =
+    {
+      wrap ? [ ],
+      keep ? [ ],
+      strictEnv ? false,
+      exec,
+    }:
+    tomlFormat.generate "pg-wrap-spec.toml" {
+      schema_version = 1;
+      inherit wrap exec;
+      strict_env = strictEnv;
+      keep = lib.unique (wrapSpecOwnedKeep ++ keep);
+    };
+
+  specRoles = lib.filterAttrs (_name: roleCfg: roleCfg.spec != null) cfg.roles;
+  # A role's rendered spec. Choice (the design is silent): every `sessionEnv`
+  # key other than PG_WRAP_SPEC (which pg-wrap-exec strips itself) joins the
+  # spec's `keep`, so a variable an operator injects into the session survives
+  # `strict_env` and reaches claude.
+  specFiles = lib.mapAttrs (
+    _name: roleCfg:
+    renderWrapSpec {
+      inherit (roleCfg.spec) wrap strictEnv exec;
+      keep = roleCfg.spec.keep ++ lib.attrNames (removeAttrs roleCfg.sessionEnv [ "PG_WRAP_SPEC" ]);
+    }
+  ) specRoles;
+
+  ccpoolRoles = lib.filterAttrs (_name: roleCfg: roleCfg.type == "ccpool") cfg.roles;
+  # The ccpool roles that share the handler-wide pool (only meaningful while
+  # `pool.enable`; otherwise they run on ccpool's unmanaged default pool).
+  handlerPoolRoles = lib.optionalAttrs cfg.pool.enable (
+    lib.filterAttrs (_name: roleCfg: !roleCfg.ccpool.pool.enable) ccpoolRoles
+  );
+  # A managed pool's FINAL settings: the module's own `claude.bin` (exactly when
+  # some role on the pool has a spec) merged UNDER the user's `settings`, so a
+  # user-set `settings.claude.bin` overrides it and the two-way check then fires.
+  withWrapBin =
+    hasSpecRole: settings:
+    lib.recursiveUpdate (lib.optionalAttrs hasSpecRole { claude.bin = pgWrapExecBin; }) settings;
+  handlerPoolSettings = withWrapBin (lib.any (r: r.spec != null) (
+    lib.attrValues handlerPoolRoles
+  )) cfg.pool.settings;
+  rolePoolSettings = roleCfg: withWrapBin (roleCfg.spec != null) roleCfg.ccpool.pool.settings;
+  # Where a ccpool role runs, and the `claude.bin` that pool's config.toml carries.
+  poolOf =
+    roleCfg:
+    if roleCfg.ccpool.pool.enable then
+      {
+        dir = roleCfg.ccpool.pool.dir;
+        managed = true;
+        claudeBin = (rolePoolSettings roleCfg).claude.bin or null;
+      }
+    else if cfg.pool.enable then
+      {
+        dir = cfg.pool.dir;
+        managed = true;
+        claudeBin = handlerPoolSettings.claude.bin or null;
+      }
+    else
+      {
+        dir = "<ccpool default pool, not managed by this module>";
+        managed = false;
+        claudeBin = null;
+      };
+  wrapPoolAssertions = lib.concatLists (
+    lib.mapAttrsToList (
+      name: roleCfg:
+      let
+        pool = poolOf roleCfg;
+        onWrapExecPool = pool.managed && pool.claudeBin == pgWrapExecBin;
+      in
+      if roleCfg.spec != null then
+        [
+          {
+            assertion = pool.claudeBin == pgWrapExecBin;
+            message = ''
+              phillipgreenii.programs.pg-router-ccpool-handler.roles.${name}: the role
+              has a `spec`, but its pool (${pool.dir}) does not run
+              `claude.bin = ${pgWrapExecBin}` (rendered claude.bin:
+              ${if pool.claudeBin == null then "unset" else toString pool.claudeBin}), so claude would
+              run unwrapped. Put the role on a pool this module manages
+              (`roles.${name}.ccpool.pool.enable` or the handler-wide `pool.enable`)
+              and do not override that pool's `settings.claude.bin`.
+            '';
+          }
+        ]
+      else
+        [
+          {
+            assertion = !onWrapExecPool;
+            message = ''
+              phillipgreenii.programs.pg-router-ccpool-handler.roles.${name}: the role
+              has no `spec`, but its pool (${pool.dir}) runs
+              `claude.bin = ${pgWrapExecBin}`, which refuses every launch without
+              PG_WRAP_SPEC. Give the role a `spec`, or move it to a pool without
+              a spec role.
+            '';
+          }
+        ]
+    ) ccpoolRoles
+  );
+  wrapSpecAssertions = lib.mapAttrsToList (name: roleCfg: {
+    assertion = roleCfg.type == "ccpool";
+    message = ''
+      phillipgreenii.programs.pg-router-ccpool-handler.roles.${name}: `spec` is valid
+      only on a ccpool role; a command role is wrapped through its argv.
+    '';
+  }) specRoles;
+  wrapSessionEnvAssertions = lib.mapAttrsToList (name: roleCfg: {
+    assertion = !(roleCfg.sessionEnv ? PG_WRAP_SPEC);
+    message = ''
+      phillipgreenii.programs.pg-router-ccpool-handler.roles.${name}: `sessionEnv`
+      sets PG_WRAP_SPEC, but the role has a `spec`, so this module owns that value.
+      Remove it from `sessionEnv`.
+    '';
+  }) specRoles;
+
+  poolConfigFile = tomlFormat.generate "pg-router-ccpool-handler-pool-config.toml" handlerPoolSettings;
 
   # ccpoolRolesWithOwnPool / poolConfigFileFor / roleBootstrapEntries (bead
   # pg2-mr0sl): the per-ROLE analogue of poolConfigFile/the
@@ -42,7 +206,7 @@ let
   ) cfg.roles;
   poolConfigFileFor =
     name: roleCfg:
-    tomlFormat.generate "pg-router-ccpool-handler-pool-config-${name}.toml" roleCfg.ccpool.pool.settings;
+    tomlFormat.generate "pg-router-ccpool-handler-pool-config-${name}.toml" (rolePoolSettings roleCfg);
   # Activation entry names must be safe, static-looking bash function names
   # (home-manager's dag activation script naming) -- an underscore
   # separator (never a hyphen) keeps this valid regardless of what a role
@@ -419,6 +583,12 @@ let
           # (short, and killing a stuck one is the point). pg-router reads
           # only this one key of the file; the Go `roleFile` ignores it.
           survivesShutdown = true;
+          # sessionEnv (design ruling 30): the role's own entries plus, for a
+          # role with a spec, the module-owned PG_WRAP_SPEC (right operand
+          # wins; a role-set PG_WRAP_SPEC also fails an assertion).
+          sessionEnv =
+            roleCfg.sessionEnv
+            // lib.optionalAttrs (roleCfg.spec != null) { PG_WRAP_SPEC = "${specFiles.${name}}"; };
           ccpool = {
             inherit (roleCfg.ccpool)
               actor
@@ -499,6 +669,9 @@ let
           command = {
             inherit (roleCfg.command) argv;
           };
+          # strictBaseEnv (design ruling 30): command roles only; a ccpool
+          # role's minimal env comes from its spec's `strict_env`.
+          inherit (roleCfg) strictBaseEnv;
         }
       )
     );
@@ -1048,6 +1221,94 @@ let
           "command" (`roleFile.Command`).
         '';
       };
+      strictBaseEnv = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Rendered as the role JSON's `strictBaseEnv` key (`roleFile.StrictBaseEnv`):
+          start a COMMAND role's argv under the minimal base environment. Rendered
+          only into a `type = "command"` role's JSON; the handler ignores the key on
+          a ccpool role, whose minimal environment comes from its `spec`
+          (`strictEnv`) instead, so a ccpool role's JSON never carries it.
+        '';
+      };
+      sessionEnv = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = { };
+        description = ''
+          Rendered as the role JSON's `sessionEnv` key (`roleFile.SessionEnv`): extra
+          environment passed to the role's ccpool session (`ccpool new --env`).
+          Rendered only into a `type = "ccpool"` role's JSON. The handler refuses a
+          key that collides with a participant marker (`BEADS_ACTOR`, `BEADS_DIR`,
+          `WORKSPACE_ROOT`, any `PG_ROUTER_*`), an empty key or one containing `=`.
+
+          A role with a `spec` also carries `PG_WRAP_SPEC=<its spec file>` here, added
+          by this module. Setting `sessionEnv.PG_WRAP_SPEC` yourself on a role that has
+          a `spec` fails evaluation (the module owns that value).
+
+          Choice (the design is silent): under a spec's `strict_env`, every other
+          `sessionEnv` key is added to that spec's `keep`, because an operator who
+          injects a variable into the role's session means it to reach claude;
+          dropping it silently would defeat the option.
+        '';
+      };
+      spec = lib.mkOption {
+        type = lib.types.nullOr (
+          lib.types.submodule {
+            options = {
+              wrap = lib.mkOption {
+                type = lib.types.listOf (lib.types.either lib.types.str (lib.types.listOf lib.types.str));
+                default = [ ];
+                description = ''
+                  pg-wrap's `wrap` chain, outermost first. A string entry is
+                  shell-parsed by pg-wrap; a list is an argv entry. The first word
+                  of every string entry and the first element of every array entry
+                  MUST be an absolute path (render from store paths and
+                  `lib.escapeShellArg` string-entry arguments).
+                '';
+              };
+              keep = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+                description = ''
+                  Extra variable names the minimal environment keeps, on top of the
+                  ten this module always adds (the participant markers, the item
+                  context and ccpool's four injected markers).
+                '';
+              };
+              strictEnv = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = ''
+                  The spec's `strict_env`: start the wrap chain from the minimal
+                  environment instead of the inherited one. A rollback switch,
+                  flipped per family by a later change.
+                '';
+              };
+              exec = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ "${pkgs.llm-agentsPkgs.claude-code}/bin/claude" ];
+                defaultText = lib.literalExpression ''[ "''${pkgs.llm-agentsPkgs.claude-code}/bin/claude" ]'';
+                description = ''
+                  The spec's `exec`: the payload argv prefix (absolute first
+                  element). `pg-wrap-exec` appends claude's own flags to it.
+                '';
+              };
+            };
+          }
+        );
+        default = null;
+        description = ''
+          This role's pg-wrap spec (design ruling 30), or `null` for none. Valid only
+          on a ccpool role (a command role is wrapped through its argv; a `spec` on
+          one fails evaluation). A role with a spec gets a rendered spec file, the
+          `PG_WRAP_SPEC` entry in its `sessionEnv`, and `claude.bin = pg-wrap-exec`
+          in the config.toml of the pool it runs on; evaluation fails when that pool's
+          rendered `claude.bin` is anything else, and when a role WITHOUT a spec runs
+          on a pool whose rendered `claude.bin` is `pg-wrap-exec` (every launch there
+          would decline).
+        '';
+      };
     };
   };
 
@@ -1173,6 +1434,40 @@ in
         `periodicDrain.handlerCommandDir` option
         (`PG_ROUTER_HANDLER_COMMAND_DIR`). Resolves to an empty directory when
         `roles` is empty.
+      '';
+    };
+
+    # lib.renderWrapSpec / specFiles / poolConfigFiles (design ruling 30, bead
+    # pg2-12gr4.8.12): read-only outputs, set unconditionally like
+    # `handlerCommandDir`, so a consumer or a check can read them without this
+    # module's own machinery enabled.
+    lib.renderWrapSpec = lib.mkOption {
+      type = lib.types.raw;
+      readOnly = true;
+      description = ''
+        Read-only function `{ wrap, keep, strictEnv, exec } -> <spec file
+        derivation>`: renders a pg-wrap spec (`schema_version = 1` plus the four
+        keys) as TOML. The ten module-owned `keep` names are always added and the
+        result is de-duplicated. Command-role specs reuse it.
+      '';
+    };
+
+    specFiles = lib.mkOption {
+      type = lib.types.attrsOf lib.types.package;
+      readOnly = true;
+      description = ''
+        Read-only output: role name -> that role's rendered pg-wrap spec file, for
+        every role with a `spec`.
+      '';
+    };
+
+    poolConfigFiles = lib.mkOption {
+      type = lib.types.attrsOf lib.types.package;
+      readOnly = true;
+      description = ''
+        Read-only output: pool name -> the `config.toml` this module installs into
+        that pool, for every pool it manages (the role name for a per-role pool;
+        `handler` for the handler-wide pool). Carries `claude.bin` as rendered.
       '';
     };
 
@@ -1673,7 +1968,11 @@ in
           "Bash(pre-commit:*)"
         ];
         # handlerCommandDir: this bead, pg2-pteab.
-        inherit handlerCommandDir;
+        inherit handlerCommandDir specFiles;
+        lib.renderWrapSpec = renderWrapSpec;
+        poolConfigFiles =
+          lib.optionalAttrs cfg.pool.enable { handler = poolConfigFile; }
+          // lib.mapAttrs poolConfigFileFor ccpoolRolesWithOwnPool;
         # launchConfigFile: this bead, pg2-qsred. `null` when disabled --
         # see that option's own doc comment for why (repoRoot/worktreeDir
         # have no default, so this branch must stay unforced while
@@ -1795,7 +2094,12 @@ in
             defeating the point of a per-role dedicated pool.
           '';
         }
-      ];
+      ]
+      # pg-wrap two-way pool/spec check, spec-on-command-role and
+      # role-set-PG_WRAP_SPEC guards (design ruling 30).
+      ++ wrapPoolAssertions
+      ++ wrapSpecAssertions
+      ++ wrapSessionEnvAssertions;
 
       systemd.user = {
         services = {
