@@ -619,6 +619,72 @@ let
     ccpoolCfg:
     lib.unique (ccpoolCfg.extraAllowedTools ++ lib.concatMap toolSetGrants ccpoolCfg.toolSets);
 
+  # checkRenderedScript (bead pg2-12gr4.8.32): `check-rendered [--spec <file>]...
+  # [--role <file>]...`, the build-time check of what this module renders. Each
+  # `--spec` runs pg-wrap's own `pg-wrap check --spec <file>`; each `--role` runs
+  # the handler's own `validate --skip-pool-dirs --role-config <file>` (the nix
+  # sandbox has no pool directories). The two tools run side by side and neither
+  # calls the other. Every failing file is printed with its messages; the exit
+  # is 1 if any check failed, else 0. A `validate` run fails when it exits
+  # non-zero, or its reply is not parsable or has a non-empty `problems`;
+  # warnings are printed and never fail.
+  checkRenderedScript = pkgs.writeShellScript "check-rendered" ''
+    PATH=${lib.makeBinPath [ pkgs.coreutils ]}
+    jq=${pkgs.jq}/bin/jq
+    pgwrap=${pkgs.pg-wrap}/bin/pg-wrap
+    handler=${cfg.package}/bin/pg-router-ccpool-handler
+    failed=0
+    while [ $# -gt 0 ]; do
+      kind="$1"
+      case "$kind" in
+        --spec | --role) ;;
+        *)
+          echo "check-rendered: unknown argument: $kind" >&2
+          exit 2
+          ;;
+      esac
+      if [ $# -lt 2 ]; then
+        echo "check-rendered: $kind needs a file" >&2
+        exit 2
+      fi
+      file="$2"
+      shift 2
+      if [ "$kind" = --spec ]; then
+        if ! out="$("$pgwrap" check --spec "$file" 2>&1)"; then
+          echo "check-rendered: FAIL spec $file:" >&2
+          echo "$out" >&2
+          failed=1
+        fi
+      else
+        rc=0
+        errf="$(mktemp)"
+        reply="$(printf '%s' '{"schemaVersion":"1","id":"check-rendered"}' |
+          "$handler" validate --skip-pool-dirs --role-config "$file" 2>"$errf")" || rc=$?
+        msgs=""
+        if [ "$rc" -ne 0 ]; then
+          msgs="validate exited $rc: $reply $(cat "$errf")"
+        elif ! msgs="$(printf '%s' "$reply" | "$jq" -r '
+            if (.problems | type) == "array" then .problems[] | "problem: " + .
+            else error("reply has no problems array") end' 2>&1)"; then
+          msgs="unparsable validate reply: $reply $msgs"
+        fi
+        rm -f "$errf"
+        if [ -n "$msgs" ]; then
+          echo "check-rendered: FAIL role $file:" >&2
+          echo "$msgs" >&2
+          failed=1
+        fi
+        # Warnings are printed and never fail.
+        warns="$(printf '%s' "$reply" | "$jq" -r '(.warnings // [])[] | "warning: " + .' 2>/dev/null || true)"
+        if [ -n "$warns" ]; then
+          echo "check-rendered: role $file:" >&2
+          echo "$warns" >&2
+        fi
+      fi
+    done
+    exit "$failed"
+  '';
+
   # roleFileFor renders one role's `roles` entry into the on-disk JSON shape
   # cmd/pg-router-ccpool-handler/roleconfig.go's `loadRole` decodes
   # (`--role-config <dir>/<role.Name>.json`, this bead pg2-pteab, wiring the
@@ -752,11 +818,28 @@ let
   # still resolves cleanly to an empty directory -- never a missing/`null`
   # output -- so a deployment that leaves `roles` unset gets a harmless,
   # empty `handlerCommandDir` rather than an eval failure.
-  handlerCommandDir = pkgs.linkFarm "pg-router-ccpool-handler-roles" (
-    lib.mapAttrsToList (name: roleCfg: {
-      name = "${name}.json";
-      path = roleFileFor name roleCfg;
-    }) cfg.roles
+  #
+  # Build-time check (bead pg2-12gr4.8.32): the directory is built by a
+  # derivation that first runs `checkRenderedScript` over every role file and
+  # every rendered spec (`specFiles`), so a spec that fails `pg-wrap check` or a
+  # role file that fails the handler's `validate` fails the build of
+  # `handlerCommandDir`, and with it everything that consumes it. The layout is
+  # unchanged: one `<role>.json` symlink per role and nothing else.
+  handlerCommandDir = pkgs.runCommand "pg-router-ccpool-handler-roles" { } (
+    ''
+      ${checkRenderedScript} ${
+        lib.concatStringsSep " " (
+          (lib.mapAttrsToList (_name: file: "--spec ${file}") specFiles)
+          ++ (lib.mapAttrsToList (name: roleCfg: "--role ${roleFileFor name roleCfg}") cfg.roles)
+        )
+      }
+      mkdir -p "$out"
+    ''
+    + lib.concatStringsSep "\n" (
+      lib.mapAttrsToList (
+        name: roleCfg: "ln -s ${roleFileFor name roleCfg} $out/${lib.escapeShellArg "${name}.json"}"
+      ) cfg.roles
+    )
   );
 
   # defaultAllowedTools (this bead, pg2-qsred): mirrors
@@ -1519,6 +1602,22 @@ in
       '';
     };
 
+    lib.checkRenderedScript = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      description = ''
+        Read-only executable script `check-rendered [--spec <file>]... [--role
+        <file>]...`. Each `--spec` runs `pg-wrap check --spec <file>`; each
+        `--role` runs the handler's `validate --skip-pool-dirs --role-config
+        <file>` (the request on stdin). It prints every failing file with its
+        messages, then exits 1 if any check failed and 0 otherwise. A `validate`
+        run fails when it exits non-zero or its reply is unparsable or has a
+        non-empty `problems`; warnings are printed and never fail.
+        `handlerCommandDir` runs it over every role file and every `specFiles`
+        entry, so a failing file fails the build.
+      '';
+    };
+
     specFiles = lib.mkOption {
       type = lib.types.attrsOf lib.types.package;
       readOnly = true;
@@ -2053,6 +2152,7 @@ in
         # handlerCommandDir: this bead, pg2-pteab.
         inherit handlerCommandDir specFiles;
         lib.renderWrapSpec = renderWrapSpec;
+        lib.checkRenderedScript = checkRenderedScript;
         inherit claudeBaseline;
         poolConfigFiles =
           lib.optionalAttrs cfg.pool.enable { handler = poolConfigFile; }

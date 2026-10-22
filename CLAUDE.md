@@ -345,7 +345,7 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
   entry in `.pg-router/config.toml` (or `pg-router config --show`'s "roles" listing) carries ONLY
   `name`/`binds`/`enabled` — never the command argv (command-type) or actor/prompt/completion
   policy (ccpool-type). Those render into one JSON file per role under
-  `pg-router-ccpool-handler`'s `handlerCommandDir` (a `linkFarm`, consumed via
+  `pg-router-ccpool-handler`'s `handlerCommandDir` (a directory of symlinks, built only after every role file passes `validate` and every spec passes `pg-wrap check`; consumed via
   `pg-router-ccpool-handler dispatch --role-config <dir>/<role>.json`; find the live dir from a
   running handler process's argv, e.g. `ps aux | grep pg-router-ccpool-handler`). Reading
   `config.toml`/`config --show` alone CANNOT tell you what a role actually executes — cat the

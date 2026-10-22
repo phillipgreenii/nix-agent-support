@@ -7634,6 +7634,73 @@
                     touch $out
                   '';
 
+                  # checkRenderedScript (bead pg2-12gr4.8.32): the build-time check
+                  # `handlerCommandDir` runs over every rendered spec and role file.
+                  # Expected-failure idiom (as test-claude-plugin-binary-default-parity):
+                  # the files are written inside this runCommand and the script must
+                  # FAIL on the bad ones, naming the file, and pass on the clean ones.
+                  # (builtins.tryEval cannot do this: it catches an evaluation error,
+                  # never a failed build.)
+                  checkRenderedScript =
+                    twoRoles.phillipgreenii.programs.pg-router-ccpool-handler.lib.checkRenderedScript;
+                  checkRenderedCheck =
+                    pkgs.runCommand "test-pg-router-ccpool-handler-check-rendered"
+                      {
+                        inherit checkRenderedScript;
+                      }
+                      ''
+                        set -euo pipefail
+                        mkdir fx
+                        cat > fx/clean.toml <<'EOF'
+                        schema_version = 1
+                        wrap = []
+                        exec = ["${pkgs.coreutils}/bin/true"]
+                        EOF
+                        cat > fx/relative.toml <<'EOF'
+                        schema_version = 1
+                        wrap = ["relative/env K=1"]
+                        exec = ["${pkgs.coreutils}/bin/true"]
+                        EOF
+                        echo '{"name":"clean","type":"command","command":{"argv":["/bin/true"]}}' > fx/clean.json
+                        echo '{"name":"neg","type":"command","command":{"argv":["/bin/true"]},"bogusKey":1}' > fx/bogus.json
+
+                        # Clean spec + clean role file: exit 0.
+                        "$checkRenderedScript" --spec fx/clean.toml --role fx/clean.json
+                        "$checkRenderedScript"
+
+                        # Spec with a relative first word: exit non-zero, naming the file.
+                        if "$checkRenderedScript" --spec fx/relative.toml 2>neg-spec.log; then
+                          echo "FAIL: a spec with a relative first word passed" >&2
+                          exit 1
+                        fi
+                        grep -q "fx/relative.toml" neg-spec.log
+
+                        # Role file with an unknown top-level key: exit non-zero, naming the file.
+                        if "$checkRenderedScript" --role fx/bogus.json 2>neg-role.log; then
+                          echo "FAIL: a role file with an unknown key passed" >&2
+                          exit 1
+                        fi
+                        grep -q "fx/bogus.json" neg-role.log
+                        grep -q "bogusKey" neg-role.log
+
+                        # One bad file among clean ones still fails, and the clean ones are not blamed.
+                        if "$checkRenderedScript" --spec fx/clean.toml --role fx/bogus.json --role fx/clean.json 2>neg-mixed.log; then
+                          echo "FAIL: a mixed run with a bad role file passed" >&2
+                          exit 1
+                        fi
+                        grep -q "fx/bogus.json" neg-mixed.log
+                        if grep -q "fx/clean" neg-mixed.log; then
+                          echo "FAIL: a clean file was blamed" >&2
+                          exit 1
+                        fi
+
+                        # An unknown argument is a usage error (exit 2), never a pass.
+                        rc=0
+                        "$checkRenderedScript" --bogus x 2>/dev/null || rc=$?
+                        [ "$rc" -eq 2 ]
+                        touch $out
+                      '';
+
                   # Case 1: a spec role whose pool's `settings.claude.bin` is overridden.
                   wrapOverriddenFired = wrapFired (evalHM {
                     enable = true;
@@ -7744,6 +7811,7 @@
                           wrapHandlerPoolConfig
                           k31SpecFile
                           k31SpecCheck
+                          checkRenderedCheck
                           k31WrapJson
                           handlerCommandDir
                           emptyHandlerCommandDir
@@ -7971,6 +8039,10 @@
                         # sets OTEL_SERVICE_NAME; keep carries TMUX, TMUX_PANE and the
                         # markers; the baseline wrap is ONE env PATH=... entry.
                         test -f "$k31SpecCheck"
+                        # checkRenderedScript (bead pg2-12gr4.8.32): its expected-failure cases ran
+                        # as the build of checkRenderedCheck; handlerCommandDir itself was built
+                        # through the same script, over every fixture role above.
+                        test -f "$checkRenderedCheck"
                         jq -e '. | length == 1 and (.[0] | type == "array" and (.[0] | endswith("/bin/env")) and (.[1] | startswith("PATH=/nix/store/")))' <<<"$k31WrapJson" >/dev/null
                         k31_json="$(toml2json "$k31SpecFile")"
                         jq -e '[.wrap[] | (if type == "array" then .[0] else (split(" ")[0]) end) | startswith("/nix/store/")] | all' <<<"$k31_json" >/dev/null
