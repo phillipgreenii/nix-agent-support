@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -2530,5 +2531,128 @@ func TestRenderNudge_notDontAsk_omitsProtectedPathNotice(t *testing.T) {
 	got := r.renderNudge(role.CCPool, DispatchContext{Role: role, Item: item.Item{ID: "pg2-x"}}, "/wt")
 	if strings.Contains(got, prompt.ProtectedPathNotice()) {
 		t.Fatalf("non-dontAsk nudge must not carry the notice: %q", got)
+	}
+}
+
+// launchEnvMeta dispatches one fresh launch of feedbackRole with the given
+// sessionEnv and returns the env and meta the (fake) ccpool Ensure received.
+func launchEnvMeta(t *testing.T, sessionEnv map[string]string, it item.Item) (env, meta map[string]string) {
+	t.Helper()
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := feedbackRole(cfg)
+	role.SessionEnv = sessionEnv
+	display := role.DisplayName(cfg.SessionPrefix, it.ID)
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{it.ID: {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{},
+		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
+	}}
+	d := DispatchContext{Role: role, Item: it, EventID: "evt-1"}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "att-1"
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(cc.Ensured) != 1 {
+		t.Fatalf("want exactly one launch, Ensured=%v", cc.Ensured)
+	}
+	return cc.EnsuredEnv, cc.EnsuredMeta
+}
+
+// INV-CCH-33 / INV-CCH-32: every sessionEnv entry reaches the ccpool launch
+// (ccpool new --env) unchanged, together with the adapter markers and the three
+// PG_ROUTER_* item-context variables taken from the item's ID and Type.
+func TestDispatch_launchEnv_sessionEnvAndItemContext(t *testing.T) {
+	env, _ := launchEnvMeta(t,
+		map[string]string{"K12_PROBE": "yes", "PG_WRAP_SPEC": "/etc/spec with space.toml", "EMPTY_VALUE": ""},
+		item.Item{ID: "zr-c", Type: "task", Title: "free text title"})
+	for k, want := range map[string]string{
+		"K12_PROBE":           "yes",
+		"PG_WRAP_SPEC":        "/etc/spec with space.toml",
+		"EMPTY_VALUE":         "",
+		"PG_ROUTER_ROLE":      "feedback",
+		"PG_ROUTER_ITEM_ID":   "zr-c",
+		"PG_ROUTER_ITEM_TYPE": "task",
+		"BEADS_ACTOR":         "pgii-pool__process-feedback",
+	} {
+		if got, ok := env[k]; !ok || got != want {
+			t.Errorf("launch env[%s] = %q (present=%v), want %q", k, got, ok, want)
+		}
+	}
+	for _, k := range []string{"BEADS_DIR", "WORKSPACE_ROOT"} {
+		if env[k] == "" {
+			t.Errorf("launch env must still carry %s; env=%v", k, env)
+		}
+	}
+	for k, v := range env {
+		if strings.Contains(v, "free text title") {
+			t.Errorf("the item title must not reach the launch env; %s=%q", k, v)
+		}
+	}
+	if len(env) != 9 {
+		t.Errorf("launch env = exactly 3 sessionEnv + 3 markers + 3 item context; got %d: %v", len(env), env)
+	}
+}
+
+// Without a sessionEnv the launch env is today's three markers plus the item
+// context, nothing more.
+func TestDispatch_launchEnv_noSessionEnv(t *testing.T) {
+	env, _ := launchEnvMeta(t, nil, item.Item{ID: "zr-c", Type: "task"})
+	got := make([]string, 0, len(env))
+	for k := range env {
+		got = append(got, k)
+	}
+	slices.Sort(got)
+	want := []string{"BEADS_ACTOR", "BEADS_DIR", "PG_ROUTER_ITEM_ID", "PG_ROUTER_ITEM_TYPE", "PG_ROUTER_ROLE", "WORKSPACE_ROOT"}
+	if !slices.Equal(got, want) {
+		t.Errorf("launch env keys = %v, want %v", got, want)
+	}
+}
+
+// Rollback pin (design section 10): sessionEnv and the item context are env
+// only. The meta the launch stamps (and so the --label set derived from it) is
+// exactly today's DispatchMeta, so a handler without sessionEnv support still
+// recognises and adopts a session this one started.
+func TestDispatch_launchMeta_unchangedBySessionEnv(t *testing.T) {
+	it := item.Item{ID: "zr-c", Type: "task"}
+	_, plain := launchEnvMeta(t, nil, it)
+	_, withEnv := launchEnvMeta(t, map[string]string{"K12_PROBE": "yes"}, it)
+	if !maps.Equal(plain, withEnv) {
+		t.Errorf("sessionEnv changed the launch meta:\n without=%v\n with   =%v", plain, withEnv)
+	}
+	want := ccpool.DispatchMeta("zr-c", "feedback", time.Unix(0, 0), 0, "evt-1", "")
+	for k, v := range want {
+		if k == ccpool.MetaKeyLaunchedAt || k == ccpool.MetaKeyLeaseUntil {
+			continue // time-valued; presence pinned below
+		}
+		if plain[k] != v {
+			t.Errorf("meta[%s] = %q, want %q", k, plain[k], v)
+		}
+	}
+	wantKeys := []string{
+		ccpool.MetaKeyBead, ccpool.MetaKeyEventID, ccpool.MetaKeyPool, ccpool.MetaKeyRole,
+	}
+	for _, k := range wantKeys {
+		if _, ok := plain[k]; !ok {
+			t.Errorf("meta lacks %s: %v", k, plain)
+		}
+	}
+	for k := range plain {
+		if strings.HasPrefix(k, "PG_ROUTER_") || k == "K12_PROBE" {
+			t.Errorf("env leaked into meta: %s", k)
+		}
+	}
+}
+
+// itemContextEnv returns exactly the three PG_ROUTER_* names, from the item's
+// ID and Type and never its Title.
+func TestItemContextEnv(t *testing.T) {
+	got := itemContextEnv("r1", item.Item{ID: "i-1", Type: "t", Title: "untrusted", Metadata: map[string]any{"a": "b"}})
+	want := map[string]string{"PG_ROUTER_ROLE": "r1", "PG_ROUTER_ITEM_ID": "i-1", "PG_ROUTER_ITEM_TYPE": "t"}
+	if !maps.Equal(got, want) {
+		t.Errorf("itemContextEnv = %v, want %v", got, want)
 	}
 }

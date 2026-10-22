@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -638,5 +639,98 @@ func TestLoadRole_effort(t *testing.T) {
 				t.Errorf("Effort = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+const sessionEnvCCPoolBlock = `"ccpool":{"actor":"a","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"p"}`
+
+// INV-CCH-32/33: the per-role JSON decodes strictBaseEnv (bool, default false)
+// and sessionEnv (string map, default empty) onto roles.Role.
+func TestLoadRole_decodesSessionEnvAndStrictBaseEnv(t *testing.T) {
+	role, err := loadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","strictBaseEnv":true,"sessionEnv":{"K12_PROBE":"yes","PG_WRAP_SPEC":"/x.toml","EMPTY":""},`+sessionEnvCCPoolBlock+`}`))
+	if err != nil {
+		t.Fatalf("loadRole: %v", err)
+	}
+	if !role.StrictBaseEnv {
+		t.Error("StrictBaseEnv = false, want true")
+	}
+	want := map[string]string{"K12_PROBE": "yes", "PG_WRAP_SPEC": "/x.toml", "EMPTY": ""}
+	if !reflect.DeepEqual(role.SessionEnv, want) {
+		t.Errorf("SessionEnv = %v, want %v", role.SessionEnv, want)
+	}
+}
+
+func TestLoadRole_sessionEnvAndStrictBaseEnvAbsentAreZero(t *testing.T) {
+	role, err := loadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool",`+sessionEnvCCPoolBlock+`}`))
+	if err != nil {
+		t.Fatalf("loadRole: %v", err)
+	}
+	if role.StrictBaseEnv {
+		t.Error("StrictBaseEnv = true, want false when absent")
+	}
+	if len(role.SessionEnv) != 0 {
+		t.Errorf("SessionEnv = %v, want empty when absent", role.SessionEnv)
+	}
+}
+
+// strictBaseEnv on a ccpool role and sessionEnv on a command role are ignored at
+// dispatch, never a load error (validate warns, in a later packet).
+func TestLoadRole_crossTypeKeysAreNotLoadErrors(t *testing.T) {
+	if _, err := loadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","strictBaseEnv":true,`+sessionEnvCCPoolBlock+`}`)); err != nil {
+		t.Errorf("strictBaseEnv on a ccpool role: %v", err)
+	}
+	role, err := loadRole(mustWriteRoleFile(t, `{"name":"c","type":"command","sessionEnv":{"K":"v"},"strictBaseEnv":true,"command":{"argv":["/bin/true"]}}`))
+	if err != nil {
+		t.Fatalf("sessionEnv on a command role: %v", err)
+	}
+	if !role.StrictBaseEnv || role.SessionEnv["K"] != "v" {
+		t.Errorf("command role = %+v", role)
+	}
+}
+
+// A sessionEnv key that collides with an adapter marker (including any
+// PG_ROUTER_*), is empty, or contains = fails the load, naming the role file and
+// the key. The collision test is case-sensitive.
+func TestLoadRole_rejectsBadSessionEnvKeys(t *testing.T) {
+	for _, tc := range []struct{ name, key, wantKey string }{
+		{"beads-actor", "BEADS_ACTOR", "BEADS_ACTOR"},
+		{"beads-dir", "BEADS_DIR", "BEADS_DIR"},
+		{"workspace-root", "WORKSPACE_ROOT", "WORKSPACE_ROOT"},
+		{"pg-router-role", "PG_ROUTER_ROLE", "PG_ROUTER_ROLE"},
+		{"pg-router-item-id", "PG_ROUTER_ITEM_ID", "PG_ROUTER_ITEM_ID"},
+		{"pg-router-other", "PG_ROUTER_ANYTHING", "PG_ROUTER_ANYTHING"},
+		{"pg-router-bare-prefix", "PG_ROUTER_", "PG_ROUTER_"},
+		{"empty", "", `""`},
+		{"equals", "A=B", "A=B"},
+		{"leading-equals", "=X", "=X"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := mustWriteRoleFile(t, `{"name":"w","type":"ccpool","sessionEnv":{"`+tc.key+`":"v"},`+sessionEnvCCPoolBlock+`}`)
+			_, err := loadRole(p)
+			if err == nil {
+				t.Fatalf("key %q: loadRole succeeded, want a load error", tc.key)
+			}
+			for _, want := range []string{p, "sessionEnv", tc.wantKey} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q must name %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// Env var names are case-sensitive, so a lowercase near-miss is a valid key.
+func TestLoadRole_sessionEnvCollisionIsCaseSensitive(t *testing.T) {
+	for _, k := range []string{"beads_actor", "pg_router_role", "PG_ROUTE", "XPG_ROUTER_ROLE"} {
+		if _, err := loadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","sessionEnv":{"`+k+`":"v"},`+sessionEnvCCPoolBlock+`}`)); err != nil {
+			t.Errorf("key %q must load: %v", k, err)
+		}
+	}
+}
+
+// A non-string sessionEnv value is a decode error (a string-to-string map).
+func TestLoadRole_sessionEnvNonStringValueFails(t *testing.T) {
+	if _, err := loadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","sessionEnv":{"K":1},`+sessionEnvCCPoolBlock+`}`)); err == nil {
+		t.Error("a numeric sessionEnv value must fail to decode")
 	}
 }

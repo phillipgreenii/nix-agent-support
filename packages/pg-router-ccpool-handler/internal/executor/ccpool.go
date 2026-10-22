@@ -257,14 +257,24 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		r.prefetch(ctx, *pf, d, wt)
 	}
 
-	env := map[string]string{
-		"BEADS_ACTOR": cc.Actor,
-		// BEADS_DIR stays repo-rooted: worktrees share .git but the beads dolt store
-		// is repo-rooted, so the worker must read/write the SAME bead store, just on
-		// its own working tree (pg2-yukh).
-		"BEADS_DIR":      beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads",
-		"WORKSPACE_ROOT": wt,
+	// The launch env (INV-CCH-32/33). This is the ONE launch path (a resume goes
+	// through it too), so every launch carries the role's CURRENT sessionEnv. The
+	// sessionEnv entries are passed through uninterpreted and go in first: the
+	// adapter markers and the item context are set after them and so always win
+	// (loadRole already rejects a sessionEnv key that collides with one).
+	env := make(map[string]string, len(d.Role.SessionEnv)+6)
+	for k, v := range d.Role.SessionEnv {
+		env[k] = v
 	}
+	for k, v := range itemContextEnv(d.Role.Name, d.Item) {
+		env[k] = v
+	}
+	env["BEADS_ACTOR"] = cc.Actor
+	// BEADS_DIR stays repo-rooted: worktrees share .git but the beads dolt store
+	// is repo-rooted, so the worker must read/write the SAME bead store, just on
+	// its own working tree (pg2-yukh).
+	env["BEADS_DIR"] = beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads"
+	env["WORKSPACE_ROOT"] = wt
 	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID, dispatchHeadSHA(d.Item))); err != nil {
 		// Could not even create the session. The bead was never dispatched, so we
 		// do not flag/unclaim it on a transient hiccup. But a bead that fails to

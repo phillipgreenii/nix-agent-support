@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -754,5 +755,42 @@ func TestNewCLIRunnerDefaultPool_runClosureStripsInheritedPool(t *testing.T) {
 	}
 	if string(stdout) != "<unset>|kept" {
 		t.Errorf("child env = %q, want CCPOOL_POOL unset and other vars kept", stdout)
+	}
+}
+
+// A launch's env map (the role's sessionEnv, the adapter markers and the item
+// context) reaches `ccpool new` as one --env K=V per key, sorted and unchanged,
+// and the --label set stays exactly pgrouter.role + pgrouter.pool whatever the
+// env carries (pg2-12gr4.8.7; the rollback pin: an older handler still adopts
+// the session).
+func TestEnsure_argv_envUnchangedLabelsUnchanged(t *testing.T) {
+	var got [][]string
+	cli := &CLIRunner{}
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	env := map[string]string{
+		"PG_ROUTER_ROLE": "worker", "PG_ROUTER_ITEM_ID": "zr-1", "K12_PROBE": "yes", "WITH_EQ": "a=b c",
+	}
+	meta := DispatchMeta("zr-1", "worker", time.Time{}, 0, "", "")
+	if err := cli.Ensure(context.Background(), "s", "", "/r", env, meta); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	var gotEnv, gotLabels []string
+	for i, a := range got[0] {
+		switch a {
+		case "--env":
+			gotEnv = append(gotEnv, got[0][i+1])
+		case "--label":
+			gotLabels = append(gotLabels, got[0][i+1])
+		}
+	}
+	wantEnv := []string{"K12_PROBE=yes", "PG_ROUTER_ITEM_ID=zr-1", "PG_ROUTER_ROLE=worker", "WITH_EQ=a=b c"}
+	if !slices.Equal(gotEnv, wantEnv) {
+		t.Errorf("--env = %v, want %v", gotEnv, wantEnv)
+	}
+	if want := []string{"pgrouter.role", "pgrouter.pool"}; !slices.Equal(gotLabels, want) {
+		t.Errorf("--label = %v, want %v", gotLabels, want)
 	}
 }

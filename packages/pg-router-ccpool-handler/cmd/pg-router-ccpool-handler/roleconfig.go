@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -42,9 +43,16 @@ const defaultBudgetStopEscalateAfter = 3
 // into internal/prompt's *template.Template form roles.CCPoolConfig/
 // CommandConfig actually carry.
 type roleFile struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"` // "ccpool" | "command"
-	CCPool *struct {
+	Name string `json:"name"`
+	Type string `json:"type"` // "ccpool" | "command"
+	// StrictBaseEnv (INV-CCH-32): the command-role strict switch; absent = false.
+	// Ignored at dispatch for a ccpool role.
+	StrictBaseEnv bool `json:"strictBaseEnv"`
+	// SessionEnv (INV-CCH-33): a generic string-to-string map the ccpool adapter
+	// passes through `ccpool new --env`; absent = empty. Ignored at dispatch for
+	// a command role. Keys are checked by validateSessionEnv at load.
+	SessionEnv map[string]string `json:"sessionEnv"`
+	CCPool     *struct {
 		Actor           string                   `json:"actor"`
 		SkillMD         string                   `json:"skillMD"`
 		Completion      roles.Completion         `json:"completion"`
@@ -132,7 +140,13 @@ func loadRole(path string) (roles.Role, error) {
 	if err := json.Unmarshal(data, &rf); err != nil {
 		return roles.Role{}, fmt.Errorf("decode role config %s: %w", path, err)
 	}
-	r := roles.Role{Name: rf.Name, Type: rf.Type}
+	if err := validateSessionEnv(rf.SessionEnv); err != nil {
+		return roles.Role{}, fmt.Errorf("role config %s: sessionEnv: %w", path, err)
+	}
+	r := roles.Role{Name: rf.Name, Type: rf.Type, StrictBaseEnv: rf.StrictBaseEnv}
+	if len(rf.SessionEnv) > 0 {
+		r.SessionEnv = rf.SessionEnv
+	}
 	switch rf.Type {
 	case "ccpool":
 		if rf.CCPool == nil {
@@ -241,6 +255,42 @@ func loadRole(path string) (roles.Role, error) {
 		return roles.Role{}, fmt.Errorf("role config %s: unknown type %q (want ccpool or command)", path, rf.Type)
 	}
 	return r, nil
+}
+
+// sessionEnvReserved are the env names the ccpool adapter sets itself on every
+// launch; a sessionEnv key may not collide with them (the PG_ROUTER_ item-context
+// names are covered by the prefix test in validateSessionEnv).
+var sessionEnvReserved = map[string]bool{
+	"BEADS_ACTOR":    true,
+	"BEADS_DIR":      true,
+	"WORKSPACE_ROOT": true,
+}
+
+// validateSessionEnv enforces the load-time rules on a role's sessionEnv keys
+// (INV-CCH-33): a key MUST be non-empty, MUST NOT contain "=", and MUST NOT
+// collide with an adapter marker (BEADS_ACTOR, BEADS_DIR, WORKSPACE_ROOT, or any
+// name starting PG_ROUTER_). The collision test is case-sensitive, because env
+// var names are. Keys are checked in sorted order so the error is deterministic.
+// Values are passed through uninterpreted and are not checked.
+func validateSessionEnv(env map[string]string) error {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		switch {
+		case k == "":
+			return fmt.Errorf("key \"\" is empty")
+		case strings.Contains(k, "="):
+			return fmt.Errorf("key %q contains =", k)
+		case sessionEnvReserved[k]:
+			return fmt.Errorf("key %q collides with an adapter-set variable", k)
+		case strings.HasPrefix(k, "PG_ROUTER_"):
+			return fmt.Errorf("key %q collides with the reserved PG_ROUTER_ prefix", k)
+		}
+	}
+	return nil
 }
 
 // loadConfig reads and decodes the launch/prompt config.Config from path,
