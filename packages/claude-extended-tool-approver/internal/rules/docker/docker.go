@@ -10,9 +10,11 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
+// safeSubcommands are approved unconditionally. rm, rmi and stop are NOT
+// here: they are destructive and are approved only against objects the session
+// itself created (owned.go, pg2-04xmm, agent rule C-3).
 var safeSubcommands = map[string]bool{
-	"build": true, "start": true, "stop": true,
-	"rm": true, "rmi": true, "ps": true,
+	"build": true, "start": true, "ps": true,
 	"images": true, "logs": true, "inspect": true,
 }
 
@@ -54,10 +56,13 @@ func isBooleanFlagCluster(arg string) bool {
 type Rule struct {
 	exprEval hookio.Evaluator
 	pe       *patheval.PathEvaluator
+	// owned loads what the session transcript at path proves the session
+	// created. A field so a test can inject a fixture; New wires loadOwned.
+	owned func(path string) *ownedObjects
 }
 
 func New(eval hookio.Evaluator, pe *patheval.PathEvaluator) *Rule {
-	return &Rule{exprEval: eval, pe: pe}
+	return &Rule{exprEval: eval, pe: pe, owned: loadOwned}
 }
 
 func (r *Rule) Name() string {
@@ -87,6 +92,21 @@ func (r *Rule) evaluateDocker(pc cmdparse.ParsedCommand, input *hookio.HookInput
 	subcmd := firstNonFlag(args)
 	if subcmd == "" {
 		return hookio.NotApplicable()
+	}
+
+	// Prune verbs are never approved (agent rule C-3), owned objects or not.
+	if isPrune(args) {
+		return hookio.Refused(r.Name(), "docker: prune removes objects this session did not create; not auto-approved")
+	}
+
+	if verb, rest, ok := classifyGuarded(args); ok {
+		return r.evaluateGuarded(verb, rest, input)
+	}
+	if hasGlobalFlagsBeforeDestructive(args) {
+		// `docker -H tcp://x rm c`, `--context prod stop c`: the verb targets an
+		// engine this session never created objects on, and classifyGuarded only
+		// recognises the verb when it is args[0].
+		return hookio.Refused(r.Name(), "docker: destructive verb behind global flags is not auto-approved")
 	}
 
 	if safeSubcommands[subcmd] {
@@ -576,4 +596,39 @@ func firstNonFlag(args []string) string {
 		return a
 	}
 	return ""
+}
+
+// hasGlobalFlagsBeforeDestructive reports a command whose first arg is a flag
+// and which carries a destructive verb token later on.
+func hasGlobalFlagsBeforeDestructive(args []string) bool {
+	if len(args) == 0 || !strings.HasPrefix(args[0], "-") {
+		return false
+	}
+	for _, a := range args[1:] {
+		switch a {
+		case "rm", "rmi", "stop", "remove":
+			return true
+		}
+	}
+	return false
+}
+
+// evaluateGuarded approves a destructive verb only when every target is an
+// object the session's transcript proves it created (owned.go).
+func (r *Rule) evaluateGuarded(verb guardedVerb, rest []string, input *hookio.HookInput) (hookio.RuleResult, error) {
+	targets, ok := parseGuardedTargets(verb, rest)
+	if !ok {
+		return hookio.Refused(r.Name(), "docker: destructive verb needs literal targets (no expansion, unknown flag or no target); not auto-approved")
+	}
+	owned := r.owned(input.TranscriptPath)
+	for _, t := range targets {
+		if !owned.owns(verb.kind, t) {
+			return hookio.Refused(r.Name(), "docker: "+t+" was not created by this session; not auto-approved")
+		}
+	}
+	return hookio.RuleResult{
+		Decision: hookio.Approve,
+		Reason:   "docker: every target was created by this session",
+		Module:   r.Name(),
+	}, nil
 }
