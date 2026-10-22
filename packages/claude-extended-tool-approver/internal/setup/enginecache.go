@@ -89,7 +89,7 @@ func (c *EngineCache) EngineForCWD(cwd string) (eng *engine.Engine, stale bool) 
 
 	var built *engine.Engine
 	if !stale {
-		built = newEngineForCWDWithConfig(cwd, nil, c.config())
+		built = newEngineForCWDWithConfig(cwd, nil, nil, c.config())
 	}
 	c.byCWD[cwd] = &cachedCWD{engine: built, stale: stale}
 	return built, stale

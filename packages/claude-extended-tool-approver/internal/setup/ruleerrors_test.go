@@ -45,7 +45,7 @@ func chainForErrorTests(t *testing.T) []hookio.RuleModule {
 	pe := patheval.NewWithCWD(projectRoot, projectRoot)
 	eng := engine.New()
 	eng.SetPathEvaluator(pe)
-	chain := RuleChain(eng, pe, cfg, nil)
+	chain := RuleChain(eng, pe, cfg, nil, nil)
 	eng.RegisterRules(chain...)
 	return chain
 }
@@ -127,6 +127,7 @@ func TestBashErrorSitesReportGenuineFailure(t *testing.T) {
 		"pnwf":               true,
 		"pg-nix-log-wrapped": true,
 		"kill-probe":         true,
+		"bgkill":             true,
 		"pg-ccaudit":         true,
 		"pg-connector":       true,
 		"rc-preflight":       true,

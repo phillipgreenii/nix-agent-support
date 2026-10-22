@@ -4495,7 +4495,9 @@
                 pname = "claude-extended-tool-approver-go-tests";
                 src = lib.cleanSource ./packages/claude-extended-tool-approver; # matches default.nix
                 gomod2nixToml = ./packages/claude-extended-tool-approver/gomod2nix.toml;
-                testDeps = [ pkgs.git ];
+                # procps: internal/rules/bgkill's FileStore tests probe real processes
+                # with ps (macOS ships /bin/ps; a Linux sandbox does not).
+                testDeps = [ pkgs.git ] ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
               };
 
               # claude-transcript — bead pg2-yyhan: this Pattern-A module had a
@@ -4551,7 +4553,9 @@
                   testDeps = [
                     pkgs.git
                     (pkgs.llm-agentsPkgs.rtk or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.rtk)
-                  ];
+                  ]
+                  # procps: see claude-extended-tool-approver-go-tests above.
+                  ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
                   testFlags = [
                     "-tags"
                     "integration"
@@ -4647,8 +4651,8 @@
                       pkgs.fd
                       pkgs.lsof
                       pkgs.prek
-                      # This repo's own CLIs (overlay attrs; bgcheck and bgwait ship in bg-tools):
-                      pkgs.bg-tools # bgcheck, bgwait
+                      # This repo's own CLIs (overlay attrs; bgcheck, bgwait and bgkill ship in bg-tools):
+                      pkgs.bg-tools # bgcheck, bgwait, bgkill
                       pkgs.integrate-branch-support
                       pkgs.wtdone
                       pkgs.handoff-create

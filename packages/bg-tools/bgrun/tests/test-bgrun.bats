@@ -105,3 +105,31 @@ fi
   wait_for_file "$alt/d1.exit"
   [ ! -e "$BG_DIR/d1.pid" ]
 }
+
+@test "meta records the launching session FIRST when CLAUDE_CODE_SESSION_ID is set" {
+  create_cmd_wrapper bgrun
+  CLAUDE_CODE_SESSION_ID="sess-123" run "$TEST_DIR/run_bgrun" s1 -- sleep 30
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$BG_DIR/s1.meta")" = "session: sess-123" ]
+  kill "$(cat "$BG_DIR/s1.pid")" 2>/dev/null || true
+}
+
+@test "meta carries no session line when CLAUDE_CODE_SESSION_ID is unset" {
+  create_cmd_wrapper bgrun
+  unset CLAUDE_CODE_SESSION_ID
+  run "$TEST_DIR/run_bgrun" s2 -- true
+  [ "$status" -eq 0 ]
+  wait_for_file "$BG_DIR/s2.exit"
+  ! grep -q "^session:" "$BG_DIR/s2.meta"
+}
+
+@test "meta pins the recorded pid's start time while the job is alive" {
+  create_cmd_wrapper bgrun
+  run "$TEST_DIR/run_bgrun" p1 -- sleep 30
+  [ "$status" -eq 0 ]
+  pid="$(cat "$BG_DIR/p1.pid")"
+  expected="$(ps -p "$pid" -o lstart= | sed -e 's/^ *//' -e 's/ *$//')"
+  [ -n "$expected" ]
+  grep -qxF "pidstart: $expected" "$BG_DIR/p1.meta"
+  kill "$pid" 2>/dev/null || true
+}

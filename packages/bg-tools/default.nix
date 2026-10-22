@@ -24,6 +24,11 @@ let
     inherit (bashBuilders) mkBashScript;
     inherit pkgs bg-tools-lib testSupport;
   };
+
+  bgkill = pkgs.callPackage ./bgkill {
+    inherit (bashBuilders) mkBashScript;
+    inherit pkgs bg-tools-lib testSupport;
+  };
 in
 {
   inherit
@@ -31,13 +36,15 @@ in
     bgrun
     bgcheck
     bgwait
+    bgkill
     ;
-  packages = bgrun.packages ++ bgcheck.packages ++ bgwait.packages;
-  tldr = bgrun.tldr ++ bgcheck.tldr ++ bgwait.tldr;
+  packages = bgrun.packages ++ bgcheck.packages ++ bgwait.packages ++ bgkill.packages;
+  tldr = bgrun.tldr ++ bgcheck.tldr ++ bgwait.tldr ++ bgkill.tldr;
   checks = {
     test-bg-tools-lib = bg-tools-lib.check;
     test-bgrun = bgrun.check;
     test-bgcheck = bgcheck.check;
     test-bgwait = bgwait.check;
+    test-bgkill = bgkill.check;
   };
 }

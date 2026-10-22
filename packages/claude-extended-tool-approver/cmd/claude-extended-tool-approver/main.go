@@ -194,9 +194,9 @@ func handlePreToolUse(input *hookio.HookInput) {
 
 	var eng *engine.Engine
 	if store != nil {
-		eng = setup.NewEngineForCWDWithShellStore(input.CWD, store)
+		eng = setup.NewEngineForCWDLive(input.CWD, store)
 	} else {
-		eng = setup.NewEngineForCWD(input.CWD)
+		eng = setup.NewEngineForCWDLive(input.CWD, nil)
 	}
 	// An autonomous worker has no human to answer a permission dialog, so the engine
 	// turns any Ask into a deny with instructions (hookio.NeverAskWhenUnattended). The

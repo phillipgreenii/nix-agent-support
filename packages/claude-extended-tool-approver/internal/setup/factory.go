@@ -7,6 +7,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/assume"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/bgkill"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/buildtools"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/claudetools"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
@@ -47,7 +48,7 @@ import (
 // no persistent shell store is available. The killshell rule then has no
 // ownership store and fails secure (Ask).
 func NewEngineForCWD(cwd string) *engine.Engine {
-	return newEngineForCWD(cwd, nil)
+	return newEngineForCWD(cwd, nil, nil)
 }
 
 // NewEngineForCWDWithShellStore is like NewEngineForCWD but injects a persistent
@@ -55,10 +56,18 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 // agent-tracked background shell is auto-approved. The live PreToolUse handler
 // uses this once it has opened the ask-log store.
 func NewEngineForCWDWithShellStore(cwd string, shells killshell.ShellStore) *engine.Engine {
-	return newEngineForCWD(cwd, shells)
+	return newEngineForCWD(cwd, shells, nil)
 }
 
-func newEngineForCWD(cwd string, shells killshell.ShellStore) *engine.Engine {
+// NewEngineForCWDLive is NewEngineForCWDWithShellStore plus the bgrun job store
+// the bgkill rule reads (bgrun's own state directory). The live PreToolUse
+// handler uses it; offline replay does not, so the bgkill rule abstains there.
+// shells MAY be nil, as for NewEngineForCWD.
+func NewEngineForCWDLive(cwd string, shells killshell.ShellStore) *engine.Engine {
+	return newEngineForCWD(cwd, shells, bgkill.NewFileStore())
+}
+
+func newEngineForCWD(cwd string, shells killshell.ShellStore, jobs bgkill.JobStore) *engine.Engine {
 	// Load the consumer config ONCE PER CALL and inject its structured
 	// sub-configs into the kubectl, build-tools, ssh, vault, curl, and monorepo
 	// rules (DI, ADR 0033), so the base binary stays generic and all consumer
@@ -74,7 +83,7 @@ func newEngineForCWD(cwd string, shells killshell.ShellStore) *engine.Engine {
 	// evaluate/baseline/compare CLI subcommands, which replay hundreds of
 	// thousands of rows against a small set of distinct CWDs in one process.
 	cfg := configrules.Load(configrules.DefaultPath())
-	return newEngineForCWDWithConfig(cwd, shells, cfg)
+	return newEngineForCWDWithConfig(cwd, shells, jobs, cfg)
 }
 
 // newEngineForCWDWithConfig is newEngineForCWD with the consumer config
@@ -84,7 +93,7 @@ func newEngineForCWD(cwd string, shells killshell.ShellStore) *engine.Engine {
 // per CWD: the project-root walk, the path evaluator, the sandbox config read,
 // and the ~17 rule modules RuleChain constructs — only the config PARSE is
 // shared.
-func newEngineForCWDWithConfig(cwd string, shells killshell.ShellStore, cfg *configrules.Config) *engine.Engine {
+func newEngineForCWDWithConfig(cwd string, shells killshell.ShellStore, jobs bgkill.JobStore, cfg *configrules.Config) *engine.Engine {
 	projectRoot := patheval.DetectProjectRoot(cwd)
 	pe := patheval.NewWithCWD(projectRoot, cwd)
 
@@ -97,7 +106,7 @@ func newEngineForCWDWithConfig(cwd string, shells killshell.ShellStore, cfg *con
 		eng.SetTrace(true)
 	}
 
-	eng.RegisterRules(RuleChain(eng, pe, cfg, shells)...)
+	eng.RegisterRules(RuleChain(eng, pe, cfg, shells, jobs)...)
 
 	return eng
 }
@@ -142,8 +151,9 @@ func newEngineForCWDWithConfig(cwd string, shells killshell.ShellStore, cfg *con
 // eng is passed back in because the recursive rules (nix, kubectl, envvars,
 // docker) take the engine as their Evaluator so a nested command/substitution
 // body can be re-evaluated through the whole chain. shells MAY be nil — the
-// killshell rule then fails secure (Ask).
-func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.Config, shells killshell.ShellStore) []hookio.RuleModule {
+// killshell rule then fails secure (Ask). jobs MAY be nil — the bgkill rule then
+// never approves (offline replay).
+func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.Config, shells killshell.ShellStore, jobs bgkill.JobStore) []hookio.RuleModule {
 	nixRule := nix.NewWithEvaluator(eng)
 	dockerRule := docker.New(eng, pe)
 
@@ -299,6 +309,12 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// excludes it) — it is placed here, alongside pnworkspace, because both
 		// are small fixed-allowlist Bash-command classifiers.
 		killprobe.New(),
+		// bgkill approves `bgkill NAME` for a still-running bgrun job THIS session
+		// launched (bead pg2-1kygx, ADR 0104; operator ruling Phillip 2026-10-22).
+		// Raw `kill <pid>` stays unapproved. jobs may be nil (offline replay) — the
+		// rule then never approves. `bgkill` is recognized by no other rule here, so
+		// ordering relative to its neighbours does not matter.
+		bgkill.New(jobs),
 		// pg-ccaudit approves the first-party pg-ccaudit CLI's command family
 		// per its own main.go usage text's read-only/ingest split (bead
 		// pg2-xu4aq, follow-up to pg2-amzvw's plugin-conformance-check

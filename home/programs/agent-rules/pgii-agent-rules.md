@@ -133,6 +133,7 @@ Primary branch = `pgii-integrate-branch.primaryBranch` (git config) → `git sym
 
 - **CRITICAL**: NEVER wait by foreground `sleep` (policy-blocked).
 - To wait on a `bgrun` job: `bgwait NAME --timeout 540`, with an explicit Bash `timeout: 600000` (the Bash default of 120000 ms kills a long wait); exit 2 means still running, so call it again. MUST NOT call `bgcheck` more than once between `bgwait` calls; MUST NOT poll with `sleep`, `date`, `tail` or repeated `bgcheck`.
+- To stop a `bgrun` job you started: `bgkill NAME` (SIGTERM to the job's own process tree; refuses a pid that is no longer the bgrun launcher). SHOULD NOT stop it with a raw `kill <pid>`, `pkill` or `killall`: only `bgkill` is auto-approved for a job of the current session, and the recorded launcher pid is not the payload.
 - To wait on any other background job's output or a file: `run_in_background`, then Monitor with an until-loop; MUST NOT poll with `sleep` plus `tail`/`cat`/`wc`.
 - To wait on external state (PR merge, CI): Monitor with an until-loop, or one check at a delay matched to the state's change rate; never `sleep`-then-check.
 

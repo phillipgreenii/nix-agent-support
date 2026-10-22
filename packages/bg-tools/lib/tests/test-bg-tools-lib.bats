@@ -102,3 +102,45 @@ load_lib() {
   [ "${lines[0]}" = "a" ]
   [ "${lines[1]}" = "b.2" ]
 }
+
+@test "bg_meta_get returns the FIRST line carrying the key, and fails when absent" {
+  load_lib
+  mkdir -p "$BG_DIR"
+  printf 'session: first\ncmd: echo a\nsession: second\n' >"$BG_DIR/m.meta"
+  run bg_meta_get m session
+  [ "$status" -eq 0 ]
+  [ "$output" = "first" ]
+  run bg_meta_get m start
+  [ "$status" -eq 1 ]
+  run bg_meta_get nofile session
+  [ "$status" -eq 1 ]
+}
+
+@test "bg_proc_start and bg_proc_command describe a live pid and are empty for a dead one" {
+  load_lib
+  [ -n "$(bg_proc_start $$)" ]
+  [ -n "$(bg_proc_command $$)" ]
+  bash -c 'exit 0' &
+  dead=$!
+  wait "$dead"
+  [ -z "$(bg_proc_start "$dead")" ]
+  [ -z "$(bg_proc_command "$dead")" ]
+}
+
+@test "bg_descendants lists every transitive child deepest-first, excluding the root" {
+  load_lib
+  bash -c 'bash -c "sleep 30 & wait" & wait' &
+  root=$!
+  # Bounded wait for the three-deep tree to exist.
+  for _ in $(seq 1 100); do
+    [ "$(bg_descendants "$root" | wc -l)" -ge 2 ] && break
+    sleep 0.05
+  done
+  mapfile -t got < <(bg_descendants "$root")
+  [ "${#got[@]}" -eq 2 ]
+  [[ "$(bg_proc_command "${got[0]}")" == *"sleep"* ]] # the leaf comes first
+  for p in "${got[@]}"; do
+    [ "$p" != "$root" ]
+  done
+  kill "${got[0]}" "${got[1]}" "$root" 2>/dev/null || true
+}

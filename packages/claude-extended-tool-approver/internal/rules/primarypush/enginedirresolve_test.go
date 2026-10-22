@@ -64,7 +64,7 @@ func chainEngine(projectRoot, cwd string) *engine.Engine {
 	pe := patheval.NewWithCWD(projectRoot, cwd)
 	eng := engine.New()
 	eng.SetPathEvaluator(pe)
-	eng.RegisterRules(setup.RuleChain(eng, pe, configrules.Load(""), nil)...)
+	eng.RegisterRules(setup.RuleChain(eng, pe, configrules.Load(""), nil, nil)...)
 	return eng
 }
 

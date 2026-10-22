@@ -8,7 +8,8 @@ Usage: bgrun [OPTIONS] NAME -- COMMAND [ARGS...]
 
 Runs COMMAND detached, appending combined output to a deterministic log, and
 records the command's TRUE exit code in NAME.exit when it finishes. Check on it
-(from this session or any other) with `bgcheck NAME`. The exit file is the only
+(from this session or any other) with `bgcheck NAME`; stop it with `bgkill NAME`.
+NAME.meta also records the launching session ($CLAUDE_CODE_SESSION_ID, when set). The exit file is the only
 trustworthy completion signal — never infer success from the launcher's exit
 code or the log's tail.
 
@@ -98,6 +99,11 @@ esac
 # Replace any state a previous, finished run of the same name left behind.
 rm -f "$EXITF"
 {
+  # session FIRST (see bg-tools-lib.bash): `bgkill` and the ceta bgkill rule
+  # use it to tell a job THIS session started from anyone else's.
+  if [[ -n ${CLAUDE_CODE_SESSION_ID:-} ]]; then
+    echo "session: $CLAUDE_CODE_SESSION_ID"
+  fi
   printf 'cmd:'
   printf ' %q' "${PAYLOAD[@]}"
   printf '\n'
@@ -118,6 +124,12 @@ rm -f "$EXITF"
 ) </dev/null >>"$LOG" 2>&1 &
 BG_PID=$!
 echo "$BG_PID" >"$PIDF"
+# Identity of the recorded pid (a pid alone can be reused once the job is gone).
+# Empty when the job already finished, in which case there is nothing to pin.
+PIDSTART="$(bg_proc_start "$BG_PID")"
+if [[ -n $PIDSTART ]]; then
+  echo "pidstart: $PIDSTART" >>"$METAF"
+fi
 disown "$BG_PID" 2>/dev/null || true
 
 echo "$BG_NAME $BG_PID $LOG"

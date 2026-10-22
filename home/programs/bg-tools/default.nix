@@ -15,9 +15,9 @@ in
       defaultText = lib.literalExpression "config.phillipgreenii.programs.claude-code.enable";
       example = true;
       description = ''
-        Install the bgrun/bgcheck/bgwait background-job helpers. These serve Claude agent sessions
-        (launching long-running commands detached, then waiting on them with bgwait or peeking with bgcheck, without an
-        inherited process boundary), so they default on exactly when Claude is enabled.
+        Install the bgrun/bgcheck/bgwait/bgkill background-job helpers. These serve Claude agent sessions
+        (launching long-running commands detached, then waiting on them with bgwait, peeking with bgcheck or stopping
+        them with bgkill, without an inherited process boundary), so they default on exactly when Claude is enabled.
       '';
     };
     package = lib.mkPackageOption pkgs "bg-tools" { };
@@ -38,6 +38,10 @@ in
       bgwait = {
         platform = "common";
         source = "${cfg.package}/share/tldr/pages.common/bgwait.md";
+      };
+      bgkill = {
+        platform = "common";
+        source = "${cfg.package}/share/tldr/pages.common/bgkill.md";
       };
     };
   };

@@ -66,7 +66,7 @@ func buildFullEngineWithConfig(projectRoot, cwd, fixture string) *engine.Engine 
 	eng.SetPathEvaluator(pe)
 	// shells is nil: no persistent shell-ownership store offline, so the killshell
 	// rule fails secure (Ask) — the same posture as offline replay.
-	eng.RegisterRules(setup.RuleChain(eng, pe, cfg, nil)...)
+	eng.RegisterRules(setup.RuleChain(eng, pe, cfg, nil, nil)...)
 	return eng
 }
 

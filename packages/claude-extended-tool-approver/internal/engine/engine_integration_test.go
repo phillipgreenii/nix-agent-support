@@ -28,6 +28,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/engine"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/bgkill"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/git"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/killshell"
@@ -3078,12 +3079,27 @@ func TestIntegration_UnparseableSubstitutionNeverApproves(t *testing.T) {
 // injected into the killshell rule (the live PreToolUse handler's posture, versus
 // the nil-store offline-replay posture the other builders use).
 func buildFullEngineWithShells(projectRoot, cwd string, shells killshell.ShellStore) *engine.Engine {
+	return buildFullEngineWithStores(projectRoot, cwd, shells, nil)
+}
+
+// buildFullEngineWithStores additionally injects the bgrun job store the bgkill
+// rule reads (the live hook's posture; the other builders use the nil-store
+// offline-replay posture).
+func buildFullEngineWithStores(projectRoot, cwd string, shells killshell.ShellStore, jobs bgkill.JobStore) *engine.Engine {
 	cfg := configrules.Load(zrFixture)
 	pe := patheval.NewWithCWD(projectRoot, cwd)
 	eng := engine.New()
 	eng.SetPathEvaluator(pe)
-	eng.RegisterRules(setup.RuleChain(eng, pe, cfg, shells)...)
+	eng.RegisterRules(setup.RuleChain(eng, pe, cfg, shells, jobs)...)
 	return eng
+}
+
+// fakeJobStore is an in-memory bgkill.JobStore.
+type fakeJobStore map[string]bgkill.Job
+
+func (f fakeJobStore) Job(name string) (bgkill.Job, bool) {
+	j, ok := f[name]
+	return j, ok
 }
 
 // chainCase is a whole-chain assertion with an optional ORDERING half.
@@ -3516,6 +3532,54 @@ func TestIntegration_KillShellThroughChain(t *testing.T) {
 				got.Decision, got.Module, got.Reason)
 		}
 	})
+}
+
+// TestIntegration_BgkillThroughChain pins bgkill's place in the composition
+// (bead pg2-1kygx, ADR 0104): `bgkill NAME` of this session's still-running bgrun
+// job is approved BY the bgkill rule, while every raw-kill spelling, another
+// session's job, and any compound that smuggles a second command stay exactly as
+// gated as they were before the rule existed.
+func TestIntegration_BgkillThroughChain(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	const sess = "sess-A"
+	jobs := fakeJobStore{
+		"mine":   {Session: sess, LauncherAlive: true},
+		"theirs": {Session: "sess-B", LauncherAlive: true},
+	}
+	hook := func(eng *engine.Engine, cmd string) hookio.RuleResult {
+		b, _ := json.Marshal(hookio.BashToolInput{Command: cmd})
+		return eng.EvaluateHook(&hookio.HookInput{
+			ToolName: "Bash", CWD: projectRoot, ToolInput: b, SessionID: sess, PermissionMode: "auto",
+		})
+	}
+	live := buildFullEngineWithStores(projectRoot, projectRoot, nil, jobs)
+	replay := buildFullEngineWithStores(projectRoot, projectRoot, nil, nil)
+
+	if got := hook(live, "bgkill mine"); got.Decision != hookio.Approve || got.Module != "bgkill" {
+		t.Errorf("own live job: got %s/%s (%s), want approve/bgkill", got.Decision, got.Module, got.Reason)
+	}
+	for _, cmd := range []string{
+		"bgkill theirs",        // another session's job
+		"bgkill ghost",         // unrecorded
+		"bgkill --dir /x mine", // flags are not approved
+		"kill 12345",           // raw kill is deliberately not approved
+		"kill -TERM 12345",
+		"kill -9 12345",
+		"pkill -f mine",
+		"killall mine",
+		"bgkill mine; kill -9 12345", // a smuggled second command
+		"bgkill mine && kill 12345",
+	} {
+		got := hook(live, cmd)
+		if got.Decision == hookio.Approve {
+			t.Errorf("%q approved by %s (%s), want it gated exactly as before", cmd, got.Module, got.Reason)
+		}
+	}
+	// Offline replay has no job store: the rule never approves.
+	if got := hook(replay, "bgkill mine"); got.Decision == hookio.Approve {
+		t.Errorf("nil job store approved (%s)", got.Module)
+	}
 }
 
 // TestIntegration_SshVaultThroughChain exercises `ssh` and `vault` through the full
