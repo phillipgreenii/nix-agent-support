@@ -89,6 +89,14 @@ requires it; the details are here.
   read-refusal** on a saturated **read** verb (`status`, `mon.read`) it is too busy to serve right
   now — the core declining, not a participant, and nothing was accepted or attempted either way,
   so the caller simply retries later
+  (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-1`). A
+  **participant's** decline body MAY carry two further optional fields: a **kind** (`busy`, `fault`
+  or `neutral`; **absent means `busy`**, so every participant that sends no kind keeps its meaning)
+  and a **bounded, redacted detail** saying why. The kind is how the participant tells the core how
+  the decline counts toward the role's progress gauges (`INV-OBS-3`, `INTF-MON`): `busy` is a
+  capacity decline, `fault` a decline that is a defect to count against the role, `neutral` one that
+  counts toward neither. The core **never reads the decline's `reason` for counting**
+  (`GOAL-MIN-1`). **One offer is one call to the role's listener**; a re-offer is a separate offer
   (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-1`). The **low** codes
   carry meanings general to any app, which is why `2` is **reserved** for usage and `busy` sits
   outside that band rather than on `2`; a caller reading one as the other would treat a decline as a
@@ -401,9 +409,9 @@ upstream call killed by the connector's exec timeout) is counted with `reason="u
 isolated kills do not page individually (`DEC-OBS-3`, amended); and a handler error carrying the
 **usage-limit sentinel** below (a session that died on an account usage or spend limit or an API
 outage) is counted with `reason="usage-limit"`, an external limit that does not page
-(`DEC-OBS-3`, amended); and a handler error carrying the **wrap-failed sentinel** below (the wrap
-chain failed before the payload started, `INV-ENV-5`) is counted with `reason="wrap-failed"`, which
-pages through its own explicit route rather than the residual series.
+(`DEC-OBS-3`, amended). A failure **before** the handler's payload is ready is not a post-accept
+class at all: it is a **pre-accept decline** (`INV-FAIL-1`), reported as a decline with an optional
+**kind** and **detail** (`DEC-WIRE-1`), never as a handler error.
 
 | class            | meaning                                                       | response                                            |
 | ---------------- | ------------------------------------------------------------- | --------------------------------------------------- |
@@ -458,20 +466,24 @@ upstream-killed, then usage-limit**. The substring is a **contract**: changing i
 (`DEC-OBS-3`). An unclaimed end for any other cause carries no such substring and keeps counting
 under the residual failure-rate series.
 
-**Wrap-failed sentinel.** When a handler's wrap chain failed before its payload started (the ready
-marker of `INV-ENV-5` was never written, so the end is a **wrap failure** and not the payload's own
-outcome), the error text it reports **MUST contain the stable substring `wrap failed before the
-payload started`**, followed by the failing stage's redacted stderr tail (for example `role-1: wrap
-failed before the payload started: pg-wrap[require]: missing tool: go`). It **MUST NOT** carry
-prompt or item content. The core cannot see why a chain failed across the process boundary, so it
-matches on this text and counts the error as a `handler-error` with `reason="wrap-failed"`.
-Precedence among `handler-error` reasons is **triager-failure, then budget-exceeded, then
-upstream-killed, then usage-limit, then wrap-failed**. The core **MUST** route a wrap-failed error to
-its own explicit failure-rate route so that it pages, and **MUST NOT** let it fall into the residual
-series, because a wrap that is broken fails every dispatch to its role until someone fixes it. The
-substring is a **contract**: changing it breaks the core's `reason="wrap-failed"` classification and
-the route built on it. A failure of the payload itself, with the ready marker written, carries no such
-substring and is classified exactly as before.
+**A failure before the payload is ready is a decline.** A handler that cannot bring its payload to
+the point where it has taken over the work (a launch that fails, times out or ends before it is
+ready) **MUST** answer the offer with a **pre-accept decline** (`busy` exit code, `DEC-WIRE-1`), not
+with a handler error, and the event does not count as delivered (`INV-FAIL-1`). The decline carries
+a **reason** of the handler's own, an optional **kind** (`busy`, `fault` or `neutral`; absent means
+`busy`) and an optional **bounded, redacted detail**. The core re-offers it as any decline
+(`INV-FAIL-2`) and counts it toward the role's progress gauges by its kind (`INTF-MON`). An offer
+handed back because the core is shutting down is **not** such a decline: it counts toward neither
+gauge, so a shutdown is never read as a fault.
+
+**Validate (optional).** A handler MAY implement a `validate` subcommand: **JSON in** (a role
+object, `INV-ROLE-2`), **a list of problems out** (empty when the configuration is valid). It is the
+adapter's **one validation entry point**, used by the build that renders a role's configuration, by
+the core at startup (`INV-ROLE-5`) and by `doctor` (`INTF-CLI`). A handler **without** it answers
+with the **usage exit** (code `2`, `DEC-WIRE-1`), which the core reads as **not supported**, never
+as a failed validation. A handler that does not answer validate within a short timeout is reported
+as not answering by `doctor`. `validate` verifies nothing about pg-router, and it never runs the
+payload.
 
 **Obligations.** A handler **MUST tolerate a duplicate event** (be idempotent) and **MUST support
 the deferred form**, so a paused or long-running handler session never pins an open call from the
@@ -539,8 +551,7 @@ sequenceDiagram
     visible rather than averaged away (`DEC-OBS-5`); a handler-reported error (`handler-error`)
     carrying the **budget-stop sentinel** below is additionally labelled `reason="budget-exceeded"`,
     and one carrying the **upstream-killed sentinel** below `reason="upstream-killed"`, and one
-    carrying the **usage-limit sentinel** below `reason="usage-limit"`, and one carrying the
-    **wrap-failed sentinel** below `reason="wrap-failed"`
+    carrying the **usage-limit sentinel** below `reason="usage-limit"`
     (`DEC-OBS-3`). The other post-accept classes are
     **not** counted here — after acceptance the handler owns the work (`INV-FAIL-1`), so classifying
     its outcomes is the handler's own concern on the handler's own surface;
@@ -643,7 +654,31 @@ sequenceDiagram
     that has just started holds no offer until its first offer pass, so it reads `0` for every role,
     including one whose session an earlier core left running, until that pass; the pass runs before
     the first source query (`INV-LIFE-3`), so the reading is `0` for the start-up only, and it is
-    never pre-set from restored events (`DEC-OBS-2`).
+    never pre-set from restored events (`DEC-OBS-2`);
+  - **role progress** (`INV-OBS-3`) — three gauges, per `role`, the **only** progress the core
+    exports. All three **start at daemon start**, as `source_last_success_age` does, so a restart
+    resets them. They are counted per offer, where the core holds the outcome and the decline's
+    kind (`INV-FAIL-1`), and **never from a decline's `reason`**:
+    - **role_last_progress_age** — in seconds: **0 while an offer to that role is in flight**, and
+      otherwise the time since the role last made progress. An offer that is accepted with **no
+      handler error**, or with a **routine sentinel error** (budget-stop, usage-limit or
+      triager-failure, which a role that ran produces), resets the age and **both counters**. An
+      accepted offer that ends in **any other handler error** does **not** reset the age;
+    - **role_unsuccessful_since_progress** — a count: incremented by an accepted offer that ends in
+      any other handler error, and by a decline of kind **`fault`**;
+    - **role_busy_since_progress** — a count: incremented by a decline of kind **`busy`**. A decline
+      of kind **`neutral`** counts toward **neither** count, and an offer handed back because the
+      core is shutting down is **not counted**; a hand-back for a dispatch retry (`DEC-RETRY-2`) is
+      counted once.
+
+  Showing a role's busy state in the TUI and `status` is outside this set. **Two alert levels** read these gauges and nothing else (`INV-OBS-3`). Both require a **recent
+  offer** to the role, so an idle role never fires, and both read the age as its **maximum over a
+  recent window**, because the in-flight `0` would otherwise reset a hold; their thresholds are
+  plain values in the alert rules file, not core configuration:
+  - **role stalled** (the higher severity): the age is above a long threshold **and** the
+    unsuccessful count is at or above a small count;
+  - **role busy a long time** (the lower severity): the age is above a longer threshold **and**
+    the busy count is at least one.
 
   `role` is config-bounded on all four (`DEC-OBS-5`). On the two histograms `type` is the **full**
   event type, bounded by configuration the way `DEC-OBS-6` bounds the entity type: a lowercase
@@ -720,8 +755,9 @@ sequenceDiagram
   **inspect** a running core for its resolved configuration, its live **deliveries** and its per-`type`
   queue depths — and, as a **MAY** rather than a fourth obligation, for **which configured bindings
   have matched no event this run**, the one signal available against a mistyped narrowing payload path
-  while `OQ-EVT-CATALOG` stands (`INV-DISP-1`, `USECASE-DEBUG-RUN`); and **resolve** the
-  configuration, both as authored and as built-in defaults. The
+  while `OQ-EVT-CATALOG` stands (`INV-DISP-1`, `USECASE-DEBUG-RUN`); **resolve** the
+  configuration, both as authored and as built-in defaults; and **check** the configuration and
+  **diagnose** a running system on demand (`config check` and `doctor`, below). The
   concrete command surface that spells these is a realization decision
   (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`). _"role"_ is the
   operator-facing name for a configured **event handler** (its concrete kind); the core dispatches it
@@ -771,15 +807,26 @@ DEC-CLI-2`).
   nor inspects how, or whether, a participant responds to it. Its concrete spelling (an
   environment variable, and its name) is a realization decision, not restated here:
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.
-- **Composed command and the environment caveat.** Resolving the configuration (`config --show`, and
-  its machine-readable form `config --show --json`) **MUST** print, for each role and each
-  `[[query]]`, the **composed command** — the declared `wrap` entries (`INV-ROLE-4`, `INV-ENV-1`)
-  followed by the command — so an operator reads what a payload or producer will actually run without
-  reconstructing it. **Caveat:** the one-event
+- **The command and the environment caveat.** Resolving the configuration (`config --show`, and its
+  machine-readable form `config --show --json`) **MUST** print each `[[query]]`'s **command** and its
+  **strict-env switch** (`INV-ROLE-4`, `INV-ENV-2`), so an operator reads what a producer will run
+  without reconstructing it. A **role's** command follows when the handler split lands, since a
+  role's command lives with its adapter. **Caveat:** the one-event
   handler smoke test (`run-role`) runs under the **operator's own shell environment**, not the
   daemon's, so while a role's strict-env switch is off (`INV-ENV-2`) its run is **not representative**
   of the environment that role's payload gets under the daemon, and a smoke test that passes there
   does not prove the payload's environment. (Concrete spelling:
+  `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.)
+- **`config check` and `doctor`.** **`config check`** runs, on demand, the checks the core runs
+  at startup (`INV-WORKFLOW-1`): the six pre-runtime conditions, and the role validation
+  (`INV-ROLE-5`) through each enabled role's adapter, and reports every problem with its
+  reason, so a configuration is judged without starting the daemon. **`doctor`** runs `config
+check` and adds **quick probes** of the system as it stands: the state directory is writable,
+  the core's socket is reachable, which gates are active, which roles are **unavailable** and why,
+  each role's **progress** (`INV-OBS-3`) and the result of each handler's own `validate`
+  (`INTF-HANDLER`). A handler without `validate` is reported **not supported**, and one that does
+  not answer within a short timeout is reported as not answering, so a hung handler never hangs
+  the report. Both only read and change nothing. (Concrete spelling:
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.)
 - **Run-scoped selectors.** The operator MAY restrict the **active** set of sources and handlers for a
   single run — as an allow-list, a deny-list, or both — **without editing the configuration**
@@ -997,31 +1044,30 @@ sequenceDiagram
 ## Configuration (an interface the operator authors)
 
 The **configuration structure** is itself a first-class interface — the operator authors it, and
-the CLI resolves it on request. It declares: the participants (each with its command, mode, any
-**wrap** around that command, and — for a monitoring sink — its selected metrics); the sources, each as **one invocation** plus the
+the CLI resolves it on request. It declares: the participants (each with its command, mode and
+— for a monitoring sink — its selected metrics); the sources, each as **one invocation** plus the
 event types it emits and, for a pull source, its query trigger — never a per-tool source kind
 (`GOAL-MIN-1`); the handlers and their event-type **bindings** (including any **payload path a
 binding names** for narrowing); and the workflow wiring the core validates (`INV-WORKFLOW-1`). Expiry is **not** declared here — it
 rides on each event as `at` / `expiresAt` (`INV-EVT-1`, `INV-EVT-4`). The **run-scoped selectors**
 above restrict the _active_ subset of this config per run without editing it.
 
-A **role** declares, beside its bindings, the **command of the adapter** that runs it, an optional
-**wrap**, an opaque **configuration table** and an optional **survives-shutdown** property
-(`INV-ROLE-1` to `INV-ROLE-4`); a **query** declares an optional **wrap**. The core reads those
-keys strictly and passes the table through unread (`INV-ROLE-2`). The inspection and smoke-test
-commands (`INTF-CLI`) resolve a role's adapter the same way the running core does, and show each
-role's resolved adapter command, wrap, survives-shutdown property and the table exactly as it is
-sent, plus each role's and each query's composed command, so what a role will run is readable
-without reading the adapter's own files
+A **role** declares, beside its bindings, the **command of the adapter** that runs it, an opaque
+**configuration table** and an optional **survives-shutdown** property (`INV-ROLE-1` to
+`INV-ROLE-4`); a **query** declares its command. **Neither a role nor a query declares a prefix list
+or any other way to run its command**: whatever a command begins with is part of the command, which
+is opaque to the core (`INV-ROLE-4`). The core reads those keys strictly and passes the table through
+unread (`INV-ROLE-2`). The inspection and smoke-test commands (`INTF-CLI`) resolve a role's adapter
+the same way the running core does, and show each role's resolved adapter command, survives-shutdown
+property and the table exactly as it is sent, plus each `[[query]]`'s command and strict-env
+switch, so what a role will run is readable without reading the adapter's own files
 (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-ROLE-1`).
 
-**Wrap and the base environment in the configuration.** A `[[query]]` MAY carry, beside its optional
-**wrap** (`INV-ROLE-4`), a boolean **`strict_base_env`** that defaults to **off** (`INV-ENV-2`,
-`INV-ENV-4`). A wrap is an ordered list of entries in the string form or the argv form, outermost
-first (`INV-ENV-1`). Validation **MUST** reject a template action in a string entry and a first word
-or element that is not an absolute path. A role's strict-env switch, where the role's adapter has
-one, is that adapter's own, under the same rules (`INV-ENV-2`, `INV-ENV-3`). A `[[query]]` that
-omits `wrap` and `strict_base_env` runs its command exactly as it did before.
+**The base environment in the configuration.** A `[[query]]` MAY carry a boolean
+**`strict_base_env`** that defaults to **off** (`INV-ENV-2`, `INV-ENV-4`): while it is off the
+producer inherits the parent's environment, as it did before the key existed. A role's strict-env
+switch, where the role's adapter has one, is that adapter's own, under the same rules
+(`INV-ENV-2`). A `[[query]]` that omits `strict_base_env` runs its command exactly as it did before.
 
 The **full configuration schema** is not yet pinned; it is tracked as an open question
 (`OQ-CONFIG`), with pg-router's existing TOML as prior art.

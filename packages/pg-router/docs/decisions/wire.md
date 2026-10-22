@@ -53,6 +53,25 @@ its own arguments, but arguments are never the payload channel. Concretely:
     practice — this decision makes that explicit rather than contradicting `ADR 0042`: `3` is
     named `exitPrecheck`, reserved by the core for its own pre-flight failure, and the
     app-specific band `ADR 0042` decided on narrows to start at `4`.
+- **A decline body carries an optional `kind` and an optional `detail`.** A participant's busy
+  decline (exit `9`) MAY carry a JSON body `{ "reason", "kind", "detail" }`. `kind` is one of `busy`,
+  `fault` or `neutral`, and **absent means `busy`**, so every existing participant keeps its
+  meaning. `detail` is **bounded** and **redacted**: it says why, for a reader, and the core never
+  parses it. The participant maps its own reasons to a kind; **the core never reads `reason` for
+  counting** (`GOAL-MIN-1`) and counts by `kind` alone into the role's progress gauges
+  (`INV-OBS-3`). The kind is named `fault`, not `unavailable`, because `unavailable` already names a
+  self-status class (`INV-FAIL-1`) and a retry class (`DEC-RETRY-2`). **One offer is one
+  `Listener.Offer` call**; a re-offer is a separate offer. The bound on `detail` lives in the
+  schema, not here. The schema gains a branch for the decline body, and the conformance suite a case
+  for it (`INV-INTF-2`).
+- **`validate` is an optional, generic subcommand.** A participant MAY implement `validate`: **JSON
+  in** (for a role's adapter, the role object, `INV-ROLE-2`), **a list of problems out** (empty
+  when valid). A participant without it answers with the **usage exit** (code `2`, above), which the
+  core reads as **not supported** and never as a failed validation. It is the adapter's **one
+  validation entry point**: the build that renders a role's configuration, the core at startup
+  (`INV-ROLE-5`) and `doctor` (`INTF-CLI`) all call it, so no check has a second home that drifts.
+  A participant that does not answer within a short timeout is reported as not answering. `validate`
+  runs no payload and verifies nothing about pg-router.
 - **The callback is one `command` string.** When the core needs to be reached back it hands the
   participant a single ready-to-run command; how that command is addressed and authenticated is
   `DEC-WIRE-2`.
@@ -430,12 +449,14 @@ handler (`DEC-ROLE-1`), by this:
   handler command plus a per-role file argument), and its handler never sees the field, so a
   handler that predates this amendment is unaffected while the compat window of `ADR 0065`'s
   Addendum (handler split) lasts.
-- **Validation (S1a).** There is **no new wire message** and no register-time validation: a role's
-  handler never registers itself, because the core starts it fresh for every call. The role's
-  `config` is validated **at build time**, by the adapter's own `validate-config` subcommand run over
-  each role's rendered config by the deployment's build, so a field dropped between the deployment's
-  option set and the rendered table fails before apply. The adapter also **decodes `role.config`
-  strictly on every call** and fails the call on an unknown or mistyped field.
+- **Validation (S1a).** There is no register-time validation: a role's handler never registers
+  itself, because the core starts it fresh for every call. The one wire addition is the **optional
+  `validate` subcommand** of `DEC-WIRE-1`, the adapter's **one validation entry point**. The role's
+  `config` is validated **at build time**, by the adapter's `validate` run over each role's rendered
+  config by the deployment's build, so a field dropped between the deployment's option set and the
+  rendered table fails before apply; the core calls the same `validate` at startup, where a failure
+  marks the role unavailable (`INV-ROLE-5`), and `doctor` calls it on demand. The adapter also
+  **decodes `role.config` strictly on every call** and fails the call on an unknown or mistyped field.
 - **Rejected.** A core-rendered file passed by `--role-config` (it goes stale, and it keeps an
   argument as a payload channel, against `DEC-WIRE-1`); an environment variable (it would leak into the
   payload's minimal environment, `INV-ROLE-4`).

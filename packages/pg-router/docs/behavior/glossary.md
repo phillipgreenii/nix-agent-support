@@ -34,15 +34,12 @@ metrics backend, …) define their own terms in their own behavior sets.
   work still draining, and a long-running daemon MAY be quiescent while its state stays `started`
   throughout, so the two readings are never substituted for one another — both are informational,
   never failures.
-
-- **Wrapper contract** — the nine rules every wrap entry and every participant that starts a wrap chain
-  obeys: argv and stdin pass through, the payload's exit status is returned unchanged, nothing is
-  written to stdout, the terminal and foreground process group are kept, signals reach the payload
-  and the chain is cancelled by process group, no prompting, item data only through environment
-  variables or templated argv-form elements, and absolute paths (`INV-ENV-3`).
-- **Ready marker** — the per-dispatch mark that the innermost stage of a wrap chain writes just before
-  starting the payload; a non-zero end without it is a **wrap failure**, with it the payload's own
-  outcome (`INV-ENV-5`).
+- **Decline kind** — the optional tag a participant puts on a pre-accept decline to say how it
+  counts toward its role's progress gauges: `busy` (a capacity decline; absent means `busy`), `fault`
+  (a defect to count against the role) or `neutral` (counts toward neither). The core reads the kind,
+  never the decline's reason (`INV-FAIL-1`, `INV-OBS-3`).
+- **Progress gauges** — the three per-role gauges the core exports: the age since the role last made
+  progress, and the counts of busy and of unsuccessful outcomes since it did (`INV-OBS-3`).
 
 ## Events and matching
 
@@ -104,18 +101,21 @@ metrics backend, …) define their own terms in their own behavior sets.
   **adapter**.
 - **Handler session** — one run of an event handler against one event, tracked by its tracking id.
 - **Role** — a configured event handler, named by the operator: its **bindings**, the command of its
-  **adapter**, an optional **wrap**, an opaque **configuration table** and an optional
-  **survives-shutdown** property, all declared once in the core's configuration (`INV-ROLE-1`).
+  **adapter**, an opaque **configuration table** and an optional **survives-shutdown** property, all
+  declared once in the core's configuration (`INV-ROLE-1`). A role whose configuration fails
+  validation stays registered and is **unavailable** (`INV-ROLE-5`).
 - **Adapter** — the participant a role names to run it: a command the core invokes over the common
   manager contract, which bridges the core's handler contract to one kind of runner. The core never
   distinguishes adapters by kind; a new kind of runner is a new adapter, with no change to the core
   or to any other adapter (`INV-ROLE-1`, `GOAL-MIN-1`).
 - **Role object** — the role's name and its opaque configuration table, which the core sends to the
   role's adapter in the payload of every request and never reads (`INV-ROLE-2`).
-- **Wrap** — an ordered list of command prefixes, outermost first, that run a role's payload or a
-  query's producer; the only way to expand the **base environment** (`INV-ROLE-4`).
-- **Base environment** — the minimal, documented set of environment variables a role's payload and a
-  query's producer start from (`INV-ROLE-4`).
+- **Base environment** — the minimal, documented set of environment variables (system variables,
+  terminal variables and the markers the participant injects) that the processes pg-router starts
+  itself, a query's producer and a command role's payload, start from while their strict-env switch
+  is on; the concrete names live in each adapter's own docs (`INV-ENV-2`).
+- **Item context** — the data of the item a role is dispatched, which the participant gives the
+  payload through the templated elements of its argv and the markers it injects (`INV-ENV-2`).
 - **Monitoring sink** — pulls or pushes a declared subset of the metric catalog.
 - **Storage** — an optional key/value scratch a participant provides for core state; never backs
   delivery.

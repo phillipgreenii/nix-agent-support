@@ -82,11 +82,13 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   both the handler retry cadence and the pull-source failure backoff.
 - [`DEC-RETRY-2`](retry.md) — a role MAY opt in to a bounded (hard cap 3), transient-class-only
   re-run of a failed dispatch, carried as a pre-accept decline at the `INV-FAIL-2` cadence.
-- [`DEC-ROLE-1`](role.md) — a role names its own handler; the core carries `wrap`, an opaque `config`
-  and `survives_shutdown`, and chooses the dispatch path per role; the operator surfaces resolve a
-  role through that one choice.
+- [`DEC-ROLE-1`](role.md) — a role names its own handler; the core carries an opaque `config` and
+  `survives_shutdown` and no `wrap` (a `[[query]]` gains none either), and chooses the dispatch path
+  per role; the operator surfaces resolve a role through that one choice, and `config --show` prints
+  each `[[query]]`'s command and strict switch.
 - [`DEC-WIRE-1`](wire.md) — the default transport is a CLI invocation carrying JSON, with coarse exit
-  codes, plus the illustrative message shapes.
+  codes, an optional decline `kind` and `detail`, and an optional `validate` subcommand, plus the
+  illustrative message shapes.
 - [`DEC-WIRE-2`](wire.md) — the core is reached over a socket, and a callback command arrives with
   its address and token already baked in.
 - [`DEC-WIRE-3`](wire.md) — `postStartup`/`preShutdown` are once-per-process-lifetime handler hooks, and

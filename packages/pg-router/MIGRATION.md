@@ -563,7 +563,7 @@ To move one role to the per-role path:
    own settings from its JSON file into `[role.config]` (the adapter's behavior docs name its keys;
    it rejects an unknown one), and set `survives_shutdown = true` for a role whose dispatch must
    outlive a restart of the core (`docs/adr/0085`'s Decision).
-2. Build. The adapter's `validate-config` runs over the role's rendered table during the build, so
+2. Build. The adapter's `validate` runs over the role's rendered table during the build, so
    a mistake fails before apply.
 3. Exercise the role once with `pg-router run-role <role> '<json>'` against a realistic event, and
    read an actual outcome, not just an exit code (the repo's config-testing rule).

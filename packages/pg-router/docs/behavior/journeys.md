@@ -72,11 +72,16 @@ occurred to someone, so a missing one shows up as an empty cell instead of as si
   runner, or a changed environment, is configuration and never a change to the core. _(→
   `USECASE-CONFIGURE-WIRING`, `USECASE-CREATE-HANDLER`; `INV-ROLE-1`, `INV-ROLE-2`, `INV-ROLE-3`,
   `INV-ROLE-4`.)_
-- **`STORY-OP-14`** <!-- uuid: 5e9df2da-69fb-41d8-b543-d9b71749f4d4 --> — trust that every wrap I declare, for a role or a `[[query]]`, obeys one
-  **wrapper contract**, and that a **base environment** only my wraps expand reaches the payload, so
-  a broken wrap fails as its own kind of failure instead of passing for a payload failure. _(→
-  `USECASE-CREATE-HANDLER`, `USECASE-CREATE-SOURCE`; `INV-ENV-1`, `INV-ENV-2`, `INV-ENV-3`,
-  `INV-ENV-4`, `INV-ENV-5`.)_
+- **`STORY-OP-15`** <!-- uuid: 14f9b6c3-7e2d-4a85-9c10-d8e35b7a62f1 --> — trust that a role or a
+  `[[query]]` is a **command** that starts from a **minimal base environment**, and that a role
+  which fails **before it is ready** is **declined and re-offered**, never counted as delivered, so
+  a broken launch is visible as a role that makes no progress instead of passing for finished work.
+  _(→ `USECASE-CREATE-HANDLER`, `USECASE-CREATE-SOURCE`; `INV-ENV-2`, `INV-ENV-4`, `INV-FAIL-1`,
+  `INV-ROLE-4`.)_
+- **`STORY-OP-16`** <!-- uuid: 9b21c5e8-0d73-4f6a-a1e4-6c8f2d70b3a9 --> — **check** a configuration
+  and **diagnose** a running system on demand, and see a role whose own configuration fails
+  validation as **unavailable, with the reason**, instead of the whole daemon refusing to start. _(→
+  `USECASE-VALIDATE-CONFIG`; `INV-ROLE-5`, `INV-WORKFLOW-1`.)_
 
 **Observer (`ACTOR-OBS`)**
 
@@ -88,6 +93,10 @@ occurred to someone, so a missing one shows up as an empty cell instead of as si
   the **delivery-side** failure classes as metrics, so a silent outage does not read as "nothing to
   do."
   _(→ `USECASE-CREATE-SOURCE`, `USECASE-DEBUG-RUN`; `INV-DISP-3`, `INV-OBS-1`.)_
+- **`STORY-OBS-3`** <!-- uuid: e50a8d17-c3b9-46f2-a784-2160fbd9e3c5 --> — tell a role that is
+  **stalled** (no progress, repeated unsuccessful outcomes) from one that is only **busy a long
+  time** or **idle**, through per-role progress gauges and two alert levels, so I am paged for a
+  role that cannot work and not for one that is merely full. _(→ `USECASE-DEBUG-RUN`; `INV-OBS-3`.)_
 
 ## The lifecycle-action matrix
 
@@ -714,10 +723,11 @@ or query that verified it when it was added), `USECASE-VALIDATE-CONFIG`.
   per-tool source kind; and, for a pull source, its **query trigger**: periodic, threshold, or
   manual, which is the core's own when-to-poll decision rather than anything a source dictates.
 - **Event handlers / roles** (`INTF-HANDLER`) — each declared **once**, with: the command of the
-  **adapter** that runs it (`INV-ROLE-1`); an optional **wrap**, and so the environment its payload
-  starts from (`INV-ROLE-4`); its own opaque **configuration table**, which the core passes to the
-  adapter and never reads (`INV-ROLE-2`); and whether its dispatch **survives the core's shutdown**
-  (`INV-ROLE-3`). A query likewise MAY declare a wrap (`INV-ROLE-4`).
+  **adapter** that runs it (`INV-ROLE-1`); its own opaque **configuration table**, which the core
+  passes to the adapter and never reads (`INV-ROLE-2`); and whether its dispatch **survives the
+  core's shutdown** (`INV-ROLE-3`). A role, like a query, is a command plus the minimal base
+  environment its payload starts from and the item context (`INV-ROLE-4`, `INV-ENV-2`); neither
+  declares anything more about how the command runs.
 - **Bindings** — for each handler, the **event-type match** it responds to. `type` MUST match; a
   binding MAY then narrow on a **payload path it names itself**, applied after the type match
   (`INV-DISP-1`). No matchable field comes from the source — matchability is the handler's alone. A
@@ -758,7 +768,7 @@ are **not** a config defect (`INV-WORKFLOW-1`, `USECASE-VALIDATE-CONFIG`).
 flowchart TD
     start["operator authors or edits the deployment config"] --> parts["declare each essential participant: command + mode"]
     parts --> src["event sources INTF-SOURCE: one opaque invocation plus emitted types, pull (periodic tick) or push"]
-    parts --> hdl["event handlers/roles INTF-HANDLER: adapter command, optional wrap, opaque config, survives-shutdown; no concurrency ceiling is declared"]
+    parts --> hdl["event handlers/roles INTF-HANDLER: adapter command, opaque config, survives-shutdown; no concurrency ceiling is declared"]
     src --> bind["bindings: type MUST match, then any narrowing payload path the binding names (INV-DISP-1)"]
     hdl --> bind
     bind --> ser["order-dependent types marked to serialize (INV-CONC-1). expiry is not configured, it rides on each event (INV-EVT-1)"]
@@ -839,7 +849,7 @@ Extensions:
 **Intent:** judge the **whole** configuration valid or invalid **before running**, and report the
 result (`INV-WORKFLOW-1`). This checks the routing graph's flat wiring **only** — never
 workflow-completeness or sequencing.
-_Requires:_ `INV-DISP-3`, `INV-EVT-4`, `INV-WORKFLOW-1`.
+_Requires:_ `INV-DISP-3`, `INV-EVT-4`, `INV-ROLE-5`, `INV-WORKFLOW-1`.
 
 **This is one whole-configuration judgement, and deliberately not four per-interface checks.** Every
 finding below is a statement about a **pair** of declarations — a binding against the types some
@@ -866,8 +876,9 @@ one on its own **blocks startup** — anything determinable as an invalid config
   because its binding declares no `type` or because every `type` it binds is emitted by no configured
   source → error. The orphan-event-type finding above names the **type**; this one names the
   **handler**, so a handler bound only to orphan types is reported both ways.
-- **Absent backing command** — a configured source or handler whose **backing command** the core
-  cannot invoke → error.
+- **Absent backing command or role configuration** — a configured source or handler whose
+  **backing command** the core cannot invoke, or a role whose own configuration file (where it keeps
+  one) is missing or does not parse → error.
 - **Determinably non-terminating re-entry cycle** — a `handler → query → same type` cycle the declared
   graph shows **cannot** terminate → error.
 
@@ -878,6 +889,17 @@ its termination usually is not, so this one is "detectable but not determinably 
 this set warns, and it is not a slot held open for future additions; a check either determines the
 configuration invalid, in which case it blocks, or it determines nothing, in which case only a cycle's
 undecidable termination is worth telling the operator about.
+
+**A role whose own configuration fails validation is neither an error nor the warning.** After the
+six checks pass, the core asks each enabled role's adapter to validate that role's configuration
+over the optional `validate` subcommand (`INTF-HANDLER`). A role that fails stays **registered**
+and is marked **unavailable** with the reported problems as its reason: its offers are declined, its
+unexpired events are kept, and the reason shows in the logs, a metric, the TUI and `status`, with
+**no alert** (`INV-ROLE-5`). An error in the core's own configuration still refuses to start. An
+adapter without `validate` is reported **not supported**, which is not a failure. The operator
+runs the same checks on demand with `config check`, and `doctor` adds quick probes of the running
+system: the state directory is writable, the socket is reachable, the active gates, the unavailable
+roles with their reasons, each role's progress and each handler's own `validate` (`INTF-CLI`).
 
 **Run-scoping is not a config defect.** A binding merely **disabled for this run** by a
 **run-scoped selector** (`STORY-OP-3`, `USECASE-DEBUG-RUN`) is neither an error nor a warning:
@@ -895,8 +917,8 @@ flowchart TD
     c3 -->|no| e3["disconnected handler: ERROR"]
     c3 -->|yes| c4{"can every handler receive some emitted type?"}
     c4 -->|no| e4["handler with no events to listen for: ERROR"]
-    c4 -->|yes| c5{"is every source and handler backing command present?"}
-    c5 -->|no| e5["absent backing command: ERROR"]
+    c4 -->|yes| c5{"is every source and handler backing command, and every role configuration, usable?"}
+    c5 -->|no| e5["absent backing command or role configuration: ERROR"]
     c5 -->|yes| c6{"any re-entry cycle?"}
     c6 -->|"yes, determinably non-terminating"| e6["cycle cannot terminate: ERROR"]
     c6 -->|"yes, termination not determinable"| w6["cycle may or may not terminate: WARNING — the only warning this set has"]
@@ -919,8 +941,11 @@ Extensions:
 - Disconnected handler — a handler no binding can reach: ERROR, blocks startup.
 - Handler with no events to listen for — a bound handler that can never receive anything: ERROR,
   blocks startup.
-- Absent backing command — a configured source or handler the core cannot invoke: ERROR, blocks
+- Absent backing command or role configuration — a configured source or handler the core cannot
+  invoke, or a role whose own configuration file is missing or does not parse: ERROR, blocks
   startup.
+- A role whose adapter's `validate` reports problems: the role stays registered and is unavailable
+  (`INV-ROLE-5`); startup proceeds.
 - Determinably non-terminating re-entry cycle — a `handler → query → same type` cycle the graph
   shows cannot terminate: ERROR, blocks startup.
 - Re-entry cycle whose termination is not determinable: WARNING — reported, and the run proceeds

@@ -174,9 +174,9 @@ schema and the canonical defaults, then copy it and edit.
 A query is a tagged union discriminated by a `type` field; a role is not:
 
 - **role**: declared once, with the **adapter** that runs it (`handler`, an absolute path to a
-  command the core invokes over the wire contract, `DEC-WIRE-1`), an optional `wrap` (an ordered
-  list of command prefixes that run the role's payload), an opaque `[role.config]` table and an
-  optional `survives_shutdown`. There is no role `type`: what kind of work a role does is its
+  command the core invokes over the wire contract, `DEC-WIRE-1`), an opaque `[role.config]` table
+  and an optional `survives_shutdown`; a role carries no `wrap`, because a command is opaque to
+  pg-router. There is no role `type`: what kind of work a role does is its
   adapter's business, and a new kind of runner is a new adapter with no change to pg-router
   (`INV-ROLE-1`; the keys and the two dispatch paths are `DEC-ROLE-1`). For the command-style
   adapter, completion = exit code: a non-zero exit fails the
