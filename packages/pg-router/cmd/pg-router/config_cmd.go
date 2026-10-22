@@ -12,7 +12,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/query"
 )
 
-// runConfig implements `pg-router config --print-defaults | --show [--json]`.
+// runConfig implements `pg-router config --print-defaults | --show [--json] | check`.
 //   - print-defaults writes the canonical built-in config.toml to stdout (the
 //     copy-paste starting point; equal to the no-config default role set).
 //     --json is never valid with print-defaults (args.go's parseConfigArgs
@@ -21,11 +21,14 @@ import (
 //     flagging any stub query types; --json prints the same information as one
 //     JSON object (renderConfigShowJSON) instead of the text form
 //     (renderConfigShow).
+//   - check runs the startup config checks on demand (configCheck).
 func runConfig(mode string, asJSON bool) int {
 	switch mode {
 	case "print-defaults":
 		fmt.Print(config.ExampleTOML())
 		return exitOK
+	case "check":
+		return configCheck(os.Stdout, os.Stderr)
 	case "show":
 		cfg, err := config.Load()
 		if err != nil {
@@ -41,6 +44,34 @@ func runConfig(mode string, asJSON bool) int {
 	}
 	printUsageErr("config: unknown mode " + mode)
 	return exitUsage
+}
+
+// configCheck implements `pg-router config check`: the checks the daemon runs at
+// startup, on demand. It adds no check of its own: every problem config.Load
+// reports is printed unchanged, one per line, on stderr, so a missing query
+// command, a missing handler command and a bad role config show in one run.
+// Exit 1 on any problem; with none it prints one line, "config ok", and exits 0.
+func configCheck(stdout, stderr io.Writer) int {
+	if _, err := config.Load(); err != nil {
+		for _, line := range errorLines(err) {
+			_, _ = fmt.Fprintln(stderr, line)
+		}
+		return exitGeneric
+	}
+	_, _ = fmt.Fprintln(stdout, "config ok")
+	return exitOK
+}
+
+// errorLines splits err's text into its non-empty lines, so an errors.Join of
+// several problems yields one entry per problem.
+func errorLines(err error) []string {
+	var out []string
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // renderConfigShow prints the resolved config: path, role set (flagging stub query

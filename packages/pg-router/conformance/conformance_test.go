@@ -49,6 +49,33 @@ func TestBackwardCompat_LegacyGoldens(t *testing.T) {
 	}
 }
 
+// TestStatusReply_ListenerProgressShape pins the per-listener `progress` key
+// (docket pg2-12gr4.8): required, null or exactly {ageSeconds, unsuccessful, busy}.
+func TestStatusReply_ListenerProgressShape(t *testing.T) {
+	mutate := func(f func(listener map[string]any)) error {
+		g := loadGolden(t, "cli.status-reply")
+		f(g["listeners"].([]any)[0].(map[string]any))
+		return Check("cli.status-reply", g)
+	}
+	if err := mutate(func(map[string]any) {}); err != nil {
+		t.Fatalf("golden rejected: %v", err)
+	}
+	if err := mutate(func(l map[string]any) { l["progress"] = nil }); err != nil {
+		t.Errorf("null progress rejected: %v", err)
+	}
+	if err := mutate(func(l map[string]any) { delete(l, "progress") }); err == nil {
+		t.Error("a listener without progress was accepted")
+	}
+	if err := mutate(func(l map[string]any) { l["progress"] = map[string]any{"ageSeconds": 1.0, "unsuccessful": 0.0} }); err == nil {
+		t.Error("progress without busy was accepted")
+	}
+	if err := mutate(func(l map[string]any) {
+		l["progress"] = map[string]any{"ageSeconds": 1.0, "unsuccessful": 0.0, "busy": 0.0, "extra": 1.0}
+	}); err == nil {
+		t.Error("progress with an extra key was accepted")
+	}
+}
+
 // schemaVersion mismatch is reported (not guessed) at the envelope layer
 // (INV-INTF-1).
 func TestSchemaVersionMismatch(t *testing.T) {

@@ -187,7 +187,8 @@
           "delivered",
           "declined",
           "backoff",
-          "description"
+          "description",
+          "progress"
         ],
         "properties": {
           "role": { "type": "string" },
@@ -204,6 +205,21 @@
           "unavailableReason": { "type": "string" },
           "inFlight": { "type": "boolean" },
           "inFlightEventType": { "type": "string" },
+          "progress": {
+            "oneOf": [
+              { "enum": [null] },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["ageSeconds", "unsuccessful", "busy"],
+                "properties": {
+                  "ageSeconds": { "type": "number", "minimum": 0 },
+                  "unsuccessful": { "type": "integer", "minimum": 0 },
+                  "busy": { "type": "integer", "minimum": 0 }
+                }
+              }
+            ]
+          },
           "backoff": {
             "oneOf": [
               { "enum": [null] },

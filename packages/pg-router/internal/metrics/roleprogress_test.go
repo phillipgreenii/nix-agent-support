@@ -114,6 +114,52 @@ func TestRoleProgress_AgeReadsZeroWhileOfferInFlight(t *testing.T) {
 	h.expect(t, "worker", 45*time.Minute, 0, 0)
 }
 
+// RoleProgress is the exported read of the state the three gauges report: the
+// same age (0 while an offer is in flight) and the same two counts.
+func TestRoleProgress_ExportedReadMatchesGauges(t *testing.T) {
+	h := newRoleProgressHarness(t, "worker", "reviewer")
+	h.clk.advance(45 * time.Minute)
+	h.emitter.OnRoleFailed("worker", errors.New("exit 1: boom"))
+	h.emitter.OnRoleDeclined("worker", "busy")
+	h.emitter.OnRoleDeclined("worker", "busy")
+	h.inFlight["reviewer"] = 1
+
+	got := h.emitter.RoleProgress()
+	want := map[string]RoleProgress{
+		"worker":   {AgeSeconds: (45 * time.Minute).Seconds(), Unsuccessful: 1, Busy: 2},
+		"reviewer": {AgeSeconds: 0},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("RoleProgress() = %+v, want %+v", got, want)
+	}
+	for role, w := range want {
+		if got[role] != w {
+			t.Errorf("RoleProgress()[%s] = %+v, want %+v", role, got[role], w)
+		}
+	}
+	age, unsuccessful, busy := h.read(t)
+	for role, g := range got {
+		if age[role] != g.AgeSeconds || unsuccessful[role] != g.Unsuccessful || busy[role] != g.Busy {
+			t.Errorf("gauges for %s = (%v, %d, %d), RoleProgress = %+v", role, age[role], unsuccessful[role], busy[role], g)
+		}
+	}
+
+	h.inFlight["reviewer"] = 0
+	if got := h.emitter.RoleProgress()["reviewer"].AgeSeconds; got != (45 * time.Minute).Seconds() {
+		t.Errorf("reviewer age after the offer ended = %v, want %v", got, (45 * time.Minute).Seconds())
+	}
+}
+
+func TestRoleProgress_ExportedReadNilWithoutOption(t *testing.T) {
+	e, err := New(sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader())), func() map[string]int { return nil })
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := e.RoleProgress(); got != nil {
+		t.Errorf("RoleProgress() = %+v, want nil without WithRoleProgress", got)
+	}
+}
+
 func TestRoleProgress_CleanFinishResetsAgeAndBothCounters(t *testing.T) {
 	h := newRoleProgressHarness(t, "worker")
 	h.emitter.OnRoleFailed("worker", errors.New("exit 1: boom"))

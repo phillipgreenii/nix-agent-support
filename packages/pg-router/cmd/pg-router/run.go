@@ -493,6 +493,9 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		SourceIntervalsMs:  sourceIntervalsMs,
 		SourceDescriptions: sourceDescriptions,
 		ListenerCounts:     listenerCounts,
+		// RoleProgress: the state behind the three role-progress gauges, read for
+		// the status reply's per-listener `progress` (docket pg2-12gr4.8).
+		RoleProgress: emitter.RoleProgress,
 	}
 	if metricsReader != nil {
 		// Assigned only when non-nil: metricsReader is a typed *metrics.Reader,

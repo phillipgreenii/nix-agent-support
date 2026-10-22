@@ -98,6 +98,7 @@
       "handlerFailures": 0,
       "selfReportState": "",
       "unavailableReason": "",
+      "progress": { "ageSeconds": 12.5, "unsuccessful": 0, "busy": 0 },
       "backoff": null,
       "description": "reviews incoming PRs for policy violations"
     },
@@ -112,6 +113,7 @@
       "handlerFailures": 0,
       "selfReportState": "unavailable",
       "unavailableReason": "stub problem",
+      "progress": null,
       "backoff": null,
       "description": ""
     }

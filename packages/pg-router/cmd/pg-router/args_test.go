@@ -180,6 +180,11 @@ func TestRoute_runSubcommands(t *testing.T) {
 		{"config-show", []string{"pg-router", "config", "--show"}, routeConfig},
 		{"config-no-flag", []string{"pg-router", "config"}, routeUsageErr},
 		{"config-bad-flag", []string{"pg-router", "config", "--nope"}, routeUsageErr},
+		{"config-check", []string{"pg-router", "config", "check"}, routeConfig},
+		{"config-check-json-is-usage-error", []string{"pg-router", "config", "check", "--json"}, routeUsageErr},
+		{"config-check-extra-arg", []string{"pg-router", "config", "check", "extra"}, routeUsageErr},
+		{"doctor", []string{"pg-router", "doctor"}, routeDoctor},
+		{"doctor-flags", []string{"pg-router", "doctor", "--socket", "/s", "--token", "t"}, routeDoctor},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -333,6 +338,35 @@ func TestSessionsReconcile_DeletedOutright(t *testing.T) {
 		}
 		if !strings.Contains(r.msg, "unknown subcommand: "+name) {
 			t.Errorf("route(%q).msg = %q, want it to name the unknown subcommand generically", name, r.msg)
+		}
+	}
+}
+
+// config check and doctor are listed in the usage line and --help, and the text
+// that describes them names no specific tool (behavior docs first).
+func TestHelp_ListsConfigCheckAndDoctor(t *testing.T) {
+	if r := route([]string{"pg-router", "config", "check"}); r.configMode != "check" {
+		t.Errorf("configMode = %q, want check", r.configMode)
+	}
+	for _, want := range []string{"config (--print-defaults | --show [--json] | check)", "doctor [--socket <path>] [--token <tok>]"} {
+		if !strings.Contains(usageLine, want) {
+			t.Errorf("usageLine does not list %q", want)
+		}
+	}
+	start := strings.Index(helpText, "  config check ")
+	end := strings.Index(helpText, "  push-inject <json>")
+	if start < 0 || end < start {
+		t.Fatalf("helpText has no config check / doctor section (start=%d end=%d)", start, end)
+	}
+	section := strings.ToLower(helpText[start:end])
+	for _, want := range []string{"config check", "doctor", "validate", "not supported", "timed out"} {
+		if !strings.Contains(section, want) {
+			t.Errorf("the config check / doctor help does not mention %q", want)
+		}
+	}
+	for _, tool := range []string{"ccpool", "pg-wrap", "claude", "launchd", "nix"} {
+		if strings.Contains(section, tool) {
+			t.Errorf("the config check / doctor help names a specific tool: %q", tool)
 		}
 	}
 }

@@ -245,3 +245,43 @@ func TestStartupValidate_ClientWithoutValidatorIsSkipped(t *testing.T) {
 	}
 	validateRolesAtStartup(context.Background(), &orchestrator.Orchestrator{}, cfg) // nil Handler: no panic
 }
+
+// The status reply carries each ENABLED role's progress (the state the three
+// progress gauges read) and null for a disabled role (docket pg2-12gr4.8).
+func TestStatus_ListenerProgressComesFromTheGaugeState(t *testing.T) {
+	f := bootWithValidate(t, failsRole("bad"))
+	ctx, cancel := context.WithCancel(context.Background())
+	accepted := make(chan error, 1)
+	go func() { accepted <- f.svc.Accept(ctx) }()
+	t.Cleanup(func() { cancel(); <-accepted })
+	deadline := time.Now().Add(2 * time.Second)
+	for f.svc.State() != conformance.Started && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	var out strings.Builder
+	if code := f.svc.Serve(core.SubcommandStatus, strings.NewReader(`{"schemaVersion":"1"}`), &out); code != conformance.ExitOK {
+		t.Fatalf("status exit = %d: %s", code, out.String())
+	}
+	if err := conformance.CheckBytes(core.StatusReplySchema, []byte(out.String())); err != nil {
+		t.Fatalf("status reply violates cli.status-reply: %v\n%s", err, out.String())
+	}
+	var reply struct {
+		Listeners []listenerView `json:"listeners"`
+	}
+	if err := json.Unmarshal([]byte(out.String()), &reply); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]*progressView{}
+	for _, l := range reply.Listeners {
+		got[l.Role] = l.Progress
+	}
+	for _, role := range []string{"bad", "good"} {
+		p := got[role]
+		if p == nil || p.AgeSeconds < 0 || p.Unsuccessful != 0 || p.Busy != 0 {
+			t.Errorf("progress for %s = %+v, want a zero-count object", role, p)
+		}
+	}
+	if p, ok := got["off"]; !ok || p != nil {
+		t.Errorf("progress for the disabled role = %+v (present %v), want null", p, ok)
+	}
+}

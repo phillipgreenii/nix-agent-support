@@ -83,10 +83,51 @@ func (e *Emitter) OnRoleDeclined(role, kind string) {
 	}
 }
 
+// RoleProgress is one role's progress state as the three role-progress gauges
+// report it: the age in seconds since the role last made progress (0 while it
+// has an offer in flight), and the unsuccessful and busy counts since then.
+type RoleProgress struct {
+	AgeSeconds   float64
+	Unsuccessful int64
+	Busy         int64
+}
+
+// RoleProgress returns a copy of the state the three role-progress gauges read,
+// keyed by role name, with the age gauge's own rule applied: the age is 0 for a
+// role with an offer in flight. It returns nil when WithRoleProgress was not given.
+func (e *Emitter) RoleProgress() map[string]RoleProgress {
+	if e.progress == nil {
+		return nil
+	}
+	busy := e.progressInFlight()
+	e.progMu.Lock()
+	defer e.progMu.Unlock()
+	out := make(map[string]RoleProgress, len(e.progress))
+	for role, rp := range e.progress {
+		age := 0.0
+		if busy[role] == 0 {
+			age = max(e.awakeSince(rp.at), 0).Seconds()
+		}
+		out[role] = RoleProgress{AgeSeconds: age, Unsuccessful: rp.unsuccessful, Busy: rp.busy}
+	}
+	return out
+}
+
+// progressInFlight reads the per-listener in-flight map the age gauge and
+// RoleProgress share; nil when no in-flight read is configured or the queue is
+// not ready yet.
+func (e *Emitter) progressInFlight() map[string]int {
+	if e.progInFlight != nil && e.progReady() {
+		return e.progInFlight()
+	}
+	return nil
+}
+
 // registerRoleProgress seeds the per-role progress state for roles at start and
 // registers the three observable gauges that read it at collect time.
 func (e *Emitter) registerRoleProgress(m metric.Meter, roles []string, start time.Time, inFlight func() map[string]int, ready func() bool) error {
 	e.progress = make(map[string]*roleProgress, len(roles))
+	e.progInFlight, e.progReady = inFlight, ready
 	for _, r := range roles {
 		e.progress[r] = &roleProgress{at: start}
 	}
@@ -106,10 +147,7 @@ func (e *Emitter) registerRoleProgress(m metric.Meter, roles []string, start tim
 		metric.WithUnit("s"),
 		metric.WithDescription("seconds since each role last made progress (an accepted offer with no handler error, or with a routine budget-stop, usage-limit or triager error), measured at collection on the router's monotonic clock; 0 while an offer is in flight and at daemon start"),
 		metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
-			var busy map[string]int
-			if inFlight != nil && ready() {
-				busy = inFlight()
-			}
+			busy := e.progressInFlight()
 			for role, rp := range snapshot() {
 				age := 0.0
 				if busy[role] == 0 {

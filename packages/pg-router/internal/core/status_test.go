@@ -132,7 +132,7 @@ func TestStatusListeners_SelfReportStateJoinsByRoleName(t *testing.T) {
 	// String()`).
 	regs := []Registration{{ID: "df-feedback", Kind: "handler", State: conformance.Started, Self: SelfDegraded}}
 
-	rows := statusListeners(declared, nil, counts, regs, nil)
+	rows := statusListeners(declared, nil, counts, regs, nil, nil)
 	if got := rows[0]["selfReportState"]; got != "degraded" {
 		t.Fatalf("selfReportState = %v, want %q (the self-status, not the lifecycle state)", got, "degraded")
 	}
@@ -149,12 +149,35 @@ func TestStatusListeners_UnavailableRoleShowsSelfStatusAndReason(t *testing.T) {
 	counts := map[string]*ListenerCounts{"w": {}}
 	regs := []Registration{{ID: "w", Kind: "handler", State: conformance.Started, Self: SelfUnavailable, UnavailableReason: "bad pool dir"}}
 
-	rows := statusListeners(declared, nil, counts, regs, nil)
+	rows := statusListeners(declared, nil, counts, regs, nil, nil)
 	if got := rows[0]["selfReportState"]; got != "unavailable" {
 		t.Fatalf("selfReportState = %v, want unavailable", got)
 	}
 	if got := rows[0]["unavailableReason"]; got != "bad pool dir" {
 		t.Fatalf("unavailableReason = %v, want %q", got, "bad pool dir")
+	}
+}
+
+// TestStatusListeners_ProgressObject proves each listener carries `progress`
+// (docket pg2-12gr4.8): the object the gauges' state yields for a role with a
+// progress series, and null for one without (a disabled role).
+func TestStatusListeners_ProgressObject(t *testing.T) {
+	declared := []roles.Role{
+		{Name: "on", Enabled: true, Binds: []string{"x"}},
+		{Name: "off", Enabled: false, Binds: []string{"x"}},
+	}
+	progress := map[string]metrics.RoleProgress{"on": {AgeSeconds: 12.5, Unsuccessful: 2, Busy: 3}}
+
+	rows := statusListeners(declared, nil, nil, nil, nil, progress)
+	want := map[string]any{"ageSeconds": 12.5, "unsuccessful": int64(2), "busy": int64(3)}
+	if got := rows[1]["progress"]; !reflect.DeepEqual(got, want) { // sorted: off, on
+		t.Errorf("on progress = %#v, want %#v", got, want)
+	}
+	if got := rows[0]["progress"]; got != nil {
+		t.Errorf("off progress = %#v, want nil", got)
+	}
+	if _, ok := rows[0]["progress"]; !ok {
+		t.Errorf("off listener has no progress key; want it present as null")
 	}
 }
 
@@ -165,7 +188,7 @@ func TestStatusListeners_SelfReportStateEmptyWhenNeverRegistered(t *testing.T) {
 	declared := []roles.Role{{Name: "df-feedback", Enabled: true, Binds: []string{"pr.changed"}}}
 	counts := map[string]*ListenerCounts{"df-feedback": {}}
 
-	rows := statusListeners(declared, nil, counts, nil, nil)
+	rows := statusListeners(declared, nil, counts, nil, nil, nil)
 	if got := rows[0]["selfReportState"]; got != "" {
 		t.Fatalf("selfReportState = %v, want empty string", got)
 	}
@@ -325,7 +348,7 @@ func TestStatusListeners_SortedByRoleName(t *testing.T) {
 		{Name: "mid", Enabled: true},
 	}
 
-	rows := statusListeners(declared, nil, nil, nil, nil)
+	rows := statusListeners(declared, nil, nil, nil, nil, nil)
 	if len(rows) != 3 {
 		t.Fatalf("len(rows) = %d, want 3", len(rows))
 	}
@@ -349,7 +372,7 @@ func TestStatusListeners_InFlight(t *testing.T) {
 	}
 	inFlight := map[string]string{"busy-role": "pr.changed"}
 
-	rows := statusListeners(declared, nil, nil, nil, inFlight)
+	rows := statusListeners(declared, nil, nil, nil, inFlight, nil)
 	byRole := map[string]map[string]any{}
 	for _, r := range rows {
 		byRole[r["role"].(string)] = r

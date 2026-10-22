@@ -261,6 +261,18 @@ type listenerView struct {
 	// marked it unavailable (docket pg2-12gr4.8), "" when it is available.
 	SelfReportState   string `json:"selfReportState"`
 	UnavailableReason string `json:"unavailableReason"`
+	// Progress is the state behind the role-progress gauges (age since the role
+	// last made progress, 0 while an offer is in flight, plus the unsuccessful and
+	// busy counts since then); nil for a role with no progress series, or from a
+	// core that predates the field.
+	Progress *progressView `json:"progress"`
+}
+
+// progressView is listeners[].progress's shape.
+type progressView struct {
+	AgeSeconds   float64 `json:"ageSeconds"`
+	Unsuccessful int64   `json:"unsuccessful"`
+	Busy         int64   `json:"busy"`
 }
 
 // sourceView is sources[]'s widened item shape (Task 4.1): name/type/

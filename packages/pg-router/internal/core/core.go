@@ -215,6 +215,12 @@ type Options struct {
 	// needs no lock of its own. Optional: nil (or a missing role-name key)
 	// reads as delivered=0/declined=0.
 	ListenerCounts map[string]*ListenerCounts
+	// RoleProgress reads the per-role progress state the three role-progress
+	// gauges read (metrics.Emitter.RoleProgress), so the `status` reply's
+	// per-listener `progress` object and the gauges can never disagree. Called
+	// once per status read. Optional: nil, or a nil result, reports every
+	// listener's progress as null.
+	RoleProgress func() map[string]metrics.RoleProgress
 }
 
 // ListenerCounts is one role's delivered/declined tally (Task 4.1 Step 5),
@@ -320,6 +326,7 @@ type Service struct {
 	sourceIntervalsMs  map[string]int64
 	sourceDescriptions map[string]string
 	listenerCounts     map[string]*ListenerCounts
+	roleProgress       func() map[string]metrics.RoleProgress
 
 	// tick is the published-state cell Serve's handlers (this package) read with
 	// no cross-package import (Task 3.5 Objective): it is written by PublishTick
@@ -583,6 +590,7 @@ func Listen(opts Options) (*Service, error) {
 		sourceIntervalsMs:  opts.SourceIntervalsMs,
 		sourceDescriptions: opts.SourceDescriptions,
 		listenerCounts:     opts.ListenerCounts,
+		roleProgress:       opts.RoleProgress,
 		store:              kvstore.NewInMemory(),
 		storeCommand:       opts.StoreCommand,
 	}, nil
@@ -1257,7 +1265,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 			"configPath": s.configPath,
 		},
 		"registry":  statusRegistrations(regs),
-		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts, regs, s.q.InFlightListeners()),
+		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts, regs, s.q.InFlightListeners(), s.readRoleProgress()),
 		"gates":     statusGates(s.q.ActiveGates(), s.q.Now()),
 		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
 		"sources":   statusSources(nil, s.excludedSources, s.sourceIntervalsMs, inFlightSources, s.sourceDescriptions),
@@ -1408,7 +1416,7 @@ func statusRegistrations(regs []Registration) []map[string]any {
 // no join table needed the way selfState above needs one (Registration.ID
 // happens to also equal the role name, but that field's own doc does not
 // promise it the way Listener.ID's contract does).
-func statusListeners(declared []roles.Role, excludedRoles []string, counts map[string]*ListenerCounts, regs []Registration, inFlight map[string]string) []map[string]any {
+func statusListeners(declared []roles.Role, excludedRoles []string, counts map[string]*ListenerCounts, regs []Registration, inFlight map[string]string, progress map[string]metrics.RoleProgress) []map[string]any {
 	excluded := make(map[string]bool, len(excludedRoles))
 	for _, n := range excludedRoles {
 		excluded[n] = true
@@ -1472,13 +1480,35 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 			// unavailable, "" when it is available -- always present, like
 			// description.
 			"unavailableReason": unavailableReason[r.Name],
-			"backoff":           nil,
+			// progress: the state the three role-progress gauges read, null for a
+			// role with no progress series (a disabled role).
+			"progress": progressObject(progress, r.Name),
+			"backoff":  nil,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i]["role"].(string) < out[j]["role"].(string)
 	})
 	return out
+}
+
+// readRoleProgress reads the per-role progress state for one status reply; nil
+// when no read is wired.
+func (s *Service) readRoleProgress() map[string]metrics.RoleProgress {
+	if s.roleProgress == nil {
+		return nil
+	}
+	return s.roleProgress()
+}
+
+// progressObject is one listener's `progress` value: {ageSeconds, unsuccessful,
+// busy}, or nil (JSON null) when role has no progress series.
+func progressObject(progress map[string]metrics.RoleProgress, role string) any {
+	p, ok := progress[role]
+	if !ok {
+		return nil
+	}
+	return map[string]any{"ageSeconds": p.AgeSeconds, "unsuccessful": p.Unsuccessful, "busy": p.Busy}
 }
 
 // statusSources renders `sources` — Task 4.1's widening: type/enabled/

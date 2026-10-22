@@ -498,6 +498,11 @@ type Emitter struct {
 	// names, bounded by the config.
 	progMu   sync.Mutex
 	progress map[string]*roleProgress
+	// progInFlight and progReady are the in-flight read and queue-ready check the
+	// age gauge applies (set by registerRoleProgress, read-only afterwards), kept
+	// so RoleProgress applies the same rule.
+	progInFlight func() map[string]int
+	progReady    func() bool
 	// awakeSince measures how much awake (monotonic) time has passed since a
 	// stored last-success time; see WithAwakeSince. Set once in New, before any
 	// gauge callback can run.

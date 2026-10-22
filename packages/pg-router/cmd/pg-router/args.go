@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json]) | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--description <text>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | gate (set <TYPE> [--description <text>] [--owner <who>] [--ttl <dur>] | clear (<TYPE> | --all) [--by <who>] | list [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json] | check) | doctor [--socket <path>] [--token <tok>] | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--description <text>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | gate (set <TYPE> [--description <text>] [--owner <who>] [--ttl <dur>] | clear (<TYPE> | --all) [--by <who>] | list [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -67,6 +67,25 @@ Subcommands:
   config --show [--json]  print the resolved config path, role set, and worker dispatch scalars
                           (permission-mode / allowed-tools / autonomous / budget); --json emits the
                           same information as one JSON object. --json is valid only with --show.
+  config check            run the startup config checks on demand: every problem loading the config
+                          reports (a source's query command that is absent, a handler command that is
+                          not an executable file, a role-config file that is missing or not
+                          well-formed JSON, and the rest) is printed, one per line, in ONE run. Exit 0
+                          and one "config ok" line when there is none, 1 otherwise. --json is not
+                          valid with check.
+  doctor [--socket <path>] [--token <tok>]
+                          run "config check" plus quick probes, one verdict line each (ok, FAIL or
+                          info): the state directory is writable, the core's socket is reachable,
+                          the active gates, the roles the core marked unavailable (with the reason),
+                          per-role progress (age since last progress, unsuccessful and busy counts),
+                          and each enabled role's handler "validate". A handler without "validate" is
+                          reported "not supported" (not a failure); one that does not answer within 5
+                          seconds is reported "timed out". The gates, unavailable-role and progress
+                          probes read the RUNNING core (located like status); with none running each
+                          says so as info, and the socket probe's FAIL is what fails the run. Exit 0
+                          when no probe is FAIL, 1 otherwise. Run it with the same environment the
+                          core runs with (for example the pool directory variables a handler reads),
+                          so a handler's own checks see the same values the core's do.
   push-inject <json>      inject one operator-supplied event into the RUNNING core (the same core-side
                           enqueue as the ingest-event callback, operator-initiated). Text by default,
                           JSON with --json. Locates the core via --socket/--token, else
@@ -226,6 +245,7 @@ const (
 	routePause                         // operator: set the SYSTEM_PAUSE gate on the running core (INV-LIFE-2, .rest)
 	routeResume                        // operator: clear SYSTEM_PAUSE (or every gate with --all) on the running core (.rest)
 	routeGate                          // operator: gate set|clear|list against the running core's Gate Registry (.rest)
+	routeDoctor                        // operator: config check plus quick probes of the state dir, socket, gates, roles and handlers (.rest)
 	routeLog                           // operator: log compact [--dry-run] on the queue log, via the running core or offline (.rest)
 )
 
@@ -243,7 +263,7 @@ type routeResult struct {
 	// is event-generic, not beads-specific, and no longer has a beads.Runner
 	// of its own to resolve a bead id through.
 	eventJSON  string
-	configMode string // "print-defaults" | "show" (routeConfig only)
+	configMode string // "print-defaults" | "show" | "check" (routeConfig only)
 	// only / disable carry the raw --only/--disable flag OCCURRENCES for
 	// routeRun/routeRunUntilIdle (STORY-OP-3, DEC-CLI-1) — NOT yet combined
 	// with PG_ROUTER_ONLY/PG_ROUTER_DISABLE, since reading the environment is I/O
@@ -338,6 +358,10 @@ func route(argv []string) routeResult {
 		return routeResult{kind: routeResume, rest: args[1:]}
 	case "gate":
 		return routeResult{kind: routeGate, rest: args[1:]}
+	case "doctor":
+		// Its own --socket/--token flags, parsed in its own handler, with the same
+		// usage exit code every operator subcommand uses.
+		return routeResult{kind: routeDoctor, rest: args[1:]}
 	case "log":
 		// Bead pg2-maxn1: log compact parses its own flags in its own handler, with
 		// the same usage exit code every operator subcommand uses.
@@ -441,17 +465,22 @@ func parseRunQueryArgs(args []string) routeResult {
 	return routeResult{kind: routeRunQuery, query: name, json: asJSON}
 }
 
-// parseConfigArgs validates `config (--print-defaults | --show [--json])`.
+// parseConfigArgs validates `config (--print-defaults | --show [--json] | check)`.
 // --json (extracted wherever it appears via extractJSONFlag, so `config --json
 // --show` and `config --show --json` are both accepted) is valid only with
-// --show: --print-defaults' output is the built-in config.toml as TEXT, and
+// --show: check's output is plain text and --print-defaults' output is the built-in config.toml as TEXT, and
 // Task 1.5b defines no JSON encoding for it.
 func parseConfigArgs(args []string) routeResult {
 	asJSON, pos := extractJSONFlag(args)
 	if len(pos) != 1 {
-		return routeResult{kind: routeUsageErr, msg: "config: usage: config (--print-defaults | --show [--json])"}
+		return routeResult{kind: routeUsageErr, msg: "config: usage: config (--print-defaults | --show [--json] | check)"}
 	}
 	switch pos[0] {
+	case "check":
+		if asJSON {
+			return routeResult{kind: routeUsageErr, msg: "config: --json is valid only with --show"}
+		}
+		return routeResult{kind: routeConfig, configMode: "check"}
 	case "--print-defaults":
 		if asJSON {
 			return routeResult{kind: routeUsageErr, msg: "config: --json is valid only with --show"}
@@ -460,7 +489,7 @@ func parseConfigArgs(args []string) routeResult {
 	case "--show":
 		return routeResult{kind: routeConfig, configMode: "show", json: asJSON}
 	}
-	return routeResult{kind: routeUsageErr, msg: "config: unknown flag " + pos[0] + " (want --print-defaults or --show)"}
+	return routeResult{kind: routeUsageErr, msg: "config: unknown flag " + pos[0] + " (want --print-defaults, --show or check)"}
 }
 
 // extractJSONFlag pulls a --json flag out of args, wherever it occurs, returning
