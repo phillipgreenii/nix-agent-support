@@ -7518,6 +7518,11 @@
                   };
                   pgWrapExecPath = "${pkgs.pg-wrap}/bin/pg-wrap-exec";
                   wrapClaudeBin = claudeBin;
+                  # Real executables for the specs that handlerCommandDir builds: the
+                  # build-time `pg-wrap check` (bead pg2-12gr4.8.32) needs every
+                  # referenced path to exist, so a fake store path no longer builds.
+                  wrapFakePrefix = "${pkgs.coreutils}/bin/env";
+                  wrapFakeOther = "${pkgs.coreutils}/bin/nice";
                   wrapFired = cfg: lib.findFirst (a: a.assertion == false) null cfg.assertions;
                   wrapMod = cfg: cfg.phillipgreenii.programs.pg-router-ccpool-handler;
 
@@ -7582,11 +7587,11 @@
                         type = "ccpool";
                         ccpool = wrapRoleBase;
                         spec = {
-                          exec = [ "/nix/store/fake/bin/claude" ];
+                          exec = [ "${pkgs.coreutils}/bin/true" ];
                           wrap = [
-                            "/nix/store/fake/bin/prefix --flag"
+                            "${wrapFakePrefix} --flag"
                             [
-                              "/nix/store/fake/bin/other"
+                              wrapFakeOther
                               "arg one"
                             ]
                           ];
@@ -7595,7 +7600,7 @@
                       triage-b = {
                         type = "ccpool";
                         ccpool = wrapRoleBase;
-                        spec.exec = [ "/nix/store/fake/bin/claude" ];
+                        spec.exec = [ "${pkgs.coreutils}/bin/true" ];
                       };
                     };
                   };
@@ -7802,6 +7807,8 @@
                         inherit
                           pgWrapExecPath
                           wrapClaudeBin
+                          wrapFakePrefix
+                          wrapFakeOther
                           wrapOwnPoolDir
                           wrapOwnPoolSpec
                           wrapOwnPoolConfig
@@ -8022,7 +8029,7 @@
                         # A mixed string/list wrap survives rendering and strict_env
                         # defaults to false.
                         spec_a_json="$(toml2json "$wrapHandlerPoolSpecA")"
-                        [ "$(jq -c .wrap <<<"$spec_a_json")" = '["/nix/store/fake/bin/prefix --flag",["/nix/store/fake/bin/other","arg one"]]' ]
+                        [ "$(jq -c .wrap <<<"$spec_a_json")" = "[\"$wrapFakePrefix --flag\",[\"$wrapFakeOther\",\"arg one\"]]" ]
                         [ "$(jq -r .strict_env <<<"$spec_a_json")" = false ]
                         [ "$(jq -r .sessionEnv.PG_WRAP_SPEC "$wrapHandlerPoolDir/triage-a.json")" = "$wrapHandlerPoolSpecA" ]
                         # Pools: claude.bin = pg-wrap-exec exactly where a spec role runs
