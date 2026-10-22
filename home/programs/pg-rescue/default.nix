@@ -149,6 +149,24 @@ let
       timeout = "10s";
       description = "macOS notification; always declines";
     };
+    # The last rung of the script-first chains below. The handler's argv is
+    # static, so the item id comes from the environment variable the role shim
+    # exports (`--annotate-from-env`). pg-rescue-bead exits 3 (deferred) after
+    # annotating, so a run whose chain reaches give-up exits 75. A deployment
+    # overrides `command` to add `--backend` and `--tracker-dir` so the label
+    # lands in the tracker that holds the item.
+    give-up = {
+      command = [
+        "pg-rescue-bead"
+        "--annotate-from-env"
+        "PG_RESCUE_ITEM_ID"
+        "--add-label"
+        "script-gave-up"
+      ];
+      timeout = "1m";
+      description = "mark the item script-gave-up so the worker may take it";
+      tags = [ "deferral" ];
+    };
   };
 
   defaultChains = {
@@ -159,6 +177,13 @@ let
       "p1-later"
       "notify"
     ];
+    conflict.handlers = [
+      "flake-lock-conflict"
+      "fix-small"
+      "fix-large"
+      "give-up"
+    ];
+    fix-ci.handlers = [ "give-up" ];
   };
 in
 {
@@ -209,7 +234,7 @@ in
       description = ''
         Named handler instances, rendered as `[handler.NAME]` tables. The
         defaults (`flake-lock-conflict`, `fix-small`, `fix-large`, `p1-later`,
-        `notify`) are set per field with `mkDefault`, so any of them can be
+        `notify`, `give-up`) are set per field with `mkDefault`, so any of them can be
         overridden wholesale or one field at a time, and further instances can
         be added.
 
@@ -238,7 +263,9 @@ in
         Named chains, rendered as `[chain.NAME]` tables and selected with
         `pg-rescue --chain NAME`. The default `sync` chain runs
         `flake-lock-conflict`, `fix-small`, `fix-large`, `p1-later`, `notify`
-        in that order.
+        in that order. The default `conflict` chain runs `flake-lock-conflict`,
+        `fix-small`, `fix-large`, `give-up`; the default `fix-ci` chain runs
+        `give-up` alone (the script-first chains of the work-item roles).
       '';
       example = {
         quick.handlers = [

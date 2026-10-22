@@ -8907,8 +8907,11 @@
               # home-manager module standalone, builds the config.toml it
               # generates, and runs the real wrapper against it.
               #   - disabled: installs nothing, renders nothing.
-              #   - defaults: the five default instances and the `sync` chain
-              #     render, `flake-lock-conflict` carries the `deterministic`
+              #   - defaults: the six default instances (the five and `give-up`)
+              #     and the `sync`, `conflict` and `fix-ci` chains render,
+              #     `give-up` carries the `deferral` tag and its fixed
+              #     `--annotate-from-env PG_RESCUE_ITEM_ID --add-label
+              #     script-gave-up` argv, `flake-lock-conflict` carries the `deterministic`
               #     tag (the design's section 7.2 common-case rate keys on it),
               #     `pg-rescue check --chain sync` exits 0 (every default
               #     handler binary resolves on PATH from the two packages the
@@ -8960,6 +8963,7 @@
                     redact = [ "ghp_[A-Za-z0-9]{36}" ];
                     handlers = {
                       fix-small.timeout = "5m";
+                      give-up.description = "overridden";
                       extra = {
                         command = [ "true" ];
                         tags = [ "deterministic" ];
@@ -8981,6 +8985,18 @@
                 assert
                   lib.head hmOverride.phillipgreenii.programs.pg-rescue.handlers.fix-small.command
                   == "pg-rescue-claude";
+                # The same holds for give-up: overriding its description keeps
+                # the command and tags of the default instance.
+                assert hmOverride.phillipgreenii.programs.pg-rescue.handlers.give-up.description == "overridden";
+                assert
+                  hmOverride.phillipgreenii.programs.pg-rescue.handlers.give-up.command == [
+                    "pg-rescue-bead"
+                    "--annotate-from-env"
+                    "PG_RESCUE_ITEM_ID"
+                    "--add-label"
+                    "script-gave-up"
+                  ];
+                assert hmOverride.phillipgreenii.programs.pg-rescue.handlers.give-up.tags == [ "deferral" ];
                 pkgs.runCommand "test-pg-rescue-module-ok"
                   {
                     nativeBuildInputs = [
@@ -9000,10 +9016,17 @@
 
                     # Every default handler binary resolves.
                     pg-rescue check --config ${defaultCfg} --chain sync
+                    pg-rescue check --config ${defaultCfg} --chain conflict
+                    pg-rescue check --config ${defaultCfg} --chain fix-ci
 
                     toml() { yq -p toml -o json "$@"; }
                     [ "$(toml -r '.chain.sync.handlers | join(",")' ${defaultCfg})" = "flake-lock-conflict,fix-small,fix-large,p1-later,notify" ]
-                    [ "$(toml -r '.handler | keys | join(",")' ${defaultCfg})" = "fix-large,fix-small,flake-lock-conflict,notify,p1-later" ]
+                    [ "$(toml -r '.chain.conflict.handlers | join(",")' ${defaultCfg})" = "flake-lock-conflict,fix-small,fix-large,give-up" ]
+                    [ "$(toml -r '.chain.fix-ci.handlers | join(",")' ${defaultCfg})" = give-up ]
+                    [ "$(toml -r '.chain | keys | join(",")' ${defaultCfg})" = "conflict,fix-ci,sync" ]
+                    [ "$(toml -r '.handler | keys | join(",")' ${defaultCfg})" = "fix-large,fix-small,flake-lock-conflict,give-up,notify,p1-later" ]
+                    [ "$(toml -r '.handler.give-up.command | join(" ")' ${defaultCfg})" = "pg-rescue-bead --annotate-from-env PG_RESCUE_ITEM_ID --add-label script-gave-up" ]
+                    [ "$(toml -r '.handler.give-up.tags | join(",")' ${defaultCfg})" = deferral ]
                     [ "$(toml -r '.handler.flake-lock-conflict.tags | join(",")' ${defaultCfg})" = deterministic ]
                     [ "$(toml -r '.handler.flake-lock-conflict.timeout' ${defaultCfg})" = 2m ]
                     [ "$(toml -r '.handler.fix-small.tags | join(",")' ${defaultCfg})" = agent ]
@@ -9021,7 +9044,10 @@
                     [ "$(toml -r '.handler.fix-small.tags | join(",")' ${overrideCfg})" = agent ]
                     [ "$(toml -r '.handler.extra.tags | join(",")' ${overrideCfg})" = deterministic ]
                     [ "$(toml -r '.chain.mine.handlers | join(",")' ${overrideCfg})" = extra ]
-                    [ "$(toml -r '.chain | keys | join(",")' ${overrideCfg})" = "mine,sync" ]
+                    [ "$(toml -r '.chain | keys | join(",")' ${overrideCfg})" = "conflict,fix-ci,mine,sync" ]
+                    [ "$(toml -r '.handler.give-up.description' ${overrideCfg})" = overridden ]
+                    [ "$(toml -r '.handler.give-up.command | join(" ")' ${overrideCfg})" = "pg-rescue-bead --annotate-from-env PG_RESCUE_ITEM_ID --add-label script-gave-up" ]
+                    [ "$(toml -r '.handler.give-up.tags | join(",")' ${overrideCfg})" = deferral ]
                     [ "$(toml -r '.redact[0]' ${overrideCfg})" = 'ghp_[A-Za-z0-9]{36}' ]
                     touch $out
                   '';

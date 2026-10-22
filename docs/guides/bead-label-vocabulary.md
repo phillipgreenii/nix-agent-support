@@ -197,6 +197,18 @@ to the operator with `hand-to-human` when it cannot resolve it, and leaves a bea
 planned operator work in the person queue with `human` only (one update that adds `human` and
 removes `escalated`, never `attention`).
 
+## Script-first routing marker: `script-gave-up`
+
+The label `script-gave-up` says "the script rung is exhausted, the worker may take this item". It is
+a marker for script-first execution of resolve-conflict and fix-ci work items, not an escalation or
+attention label, and it is in neither `ESCALATED_LABELS` nor `HUMAN_LABELS`.
+
+- It is written by the `give-up` handler of the `pg-rescue` home-manager module (the last handler of
+  the `conflict` and `fix-ci` chains, `pg-rescue-bead --annotate-from-env PG_RESCUE_ITEM_ID
+--add-label script-gave-up`), and by nothing else.
+- It never replaces `worker-ready`: the item keeps `worker-ready`, and the marker only tells the
+  worker role that the script rung already failed for it.
+
 ## Non-goal
 
 Prefer one label for INTENT (attention, design, implementation, ...) augmented by `escalated` or
