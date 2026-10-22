@@ -50,7 +50,7 @@ const (
 // Timeout is the parsed -t value.
 type Timeout struct {
 	Kind TimeoutKind
-	// D is the positive wall-clock duration when Kind is TimeoutFinite.
+	// D is the positive awake-time budget when Kind is TimeoutFinite.
 	D time.Duration
 }
 

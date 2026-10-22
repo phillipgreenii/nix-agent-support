@@ -93,6 +93,10 @@ unreadable, so it never matches).
   seam to update.
 - The shim is a new executable on `PATH` named `caffeinate`. It MUST track the real tool's argument and
   exit-status behavior, which the design pins with parity tests.
+- The shim's `-t` counts awake time only, as the real tool does (measured 2026-10-22: a 120 s `-t` with
+  about 134 s asleep ran 120 s awake; ruling by Phillip the same day, bead pg2-mpzwr). It uses the
+  sleep-excluding clock the anchor uses, and keeps the lease's wall-clock `expires_at` in step so the
+  keeper does not reap the lease during the budget.
 - With the keeper down and no held assertion, the Mac can sleep mid-task. The accepted remedy is the
   keeper's restart plus an alert, not a fallback.
 - pa-monitor's battery policy and `caffeinate` process management move out of pa-monitor, and its

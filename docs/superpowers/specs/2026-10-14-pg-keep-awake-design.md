@@ -374,8 +374,17 @@ Lifetime and signals:
 3. SIGKILL leaves the file; the keeper reaps it (see "The keeper").
 4. In the utility form the shim MUST forward SIGINT, SIGTERM and SIGHUP to the child, wait for it,
    remove its lease, and exit with the child's status (or re-raise the signal if the child died of it).
-5. `-t` counts wall-clock time (a Mac that sleeps through a 50-hour `-t` still expires on schedule).
-   Whether the real tool counts sleep time is unverified; the test plan includes a test.
+5. `-t` counts AWAKE time only, as the real tool does. The shim counts it on the sleep-excluding clock
+   the anchor uses (`mach_absolute_time`), so a sleep window MUST NOT consume the `-t` budget. The
+   lease's `expires_at` is the keeper's wall-clock view of the deadline (the keeper reaps on it), so the
+   shim MUST keep it equal to now plus the awake time left, rewriting the lease after a sleep window or
+   a wall-clock step; otherwise the keeper would reap a lease whose budget remains. A keeper tick that
+   lands between a wake and the shim's next poll (at most 1 s) can still reap it, and the shim then
+   rewrites it. Measured 2026-10-22 (operator, Check 3 of pg2-8bgxg.3): `/usr/bin/caffeinate -t 120`,
+   Mac asleep about 134 s, ran about 30 s before and 90 s after the sleep and ended at 253.8 s total, so
+   the real tool counts awake time (wall-clock counting would have ended it at wake). Ruling (Phillip,
+   2026-10-22, bead pg2-mpzwr): match the real tool. A test simulates a sleep window on an injected
+   clock (`cmd/pg-caffeinate-shim/sleepwindow_test.go`).
 
 Failure policy (proposed): if the lease cannot be written, the pure form MUST print one line on stderr
 and exit 3; the utility form MUST warn on stderr, still run the utility, and exit with the utility's
@@ -652,13 +661,16 @@ environment. Mocks of `caffeinate` do not count.
   tldr page.
 - **nix**: `pg-keep-awake-go-tests` next to `pa-monitor-go-tests`, and `test-pg-keep-awake-hm-launchd`
   with the launchd registry stub. `caffeinate`, `pmset`, launchd and the sleep-excluding clock cannot run
-  in the sandbox. Those tests guard on `runtime.GOOS` and `exec.LookPath("/usr/bin/caffeinate")` with
+  in the sandbox (the shim's `-t` budget is tested with an injected clock that simulates a sleep window,
+  which does run in the sandbox). Those tests guard on `runtime.GOOS` and `exec.LookPath("/usr/bin/caffeinate")` with
   `t.Skip`, and the nix check MUST print a visible `SKIPPED integration` line. A runbook step covers the
   manual run on the Mac.
 - **Live checks after the first apply**: a write to the state directory from a real pool session; the
   shim winning `PATH` in a pool session (its `PATH` is assembled by nix wrappers, not a login shell, and
-  the shim MUST land in the per-user profile, not only `~/.nix-profile`); whether the real tool counts
-  `-t` across sleep.
+  the shim MUST land in the per-user profile, not only `~/.nix-profile`); that a shimmed `caffeinate -t N`
+  survives a real sleep window (the real tool counts `-t` across sleep as awake time only, measured
+  2026-10-22; the shim now matches it, proven in the sandbox on an injected clock, not yet on a real
+  sleep).
 
 ## 15. Packaging
 
@@ -711,7 +723,15 @@ verified" item, which assumed the shim would intercept it; the exact bundle text
 "Mechanism evidence". The earlier "PATH order in a pool session" bullet above stays true and is
 irrelevant to this holder.
 
-Not verified: whether the real tool counts `-t` across sleep; pa-monitor's launchd `PATH`; a write to the
+Verified on 2026-10-22 (operator, Check 3 of pg2-8bgxg.3): the real `/usr/bin/caffeinate -t 120` counts
+awake time only, not wall-clock time. Started 23:55:42, the Mac slept about 30 s in and stayed asleep
+just over 2 minutes; the command kept running about 1 min 30 s after the wake and ended at 23:59:56,
+253.8 s total. Awake time = about 30 s + about 90 s = about 120 s = N; asleep = 253.8 - 120 = about
+133.8 s. Under wall-clock counting it would have exited at the wake. The shim was changed to match
+(bead pg2-mpzwr, section 7 rule 5).
+
+Not verified: that a shimmed `caffeinate -t N` survives a real sleep window on the Mac (the sandbox test
+simulates the window); pa-monitor's launchd `PATH`; a write to the
 state directory from inside a live pool session; that the keeper's stop of Claude Code's inhibitor under
 a released gate happens on a live machine with a fresh session (a post-apply check).
 

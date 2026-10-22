@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,17 +12,28 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-keep-awake/internal/anchor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-keep-awake/internal/lease"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-keep-awake/internal/shimargs"
 )
 
-// Poll intervals. Timers are checked against the wall clock at least this
-// often, because Go's monotonic timers do not count time the Mac spends
-// asleep, and -t counts wall-clock time.
+// Poll intervals. The -t budget is checked at least this often.
 const (
 	maxPoll   = time.Second
 	watchPoll = 200 * time.Millisecond
 )
+
+// expirySlack is how far the lease's expires_at may drift from "now plus the
+// awake time left" before the shim rewrites it. Ordinary polling jitter stays
+// far below it; a sleep window or a wall-clock step does not.
+const expirySlack = time.Second
+
+// newClock is the time source for -t. -t counts AWAKE time, as the real
+// /usr/bin/caffeinate -t does (measured 2026-10-22, pg2-mpzwr): the same
+// sleep-excluding clock the anchor uses (Go's monotonic reading is
+// mach_absolute_time on darwin, which stands still while the Mac sleeps).
+// Tests replace it to simulate a sleep window.
+var newClock = func() anchor.Clock { return anchor.NewRealClock() }
 
 // parseArgs runs the caffeinate-compatible parser with the real process table.
 func parseArgs(args []string) (shimargs.Request, *shimargs.Outcome) {
@@ -55,8 +67,10 @@ func flagList(f shimargs.Flags) []string {
 }
 
 // newLease builds the shim lease for req, bound to self. The expiry is a plain
-// wall-clock time (no monotonic reading), so every later comparison uses the
-// wall clock.
+// wall-clock time (no monotonic reading) that is only the keeper's view of the
+// deadline: the shim itself counts -t on the awake clock and rewrites the
+// expiry (see waitBounds) when the Mac sleeps, so the keeper does not reap the
+// lease while the budget remains.
 func newLease(req shimargs.Request, args []string, self lease.ProcRef, now time.Time) *lease.Lease {
 	l := &lease.Lease{
 		Owner:     lease.ShimOwner,
@@ -118,8 +132,13 @@ func runPure(req shimargs.Request, args []string, stderr io.Writer) result {
 		fmt.Fprintf(stderr, "caffeinate: cannot identify this process: %v\n", err)
 		return result{code: exitLeaseWrite}
 	}
-	now := time.Now().UTC()
+	clk := newClock()
+	now := clk.Now().UTC()
 	l := newLease(req, args, self, now)
+	var cd *countdown
+	if req.Timeout.Kind == shimargs.TimeoutFinite {
+		cd = startCountdown(clk, req.Timeout.D)
+	}
 	var watch *lease.ProcRef
 	if req.Watch.Kind == shimargs.WatchPID {
 		ref, err := lease.Ref(req.Watch.PID)
@@ -141,39 +160,72 @@ func runPure(req shimargs.Request, args []string, stderr io.Writer) result {
 		return result{code: exitLeaseWrite}
 	}
 
+	refresh := func(exp time.Time) bool {
+		upd := *l
+		upd.ExpiresAt = &exp
+		return h.dir.PutLease(&upd) == nil
+	}
+
 	var res result
 	select {
 	case s := <-sigs:
 		res = signalResult(s)
-	case <-waitBounds(l.ExpiresAt, watch):
+	case <-waitBounds(clk, cd, watch, l.ExpiresAt, refresh):
 	}
 	h.remove()
 	return res
 }
 
-// waitBounds returns a channel that closes when the expiry passes or the
-// watched process exits; with neither it never closes. The check runs on the
-// wall clock at the poll intervals above.
-func waitBounds(expires *time.Time, watch *lease.ProcRef) <-chan struct{} {
+// countdown is the -t budget, counted on the awake clock.
+type countdown struct {
+	clk      anchor.Clock
+	deadline time.Duration // an Awake() reading
+}
+
+func startCountdown(clk anchor.Clock, d time.Duration) *countdown {
+	return &countdown{clk: clk, deadline: clk.Awake() + d}
+}
+
+// remaining is the awake time left in the budget, never negative.
+func (c *countdown) remaining() time.Duration { return max(c.deadline-c.clk.Awake(), 0) }
+
+// waitBounds returns a channel that closes when the -t budget is used up or the
+// watched process exits; with neither it never closes. The budget is awake
+// time only, so a Mac that sleeps mid-window does not spend it. After a sleep
+// (or a wall-clock step) the lease's wall-clock expiry no longer matches the
+// time left, so refresh is called with the corrected expiry (and retried while it fails); expires is the
+// expiry the lease was written with.
+func waitBounds(clk anchor.Clock, cd *countdown, watch *lease.ProcRef, expires *time.Time, refresh func(time.Time) bool) <-chan struct{} {
 	done := make(chan struct{})
-	if expires == nil && watch == nil {
+	if cd == nil && watch == nil {
 		return done
 	}
 	go func() {
 		defer close(done)
+		ctx := context.Background()
 		for {
 			wait := maxPoll
 			if watch != nil {
 				wait = watchPoll
 			}
-			if expires != nil {
-				if rem := time.Until(*expires); rem < wait {
-					wait = max(rem, 0)
-				}
+			if cd != nil {
+				wait = min(wait, cd.remaining())
 			}
-			time.Sleep(wait)
-			if expires != nil && !time.Now().Before(*expires) {
-				return
+			_ = clk.Sleep(ctx, wait)
+			if cd != nil {
+				rem := cd.remaining()
+				if rem == 0 {
+					return
+				}
+				want := clk.Now().Add(rem)
+				if expires == nil || want.Sub(*expires).Abs() > expirySlack {
+					want = want.UTC().Round(0)
+					// A failed rewrite is retried at the next poll; the lease
+					// is bound to this process either way.
+					if refresh(want) {
+						expires = &want
+					}
+				}
 			}
 			if watch != nil && !watchAlive(*watch) {
 				return

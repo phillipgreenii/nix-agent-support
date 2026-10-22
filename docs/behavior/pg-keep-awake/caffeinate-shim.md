@@ -88,8 +88,8 @@ Extensions:
   usage line and exit 1, and any other usage error MUST print the usage line and exit 1. The shim keeps
   exit status 1 for a usage error to match the real tool, and does not use the product's own usage-error
   code. _(Design sections 6 and 7.)_
-- **`INV-SHIM-5`** <!-- uuid: 90b4d2f6-a37e-4c18-8d65-c1e5a0b9f347 --> — With `-t N` for N above 0, the lease MUST expire N seconds later by the
-  wall clock and the shim MUST exit 0 then. `-t 0` MUST give an indefinite lease; a negative or an
+- **`INV-SHIM-5`** <!-- uuid: 90b4d2f6-a37e-4c18-8d65-c1e5a0b9f347 --> — With `-t N` for N above 0, the lease MUST expire after N seconds of awake
+  time (see `INV-SHIM-10`) and the shim MUST exit 0 then. `-t 0` MUST give an indefinite lease; a negative or an
   overflowing value MUST make no lease and exit 0; a value that is not a number, or a missing value,
   MUST print the usage line and exit 1. A value with a numeric prefix MUST be read as the real tool reads
   it, and a repeated `-t` MUST use the last one. _(Design section 7.)_
@@ -109,8 +109,11 @@ Extensions:
   143, 129 or 130, and MUST NOT take over a signal that was ignored when it started. A shim that is
   killed without warning leaves its lease for the keeper to reap. _(Design section 7 (lifetime and
   signals).)_
-- **`INV-SHIM-10`** <!-- uuid: a39d4e07-6b52-4c81-8f1a-d0c7e5a3b269 --> — The time `-t` counts MUST be wall-clock time, so a Mac that sleeps through a
-  long `-t` still lets it expire on schedule. _(Design section 7.)_
+- **`INV-SHIM-10`** <!-- uuid: a39d4e07-6b52-4c81-8f1a-d0c7e5a3b269 --> — The time `-t` counts MUST be awake time, not wall-clock time, as the real
+  tool counts it (measured 2026-10-22): time the Mac spends asleep MUST NOT use up the budget, so a Mac
+  that sleeps through part of a `-t` still holds for the full N seconds awake. While it waits, the shim
+  MUST keep the lease's `expires_at` equal to the wall time at which the awake budget runs out, so the
+  keeper does not reap the lease early. _(Design section 7, rule 5.)_
 - **`INV-SHIM-11`** <!-- uuid: 68f2b0c5-a4d3-4e97-a5b1-81c9e7d03f4a --> — When the shim cannot record its lease, the pure form MUST print one line on
   standard error and exit 3, and the utility form MUST warn on standard error, still run the utility and
   exit with the utility's status. When the keeper is down the shim MUST still record its lease and hold
