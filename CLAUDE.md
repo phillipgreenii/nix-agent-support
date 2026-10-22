@@ -94,6 +94,13 @@ MUST also stub `home.file` (an undeclared option errors even under `mkIf false`)
 `test-pa-monitor-swiftbar-hm-render` do. Installing SwiftBar and setting its PluginDirectory is the
 consuming flake's job. Design: `docs/superpowers/specs/2026-10-07-pa-monitor-swiftbar-design.md`.
 
+**SwiftBar title width (`swiftbar-title-width`).** Every SwiftBar plugin in this repo
+(`pa-monitor-swiftbar`, `pg-task-focus-swiftbar`) MUST offer a wide and a narrow title, switched by a
+dropdown Title row, with the primary state only in the title and alerts and prompts in the dropdown.
+The convention is `nix-repo-base` `docs/swiftbar-title-width.md` (ADR 0036 in that repo).
+`pa-monitor-swiftbar` is the reference mechanism (`--set-title-width wide|narrow`, state file
+`$XDG_STATE_HOME/<plugin>/title-width`); the `pg-task-focus-swiftbar` rework is bead `pg2-incbn`.
+
 ### pg-task-focus daemon (`phillipgreenii.programs.pg-task-focus`)
 
 The second HM-scoped launchd agent (bead `pg2-t7me1.2`, ADR 0091): `home/programs/pg-task-focus`
