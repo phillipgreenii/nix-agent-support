@@ -79,7 +79,7 @@ type Tracker struct {
 // hand-back is not an outcome there. sessionEnded is read by close-or-release
 // only (INV-CCH-28): there the session must have ended, and an unassigned open
 // bead counts as handed back even without the latch (a restarted handler lost
-// it) when it carries human, a future defer_until or an open blocker.
+// it) when it carries escalated or human, a future defer_until or an open blocker.
 func (t *Tracker) Done(c roles.Completion, obs Observation, ok bool, sessionEnded bool) bool {
 	if !ok {
 		return DoneSignal(c, "", t.SeenClaimed, "", sessionEnded)
@@ -103,10 +103,13 @@ func (t *Tracker) Done(c roles.Completion, obs Observation, ok bool, sessionEnde
 }
 
 // releaseMark reports whether an open, unassigned bead carries a mark that
-// only a worker's own release leaves: human (park), a future defer_until
-// (DEFER-ON-EVENT) or an open blocker (CONVERT).
+// only a worker's own release leaves: escalated (pb:drain-stuck's ESCALATE exit,
+// the stuck bead goes to the escalation-triager; pg2-zpj6z), human (an earlier
+// park, or a hand-off already made), a future defer_until (DEFER-ON-EVENT) or an
+// open blocker (CONVERT).
 func releaseMark(obs Observation) bool {
-	return slices.Contains(obs.Labels, beads.LabelHuman) || obs.FutureDefer || obs.Blocked
+	return slices.Contains(obs.Labels, EscalatedLabel) ||
+		slices.Contains(obs.Labels, beads.LabelHuman) || obs.FutureDefer || obs.Blocked
 }
 
 // Observe records the claim latch for a read (call after Done returned false).

@@ -210,7 +210,7 @@ Extensions:
 - 4d. The session was closed by ccpool before the bead was handed back, and the bead is not held
   by a peer: `INV-CCH-7` applies (release, comment, strike on `pool-evicted`), ahead of 4b.
 - 4e. The handler restarts while the session runs: the latch is lost with it. A bead that the
-  worker parked, deferred or converted still reads as handed back (step 4); one it handed back
+  worker escalated, parked, deferred or converted still reads as handed back (step 4); one it handed back
   inside a single poll interval, with none of those marks, reads as 4b and earns a strike.
 
 ### `USECASE-CCH-SPLIT-TRIAGE` — settle a bead parked for split review, for the split-triage role <!-- uuid: e0b4ef0a-189d-4297-b11e-e6454c930cbc -->

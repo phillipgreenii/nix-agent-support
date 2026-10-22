@@ -110,6 +110,10 @@ already cached in `WORKDIR/probes/gate-check.json`.
    - Check whether the decision is already recorded in `acceptance_criteria` or the comments
      (F-10).
    - `worktree-review` follows W-4..W-8 strictly.
+   - An `escalated` bead is waiting for the escalation-triager (the label means an agent hit a
+     problem and asked it to look). Leave it unchanged: MUST NOT remove `escalated`, MUST NOT
+     add `human` or `attention` (only the triager hands a bead on, with `hand-to-human`), and
+     record "unchanged: escalated, the triager owns it".
 6. **Stale or done:** close the bead with precise evidence in each of these cases:
    - its work already landed (run the `landed?` probe, never trust a claim);
    - its referent is gone;

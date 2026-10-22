@@ -249,8 +249,12 @@ preconditions, and premise freshness (whose heaviest reference material lives in
 
 - **D-1** Before applying `human`, an agent MUST classify each blocker by what would clear it:
   ANOTHER ISSUE that must finish first (⇒ a dependency), or a PERSON whose decision, input,
-  approval, or out-of-band action is required (⇒ `human`). `human` MUST NOT be used as a generic
-  "not workable right now" park, and MUST NOT be applied without that determination being made.
+  approval, or out-of-band action is required (⇒ a PERSON is the blocker). `human` MUST NOT be
+  used as a generic "not workable right now" park, and MUST NOT be applied without that
+  determination being made. For a bead an agent HOLDS and cannot finish, "a person is the
+  blocker" is a finding the agent reports by ESCALATING (LV-7), not a label it writes: the
+  escalation-triager decides, and `human` + `attention` reach the bead only through
+  `hand-to-human`. An agent writes `human` itself only on NEW planned operator work (LV-2).
 - **D-2** A blocker that is another issue MUST be modeled as a blocking dependency and MUST NOT be
   labeled `human`. The FIRST id is the BLOCKED issue and the SECOND is the BLOCKER — per
   `bd dep add --help`, "`issue-123` depends on (is blocked by) the specified issue":
@@ -355,7 +359,7 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   on its FIRST park, not only after a person has said so once. `pb:drain-stuck`'s DEFER-ON-EVENT
   exit is the operational form of this rule.
 
-## Escalation and Operator-Attention Labels (LV-1 to LV-6)
+## Escalation and Operator-Attention Labels (LV-1 to LV-7)
 
 > The vocabulary is defined ONCE, in `docs/guides/bead-label-vocabulary.md` in
 > `nix-agent-support` (ADR 0105; bead `pg2-ikkpk`; operator rulings, Phillip, 2026-10-21 and
@@ -400,6 +404,18 @@ preconditions, and premise freshness (whose heaviest reference material lives in
 - **LV-6** The word "escalation" in `docs/superpowers/specs/2026-10-10-escalations-design.md` names
   a menu-bar reminder item, not the `escalated` label. When both could be meant, say "the
   escalated label" or "the menu-bar escalation".
+- **LV-7** An agent that cannot finish a claimed bead MUST ESCALATE it and MUST NOT label that
+  bead `human` or `attention` itself (the D-1 classification names who must act, not the
+  label the agent writes). Escalating is ONE `bd update` that adds `escalated` AND releases
+  the claim (`--add-label escalated --status open --assignee ""`, B-1..B-3), written AFTER a
+  comment that carries the findings and the freshness-probe output (F-1), so the findings are
+  on the bead when the triager is dispatched. Only the triager hands a bead on, with
+  `hand-to-human` (LV-3). A bead that waits on ANOTHER bead is a dependency (D-2) and one that
+  waits on a live external event is a defer (D-10); neither is escalated. The exceptions are
+  NEW beads an agent files FOR the operator (a verify, checkpoint or decision bead, or a
+  leftover-isolation `worktree-review` follow-up), which are planned operator work and carry
+  `human` only (LV-2). `pb:drain-stuck` is the operational form of this rule; the triager's
+  side is its prompt (one per tracker, in the deployment flake).
 
 ## Misfiled Beads: Recreate and Verify (BF-3, BF-4)
 

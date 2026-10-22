@@ -28,7 +28,9 @@ state takes the default, which is exactly what /drain-beads does.
   `container-hit` still holding the claim, and the pinned-lander case releases the
   bead to `open`. `park` — NO path may leave the bead `open`, unclaimed and ready,
   because the router would re-offer it within a minute: a container hit takes
-  `pb:drain-stuck`'s CONTAINER PARK entry and the pinned-lander case PARKs.
+  `pb:drain-stuck`'s CONTAINER PARK entry and the pinned-lander case PARKs. PARK here
+  means `pb:drain-stuck`'s ESCALATE exit: the bead is left labeled `escalated` (never
+  `human`), which every drain queue excludes, with the claim released in the same update.
 - **session mode** (default `loop`): `loop` — an operator is reachable, and async
   subagents follow the rule in `references/rules.md` (end the turn, the task
   notification resumes you). `unattended` — no operator is present: every
@@ -68,7 +70,7 @@ Return exactly one of:
 
 - `closed` — closed (done, a handoff bead absorbed, or STUCK's CLOSE-AS-MOOT).
 - `released` — claim released with the assignee cleared, by `pb:drain-stuck`
-  (PARK, CONVERT-TO-DEPENDENCY, DEFER-ON-EVENT), by step 4's STAMP REFUSAL
+  (ESCALATE, CONVERT-TO-DEPENDENCY, DEFER-ON-EVENT), by step 4's STAMP REFUSAL
   (`--status deferred --assignee ""`), or by step 6's pinned-session release.
   Every `released` path except step 6's pinned-session release (which has committed work, so
   nothing to reclaim) first runs `pb drain reclaim` through `pb:drain-stuck`'s RECLAIM section,
@@ -192,7 +194,7 @@ and the container's own priority, then:
      by an observed harness refusal or a failed probe, never by environment-block
      text alone. Pinned AND the strategy is `ff-merge-to-main` → do NOT dispatch:
      release policy `release` releases the bead to `open` with no `human` label and
-     returns `released`; release policy `park` PARKs it through `pb:drain-stuck`.
+     returns `released`; release policy `park` ESCALATES it through `pb:drain-stuck`.
    - VERIFY the reported verdict with one observation before recording it.
    - A lost fast-forward race or a rejected non-fast-forward push is TRANSIENT:
      re-dispatch at most once more. A genuine `stopped:` routes to STUCK.
@@ -259,8 +261,9 @@ Invoke the `pb:drain-stuck` skill with: the bead id, your actor ID, the
 worktree/branch location (`<work-branch>`), and what you tried. Follow it exactly — it runs the
 freshness probes first, runs its RECLAIM step (`pb drain reclaim`) before every release so an
 EMPTY isolation (clean tree, zero commits) is removed and the bead noted while an isolation holding
-anything is kept, and exits by exactly one of PARK (labeled `human`,
-claim released), CLOSE-AS-MOOT (with extraction), CONVERT-TO-DEPENDENCY
+anything is kept, and exits by exactly one of ESCALATE (labeled `escalated`
+with the findings in a comment, claim released in the same update; never `human`,
+which only the escalation-triager hands on), CLOSE-AS-MOOT (with extraction), CONVERT-TO-DEPENDENCY
 (edges wired, claim released, no label), or DEFER-ON-EVENT (deferred, claim
 released, no label — a live external event, not a person or a bead, is the
 blocker). Then return to the caller with outcome `released` (`closed` after CLOSE-AS-MOOT).

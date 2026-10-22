@@ -644,7 +644,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   `pg2-nk6th.2`, plan `2026-10-08-drain-worker-roles` section A1.
 
 - **`INV-CCH-28`** <!-- uuid: dea93749-b558-4331-9b46-5ac4c4d399ae --> — a role whose session claims its bead and MAY legitimately give it back
-  unfinished (a drain worker that parks, defers, converts or refuses a bead) MUST be able to use the
+  unfinished (a drain worker that escalates, parks, defers, converts or refuses a bead) MUST be able to use the
   completion mode `close-or-release`, alongside `close-only`, `close-or-handback`,
   `close-or-triage` and `close-or-split-triage`; the other modes are unchanged. A dispatch under
   it is done when the bead is closed, or when the session has ENDED and the bead has been handed
@@ -665,16 +665,16 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     `in_progress` read.
   - **Classification at the end of a session.** In this order:
 
-    | Bead when the session has ended                                                                 | Result                                                                           |
-    | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-    | `closed`                                                                                        | done                                                                             |
-    | `deferred`, unassigned (a worker's refusal of a stamp)                                          | done                                                                             |
-    | `open`, unassigned, latch set                                                                   | done (a hand-back)                                                               |
-    | `open`, unassigned, no latch, and `human`, a future deferral date or an open `blocks` edge      | done (the latch was lost to a restart or a missed poll, but the worker released) |
-    | held by an actor other than the role's own, or `in_progress` with no assignee                   | peer end: NO bead write, NO strike, no verb                                      |
-    | `open`, unassigned, no latch, no `human`, not deferred, no future deferral, no open blocker     | unclaimed end                                                                    |
-    | assigned to the role's own actor (still `in_progress`, or `open`/`deferred` but not unassigned) | failure: the role's `on_failure`, as in every other mode                         |
-    | any other status                                                                                | failure: the role's `on_failure`                                                 |
+    | Bead when the session has ended                                                                             | Result                                                                           |
+    | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+    | `closed`                                                                                                    | done                                                                             |
+    | `deferred`, unassigned (a worker's refusal of a stamp)                                                      | done                                                                             |
+    | `open`, unassigned, latch set                                                                               | done (a hand-back)                                                               |
+    | `open`, unassigned, no latch, and `escalated`, `human`, a future deferral date or an open `blocks` edge     | done (the latch was lost to a restart or a missed poll, but the worker released) |
+    | held by an actor other than the role's own, or `in_progress` with no assignee                               | peer end: NO bead write, NO strike, no verb                                      |
+    | `open`, unassigned, no latch, no `escalated`, no `human`, not deferred, no future deferral, no open blocker | unclaimed end                                                                    |
+    | assigned to the role's own actor (still `in_progress`, or `open`/`deferred` but not unassigned)             | failure: the role's `on_failure`, as in every other mode                         |
+    | any other status                                                                                            | failure: the role's `on_failure`                                                 |
 
     A deferral date or an open blocker is read from the single-bead read only, and an unreadable
     bead (twice in a row) is a failure.
@@ -689,8 +689,10 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     writes a `dispatch_result` failure record. Each end writes one `unclaimed_end` record carrying
     `failure_signature` and `signature_evidence` (`INV-CCH-9`), which is how an end is told apart
     from a limit death below. A claim made and released inside one poll interval
-    can miss the latch; the guard that the bead is `open`, not `human`, not deferred and without
-    blocker keeps a worker's own park, deferral or conversion in that window from being struck.
+    can miss the latch; the guard that the bead is `open`, neither `escalated` nor `human`, not
+    deferred and without blocker keeps a worker's own escalation, park, deferral or conversion in
+    that window from being struck (a drain worker that cannot finish a bead escalates it with the
+    `escalated` label, `pb:drain-stuck`'s ESCALATE exit, bead `pg2-zpj6z`).
     Not covered, accepted: a bead that cannot take a label because it is a read-only template
     earns the strikes but cannot be given `human`, so it would be re-offered without bound; the
     role's query is expected to exclude templates, and the worker's own check ends without

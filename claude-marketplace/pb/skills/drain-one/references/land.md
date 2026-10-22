@@ -72,7 +72,7 @@ Read in full when step 6 of `SKILL.md` applies. Moved verbatim from /drain-beads
      anything about this bead; it only needs a session that is not pinned to
      this worktree, same reasoning as the CLAIM-step SELF-CHECK's unattended
      halt above being NOT a `human` park. Leave the worktree/branch exactly
-     as committed — nothing here is discarded. Then return to the caller with outcome `released`. Under release policy `park` (see `SKILL.md`), do NOT release to `open` as described above: PARK the bead through `pb:drain-stuck` instead (a comment with the evidence plus `human`), because an open, unclaimed bead is re-offered within a minute, and return `released`.
+     as committed — nothing here is discarded. Then return to the caller with outcome `released`. Under release policy `park` (see `SKILL.md`), do NOT release to `open` as described above: ESCALATE the bead through `pb:drain-stuck` instead (a comment with the evidence plus `escalated`, released in the same update), because an open, unclaimed bead is re-offered within a minute, and return `released`.
 
    The lander brief MUST contain: the bead id; the absolute canonical repo
    root; the worktree path and branch `<work-branch>` (for a set, the set root
@@ -171,7 +171,7 @@ state,isDraft` must show OPEN and draft (cwd cannot be assumed); record
 
    This is the DEFAULT policy. When the caller passed a tracker section, push and
    draft-PR authority come ONLY from that section; where it grants none, you MUST NOT
-   push (U-5) — PARK the bead through `pb:drain-stuck` instead of landing it.
+   push (U-5) — ESCALATE the bead through `pb:drain-stuck` instead of landing it.
 
    If landing returns `stopped:` due to a lost FAST-FORWARD RACE (another session
    advanced local main first), that is TRANSIENT: re-dispatch the lander at most

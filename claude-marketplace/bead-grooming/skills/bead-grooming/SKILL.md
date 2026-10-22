@@ -18,13 +18,13 @@ description: >-
 Turn under-specified open beads into plan-ready ones. For each bead in scope you write
 **acceptance criteria** at the right altitude for its type, do light **polish** (title,
 type, priority, description) where something is clearly wrong, and — when you genuinely
-can't define criteria — leave good partial work plus **specific open questions** and hand
-the bead to a human. Groomed beads get the `has-acceptance-criteria` label so the work is
+can't define criteria — leave good partial work plus **specific open questions** and escalate
+the bead (the escalation-triager decides whether a person must answer). Groomed beads get the `has-acceptance-criteria` label so the work is
 durable and the run is re-entrant.
 
 This is an **autonomous batch** workflow: you process every matching bead in one pass, then
 report a summary. You don't pause for per-bead approval — the `has-acceptance-criteria` /
-`human` labels and the end-of-run summary are how the user audits what happened.
+`escalated` labels and the end-of-run summary are how the user audits what happened.
 
 ## Why acceptance criteria, and why the altitude matters
 
@@ -60,12 +60,13 @@ field conventions.
 ### 1. Find the work
 
 ```bash
-bd list --status open --exclude-label human,has-acceptance-criteria --limit 0
+bd list --status open --exclude-label escalated,attention,human-focus,human-focus-required,human,has-acceptance-criteria --limit 0
 ```
 
-`--exclude-label` drops any bead carrying **either** the `human` label (already escalated) or
-`has-acceptance-criteria` (already groomed), so this is the exact "open, un-groomed, not yet
-escalated" set. `--limit 0` means no cap. Report the count to the user up front, then work
+`--exclude-label` drops any bead carrying **either** a label of the escalated or human sets
+(`escalated`, `attention`, `human-focus`, `human-focus-required`, `human`: already escalated or
+with a person) or `has-acceptance-criteria` (already groomed), so this is the exact "open,
+un-groomed, not yet escalated" set. `--limit 0` means no cap. Report the count to the user up front, then work
 through them in priority order (P0 first). Use `--json` if you want to script the iteration.
 
 A large batch is fine — the labels make every bead's progress durable, so a re-run picks up
@@ -164,7 +165,7 @@ You can fold this into the criteria/polish update:
 
 Only add this label when the bead truly has usable acceptance criteria at the right altitude.
 
-## When you can't define criteria — flag for a human
+## When you can't define criteria — escalate
 
 Sometimes even high-level criteria require a decision you can't make: the intent is genuinely
 ambiguous, "done" depends on a product/design choice, or a critical fact isn't knowable from
@@ -184,20 +185,23 @@ any available source. When that happens, **do the partial work, then escalate** 
 
    Use `--append-notes`, never `--notes`, so you don't clobber existing notes.
 
-3. Add the `human` label:
+3. Add the `escalated` label (never `human` or `attention` yourself: the escalation-triager
+   reads your questions and decides whether the bead goes to the operator, `beads-lifecycle`
+   LV-1 and LV-7; `hand-to-human` is the triager's command, not yours):
 
    ```bash
-   bd update <id> --add-label human
+   bd update <id> --add-label escalated
    ```
 
 4. **Do not** add `has-acceptance-criteria` — it's not done.
 
-The `human` label is the project's escalation queue (`bd human list`). By attaching concrete,
-pointed questions you turn a vague "needs attention" into something the human can answer in a
-minute, then a future grooming run finishes it.
+The `escalated` label is the escalation-triager's input queue (`bd list --label escalated`). By
+attaching concrete, pointed questions you turn a vague "needs attention" into something the
+triager, or the person it hands the bead to, can answer in a minute, then a future grooming run
+finishes it.
 
 A bead can be **both** partially groomed and flagged: write the criteria you're confident in,
-leave the rest as questions, add `human`, and skip `has-acceptance-criteria`.
+leave the rest as questions, add `escalated`, and skip `has-acceptance-criteria`.
 
 ### Planning / "plan out" / design tasks
 
@@ -209,10 +213,10 @@ that framing just defers those decisions into a planning session that may head t
 
 So: when a planning task's intent isn't established in the bead or derivable from project
 context, treat the undecided intent as the blocker. Write the high-level shape of the plan as
-partial criteria, put the intent/motivation questions in notes, add `human`, and **withhold**
-`has-acceptance-criteria` — the human sets direction before this becomes plan-ready. Reserve a
+partial criteria, put the intent/motivation questions in notes, add `escalated`, and **withhold**
+`has-acceptance-criteria` — a person sets direction before this becomes plan-ready. Reserve a
 groomed label for planning tasks whose goal is already clear and where only the technical
-approach remains to be worked out. When in doubt on a "plan out" bead, flag the human; a
+approach remains to be worked out. When in doubt on a "plan out" bead, escalate it; a
 plausible-but-wrong design deliverable is more expensive than a quick intent check.
 
 ## End-of-run summary
@@ -220,16 +224,16 @@ plausible-but-wrong design deliverable is more expensive than a quick intent che
 After the batch, give the user a compact report so they can audit without opening every bead:
 
 ```
-Groomed N beads (M flagged for human):
+Groomed N beads (M escalated):
 
 | id        | type    | action                                    |
 |-----------|---------|-------------------------------------------|
 | pg2-abc   | bug     | criteria added (specific); priority P3→P2 |
 | pg2-def   | feature | criteria added (high-level)               |
 | pg2-ghi   | task    | criteria added; title clarified           |
-| pg2-jkl   | feature | PARTIAL + flagged human — 2 open questions |
+| pg2-jkl   | feature | PARTIAL + escalated — 2 open questions    |
 
-Flagged for human (bd human list):
+Escalated (bd list --label escalated):
 - pg2-jkl: needs a product call on whether anonymous users are in scope.
 ```
 
@@ -240,21 +244,21 @@ List anything you deliberately left alone and why (e.g., priority you chose not 
 - The selection query already skips groomed and escalated beads, so **re-running is safe** and
   resumes where you left off.
 - **Never close beads** and never change status — grooming readies work, it doesn't do it.
-- **Never** add `has-acceptance-criteria` to a bead you flagged `human`.
+- **Never** add `has-acceptance-criteria` to a bead you escalated.
 - Always `--append-notes`, never `--notes` (which replaces). Preserve the author's description;
   add, don't overwrite.
 - Avoid `bd edit` (it opens an interactive editor and will hang).
 
 ## Command quick reference
 
-| need                       | command                                                                               |
-| -------------------------- | ------------------------------------------------------------------------------------- |
-| find un-groomed open beads | `bd list --status open --exclude-label human,has-acceptance-criteria --limit 0`       |
-| inspect a bead             | `bd show <id>`                                                                        |
-| find related beads         | `bd search "<terms>"`                                                                 |
-| write criteria             | `bd update <id> --acceptance "..."`                                                   |
-| mark groomed               | `bd update <id> --add-label has-acceptance-criteria`                                  |
-| append questions           | `bd update <id> --append-notes "..."`                                                 |
-| flag for human             | `bd update <id> --add-label human`                                                    |
-| polish fields              | `bd update <id> --title "..." --type <t> -p <n> --description "..."`                  |
-| do it all at once          | `bd update <id> --acceptance "..." --title "..." --add-label has-acceptance-criteria` |
+| need                       | command                                                                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| find un-groomed open beads | `bd list --status open --exclude-label escalated,attention,human-focus,human-focus-required,human,has-acceptance-criteria --limit 0` |
+| inspect a bead             | `bd show <id>`                                                                                                                       |
+| find related beads         | `bd search "<terms>"`                                                                                                                |
+| write criteria             | `bd update <id> --acceptance "..."`                                                                                                  |
+| mark groomed               | `bd update <id> --add-label has-acceptance-criteria`                                                                                 |
+| append questions           | `bd update <id> --append-notes "..."`                                                                                                |
+| escalate (open questions)  | `bd update <id> --add-label escalated`                                                                                               |
+| polish fields              | `bd update <id> --title "..." --type <t> -p <n> --description "..."`                                                                 |
+| do it all at once          | `bd update <id> --acceptance "..." --title "..." --add-label has-acceptance-criteria`                                                |

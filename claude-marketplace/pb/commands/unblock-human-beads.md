@@ -18,8 +18,10 @@ argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, -
 You are the UNBLOCKER of one of several concurrent Claude Code sessions clearing the
 `human`-blocked beads in this pn-workspace (the workspace containing your current working
 directory). This is the counterpart to `/drain-beads`: those sessions skip every
-`human`-labeled bead (they claim with `--exclude-label human`), so parked beads accumulate
-until a person clears them. Your job is to **remove the human blocker** on each ready
+`human`-labeled bead (they claim with `--exclude-label human`), so beads handed to a person
+accumulate until a person clears them. A stuck drain bead does not reach this queue directly:
+`pb:drain-stuck` ESCALATES it (`escalated`), and only a bead the escalation-triager could not
+resolve arrives here, handed on by `hand-to-human` as `human` + `attention`. Your job is to **remove the human blocker** on each ready
 `human` bead so a separately-running `/drain-beads` can then finish the work.
 
 Work through the queue autonomously, ENGAGING the operator — the person running this
@@ -57,7 +59,9 @@ carries `human` + `attention` (written in one call by the `hand-to-human` comman
 select on `human` and `human-focus-required` because every handed-off bead carries `human`.
 Planned operator work (verify, checkpoint, decision and handoff beads) stays `human` only, with
 no `attention`; a hand-off the escalation path could not resolve is written ONLY through
-`hand-to-human`, never by hand.
+`hand-to-human`, never by hand. A RELEASE below strips `attention` together with `human`
+(`attention` is in the drain queues' exclude list, so a released bead that kept it would stay
+out of the drain pool); removing a label that is absent is a no-op.
 
 ## Sourcing invariant (deferred-safety by construction — DO NOT REGRESS)
 
@@ -358,8 +362,8 @@ and it STOPs unconditionally regardless of this flag.
    invents.
 
 3. **UNDERSTAND** (brief): `bd show <id>`. Read the `stuck:` comment/description to learn
-   the blocker, and — if `/drain-beads` or a drain worker parked one — note the branch/set
-   location. The park comment names the branch and the repo; call that branch `<work-branch>`
+   the blocker, and — if `/drain-beads` or a drain worker escalated one — note the branch/set
+   location. The escalation comment names the branch and the repo; call that branch `<work-branch>`
    (`drain/<id>` by default, but a worker's may differ, e.g. `phillipg.NO-JIRA.<bead id>` in
    zr) and use it wherever this command says `<work-branch>`. The worktree is conventionally
    `.worktrees/<id>`; if the comment gives no branch, or a probe on it resolves nothing,
@@ -451,7 +455,7 @@ output verbatim:
 | 2   | **handoff bead**                          | a bead of type `handoff` (or one unmistakably so, per the `beads-lifecycle:handoff-bead` skill, which is the sole definition; any ambiguity means it is NOT a handoff)                                                                                                                                                                                                                                                                                                                                        | **NO operator prompt. Follow the `beads-lifecycle:handoff-bead` skill's unattended handling:** a handoff carrying `human` (every bead this command claims) is the skill's EXCEPTION, so LEAVE it (release unchanged, session skip-set); typed handoffs are excluded from the claim query. Never demoted or deferred. See below.                                                                                                                                                                                                                          |
 | 3   | **label-to-dependency conversion**        | every live blocker named by the bead or its `stuck:` comment is ANOTHER BEAD — each resolves to an existing id whose `sibling-open?` probe reads `open` / `in_progress` / `blocked` — and nothing needs a person's decision, input, or authority                                                                                                                                                                                                                                                              | **CONVERT, then RELEASE. NO operator prompt.** `bd dep add` per blocker FIRST, then drop `human` in the single atomic release. See below.                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 4   | **planning session already required**     | carries the `planning-session-required` label — an earlier run already concluded the blocker is a design/planning SESSION, not a single answerable question                                                                                                                                                                                                                                                                                                                                                   | **RE-CHECK the recorded evidence; NEVER re-present the question.** Still required (no evidence) → **DEFER**: a silent skip to the next bead, NO operator prompt. Session CONFIRMED held → drop that label (KEEP `human`) and re-enter the rubric. See below.                                                                                                                                                                                                                                                                                             |
-| 5   | **suspected stale precondition**          | carries the `stale-precondition` label — `/drain-beads` parked it TWICE on the same `PRECONDITION-KEY`                                                                                                                                                                                                                                                                                                                                                                                                        | **MUST NOT RELEASE as-is.** Re-derive from the park comment's `DERIVED-FROM` → CLOSE if the outcome already holds, else ENGAGE → rewrite → RELEASE. See below.                                                                                                                                                                                                                                                                                                                                                                                           |
+| 5   | **suspected stale precondition**          | carries the `stale-precondition` label — `/drain-beads` escalated it TWICE on the same `PRECONDITION-KEY`                                                                                                                                                                                                                                                                                                                                                                                                     | **MUST NOT RELEASE as-is.** Re-derive from the park comment's `DERIVED-FROM` → CLOSE if the outcome already holds, else ENGAGE → rewrite → RELEASE. See below.                                                                                                                                                                                                                                                                                                                                                                                           |
 | 6   | **apply-waiting**                         | "verify/act after apply", deploy-gated content                                                                                                                                                                                                                                                                                                                                                                                                                                                                | **RELEASE.** Trust that `pn workspace apply` ran before this command — see "apply-waiting = trust" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 7   | **mislabeled / normal work**              | the label's reason is provably moot (referenced worktree already gone, decision already recorded in a later comment, transient infra passed, every named blocker bead now probes `closed`) and no human input is needed                                                                                                                                                                                                                                                                                       | **RELEASE** — no operator prompt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 8   | **genuine decision / input**              | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                                                                                                                                                                                                                                                                                                                                      | **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / DEFER per outcome. **Branch:** if the blocker is a design/planning SESSION rather than a single answerable question, do NOT put it to the operator as a decision — label `planning-session-required` (KEEPING `human`) and DEFER. See "Class 4". If the ENGAGE instead matches the `human-focus-required` recognition test (not scoped to this row alone), label `human-focus-required` (KEEPING `human`) as part of the terminal action. See "Labeling a bead `human-focus-required`". |
@@ -679,14 +683,14 @@ Do these IN ORDER — the ordering is the whole safety property (**D-5**):
    `human-focus-required` in this SAME call too, if present — a bead that earned it during an
    earlier ENGAGE must not be orphaned from both commands. If the
    bead also carries `stale-precondition` or `planning-session-required`, drop those in this one
-   call too (`--remove-label human,human-focus-required,planning-session-required`): this class
+   call too (`--remove-label human,attention,human-focus-required,planning-session-required`): this class
    outranks both, so
    neither has been re-checked, and a finding that NO person is the blocker at all is stronger
    evidence than any session record that the marker's premise died. A lingering marker would
    re-trigger class 4 or 5 on a bead that has left this queue for good:
 
    ```bash
-   bd update <id> --remove-label human,human-focus-required --status open --assignee "" --actor "ID"
+   bd update <id> --remove-label human,attention,human-focus-required --status open --assignee "" --actor "ID"
    ```
 
    `--status open`, never `blocked`: readiness is DERIVED from the dependency graph, so the
@@ -741,7 +745,7 @@ bead with nothing to implement.
 **`stale-precondition` outranks apply-waiting.** A stale precondition presents EXACTLY as
 apply-waiting ("verify after apply"), so the apply-trust rule below would RELEASE it, drain
 would park it again on the same `PRECONDITION-KEY`, and the bead would churn between the two
-queues indefinitely. The label means drain already parked it TWICE on that key, so the
+queues indefinitely. The label means drain already escalated it TWICE on that key, so the
 PREMISE — not the deploy state — is the suspect. Therefore:
 
 - Re-derive the precondition from the `DERIVED-FROM: <repo>@<sha> — <path>` citation in the
@@ -948,7 +952,7 @@ step — and never reaches TRIAGE at all.
   drain pool with a SINGLE atomic update:
 
   ```bash
-  bd update <id> --remove-label human,human-focus-required --status open --assignee "" --actor "ID"
+  bd update <id> --remove-label human,attention,human-focus-required --status open --assignee "" --actor "ID"
   ```
 
   Strip `human-focus-required` here too, if present — a bead that earned it during an earlier
@@ -957,7 +961,7 @@ step — and never reaches TRIAGE at all.
   would strand the bead in neither queue). One call — so there is no crash window leaving a
   label-less `in_progress` orphan that
   neither resume query recovers. If the bead carries `stale-precondition`, drop BOTH labels
-  in that same single call — `--remove-label human,human-focus-required,stale-precondition` —
+  in that same single call — `--remove-label human,attention,human-focus-required,stale-precondition` —
   and only after the
   precondition has been rewritten as an observable outcome (class 5). A lingering
   `stale-precondition` label makes drain treat the NEXT, legitimately-fresh park as an
@@ -983,7 +987,7 @@ step — and never reaches TRIAGE at all.
   later sweep re-park the bead:
 
   ```bash
-  bd update <id> --remove-label human,human-focus-required,worktree-review --priority <prior> --status open --assignee "" \
+  bd update <id> --remove-label human,attention,human-focus-required,worktree-review --priority <prior> --status open --assignee "" \
     --append-notes "[worktree-review-resolved $(date +%F)] <verdict>. Restored P0->P<prior>." --actor "ID"
   ```
 
@@ -1022,7 +1026,8 @@ step — and never reaches TRIAGE at all.
   task — file a follow-up instead. It carries `worktree-review` ALONGSIDE `human` so the next
   unblock run recognizes it as class 1 mechanically (W-1), with the entry marker recorded at
   birth (W-2; `bd create` defaults to P2 and promotes nothing, so the no-promotion form
-  applies). Note `--labels`, not `--add-label`, on `bd create`:
+  applies). The follow-up is planned operator work (LV-2): `human` ONLY, never `attention`.
+  Note `--labels`, not `--add-label`, on `bd create`:
 
   ```bash
   bd create "worktree-review: reconcile leftover isolation for <id>" \
@@ -1369,7 +1374,7 @@ Freshness` rules (F-3) —
   substrate resolution MUST be closed WITHOUT a prompt, on the operator's standing ruling that a
   provably-landed teardown needs no approval. A proof recorded by an EARLIER session is NOT such
   evidence — the legs MUST have been run in the closing session. If a worktree is
-  left, MUST file a `worktree-review` follow-up
+  left, MUST file a `worktree-review` follow-up (planned operator work, LV-2: `human` only)
   (`bd create … --labels human,worktree-review --defer +7d --deps "discovered-from:<id>"`,
   carrying the W-2 entry marker) rather than orphan it.
 - **Arguments narrow-only.** `$ARGUMENTS` MUST only restrict the claim query and MUST NOT
@@ -1428,8 +1433,8 @@ flowchart TD
     SUB -->|can't now| DEF
     STL -- "outcome holds or is unsatisfiable" --> CLO
     STL -- "outcome genuinely unmet" --> ENG
-    ENG -->|now drain-doable| REL["RELEASE (atomic): commit only the blocker-lift artifact →<br/>bd comment (precondition rewritten as an OUTCOME) →<br/>bd update --remove-label human,human-focus-required (+stale-precondition,<br/>+worktree-review with --priority prior) --status open --assignee '' (one call)"]
-    ENG -->|obsolete, confirmed| CLO["CLOSE: if worktree-review, FIRST<br/>bd update --remove-label worktree-review --priority prior (keep human) →<br/>bd close (+ worktree-review follow-up bd create<br/>--labels human,worktree-review --defer, if a worktree is left)"]
+    ENG -->|now drain-doable| REL["RELEASE (atomic): commit only the blocker-lift artifact →<br/>bd comment (precondition rewritten as an OUTCOME) →<br/>bd update --remove-label human,attention,human-focus-required (+stale-precondition,<br/>+worktree-review with --priority prior) --status open --assignee '' (one call)"]
+    ENG -->|obsolete, confirmed| CLO["CLOSE: if worktree-review, FIRST<br/>bd update --remove-label worktree-review --priority prior (keep human) →<br/>bd close (+ worktree-review follow-up, planned operator work: bd create<br/>--labels human,worktree-review --defer, if a worktree is left)"]
     ENG -->|"blocker is a design SESSION, not an answerable question: do NOT present it"| DEF
     ENG -->|operator can't now| DEF["DEFER: bd comment why, or the class-4 ENTRY MARKER<br/>naming the design question + SEARCH TERM →<br/>bd update --defer +7d --status open --assignee ''<br/>plus --add-label planning-session-required on first application<br/>(keep human AND worktree-review AND planning-session-required<br/>AND the promoted priority), add id to skip-set"]
     REL --> C

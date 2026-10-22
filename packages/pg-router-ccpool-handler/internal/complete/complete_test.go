@@ -351,6 +351,7 @@ func TestTracker_closeOrReleaseDone(t *testing.T) {
 	future := Observation{Status: "open", FutureDefer: true}
 	blocked := Observation{Status: "open", Blocked: true}
 	human := Observation{Status: "open", Labels: []string{"human"}}
+	escalated := Observation{Status: "open", Labels: []string{"escalated"}}
 	cases := []struct {
 		name  string
 		latch bool
@@ -365,6 +366,7 @@ func TestTracker_closeOrReleaseDone(t *testing.T) {
 		{"open+no latch+ended, no mark", false, Observation{Status: "open"}, true, true, false},
 		{"deferred+latch+ended", true, Observation{Status: "deferred"}, true, true, true},
 		{"fresh tracker: park (human)", false, human, true, true, true},
+		{"fresh tracker: ESCALATE (escalated, pb:drain-stuck)", false, escalated, true, true, true},
 		{"fresh tracker: DEFER-ON-EVENT", false, future, true, true, true},
 		{"fresh tracker: CONVERT", false, blocked, true, true, true},
 		{"fresh-tracker marks need the session to have ended", false, human, true, false, false},
@@ -400,6 +402,7 @@ func TestTracker_closeOrReleaseEndKind(t *testing.T) {
 		{"open still assigned to the actor", true, Observation{Status: "open", Assignee: relActor}, true, EndFailed},
 		{"unclaimed end: open, unassigned, no latch, no mark", false, Observation{Status: "open"}, true, EndUnclaimed},
 		{"open+human is a release, not an unclaimed end", false, Observation{Status: "open", Labels: []string{"human"}}, true, EndFailed},
+		{"open+escalated is a release (drain-stuck ESCALATE), not an unclaimed end", false, Observation{Status: "open", Labels: []string{"escalated"}}, true, EndFailed},
 		{"future defer is a release, not an unclaimed end", false, Observation{Status: "open", FutureDefer: true}, true, EndFailed},
 		{"blocker edge is a release, not an unclaimed end", false, Observation{Status: "open", Blocked: true}, true, EndFailed},
 		{"latched open bead is Done, never an unclaimed end", true, Observation{Status: "open"}, true, EndFailed},

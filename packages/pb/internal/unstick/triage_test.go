@@ -115,6 +115,41 @@ func TestLiveFixpointTable(t *testing.T) {
 			[]string{"t1", "t2"},
 		},
 		{
+			"root carries escalated: with the triager, not drainable, chain is REVIEW",
+			[]Row{trMk("r", trLabel("escalated")), trMk("t1", trStatus(StatusBlocked), trBlockedBy("r"))},
+			[]string{"r"},
+			nil,
+			[]string{"t1"},
+		},
+		{
+			"root carries attention",
+			[]Row{trMk("r", trLabel("attention")), trMk("t1", trStatus(StatusBlocked), trBlockedBy("r"))},
+			[]string{"r"},
+			nil,
+			[]string{"t1"},
+		},
+		{
+			"target carries escalated: held by the triager, never LIVE",
+			[]Row{trMk("r"), trMk("t1", trStatus(StatusBlocked), trLabel("escalated"), trBlockedBy("r"))},
+			[]string{"r"},
+			nil,
+			[]string{"t1"},
+		},
+		{
+			"target carries attention",
+			[]Row{trMk("r"), trMk("t1", trStatus(StatusBlocked), trLabel("attention"), trBlockedBy("r"))},
+			[]string{"r"},
+			nil,
+			[]string{"t1"},
+		},
+		{
+			"escalated ancestor of target",
+			[]Row{trMk("r"), trMk("p", trLabel("escalated")), trMk("t1", trStatus(StatusBlocked), trBlockedBy("r"), trChildOf("p"))},
+			[]string{"r"},
+			nil,
+			[]string{"t1"},
+		},
+		{
 			"root carries human-focus-required",
 			[]Row{trMk("r", trLabel("human-focus-required")), trMk("t1", trStatus(StatusBlocked), trBlockedBy("r"))},
 			[]string{"r"},
@@ -355,12 +390,15 @@ func TestDrainableExclusions(t *testing.T) {
 		trMk("ok"),
 		trMk("h", trLabel("human")),
 		trMk("hf", trLabel("human-focus-required")),
+		trMk("esc", trLabel("escalated")),
+		trMk("att", trLabel("attention")),
+		trMk("hfo", trLabel("human-focus")),
 		trMk("rc", trLabel("refactor-campaign")),
 		trMk("ep", trTyp("epic")),
 		trMk("tp"),
 		trMk("other", trLabel("unrelated")),
 	}
-	ready := trRdy(rows, "ok", "h", "hf", "rc", "ep", "tp", "other")
+	ready := trRdy(rows, "ok", "h", "hf", "esc", "att", "hfo", "rc", "ep", "tp", "other")
 	for i := range ready {
 		if ready[i].ID == "tp" {
 			ready[i].IsTemplate = true
@@ -368,7 +406,7 @@ func TestDrainableExclusions(t *testing.T) {
 	}
 	res := trRun(t, rows, ready, TriageOptions{})
 	trEq(t, "drainable", res.Drainable, []string{"ok", "other"})
-	if res.Counts.Drainable != 2 || res.Counts.Ready != 7 {
+	if res.Counts.Drainable != 2 || res.Counts.Ready != 10 {
 		t.Fatalf("counts = %+v", res.Counts)
 	}
 	if len(res.Targets) != 0 {

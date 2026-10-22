@@ -37,11 +37,15 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   bead, NOT the `human` label on the IMPLEMENTATION bead. Reserve `human` for work that
   genuinely needs a person — which, where no gate could ever resolve, is exactly that
   verification child itself (see the gating-scope rule below).
-- `human` means A PERSON IS THE BLOCKER, never "not workable right now". All
-  parking, mooting, and dependency conversion goes through the
+- A bead an agent cannot finish is ESCALATED (`escalated` plus a findings comment, claim
+  released in the same update), never labeled `human` by the agent: the escalation-triager
+  decides, and only a bead it cannot resolve reaches the operator as `human` + `attention`
+  (`beads-lifecycle` LV-1..LV-4, `docs/guides/bead-label-vocabulary.md`). `human` means A
+  PERSON IS THE BLOCKER, never "not workable right now". All escalating, mooting, and
+  dependency conversion goes through the
   `pb:drain-stuck` skill, which enforces the freshness probes (F-1..F-10), the
   blocker classification (D-1..D-10), outcome-shaped preconditions (P-1..P-5),
-  bounded re-parks, and edges-and-label-before-release ordering (D-5, D-6,
+  bounded re-escalations, and edges-and-label-before-release ordering (D-5, D-6,
   B-2/B-3).
 - A curated packet's stamp refusal is released WITHOUT `pb:drain-stuck`: the packet is not
   implemented by any path that pass (the UNCURATED fallback covers only an
@@ -57,7 +61,8 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   safely deferred; exit 4 means the child may be workable — in both cases the
   impl bead MUST NOT be closed.
 - A leftover-isolation follow-up (filed inside `pb:drain-stuck`'s
-  CLOSE-AS-MOOT) is born with BOTH `human` and `worktree-review` plus the
+  CLOSE-AS-MOOT) is planned operator work (LV-2): it is born with BOTH `human` and
+  `worktree-review` (never `attention`) plus the
   entry marker; this command never adjudicates such a bead and MUST NOT be
   given `/unblock-human-beads`' provably-lossless teardown carve-out (an
   unattended session cannot re-prove losslessness — F-1).
@@ -79,7 +84,7 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   instead report to the operator and release the claim (open, unassigned,
   no `human` label — a session-shaped blocker, not a person-shaped one),
   leaving the worktree/branch exactly as committed. Does not apply to
-  `pull-request`, which needs no canonical-clone access. Under release policy `park`, PARK the bead through `pb:drain-stuck` instead of releasing it plainly.
+  `pull-request`, which needs no canonical-clone access. Under release policy `park`, ESCALATE the bead through `pb:drain-stuck` (CONTAINER PARK / step 7a) instead of releasing it plainly.
 - If a skill reports the canonical clone is off its primary branch or dirty, HALT and
   report — EXCEPT under a strategy that never touches the canonical clone, where the
   handler surfaces the anomaly and proceeds (the `pull-request` handler's PR-0, R-8's

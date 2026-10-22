@@ -86,10 +86,10 @@ Tracked in child beads: schema mapping, data migration, command audit, rollback 
 
 ---
 
-## Partial + flagged-for-human
+## Partial + escalated
 
 You could define some criteria but a real decision blocks the rest. Write what you're sure of,
-list pointed questions, add `human`, and **don't** add `has-acceptance-criteria`.
+list pointed questions, add `escalated`, and **don't** add `has-acceptance-criteria`.
 
 **Bead:** "Improve onboarding" (vague)
 
@@ -109,7 +109,7 @@ Notes appended:
 - Is there a target activation rate this bead should move, or is it qualitative for now?
 ```
 
-Then: `bd update <id> --add-label human` (and not `has-acceptance-criteria`).
+Then: `bd update <id> --add-label escalated` (and not `has-acceptance-criteria`).
 
 Why: "reaches a successful action" and "is measurable" are safe outcomes. But _which_ action
 and _which_ audience are product calls — guessing would send planning down the wrong path. The

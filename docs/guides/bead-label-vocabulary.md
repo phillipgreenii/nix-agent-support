@@ -7,7 +7,7 @@ attention, and when each is written. Every consumer (the escalation-triager prom
 commands and queue definitions, the `beads-lifecycle` skill, the pg-connector attention list, the
 probes and the handler) points here. The decision record is
 [ADR 0105](../adr/0105-bead-label-vocabulary-for-escalation-and-operator-attention.md). The
-agent-facing rules are `LV-1` to `LV-6` in the `beads-lifecycle` skill.
+agent-facing rules are `LV-1` to `LV-7` in the `beads-lifecycle` skill.
 
 ## Why it exists
 
@@ -149,12 +149,53 @@ died or stalled; the park note says "resume-or-land work, not a decision"), so t
 changed here and whether they are operator escalations needs a ruling. Until that is settled,
 `human` MUST stay in the attention list's read set.
 
+## Stuck beads and agent-filed operator work
+
+ADR [0107](../adr/0107-pb-drain-stuck-escalates-instead-of-parking-for-a-person.md) (bead
+`pg2-zpj6z`). An agent that cannot finish a claimed bead ESCALATES it (`beads-lifecycle` LV-7):
+`pb:drain-stuck` writes one comment (findings, `FRESHNESS:` output, a `NEEDS:` line, the
+preserved branch), then ONE `bd update --add-label escalated --status open --assignee ""`. It never
+writes `human` or `attention` on the stuck bead and never runs `hand-to-human`. A bead that waits
+on another bead is a dependency, and one that waits on a live external event is a defer; neither
+is escalated.
+
+```mermaid
+flowchart LR
+  S["stuck drain bead"] --> E["escalated (pb:drain-stuck)"]
+  E --> T["escalation-triager"]
+  T -->|resolves| C["closed or re-queued with the answer"]
+  T -->|cannot resolve| H["human + attention (hand-to-human)"]
+  T -->|bead is planned operator work| P["human only"]
+  N["new bead filed FOR the operator"] --> P
+```
+
+A NEW bead an agent files for the operator is planned operator work (LV-2), carries `human` ONLY
+and is not routed through the triager. These are the only direct `human` writes left in the
+agent skills; a conformance test (`tests/pb-escalation-conformance.bats`) pins the list:
+
+| Writer                                          | Bead it writes                                         |
+| ----------------------------------------------- | ------------------------------------------------------ |
+| `pb:drain-stuck` mixed-blocker case             | a decision bead for a question answerable now          |
+| `pb:drain-stuck` CLOSE-AS-MOOT                  | a `worktree-review` follow-up (plus `worktree-review`) |
+| `pb:drain-one` post-deploy gate fallback        | a verification child                                   |
+| `pb:pb-gate-lifecycle` (gate-ineligible change) | a verification follow-up                               |
+| `plan-decompose:phase-plan-verifier`            | an open-question bead the phase trigger depends on     |
+
+`bead-grooming` escalates a bead whose criteria need a decision (`escalated`, with the questions
+in notes) instead of labeling it `human`. Releases by `/unblock-human-beads` remove `attention`
+together with `human`, so a released bead is claimable by drain again.
+
 ## Escalation-triager prompts
 
 The triager prompts (in the deployment flake, one per tracker) hand a bead to the operator ONLY
 through `hand-to-human --backend <that tracker's pg-connector backend>`; the "Escalate to human"
 and "Park for a human" outcomes both use it, so both trackers behave identically. A "Handle
-directly" resolution removes `escalated` (or closes the bead); a "Triage" outcome leaves it.
+directly" resolution removes `escalated` (or closes the bead); a "Triage" outcome leaves it. The
+"Stuck work beads" section covers a bead a drain agent escalated: the triager answers or closes it
+when the evidence allows, re-queues it at most once with the answer written into the bead, hands it
+to the operator with `hand-to-human` when it cannot resolve it, and leaves a bead that is itself
+planned operator work in the person queue with `human` only (one update that adds `human` and
+removes `escalated`, never `attention`).
 
 ## Non-goal
 

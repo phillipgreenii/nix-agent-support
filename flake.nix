@@ -1839,6 +1839,39 @@
                     touch $out
                   '';
 
+              # Escalation conformance (pg2-zpj6z, ADR 0107): a drain agent that cannot finish a
+              # bead escalates it (`escalated`, claim released in the SAME update) and never
+              # parks it for a person by writing `human` itself; nothing but hand-to-human writes
+              # `attention`. The consumers are the pb plugin, bead-grooming and the
+              # phase-plan-verifier; each direct `human` write left is a NEW bead filed for the
+              # operator (planned operator work). Mutated copies prove the scan bites.
+              test-pb-escalation-conformance =
+                let
+                  escalationSrc = lib.fileset.toSource {
+                    root = ./claude-marketplace;
+                    fileset = lib.fileset.unions [
+                      ./claude-marketplace/pb
+                      ./claude-marketplace/plan-decompose/agents/phase-plan-verifier.md
+                      ./claude-marketplace/bead-grooming
+                    ];
+                  };
+                in
+                pkgs.runCommand "test-pb-escalation-conformance"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.gawk
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    export PBE_MARKETPLACE="${escalationSrc}"
+                    bats --verbose-run ${./tests/pb-escalation-conformance.bats}
+                    touch $out
+                  '';
+
               # Focus-item exclusion conformance (pg2-2j5ac.44.33): the sweep that undefers or
               # closes deferred beads MUST NOT touch a `focus-item` bead (the decider holds one as
               # status=deferred; a close ends the item for good). The rule must live in the

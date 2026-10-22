@@ -7,8 +7,9 @@ description: >-
   sessions via atomic claims. Post-deploy verification is handled by a
   `pn:applied` gate on a verification child bead (or, where no such gate could ever
   resolve, by a `human` verification child) — never by labeling the IMPLEMENTATION
-  bead `human`, which is reserved as a last resort for a blocker only a PERSON can
-  clear (a blocker that is another bead is modeled with `bd dep`, never with the
+  bead `human` (a bead this loop cannot finish is ESCALATED through `pb:drain-stuck`: the
+  `escalated` label plus a findings comment, and the escalation-triager decides whether a
+  PERSON must act; a blocker that is another bead is modeled with `bd dep`, never with a
   label).
 argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, --parent ID, or 'one'; optionally --monitor-if-empty]"
 ---
@@ -193,7 +194,7 @@ condition that otherwise means Goal met and STOP.
 
    If one exists, resume it: invoke `pb:drain-one` (if it is not yet loaded this
    session) and apply it to that bead with the container probe settled — a resumed
-   bead skips the probe — then it finishes the bead or parks it per STUCK, before
+   bead skips the probe — then it finishes the bead or escalates it per STUCK, before
    you claim new work.
 
 ## Main loop — repeat until the Goal is met
@@ -251,7 +252,7 @@ proceeding on currently loaded text (direct interactive invocation).`)
      - If you are currently holding a claimed bead (e.g. from Startup/resume),
        leave it exactly where the existing STUCK path would leave it — PARKED,
        not discarded, worktree/branch KEPT — without running any further STUCK
-       step; there is no bead-shaped question here, and this is NOT a `human`
+       step; there is no bead-shaped question here, and this is NOT an escalation or a `human`
        park.
      - Report directly to the operator that this session's own loaded command
        content is stale and the session should be restarted fresh.
@@ -521,7 +522,7 @@ arguments, behavior is otherwise unchanged.
   no live operator turn) still HALTs the drain loop on drift exactly as
   before: leave any currently-claimed bead PARKED per the existing STUCK path
   (not discarded), and report to the operator that the session should be
-  restarted fresh — this is a session-level anomaly, not a `human`-labeled
+  restarted fresh — this is a session-level anomaly, not an `escalated` or `human`-labeled
   bead park.
 
 ## Running several at once
@@ -535,8 +536,9 @@ stops on its own when a successful
 `bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign -n 10` is empty of
 non-template entries (zr-refactor
 campaign beads carry their own protocol; excluded here by design (zr-refactor spec
-§3)). A parked (`human`-labeled) bead,
-or a stale-converted gate, stays out of the queue until a human reviews it. A bead
+§3)). An escalated bead (`escalated`; `human` + `attention` once the escalation-triager
+hands it to the operator), or a stale-converted gate (`human`), stays out of the queue until
+the triager or a human reviews it. A bead
 whose blockers were converted to dependencies (via `pb:drain-stuck`) is different
 in kind: it needs NO review, and re-enters this queue by itself as soon as its
 last blocker closes.
@@ -560,9 +562,10 @@ last blocker closes.
   closes once landed + gated, so dependents unblock immediately — safe for a
   code dependency, but one needing the change VERIFIED LIVE could proceed
   early with no auto-re-block if live-verify later fails. Accepted trade-off.
-- **Parked-bead accumulation.** Every parked bead deliberately leaves a
-  worktree/branch behind. Periodic human review of `bd ready --label human`
-  reclaims them and their worktrees.
+- **Escalated-bead accumulation.** Every escalated bead deliberately leaves a
+  worktree/branch behind. The escalation-triager's queue (`bd ready --label escalated`)
+  and, for what it hands on, periodic human review of `bd ready --label human`
+  reclaim them and their worktrees.
 - **Retained isolation in `pull-request` repos.** A `pull-request` land KEEPS the
   worktree and branch by design (PR-4), so a drain over such a repo accumulates one
   `.worktrees/<id>` per closed bead until someone merges the PRs. Retiring them is the

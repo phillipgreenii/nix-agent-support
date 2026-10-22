@@ -104,7 +104,8 @@ drain beads whose `pn:applied` gates had to be manually caught and converted to
 resolved strategy `pull-request`): file the verification child as a `human`
 bead instead — CORRECT under **D-1**, because a PERSON's out-of-band action
 (merging the draft PR, then deploying) stands between the code and the live
-machine:
+machine. A verification child is planned operator work (`beads-lifecycle` LV-2): it
+carries `human` ONLY, never `attention`, and does not go through the triager:
 
 ```bash
 bd create "verify <thing> works once <pr-url> is merged and deployed (<impl-id>): <concrete checks>" \

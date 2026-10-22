@@ -66,8 +66,12 @@ corrected to match (not a judgment call, just updating what changed):
 If what you found is a real judgment call a person needs to make (not mechanically
 correctable), you MUST:
 
-1. File a **NEW** bead labeled `human` — never label the phase's trigger bead itself `human`.
-   Use this exact body template (reproduced verbatim; do not invent a second one):
+1. File a **NEW** decision bead labeled `human` — never label the phase's trigger bead itself
+   `human` or `escalated`. A decision bead filed FOR the operator is planned operator work
+   (`beads-lifecycle` LV-2): it carries `human` ONLY, never `attention`, and it is NOT routed
+   through the escalation-triager (the question is already the operator's to answer; the
+   triager is for a bead an agent could not finish). Use this exact body template (reproduced
+   verbatim; do not invent a second one):
 
    ```
    Phase: <phase-bead-id> — <phase title>

@@ -109,7 +109,8 @@ pb gate check [--dry-run] [--strict] [--last-n N] [--stale-handler convert-to-hu
 - **`--dry-run`** mutates nothing (reports `would_resolve` / would-be stale actions).
 - **Stale handling:** gates older than `--stale-after` (default `3d`; units `ms`..`d`,
   rejects `<1ms`) that still cannot be resolved get the `--stale-handler` action:
-  `convert-to-human` (adds the `human` label → surfaces in `bd human list`) or `close`
+  `convert-to-human` (adds the `human` label → surfaces in `bd human list`; a stale gate is a
+  verification bead, which is planned operator work, so `human` ONLY and never `attention`) or `close`
   (resolves the gate, unblocking the bead).
 - **`blocked` vs `skipped`:** `blocked` gates were DETERMINED to be correctly still
   closed (condition 2 said no) and do NOT affect the exit code — otherwise the apply
@@ -294,6 +295,12 @@ The same inputs plus the same `--now` always produce byte-identical files.
 Note: `prepare` and `report` call `bd ready`, which mutates (it un-defers beads whose
 `defer_until` elapsed). Triage ignores ready rows whose export status is not open or
 in_progress, so such a bead lands in REVIEW rather than LIVE.
+
+A bead held by the escalation-triager or a person (any label of the escalated and human sets of
+`docs/guides/bead-label-vocabulary.md`: `escalated`, `attention`, `human-focus`,
+`human-focus-required`, `human`) is never DRAINABLE and never joins LIVE, as a target or as an
+ancestor, because a drain session will not claim it until the triager or the operator acts. The
+claim-query label list is `unstick.ExcludedLabelsCSV`, drift-tested against `drain-beads.md`.
 
 ```bash
 pb unstick prepare [--root R] [--workdir W] [--full] [--label L] [--id-prefix P] [--json]

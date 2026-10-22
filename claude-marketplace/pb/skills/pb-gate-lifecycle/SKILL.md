@@ -151,7 +151,8 @@ Then the bead surfaces as ordinary work.
   terminal host actually cause THIS change to take effect, or does it require a
   separate `just deploy` / `just deploy-remote` step? If the latter, gating is
   wrong even though the repo is a pn-workspace member on `ff-merge-to-main` — use
-  an ordinary human-labeled follow-up instead (`bd create ... --labels human
+  an ordinary human-labeled follow-up instead (a verification follow-up is planned operator
+  work, `beads-lifecycle` LV-2, so `human` ONLY and never `attention`: `bd create ... --labels human
 --deps discovered-from:<impl>`, no gate). Discovered live (`tc-satmb`,
   `tc-vpaki`): two homelab k8s-manifest-only drain beads that got `pn:applied`
   gates via `pb gate attach-verified-child` and had to be manually caught and

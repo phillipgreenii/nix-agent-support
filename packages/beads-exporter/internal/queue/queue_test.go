@@ -181,11 +181,18 @@ func TestRealQueuesFilterBehaviour(t *testing.T) {
 		bead("campaign", "task", "refactor-campaign"),
 		bead("handoff-human", "handoff", "human"),
 		bead("human-campaign", "task", "human", "refactor-campaign"),
+		// The escalation vocabulary (docs/guides/bead-label-vocabulary.md, ADR 0105/0107): a
+		// bead an agent escalated, or that the triager handed to the operator, is never a
+		// drain candidate and never counts toward drain termination.
+		bead("escalated", "task", "escalated"),
+		bead("attention-only", "task", "attention"),
+		bead("handed-off", "task", "human", "attention"),
+		bead("historical-focus", "task", "human-focus"),
 	}
 	want := map[string][]string{
 		"drain-claim":         {"plain"},
 		"drain-termination":   {"plain", "epic"},
-		"unblock-human":       {"human"},
+		"unblock-human":       {"human", "handed-off"},
 		"unblock-human-focus": {"humanfocus"},
 	}
 	for _, spec := range qs {

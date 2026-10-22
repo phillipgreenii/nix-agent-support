@@ -151,12 +151,14 @@ report it); `2` a `bd` call failed (STOP and report; do not retry blindly). `pb 
   it stays a Stage 2 `claim_candidate`, which reports it and releases nothing it cannot prove
   dead. Such beads go to NO subagent and get NO note and NO marker.
 - **DRAINABLE** is the subset of ready that `/pb:drain-beads` would actually claim (it excludes
-  the `human`, `human-focus-required` and `refactor-campaign` labels, epics and templates).
+  every label of the escalated and human sets, `escalated`, `attention`, `human-focus`,
+  `human-focus-required` and `human`, plus `refactor-campaign`, epics and templates).
 - **SKIP-live-chain** is a LEAST fixpoint. LIVE is seeded with DRAINABLE plus `in_progress`
-  beads updated within 24h. A TARGET joins LIVE when it is not `human`-labelled, has no
+  beads updated within 24h. A TARGET joins LIVE when it carries none of the escalated or human labels (`escalated`, `attention`,
+  `human-focus`, `human-focus-required`, `human`: it is held by the escalation-triager or a person), has no
   `defer_until`, is not `status=deferred`, has at least one open `blocks` blocker, every open
   blocker is already LIVE and present in the export, neither it nor any of those blockers has
-  a deferred, blocked, `human`-labelled or `defer_until` ancestor (by `parent-child`), and it
+  a deferred, blocked, escalated-or-human-labelled or `defer_until` ancestor (by `parent-child`), and it
   is not blocked by its own descendant. A bead in a cycle is never added. These are correctly
   sequenced chains that clear by themselves.
 - **Deviation from the earlier prose spec (recorded):** the old text let a target with NO open
@@ -313,7 +315,9 @@ no child covers`). Beads that need the same action are grouped onto one line. Co
   pushes, applies, `sudo`, dolt server starts, or launchd/systemd restarts, and no routing
   around a denied command.
 - The sweep MUST NOT ADD the escalation and operator labels (`escalated`, `human`,
-  `attention`) by hand (removing them is its job): the vocabulary and the single write command (`hand-to-human`) are in
+  `attention`) by hand, and MUST NOT remove `escalated` (the escalation-triager's input; a
+  bead stuck behind it is left unchanged); removing a `human` that no person is needed for is
+  its job: the vocabulary and the single write command (`hand-to-human`) are in
   `docs/guides/bead-label-vocabulary.md` (`nix-agent-support`) and the `beads-lifecycle` skill
   (`LV-*`).
 - Every reviewed bead that stays open MUST end the sweep with exactly one marker from this

@@ -158,11 +158,11 @@ them. ADR 0076 owns the claim-identity rule itself.
 `released`, `container-hit` (release policy `release` only, still holding the claim) or `not-mine`
 (the first action is one `bd show`, and a bead that is not `in_progress` under the actor is changed
 in NO way). The bead MUST NEVER be left `in_progress`, except on `container-hit`. A release goes
-through `pb:drain-stuck`: PARK (`open`, `human`), CONVERT-TO-DEPENDENCY (`open`, a blocker edge),
+through `pb:drain-stuck`: ESCALATE (`open`, `escalated`; this was PARK with `human` until ADR 0107), CONVERT-TO-DEPENDENCY (`open`, a blocker edge),
 DEFER-ON-EVENT (`open` plus a future deferral date), CLOSE-AS-MOOT (`closed`), or step 4's
 stamp-refusal (`deferred`, unassigned). `pb:drain-stuck` returns to "the caller" rather than to the
 loop's CLAIM step, and gained a CONTAINER PARK entry for release policy `park`: it parks with a
-comment carrying the probe evidence and the `human` label, with NO deferral and NO blocker edge,
+comment carrying the probe evidence and the `escalated` label (ADR 0107; it was `human`), with NO deferral and NO blocker edge,
 because a deferral or blocker on a container propagates down and hides its whole subtree.
 
 **Compaction drives the file layout.** Claude Code truncates an invoked skill to 20,000 characters

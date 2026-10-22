@@ -17,6 +17,15 @@ const ExcludedLabelsCSV = "escalated,attention,human-focus,human-focus-required,
 // ExcludedLabels returns ExcludedLabelsCSV split into labels.
 func ExcludedLabels() []string { return strings.Split(ExcludedLabelsCSV, ",") }
 
+// heldLabelsCSV is the part of ExcludedLabelsCSV that means a bead is WITH the
+// escalation-triager or a person, which holds it out of the drain pool until
+// one of them acts: the ESCALATED_LABELS and HUMAN_LABELS sets of the label
+// vocabulary (refactor-campaign is a separate protocol and is not in it). A
+// held bead is never LIVE, whichever label of the sets it carries.
+const heldLabelsCSV = "escalated,attention,human-focus,human-focus-required,human"
+
+func heldLabels() []string { return strings.Split(heldLabelsCSV, ",") }
+
 // Triage tuning, from unstick-beads.md.
 const (
 	// LiveInProgressWindow is how recently an in_progress bead must have been
@@ -28,7 +37,6 @@ const (
 
 	issueTypeEpic = "epic"
 	issueTypeGate = "gate"
-	labelHuman    = "human"
 	// labelFocusItem marks a focus bead held by the decider. A sweep must
 	// never review, undefer, re-date, re-edge or close one (a closed focus
 	// bead is never reopened), so it is excluded from TARGETS in EVERY
@@ -366,7 +374,7 @@ func (t *triager) computeLive(drainable, targets []string) {
 
 func (t *triager) canJoinLive(id string) bool {
 	r, _ := t.g.Row(id)
-	if r.IssueType == issueTypeGate || r.HasLabel(labelHuman) || r.DeferUntil != "" || r.Status == StatusDeferred {
+	if r.IssueType == issueTypeGate || hasAnyLabel(r.Labels, heldLabels()) || r.DeferUntil != "" || r.Status == StatusDeferred {
 		return false
 	}
 	if p, ok := t.g.Parent(id); ok && !t.g.Has(p) {
@@ -406,7 +414,8 @@ func (t *triager) canJoinLive(id string) bool {
 }
 
 // badAncestor reports whether id has a parent-child ancestor that is deferred,
-// blocked, human-labelled, has defer_until, or is absent from the export.
+// blocked, held by the triager or a person (escalated or a human label), has
+// defer_until, or is absent from the export.
 func (t *triager) badAncestor(id string) bool {
 	if v, ok := t.ancBad[id]; ok {
 		return v
@@ -415,7 +424,7 @@ func (t *triager) badAncestor(id string) bool {
 	for _, a := range t.g.Ancestors(id) {
 		ar, ok := t.g.Row(a)
 		if !ok || ar.Status == StatusDeferred || ar.Status == StatusBlocked ||
-			ar.HasLabel(labelHuman) || ar.DeferUntil != "" {
+			hasAnyLabel(ar.Labels, heldLabels()) || ar.DeferUntil != "" {
 			bad = true
 			break
 		}
