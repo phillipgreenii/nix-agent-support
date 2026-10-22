@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot/temproottest"
 )
 
 // config_shared_write_test.go pins the repo-local `git config` write floor for the
@@ -50,7 +51,7 @@ func TestConfigSharedWrite_RealRepo_Rejected(t *testing.T) {
 // is itself a temp dir.
 func TestConfigSharedWrite_ProvablyTemp_NotRejected(t *testing.T) {
 	r := New(nil)
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	tests := []struct{ name, cmd, cwd string }{
 		{"-C temp from real cwd", `git -C ` + tmp + ` config user.email t@e.com`, realDir},
 		{"-C temp, protocol", `git -C ` + tmp + ` config protocol.file.allow always`, realDir},

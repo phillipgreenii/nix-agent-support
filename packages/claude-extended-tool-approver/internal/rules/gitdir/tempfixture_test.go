@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot/temproottest"
 )
 
 // tempfixture_test.go pins pg2-yoqsr's R1-R6 temp-root carve-out and its
@@ -36,7 +37,7 @@ func bashInputCWD(cmd, cwd string) *hookio.HookInput {
 // under a FRESH t.TempDir() is never created by this test).
 func TestTempFixture_GitMetadataWrite_UnderTempRoot_Relaxed(t *testing.T) {
 	r := New()
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	for _, cmd := range []string{
 		"echo x > .git/config",
 		"rm -rf .git/hooks",
@@ -97,7 +98,7 @@ func TestTempFixture_SideFinding_BareRepoEnvVar(t *testing.T) {
 // either way.
 func TestTempFixture_SideFinding_BareRepoEnvVar_UnderTempRoot_Relaxed(t *testing.T) {
 	r := New()
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	tests := []string{
 		"GIT_DIR=" + tmp + "/bare-repo git status",
 		"GIT_WORK_TREE=" + tmp + "/worktree git status",
@@ -124,7 +125,7 @@ func TestTempFixture_SideFinding_BareRepoEnvVar_UnderTempRoot_Relaxed(t *testing
 // a naive "some argument is a temp path" carve-out.
 func TestTempFixture_R2Regression_MixedRealAndTemp_StillRefused(t *testing.T) {
 	r := New()
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	cmd := "GIT_DIR=" + realDir + "/.git git -C " + tmp + " config user.email t@example.com"
 	got := hookio.Verdict(r.Evaluate(bashInputCWD(cmd, "/tmp")))
 	if got.Decision != hookio.Reject {
@@ -137,7 +138,7 @@ func TestTempFixture_R2Regression_MixedRealAndTemp_StillRefused(t *testing.T) {
 // the SAME temporary root, so the refusal is relaxed.
 func TestTempFixture_AllTempRoot_Relaxed(t *testing.T) {
 	r := New()
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	cmd := "GIT_DIR=" + tmp + "/.git git -C " + tmp + " config user.email t@example.com"
 	got := hookio.Verdict(r.Evaluate(bashInputCWD(cmd, "/tmp")))
 	if got.Decision == hookio.Reject {

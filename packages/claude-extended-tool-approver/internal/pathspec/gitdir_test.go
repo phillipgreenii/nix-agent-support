@@ -8,13 +8,14 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot/temproottest"
 )
 
 // mkRepo builds a minimal non-bare repo layout under a fresh temp dir:
 // <root>/.git/{HEAD,objects,refs,hooks,config}.
 func mkRepo(t *testing.T) string {
 	t.Helper()
-	root := patheval.ResolveRealPath(t.TempDir())
+	root := patheval.ResolveRealPath(temproottest.TempDir(t))
 	for _, d := range []string{".git/objects", ".git/refs", ".git/hooks"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
 			t.Fatal(err)
@@ -161,7 +162,7 @@ func TestGitDirProtection(t *testing.T) {
 		if err != nil {
 			t.Skip("git not on PATH")
 		}
-		root := patheval.ResolveRealPath(t.TempDir())
+		root := patheval.ResolveRealPath(temproottest.TempDir(t))
 		cmd := exec.Command(git, "-C", root, "init", "-q")
 		cmd.Env = []string{"HOME=" + root, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
 		if out, err := cmd.CombinedOutput(); err != nil {

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot/temproottest"
 )
 
 // worktree_redirect_test.go pins tc-mzr5's extension of the pg2-yoqsr temp-root
@@ -56,7 +57,7 @@ func TestWorktreeRedirect_ConfigCoreWorktree_RealCheckout_Refused(t *testing.T) 
 // temporary root.
 func TestWorktreeRedirect_ConfigCoreWorktree_UnderTempRoot_Relaxed(t *testing.T) {
 	r := New()
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	cmd := "git config core.worktree " + tmp + "/elsewhere"
 	got := hookio.Verdict(r.Evaluate(bashInputCWD(cmd, tmp)))
 	if got.Decision == hookio.Reject {
@@ -71,7 +72,7 @@ func TestWorktreeRedirect_ConfigCoreWorktree_UnderTempRoot_Relaxed(t *testing.T)
 // the attack the carve-out exists to keep refusing, not a use case to accommodate.
 func TestWorktreeRedirect_ConfigCoreWorktree_MixedRealAndTemp_StillRefused(t *testing.T) {
 	r := New()
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	cmd := "git config core.worktree " + tmp + "/elsewhere"
 	got := hookio.Verdict(r.Evaluate(bashInputCWD(cmd, realDir)))
 	if got.Decision != hookio.Reject {
@@ -85,7 +86,7 @@ func TestWorktreeRedirect_ConfigCoreWorktree_MixedRealAndTemp_StillRefused(t *te
 // root, since the value written could be anything.
 func TestWorktreeRedirect_ConfigFileCoreWorktree_RealFile_Refused(t *testing.T) {
 	r := New()
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	tests := []struct {
 		name string
 		cmd  string
@@ -111,7 +112,7 @@ func TestWorktreeRedirect_ConfigFileCoreWorktree_RealFile_Refused(t *testing.T) 
 // under the same temp root relaxes the refusal, regardless of what the VALUE is.
 func TestWorktreeRedirect_ConfigFileCoreWorktree_UnderTempRoot_Relaxed(t *testing.T) {
 	r := New()
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	cmd := "git config --file " + tmp + "/config core.worktree /anything/at/all"
 	got := hookio.Verdict(r.Evaluate(bashInputCWD(cmd, tmp)))
 	if got.Decision == hookio.Reject {
@@ -145,7 +146,7 @@ func TestWorktreeRedirect_InitSeparateGitDir_RealCheckout_Refused(t *testing.T) 
 // carve-out half.
 func TestWorktreeRedirect_InitSeparateGitDir_UnderTempRoot_Relaxed(t *testing.T) {
 	r := New()
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	tests := []string{
 		"git init --separate-git-dir=" + tmp + "/gitdir",
 		"git init --separate-git-dir " + tmp + "/gitdir",
@@ -187,7 +188,7 @@ func TestWorktreeRedirect_WorktreeAddMove_RealCheckout_Refused(t *testing.T) {
 // carve-out half.
 func TestWorktreeRedirect_WorktreeAddMove_UnderTempRoot_Relaxed(t *testing.T) {
 	r := New()
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	tests := []string{
 		"git worktree add " + tmp + "/feature feature-branch",
 		"git worktree move " + tmp + "/old " + tmp + "/new",
@@ -210,7 +211,7 @@ func TestWorktreeRedirect_WorktreeAddMove_UnderTempRoot_Relaxed(t *testing.T) {
 // REAL directory) stays refused even though the process cwd is a temp root.
 func TestWorktreeRedirect_ChdirFlag_ResolvesAgainstDashC(t *testing.T) {
 	r := New()
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 
 	relaxed := "git -C " + tmp + " config core.worktree " + tmp + "/elsewhere"
 	if got := hookio.Verdict(r.Evaluate(bashInputCWD(relaxed, realDir))).Decision; got == hookio.Reject {

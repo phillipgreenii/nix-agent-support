@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot/temproottest"
 )
 
 // tempfixture_test.go pins the `git` rule's half of pg2-yoqsr's temp-root
@@ -56,7 +57,7 @@ func TestTempFixture_GitDirFlag_Real_Rejected(t *testing.T) {
 // floor — the leaf falls through to classify's ordinary verdict.
 func TestTempFixture_GitDirFlag_Temp_NotRejected(t *testing.T) {
 	r := New(nil)
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	tests := []string{
 		"git --git-dir=" + tmp + "/.git config user.email t@example.com",
 		"git --work-tree=" + tmp + " config user.email t@example.com",
@@ -80,7 +81,7 @@ func TestTempFixture_GitDirFlag_Temp_NotRejected(t *testing.T) {
 // traffic pg2-yoqsr exists to unblock.
 func TestTempFixture_RedirectEnvVar_Temp_NoLongerAsks(t *testing.T) {
 	r := New(nil)
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	cmd := "GIT_DIR=" + tmp + "/.git git -C " + tmp + " config user.email t@example.com"
 	got := hookio.Verdict(r.Evaluate(chdirInputNoZone(cmd, "/tmp")))
 	if got.Decision == hookio.Ask {
