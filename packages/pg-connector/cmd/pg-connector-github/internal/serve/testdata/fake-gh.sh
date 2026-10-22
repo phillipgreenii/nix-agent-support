@@ -19,6 +19,9 @@
 #   failn                a count: the next N `api` calls answer 502, then mode applies
 #   delay                seconds every `api` call sleeps before answering
 #   remaining            the rateLimit remaining every answer reports (default 4900)
+#   remaining.summary    the same, for the summary answer only (default: remaining)
+#   seq                  the seqlock a summary answer's reads honour: odd while a
+#                        Shim.Update is writing (see nodes_reply)
 #   retry_after          the Retry-After seconds of mode secondary (default 3600)
 #   viewer.login         the login the viewer query answers (default fixture-viewer)
 #
@@ -386,17 +389,45 @@ fixture() {
 }
 
 # nodes_reply <file prefix>: the nodes(ids:) answer for the ids of the call.
+#
+# The node fixtures and the remaining count are one consistent snapshot: a test
+# that lowers the count and changes a pull request in the same step (a Go
+# Shim.Update, which brackets its writes with odd and even values of the seq
+# file) relies on every answer that shows the change also showing the lowered
+# count, and the reverse, however long a loaded host leaves this process
+# descheduled between its reads. So the reads are repeated until the seq file was
+# even and unchanged around them (a seqlock). A summary answer also takes
+# remaining.summary, when it exists, over remaining: the count then reaches the
+# daemon only in the answer that carries the change, never in a search or viewer
+# answer that happens to come first.
 nodes_reply() {
-  local nodes='' id f n
-  for id in ${ids[@]+"${ids[@]}"}; do
-    f="$dir/$1.$id.json"
-    if [ -f "$f" ]; then
-      n=$(cat "$f")
-    else
-      n=null
+  local nodes id f n g1 g2
+  while :; do
+    g1=$(read_or seq 0)
+    nodes=''
+    for id in ${ids[@]+"${ids[@]}"}; do
+      f="$dir/$1.$id.json"
+      if [ -f "$f" ]; then
+        n=$(cat "$f")
+      else
+        n=null
+      fi
+      nodes="${nodes:+$nodes,}$n"
+    done
+    remaining=$(read_or remaining 4900)
+    if [ "$kind" = summary ]; then
+      remaining=$(read_or remaining.summary "$remaining")
     fi
-    nodes="${nodes:+$nodes,}$n"
+    g2=$(read_or seq 0)
+    case "$g1$g2" in '' | *[!0-9]*)
+      sleep 0.005
+      continue
+      ;;
+    esac
+    if [ $((g1 % 2)) -eq 0 ] && [ "$g1" = "$g2" ]; then break; fi
+    sleep 0.005
   done
+  rate="\"rateLimit\":{\"cost\":1,\"remaining\":$remaining,\"resetAt\":\"$reset\"}"
   printf '{"data":{%s,"nodes":[%s]}}' "$rate" "$nodes" | sed "s/@REMAINING@/$remaining/g"
 }
 

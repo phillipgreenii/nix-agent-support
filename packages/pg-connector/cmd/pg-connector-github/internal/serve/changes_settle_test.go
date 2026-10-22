@@ -80,12 +80,21 @@ func TestChangesSettle_AGovernorPauseTimesOutTheRowAppendsItAndIsCountedTimeout(
 	// moves in the same breath, so the very summary response that detects the
 	// change also carries the reading, and the files and commits fetches it
 	// queues are refused. (The runs group is a REST read in a bucket of its own,
-	// which this reading does not close.)
-	d.Shim.Remaining(500)
+	// which this reading does not close.) The reading and the new head must reach
+	// the daemon together, whatever the host's load does to the fake gh between
+	// its reads: the count is lowered for the summary answers only, and in one
+	// Shim.Update with the head change, so the only answer that can close the
+	// reserve is one that also shows the new head. (Lowered first and alone, a
+	// summary answer could close it before the head moved, and every later
+	// summary fetch would then be refused; changed first, a fetch could carry the
+	// new head under the old count and let the dependents out.)
 	changed := prA
 	changed.Head = prAHead
-	d.Shim.SetPRs(servetest.MineExpr, changed, prB, prC)
-	d.Shim.SetPRs(servetest.TeamExpr, changed, prB)
+	d.Shim.Update(func() {
+		d.Shim.RemainingSummary(500)
+		d.Shim.SetPRs(servetest.MineExpr, changed, prB, prC)
+		d.Shim.SetPRs(servetest.TeamExpr, changed, prB)
+	})
 	var pending servetest.PendingRow
 	until(t, 60*time.Second, "the head change to be stored as a pending row", func() bool {
 		rows := d.PendingRows(t)

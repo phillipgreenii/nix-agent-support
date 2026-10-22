@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -21,6 +22,9 @@ type Shim struct {
 	Path string
 
 	t testing.TB
+
+	mu  sync.Mutex
+	seq int
 }
 
 func newShim(t testing.TB, dir, token string) *Shim {
@@ -54,6 +58,37 @@ func newShim(t testing.TB, dir, token string) *Shim {
 func (s *Shim) Set(name, content string) {
 	s.t.Helper()
 	if err := os.WriteFile(filepath.Join(s.Dir, name), []byte(content), 0o600); err != nil {
+		s.t.Fatal(err)
+	}
+}
+
+// RemainingSummary sets the rateLimit remaining the summary answers report, and
+// no other answer: the count reaches the daemon only in the answer that carries
+// whatever the same Update changed beside it.
+func (s *Shim) RemainingSummary(n int) { s.Set("remaining.summary", fmt.Sprint(n)) }
+
+// Update makes the writes of change visible to the summary answers all at once or
+// not at all: a summary answer built while change runs is built again afterwards,
+// so it never shows a part of it (the new head without the lowered count, or the
+// lowered count without the new head). It is a seqlock over the seq file, which
+// the shim's reads check (see nodes_reply in fake-gh.sh).
+func (s *Shim) Update(change func()) {
+	s.t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setSeq()
+	change()
+	s.setSeq()
+}
+
+// setSeq moves the seq file to its next value; the rename keeps a reader from
+// meeting a half-written one.
+func (s *Shim) setSeq() {
+	s.t.Helper()
+	s.seq++
+	tmp := filepath.Join(s.Dir, "seq.tmp")
+	s.Set("seq.tmp", fmt.Sprint(s.seq))
+	if err := os.Rename(tmp, filepath.Join(s.Dir, "seq")); err != nil {
 		s.t.Fatal(err)
 	}
 }
