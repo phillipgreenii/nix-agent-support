@@ -55,45 +55,14 @@ however it was authored (`INV-SPEC-6`).
 
 This set's **realization-gap register** (`INV-23`): intended behavior this set's implementation has
 not built yet, one row per gap, each keyed by the element id the gap is against. Not an open
-question: the intent is settled and the build has not caught up (`INV-15`). This set is written
-before the module exists, so every element is a gap until the module lands.
+question: the intent is settled and the build has not caught up (`INV-15`).
 
-| Element        | Intended                                                                 | Where the implementation stands | Tracked by    |
-| -------------- | ------------------------------------------------------------------------ | ------------------------------- | ------------- |
-| `INV-SPEC-1`   | the spec format and its decode errors                                    | module not built yet            | `pg2-12gr4.8` |
-| `INV-SPEC-2`   | a newer schema version is refused with the quoted message                | module not built yet            | `pg2-12gr4.8` |
-| `INV-SPEC-3`   | string and array wrap entries, no templating                             | module not built yet            | `pg2-12gr4.8` |
-| `INV-SPEC-4`   | strict environment and exact-name keep                                   | module not built yet            | `pg2-12gr4.8` |
-| `INV-SPEC-5`   | the exec prefix                                                          | module not built yet            | `pg2-12gr4.8` |
-| `INV-SPEC-6`   | absolute paths, and any author may write a spec                          | module not built yet            | `pg2-12gr4.8` |
-| `INV-ENTRY-1`  | `run`                                                                    | module not built yet            | `pg2-12gr4.8` |
-| `INV-ENTRY-2`  | `pg-wrap-exec`, the second binary                                        | module not built yet            | `pg2-12gr4.8` |
-| `INV-ENTRY-3`  | `check`, the one validation entry point                                  | module not built yet            | `pg2-12gr4.8` |
-| `INV-ENTRY-4`  | `show`                                                                   | module not built yet            | `pg2-12gr4.8` |
-| `INV-ENTRY-5`  | the spec-path variable is removed from the payload's environment         | module not built yet            | `pg2-12gr4.8` |
-| `INV-COMP-1`   | one layer per entry, the innermost rest is the payload                   | module not built yet            | `pg2-12gr4.8` |
-| `INV-COMP-2`   | per-layer environment flow, `"$@"`, POSIX shell, no rc files             | module not built yet            | `pg2-12gr4.8` |
-| `INV-ENV-1`    | inherited versus minimal environment                                     | module not built yet            | `pg2-12gr4.8` |
-| `INV-FAIL-1`   | exit 97 before the payload                                               | module not built yet            | `pg2-12gr4.8` |
-| `INV-FAIL-2`   | the `pg-wrap[<stage>]:` message form                                     | module not built yet            | `pg2-12gr4.8` |
-| `INV-FAIL-3`   | the `pg-wrap-exec` no-spec message                                       | module not built yet            | `pg2-12gr4.8` |
-| `INV-ISO-1`    | pg-wrap names and validates no caller                                    | module not built yet            | `pg2-12gr4.8` |
-| `INV-WC-1`     | wrapper contract: run the rest of argv, argv and stdin unmodified        | module not built yet            | `pg2-12gr4.8` |
-| `INV-WC-2`     | wrapper contract: exit status, own failure, not 9                        | module not built yet            | `pg2-12gr4.8` |
-| `INV-WC-3`     | wrapper contract: nothing on stdout                                      | module not built yet            | `pg2-12gr4.8` |
-| `INV-WC-4`     | wrapper contract: same controlling terminal, foreground process group    | module not built yet            | `pg2-12gr4.8` |
-| `INV-WC-5`     | wrapper contract: deliver SIGTERM, SIGINT and SIGHUP                     | module not built yet            | `pg2-12gr4.8` |
-| `INV-WC-6`     | wrapper contract: works under the minimal environment, never prompts     | module not built yet            | `pg2-12gr4.8` |
-| `INV-WC-7`     | wrapper contract: exec when there is no cleanup                          | module not built yet            | `pg2-12gr4.8` |
-| `INV-WC-8`     | wrapper contract: per-item data only from env or argv                    | module not built yet            | `pg2-12gr4.8` |
-| `INV-WC-9`     | wrapper contract: absolute first words, checked by `check` and every run | module not built yet            | `pg2-12gr4.8` |
-| `INTF-SPEC`    | the wrap spec boundary                                                   | module not built yet            | `pg2-12gr4.8` |
-| `INTF-RUN`     | the `run` boundary                                                       | module not built yet            | `pg2-12gr4.8` |
-| `INTF-EXEC`    | the `pg-wrap-exec` boundary                                              | module not built yet            | `pg2-12gr4.8` |
-| `INTF-CHECK`   | the `check` boundary                                                     | module not built yet            | `pg2-12gr4.8` |
-| `INTF-SHOW`    | the `show` boundary                                                      | module not built yet            | `pg2-12gr4.8` |
-| `INTF-LAYER`   | the wrapper-contract boundary toward layers                              | module not built yet            | `pg2-12gr4.8` |
-| `INTF-PAYLOAD` | the hand-off boundary toward the payload                                 | module not built yet            | `pg2-12gr4.8` |
+None. The module (`packages/pg-wrap`) realizes every element of this set: the spec decoder, the
+`run`, `check` and `show` entry points, the second binary `pg-wrap-exec`, the exit-97 failures with
+their `pg-wrap[<stage>]:` messages, the environment rules, and the wrapper-contract suite
+(`INV-WC-1` to `INV-WC-9`), each proven by tests against the real binaries and real wrappers on the
+host. A case whose tool is absent from a host (`tmux`, `flox`, `nix develop`) skips there with a
+one-line reason, so a host without that tool has not exercised that case.
 
 ## External references
 
