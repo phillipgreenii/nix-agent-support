@@ -1,0 +1,11 @@
+{
+  "$id": "handler.validate",
+  "title": "INTF-HANDLER validate (core -> handler, optional; asks the handler to check the config it was given)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" }
+  }
+}

@@ -38,6 +38,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
@@ -143,6 +144,13 @@ type OSRunner struct {
 	Stderr io.Writer
 }
 
+// runWaitDelay is cmd.WaitDelay for OSRunner.Run: a few seconds, long enough for a
+// well-behaved handler's last bytes and short enough that a deadline reaches the
+// caller promptly.
+//
+// A package var so tests can lower it; production never reassigns it.
+var runWaitDelay = 3 * time.Second
+
 func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
 	if len(argv) == 0 {
 		return nil, 0, errors.New("wireclient: empty argv")
@@ -156,6 +164,13 @@ func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte,
 	} else {
 		cmd.Stderr = os.Stderr
 	}
+	// WaitDelay bounds how long Run waits, after the handler process exits or is
+	// killed on the context's deadline, for the stdout copy to finish. Without it a
+	// child the handler left running with the pipe open (a handler that hangs, or
+	// forks and leaves) keeps cmd.Run blocked until that child exits, so a deadline
+	// never arrives (docket pg2-12gr4.8, the validate call's "handler that hangs"
+	// case).
+	cmd.WaitDelay = runWaitDelay
 	err := cmd.Run()
 	var exitErr *exec.ExitError
 	switch {
@@ -470,6 +485,82 @@ func (c *Client) lifecycleCall(ctx context.Context, subcommand string, role role
 		return Reply{}, fmt.Errorf("wireclient: role %q: %s", role.Name, reply.Error)
 	}
 	return Reply{ID: reply.ID, Outcome: reply.Outcome}, nil
+}
+
+// Validator is the OPTIONAL validate half of the handler contract (docket
+// pg2-12gr4.8). It is a separate interface from HandlerClient so a client that
+// does not implement it (a fake, an unwired handler) simply cannot be asked, which
+// the caller reads like a handler without the subcommand: not supported.
+type Validator interface {
+	Validate(ctx context.Context, role roles.Role) (ValidateResult, error)
+}
+
+// ValidateResult is the decoded handler.validate-reply.
+type ValidateResult struct {
+	// Supported is false when the handler answered the usage exit (code 2): it has
+	// no validate subcommand, which is not a failed validation.
+	Supported bool
+	// Problems fail validation; Warnings are reported but never fail it.
+	Problems, Warnings []string
+}
+
+// validateReply mirrors schemas/handler.validate-reply.schema.json.
+type validateReply struct {
+	SchemaVersion string   `json:"schemaVersion"`
+	Problems      []string `json:"problems"`
+	Warnings      []string `json:"warnings"`
+}
+
+// Validate sends handler.validate to role's handler participant:
+// `<handler> validate [--role-config <file>]`, the lifecycle request on stdin.
+// Exit 2 (usage) means the participant has no validate subcommand: Supported
+// false, nil error. Exit 0 with a well-formed reply gives Supported true and the
+// problem and warning lists (an empty problem list means valid). Anything else
+// (another exit code, an unparsable or schema-invalid reply, or ctx's deadline)
+// is an error: validation could not run, which is not a verdict. The caller sets
+// the deadline; OSRunner's WaitDelay makes it arrive even when the handler's own
+// children keep its stdout open.
+func (c *Client) Validate(ctx context.Context, role roles.Role) (ValidateResult, error) {
+	if c.Command == nil {
+		return ValidateResult{}, errors.New("wireclient: no CommandFor configured")
+	}
+	argv, err := c.Command(role, "validate")
+	if err != nil {
+		return ValidateResult{}, fmt.Errorf("wireclient: resolve command for role %q: %w", role.Name, err)
+	}
+	if len(argv) == 0 {
+		return ValidateResult{}, fmt.Errorf("wireclient: role %q resolved an empty command", role.Name)
+	}
+	id, err := newDispatchID()
+	if err != nil {
+		return ValidateResult{}, fmt.Errorf("wireclient: mint validate id: %w", err)
+	}
+	body, err := json.Marshal(lifecycleRequest{SchemaVersion: SchemaVersion, ID: id})
+	if err != nil {
+		return ValidateResult{}, fmt.Errorf("wireclient: encode validate request: %w", err)
+	}
+	stdout, code, err := c.runner().Run(ctx, argv, body)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ValidateResult{}, fmt.Errorf("wireclient: role %q validate: %w", role.Name, ctxErr)
+	}
+	if err != nil {
+		return ValidateResult{}, err
+	}
+	switch code {
+	case conformance.ExitUsage:
+		return ValidateResult{Supported: false}, nil
+	case conformance.ExitOK:
+	default:
+		return ValidateResult{}, fmt.Errorf("wireclient: role %q validate exited %d", role.Name, code)
+	}
+	if err := conformance.CheckBytes("handler.validate-reply", stdout); err != nil {
+		return ValidateResult{}, fmt.Errorf("wireclient: role %q: validate reply: %w", role.Name, err)
+	}
+	var reply validateReply
+	if err := json.Unmarshal(stdout, &reply); err != nil {
+		return ValidateResult{}, fmt.Errorf("wireclient: role %q: decode validate reply: %w", role.Name, err)
+	}
+	return ValidateResult{Supported: true, Problems: reply.Problems, Warnings: reply.Warnings}, nil
 }
 
 const rfc3339 = "2006-01-02T15:04:05Z07:00"

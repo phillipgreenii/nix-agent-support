@@ -256,6 +256,11 @@ type listenerView struct {
 	Delivered int          `json:"delivered"`
 	Declined  int          `json:"declined"`
 	Backoff   *backoffView `json:"backoff"`
+	// SelfReportState is the role's self-status (healthy / degraded /
+	// unavailable), "" when it never reported; UnavailableReason is why core
+	// marked it unavailable (docket pg2-12gr4.8), "" when it is available.
+	SelfReportState   string `json:"selfReportState"`
+	UnavailableReason string `json:"unavailableReason"`
 }
 
 // sourceView is sources[]'s widened item shape (Task 4.1): name/type/
@@ -371,8 +376,12 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 			if l.Backoff != nil {
 				backoff = fmt.Sprintf("streak=%d nextEligible=%s", l.Backoff.Streak, dash(l.Backoff.NextEligible))
 			}
-			fmt.Fprintf(w, "  %s: binds=%v enabled=%t excluded=%t delivered=%d declined=%d backoff=%s\n",
+			fmt.Fprintf(w, "  %s: binds=%v enabled=%t excluded=%t delivered=%d declined=%d backoff=%s",
 				dash(l.Role), l.Binds, l.Enabled, l.Excluded, l.Delivered, l.Declined, backoff)
+			if l.UnavailableReason != "" {
+				fmt.Fprintf(w, " unavailable=%s", dash(l.UnavailableReason))
+			}
+			fmt.Fprintln(w)
 		}
 	})
 

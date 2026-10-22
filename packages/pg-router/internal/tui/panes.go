@@ -84,7 +84,7 @@ func selfReportDegraded(state string) bool {
 }
 
 // listenerHealthText ranks a listener's health: disabled > excluded >
-// cooling > ok. disabled (a config fact) and excluded (a run-scoped
+// unavailable > cooling > ok. disabled (a config fact) and excluded (a run-scoped
 // selector fact) both outrank any runtime observation; disabled outranks
 // excluded because it is the more durable fact [design: Task 4.6 Binding
 // decisions].
@@ -105,6 +105,10 @@ func listenerHealthText(l Listener, theme render.Theme) string {
 		base = theme.Disabled.Render("disabled")
 	case l.Excluded:
 		base = theme.Excluded.Render("excluded")
+	case l.SelfReportState == "unavailable":
+		// Core (or the participant) marked the role unavailable: it stays
+		// registered but declines every offer (docket pg2-12gr4.8, ruling 31).
+		base = theme.Cooling.Render("unavailable")
 	case l.Backoff != nil:
 		base = theme.Cooling.Render("cooling " + formatSeconds(time.Until(l.Backoff.NextEligible)))
 	default:

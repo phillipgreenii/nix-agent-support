@@ -271,6 +271,17 @@ var negativeMatrix = map[string][]negativeCase{
 		{"missing outcome", `{"schemaVersion":"1","id":"h"}`},
 		{"wrong-type outcome", `{"schemaVersion":"1","id":"h","outcome":5}`},
 	},
+	"handler.validate": {
+		{"missing id", `{"schemaVersion":"1"}`},
+		{"wrong-type id", `{"schemaVersion":"1","id":5}`},
+	},
+	"handler.validate-reply": {
+		{"missing problems", `{"schemaVersion":"1","warnings":[]}`},
+		{"missing warnings", `{"schemaVersion":"1","problems":[]}`},
+		{"problems not an array", `{"schemaVersion":"1","problems":"bad","warnings":[]}`},
+		{"problems item not a string", `{"schemaVersion":"1","problems":[1],"warnings":[]}`},
+		{"warnings item not a string", `{"schemaVersion":"1","problems":[],"warnings":[{}]}`},
+	},
 	"mon.read": {
 		{"missing metrics", `{"schemaVersion":"1","id":"m"}`},
 		{"metrics wrong item type", `{"schemaVersion":"1","id":"m","metrics":[1,2]}`},

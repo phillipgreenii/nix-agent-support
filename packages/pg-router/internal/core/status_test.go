@@ -130,11 +130,31 @@ func TestStatusListeners_SelfReportStateJoinsByRoleName(t *testing.T) {
 	// Started is the constant whose .String() is "started" (matching the
 	// existing pattern at statusRegistrations' own `"state": r.State.
 	// String()`).
-	regs := []Registration{{ID: "df-feedback", Kind: "handler", State: conformance.Started}}
+	regs := []Registration{{ID: "df-feedback", Kind: "handler", State: conformance.Started, Self: SelfDegraded}}
 
 	rows := statusListeners(declared, nil, counts, regs, nil)
-	if got := rows[0]["selfReportState"]; got != "started" {
-		t.Fatalf("selfReportState = %v, want %q", got, "started")
+	if got := rows[0]["selfReportState"]; got != "degraded" {
+		t.Fatalf("selfReportState = %v, want %q (the self-status, not the lifecycle state)", got, "degraded")
+	}
+	if got := rows[0]["unavailableReason"]; got != "" {
+		t.Fatalf("unavailableReason = %v, want empty for an available role", got)
+	}
+}
+
+// TestStatusListeners_UnavailableRoleShowsSelfStatusAndReason proves a role core
+// marked unavailable (docket pg2-12gr4.8) shows "unavailable" as its
+// selfReportState and its reason in unavailableReason.
+func TestStatusListeners_UnavailableRoleShowsSelfStatusAndReason(t *testing.T) {
+	declared := []roles.Role{{Name: "w", Enabled: true, Binds: []string{"x"}}}
+	counts := map[string]*ListenerCounts{"w": {}}
+	regs := []Registration{{ID: "w", Kind: "handler", State: conformance.Started, Self: SelfUnavailable, UnavailableReason: "bad pool dir"}}
+
+	rows := statusListeners(declared, nil, counts, regs, nil)
+	if got := rows[0]["selfReportState"]; got != "unavailable" {
+		t.Fatalf("selfReportState = %v, want unavailable", got)
+	}
+	if got := rows[0]["unavailableReason"]; got != "bad pool dir" {
+		t.Fatalf("unavailableReason = %v, want %q", got, "bad pool dir")
 	}
 }
 

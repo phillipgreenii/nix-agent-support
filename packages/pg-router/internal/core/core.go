@@ -1393,8 +1393,9 @@ func statusRegistrations(regs []Registration) []map[string]any {
 // regs is the registry's live participant list (Task 2 fold-in of the
 // retired Registry pane's one useful signal): joined onto each declared
 // role by Registration.ID == role name, so `selfReportState` reports a
-// handler's own self-reported lifecycle state, or the empty string for a
-// role that has never self-reported.
+// handler's own self-status (Registration.Self; healthy / degraded /
+// unavailable), or the empty string for a role that has never self-reported,
+// and `unavailableReason` carries why core marked the role unavailable.
 //
 // The output is sorted by Role.Name (bead pg2-d1sem) so the Listeners pane
 // renders in a stable, predictable order regardless of the config's own
@@ -1413,11 +1414,14 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 		excluded[n] = true
 	}
 	selfState := make(map[string]string, len(regs))
+	unavailableReason := make(map[string]string, len(regs))
 	for _, r := range regs {
-		// r.State is conformance.Lifecycle (int-based Stringer), not a
-		// string -- .String() matches the existing pattern this file
-		// already uses at statusRegistrations above.
-		selfState[r.ID] = r.State.String()
+		// The participant's SELF-status (healthy / degraded / unavailable), not
+		// its lifecycle state: before docket pg2-12gr4.8 this was filled from
+		// r.State.String(), so a self-reported unavailable never showed. Empty
+		// for a participant that has never self-reported.
+		selfState[r.ID] = string(r.Self)
+		unavailableReason[r.ID] = r.UnavailableReason
 	}
 	out := make([]map[string]any, 0, len(declared))
 	for _, r := range declared {
@@ -1464,7 +1468,11 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 			// ListenerCounts.HandlerFailures' own doc.
 			"handlerFailures": handlerFailures,
 			"selfReportState": selfState[r.Name],
-			"backoff":         nil,
+			// unavailableReason (docket pg2-12gr4.8): why core marked this role
+			// unavailable, "" when it is available -- always present, like
+			// description.
+			"unavailableReason": unavailableReason[r.Name],
+			"backoff":           nil,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {

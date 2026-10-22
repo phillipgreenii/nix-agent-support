@@ -207,6 +207,12 @@ const (
 	MetricRoleUnsuccessfulSinceProgress = "pg_router_role_unsuccessful_since_progress"
 	// MetricRoleBusySinceProgress: see MetricRoleLastProgressAge.
 	MetricRoleBusySinceProgress = "pg_router_role_busy_since_progress"
+	// MetricRoleAvailable is a gauge, per enabled role: 1 while the role is
+	// available (registered, started and not marked unavailable) and 0 while a
+	// startup validate marked it unavailable (docket pg2-12gr4.8, design section
+	// 5, ruling 31). There is no alert for it in this plan; the reason is in the
+	// logs, status and the TUI. Exposed as pg_router_role_available.
+	MetricRoleAvailable = "pg_router_role_available"
 	// MetricSourceFailures counts a pull-source query failure, per source and
 	// reason (see ClassifySourceFailure; the alert sums the reason away) —
 	// the metrics half of INV-FAIL-3's "reported to logs and metrics, never a
@@ -552,6 +558,7 @@ type options struct {
 	awakeSince    func(time.Time) time.Duration
 	queueAges     func() map[string]time.Duration
 	listenerBusy  func() map[string]int
+	roleAvail     func() map[string]bool
 	queueReady    func() bool
 	progressRoles []string
 	progressOn    bool
@@ -593,6 +600,14 @@ func WithQueueAges(fn func() map[string]time.Duration) Option {
 // option the gauge is not registered.
 func WithListenerInFlight(fn func() map[string]int) Option {
 	return func(o *options) { o.listenerBusy = fn }
+}
+
+// WithRoleAvailability registers MetricRoleAvailable, an ObservableGauge reading
+// fn on each collect: one series per role in the returned map, 1 for true (the
+// role is available) and 0 for false (marked unavailable by a failed startup
+// validate). Without the option the gauge is not registered.
+func WithRoleAvailability(fn func() map[string]bool) Option {
+	return func(o *options) { o.roleAvail = fn }
 }
 
 // WithRoleProgress registers the three per-role progress gauges
@@ -863,6 +878,28 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 				}
 				for role, n := range cfg.listenerBusy() {
 					o.Observe(int64(n), metric.WithAttributes(attribute.String("role", role)))
+				}
+				return nil
+			}),
+		); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.roleAvail != nil {
+		if _, err := m.Int64ObservableGauge(
+			MetricRoleAvailable,
+			metric.WithUnit("{role}"),
+			metric.WithDescription("1 while an enabled role is available, 0 while a startup validate marked it unavailable (docket pg2-12gr4.8, ruling 31), per role"),
+			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+				if !ready() {
+					return nil
+				}
+				for role, ok := range cfg.roleAvail() {
+					v := int64(0)
+					if ok {
+						v = 1
+					}
+					o.Observe(v, metric.WithAttributes(attribute.String("role", role)))
 				}
 				return nil
 			}),

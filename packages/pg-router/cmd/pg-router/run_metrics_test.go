@@ -43,7 +43,8 @@ import (
 
 // queueBoundMetrics are the members that read the queue on each collect: the per-type
 // depth and its scalar sum, the oldest-owed age, the per-role in-flight gauge, the
-// event-log size and limit gauges, and the Gate Registry's active-gate gauge.
+// event-log size and limit gauges, the Gate Registry's active-gate gauge and the per-role
+// availability gauge.
 var queueBoundMetrics = []string{
 	metrics.MetricQueueDepth,
 	metrics.MetricBacklog,
@@ -55,6 +56,7 @@ var queueBoundMetrics = []string{
 	metrics.MetricEmittersHalted,
 	metrics.MetricLogRejecting,
 	metrics.MetricActiveGates,
+	metrics.MetricRoleAvailable,
 }
 
 // startupCompactedHandler is a slog.Handler that runs onWindow, once and on the calling

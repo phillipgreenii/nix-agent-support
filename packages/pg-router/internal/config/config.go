@@ -10,6 +10,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -497,7 +498,10 @@ func noConfigWarnSuppressed() bool {
 //  2. unhandled source output    — a source emits a type no binding declares
 //  3. disconnected handler       — a handler no binding can reach
 //  4. handler with no events     — a BOUND handler whose reachable event set is empty
-//  5. absent backing command     — a source's/handler's command cannot be invoked
+//  5. absent backing command     — a source's query command or the handler command
+//     (PG_ROUTER_HANDLER_COMMAND, when set) cannot be invoked; with
+//     PG_ROUTER_HANDLER_COMMAND_DIR set, an enabled role's role-config file is
+//     also missing or not well-formed JSON
 //  6. non-terminating re-entry   — a cycle the declared graph shows cannot terminate
 //
 // plus each resolved query's own Validate. Errors are AGGREGATED (errors.Join),
@@ -590,6 +594,8 @@ func (c Config) diagnose() (errs []error, warns []string) {
 	}
 	errs = append(errs, c.logLimitFindings()...)
 	errs = append(errs, c.absentBackingCommands()...)
+	errs = append(errs, c.handlerCommandFindings()...)
+	errs = append(errs, c.roleConfigFindings()...)
 	cycleErrs, cycleWarns := c.reentryCycleFindings()
 	errs = append(errs, cycleErrs...)
 	warns = append(warns, cycleWarns...)
@@ -679,6 +685,54 @@ func (c Config) absentBackingCommands() []error {
 		}
 		if err := loc.Locate(cmd); err != nil {
 			errs = append(errs, fmt.Errorf("source %q backing command %q cannot be invoked: %w (absent backing command)", s.Name, cmd, err))
+		}
+	}
+	return errs
+}
+
+// handlerCommandFindings is the startup check that the handler command is
+// invocable (docket pg2-12gr4.8, design section 5; register row INV-WORKFLOW-1).
+// It runs only when PG_ROUTER_HANDLER_COMMAND is set: an unset handler command is
+// legal today (it gives a per-dispatch error, see HandlerCommand), so a config
+// without it must not start failing Load. "Invocable" means the command resolves
+// through the same locator absentBackingCommands uses to an executable file; the
+// core does NOT run the handler to check it (that is the optional validate
+// subcommand's job, asked at startup by cmd/pg-router).
+func (c Config) handlerCommandFindings() []error {
+	if c.HandlerCommand == "" {
+		return nil
+	}
+	if err := c.locator().Locate(c.HandlerCommand); err != nil {
+		return []error{fmt.Errorf("handler command %q (PG_ROUTER_HANDLER_COMMAND) cannot be invoked: %w (absent backing command)", c.HandlerCommand, err)}
+	}
+	return nil
+}
+
+// roleConfigFindings is the startup check that each enabled role's --role-config
+// file exists and parses (docket pg2-12gr4.8, design section 5; register row
+// INV-WORKFLOW-1). It runs only when PG_ROUTER_HANDLER_COMMAND_DIR is set (the
+// "old-path" roles; with no dir there is no role-config file to check). The file
+// is <dir>/<role>.json, the path cmd/pg-router's handlerRoleConfigPath builds.
+// "Parses" means well-formed JSON: core does not interpret the handler's fields,
+// because pg-router never validates another tool (the handler's own validate
+// does). A disabled role is not started, so it is not checked here.
+func (c Config) roleConfigFindings() []error {
+	if c.HandlerCommandDir == "" {
+		return nil
+	}
+	var errs []error
+	for _, role := range c.Roles {
+		if !role.Enabled {
+			continue
+		}
+		path := filepath.Join(c.HandlerCommandDir, role.Name+".json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("role %q role-config file %q cannot be read: %w (PG_ROUTER_HANDLER_COMMAND_DIR)", role.Name, path, err))
+			continue
+		}
+		if !json.Valid(data) {
+			errs = append(errs, fmt.Errorf("role %q role-config file %q is not well-formed JSON (PG_ROUTER_HANDLER_COMMAND_DIR)", role.Name, path))
 		}
 	}
 	return errs

@@ -1,0 +1,12 @@
+{
+  "$id": "handler.validate-reply",
+  "title": "INTF-HANDLER validate reply (exit 0 = ran; an empty problems list = valid; exit 2 = not supported)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "problems", "warnings"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "problems": { "type": "array", "items": { "type": "string" } },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  }
+}

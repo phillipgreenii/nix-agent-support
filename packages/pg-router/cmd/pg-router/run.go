@@ -357,6 +357,17 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		}
 	}
 	metricsOpts = append(metricsOpts, metrics.WithRoleProgress(enabledRoles...))
+	// Per-role availability gauge (docket pg2-12gr4.8, ruling 31): 1 while the
+	// role is available, 0 while a startup validate marked it unavailable. It
+	// reads o.Registry live, which bootCore sets below, before queueRef is stored
+	// (the gauge stays silent until then, like every queue-bound gauge here).
+	metricsOpts = append(metricsOpts, metrics.WithRoleAvailability(func() map[string]bool {
+		out := make(map[string]bool, len(enabledRoles))
+		for _, name := range enabledRoles {
+			out[name] = o.Registry != nil && o.Registry.Available(name)
+		}
+		return out
+	}))
 	// Per-source last-success / expected-interval gauges (bead pg2-tv11a,
 	// DEC-OBS-4): one series per enabled, non-excluded PULL source with a
 	// period, last-success initialised to now (process start).
@@ -1464,6 +1475,7 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 	// request (bead pg2-ag31a).
 	stopChaining := context.AfterFunc(ctx, q.StopChaining)
 	defer stopChaining()
+	validateRolesAtStartup(ctx, pr.o, pr.cfg)
 	postStartupAll(ctx, pr.o, pr.cfg)
 	// Ordering considered and accepted (review of this bead's design doc,
 	// "decouple pg-router-core's tick loop from per-dispatch-pass
@@ -1681,6 +1693,7 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 	// Kick offer makes for its listener's next head (bead pg2-ag31a).
 	stopChaining := context.AfterFunc(ctx, q.StopChaining)
 	defer stopChaining()
+	validateRolesAtStartup(ctx, pr.o, pr.cfg)
 	postStartupAll(ctx, pr.o, pr.cfg)
 	// Ordering considered and accepted (same reasoning as runRunUntilIdle's
 	// identical defer pair; review of this bead's design doc, "decouple

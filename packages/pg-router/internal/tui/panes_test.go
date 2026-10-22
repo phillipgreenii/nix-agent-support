@@ -13,7 +13,7 @@ import (
 )
 
 // TestPanes_DerivedHealthTwoAxes is this packet's own acceptance bar:
-// derived health for listeners ranks disabled > excluded > cooling > ok;
+// derived health for listeners ranks disabled > excluded > unavailable > cooling > ok;
 // for sources disabled > excluded > failing > idle > N/A (unknown interval)
 // > stale > ok (this task, pg2-mnf7t.1, widens sources to rank per-source
 // staleness against ExpectedIntervalMs rather than the pool-wide tick); for
@@ -50,6 +50,8 @@ func TestPanes_DerivedHealthTwoAxes(t *testing.T) {
 		}{
 			{"disabled wins over excluded+cooling", Listener{Enabled: false, Excluded: true, Backoff: cooling}, "disabled"},
 			{"excluded wins over cooling", Listener{Enabled: true, Excluded: true, Backoff: cooling}, "excluded"},
+			{"unavailable wins over cooling", Listener{Enabled: true, Backoff: cooling, SelfReportState: "unavailable"}, "unavailable"},
+			{"excluded wins over unavailable", Listener{Enabled: true, Excluded: true, SelfReportState: "unavailable"}, "excluded"},
 			{"cooling when enabled+included", Listener{Enabled: true, Backoff: cooling}, "cooling"},
 			{"ok otherwise", Listener{Enabled: true}, "ok"},
 		}
@@ -1145,5 +1147,30 @@ func TestRenderQueuesPane_ClampsToHeightBudget(t *testing.T) {
 				t.Errorf("maxLines=%d: rendered %d physical lines, want <= %d; got:\n%s", maxLines, len(lines), maxLines, got)
 			}
 		})
+	}
+}
+
+// TestRenderListenersPane_UnavailableRoleShowsInHealthAndSelfColumns pins the
+// TUI half of docket pg2-12gr4.8: a role core marked unavailable reads
+// "unavailable" in the HEALTH column and in the SELF column (the self-report
+// column reflects the self-status, not the lifecycle state).
+func TestRenderListenersPane_UnavailableRoleShowsInHealthAndSelfColumns(t *testing.T) {
+	theme := render.NewTheme(false)
+	ok := Listener{Role: "fine", Enabled: true, SelfReportState: "healthy"}
+	bad := Listener{Role: "parked", Enabled: true, SelfReportState: "unavailable", UnavailableReason: "pool dir missing"}
+	got := renderListenersPane([]Listener{ok, bad}, render.TierWide, 200, theme, "(none)", "Listeners", nil, 0)
+	var badRow string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "parked") {
+			badRow = line
+		}
+	}
+	if strings.Count(badRow, "unavailable") < 2 {
+		t.Errorf("the unavailable role's row must show unavailable in HEALTH and SELF; row = %q", badRow)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "fine") && strings.Contains(line, "unavailable") {
+			t.Errorf("an available role's row must not read unavailable: %q", line)
+		}
 	}
 }

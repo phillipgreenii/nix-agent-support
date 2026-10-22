@@ -77,6 +77,12 @@ type Registration struct {
 	Kind  Kind
 	State conformance.Lifecycle
 	Self  SelfStatus
+	// UnavailableReason says why Self is SelfUnavailable when core itself marked
+	// the participant so (SetUnavailable: a failed startup validate, docket
+	// pg2-12gr4.8). Empty whenever the participant is not unavailable, and for an
+	// unavailable report that carried no reason (a participant's own self-status
+	// push has none).
+	UnavailableReason string
 	// Callback is the event-delivery command string the core handed this
 	// participant, with the socket and token already baked in (interfaces.md
 	// "Callback"). Empty when the participant's kind has no callback target for
@@ -256,6 +262,27 @@ func (r *Registry) SetSelfStatus(id string, self SelfStatus) error {
 		return fmt.Errorf("%w: %s", ErrUnknownParticipant, id)
 	}
 	reg.Self = self
+	// A fresh self-report supersedes whatever core marked earlier, so a role core
+	// parked as unavailable becomes routable again once its participant reports
+	// healthy (the implementer's choice the docket leaves open).
+	reg.UnavailableReason = ""
+	reg.UpdatedAt = r.now()
+	return nil
+}
+
+// SetUnavailable marks a participant unavailable on core's own authority and
+// records why: Self becomes SelfUnavailable and UnavailableReason becomes reason
+// (a failed startup validate, docket pg2-12gr4.8). The participant stays
+// registered; Available then declines it with the pre-accept unavailable path.
+func (r *Registry) SetUnavailable(id, reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	reg, ok := r.byID[id]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrUnknownParticipant, id)
+	}
+	reg.Self = SelfUnavailable
+	reg.UnavailableReason = reason
 	reg.UpdatedAt = r.now()
 	return nil
 }

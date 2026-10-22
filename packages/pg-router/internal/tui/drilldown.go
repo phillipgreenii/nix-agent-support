@@ -306,6 +306,9 @@ func renderListenerDetail(l Listener, theme render.Theme, activity []ActivityEnt
 		}
 	}
 	fmt.Fprintf(&b, "Self:           %s\n", self)
+	if l.UnavailableReason != "" {
+		fmt.Fprintf(&b, "Unavailable:    %s\n", textsafe.Sanitize(l.UnavailableReason))
+	}
 	fmt.Fprintf(&b, "Fail:           %d\n", l.HandlerFailures)
 	fmt.Fprintf(&b, "Processing:     %s\n", processingText(l.InFlight, l.InFlightEventType))
 	b.WriteString(renderRecentActivity(activity, l.Role))

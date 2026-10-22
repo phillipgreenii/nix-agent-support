@@ -48,6 +48,11 @@ func (r *shutdownRunner) record(step string) {
 }
 
 func (r *shutdownRunner) Run(ctx context.Context, argv []string, _ []byte) ([]byte, int, error) {
+	if argv[len(argv)-1] == "validate" {
+		// The optional startup validate: this handler has none (the usage exit),
+		// and the step is not part of the shutdown ordering recorded below.
+		return nil, 2, nil
+	}
 	if argv[len(argv)-1] != "dispatch" {
 		r.record(argv[len(argv)-1])
 		return []byte(`{"schemaVersion":"1","id":"x","outcome":"ok"}`), 0, nil

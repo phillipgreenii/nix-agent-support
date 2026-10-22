@@ -1,0 +1,5 @@
+{
+  "schemaVersion": "1",
+  "problems": ["role file has an unknown key"],
+  "warnings": ["sessionEnv key API_TOKEN looks like a secret"]
+}

@@ -354,3 +354,21 @@ func TestHumanBytes(t *testing.T) {
 		}
 	}
 }
+
+// A role core marked unavailable shows its reason on the LISTENERS row (docket
+// pg2-12gr4.8); an available role's row is unchanged.
+func TestRenderStatusText_UnavailableListenerShowsReason(t *testing.T) {
+	st := statusReply{Listeners: []listenerView{
+		{Role: "bad", Binds: []string{"t1"}, Enabled: true, SelfReportState: "unavailable", UnavailableReason: "pool dir missing"},
+		{Role: "good", Binds: []string{"t2"}, Enabled: true},
+	}}
+	var out strings.Builder
+	renderStatusText(&out, "/s", st)
+	text := out.String()
+	if want := "  bad: binds=[t1] enabled=true excluded=false delivered=0 declined=0 backoff=- unavailable=pool dir missing\n"; !strings.Contains(text, want) {
+		t.Errorf("stdout = %q, want %q", text, want)
+	}
+	if want := "  good: binds=[t2] enabled=true excluded=false delivered=0 declined=0 backoff=-\n"; !strings.Contains(text, want) {
+		t.Errorf("stdout = %q, want %q", text, want)
+	}
+}

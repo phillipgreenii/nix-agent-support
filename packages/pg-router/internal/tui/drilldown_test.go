@@ -798,3 +798,17 @@ func TestRenderSourceDetail_Description(t *testing.T) {
 		}
 	})
 }
+
+// TestRenderListenerDetail_ShowsUnavailableReasonOnlyWhenSet pins docket
+// pg2-12gr4.8: the drill-down names why core marked a role unavailable, and an
+// available role renders no such line.
+func TestRenderListenerDetail_ShowsUnavailableReasonOnlyWhenSet(t *testing.T) {
+	theme := render.NewTheme(false)
+	bad := Listener{Role: "r", Enabled: true, SelfReportState: "unavailable", UnavailableReason: "pool dir missing"}
+	if got := renderListenerDetail(bad, theme, nil); !strings.Contains(got, "Unavailable:    pool dir missing") {
+		t.Errorf("detail = %q, want the unavailable reason line", got)
+	}
+	if got := renderListenerDetail(Listener{Role: "r", Enabled: true}, theme, nil); strings.Contains(got, "Unavailable:") {
+		t.Errorf("an available role must render no Unavailable line; detail = %q", got)
+	}
+}

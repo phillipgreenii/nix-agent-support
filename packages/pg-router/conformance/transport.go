@@ -95,7 +95,7 @@ type ReferenceHandler struct {
 // (INTF-HANDLER's per-event message, the original behavior this method
 // carried before it took a subcommand parameter at all) or `postStartup`/
 // `preShutdown` (pg2-oju6w.15's once-per-process-lifetime lifecycle hooks,
-// same transport, DEC-WIRE-1). Earlier this method ignored subcommand
+// same transport, DEC-WIRE-1) or the optional `validate` config check. Earlier this method ignored subcommand
 // entirely and always validated against "handler.dispatch" — a bug once a
 // second subcommand existed to invoke it with, fixed here in the same change
 // that introduces postStartup/preShutdown.
@@ -120,6 +120,8 @@ func (h *ReferenceHandler) Serve(subcommand string, stdin io.Reader, stdout io.W
 	switch subcommand {
 	case "postStartup", "preShutdown":
 		return h.serveLifecycleHook(subcommand, v, stdout)
+	case "validate":
+		return h.serveValidate(v, stdout)
 	default:
 		return h.serveDispatch(v, stdout)
 	}
@@ -165,6 +167,18 @@ func (h *ReferenceHandler) serveLifecycleHook(subcommand string, v any, stdout i
 	obj := v.(map[string]any)
 	id, _ := obj["id"].(string)
 	writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "id": id, "outcome": "ok"})
+	return ExitOK
+}
+
+// serveValidate is Serve's `validate` handling (docket pg2-12gr4.8): the optional
+// config check. The reference handler has nothing to complain about, so it
+// replies exit 0 with empty problems and warnings (valid).
+func (h *ReferenceHandler) serveValidate(v any, stdout io.Writer) int {
+	if err := Check("handler.validate", v); err != nil {
+		writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": err.Error()})
+		return ExitError
+	}
+	writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "problems": []string{}, "warnings": []string{}})
 	return ExitOK
 }
 

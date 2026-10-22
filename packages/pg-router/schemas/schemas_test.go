@@ -281,6 +281,7 @@ func TestRegistryLoadsAllInterfaces(t *testing.T) {
 		"handler.dispatch", "handler.dispatch-reply",
 		"handler.postStartup", "handler.postStartup-reply",
 		"handler.preShutdown", "handler.preShutdown-reply",
+		"handler.validate", "handler.validate-reply",
 		"mon.read", "mon.read-reply", "mon.update", "mon.update-reply",
 		"store.request", "store.reply",
 		"cli.ingest-event", "cli.ingest-event-reply", "cli.push-inject", "cli.status", "cli.status-reply",

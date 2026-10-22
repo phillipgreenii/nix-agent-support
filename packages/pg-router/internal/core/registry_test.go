@@ -121,6 +121,39 @@ func TestRegistry_LifecycleAndAvailability(t *testing.T) {
 	}
 }
 
+// TestRegistry_SetUnavailableRecordsReasonAndSelfReportClearsIt covers docket
+// pg2-12gr4.8: core marks a participant unavailable with a reason, Available then
+// refuses it, and a later self-status report supersedes the mark and the reason.
+func TestRegistry_SetUnavailableRecordsReasonAndSelfReportClearsIt(t *testing.T) {
+	r := NewRegistry(nil)
+	if _, err := r.RegisterInProcess("h1", KindHandler); err != nil {
+		t.Fatalf("RegisterInProcess: %v", err)
+	}
+	if err := r.SetLifecycle("h1", conformance.Started); err != nil {
+		t.Fatalf("SetLifecycle: %v", err)
+	}
+	if err := r.SetUnavailable("h1", "pool dir missing"); err != nil {
+		t.Fatalf("SetUnavailable: %v", err)
+	}
+	got, _ := r.Get("h1")
+	if got.Self != SelfUnavailable || got.UnavailableReason != "pool dir missing" {
+		t.Fatalf("after SetUnavailable: Self=%q reason=%q", got.Self, got.UnavailableReason)
+	}
+	if r.Available("h1") {
+		t.Fatal("Available = true for a role core marked unavailable")
+	}
+	if err := r.SetSelfStatus("h1", SelfHealthy); err != nil {
+		t.Fatalf("SetSelfStatus: %v", err)
+	}
+	got, _ = r.Get("h1")
+	if got.UnavailableReason != "" || !r.Available("h1") {
+		t.Fatalf("a healthy self-report must clear the mark: reason=%q available=%v", got.UnavailableReason, r.Available("h1"))
+	}
+	if err := r.SetUnavailable("nope", "x"); !errors.Is(err, ErrUnknownParticipant) {
+		t.Fatalf("SetUnavailable unknown err = %v, want ErrUnknownParticipant", err)
+	}
+}
+
 func TestRegistry_UnknownParticipant(t *testing.T) {
 	r := NewRegistry(nil)
 	if err := r.SetLifecycle("nope", conformance.Started); !errors.Is(err, ErrUnknownParticipant) {

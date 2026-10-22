@@ -97,6 +97,7 @@
       "lastDeliveredAtMs": 0,
       "handlerFailures": 0,
       "selfReportState": "",
+      "unavailableReason": "",
       "backoff": null,
       "description": "reviews incoming PRs for policy violations"
     },
@@ -109,7 +110,8 @@
       "declined": 0,
       "lastDeliveredAtMs": 0,
       "handlerFailures": 0,
-      "selfReportState": "",
+      "selfReportState": "unavailable",
+      "unavailableReason": "stub problem",
       "backoff": null,
       "description": ""
     }

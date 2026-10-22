@@ -211,9 +211,13 @@ type Listener struct {
 	HandlerFailures int64    `json:"handlerFailures"`
 	Backoff         *Backoff `json:"backoff"`
 	// SelfReportState is this task's fold-in of the retired Registry pane:
-	// the Registration.State whose ID equals this Listener's Role, or ""
-	// if this listener has never self-reported.
+	// the Registration.Self (healthy / degraded / unavailable) whose ID
+	// equals this Listener's Role, or "" if this listener has never
+	// self-reported.
 	SelfReportState string `json:"selfReportState"`
+	// UnavailableReason is why core marked the role unavailable (a failed
+	// startup validate, docket pg2-12gr4.8), or "" when it is available.
+	UnavailableReason string `json:"unavailableReason"`
 	// InFlight/InFlightEventType (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2's
 	// "processing now" signal) -- InFlight is true exactly while this role
 	// has an outstanding offer; InFlightEventType is the offered event's
