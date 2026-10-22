@@ -890,7 +890,19 @@ check_widths() {
   unset PG_TASK_FOCUS_SWIFTBAR_SELF
   state_idle
   render
-  [[ $output == *$'\nTitle: wide (click for narrow) | bash='"${PLUGIN[-1]}"' param1=--set-title-width'* ]]
+  # The path is the script's own ($0): the artifact under test, or, in the nix
+  # build, the unwrapped script behind the runtimeDeps wrapper. Either way it is
+  # an executable file that accepts --set-title-width.
+  local self
+  self=$(sed -n 's/^Title: wide (click for narrow) | bash=\([^ ]*\) param1=--set-title-width .*/\1/p' <<<"$output")
+  [ -n "$self" ]
+  if [ -x "$self" ]; then
+    run "$self" --set-title-width narrow
+  else
+    run bash "$self" --set-title-width narrow
+  fi
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WIDTH_FILE")" = "narrow" ]
 }
 
 @test "Title row: a read-only daemon still offers it (a local setting, not a daemon write)" {
