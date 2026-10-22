@@ -12952,6 +12952,9 @@
                 assert has "exec ${pkgs.pg-task-focus-swiftbar}/bin/pg-task-focus-swiftbar" (
                   textOf enabled pluginPath
                 );
+                assert has
+                  "export PG_TASK_FOCUS_SWIFTBAR_SELF=${pkgs.pg-task-focus-swiftbar}/bin/pg-task-focus-swiftbar\n"
+                  (textOf enabled pluginPath);
                 assert has "# <swiftbar.type>streamable</swiftbar.type>\n" (textOf enabled pluginPath);
                 # the due-soon window and boost sizes follow the routine, else the daemon's defaults
                 assert has "export PG_TASK_FOCUS_SWIFTBAR_DUE_SOON_MIN=${toString fromRoutine}\n" (

@@ -21,7 +21,7 @@ let
     "xbar.version" = "v1.0";
     "xbar.author" = "phillipgreenii";
     "xbar.desc" =
-      "pg-task-focus in the menu bar: the running cycle and its timer, overtime, paused cycles with a resume or switch action, the next due task and a READ-ONLY marker when the daemon cannot write. Streams from `pg-task-focus status --watch`";
+      "pg-task-focus in the menu bar: the active task with a coarse clock (wide) or one colour-coded glyph (narrow, a Title row in the dropdown switches), overtime, paused cycles with a resume or switch action, the next due task and a READ-ONLY marker when the daemon cannot write. Streams from `pg-task-focus status --watch`";
     "xbar.dependencies" = "pg-task-focus";
     "swiftbar.type" = "streamable";
     "swiftbar.hideRunInTerminal" = "true";
@@ -73,6 +73,10 @@ let
         export PG_TASK_FOCUS_SWIFTBAR_BOOST_MINUTES=${
           lib.escapeShellArg (lib.concatMapStringsSep " " toString boostMinutes)
         }
+        # The dropdown's Title row re-invokes the renderer (SwiftBar `bash=`) to
+        # switch the title width. Hand it the renderer's store path: it has no
+        # whitespace, unlike this wrapper's installed path under "Application Support".
+        export PG_TASK_FOCUS_SWIFTBAR_SELF=${lib.escapeShellArg "${script}/bin/pg-task-focus-swiftbar"}
         exec ${lib.escapeShellArg "${script}/bin/pg-task-focus-swiftbar"} "$@"
       '';
     in
@@ -128,6 +132,16 @@ let
       grep -qx 'export PG_TASK_FOCUS_SWIFTBAR_WEB_URL=http://127.0.0.1:49210' "$w" || fail "default web URL not baked"
       grep -qx 'export PG_TASK_FOCUS_SWIFTBAR_DUE_SOON_MIN=30' "$w" || fail "default due-soon window not baked"
       grep -qx "export PG_TASK_FOCUS_SWIFTBAR_BOOST_MINUTES='5 10 25'" "$w" || fail "default boost sizes not baked"
+
+      # The Title toggle row re-invokes the renderer through this exported path:
+      # it must be the renderer store path, whitespace-free, set before the exec.
+      self_line=$(grep -n '^export PG_TASK_FOCUS_SWIFTBAR_SELF=' "$w" | head -n1 | cut -d: -f1)
+      [ -n "$self_line" ] || fail "no PG_TASK_FOCUS_SWIFTBAR_SELF export"
+      [ "$self_line" -lt "$exec_line" ] || fail "PG_TASK_FOCUS_SWIFTBAR_SELF export must precede exec"
+      grep -qxF 'export PG_TASK_FOCUS_SWIFTBAR_SELF=${script}/bin/pg-task-focus-swiftbar' "$w" || fail "PG_TASK_FOCUS_SWIFTBAR_SELF is not the renderer store path"
+      self=$(sed -n 's|^export PG_TASK_FOCUS_SWIFTBAR_SELF=||p' "$w")
+      case "$self" in *[[:space:]]*) fail "PG_TASK_FOCUS_SWIFTBAR_SELF contains whitespace" ;; esac
+      [ -x "$self" ] || fail "PG_TASK_FOCUS_SWIFTBAR_SELF $self is not an executable file"
 
       target=$(sed -n 's|^exec \([^ ]*\) .*|\1|p' "$w")
       [ -x "$target" ] || fail "exec target $target is not an executable file"

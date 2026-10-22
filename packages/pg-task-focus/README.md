@@ -25,7 +25,9 @@ reasons for the main decisions are in `docs/adr/0088-pg-task-focus-event-log-and
 | `grafana/`                        | The dashboard and the alert rules                                                                                             |
 
 The SwiftBar menu-bar plugin is a separate package, `packages/pg-task-focus-swiftbar`: a streaming
-renderer over `status --watch` and the CLI, with a nix-generated plugin wrapper.
+renderer over `status --watch` and the CLI, with a nix-generated plugin wrapper. Its wide and narrow
+titles, coarse clock and title-width state file are documented in
+[its README](../pg-task-focus-swiftbar/README.md).
 
 ## Running it
 
@@ -44,7 +46,10 @@ configuration without the daemon: `pg-task-focus check`, `pg-task-focus config c
 `--client NAME` (or `PG_TASK_FOCUS_CLIENT`) sets the `X-Client` the verb sends: `cli` (the default), `web`,
 `connector` or `swiftbar`, anything else is a usage error. The SwiftBar plugin
 (`packages/pg-task-focus-swiftbar`, installed by `phillipgreenii.programs.pg-task-focus.swiftbar`) runs
-this binary as `--client swiftbar`, so the daemon's per-client metrics show a silent plugin.
+this binary as `--client swiftbar`, so the daemon's per-client metrics show a silent plugin. The
+plugin's title is the active task only, with a coarse clock, in a wide or a narrow (one glyph) form
+that its dropdown switches; see the
+[plugin README](../pg-task-focus-swiftbar/README.md).
 
 The root path serves the web UI (see below). Logs are JSON lines on stdout. The API is loopback-only (`127.0.0.1`), requires a `Host` and
 `Origin` from the allowlist (the loopback names with the port, and the host of `public_url`), and uses

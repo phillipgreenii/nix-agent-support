@@ -127,7 +127,13 @@ pa-monitor's does (darwin only, requires `enable`, wrapper is the FUNCTION
 `packages/pg-task-focus-swiftbar/plugin.nix` `mkPluginWrapper`, renderer is the internal
 `pg-task-focus-swiftbar` package), so `test-pg-task-focus-hm-launchd` stubs `home.file`
 too. Unlike pa-monitor it is a STREAMING plugin (`swiftbar.type` = `streamable`, no refresh
-interval in the filename): it keeps `pg-task-focus status --watch` open and ticks the timer locally.
+interval in the filename): it keeps `pg-task-focus status --watch` open and ticks the timer locally,
+every 5 s while a cycle runs, with a coarse clock (whole minutes, then 20 s buckets). Its title is the
+active task only, in a wide or a narrow (one colour-coded glyph) form switched by the dropdown's Title
+row and persisted in `$XDG_STATE_HOME/pg-task-focus-swiftbar/title-width` (re-read on every frame, since
+the process is long-lived; the SwiftBar title width convention, bead `pg2-incbn`). The wrapper exports
+`PG_TASK_FOCUS_SWIFTBAR_SELF` (the renderer's store path) for that row. Read
+`packages/pg-task-focus-swiftbar/README.md` before changing the title.
 The frame-separator syntax is one seam (`STREAM_SEPARATOR` in the renderer), verified against the
 SwiftBar 2.0.1 README but not against the live GUI (see the renderer's header comment). Its actions
 run the CLI with `--client swiftbar` (the CLI's `--client` flag / `PG_TASK_FOCUS_CLIENT`), so the
