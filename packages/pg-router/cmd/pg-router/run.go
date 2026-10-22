@@ -1446,6 +1446,10 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
 		return exitGeneric
 	}
+	// Same shutdown rule as runLongRunningBody: no chained re-offers after a stop
+	// request (bead pg2-ag31a).
+	stopChaining := context.AfterFunc(ctx, q.StopChaining)
+	defer stopChaining()
 	postStartupAll(ctx, pr.o, pr.cfg)
 	// Ordering considered and accepted (review of this bead's design doc,
 	// "decouple pg-router-core's tick loop from per-dispatch-pass
@@ -1659,6 +1663,10 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 		fmt.Fprintln(os.Stderr, "run:", err)
 		return exitGeneric
 	}
+	// No new offers once shutdown is requested, including the re-offer a settling
+	// Kick offer makes for its listener's next head (bead pg2-ag31a).
+	stopChaining := context.AfterFunc(ctx, q.StopChaining)
+	defer stopChaining()
 	postStartupAll(ctx, pr.o, pr.cfg)
 	// Ordering considered and accepted (same reasoning as runRunUntilIdle's
 	// identical defer pair; review of this bead's design doc, "decouple

@@ -64,6 +64,16 @@ is supported, and acceptance is tracked per `(event, handler)` (`INV-CONC-1`). C
 **handler-enforced** — a pre-accept `busy` decline, never a number the core tracks — exactly as `ADR
 0031` decided it.
 
+**The next offer follows the accept, not the next pass** (bead `pg2-ag31a`). "Only once the current
+one is accepted" is the whole gate: the core offers a handler its next eligible head the moment the
+current offer is accepted (`INV-LIFE-3`), still one outstanding offer per handler, instead of
+waiting for the drive loop's next pass. Before this a pass offered each handler at most once, so a
+handler that accepts in 0.1 s was capped at one event per pass interval (about 300 events an hour
+at a 10 to 13 s interval) and a 5900-event backlog never drained. Chosen over running the offer
+pass on a faster timer, which re-scans every handler's head on a clock instead of reacting to the
+one accept that frees it; the cost is that one fast handler is served back to back through its own
+backlog (other handlers are unaffected: each has its own cursor and offers run concurrently).
+
 **Head-of-line blocking is the accepted cost of per-handler FIFO.** An event a handler cannot yet
 accept stalls only that handler's own stream until the event expires; the mitigation is a short
 `expiresAt`, not reordering around the stuck head.

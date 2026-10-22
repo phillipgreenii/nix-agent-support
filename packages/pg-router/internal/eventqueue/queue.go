@@ -438,6 +438,10 @@ type Queue struct {
 	// makes "minted before q.mu is taken" possible without guessing.
 	listenerCount atomic.Int64
 
+	// chainStopped, once set by StopChaining, makes Kick's offer goroutines stop
+	// re-offering a listener's next head on settle (bead pg2-ag31a).
+	chainStopped atomic.Bool
+
 	// evictWhenAllAccept is the opt-in early-eviction switch (ADR 0031). Default
 	// off: keep every event until its retention ends. On: evict once all
 	// currently-bound listeners have accepted (disk savings; shortens the dedup
@@ -1230,13 +1234,61 @@ func (q *Queue) snapshotLocked(takeID func() string, gsig *gateSignals) (pending
 		if !ls.eligibleNow(e.evt.ID, now) {
 			continue // still cooling down from a prior pre-accept decline (INV-FAIL-2)
 		}
-		id := takeID()
-		q.custody[id] = custody{}
-		q.inFlight[lid] = e.evt.Type
-		pending = append(pending, pendingOffer{ls: ls, evt: e.evt, id: id, startedAt: now, lastAttempt: e.evt.Expired(now)})
+		pending = append(pending, q.markOfferLocked(ls, e, takeID(), now))
 	}
 	return pending, now
 }
+
+// markOfferLocked records one new outstanding offer of e to ls — the custody
+// entry and the per-listener inFlight slot (INV-CONC-1) — and returns the
+// pendingOffer for it. The ONE place an offer is minted, shared by
+// snapshotLocked and chainNextLocked. Caller holds q.mu and has already
+// checked ls is not busy.
+func (q *Queue) markOfferLocked(ls *listenerState, e *entry, id string, now time.Time) pendingOffer {
+	q.custody[id] = custody{}
+	q.inFlight[ls.l.ID()] = e.evt.Type
+	return pendingOffer{ls: ls, evt: e.evt, id: id, startedAt: now, lastAttempt: e.evt.Expired(now)}
+}
+
+// chainNextLocked is Kick's re-offer-on-settle step (bead pg2-ag31a): called
+// from a Kick offer goroutine under q.mu, immediately after settleOfferLocked
+// cleared ls's inFlight slot for an ACCEPTED offer, it mints ls's NEXT head
+// offer in that same critical section, so the listener goes from "one
+// outstanding offer" straight to "one outstanding offer" with no instant at
+// which inFlight is empty (INV-CONC-1 holds throughout; WaitForInFlightDrain
+// cannot observe a false idle between two chained offers). It applies the
+// same per-listener checks as snapshotLocked (not busy, no blocking gate,
+// headFor including the serialize-types occupancy gate, eligibleNow), so FIFO
+// order and every gate are unchanged; the only difference is WHEN the offer
+// is made. It returns false, minting nothing, when chaining has been stopped
+// (StopChaining), the listener is gated or busy, or it has no eligible head;
+// a gated listener is then picked up by the next tick's Kick as before.
+// id was minted by the caller before taking q.mu (no crypto/rand under the
+// lock). Caller holds q.mu.
+func (q *Queue) chainNextLocked(ls *listenerState, id string, now time.Time) (pendingOffer, bool) {
+	if q.chainStopped.Load() {
+		return pendingOffer{}, false
+	}
+	if _, busy := q.inFlight[ls.l.ID()]; busy {
+		return pendingOffer{}, false
+	}
+	if _, blocked := BlockingGate(q.activeGatesLocked(now), ls.exempt); blocked {
+		return pendingOffer{}, false
+	}
+	e := q.headFor(ls.l)
+	if e == nil || !ls.eligibleNow(e.evt.ID, now) {
+		return pendingOffer{}, false
+	}
+	return q.markOfferLocked(ls, e, id, now), true
+}
+
+// StopChaining stops Kick's offer goroutines from re-offering their listener's
+// next head when an offer settles (bead pg2-ag31a). The daemon calls it the
+// moment shutdown is requested, so a handler that accepts instantly cannot
+// keep launching new offers through the backlog while the shutdown drain waits
+// (the same "no new offers once shutdown has been requested" rule Kick's own
+// caller applies per tick). Irreversible for the life of the queue.
+func (q *Queue) StopChaining() { q.chainStopped.Store(true) }
 
 // settleOfferLocked is PHASE 3 (RECORD, locked) for exactly ONE pending
 // offer p, evaluated against now: it deletes p's custody/inFlight entries
@@ -1566,32 +1618,84 @@ func (q *Queue) Dispatch() (accepted int) {
 // before doing something that requires that (e.g. closing the durable store
 // at shutdown — this package's design doc's "shutdown ordering" note) needs
 // WaitForInFlightDrain.
+//
+// RE-OFFER ON SETTLE (bead pg2-ag31a): when a Kick-launched offer is ACCEPTED,
+// its goroutine immediately offers the same listener its NEXT eligible head
+// (chainNextLocked), in the same critical section that settled the accepted
+// offer, instead of leaving the listener idle until a later Kick call (the
+// daemon's Kick runs once per ProduceTick-bearing tick, ~10-13 s). Without it a
+// handler needing 0.1 s per event was capped at one event per tick (about 300
+// events/hour) and a backlog of thousands never drained. Exactly one offer per
+// listener stays outstanding at every instant (INV-CONC-1: inFlight is never
+// empty between two chained offers, so no concurrent Kick can interleave a
+// second one), FIFO order and the serialize-types occupancy gate are untouched
+// (the next head comes from the same headFor), and a gated, declined or
+// cooling-down listener is NOT chained: those wait for the next tick exactly as
+// before (retry cadence INV-FAIL-2 is unchanged). Trade-off: one goroutine
+// loops through a fast handler's whole backlog, so a handler that accepts
+// instantly and enqueues many events is served back to back; StopChaining ends
+// it at shutdown. The alternative (Kick on a faster timer than ProduceTick) was
+// rejected: it polls every listener's head on a clock instead of reacting to
+// the one event that frees a listener.
 func (q *Queue) Kick() (launched int) {
 	pending, _ := q.snapshotPending()
 	for _, p := range pending {
-		go func(p pendingOffer) {
-			p.result, p.dispatchFailed = offerSafely(p.ls.l, Offering{ID: p.id, Event: p.evt, StartedAt: p.startedAt})
-
-			q.mu.Lock()
-			unlock := q.unlockOnce()
-			defer unlock()
-			now := q.now()
-			var signals []dispatchSignal
-			rec, evicted, _ := q.settleOfferLocked(p, now, &signals)
-			if evicted {
-				// Kept under q.mu, exactly like Dispatch's batched evict-append
-				// (see this function's own doc: the Store is not internally
-				// synchronized).
-				if err := q.appendLocked(rec); err != nil {
-					slog.Error("eventqueue: evict-append failed; the event will replay as retained and be re-offered after a restart",
-						"eventId", p.evt.ID, "err", err)
-				}
-			}
-			unlock()
-			q.fanOut(signals)
-		}(p)
+		go q.runOffer(p)
 	}
 	return len(pending)
+}
+
+// runOffer runs p, then (see Kick's RE-OFFER ON SETTLE) every offer chained
+// from it, one after another on this goroutine, until a settle chains nothing.
+func (q *Queue) runOffer(p pendingOffer) {
+	for {
+		next, ok := q.runOfferOnce(p)
+		if !ok {
+			return
+		}
+		p = next
+	}
+}
+
+// runOfferOnce is one Kick offer's phases 2 and 3: it offers p, settles it
+// under q.mu, and, when the offer was accepted, mints the listener's next head
+// offer in that same critical section (chainNextLocked), returning it with
+// true for runOffer to run.
+func (q *Queue) runOfferOnce(p pendingOffer) (next pendingOffer, chained bool) {
+	p.result, p.dispatchFailed = offerSafely(p.ls.l, Offering{ID: p.id, Event: p.evt, StartedAt: p.startedAt})
+
+	// The next offer's dispatch id is minted BEFORE q.mu is taken, like
+	// snapshotPending's (no crypto/rand under the lock); skipped when this
+	// offer cannot chain.
+	var nextID string
+	if p.result.Accepted && !p.dispatchFailed && !q.chainStopped.Load() {
+		id, err := newDispatchID()
+		if err != nil {
+			slog.Error("eventqueue: mint dispatch id failed", "err", err)
+		}
+		nextID = id
+	}
+
+	q.mu.Lock()
+	unlock := q.unlockOnce()
+	defer unlock()
+	now := q.now()
+	var signals []dispatchSignal
+	rec, evicted, accepted := q.settleOfferLocked(p, now, &signals)
+	if evicted {
+		// Kept under q.mu, exactly like Dispatch's batched evict-append
+		// (see Kick's own doc: the Store is not internally synchronized).
+		if err := q.appendLocked(rec); err != nil {
+			slog.Error("eventqueue: evict-append failed; the event will replay as retained and be re-offered after a restart",
+				"eventId", p.evt.ID, "err", err)
+		}
+	}
+	if accepted && nextID != "" {
+		next, chained = q.chainNextLocked(p.ls, nextID, now)
+	}
+	unlock()
+	q.fanOut(signals)
+	return next, chained
 }
 
 // maybeEvict evicts an event early when opted-in and every currently-bound

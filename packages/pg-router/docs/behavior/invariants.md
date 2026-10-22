@@ -604,6 +604,17 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   loop has since moved on to. What changes is only the loop's own posture toward a pass it has
   already launched, never the per-handler ceiling itself.
 
+  **A handler's next head is offered as soon as its outstanding offer is accepted.** The core
+  **MUST NOT** hold an idle handler's next deliverable head until the drive loop's next pass: the
+  moment an offer is **accepted**, the core **MUST** offer that same handler its next eligible head
+  at once, so the handler is never left idle for the rest of a pass interval. Without this a
+  handler that takes custody in a fraction of a second drains no more than **one event per pass**
+  however deep its queue, and a backlog that source production outpaces never shrinks. Exactly one
+  offer per handler is still outstanding at every instant (`INV-CONC-1`), the next head comes from
+  the same per-handler FIFO and serialize-type gates, and a handler that **declined** or is held
+  by a gate waits for the next pass at the `INV-FAIL-2` cadence exactly as before. The core
+  **MUST** stop making such follow-on offers once shutdown has been requested.
+
   **A restarted core offers before it queries.** A core that starts over a queue holding events an
   earlier core left owed — above all a dispatch that **survives the core's shutdown** (`INV-LIFE-1`,
   `INTF-HANDLER`'s `stopping` state) — **MUST** make its first offer pass over what the queue

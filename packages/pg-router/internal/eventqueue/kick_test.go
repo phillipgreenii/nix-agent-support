@@ -198,8 +198,8 @@ func TestKickStuckListenerDoesNotBlockFreeListener(t *testing.T) {
 
 // Scenario 2: repeated Kick() calls against a still-busy listener must skip
 // it every time (Offer count pinned at 1); the instant it settles, the
-// NEXT Kick() must dispatch its second queued item — the per-listener FIFO
-// cursor survives Kick()'s async settlement path.
+// listener is re-offered its second queued item at once — the per-listener
+// FIFO cursor survives Kick()'s async settlement path.
 func TestKickRepeatedKicksAgainstBusyListenerThenNextItem(t *testing.T) {
 	clk := newClock()
 	q := newQueue(t, clk)
@@ -228,18 +228,23 @@ func TestKickRepeatedKicksAgainstBusyListenerThenNextItem(t *testing.T) {
 	}
 
 	// Arm the SECOND offer's gate before releasing the first, so there is no
-	// window in which a re-offer could be entered with no gate armed.
+	// window in which a re-offer could be entered with no gate armed. Settling
+	// e1 re-offers the listener's next head (e2) by itself, with no further
+	// Kick() (bead pg2-ag31a): the listener goes from one outstanding offer
+	// straight to one outstanding offer.
 	entered2, release2 := l.arm()
 	release1()
-	waitForCond(t, 5*time.Second, func() bool { return q.SessionsInFlight() == 0 })
-
-	if launched := q.Kick(); launched != 1 {
-		t.Fatalf("Kick() after e1 settled launched = %d, want 1 (e2)", launched)
-	}
 	select {
 	case <-entered2:
 	case <-time.After(5 * time.Second):
-		t.Fatal("listener never entered its second offer (e2) (timeout)")
+		t.Fatal("listener never entered its second offer (e2) without a further Kick() (timeout)")
+	}
+	if got := q.SessionsInFlight(); got != 1 {
+		t.Fatalf("SessionsInFlight = %d while e2 is outstanding, want 1", got)
+	}
+	// e2 is the listener's one outstanding offer, so a Kick() skips it.
+	if launched := q.Kick(); launched != 0 {
+		t.Fatalf("Kick() while e2 outstanding launched = %d, want 0 (listener busy)", launched)
 	}
 	release2()
 	waitForCond(t, 5*time.Second, func() bool { return q.SessionsInFlight() == 0 })
@@ -608,5 +613,170 @@ func TestKickAcceptsSingleOfferAndRecordsSettlement(t *testing.T) {
 	}
 	if got := q.delivered.Load(); got != 1 {
 		t.Fatalf("q.delivered = %d, want 1", got)
+	}
+}
+
+// --- Re-offer on settle (bead pg2-ag31a) ---------------------------------
+//
+// Before this bead a Kick()-launched offer that was accepted left its listener
+// idle until the NEXT Kick() call, which the daemon makes once per ~10-13 s
+// tick: a handler needing 0.1 s per event drained about 300 events an hour and
+// a backlog of thousands never shrank. The offer's goroutine now offers the
+// listener's next head the instant the accept settles, while INV-CONC-1's
+// one-outstanding-offer-per-handler ceiling and per-listener FIFO still hold.
+
+// chainListener is an always-accepting listener that records the order of the
+// events it was offered and the highest number of its own Offer calls ever
+// running at once (the INV-CONC-1 ceiling, which must stay 1). When gate is
+// non-nil each Offer first signals entered, then blocks until gate is closed.
+type chainListener struct {
+	id    string
+	types map[string]bool
+
+	mu      sync.Mutex
+	order   []string
+	running int
+	maxRun  int
+
+	// gate, when set before the first Kick, makes every Offer block until it is
+	// closed (a "slow handler"); entered receives one value per Offer entered.
+	gate    chan struct{}
+	entered chan string
+}
+
+func newChainListener(id, typ string) *chainListener {
+	return &chainListener{id: id, types: map[string]bool{typ: true}, entered: make(chan string, 1024)}
+}
+
+func (l *chainListener) ID() string           { return l.id }
+func (l *chainListener) Matches(e Event) bool { return l.types[e.Type] }
+
+func (l *chainListener) Offer(o Offering) OfferResult {
+	l.mu.Lock()
+	l.order = append(l.order, o.Event.ID)
+	l.running++
+	if l.running > l.maxRun {
+		l.maxRun = l.running
+	}
+	gate := l.gate
+	l.mu.Unlock()
+	l.entered <- o.Event.ID
+	if gate != nil {
+		<-gate
+	}
+	l.mu.Lock()
+	l.running--
+	l.mu.Unlock()
+	return OfferResult{Accepted: true, Decline: DeclineNone}
+}
+
+func (l *chainListener) snapshot() (order []string, maxRun int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.order...), l.maxRun
+}
+
+func enqueueSeq(t *testing.T, q *Queue, clk *mockClock, typ string, n int) []string {
+	t.Helper()
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("e%03d", i)
+		mustEnqueue(t, q, evtUntil(ids[i], typ, clk.in(time.Hour)))
+	}
+	return ids
+}
+
+// A handler that accepts at once drains a whole backlog from ONE Kick() — not
+// one event per tick — in FIFO order, and never has two offers outstanding.
+func TestKickChainsNextHeadOnAcceptDrainsBacklogFromOneKick(t *testing.T) {
+	const n = 50
+	clk := newClock()
+	q := newQueue(t, clk)
+	l := newChainListener("h", "T")
+	q.Register(l)
+	want := enqueueSeq(t, q, clk, "T", n)
+
+	if launched := q.Kick(); launched != 1 {
+		t.Fatalf("Kick() launched = %d, want 1 (one offer per listener)", launched)
+	}
+	// No further Kick(): any event past the first can only have been offered by
+	// the settle-time re-offer. Without it this waits out the 5 s and fails with
+	// delivered == 1.
+	waitForCond(t, 5*time.Second, func() bool { return q.delivered.Load() == n && q.SessionsInFlight() == 0 })
+
+	order, maxRun := l.snapshot()
+	if maxRun != 1 {
+		t.Fatalf("max concurrent Offer calls = %d, want 1 (INV-CONC-1: one outstanding offer per handler)", maxRun)
+	}
+	if fmt.Sprint(order) != fmt.Sprint(want) {
+		t.Fatalf("offer order = %v, want FIFO %v", order, want)
+	}
+	if got := q.SessionsInFlight(); got != 0 {
+		t.Fatalf("SessionsInFlight = %d after the backlog drained, want 0", got)
+	}
+}
+
+// The regression guard for the invariant: a SLOW handler still has exactly one
+// outstanding offer however often Kick() runs, and its next head is offered
+// only after (and straight after) the current one settles.
+func TestKickChainingKeepsOneOutstandingOfferUnderSlowHandler(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	l := newChainListener("h", "T")
+	l.gate = make(chan struct{})
+	q.Register(l)
+	want := enqueueSeq(t, q, clk, "T", 3)
+
+	q.Kick()
+	select {
+	case id := <-l.entered:
+		if id != want[0] {
+			t.Fatalf("first offer = %s, want %s", id, want[0])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("listener never entered its first offer (timeout)")
+	}
+	for i := range 5 {
+		if launched := q.Kick(); launched != 0 {
+			t.Fatalf("Kick() #%d while the first offer is outstanding launched = %d, want 0", i, launched)
+		}
+	}
+	if order, _ := l.snapshot(); len(order) != 1 {
+		t.Fatalf("Offer calls while the first is outstanding = %v, want exactly 1", order)
+	}
+	if got := q.InFlightByListener()["h"]; got != 1 {
+		t.Fatalf("InFlightByListener[h] = %d while its offer is outstanding, want 1", got)
+	}
+
+	close(l.gate) // the handler finishes; the rest drain without another Kick()
+	waitForCond(t, 5*time.Second, func() bool { return q.delivered.Load() == 3 && q.SessionsInFlight() == 0 })
+	order, maxRun := l.snapshot()
+	if maxRun != 1 {
+		t.Fatalf("max concurrent Offer calls = %d, want 1", maxRun)
+	}
+	if fmt.Sprint(order) != fmt.Sprint(want) {
+		t.Fatalf("offer order = %v, want FIFO %v", order, want)
+	}
+}
+
+// StopChaining (the daemon calls it on shutdown) ends the re-offer: the offer
+// already launched still settles, but nothing new starts behind it.
+func TestKickStopChainingEndsReOfferOnSettle(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	l := newChainListener("h", "T")
+	q.Register(l)
+	enqueueSeq(t, q, clk, "T", 5)
+
+	q.StopChaining()
+	q.Kick()
+	waitForCond(t, 5*time.Second, func() bool { return q.delivered.Load() == 1 && q.SessionsInFlight() == 0 })
+	// Give a (wrongly) chained second offer time to show up.
+	time.Sleep(50 * time.Millisecond)
+	if order, _ := l.snapshot(); len(order) != 1 {
+		t.Fatalf("offers after StopChaining = %v, want exactly the one Kick launched", order)
+	}
+	if got := q.delivered.Load(); got != 1 {
+		t.Fatalf("delivered = %d, want 1", got)
 	}
 }
