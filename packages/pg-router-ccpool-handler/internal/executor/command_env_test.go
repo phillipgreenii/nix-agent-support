@@ -58,6 +58,19 @@ func runEnvProbe(t *testing.T, strict bool) (names []string, kv map[string]strin
 	return envNames(t, out)
 }
 
+// clearAmbientEnv removes every variable from the test process's environment
+// (restored at cleanup). A probe that dumps `env | sort` sees one line per
+// variable only when no value spans lines; the nix build sandbox exports
+// multi-line ones (buildPhase, preBuild, ...) that would read as phantom names.
+func clearAmbientEnv(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		t.Setenv(k, "") // registers the restore
+		_ = os.Unsetenv(k)
+	}
+}
+
 func setHandlerEnv(t *testing.T) {
 	t.Helper()
 	for k, v := range map[string]string{
@@ -97,6 +110,7 @@ func TestCommandPayloadEnv_StrictGolden(t *testing.T) {
 // TestCommandPayloadEnv_NotStrictInherits: with strictBaseEnv off the payload
 // inherits the handler's env plus the three PG_ROUTER_* variables.
 func TestCommandPayloadEnv_NotStrictInherits(t *testing.T) {
+	clearAmbientEnv(t)
 	setHandlerEnv(t)
 	names, kv := runEnvProbe(t, false)
 	want := map[string]bool{"PG_ROUTER_ROLE": true, "PG_ROUTER_ITEM_ID": true, "PG_ROUTER_ITEM_TYPE": true}
