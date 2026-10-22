@@ -4,13 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/failsig"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/prompt"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/query"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
+	"github.com/phillipgreenii/pg-router/procenv"
 )
 
 // ErrBusy is the sentinel a command role's exit code 9 maps to (Task 2.3,
@@ -40,15 +46,53 @@ func (commandExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Dep
 
 type commandRun struct{ deps Deps }
 
-// run dispatches a command role: render its argv, run it once, success iff
-// exit 0. No ccpool/watchdog. (No built-in command role exists; this path is
-// exercised by explicit config.)
+// baseEnvExtras are the participant markers a strict base env keeps, by exact
+// name (design section 4): run-role and the handler's own launch set them.
+var baseEnvExtras = []string{"BEADS_ACTOR", "BEADS_DIR", "WORKSPACE_ROOT", "PG_ROUTER_TEST_MODE"}
+
+// commandPayloadEnv builds the environment a command role's payload starts
+// with. With r.StrictBaseEnv on, env is procenv.BaseEnv over the handler's
+// environment (the minimal base env plus baseEnvExtras where set) plus the
+// three PG_ROUTER_* item-context entries, and baseNames is the sorted list of
+// the variable names in env. With it off, env is os.Environ() plus the three
+// PG_ROUTER_* entries (they come last, so they win a duplicate) and baseNames
+// is nil.
+func commandPayloadEnv(r roles.Role, it item.Item) (env []string, baseNames []string) {
+	itemCtx := itemContextEnv(r.Name, it)
+	keys := make([]string, 0, len(itemCtx))
+	for k := range itemCtx {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var itemEnv []string
+	for _, k := range keys {
+		itemEnv = append(itemEnv, k+"="+itemCtx[k])
+	}
+	if !r.StrictBaseEnv {
+		return append(os.Environ(), itemEnv...), nil
+	}
+	env = append(procenv.BaseEnv(os.Environ(), baseEnvExtras), itemEnv...)
+	baseNames = make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		baseNames = append(baseNames, name)
+	}
+	sort.Strings(baseNames)
+	return env, baseNames
+}
+
+// run dispatches a command role: render its argv, run it once in its own
+// process group with the payload env, success iff exit 0. No ccpool/watchdog.
+// (No built-in command role exists; this path is exercised by explicit config.)
 func (r *commandRun) run(ctx context.Context, d DispatchContext) error {
 	argv, err := r.renderArgv(d.Role.Command.Argv, d)
 	if err != nil {
 		return fmt.Errorf("command role %q: render argv: %w", d.Role.Name, err)
 	}
-	if _, err := r.deps.commander().Run(ctx, argv); err != nil {
+	// The next packet (dispatch_start) records argv and the base env names from
+	// here; env is the payload env, baseNames the strict env's variable names.
+	env, _ := commandPayloadEnv(d.Role, d.Item)
+	if _, err := r.runPayload(ctx, argv, env); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == busyExitCode {
 			return fmt.Errorf("command role %q item %s: %w: %w", d.Role.Name, d.Item.ID, ErrBusy, err)
@@ -56,6 +100,18 @@ func (r *commandRun) run(ctx context.Context, d DispatchContext) error {
 		return fmt.Errorf("command role %q item %s: %w%s", d.Role.Name, d.Item.ID, err, stderrSuffix(err))
 	}
 	return nil
+}
+
+// runPayload runs argv with env through the commander. A Commander that can
+// take an environment (query.EnvCommander, the default OSCommander) runs it with
+// exactly env, in its own process group; any other Commander (a test double)
+// runs through Run.
+func (r *commandRun) runPayload(ctx context.Context, argv, env []string) ([]byte, error) {
+	c := r.deps.commander()
+	if ec, ok := c.(query.EnvCommander); ok {
+		return ec.RunEnv(ctx, argv, env)
+	}
+	return c.Run(ctx, argv)
 }
 
 // renderArgv interpolates each argv element through the prompt template engine, so a
