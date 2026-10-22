@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,8 +22,12 @@ import (
 // shAdds are the variables /bin/sh itself adds to what it was started with.
 var shAdds = map[string]bool{"PWD": true, "OLDPWD": true, "SHLVL": true, "_": true}
 
+var envIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // envNames reads an `env | sort` dump and returns its variable names, sorted,
-// minus what /bin/sh adds itself.
+// minus what /bin/sh adds itself and any line whose name is not a valid
+// identifier (the continuation lines of a multi-line variable value, as the
+// nix sandbox environment has).
 func envNames(t *testing.T, path string) (names []string, kv map[string]string) {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -32,7 +37,7 @@ func envNames(t *testing.T, path string) (names []string, kv map[string]string) 
 	kv = map[string]string{}
 	for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
 		name, val, ok := strings.Cut(line, "=")
-		if !ok || shAdds[name] {
+		if !ok || shAdds[name] || !envIdent.MatchString(name) {
 			continue
 		}
 		names = append(names, name)
