@@ -365,10 +365,6 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, rawKeys [][]s
 		}
 		seen[qt.Name] = true
 		if i < len(rawKeys) {
-			if hasKey(rawKeys[i], "wrap") {
-				errs = append(errs, fmt.Errorf("query[%d] %q: %s", i, qt.Name, errQueryWrapRemoved))
-				continue
-			}
 			if unknown := unknownQueryKeys(rawKeys[i]); len(unknown) > 0 {
 				errs = append(errs, fmt.Errorf("query[%d] %q: unknown key(s) %s (a misspelled key is never silently ignored; known keys: %s)", i, qt.Name, strings.Join(unknown, ", "), strings.Join(knownQueryKeys(), ", ")))
 				continue
@@ -389,22 +385,6 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, rawKeys [][]s
 		}
 	}
 	return out, overrides, errs
-}
-
-// errQueryWrapRemoved is the load error for the removed [[query]] wrap key. The
-// wrap concept left pg-router: a wrapped query writes the standalone wrapper's
-// command as its own command. This is the one place core names pg-wrap, as a
-// migration pointer only.
-const errQueryWrapRemoved = `the [[query]] wrap key was removed; write the wrapper as the query's own command instead, e.g. argv = ["pg-wrap", "run", ...] (see pg-wrap run)`
-
-// hasKey reports whether keys contains key.
-func hasKey(keys []string, key string) bool {
-	for _, k := range keys {
-		if k == key {
-			return true
-		}
-	}
-	return false
 }
 
 // knownQueryKeys lists every key queryTOML consumes, taken from its toml tags

@@ -58,9 +58,10 @@ func TestLoad_queryStrictBaseEnvDefaultOff(t *testing.T) {
 	}
 }
 
-// A [[query]] that still carries the removed wrap key fails to load, names the
-// query, and points at pg-wrap run, whatever shape the old value had.
-func TestLoad_queryWrapKeyRemovedPointsAtPgWrapRun(t *testing.T) {
+// A [[query]] that still carries a wrap key fails to load through the generic
+// unknown-key rule: the error names the query and the key and lists the known
+// keys, whatever shape the old value had, with no wrap-specific message.
+func TestLoad_queryWrapKeyFailsGenericUnknownKey(t *testing.T) {
 	for _, extra := range []string{
 		`wrap = ["/usr/bin/env WRAPPED=1", ["/usr/bin/nice", "-n", "5"]]`,
 		`wrap = []`,
@@ -73,11 +74,13 @@ func TestLoad_queryWrapKeyRemovedPointsAtPgWrapRun(t *testing.T) {
 			if err == nil {
 				t.Fatal("Load succeeded, want an error")
 			}
-			if !strings.Contains(err.Error(), `"probe"`) {
-				t.Errorf("error does not name the query: %v", err)
+			for _, want := range []string{`"probe"`, "unknown key(s) wrap", "known keys:"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q lacks %q", err, want)
+				}
 			}
-			if !strings.Contains(err.Error(), "pg-wrap run") {
-				t.Errorf("error %q lacks the pointer to pg-wrap run", err)
+			if strings.Contains(err.Error(), "removed") || strings.Contains(err.Error(), "pg-wrap") {
+				t.Errorf("error %q carries a wrap-specific message", err)
 			}
 		})
 	}
