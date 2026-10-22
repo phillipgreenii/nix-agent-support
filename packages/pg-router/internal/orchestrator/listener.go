@@ -395,6 +395,10 @@ func (l *roleListener) shouldRetry(evt eventqueue.Event, err error) bool {
 // events.jsonl row from it. A reply without the field changes nothing.
 func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	if l.reg != nil && !l.reg.Available(l.role.Name) {
+		// Role progress: the role is unavailable, so no handler runs. The design's
+		// progress list (section 5) does not name this path (a stated gap), so it is
+		// implemented as the literal list: it moves no counter and does not reset the
+		// age.
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineUnavailable}
 	}
 	evt := o.Event
