@@ -93,7 +93,7 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   `INV-CCA-4`, and that each referenced pool directory exists, and it warns on a secret-looking
   `sessionEnv` key. It never runs `pg-wrap` or any other prefix tool, whose own check is the tool's,
   and it verifies nothing about pg-router (`INV-CCH-36`).
-- **`INV-CCA-10`** <!-- uuid: ee3073fd-9313-40d7-8a64-6a5868008f5d --> — **The adapter records what each dispatch ran and why each one declined.**
+- **`INV-CCA-10`** <!-- uuid: ee3073fd-9313-40d7-8a64-6a5868008f5d --> — **The adapter records what each dispatch ran, how it ended and why each one declined.**
   For every accepted dispatch it **MUST** write a `dispatch_start` event-log record carrying the
   `ccpool new` route and the `sessionEnv` entries, values included (non-secret by `INV-CCA-4`); the
   agent's own environment is the prefix tool's, which an operator reaches by following the
@@ -103,7 +103,12 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   `item_type`, `route`, `session` and `session_env`, where `route` is `launched` (this dispatch ran
   `ccpool new` and it returned ready) or `adopted` (it took over a live session of the same event's
   turn); the `dispatch_decline` fields are `role`, `item_id`, `reason`, `decline_kind`,
-  `session_env`, `evidence` and `failure_signature` (`INV-CCH-35` lists them in full).
+  `session_env`, `evidence` and `failure_signature` (`INV-CCH-35` lists them in full). Every
+  accepted dispatch **MUST** then write exactly one outcome record after its `dispatch_start`,
+  success included: the `dispatch_result` failure record (`INV-CCH-9`) when the dispatch failed, and
+  a `dispatch_end` record, with `role`, `item_id`, `item_type`, `session` and an `outcome` of
+  `completed`, `unclaimed-end`, `peer-held`, `needs-input-stalled` or `interrupted`, for every other
+  end. A decline is not an accepted dispatch and writes only its `dispatch_decline`.
 
 ## Across a cutover
 

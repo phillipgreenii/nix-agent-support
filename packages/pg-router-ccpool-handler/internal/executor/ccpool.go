@@ -35,7 +35,10 @@ const purgeCloseTimeout = 2 * time.Minute
 type ccpoolExecutor struct{}
 
 func (ccpoolExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps) (report.Result, error) {
-	return (&ccpoolRun{deps: deps}).run(ctx, d)
+	r := &ccpoolRun{deps: deps}
+	res, err := r.run(ctx, d)
+	r.recordOutcome(d, err)
+	return res, err
 }
 
 // ccpoolRun carries Deps so the moved methods keep their original signatures
@@ -54,6 +57,44 @@ type ccpoolRun struct {
 	// fetched, so it adds no ccpool call.
 	row   ccpool.Session
 	rowOK bool
+
+	// The outcome record state (INV-CCH-35), touched only by the dispatch's own
+	// goroutine. started: dispatch_start was written (the dispatch is accepted),
+	// startSession its session's external id. finished/waitErr: finishWait ran, and
+	// the wait's end cause. outcomeDone: the failure record (dispatch_result) was
+	// already written, so recordOutcome writes nothing more.
+	started      bool
+	startSession string
+	finished     bool
+	waitErr      error
+	outcomeDone  bool
+}
+
+// recordOutcome writes the ONE outcome record an accepted dispatch owes after
+// its dispatch_start (INV-CCH-35): the dispatch_result failure record when it
+// failed (already written by recordDispatchFailure for a failed wait, written
+// here for a failure before the wait such as a failed send), else dispatch_end
+// with the outcome that ended it, success included. runErr is Dispatch's own
+// returned error. A dispatch that was never accepted (a decline, a failed launch)
+// has no dispatch_start and so writes none.
+func (r *ccpoolRun) recordOutcome(d DispatchContext, runErr error) {
+	if !r.started || r.outcomeDone {
+		return
+	}
+	r.outcomeDone = true
+	cause := runErr
+	if r.finished {
+		cause = r.waitErr
+	}
+	if outcome, ok := dispatchEndOutcome(cause); ok {
+		emitDispatchEnd(r.deps.Log, d, r.startSession, outcome)
+		return
+	}
+	pool := "default"
+	if d.Role.CCPool != nil && d.Role.CCPool.PoolDir != "" {
+		pool = d.Role.CCPool.PoolDir
+	}
+	emitDispatchFailed(r.deps.Log, d, pool, r.startSession, cause.Error())
 }
 
 // ErrPoolAtCapacity: the pool reported free == 0 — a healthy, expected
@@ -600,6 +641,7 @@ func budgetUnlimited(b budget.Budget) bool {
 // absorbed (closeSettledSession, INV-CCH-17, ADR 0082), so a finished session
 // does not hold a counted slot of a max_sessions=1 pool until idle_ttl.
 func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
+	r.finished, r.waitErr = true, werr
 	r.recordDispatchFailure(d, name, werr)
 	q := r.cleanupWorktree(ctx, cc, name, d.Item.ID, wt)
 	r.closeSettledSession(ctx, cc, d.Item.ID, name, werr, q)

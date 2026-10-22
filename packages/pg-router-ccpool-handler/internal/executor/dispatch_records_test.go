@@ -144,12 +144,13 @@ func TestCommandDispatch_writesDispatchStart_strictOffHasNoNames(t *testing.T) {
 	}
 }
 
-// A failing payload (any exit code but 9) is still an accepted dispatch.
-func TestCommandDispatch_dispatchStartOnFailureButNotOnExit9(t *testing.T) {
+// dispatch_start is written when the payload starts, so a failing payload and a
+// busy exit 9 (which the cmd layer then turns into dispatch_decline) both have one.
+func TestCommandDispatch_dispatchStartOnFailureAndOnExit9(t *testing.T) {
 	for _, tc := range []struct {
 		code      string
 		wantStart int
-	}{{"3", 1}, {"9", 0}} {
+	}{{"3", 1}, {"9", 1}} {
 		t.Run("exit "+tc.code, func(t *testing.T) {
 			log, path := newTestLog(t)
 			_ = dispatchCommand(t, shCommandRole("exit "+tc.code), log)

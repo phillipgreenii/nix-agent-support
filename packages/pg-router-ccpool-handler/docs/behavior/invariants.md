@@ -100,8 +100,11 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   fragment behind. The raw failure text MUST never be logged or returned. Naming a cause is a
   judgment about the work, not an observed session fact, so this classification lives on the
   handler side and never in ccpool (`phillipgreenii-nix-agent-support` ADR 0015's "Decision").
-  - **Dispatch result.** When a dispatched session fails, exits without completing its bead, or is
-    hard-stopped by the budget watchdog, the handler MUST record one `dispatch_result` event-log
+  - **Dispatch result.** `dispatch_result` is the FAILURE outcome record of `INV-CCH-35`: it is
+    written for a failure only, never for a success (the success outcome is that invariant's
+    `dispatch_end`), so every row of it carries a `failure_signature`. When a dispatched session
+    fails, exits without completing its bead, or is hard-stopped by the budget watchdog, the handler
+    MUST record one `dispatch_result` event-log
     entry (and a log line) carrying `failure_signature`, `signature_evidence` (redacted, at most
     300 characters, and never empty for a dispatched session), `role`, `pool`, `bead`, and
     `session`. The signature MUST be classified from the last 64 KB of the session transcript
@@ -124,7 +127,8 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   - **Unclaimed end.** The `unclaimed_end` event-log record of `INV-CCH-28` MUST carry the same
     `failure_signature` and `signature_evidence`, classified by this same shared classification and
     captured before the session is closed or purged. It keeps its kind and its other fields, and an
-    unclaimed end still writes NO `dispatch_result` record.
+    unclaimed end still writes NO `dispatch_result` record; its one outcome record is the
+    `dispatch_end` of `INV-CCH-35` with outcome `unclaimed-end`.
     ccpool reports no process exit status or signal (`ADR 0015`: observed state only), so none is
     recorded. `budget` MUST be set only for a watchdog hard stop and reuses its `limit`, `used`,
     and `cap` fields; there MUST be no second budget
@@ -992,22 +996,43 @@ changes a core gate or `INV-LIFE-2`.
     `command-busy` (`INV-CCH-6`), a risk this module accepts.
 
 - **`INV-CCH-35`** <!-- uuid: dafefee7-edda-40ef-af3c-de3a08b40a1f --> — the handler MUST be able to
-  tell an operator what a dispatch ran and why a dispatch declined, without recording a secret.
+  tell an operator what a dispatch ran, how it ended and why a dispatch declined, without recording a
+  secret. Its event log follows one rule (operator ruling 33, 2026-10-22: "dispatch_start before
+  command run sounds correct, the next event of error or declined or success or ... would show up
+  based upon the result"): `dispatch_start` when the payload starts, then exactly one outcome record.
   - **`dispatch_start`.** For every accepted dispatch the handler MUST write one `dispatch_start`
     event-log record carrying the role, the item's id and type, and, for a command-backed role, the
     argv as rendered, whether `strictBaseEnv` is on, and the **names** of the base-environment
     variables the payload received (never their values, and never the item-context values); for a
     ccpool-backed role, the route the session was launched by and the `sessionEnv` entries, values
     included, since they are non-secret by `INV-CCH-33`. The agent's own environment is the prefix tool's: an operator follows the `sessionEnv` entry that names its spec to that tool's
-    own `show` command. The record is written once the dispatch is past every pre-accept decline, so
-    a declined dispatch writes none.
+    own `show` command. For a command-backed role the record MUST be written BEFORE the payload
+    starts, so a payload that hangs or is killed still has it; because that role's busy exit `9` is
+    only known after the command ran, an exit `9` leaves a `dispatch_start` followed by a
+    `dispatch_decline`. For a ccpool-backed role the record is written once the dispatch is past
+    every pre-accept decline (`ccpool new` returned ready, or a live session was adopted), so a
+    declined launch writes none.
+  - **The outcome record.** Every accepted dispatch, command-backed or ccpool-backed, MUST write
+    exactly one outcome record after its `dispatch_start`, success included, and no accepted dispatch
+    writes two. It is the `dispatch_result` failure record of `INV-CCH-9` when the dispatch FAILED,
+    and a `dispatch_end` record for every other end. The operator's `dispatch_failed` is that
+    existing `dispatch_result` kind, not a new kind, and `dispatch_result` is NOT written for a
+    success, because its readers (the failure-signature queries and alerts) select on the kind and
+    read `failure_signature` from every row. A command-backed dispatch fails when its payload exits
+    non-zero (any code but `9`) or cannot start; a ccpool-backed one fails as `INV-CCH-9` says, and
+    also when the send of its nudge fails. The `dispatch_end` outcomes are `completed` (the payload
+    exited `0`, or the session completed its work), `unclaimed-end` (`INV-CCH-28`), `peer-held`
+    (`INV-CCH-28`), `needs-input-stalled` (`INV-CCH-29`) and `interrupted` (the dispatch's context
+    ended, as at shutdown or when a hung payload was cancelled, so the end is not a session failure).
+    A pre-accept decline, including a command-backed busy exit `9`, writes `dispatch_decline` as its
+    one record and no outcome record.
   - **`dispatch_decline`.** For every pre-accept decline the handler MUST write one
     `dispatch_decline` record carrying the role, the item's id, the reason, the kind (`INV-CCH-37`),
     the role's `sessionEnv`, the redacted evidence tail and the failure signature (`INV-CCH-9`),
     each of the last two where the decline has one.
-  - **What the records never hold.** Neither record holds an item-context value, a prompt, an item's
+  - **What the records never hold.** No record holds an item-context value, a prompt, an item's
     content or an unredacted failure text.
-  - **The fields as implemented.** Both go to the handler's event log, `events.jsonl` in the handler
+  - **The fields as implemented.** All go to the handler's event log, `events.jsonl` in the handler
     state directory, as one JSON object per line with the log's own `time`, `level`, `kind` and `msg`.
     `dispatch_start` adds `role`, `item_id` and `item_type`, then for a command-backed role `argv`
     (as rendered), `strict_base_env` (boolean) and `base_env_names` (sorted; empty when the switch is
@@ -1016,10 +1041,17 @@ changes a core gate or `INV-LIFE-2`.
     launched a fresh session through `ccpool new` and it returned ready, and `adopted` when it took
     over a live session of the same event's turn (`INV-CCH-30`): ccpool does not report its own
     internal route to its caller, so the record names the route the handler took. A command-backed
-    `dispatch_start` is written after the payload exits with any code but `9` (exit `9` is a decline);
-    a payload that cannot start, hangs or is killed before it exits leaves none, and the core records
-    that dispatch's error. A ccpool-backed one is written once `ccpool new` returned ready or the
-    adoption took over, before the nudge is sent. `dispatch_decline` adds `role`, `item_id`,
+    `dispatch_start` is written before the payload starts, so one exists for a payload that exits
+    `9` (then followed by the cmd layer's `dispatch_decline`), cannot start, hangs or is killed. A
+    ccpool-backed one is written once `ccpool new` returned ready or the adoption took over, before
+    the nudge is sent. `dispatch_end` adds `role`, `item_id`, `item_type`, `outcome` (one of the
+    values above) and, for a ccpool-backed role, `session` (the session's external id); it is logged
+    at `info`. The failure `dispatch_result` keeps the fields of `INV-CCH-9` for both role types:
+    `role`, `pool` (`default` or the role's pool directory; `""` for a command-backed role), `bead`,
+    `session` (`""` for a command-backed role), `failure_signature` and `signature_evidence`. A
+    command-backed failure is classified by the same shared classifier from the payload's standard
+    error, else from the error that stopped it, redacted and bounded, with the evidence never empty.
+    `dispatch_decline` adds `role`, `item_id`,
     `reason`, `decline_kind` (the kind of `INV-CCH-37`: the record's own `kind` field names the
     record), `session_env` (the role's entries; an empty object for a command-backed role),
     `evidence` (the redacted, bounded tail of the `ccpool new` error, `""` unless the reason is

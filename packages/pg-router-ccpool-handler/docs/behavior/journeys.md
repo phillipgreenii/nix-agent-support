@@ -70,8 +70,9 @@ Extensions:
 - 2x. This module starts the payload (`INV-CCH-32`, `INV-CCH-33`): it sets the three item-context
   variables for every payload, a command-backed payload starts from the base environment's keep-list
   when its switch is on, and a ccpool-backed session is launched with the role's `sessionEnv`
-  passed through uninterpreted. One `dispatch_start` record names the argv or the launch route, the
-  base-environment variable names and the `sessionEnv` entries, never a secret (`INV-CCH-35`). Every
+  passed through uninterpreted. One `dispatch_start` record, written when the payload starts, names
+  the argv or the launch route, the base-environment variable names and the `sessionEnv` entries,
+  never a secret, and exactly one outcome record follows it, success included (`INV-CCH-35`). Every
   start of a ccpool-backed session passes the whole environment again, and a send first checks that
   the session is live (`INV-CCH-38`).
 - 2h. A dispatch whose role opts in to the pre-launch check and whose check says the dispatch is

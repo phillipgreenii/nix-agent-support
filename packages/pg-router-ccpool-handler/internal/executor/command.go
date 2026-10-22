@@ -93,23 +93,39 @@ func (r *commandRun) run(ctx context.Context, d DispatchContext) error {
 	// the strict switch is off); dispatch_start records the argv and the names,
 	// never an env value.
 	env, baseNames := commandPayloadEnv(d.Role, d.Item)
+	// dispatch_start is per ACCEPTED dispatch and is written BEFORE the payload
+	// starts, so a payload that hangs or is killed still has its record (ruling
+	// 33). A busy exit 9 is only known after the command ran: it is a decline, and
+	// leaves dispatch_start followed by the cmd layer's dispatch_decline.
+	r.emitCommandStart(d, argv, baseNames)
 	_, err = r.runPayload(ctx, argv, env)
+	if err == nil {
+		emitDispatchEnd(r.deps.Log, d, "", OutcomeCompleted)
+		return nil
+	}
 	var exitErr *exec.ExitError
-	exitedBusy := errors.As(err, &exitErr) && exitErr.ExitCode() == busyExitCode
-	// dispatch_start is per ACCEPTED dispatch and is written once acceptance is
-	// known: the payload ran to an exit of any code but 9 (exit 9 is a decline and
-	// gets dispatch_decline instead). A payload that could not start leaves none (and a
-	// payload that hangs never reaches here): core records that dispatch's error.
-	if err == nil || (exitErr != nil && !exitedBusy) {
-		r.emitCommandStart(d, argv, baseNames)
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == busyExitCode {
+		return fmt.Errorf("command role %q item %s: %w: %w", d.Role.Name, d.Item.ID, ErrBusy, err)
 	}
-	if err != nil {
-		if exitedBusy {
-			return fmt.Errorf("command role %q item %s: %w: %w", d.Role.Name, d.Item.ID, ErrBusy, err)
-		}
-		return fmt.Errorf("command role %q item %s: %w%s", d.Role.Name, d.Item.ID, err, stderrSuffix(err))
+	// Exactly one outcome record follows dispatch_start (the decline above has the
+	// cmd layer's own): a cancelled context is dispatch_end "interrupted", every
+	// other failure the dispatch_result failure record of INV-CCH-9.
+	if ctx.Err() != nil {
+		emitDispatchEnd(r.deps.Log, d, "", OutcomeInterrupted)
+	} else {
+		emitDispatchFailed(r.deps.Log, d, "", "", commandFailureText(err))
 	}
-	return nil
+	return fmt.Errorf("command role %q item %s: %w%s", d.Role.Name, d.Item.ID, err, stderrSuffix(err))
+}
+
+// commandFailureText is the text a failed command payload is classified from
+// (INV-CCH-9): the stderr the command wrote, else the error that stopped it.
+func commandFailureText(err error) string {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+		return string(exitErr.Stderr)
+	}
+	return err.Error()
 }
 
 // runPayload runs argv with env through the commander. A Commander that can

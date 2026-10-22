@@ -67,14 +67,20 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   stderr tail (`INV-CMA-4`), where a `pg-wrap[<stage>]:` line, when the argv starts with `pg-wrap`,
   names the failing layer. The adapter neither knows nor checks a prefix tool: the argv's first
   element is part of the command (`INV-ROLE-4`).
-- **`INV-CMA-10`** <!-- uuid: 56b4b7b4-89ba-4916-9195-d9f9484bdbfb --> — **Each accepted dispatch records what it ran.**
+- **`INV-CMA-10`** <!-- uuid: 56b4b7b4-89ba-4916-9195-d9f9484bdbfb --> — **Each accepted dispatch records what it ran and how it ended.**
   The adapter **MUST** write one `dispatch_start` event-log record per accepted dispatch carrying the
   role, the item's id and type, the rendered argv, whether `strictBaseEnv` is on, and the **names** of
   the base-environment variables the payload received, never their values and never the item-context
   values. A decline writes a `dispatch_decline` record with the role, the item id, the reason, the
   kind and the evidence it has. The `dispatch_start` fields are `role`, `item_id`, `item_type`,
-  `argv`, `strict_base_env` and `base_env_names`; it is written once the payload has exited with any
-  code but `9`, since exit `9` is a decline, so a payload that cannot start or never exits leaves
-  none. The `dispatch_decline` fields are `role`, `item_id`, `reason`, `decline_kind`,
+  `argv`, `strict_base_env` and `base_env_names`; it is written BEFORE the payload starts, so a
+  payload that hangs, is killed or cannot start still has one. Exit `9` is a decline that is only
+  known after the command ran, so it leaves a `dispatch_start` and then a `dispatch_decline`. The
+  `dispatch_decline` fields are `role`, `item_id`, `reason`, `decline_kind`,
   `session_env` (an empty object for this adapter), `evidence` and `failure_signature` (`INV-CCH-35`
-  lists them in full).
+  lists them in full). Every other accepted dispatch **MUST** write exactly one outcome record after
+  its `dispatch_start`, success included: a `dispatch_end` record (`role`, `item_id`, `item_type`
+  and an `outcome` of `completed` for exit `0`, or `interrupted` when the dispatch's context ended
+  while the payload ran) or, when the payload exits non-zero or cannot start, the `dispatch_result`
+  failure record (`role`, `pool` and `session` empty, `bead`, `failure_signature`,
+  `signature_evidence`; `INV-CCH-9`), never both.

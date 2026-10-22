@@ -30,7 +30,8 @@ _Includes:_ `INTF-CMA-PAYLOAD`.
 3. It starts the command in its own process group (`INV-CMA-6`), with the base environment and the
    item context (`INV-CMA-8`), writes one `dispatch_start` record (`INV-CMA-10`), and runs the
    command once.
-4. The command exits zero: the adapter replies inline with a completion.
+4. The command exits zero: the adapter writes one `dispatch_end` record (outcome `completed`,
+   `INV-CMA-10`) and replies inline with a completion.
 
 Extensions:
 

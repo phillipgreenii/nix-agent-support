@@ -213,6 +213,9 @@ func (r *ccpoolRun) recordDispatchFailure(d DispatchContext, name string, werr e
 	if errors.Is(werr, ErrNeedsInputStalled) {
 		return
 	}
+	// This is the dispatch's failure record: it is its one outcome record
+	// (recordOutcome writes none after it).
+	r.outcomeDone = true
 	pool := "default"
 	if d.Role.CCPool != nil && d.Role.CCPool.PoolDir != "" {
 		pool = d.Role.CCPool.PoolDir

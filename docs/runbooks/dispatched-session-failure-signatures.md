@@ -12,6 +12,11 @@ handler's default state directory). Each record carries `time`, `failure_signatu
 `signature_evidence`, `role`, `pool`, `bead`, and `session`. A budget hard stop also carries
 `limit`, `used`, and `cap`.
 
+`dispatch_result` is the failure outcome only: every row carries a `failure_signature`. A dispatch
+that did not fail writes a `dispatch_end` record instead (`outcome` `completed`, `unclaimed-end`,
+`peer-held`, `needs-input-stalled` or `interrupted`), so the queries below never see a success. A
+command-backed role writes the same `dispatch_result` with an empty `pool` and `session`.
+
 `failure_signature` is one of `git-auth`, `git-network`, `mount-or-path`, `budget`, `index-lock`,
 `api-transient`, `api-rate-limit`, `api-auth`, `context-limit`, `session-errored`, `session-idle`,
 `session-gone`, or `unknown`. `signature_evidence` is redacted and at most 300 characters. There is

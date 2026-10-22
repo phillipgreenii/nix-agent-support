@@ -59,10 +59,14 @@ and to the deployment. Each is fully defined by the invariant cited; none is dec
   (`at-capacity`, `capacity-unknown`, `pool-unreadable`, `low-disk`, `session-in-flight`,
   `command-busy`, `origin-unavailable`, `launch-failed` and the `skipped-*` reasons), each mapped to
   a kind (`INV-CCH-37`).
-- **The `dispatch_start` and `dispatch_decline` event-log records** — what an accepted dispatch ran
-  (`role`, `item_id`, `item_type`, then `argv`, `strict_base_env` and `base_env_names` for a
-  command-backed role, or `route` (`launched` or `adopted`), `session` and `session_env` for a
-  ccpool-backed one) and why a dispatch declined (`role`, `item_id`, `reason`, `decline_kind`,
+- **The `dispatch_start`, outcome and `dispatch_decline` event-log records** — what an accepted
+  dispatch ran, written when its payload starts (`role`, `item_id`, `item_type`, then `argv`,
+  `strict_base_env` and `base_env_names` for a command-backed role, or `route` (`launched` or
+  `adopted`), `session` and `session_env` for a ccpool-backed one); how it ended, as exactly one
+  outcome record after it, which is `dispatch_result` for a failure (`role`, `pool`, `bead`,
+  `session`, `failure_signature`, `signature_evidence`; `INV-CCH-9`) and `dispatch_end` for every
+  other end, success included (`role`, `item_id`, `item_type`, `outcome`, and `session` for a
+  ccpool-backed role); and why a dispatch declined (`role`, `item_id`, `reason`, `decline_kind`,
   `session_env`, `evidence`, `failure_signature`) (`INV-CCH-35`).
 - **The environment of a payload** — the three item-context variables `PG_ROUTER_ROLE`,
   `PG_ROUTER_ITEM_ID` and `PG_ROUTER_ITEM_TYPE` the handler sets for every payload, and, for a

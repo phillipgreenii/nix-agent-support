@@ -21,6 +21,8 @@ environment**, **handler session**, **pre-accept decline**) are **inherited** wi
   with it (`INV-CMA-4`).
 - **Stderr tail** — the bounded, redacted, one-line tail of a failed payload's standard error that
   the adapter puts in a failure's error text.
-- **`dispatch_start`** — the event-log record of what an accepted dispatch ran: the rendered argv,
-  whether the strict switch is on and the names of the base-environment variables (`INV-CMA-10`).
+- **`dispatch_start`** — the event-log record of what an accepted dispatch ran, written before the
+  payload starts: the rendered argv, whether the strict switch is on and the names of the
+  base-environment variables. Exactly one outcome record follows it: `dispatch_end` for an end that
+  is not a failure, success included, or `dispatch_result` for a failure (`INV-CMA-10`).
 - **`validate`** — the adapter's one validation entry point, which runs no payload (`INV-CMA-2`).

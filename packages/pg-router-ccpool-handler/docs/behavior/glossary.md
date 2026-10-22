@@ -65,8 +65,10 @@ Realization gaps for the build's one remaining residual.
   (`INV-CCH-34`).
 - **Decline kind** — the `busy`, `fault` or `neutral` class this module maps each decline reason to,
   by which the core counts a role's progress (`INV-CCH-37`).
-- **`dispatch_start` and `dispatch_decline`** — the event-log records of what an accepted dispatch
-  ran and of why a dispatch declined (`INV-CCH-35`).
+- **`dispatch_start`, `dispatch_end` and `dispatch_decline`** — the event-log records of what an
+  accepted dispatch ran, of how it ended when it did not fail (success included), and of why a
+  dispatch declined; a failed dispatch's outcome is the `dispatch_result` record (`INV-CCH-35`,
+  `INV-CCH-9`).
 - **`validate`** — the handler's one validation entry point, the optional generic subcommand of the
   wire decision, which runs no payload (`INV-CCH-36`).
 
