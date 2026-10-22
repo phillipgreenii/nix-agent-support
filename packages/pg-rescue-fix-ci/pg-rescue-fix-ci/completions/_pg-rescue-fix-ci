@@ -1,0 +1,12 @@
+#compdef pg-rescue-fix-ci
+
+_arguments \
+  '1::subcommand:(step)' \
+  '--item-id[Work item to handle]:item id:' \
+  '--repo[Repository (owner/name)]:repo:' \
+  '--pr-number[Pull request number]:number:' \
+  '--tracker-dir[Directory containing .beads]:directory:_files -/' \
+  '--ci-backend[pg-connector ci backend instance]:instance:' \
+  '--state-dir[Directory for the outcome record and result file]:directory:_files -/' \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]'

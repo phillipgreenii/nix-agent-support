@@ -695,6 +695,18 @@
               inherit bashBuilders;
               beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
             }).pg-rescue-resolve-conflict.script;
+          # pg-rescue-fix-ci (docket pg2-q6a96, design D6): the argv of the
+          # fix-ci-script pg-router role -- claim, one CI rerun under pg-rescue,
+          # the chain's give-up hands the item to the worker. Single mkBashScript
+          # tool, so it takes `.script` directly. `bd` and `pg-connector` are
+          # resolved from the ambient machine PATH at runtime; the beads package
+          # is for the test check's real-bd throwaway-database fixture only.
+          pg-rescue-fix-ci =
+            (import ./packages/pg-rescue-fix-ci {
+              pkgs = final;
+              inherit bashBuilders;
+              beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
+            }).pg-rescue-fix-ci.script;
           # sync-projects (bead pg2-zr3jf): pg-rescue's first consumer -- rebase
           # every workspace repo under `pg-rescue --chain sync`, then `pn
           # workspace push`. Single mkBashScript tool, so -- same rationale as
@@ -14411,6 +14423,13 @@
               bashBuilders = pkgs._agentSupportBashBuilders;
               beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
             }).checks
+            # test-pg-rescue-fix-ci (docket pg2-q6a96). Same one-line idiom as
+            # test-pg-rescue-resolve-conflict above (real-bd throwaway-DB fixture).
+            // (import ./packages/pg-rescue-fix-ci {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+              beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
+            }).checks
             # test-sync-projects (bead pg2-zr3jf). Same one-line idiom as
             # wtdone above: the overlay attr takes only the script derivation,
             # so without this the bats suite would run in no gate at all.
@@ -14594,6 +14613,10 @@
             # mkBashScript tool) -- re-exported so
             # `nix build .#pg-rescue-resolve-conflict` resolves via flake.packages.<system>.
             inherit (pkgs) pg-rescue-resolve-conflict;
+            # pg-rescue-fix-ci is likewise an overlay-only attr (single mkBashScript
+            # tool) -- re-exported so `nix build .#pg-rescue-fix-ci` resolves via
+            # flake.packages.<system>.
+            inherit (pkgs) pg-rescue-fix-ci;
             # sync-projects is likewise an overlay-only attr (single mkBashScript
             # tool) -- re-exported so `nix build .#sync-projects` resolves via
             # flake.packages.<system>.
