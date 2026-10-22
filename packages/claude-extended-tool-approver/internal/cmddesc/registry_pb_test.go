@@ -13,6 +13,11 @@ func TestPbInterpretation(t *testing.T) {
 		"pb drain isolate --bead pg2-abc12 --repo /ws/repo",
 		"pb drain isolate --bead pg2-abc12 --repo /ws/repo --json",
 		"pb drain isolate --help",
+		// pg2-qeod7: the skill-instructed reclaim forms.
+		"pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-drain",
+		"pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-drain --json",
+		"pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-drain --branch drain/pg2-abc12 --git-timeout 2m",
+		"pb drain reclaim --help",
 		// pg2-7z71z: a group invoked with only its help/version flag.
 		"pb --help",
 		"pb -h",
@@ -55,7 +60,9 @@ func TestPbInterpretation(t *testing.T) {
 		"pb gate check --last-n 5",
 		"pb gate check --strict",
 		"pb drain isolate --bead pg2-abc12 --repo /ws/repo --force",
+		"pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-drain --force",
 		// A stray operand is Unmodeled.
+		"pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-drain extra",
 		"pb gate check extra",
 		"pb drain isolate --bead pg2-abc12 --repo /ws/repo extra",
 		// Unmodeled verbs.

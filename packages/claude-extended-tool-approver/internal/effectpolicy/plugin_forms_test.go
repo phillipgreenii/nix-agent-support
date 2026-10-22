@@ -381,6 +381,10 @@ var pluginForms = []pluginForm{
 	{"pb", "bgwait -t 120 -n 40 flake-check", evalcontract.Approve, ""},
 	{"pb", "bgwait --dir <ROOT>/.bg flake-check", evalcontract.Approve, ""},
 	{"pb", "bgwait --bogus flake-check", evalcontract.Abstain, "an unmodeled flag stays insufficient (UnknownFlagInsufficient)"},
+	// pg2-qeod7: pb drain reclaim, instructed by pb:drain-stuck / pb:drain-one (pg2-v3hsj).
+	{"pb", "pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-1-drain", evalcontract.Approve, ""},
+	{"pb", "pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-1-drain --branch drain/pg2-abc12 --json", evalcontract.Approve, ""},
+	{"pb", "pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-1-drain --force", evalcontract.Abstain, "an unmodeled flag stays insufficient (UnknownFlagInsufficient)"},
 	{"pg-ccaudit", "git diff --no-ext-diff", evalcontract.Approve, ""},
 	{"bash-scripting", "nix run .#install-pre-commit-hooks", evalcontract.Abstain, "requires an operator buildToolVerbs declaration (installable-reference class)"},
 	{"claude-extended-tool-approver", "jq --help", evalcontract.Abstain, "generic '<tool> --help': executes an arbitrary program; not approved"},

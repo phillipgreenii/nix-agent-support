@@ -7403,6 +7403,22 @@
     "notes": "Instructed by claude-marketplace/pb (drain-beads.md ISOLATE)."
   },
   {
+    "case": "pb_plugin_pb_drain_reclaim",
+    "tags": ["pb-plugin-instructed", "pg2-qeod7"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb drain reclaim --bead pg2-abc12 --repo /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (pb:drain-stuck, pb:drain-one: reclaim the bead's worktree before releasing the claim; pg2-v3hsj)."
+  },
+  {
     "case": "pb_plugin_pb_drain_isolate_chain",
     "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
     "tool_input": {
@@ -8049,6 +8065,22 @@
       "tool_name": "Bash",
       "tool_input": {
         "command": "pb drain isolate --bead pg2-abc12 --repo /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support extra"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Pin: a pb form no pb skill/command instructs (or one the engine cannot dispatch) stays unmodeled; must not approve."
+  },
+  {
+    "case": "pb_plugin_pin_pb_drain_reclaim_unmodeled_flag",
+    "tags": ["pb-plugin-instructed", "pg2-qeod7", "pin"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb drain reclaim --bead pg2-abc12 --repo /tmp/ceta-corpus-ws/phillipgreenii-nix-agent-support --actor \"sess-1-drain\" --force"
       }
     },
     "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },

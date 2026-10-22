@@ -244,6 +244,139 @@
             "stdout": "metadata",
             "unknownFlag": "insufficient",
             "endOfOptions": true
+          },
+          "reclaim": {
+            "name": "reclaim",
+            "provenance": "pb drain reclaim --help (pb built from packages/pb at pg2-v3hsj 9c84d17a3, 2026-10-22)",
+            "citations": {
+              "provenance": {
+                "source": "pb drain reclaim --help: \"Remove the bead's isolation worktree when it holds nothing (clean tree, zero commits) and note the bead\""
+              },
+              "stdin": {
+                "source": "pb drain reclaim --help: usage \"Usage: pb drain reclaim [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pb drain reclaim --help: usage \"Usage: pb drain reclaim [flags]\" and the Output paragraph \"outcome=<removed|none|kept-dirty|kept-commits> worktree=<abs> branch=<b>\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pb drain reclaim --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--actor": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain reclaim --help: \"--actor string   actor id for the bd comment (required)\""
+                }
+              },
+              "--bead": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain reclaim --help: \"--bead string   bead id (required)\""
+                }
+              },
+              "--branch": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain reclaim --help: \"--branch string   work branch (default drain/<bead>)\""
+                }
+              },
+              "--git-timeout": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain reclaim --help: \"--git-timeout duration   upper bound for EACH git call; on expiry its process group is killed (default 5m0s)\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain reclaim --help: \"-h, --help   help for reclaim\""
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain reclaim --help: \"--json   JSON output\""
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain reclaim --help: \"--repo string   absolute path to the canonical clone (required)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain reclaim --help: \"-h, --help   help for reclaim\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pb drain reclaim --help: usage \"Usage: pb drain reclaim [flags]\" lists no positional operand; every operand is left unmodeled (insufficient)"
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
           }
         }
       },

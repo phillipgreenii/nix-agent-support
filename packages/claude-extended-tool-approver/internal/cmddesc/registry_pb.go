@@ -5,7 +5,8 @@ import "strings"
 // pg2-cjfpy.1: the `pb` CLI the claude-marketplace/pb plugin (its /drain-beads,
 // /unblock-human-beads and /unstick-beads commands and its drain-one,
 // drain-stuck and pb-gate-lifecycle skills) instructs an agent to run -- `pb drain isolate`,
-// `pb gate create`, `pb gate check` and `pb gate attach-verified-child`.
+// `pb drain reclaim` (pg2-qeod7), `pb gate create`, `pb gate check` and
+// `pb gate attach-verified-child`.
 //
 // Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy, verbatim): "for
 // pb *, any command which is supposed to work as part of a skill should be
@@ -29,6 +30,11 @@ import "strings"
 //     clears anything: exit 3 on conflicting state). It also runs
 //     `pg-hooks status --porcelain`, read-only. ADR 0075 R2 puts members of the
 //     same pn workspace inside the repo-trust boundary.
+//   - `pb drain reclaim` runs against the canonical clone named by `--repo`:
+//     it removes the bead's isolation worktree with `wtdone` (never forced)
+//     only when the tree is clean and the branch holds zero commits the primary
+//     branch lacks, and adds a clean-up note with `bd comment --actor`. Left
+//     alone otherwise. Like `isolate`, the path and actor are inert literals.
 //   - `pb gate create` and `pb gate attach-verified-child` WRITE to the shared
 //     beads tracker (they shell out to `bd create` / `bd update` /
 //     `bd dep add` / `bd comment`) and read git patch-ids. The beads write is
@@ -77,6 +83,18 @@ func pbLeaf(path string, extra map[string]FlagSpec) CommandSchema {
 	}
 }
 
+// pbDrainReclaim is `pb drain reclaim` (pg2-qeod7). Its provenance names the
+// packages/pb source build, not the 0.0.0-b674b6b9 host binary pbLeaf cites,
+// because that binary predates the verb.
+func pbDrainReclaim() CommandSchema {
+	s := pbLeaf("drain reclaim", map[string]FlagSpec{
+		"--bead": literal1, "--repo": literal1, "--actor": literal1,
+		"--branch": literal1, "--git-timeout": literal1, "--json": inert,
+	})
+	s.Provenance = "pb drain reclaim --help (pb built from packages/pb at pg2-v3hsj 9c84d17a3, 2026-10-22)"
+	return s
+}
+
 // pbGroup builds a pb verb group (`drain`, `gate`): only -h/--help of its own,
 // the leaves below it carry the real flags.
 func pbGroup(name string, subs map[string]CommandSchema) CommandSchema {
@@ -101,6 +119,11 @@ var pbSchema = CommandSchema{
 			"isolate": pbLeaf("drain isolate", map[string]FlagSpec{
 				"--bead": literal1, "--repo": literal1, "--json": inert,
 			}),
+			// pg2-qeod7: the drain-stuck / drain-one skills instruct `pb drain
+			// reclaim` (pg2-v3hsj). It post-dates the pb binary the other leaves
+			// were verified against, so its flags come from the source-built
+			// `pb drain reclaim --help` (packages/pb).
+			"reclaim": pbDrainReclaim(),
 		}),
 		"gate": pbGroup("gate", map[string]CommandSchema{
 			"create": pbLeaf("gate create", map[string]FlagSpec{
