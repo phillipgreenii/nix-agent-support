@@ -333,6 +333,12 @@
           ccpool = final.callPackage ./packages/ccpool {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-wrap: the standalone command-prefix wrapper (design ruling 30).
+          # Mutually unaware of pg-router and ccpool, so neither package takes it
+          # as an input. Exposes bin/pg-wrap and bin/pg-wrap-exec.
+          pg-wrap = final.callPackage ./packages/pg-wrap {
+            inherit (goBuilders) mkGoApp;
+          };
           # claude-hook-router: Pattern A (ADR 0008), ADR 0071 Phase B's dispatch/merge
           # runtime (packet B1, tc-rjzd3.6). packages/claude-hook-router/default.nix
           # landed with B1 but was never actually wired into this overlay — this entry
@@ -1593,6 +1599,7 @@
                 "pg-rescue"
                 "pg-task-focus"
                 "pg-keep-awake"
+                "pg-wrap"
               ];
 
               # Subset of simpleGoLintModules with build-tagged test files
@@ -4394,6 +4401,34 @@
                 gomod2nixToml = ./packages/ccpool/gomod2nix.toml;
                 testDeps = [ pkgs.git ];
               };
+
+              # pg-wrap — the standalone command-prefix wrapper (design ruling 30,
+              # docket pg2-12gr4.8). A single module with no local `replace`, so
+              # the source is just the module minus docs/. Same per-package
+              # statement-coverage gate as pg-router-go-tests (script copied
+              # verbatim into the module's tests/, thresholds beside it). Cases
+              # whose real tool is absent in the sandbox skip with a reason.
+              pg-wrap-go-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-wrap-go-tests";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.difference ./packages/pg-wrap ./packages/pg-wrap/docs;
+                  };
+                  modRoot = "pg-wrap";
+                  gomod2nixToml = ./packages/pg-wrap/gomod2nix.toml;
+                  testFlags = [
+                    "-coverprofile=cover.out"
+                    "-covermode=atomic"
+                    "-short"
+                  ];
+                }).overrideAttrs
+                  (old: {
+                    postBuild = (old.postBuild or "") + ''
+                      echo "=== pg-wrap per-package statement-coverage gate ==="
+                      bash tests/coverage-gate.sh cover.out tests/coverage-thresholds.txt
+                    '';
+                  });
 
               # pg-router-ccpool-handler — pg-router's sibling module (docket
               # pg2-oju6w Task 5.1, renamed from prpool-ccpool-handler by the
@@ -13819,6 +13854,7 @@
             # "expected a set but found null").
             inherit (pkgs)
               ccpool
+              pg-wrap
               pg-router
               pg-router-ccpool-handler
               pb

@@ -1,0 +1,23 @@
+# Per-package STATEMENT-coverage thresholds enforced by the `pg-wrap-go-tests`
+# flake check, by the same enforcer as packages/pg-router/tests/coverage-gate.sh
+# (copied verbatim, as packages/pg-router-ccpool-handler/tests/ does). Format:
+#
+#   <package-import-suffix> <min-statement-percent>
+#
+# A rule matches the package whose import path equals the suffix or ends with
+# "/<suffix>". A gated package ABSENT from the profile FAILS the gate (so a
+# renamed/removed package cannot silently pass its bar). `#` comments and blank
+# lines are ignored.
+#
+# Values sit just below what the suite measured when the module landed
+# (go test -coverprofile=cover.out -covermode=atomic -short ./...: cli 56.9%,
+# spec 96.2%, wrap 87.0%), rounded down to the nearest 5.
+#
+# Not gated: cmd/pg-wrap and cmd/pg-wrap-exec (thin mains, exercised by
+# internal/e2e through the built binaries, which a coverprofile does not
+# attribute), internal/e2e (test-only, no statements) and internal/fail (no
+# test of its own).
+
+internal/cli 55
+internal/spec 95
+internal/wrap 85

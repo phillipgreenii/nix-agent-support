@@ -1,0 +1,9 @@
+schema = 3
+cachePackages = [
+  'github.com/BurntSushi/toml'
+]
+
+[mod]
+  [mod.'github.com/BurntSushi/toml']
+    version = 'v1.6.0'
+    hash = 'sha256-ptdUJvuc21ixeLt+M5way/na3aCnCO4MYHWulWp8NEY='

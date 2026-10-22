@@ -155,6 +155,7 @@ impl_root() {
   packages/pg-router-ccpool-handler/docs/behavior) printf '%s\n' "packages/pg-router-ccpool-handler" ;;
   packages/pg-router-source-pg-connector/docs/behavior) printf '%s\n' "packages/pg-router-source-pg-connector" ;;
   packages/pg-router/docs/behavior) printf '%s\n' "packages/pg-router" ;;
+  packages/pg-wrap/docs/behavior) printf '%s\n' "packages/pg-wrap" ;;
   packages/work-report/docs/behavior) printf '%s\n' "packages/work-report" ;;
   *) ;;
   esac
