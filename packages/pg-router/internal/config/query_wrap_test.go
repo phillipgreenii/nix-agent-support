@@ -5,11 +5,10 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-router/internal/query"
-	"github.com/phillipgreenii/pg-router/wrap"
 )
 
 // queryWrapCfg renders a config with one command query carrying extra
-// [[query]]-level lines (wrap, strict_base_env, ...) and one role.
+// [[query]]-level lines (strict_base_env, ...) and one role.
 func queryWrapCfg(extra string) string {
 	return `
 [[query]]
@@ -30,10 +29,9 @@ argv = ["x"]
 `
 }
 
-func TestLoad_queryWrapAndStrictBaseEnvDecode(t *testing.T) {
+func TestLoad_queryStrictBaseEnvDecode(t *testing.T) {
 	absentGlobalConfig(t)
-	writeCfg(t, queryWrapCfg(`wrap = ["/usr/bin/env WRAPPED=1", ["/usr/bin/nice", "-n", "5"]]
-strict_base_env = true`))
+	writeCfg(t, queryWrapCfg(`strict_base_env = true`))
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -42,16 +40,12 @@ strict_base_env = true`))
 	if !ok {
 		t.Fatalf("query is %T, want query.CommandQuery", c.Queries[0].Query)
 	}
-	want := []wrap.Entry{{Shell: "/usr/bin/env WRAPPED=1"}, {Argv: []string{"/usr/bin/nice", "-n", "5"}}}
-	if len(q.Wrap) != 2 || q.Wrap[0].Shell != want[0].Shell || strings.Join(q.Wrap[1].Argv, " ") != "/usr/bin/nice -n 5" {
-		t.Fatalf("Wrap = %+v, want %+v", q.Wrap, want)
-	}
 	if !q.StrictBaseEnv {
 		t.Fatal("StrictBaseEnv = false, want true")
 	}
 }
 
-func TestLoad_queryWrapAndStrictBaseEnvDefaultOff(t *testing.T) {
+func TestLoad_queryStrictBaseEnvDefaultOff(t *testing.T) {
 	absentGlobalConfig(t)
 	writeCfg(t, queryWrapCfg(``))
 	c, err := Load()
@@ -59,25 +53,43 @@ func TestLoad_queryWrapAndStrictBaseEnvDefaultOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := c.Queries[0].Query.(query.CommandQuery)
-	if len(q.Wrap) != 0 || q.StrictBaseEnv {
-		t.Fatalf("defaults: Wrap=%+v StrictBaseEnv=%v, want none/false", q.Wrap, q.StrictBaseEnv)
+	if q.StrictBaseEnv {
+		t.Fatal("StrictBaseEnv = true by default, want false")
 	}
 }
 
-// Every rejected shape fails config load and names the query.
-func TestLoad_queryWrapRejections(t *testing.T) {
+// A [[query]] that still carries the removed wrap key fails to load, names the
+// query, and points at pg-wrap run, whatever shape the old value had.
+func TestLoad_queryWrapKeyRemovedPointsAtPgWrapRun(t *testing.T) {
+	for _, extra := range []string{
+		`wrap = ["/usr/bin/env WRAPPED=1", ["/usr/bin/nice", "-n", "5"]]`,
+		`wrap = []`,
+		`wrap = "/usr/bin/env"`,
+	} {
+		t.Run(extra, func(t *testing.T) {
+			absentGlobalConfig(t)
+			writeCfg(t, queryWrapCfg(extra))
+			_, err := Load()
+			if err == nil {
+				t.Fatal("Load succeeded, want an error")
+			}
+			if !strings.Contains(err.Error(), `"probe"`) {
+				t.Errorf("error does not name the query: %v", err)
+			}
+			if !strings.Contains(err.Error(), "pg-wrap run") {
+				t.Errorf("error %q lacks the pointer to pg-wrap run", err)
+			}
+		})
+	}
+}
+
+// Every other rejected shape fails config load and names the query.
+func TestLoad_queryKeyRejections(t *testing.T) {
 	cases := []struct {
 		name  string
 		extra string
 		want  string
 	}{
-		{"malformed wrap: not a list", `wrap = "/usr/bin/env"`, "wrap"},
-		{"malformed wrap: nested list", `wrap = [["/usr/bin/env", ["x"]]]`, "wrap"},
-		{"malformed wrap: empty array entry", `wrap = [[]]`, "empty array entry"},
-		{"relative string entry", `wrap = ["env WRAPPED=1"]`, "absolute"},
-		{"relative array entry", `wrap = [["env", "WRAPPED=1"]]`, "absolute"},
-		{"template in string entry", `wrap = ["/usr/bin/env X={{ .a }}"]`, "template"},
-		{"template in array entry", `wrap = [["/usr/bin/env", "X={{ .a }}"]]`, "template"},
 		{"misspelled wraps", `wraps = ["/usr/bin/env X=1"]`, "wraps"},
 		{"misspelled strictBaseEnv", `strictBaseEnv = true`, "strictBaseEnv"},
 		{"strict_base_env not a bool", `strict_base_env = "yes"`, ""},
@@ -100,10 +112,10 @@ func TestLoad_queryWrapRejections(t *testing.T) {
 	}
 }
 
-// A wrap or strict_base_env on a timer query (no command) is a load error that
+// A strict_base_env on a timer query (no command) is a load error that
 // names the query.
 func TestLoad_queryWrapOnTimerQueryRejected(t *testing.T) {
-	for _, extra := range []string{`wrap = ["/usr/bin/env X=1"]`, `strict_base_env = true`, `strict_base_env = false`} {
+	for _, extra := range []string{`strict_base_env = true`, `strict_base_env = false`} {
 		t.Run(extra, func(t *testing.T) {
 			absentGlobalConfig(t)
 			writeCfg(t, `

@@ -8,7 +8,6 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/query"
-	"github.com/phillipgreenii/pg-router/wrap"
 )
 
 func TestRenderConfigShow_includesDispatchScalars(t *testing.T) {
@@ -136,41 +135,33 @@ func TestRenderConfigShow_pointsAtTheGateRegistryInsteadOfGateFiles(t *testing.T
 	}
 }
 
-// config --show and --show --json print each [[query]]'s composed command (its
-// argv under every wrap layer), and nothing of the kind for a role.
-func TestRenderConfigShow_printsEachQuerysComposedCommand(t *testing.T) {
+// config --show and --show --json print each [[query]]'s command and strict
+// switch, and nothing of the kind for a role.
+func TestRenderConfigShow_printsEachQuerysCommandAndStrictSwitch(t *testing.T) {
 	cfg := config.Default()
 	cfg.Queries = query.SourceSet{
-		{Name: "wrapped", Query: query.CommandQuery{
+		{Name: "strict", Query: query.CommandQuery{
 			Meta:          query.Meta{EmitTypes: []string{"e"}},
-			Argv:          []string{"/opt/producer", "--flag"},
+			Argv:          []string{"/opt/producer", "--flag", "two words"},
 			Format:        query.FormatJSONL,
 			StrictBaseEnv: true,
-			Wrap:          []wrap.Entry{{Shell: "/usr/bin/env WRAPPED=1"}, {Argv: []string{"/usr/bin/nice", "-n", "5"}}},
 		}},
 		{Name: "plain", Query: query.CommandQuery{Meta: query.Meta{EmitTypes: []string{"e"}}, Argv: []string{"/opt/plain"}, Format: query.FormatJSONL}},
 		{Name: "tick", Query: query.TimerQuery{Meta: query.Meta{EmitTypes: []string{"t"}}}},
 	}
-	wantArgv, _, _, err := query.ComposedOf(cfg.Queries[0].Query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantLine := wrap.Display(wantArgv)
-	if !strings.Contains(wantLine, "WRAPPED=1") || !strings.Contains(wantLine, "/opt/producer") {
-		t.Fatalf("composed display %q lacks the wrap or the payload", wantLine)
-	}
+	wantLine := "/opt/producer --flag 'two words'"
 
 	var b bytes.Buffer
 	renderConfigShow(&b, cfg)
 	out := b.String()
 	if !strings.Contains(out, "command: "+wantLine) {
-		t.Errorf("text form lacks the composed command %q:\n%s", wantLine, out)
+		t.Errorf("text form lacks the command %q:\n%s", wantLine, out)
 	}
-	if !strings.Contains(out, "strict_base_env: true") {
-		t.Errorf("text form lacks the strict_base_env marker:\n%s", out)
+	if !strings.Contains(out, "strict_base_env: true") || !strings.Contains(out, "strict_base_env: false") {
+		t.Errorf("text form lacks the strict_base_env switch for both command queries:\n%s", out)
 	}
 	if !strings.Contains(out, "command: /opt/plain") {
-		t.Errorf("an unwrapped command query still prints its command:\n%s", out)
+		t.Errorf("a plain command query still prints its command:\n%s", out)
 	}
 	if n := strings.Count(out, "command:"); n != 2 {
 		t.Errorf("want a command line for the two command queries only (timer has none), got %d:\n%s", n, out)
@@ -185,13 +176,13 @@ func TestRenderConfigShow_printsEachQuerysComposedCommand(t *testing.T) {
 	if len(got.Queries) != 3 {
 		t.Fatalf("queries = %d, want 3", len(got.Queries))
 	}
-	if got.Queries[0].Command != wantLine || !got.Queries[0].StrictBaseEnv {
-		t.Errorf("wrapped query json = %+v, want command %q and strictBaseEnv", got.Queries[0], wantLine)
+	if got.Queries[0].Command != wantLine || got.Queries[0].StrictBaseEnv == nil || !*got.Queries[0].StrictBaseEnv {
+		t.Errorf("strict query json = %+v, want command %q and strictBaseEnv true", got.Queries[0], wantLine)
 	}
-	if got.Queries[1].Command != "/opt/plain" || got.Queries[1].StrictBaseEnv {
-		t.Errorf("plain query json = %+v", got.Queries[1])
+	if got.Queries[1].Command != "/opt/plain" || got.Queries[1].StrictBaseEnv == nil || *got.Queries[1].StrictBaseEnv {
+		t.Errorf("plain query json = %+v, want strictBaseEnv false", got.Queries[1])
 	}
-	if got.Queries[2].Command != "" {
+	if got.Queries[2].Command != "" || got.Queries[2].StrictBaseEnv != nil {
 		t.Errorf("timer query json carries a command: %+v", got.Queries[2])
 	}
 	var raw map[string]any

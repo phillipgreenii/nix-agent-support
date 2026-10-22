@@ -15,7 +15,6 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
-	"github.com/phillipgreenii/pg-router/wrap"
 )
 
 // duration is a TOML-decodable time.Duration ("30m", "25m"), mirroring ccpool's
@@ -199,12 +198,7 @@ type queryTOML struct {
 	// Absent: the emitter blocks on every gate TYPE. The built-in `timer`
 	// emitter ignores gates altogether and needs no list.
 	NonBlockingGates []string `toml:"non_blocking_gates"`
-	// Wrap is the wrap list of a command query (INV-ENV-4): each element a
-	// string entry (shell text, absolute first word) or an array entry
-	// (absolute first element). Held as the raw decoded value; wrap.Decode and
-	// wrap.Validate (templates disallowed) judge it.
-	Wrap any `toml:"wrap"`
-	// StrictBaseEnv switches a command query's chain onto the minimal base
+	// StrictBaseEnv switches a command query's process onto the minimal base
 	// environment (default off). A pointer so a timer query that sets it can be
 	// told apart from one that does not.
 	StrictBaseEnv *bool `toml:"strict_base_env"`
@@ -371,6 +365,10 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, rawKeys [][]s
 		}
 		seen[qt.Name] = true
 		if i < len(rawKeys) {
+			if hasKey(rawKeys[i], "wrap") {
+				errs = append(errs, fmt.Errorf("query[%d] %q: %s", i, qt.Name, errQueryWrapRemoved))
+				continue
+			}
 			if unknown := unknownQueryKeys(rawKeys[i]); len(unknown) > 0 {
 				errs = append(errs, fmt.Errorf("query[%d] %q: unknown key(s) %s (a misspelled key is never silently ignored; known keys: %s)", i, qt.Name, strings.Join(unknown, ", "), strings.Join(knownQueryKeys(), ", ")))
 				continue
@@ -393,6 +391,22 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, rawKeys [][]s
 	return out, overrides, errs
 }
 
+// errQueryWrapRemoved is the load error for the removed [[query]] wrap key. The
+// wrap concept left pg-router: a wrapped query writes the standalone wrapper's
+// command as its own command. This is the one place core names pg-wrap, as a
+// migration pointer only.
+const errQueryWrapRemoved = `the [[query]] wrap key was removed; write the wrapper as the query's own command instead, e.g. argv = ["pg-wrap", "run", ...] (see pg-wrap run)`
+
+// hasKey reports whether keys contains key.
+func hasKey(keys []string, key string) bool {
+	for _, k := range keys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
 // knownQueryKeys lists every key queryTOML consumes, taken from its toml tags
 // so a new field is known automatically.
 func knownQueryKeys() []string {
@@ -409,9 +423,8 @@ func knownQueryKeys() []string {
 
 // unknownQueryKeys returns the keys of one [[query]] table that queryTOML does
 // not consume, sorted. Core's TOML decode is lenient elsewhere, but a [[query]]
-// key is strict because a misspelled wrap or strict_base_env (wraps,
-// strictBaseEnv) would silently run an unwrapped producer on the ambient
-// environment.
+// key is strict because a misspelled strict_base_env
+// (strictBaseEnv) would silently run a producer on the ambient environment.
 func unknownQueryKeys(keys []string) []string {
 	known := map[string]bool{}
 	for _, k := range knownQueryKeys() {
@@ -569,24 +582,14 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 	if err != nil {
 		return nil, fmt.Errorf("failure_backoff: %w", err)
 	}
-	entries, err := wrap.Decode(qt.Wrap)
-	if err != nil {
-		return nil, err
-	}
-	// A query's wrap never carries template actions: templated array entries
-	// exist only for command roles (allowTemplates = false).
-	if err := wrap.Validate(entries, false); err != nil {
-		return nil, err
-	}
-	if qt.Type != "command" && (qt.Wrap != nil || qt.StrictBaseEnv != nil) {
-		return nil, fmt.Errorf("wrap and strict_base_env apply only to a command query; a %q query has no command to wrap", qt.Type)
+	if qt.Type != "command" && qt.StrictBaseEnv != nil {
+		return nil, fmt.Errorf("strict_base_env applies only to a command query; a %q query has no command to run", qt.Type)
 	}
 	q, err := r.queries.Decode(qt.Type, query.Meta{EmitTypes: qt.Emits, Trig: trig, FB: fb}, md, prim)
 	if err != nil {
 		return nil, err
 	}
 	if cq, ok := q.(query.CommandQuery); ok {
-		cq.Wrap = entries
 		cq.StrictBaseEnv = qt.StrictBaseEnv != nil && *qt.StrictBaseEnv
 		return cq, nil
 	}

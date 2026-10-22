@@ -5,11 +5,11 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/query"
-	"github.com/phillipgreenii/pg-router/wrap"
 )
 
 // runConfig implements `pg-router config --print-defaults | --show [--json]`.
@@ -68,14 +68,12 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 			emits = s.Query.Emits()
 		}
 		_, _ = fmt.Fprintf(w, "  - %-14s emits=%v%s\n", s.Name, emits, stub)
-		// A command query shows the command line it actually runs: its argv
-		// under every wrap layer. A role's composed command is not printed here.
+		// A command query shows its command and its strict switch. A role's
+		// command is not printed here.
 		if s.Query != nil {
-			if cmdline, strict, ok := composedCommand(s.Query); ok {
+			if cmdline, strict, ok := queryCommand(s.Query); ok {
 				_, _ = fmt.Fprintf(w, "      command: %s\n", cmdline)
-				if strict {
-					_, _ = fmt.Fprintln(w, "      strict_base_env: true")
-				}
+				_, _ = fmt.Fprintf(w, "      strict_base_env: %t\n", strict)
 			}
 		}
 	}
@@ -172,8 +170,8 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 		}
 		cq := configShowQuery{Name: s.Name, Emits: emits, Stub: stub, NonBlockingGates: s.NonBlockingGates}
 		if s.Query != nil {
-			if cmdline, strict, ok := composedCommand(s.Query); ok {
-				cq.Command, cq.StrictBaseEnv = cmdline, strict
+			if cmdline, strict, ok := queryCommand(s.Query); ok {
+				cq.Command, cq.StrictBaseEnv = cmdline, &strict
 			}
 		}
 		out.Queries = append(out.Queries, cq)
@@ -215,27 +213,51 @@ type configShowQuery struct {
 	// NonBlockingGates are the gate TYPEs this emitter declared it does not
 	// block on (Gate Registry); omitted when it blocks on every TYPE.
 	NonBlockingGates []string `json:"nonBlockingGates,omitempty"`
-	// Command is a command query's composed command line (its argv under every
-	// wrap layer, shell-quoted, as config --show prints it); omitted for a
-	// query with no command (the timer).
+	// Command is a command query's command line (its argv, shell-quoted, as
+	// config --show prints it); omitted for a query with no command (the timer).
 	Command string `json:"command,omitempty"`
-	// StrictBaseEnv is the query's strict_base_env switch; omitted when off.
-	StrictBaseEnv bool `json:"strictBaseEnv,omitempty"`
+	// StrictBaseEnv is a command query's strict_base_env switch (present, true
+	// or false, for every command query); omitted for a query with no command.
+	StrictBaseEnv *bool `json:"strictBaseEnv,omitempty"`
 }
 
-// composedCommand renders a command query's composed command line via the wrap
-// library's display form. ok is false for a query with no command. A
-// composition failure (cannot happen for a loaded config: wrap is validated at
-// load) is shown in place of the line rather than dropped.
-func composedCommand(q query.Query) (line string, strict bool, ok bool) {
-	argv, strict, ok, err := query.ComposedOf(q)
+// queryCommand renders a command query's command line, shell-quoted for
+// display. ok is false for a query with no command.
+func queryCommand(q query.Query) (line string, strict bool, ok bool) {
+	argv, strict, ok := query.CommandOf(q)
 	if !ok {
 		return "", false, false
 	}
-	if err != nil {
-		return "(wrap does not compose: " + err.Error() + ")", strict, true
+	return displayArgv(argv), strict, true
+}
+
+// displayArgv renders argv as one shell-quoted, human-readable line. Words made
+// only of safe characters are left bare.
+func displayArgv(argv []string) string {
+	parts := make([]string, len(argv))
+	for i, a := range argv {
+		parts[i] = shellQuote(a)
 	}
-	return wrap.Display(argv), strict, true
+	return strings.Join(parts, " ")
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	safe := true
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("_@%+=:,./-", r):
+		default:
+			safe = false
+		}
+	}
+	if safe {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // configShowDispatch mirrors renderConfigShow's "dispatch (workers):" block —

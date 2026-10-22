@@ -9,8 +9,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/phillipgreenii/pg-router/wrap"
 )
 
 // envProbe writes a /bin/sh producer that emits one JSONL record whose title is
@@ -39,17 +37,6 @@ func runProbe(t *testing.T, q CommandQuery) string {
 	return evts[0].Item.Title
 }
 
-func TestCommandQuery_composedWrapRunsAroundTheProducer(t *testing.T) {
-	q := CommandQuery{
-		Argv:   []string{envProbe(t)},
-		Format: FormatJSONL,
-		Wrap:   []wrap.Entry{{Shell: "/usr/bin/env WRAPPED=1"}},
-	}
-	if title := runProbe(t, q); !strings.Contains(title, "WRAPPED=1") {
-		t.Fatalf("producer did not run under its wrap; env = %s", title)
-	}
-}
-
 func TestCommandQuery_strictBaseEnvKeepsOnlyTheBaseList(t *testing.T) {
 	t.Setenv("PG_ROUTER_TEST_MODE", "1")
 	t.Setenv("PG_ROUTER_LEAKY", "secret")
@@ -58,10 +45,9 @@ func TestCommandQuery_strictBaseEnvKeepsOnlyTheBaseList(t *testing.T) {
 		Argv:          []string{envProbe(t)},
 		Format:        FormatJSONL,
 		StrictBaseEnv: true,
-		Wrap:          []wrap.Entry{{Shell: "/usr/bin/env WRAPPED=1"}},
 	}
 	title := runProbe(t, q)
-	for _, want := range []string{"WRAPPED=1", "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "PG_ROUTER_TEST_MODE=1", "HOME=/tmp/k06-home"} {
+	for _, want := range []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "PG_ROUTER_TEST_MODE=1", "HOME=/tmp/k06-home"} {
 		if !strings.Contains(title, want) {
 			t.Errorf("strict env lacks %q; env = %s", want, title)
 		}
@@ -70,7 +56,7 @@ func TestCommandQuery_strictBaseEnvKeepsOnlyTheBaseList(t *testing.T) {
 		t.Errorf("strict env leaked an inherited variable; env = %s", title)
 	}
 	allowed := map[string]bool{
-		"WRAPPED": true, "PATH": true, "PG_ROUTER_TEST_MODE": true, "HOME": true, "USER": true, "LOGNAME": true,
+		"PATH": true, "PG_ROUTER_TEST_MODE": true, "HOME": true, "USER": true, "LOGNAME": true,
 		"TMPDIR": true, "LANG": true, "TERM": true, "COLORTERM": true, "PWD": true, "SHLVL": true, "_": true, "OLDPWD": true,
 	}
 	for _, kv := range strings.Fields(title) {
@@ -89,15 +75,15 @@ func TestCommandQuery_nonStrictInheritsTheAmbientEnv(t *testing.T) {
 	}
 }
 
-// A fake Commander (no RunEnv) still receives the composed argv.
-func TestCommandQuery_fakeCommanderSeesComposedArgv(t *testing.T) {
+// A fake Commander (no RunEnv) receives the query's argv unchanged.
+func TestCommandQuery_fakeCommanderSeesTheArgv(t *testing.T) {
 	var got []string
-	q := CommandQuery{Argv: []string{"/bin/x", "a"}, Format: FormatJSONL, Wrap: []wrap.Entry{{Argv: []string{"/usr/bin/nice"}}}}
+	q := CommandQuery{Argv: []string{"/bin/x", "a"}, Format: FormatJSONL}
 	_, err := q.Run(context.Background(), Env{Cmd: recordCmd{&got}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"/usr/bin/nice", "/bin/x", "a"}; strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+	if want := []string{"/bin/x", "a"}; strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("argv = %q, want %q", got, want)
 	}
 }

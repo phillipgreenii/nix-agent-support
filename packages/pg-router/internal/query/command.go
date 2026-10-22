@@ -14,7 +14,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/event"
 	"github.com/phillipgreenii/pg-router/internal/item"
-	"github.com/phillipgreenii/pg-router/wrap"
+	"github.com/phillipgreenii/pg-router/procenv"
 )
 
 // envTestMode is PG_ROUTER_TEST_MODE, set by run-role/run-query in their own
@@ -22,7 +22,7 @@ import (
 const envTestMode = "PG_ROUTER_TEST_MODE"
 
 // cancelGrace is how long a cancelled query's process group has between SIGTERM
-// and SIGKILL (wrapper contract WC-5).
+// and SIGKILL.
 const cancelGrace = 5 * time.Second
 
 // CommandQuery runs an executable and parses its stdout into items.
@@ -30,29 +30,16 @@ type CommandQuery struct {
 	Meta   `toml:"-"`
 	Argv   []string    `toml:"argv"`
 	Format QueryFormat `toml:"format"`
-	// Wrap is the [[query]]-level wrap (one layer per entry, outermost first),
-	// installed by config load after validation; it is not a key of the command
-	// sub-table.
-	Wrap []wrap.Entry `toml:"-"`
 	// StrictBaseEnv is the [[query]]-level strict_base_env switch (default off):
-	// when true the chain starts from wrap.BaseEnv plus PG_ROUTER_TEST_MODE
+	// when true the process starts from procenv.BaseEnv plus PG_ROUTER_TEST_MODE
 	// instead of the inherited environment.
 	StrictBaseEnv bool `toml:"-"`
 }
 
-// Composed returns the argv this query actually runs: Argv under every wrap
-// layer (a query without a wrap runs Argv unchanged). Templates are never
-// rendered: config load rejects them for queries.
-func (q CommandQuery) Composed() ([]string, error) {
-	if len(q.Wrap) == 0 {
-		return append([]string(nil), q.Argv...), nil
-	}
-	return wrap.Compose(q.Wrap, nil, q.Argv)
-}
-
-// ComposedOf returns the composed command line of a command query (see
-// CommandQuery.Composed) and whether q is a command query at all.
-func ComposedOf(q Query) (argv []string, strictBaseEnv bool, ok bool, err error) {
+// CommandOf returns the command line of a command query (a copy of its argv: a
+// query that wraps its producer writes the wrapper as its own command), its
+// strict_base_env switch, and whether q is a command query at all.
+func CommandOf(q Query) (argv []string, strictBaseEnv bool, ok bool) {
 	var cq CommandQuery
 	switch v := q.(type) {
 	case CommandQuery:
@@ -60,19 +47,18 @@ func ComposedOf(q Query) (argv []string, strictBaseEnv bool, ok bool, err error)
 	case *CommandQuery:
 		cq = *v
 	default:
-		return nil, false, false, nil
+		return nil, false, false
 	}
-	argv, err = cq.Composed()
-	return argv, cq.StrictBaseEnv, true, err
+	return append([]string(nil), cq.Argv...), cq.StrictBaseEnv, true
 }
 
-// runEnv is the environment the chain starts from: nil (inherit) unless the
+// runEnv is the environment the process starts from: nil (inherit) unless the
 // strict switch is on.
 func (q CommandQuery) runEnv() []string {
 	if !q.StrictBaseEnv {
 		return nil
 	}
-	return wrap.BaseEnv(os.Environ(), []string{envTestMode})
+	return procenv.BaseEnv(os.Environ(), []string{envTestMode})
 }
 
 func (q CommandQuery) Validate() error {
@@ -141,15 +127,12 @@ func (q CommandQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
 	if cmd == nil {
 		cmd = OSCommander{}
 	}
-	argv, err := q.Composed()
-	if err != nil {
-		return nil, fmt.Errorf("command query %v: compose wrap: %w", q.Argv, err)
-	}
 	var out []byte
+	var err error
 	if ec, ok := cmd.(EnvCommander); ok {
-		out, err = ec.RunEnv(ctx, argv, q.runEnv())
+		out, err = ec.RunEnv(ctx, q.Argv, q.runEnv())
 	} else {
-		out, err = cmd.Run(ctx, argv)
+		out, err = cmd.Run(ctx, q.Argv)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("command query %v: %w", q.Argv, err)
@@ -235,14 +218,14 @@ func (o OSCommander) Run(ctx context.Context, argv []string) ([]byte, error) {
 // RunEnv runs argv with env (os/exec form; nil inherits the process
 // environment) in its own process group: a context cancel sends SIGTERM to the
 // whole group, then SIGKILL after cancelGrace, so a non-exec wrapper cannot
-// orphan the payload (wrapper contract WC-5).
+// orphan the payload.
 func (OSCommander) RunEnv(ctx context.Context, argv []string, env []string) ([]byte, error) {
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("empty argv")
 	}
 	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	c.Env = env
-	wrap.Group(c, cancelGrace)
+	procenv.Group(c, cancelGrace)
 	out, err := c.Output()
 	if err != nil {
 		// exec.Cmd.Output populates a non-zero-exit *exec.ExitError's own
