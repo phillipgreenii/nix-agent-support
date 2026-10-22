@@ -13,6 +13,12 @@ under `docs/superpowers/specs/` are not durable citation targets. The key words 
 REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT, RECOMMENDED, MAY and OPTIONAL in this ADR are to be
 interpreted as described in RFC 2119.
 
+**Amended 2026-10-22** (ADR 0106, draft): `owns_changes` is read per backend instance for a type with
+more than one implementation. The `issue` type has two: a daemon-backed Jira backend that owns its
+changes and a local beads backend that does not. The daemon-backed backend is therefore no longer
+assumed to be the GitHub one, and everything else in this ADR stands. The open item below about
+recovery of a failed decider run is resolved by ADR 0106.
+
 ## Context
 
 The connector suite was built on four rulings of the 2026-09-09 pg-desk and connector discovery
@@ -99,7 +105,7 @@ was filed. The check found no conflict that needs a ruling.
 - **Boundary kept by both.** The decoration-versus-decision rule is untouched: a daemon-backed
   backend decides only WHAT CHANGED for its own types, never what work should exist. Deciders stay
   outside connectors and pg-desk (ADR 0077 G5, ADR 0087 decision 2).
-- **Open items.** None needing an operator ruling. One matter is left to the pg-desk behavior docs
+- **Open items.** None needing an operator ruling. (Resolved 2026-10-22 by ADR 0106: the matter below is settled, because no decider-acknowledgement protocol is built and a failed run waits for the next change of that issue, as for PRs.) One matter is left to the pg-desk behavior docs
   of this program rather than decided here: ADR 0077 S31's local reconcile tier also recovers a
   failed decider run (D6 of that ADR), and the behavior docs MUST state how that recovery is
   provided for a type whose backend owns its changes, since the connector's acknowledged change feed

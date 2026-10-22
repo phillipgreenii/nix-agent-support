@@ -87,6 +87,14 @@ that declares `owns_changes`: change detection and the remote sweep live in that
 pg-router keeps only the clocks of consumer polls, so an upstream read clock MAY live in a
 daemon-backed backend. No decision-log row is added and S1 to S35 are unchanged.
 
+**Amended 2026-10-22** (ADR 0106, draft): for the `issue` type, ownership of change detection is
+applied per backend. Row S29 is narrowed to the backends that do not own changes and to watched
+queries and watched entities only; both S31 sweep tiers, and S31's clause that a failed decider run
+is recovered by the local tier, are retired for `issue` with no replacement (a failed run waits for
+the next change of that issue, as for PRs); and S32's cadence is read per backend with no cadence
+number changed. `pr` and `thread` keep S29 and S31 as they stand. No decision-log row is added and
+S1 to S35 are unchanged.
+
 **Approval and provenance.** The operator (Phillip) approved the design and its implementation plan
 on 2026-09-29 ("if good, consider it approved and continue", recorded on bead `pg2-2j5ac.51`). The
 generic entity pipeline design that this flow governs where the two overlap (bead `pg2-2j5ac.46`)
