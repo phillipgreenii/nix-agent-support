@@ -1,6 +1,6 @@
 # Issue change emission for beads and Jira: watched-entity events only (the PR pattern) and a Jira daemon — design
 
-- **Status**: Draft 11 for operator review. Drafts 1 and 2 were a pg-desk-only fix; drafts 3 to 6 applied the
+- **Status**: Draft 12 for operator review. Drafts 1 and 2 were a pg-desk-only fix; drafts 3 to 6 applied the
   GitHub daemon to every issue backend. On 2026-10-20 the operator ruled that the store and the daemon are
   **per implementation**: beads runs locally and needs neither, Jira needs both. Draft 9 applied the
   operator's 2026-10-21 rulings (the Jira daemon is committed and goes BEFORE the beads path; the 24-hour
@@ -9,12 +9,13 @@
   beads and Jira issues follow the PR "watched" pattern, so the connector emits events only for watched
   issues; the blanket silent sweep, the acknowledged retry tier, Appendix A (the decider acknowledgement
   protocol) and the focus re-emission timer are removed. Draft 11 applies two independent reviews of draft 10
-  and three operator decisions of 2026-10-22: ruling 8 (pg-desk keeps detecting beads changes "until the
-  beads connector handles it", which the later bead `pg2-f7155` does), decision D1 (the generic change feed,
+  and the operator's rulings 8 to 10 of 2026-10-22: ruling 8 (pg-desk keeps detecting beads changes "until the
+  beads connector handles it", which the later bead `pg2-f7155` does), ruling 9 (the generic change feed,
   change engine and watched-query shape are hoisted into the shared library first, bead `pg2-qbu5b`, and the
-  Jira daemon and the PR design's P2 wait for it) and decision D2 (delivery of `issue.changed` is gated on
-  `watched`). Draft 11 has not been independently re-reviewed (section 12). Nothing here is implemented. No
-  implementation bead is filed.
+  Jira daemon and the PR design's P2 wait for it) and ruling 10 (delivery of `issue.changed` is gated on
+  `watched`). Draft 12 applies the second round of two independent reviews (internal consistency, technical
+  feasibility) of draft 11, and has not been independently re-reviewed (section 12). Nothing here is
+  implemented. No implementation bead is filed.
 - **Date**: 2026-10-22 (draft 9: 2026-10-21; draft 8: 2026-10-20)
 - **Bead**: `pg2-oa1h4` (this design). Closes the root cause of `pg2-izeuu` and `pg2-2f24a`; gates
   `pg2-2j5ac.44.37` (the flip of the issue decider to `apply`). Related beads: `pg2-qbu5b` (the shared-library
@@ -42,20 +43,21 @@ has at least one test row for each; every test row names the invariant it checks
 
 ## 0. Summary
 
-| Topic                   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| What is wrong           | 2,039 of 2,049 `issue.changed` events enqueued since 2026-10-19 18:52Z carry kind `reconcile` [2,039 / 2,049 = 99.5%]. pg-desk's two age-sweep tiers re-emit every active entity whether or not anything differs; the queue grew by about 113 per hour at the first measurement and about 130 per hour at the second (section 1).                                                                                                                                                        |
-| Where the load is       | Beads. `work-beads` held about 167 to 171 entities in the sampled connector ledgers and the focus queries add the rest of the 452 active issues; Jira's `mine` query held 3 to 4. The split is inferred, to be measured (section 1).                                                                                                                                                                                                                                                     |
-| Operator rulings        | 2026-10-20: emit nothing when nothing differs; do what was done for PRs; the store and daemon are per implementation. 2026-10-22 (ruling 7): the watched-entity model for BOTH backends; (ruling 8): pg-desk keeps detecting beads changes "until the beads connector handles it", which bead `pg2-f7155` does later (section 13).                                                                                                                                                       |
-| The model               | Tracking and change events are separate. Nothing is watched by default. An issue is watched when it is a member of a query the deployment marks `watched`, or when one read or lookup opts in to watching that one entity. Watched stays watched until the issue closes (INV-ICD-13(c)). The connector emits change events ONLY for watched issues, and pg-desk delivers `issue.changed` ONLY for a watched issue, whatever the origin of the change row (sections 2 and 5, INV-ICD-16). |
-| Beads (no daemon)       | Beads has no daemon or store of its own. The watched flag is declared on the query in the connector configuration; the per-entity flag and the change emission live in pg-desk's existing flow (section 4.2). A cross-process budget keeps `bd` from being overloaded (section 4.4). pg-desk keeps detecting beads changes until the later bead `pg2-f7155` moves detection into the beads connector (ruling 8, section 10 item 9).                                                      |
-| Jira (daemon and store) | A Jira daemon, built on the shared connector-daemon library AFTER the prerequisite hoist `pg2-qbu5b` (section 3.6), tracks every retrieved issue until closed plus 24 hours, evicts it 7 days after closing, and runs on an internal request budget (section 3). It delivers change rows for watched issues only. pg-desk consumes its change feed.                                                                                                                                      |
-| Order                   | Build order only, operator ruling 2026-10-21: the Jira implementation is built FIRST, then the beads path (section 8). Before the Jira daemon, the shared-library hoist `pg2-qbu5b` lands (section 8, step 1.5); the Jira daemon and the PR design's P2 amendment wait for it.                                                                                                                                                                                                           |
-| Shared library (D1)     | The feed, the change engine, the query runner and a configured-query shape with a `watched` option are GitHub-only today. The bead `pg2-qbu5b` hoists them into the shared library as GENERIC code (no PR, CI, issue, Jira or beads specifics; a guard test enforces it). This design only states what it needs from that shared shape and from the one cursor key (section 3.6, INV-ICD-20).                                                                                            |
-| Delivery gate (D2)      | pg-desk MUST NOT append or deliver a change row for an issue entity that is not watched, whatever the origin: feed row, link or work propagation from a PR change, `refresh`, annotation write (section 5, INV-ICD-16).                                                                                                                                                                                                                                                                  |
-| Failed decider run      | No decider-acknowledgement protocol is built. A failed decider run waits for the next change of that issue, as for PRs. Revisit only if problems appear without it (section 6).                                                                                                                                                                                                                                                                                                          |
-| Removed in draft 10     | The blanket silent 24-hour sweep, the acknowledged retry tier, Appendix A (decision table, `pg-desk issue ack`, `redrive`, decider view change, `INV-ICD-12`), the 30-minute focus re-emission timer and the interim-relief machinery.                                                                                                                                                                                                                                                   |
-| De-duplication          | Checked 2026-10-21 (section 1): the router de-duplicates by exact event id and the id carries the change-log sequence, so a re-emission is always a new id; 89.7% of enqueued events are superseded by a later event for the same entity. Measured background, no longer a driver. Router-side supersession stays OPEN (section 10, item 8).                                                                                                                                             |
+| Topic                     | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status                    | Draft 12 (2026-10-22): the second round of two independent reviews of draft 11 is applied, and the draft is not re-reviewed (section 12). No ruling is reopened and no new question is asked of the operator.                                                                                                                                                                                                                                                                            |
+| What is wrong             | 2,039 of 2,049 `issue.changed` events enqueued since 2026-10-19 18:52Z carry kind `reconcile` [2,039 / 2,049 = 99.5%]. pg-desk's two age-sweep tiers re-emit every active entity whether or not anything differs; the queue grew by about 113 per hour at the first measurement and about 130 per hour at the second (section 1).                                                                                                                                                        |
+| Where the load is         | Beads. `work-beads` held about 167 to 171 entities in the sampled connector ledgers and the focus queries add the rest of the 452 active issues; Jira's `mine` query held 3 to 4. The split is inferred, to be measured (section 1).                                                                                                                                                                                                                                                     |
+| Operator rulings          | 2026-10-20: emit nothing when nothing differs; do what was done for PRs; the store and daemon are per implementation. 2026-10-22 (ruling 7): the watched-entity model for BOTH backends; (ruling 8): pg-desk keeps detecting beads changes "until the beads connector handles it", which bead `pg2-f7155` does later (section 13).                                                                                                                                                       |
+| The model                 | Tracking and change events are separate. Nothing is watched by default. An issue is watched when it is a member of a query the deployment marks `watched`, or when one read or lookup opts in to watching that one entity. Watched stays watched until the issue closes (INV-ICD-13(c)). The connector emits change events ONLY for watched issues, and pg-desk delivers `issue.changed` ONLY for a watched issue, whatever the origin of the change row (sections 2 and 5, INV-ICD-16). |
+| Beads (no daemon)         | Beads has no daemon or store of its own. The watched flag is declared on the query in the connector configuration; the per-entity flag and the change emission live in pg-desk's existing flow (section 4.2). A cross-process budget keeps `bd` from being overloaded (section 4.4). pg-desk keeps detecting beads changes until the later bead `pg2-f7155` moves detection into the beads connector (ruling 8, section 10 item 9).                                                      |
+| Jira (daemon and store)   | A Jira daemon, built on the shared connector-daemon library AFTER the prerequisite hoist `pg2-qbu5b` (section 3.6), tracks every retrieved issue until closed plus 24 hours, evicts it 7 days after closing, and runs on an internal request budget (section 3). It delivers change rows for watched issues only. pg-desk consumes its change feed.                                                                                                                                      |
+| Order                     | Build order only, operator ruling 2026-10-21: the Jira implementation is built FIRST, then the beads path (section 8). Before the Jira daemon, the shared-library hoist `pg2-qbu5b` lands (section 8, step 1.5); the Jira daemon and the PR design's P2 amendment wait for it.                                                                                                                                                                                                           |
+| Shared library (ruling 9) | The feed, the change engine, the query runner and a configured-query shape with a `watched` option are GitHub-only today. The bead `pg2-qbu5b` hoists them into the shared library as GENERIC code (no PR, CI, issue, Jira or beads specifics; a guard test enforces it). The hoist defines and implements that shape, the one cursor key, the store identity and delivery by the watched flag; this design only consumes them (section 3.6, INV-ICD-20).                                |
+| Delivery gate (ruling 10) | pg-desk MUST NOT append or deliver a change row for an issue entity that is not watched, whatever the origin: feed row, link or work propagation from a PR change, `refresh`, annotation write (section 5, INV-ICD-16).                                                                                                                                                                                                                                                                  |
+| Failed decider run        | No decider-acknowledgement protocol is built. A failed decider run waits for the next change of that issue, as for PRs. Revisit only if problems appear without it (section 6).                                                                                                                                                                                                                                                                                                          |
+| Removed in draft 10       | The blanket silent 24-hour sweep, the acknowledged retry tier, Appendix A (decision table, `pg-desk issue ack`, `redrive`, decider view change, `INV-ICD-12`), the 30-minute focus re-emission timer and the interim-relief machinery.                                                                                                                                                                                                                                                   |
+| De-duplication            | Checked 2026-10-21 (section 1): the router de-duplicates by exact event id and the id carries the change-log sequence, so a re-emission is always a new id; 89.7% of enqueued events are superseded by a later event for the same entity. Measured background, no longer a driver. Router-side supersession stays OPEN (section 10, item 8).                                                                                                                                             |
 
 ## 1. Problem, measured
 
@@ -81,7 +83,7 @@ Measured 2026-10-20 06:29Z from the router queue log, `pg-router status --json` 
   open-bead queries. The 452 active issues are therefore almost certainly almost all beads, but no count by
   backend was taken from the pg-desk store. The packet that cuts the beads path MUST first record the active
   count per backend, the count of entities the deployment's watched queries would hold per backend (the expected watched-set size,
-  which sections 2.1 and 6 otherwise call only "small"), and the
+  which sections 2.1 and 6 call unmeasured), and the
   number of hydrations whose fingerprint changed per day among them (the real-change rate that the success
   criterion of section 7 divides by). The new `fields_changed` rows add events that were previously dropped,
   so the real-change rate is measured against the NEW rule.
@@ -135,8 +137,10 @@ flowchart LR
   entity, because the operator's ruling 7 names those two and a query run with the option would watch a SET,
   which the configuration declares instead. (c) **Stickiness (stated here once; every other section refers to
   it).** A watched issue MUST stay watched after it leaves every query, until it is closed AND past retention:
-  for Jira until it is evicted 7 days after closing (section 3.2), for beads until pg-desk deactivates it
-  after observing it closed (section 4.5). While the flag is set the connector MUST deliver the issue's rows,
+  for beads until pg-desk deactivates it after observing it closed (section 4.5); for Jira the daemon's flag
+  lasts until eviction 7 days after closing (section 3.2), while pg-desk's own column follows the beads rule
+  (cleared when it deactivates the entity after the delivered `closed` row) and is set again by the next feed
+  row, which exists only for a watched issue, so no signal at eviction is needed. While the flag is set the connector MUST deliver the issue's rows,
   including `closed` and `reopened`, so a `closed` row is delivered although the issue is no longer a query
   member, and a reopen inside the retention window needs no new watch (after the 24-hour refresh period of
   section 3.2 a Jira reopen is observed when a query run or a read next retrieves the issue). After the flag
@@ -147,10 +151,14 @@ flowchart LR
   size of the watched set is unmeasured (a spike output, section 1 and section 10 item 13).
 - **INV-ICD-15.** pg-desk and the connector MUST NOT re-emit an issue that has not changed. For `issue` there
   is no age-driven sweep, no timer, no `reconcile` kind, no `sweep` or `local-reconcile` origin, and no
-  acknowledgement or retry tier that appends a row: a row is appended only for a real difference in the
-  normalised content (INV-ICD-5 to -7), for the first observation of a watched issue, or for the late watch of
-  a known issue (INV-ICD-18). `pg-desk issue changes --reset` MUST replay only WATCHED active issues, as kind
-  `added` with origin `reset`, never as `reconcile`, and the delivery gate (INV-ICD-16) applies to it. The feed's
+  acknowledgement or retry tier that appends a row. **The permitted append causes (stated once; INV-ICD-16
+  and every other section refer to this list).** A row for an `issue` entity MUST be appended only for: (1) a
+  real difference in the normalised content (INV-ICD-5 to -7), including `closed`, `reopened` and `removed`;
+  (2) the first observation of a watched issue after its query's baseline; (3) the late watch of a known issue
+  (causes 2 and 3 are INV-ICD-18); (4) propagation of `link_changed` or `work_changed` from a PR change to a
+  WATCHED linked issue; (5) an annotation write on a watched issue; (6) `pg-desk issue changes --reset`, which
+  MUST replay only WATCHED active issues, as kind `added` with origin `reset`, never as `reconcile`. Every
+  cause is subject to the delivery gate (INV-ICD-16). The feed's
   `entered_query` and `left_query` rows are membership information for pg-desk's listing status and are NOT
   stored as change rows (otherwise each would become a row and an event for a flip that changed nothing about
   the issue); an `entered_query` for an issue never seen before is delivered as its first-observation `added`
@@ -169,7 +177,7 @@ backend, not per type:
 | ------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | Beads (local) | One-shot `bd` processes; no store, no daemon        | pg-desk, by fingerprint list-and-diff (ADR 0077 S29) over watched queries and watched entities; the flag lives in pg-desk (section 4.2) | The old tiers until step 4, none after                         |
 | Jira (remote) | After the daemon lands: a daemon with its own store | The daemon (`owns_changes`), which stores the flag; pg-desk consumes the feed, hydrates, and acknowledges                               | None (the old tiers skip an owning-backend entity from step 2) |
-| Jira (today)  | One-shot `pjira` processes                          | pg-desk, as for beads                                                                                                                   | The old tiers until step 2                                     |
+| Jira (today)  | One-shot `pjira` processes                          | pg-desk, as for beads                                                                                                                   | The old tiers until the step 3 registry switch                 |
 
 pg-desk therefore handles a MIX of backends inside its one `issue` flow (section 5), and the router source,
 the roles and the decider are unchanged: pg-desk stays the single emitter of `issue.changed`.
@@ -208,25 +216,35 @@ member that "appeared later", a flood. The disagreement is resolved by one rule,
   member MUST be marked watched and MUST append NO row. For beads, a member pg-desk does not yet hold MUST be
   hydrated silently with the existing no-row write (a state write with empty kinds updates the snapshot and
   bumps the version but appends no change-log row, `writeEntity` in `store/changelog.go`), paced by
-  `hydration.max_per_poll`; a held member is only marked, and the marker MUST be written only in the poll in
-  which the last unhydrated member was hydrated, so a baseline that takes several polls stays silent. For
+  `hydration.max_per_poll`; a held member is only marked, EXCEPT that a held member whose `list_fp` differs is
+  selected for hydration in the same poll (`diffListed`, `changes/poll.go:392`) and that hydration MUST use
+  the same no-row write, or it would append a real row; the marker MUST be written only in the poll in which
+  the last unhydrated member was hydrated, so a baseline that takes several polls stays silent. For
   Jira the daemon holds the members, and pg-desk learns a member it does not hold from that member's first feed
   row (the members it already holds are backfilled at cutover, section 8 step 3). A query added to the
   configuration later has no marker, so its first run is also a baseline run. (c) **Which rule wins.** The
-  baseline rule wins over "appears later": a member present at its query's baseline run is never "appearing
-  later". (d) **First observation.** An entity first seen in a watched query that already has its marker MUST
+  baseline rule MUST win over "appears later": a member present at its query's baseline run is never
+  "appearing later". (d) **First observation.** An entity first seen in a watched query that already has its marker MUST
   append exactly one `added` row, the one first-observation kind for both backends (section 3.5). (e) **Late
   watch.** A KNOWN entity that becomes watched after its query's baseline, by being listed by a baselined query
   it was not in or by a one-off watch, MUST append exactly one `added` row, so pg-desk hydrates and emits it
-  (the PR design's late-watch rule). (f) **A query flipped to watched.** pg-desk lists only watched queries, so
+  (the PR design's late-watch rule). `diffListed` selects only an absent or inactive row or a row whose
+  `list_fp` differs (`changes/poll.go:392-440`), so a known, active entity with an unchanged `list_fp` is never
+  selected: outside a baseline run the selection MUST also include a listed entity whose `watched` column is
+  NULL, and the flag MUST be set only by the hydration write, never at selection, so a late watch cut by the
+  hydration budget is retried at the next poll and not lost. (f) **A query flipped to watched.** pg-desk lists only watched queries, so
   a query newly flagged has no pg-desk marker and its first run is a baseline run (silent). The Jira daemon
   baselines every configured query for tracking, so flipping an already-baselined query to watched is the PR
   design's late watch: one `added` row per known member. That burst is bounded in total by the number of known
   open members of the query and in rate by `hydration.max_per_poll`, because a row is emitted only after
   hydration; the flip is an operator configuration change and the member count is read before it. The
   asymmetry follows from where the marker lives, and the beads side is the quieter one. (g) **Move-aside.** A
-  moved-aside pg-desk store or daemon store loses its markers, so each watched query runs a baseline run
-  again: silent, no flood; the one-off flags are lost (section 10, item 11).
+  moved-aside pg-desk store or daemon store loses its markers, so each watched query MUST run a baseline run
+  again: silent, no flood; the one-off flags are lost (section 10, item 11). (h) **A baseline that cannot
+  finish.** A member whose hydration fails or is degraded MUST be retried at every poll and keeps the marker
+  unwritten; a baseline open for more than one day (the day of INV-ICD-21 item 2) MUST be a `doctor` gate
+  naming the query and the failing members, and from then on its members are no longer excluded from the
+  unflagged-member alert (INV-ICD-21 item 3).
 
 **Divergences from the PR design, stated in one place.** (1) No ad-hoc query run with the watch option
 (INV-ICD-13(b)). (2) Beads orphans are read in the foreground at each poll against the `bd` budget, where the PR
@@ -291,7 +309,8 @@ rule.
 - **Watched flag in the store.** The daemon MUST store each issue's watched flag (INV-ICD-13) and set it from a
   member of a configured query whose configuration carries `watched = true`, and from a read or lookup with
   the watch option. The change feed MUST return rows for watched issues only, with one cursor per consumer
-  (the key is owned by the hoist, INV-ICD-20); `--query` is no longer required and MAY remain as a filter. The
+  and by the stored flag, not by query membership (both are the hoist's, INV-ICD-20(c) and (f)); `--query` is
+  no longer required and MAY remain as a filter. The
   stickiness rule of INV-ICD-13(c) governs when the flag is cleared; informational membership rows are
   handled by INV-ICD-15. A moved-aside daemon store loses the flags: query members become watched again at
   the next run of their queries (as a baseline run, INV-ICD-18), directly watched issues do not, and with no
@@ -404,12 +423,13 @@ produces it. `entered_query` and `left_query` are membership information and are
   `bd update` by the decider on a watched bead produces one `comments_changed` row and one extra decider run,
   which T-12's budget allows only if that run writes nothing.
 - The settle rule, baselines and the feed are the GitHub design's, with the PR design's amendment: ONE cursor
-  per consumer, with `--query` an optional filter. This design does not define the key: the shared store keys a
-  cursor `(consumer, kind, query)` today (the `consumer` table of `connectord/store/schema.go`), and the PR
-  design's "one cursor per consumer" needs a primary-key change, which is a table-rebuild migration owned by the
-  hoist (INV-ICD-20). Two Jira instances stay separate because each instance has its OWN daemon store file, so
-  no instance component is needed in the key. Each row's entity carries the row's own `version` (the schema
-  gains `Issue.Version`) and the store `epoch`.
+  per consumer, with `--query` an optional filter. This design neither defines nor implements the key: the shared store
+  keys a cursor `(consumer, kind, query)` today (the `consumer` table of `connectord/store/schema.go`), and the
+  PR design's "one cursor per consumer" needs a primary-key change, a table-rebuild migration that the hoist
+  defines and implements (INV-ICD-20(c)) and the Jira daemon consumes. Two Jira instances stay separate
+  because each instance has its OWN daemon store file, so no instance component is needed in the key. Each
+  row's entity carries the row's own `version` (the schema gains `Issue.Version`), and every feed answer
+  carries the daemon's store identity (INV-ICD-20(e)), which does not exist today.
 
 ### 3.6 The shared library: what is generic today, and the prerequisite hoist (`pg2-qbu5b`)
 
@@ -438,12 +458,29 @@ flowchart LR
   B -.-> F["pg2-f7155: beads connector owns detection, later"]
 ```
 
-**What the hoist moves** (its scope, restated; the bead owns the design and the decomposition): the change feed
-(cursor per consumer, first poll at the tail, `cursor_expired`), the change engine skeleton (settle, per-query
-baseline, membership, the watched flag), the query runner, and any group rules that are not provider-specific.
-The feed's entity-kind and key validation is parameterised, so a connector registers its kinds instead of the
-shared code naming `pr` and `ci`. The bead notes that `pg2-z5fax.4` (Phase 3b, the change engine) is still open
-and edits the same area, so which of the two lands first is decided with that docket, not here.
+**What the hoist moves and implements** (the bead owns the design and the decomposition; this lists what this
+design consumes). It MOVES the change feed (cursor per consumer, first poll at the tail, `cursor_expired`), the
+change engine skeleton (settle, per-query baseline, membership), the query runner and any group rules that are
+not provider-specific, with the feed's entity-kind and key validation parameterised so a connector registers
+its kinds instead of the shared code naming `pr` and `ci`. It DEFINES AND IMPLEMENTS, so that exactly one bead
+owns each piece and the Jira daemon (step 2) and the PR design's P2 only CONSUME them: the shared
+configured-query shape with `watched`, the stored watched flag, the single feed cursor key with its
+table-rebuild migration, the one order of migration rungs, the daemon store identity, and feed delivery by the
+watched flag (INV-ICD-20(b) to (f)). The bead notes that `pg2-z5fax.4` (Phase 3b, the change engine) is still
+open and edits the same area, so which of the two lands first is decided with that docket, not here.
+
+**The hoist's starting inventory** of PR and CI specifics (read from main; paths under
+`cmd/pg-connector-github/internal/`; each becomes data or stays behind): (1) `feed/keys.go:15-18,59`, the
+`KindPR` and `KindCI` constants and the pr-versus-ci conflict rule; (2) `feed/feed.go:197` and
+`feed/delivery.go:113`, the hard-coded `LogKindPR` filter and the `ci_changed` rule; (3) `changes/summary.go:44,53`,
+`changes/append.go:101` and `changes/group.go:59`, `HeadSHA`, `BaseSHA` and `HeadRefOid`; (4)
+`groups/table.go:36-56`, the field table (`head_sha`, `mergeable`, `checks_rollup`, `pr_id`); (5)
+`query/runner.go:131-134,198`, `query/fetch.go:136` and `groupsvc/executor.go:140,221`, `ratefeed.Meta`,
+`vcs.ErrAuthInvalid` and the GitHub search paging; (6) the five packages import `classify`, `summary`,
+`entity`, `ratefeed`, `vcs`, `config`, `metered` and `revalidate` from the same `internal/` tree, which move or
+are cut; (7) the change metrics of section 7 (`consumer.lag_rows`, `query.last_success_age_seconds` and the
+others) are GitHub-private in `telemetry/changemetrics.go:162`, so the Jira daemon's series need that code
+hoisted too.
 
 **What this design requires of the hoist (it states the requirement and designs none of it):**
 
@@ -451,24 +488,40 @@ and edits the same area, so which of the two lands first is decided with that do
   good, make sure the shared is generic enough and doesn't contain specifics of either usage." The shared
   library MUST NOT contain anything specific to PRs, CI, issues, Jira or beads. Entity kinds, change kinds, key
   shapes, grouping rules and classifier rules MUST be supplied by each connector as data or small interfaces,
-  and shared code MUST NOT switch on a concrete kind. A guard test, in the spirit of the layout test, MUST fail
-  if the shared package names a concrete provider or kind. (b) **One configured-query shape.** The hoist MUST
-  define ONE shared shape of a configured query that carries a `watched` option (default false, a boolean named
-  `watched`, INV-ICD-13), used by the PR design and by this design alike. Today a query is `schema.QueryExpr`, a
-  bare string or list of strings (`pkg/schema/queries.go:27`), resolved by `schema.ResolveQuery` in the issue
+  and shared code MUST NOT switch on a concrete kind. A guard test (a `go/parser` scan of identifiers and
+  string literals, in the spirit of `layout_convention_test.go`) MUST fail if the shared package names a
+  concrete provider or kind. **Guard scope:** the hoisted code and every NEW identifier in `pkg/connectord`. A
+  shipped migration rung MUST NOT change (`store/schema.go:13-14`), so the existing PR-named store columns
+  (`head_sha` on `change_log` and `pending_change`, `entity.last_known_mergeable`) and `ChangeRow.HeadSHA`
+  are treated as OPAQUE columns on an explicit, committed allowlist, which a later rename rung MAY retire. The
+  guard allowlists or the hoist neutralises the other existing specifics: `router/router.go:63` and
+  `socket/frame.go:62` ("pr" or "ci"), and `socket/client.go:46` and `proc/supervisor_linux.go:15`
+  (`pg-connector-github`). (b) **One configured-query shape.** The hoist MUST define and implement ONE shared
+  shape of a configured query that carries a `watched` option (default false, a boolean named `watched`,
+  INV-ICD-13), used by the PR design and by this design alike. Today a query is `schema.QueryExpr`, a bare
+  string or list of strings (`pkg/schema/queries.go:27`), resolved by `schema.ResolveQuery` in the issue
   dispatcher (`pkg/provider/issue/dispatch.go:116`), held in the GitHub connector's configuration as
   `map[string]schema.QueryExpr` and parsed by the beads backend (`parseBDListExpr`); a flag needs an object
   form, and a bare string or list MUST keep parsing as an unwatched query. (c) **One cursor key.** The hoist
-  MUST define ONE feed cursor key, one cursor per consumer within a store, as the PR design says; the code
-  keys it `(consumer, kind, query)` today. (d) **One ladder order.** The hoist MUST define ONE order for the
-  store-schema migration rungs (the ladder is at version 3), because the PR design's P2 and this design's
-  closed-at rung (section 3.2) both add to it; a shipped rung MUST NOT change, and each new rung MUST be
-  proven against the GitHub store and its fixture (T-10). (e) **No behaviour change for GitHub.** The hoist
-  moves code behind the existing tests. (f) **Order.** The Jira daemon (section 8, step 2) and the PR design's
-  P2 amendment MUST wait for the hoist.
+  MUST define and implement ONE feed cursor key, one cursor per consumer within a store, as the PR design says,
+  with its table-rebuild migration; the code keys it `(consumer, kind, query)` today. (d) **One ladder
+  order.** The hoist MUST define ONE order for the store-schema migration rungs (the ladder is at version 3),
+  because the PR design's P2 and this design's closed-at rung (section 3.2) both add to it; a shipped rung
+  MUST NOT change, and each new rung MUST be proven against the GitHub store and its fixture (T-10).
+  (e) **Store identity.** The daemon store MUST carry a persisted identity (an epoch or uuid created with the
+  store) and every feed answer MUST surface it. Today there is none: `change_log.seq` is AUTOINCREMENT
+  (`store/schema.go:149-150`), so a moved-aside store restarts at 1, and the feed learns of a move only
+  through the `moved_aside_at` `store_meta` key. INV-ICD-19 keys pg-desk's redelivery marker on it.
+  (f) **Delivery by the watched flag.** The feed MUST deliver the rows of a watched entity whether or not it is
+  still a member of the query, and MUST NOT deliver the rows of an unwatched entity. Today `DeliveryForKey`
+  (`feed/delivery.go:97-120`) delivers a non-member's row only when a membership kind names the query, so a
+  `closed` row after the issue left its query (INV-ICD-13(c)) would be dropped. (g) **No behaviour change for
+  GitHub** from the move itself: the hoist moves code behind the existing tests. (h) **Order.** The Jira daemon
+  (section 8, step 2) and the PR design's P2 amendment MUST wait for the hoist.
 
-This design states (a) to (f) and nothing more about the shared library: where the shape, the key and the ladder
-order are decided is `pg2-qbu5b`, and every mention of them in this document follows that bead's decision.
+This design states (a) to (h) and nothing more about the shared library: the shape, the key, the store
+identity, the delivery rule and the ladder order are decided and built by `pg2-qbu5b`, and every mention of
+them in this document follows that bead.
 
 ## 4. The beads path (no daemon, watched only)
 
@@ -488,6 +541,15 @@ makes the entity "changed" and it is hydrated. UNVERIFIED: whether `bd list --js
 decider reads (dependencies and metadata, which `bd show` may fill differently); a spike settles it, and the
 fingerprint-completeness test (section 9, T-7) fails if a read field is missing from the fingerprint.
 
+**Classifier rewrite.** `classify.Classify` rule 1 (`classify/classify.go:49-51`) returns `[reconcile]` for
+any no-old or inactive snapshot and `KindAdded` is only declared (`classify/kinds.go:19`), so a first
+observation, a return after deactivation, a late watch and a `ForceReconcile` hydration
+(`pipeline/entity_change.go:48-50`) all yield `reconcile` today. For `issue` rule 1 MUST return `added`
+instead (`pr` and `thread` keep `reconcile`); the rewrite lands in step 4, with the retirement of the tiers.
+The test that pins it for `issue` is `TestIssueFirstObservationYieldsOnlyReconcile` (`classify/issue_test.go`),
+rewritten in the same step; the generic `TestFirstObservationYieldsOnlyReconcile` (`classify/classify_test.go`)
+stays for the other types.
+
 ### 4.2 Where the beads watched flag lives
 
 Beads has no daemon or store of its own (operator ruling 2), so the flag is split between the connector
@@ -503,7 +565,9 @@ minimal change that mirrors the PR connector configuration, and it adds no proce
   lists it as a per-op row and no caller-facing verb exists), so a new umbrella verb MUST return a backend's
   capabilities answer to a caller, extended with each configured query's `watched` value; pg-desk MUST check
   it at start-up, and a mismatch with pg-desk's list MUST be a `doctor` gate (the check of INV-ICD-10(a)),
-  comparing whatever option name INV-ICD-20(b) defines. Whether the backend sees its configuration on a
+  comparing whatever option name INV-ICD-20(b) defines. The verb and the gate land in step 2 for owning
+  backends (each Jira query's `watched` value included) and gain the beads backend's values in step 4
+  (section 8). Whether the backend sees its configuration on a
   capabilities call is a spike (section 10, item 13). pg-desk MUST list only watched queries; an unflagged
   query stays available to every other reader and MUST produce no change event. (b) **Entity level.** The
   entity row MUST gain a nullable `watched` column (NULL means not watched), ensured by the mechanism of
@@ -528,22 +592,35 @@ minimal change that mirrors the PR connector configuration, and it adds no proce
   "raise for exactly the issues the deployment's watch queries select", so an issue selected only by an
   unwatched query no longer gets due-date attention: a deployment that wants it MUST declare that query
   watched (section 10, item 12).
-- **INV-ICD-17 (orphan reads).** A watched, still-open entity that no watched query lists any longer (a
-  one-off watch, or an entity that left its query for any ordinary reason, for example a deferral, a block or
-  a relabel) MUST NOT be removed and MUST be read by id until it closes. This is change detection for a
-  watched entity, not a sweep. (a) **Bound.** At most `orphan_max_per_poll` orphans MUST be read per poll; the
-  reads share `hydration.max_per_poll` and the `bd` budget of INV-ICD-9, so they cannot starve the changed
-  members of watched queries. A hydration is two umbrella calls when dependency hydration is on (`issue show
+- **INV-ICD-17 (orphan reads, beads only).** For an owning backend (Jira) the daemon tracks the issue and the
+  feed delivers its rows by the watched flag (INV-ICD-20(f)), so an issue that left its query is still
+  reported and pg-desk has no orphan read for it. For beads, a watched, still-open entity that no watched
+  query lists any longer (a one-off watch, or an entity that left its query for any ordinary reason, for
+  example a deferral, a block or a relabel) MUST NOT be removed and MUST be read by id until it closes. This
+  is change detection for a watched entity, not a sweep. (a) **Bound and capacity.** At most
+  `orphan_max_per_poll` orphans MUST be read per poll, and they MUST be read FIRST, out of the same
+  `hydration.max_per_poll` budget (default 50, `internal/config/config.go:231`) and the `bd` budget of
+  INV-ICD-9, so changed members cannot starve them and the orphans cannot take more than the cap from the
+  members. A hydration is two umbrella calls when dependency hydration is on (`issue show
 --fresh` and `issue deps --full`, `gather/entity.go`); how many `bd` processes stand behind them is
   unmeasured (a spike output). The default of `orphan_max_per_poll` is a spike output; the recommended default
-  is 10, which is `10 / 50 = 20%` of a poll's hydration budget at the documented `hydration.max_per_poll` of 50. (b) **Order.** Orphans MUST be read oldest-read first, so with N orphans each is read within
-  `ceil(N / orphan_max_per_poll)` polls. (c) **Comparison basis.** An orphan read MUST compare the NORMALISED
-  snapshot of INV-ICD-7 with the stored one, never `list_fp`, which is a hash of the LIST shape (section 4.1
-  itself says it is unverified that list covers every field `show` returns); the read MUST leave `list_fp`
-  untouched (a nil list fingerprint leaves it untouched in the store write), and an unchanged orphan read MUST
-  write nothing: no row and no version bump. (d) **Gone.** A read answering `not_found` (a deleted bead) MUST
-  append one `removed` row (delivered, because the entity is still watched at that moment, INV-ICD-16), clear
-  the flag, deactivate the entity and stop reading it. (e) **Failed or degraded.** A failed or degraded read
+  is 10, which is `10 / 50 = 20%` of a poll's hydration budget, so changed members keep at least `50 - 10 = 40`
+  slots. (b) **Order and age.** Orphans MUST be read oldest-ATTEMPT first, by a per-entity last-attempt time,
+  so with N orphans each is attempted within `ceil(N / orphan_max_per_poll)` polls and a failing orphan
+  rotates instead of holding a slot at every poll. The age metric `pg_desk_oldest_orphan_read_age_seconds`
+  MUST count from the last SUCCESSFUL read (`hydrated_at` before any), so a failing orphan keeps ageing and
+  trips the alert of INV-ICD-21. Both times are the nullable columns `read_attempt_at` and `read_ok_at`,
+  written by the column-only write of INV-ICD-10(c). (c) **Comparison basis.** An orphan read MUST compare
+  the NORMALISED snapshot of INV-ICD-7 with the stored one, never `list_fp`, which is a hash of the LIST shape
+  (section 4.1 itself says it is unverified that list covers every field `show` returns); the read MUST leave
+  `list_fp` untouched (a nil list fingerprint leaves it untouched in the store write), and an unchanged orphan
+  read MUST write nothing but the two times: no row and no version bump. That needs a NEW pipeline option
+  that skips the snapshot write when the normalised snapshots are equal, because the pipeline rewrites the
+  snapshot and bumps the version on every hydration today (`pipeline/entity_change.go:246`). (d) **Gone.** A
+  read answering `not_found` (a deleted bead; the gather adapter reports it as `RemovedState "not_found"`,
+  `gather/entity.go:93-95`) MUST append one `removed` row, which is delivered because the gate reads the flag
+  as it stood before the statement (INV-ICD-16), and in the same transaction after that append clear the
+  flag, deactivate the entity and stop reading it. (e) **Failed or degraded.** A failed or degraded read
   (INV-ICD-10(d)) MUST leave the entity watched and due; with no retry counter (INV-CHANGES-10) its age is
   what exposes it (INV-ICD-21). (f) INV-CHANGES-6 and -11 (removal and its confirmation read) are rewritten for
   `issue` accordingly. (g) **Divergence from the PR design, stated.** The PR daemon refreshes every tracked PR
@@ -583,7 +660,7 @@ cross-process and has no daemon:
   open file descriptor to the `bd` child as an extra file, so the slot is held until the CHILD exits. The
   umbrella kills the backend at its call deadline and the backend then dies while `bd` can keep running; a
   slot tied only to the backend process would be released exactly when the host is most overloaded. (b) A
-  sliding-window counter capping `bd` processes started per minute (`bd_max_per_minute`). A call over budget
+  sliding-window counter capping `bd` processes started per minute (`bd_max_per_minute`, a new setting). A call over budget
   waits up to a short bound and then answers `unavailable` (retryable). Writes get reserved slots, so a decider
   claim or transition is not starved by reads. The settings come from the backend's own rendered flags (the
   runner is built before any request, `main.go`), not from per-request config. Two trackers served by one dolt
@@ -657,25 +734,32 @@ sequenceDiagram
   instance that serves it and whether it owns changes, rendered from the same source as the registry so the
   two cannot drift, with the capabilities answer of INV-ICD-14(a) as the check at start-up (a mismatch MUST be
   a `doctor` gate); (b) every pg-desk `changes` call MUST pin `--backend`; (c) the entity row MUST gain a
-  `backend` column (and the `watched` column of INV-ICD-14) so that per-backend rules can be applied per
-  entity, not per type. A call knows its backend only where it pins one: `pg-desk issue refresh <id>` takes only an id,
+  `backend` column (and the `watched` column of INV-ICD-14, and the two read-time columns of INV-ICD-17(b))
+  so that per-backend rules can be applied per entity, not per type. A call knows its backend only where it pins one: `pg-desk issue refresh <id>` takes only an id,
   and the hydration call `issue show <id> --fresh` carries no `--backend` (`cmd/pg-desk/refresh.go`,
   `gather/entity.go:93`), so those paths cannot be the source of the column. The columns are written by a
   **column-only write primitive** that appends no row and does not bump `entity.version` (every write bumps
   the version today, so this is a new store primitive): (i) from a feed row's pinned `changes` call, (ii) from
-  a listing, for a created, changed or unchanged listed entity, and (iii) by the cutover backfill. Hydration,
-  `refresh` and the orphan reads READ the column, and when it is NULL resolve the backend from the configured
-  watched queries of (a) and pass `--backend` to `issue show`, so a Jira id never costs a `bd` call first (an
-  unpinned `issue show` tries every registered backend in order); an id served by queries of two different
-  backends is a `doctor` gate. Existing rows are NULL after the migration and NULL is treated as non-owning
-  only until set; the cutover therefore MUST run a one-time backfill, which is a numbered part of step 3
-  (section 8): for each owning watched query one `list` read of the daemon, then the column-only write sets
-  `backend` and `watched` for every returned id that pg-desk holds (an id it does not hold gets both from its
-  first feed row). `refresh` cannot be that source. T-8 covers `refresh` and the orphan read of an
-  owning-backend entity (the `backend` column read, `--backend` passed). The dropped-key runbook below selects
-  the entities of a backend through the
-  configured watched queries, not the column alone. The storage additions (the two columns and the
-  failed-ingest side table of INV-ICD-11, all in step 2) MUST use one stated mechanism: `CREATE TABLE IF NOT
+  a listing, for a created, changed or unchanged listed entity, and (iii) by the cutover backfill. Hydration
+  and `refresh` READ the column and, when it is NULL, resolve the backend from the configured watched queries
+  of (a) and pass `--backend` to `issue show`, so a Jira id never costs a `bd` call first (an unpinned `issue
+  show` tries every registered backend in order); an id served by queries of two different backends is a
+  `doctor` gate. **No Jira entity MAY keep a NULL `backend`.** `hydrateJiraIssue` (`cmd/pg-desk/run.go:257`),
+  which stores a ticket key named in PR text with no backend and no watched query, MUST resolve the owning
+  backend and write the column: it probes the configured OWNING instances first with `--backend` (a daemon
+  read, never a `bd` call), the first that holds the id sets the column, and an id none holds is set
+  to the non-owning backend. Existing rows are NULL after the migration, so the cutover MUST run a one-time
+  backfill, a numbered part of step 3 (section 8), that covers EVERY held Jira id, not only the members of
+  watched queries: for each owning watched query one `list` read of the daemon, then the column-only write
+  sets `backend` and `watched` for every returned id that pg-desk holds (an id it does not hold gets both from
+  its first feed row), and every other held id with a NULL `backend` is resolved by the probe above and gets
+  `backend` set. `refresh` cannot be that source. Until step 3 has run, the step 2 gate of INV-ICD-16 also
+  covers a NULL-`backend` id that resolves to an owning backend (the gate takes that resolver as a
+  parameter), so no Jira entity escapes it. T-8 covers `refresh` of an owning-backend entity (the `backend`
+  column read, `--backend` passed) and the NULL cases. The dropped-key runbook below selects the entities of
+  a backend through the configured watched queries, not the column alone. The storage additions (the
+  `backend` and `watched` columns and the failed-ingest side table of INV-ICD-11 in step 2, the two
+  read-time columns in step 4) MUST use one stated mechanism: `CREATE TABLE IF NOT
 EXISTS` and an `ALTER TABLE ... ADD COLUMN` guarded by a `pragma table_info` check, with no `user_version`
   change, because SQLite has no `ADD COLUMN IF NOT EXISTS` and a newer `user_version` would make an older
   binary refuse the store. It MUST be a NEW ensure function called from the store's open path BEFORE the
@@ -714,11 +798,19 @@ EXISTS` and an `ALTER TABLE ... ADD COLUMN` guarded by a `pragma table_info` che
   watched entity of that backend), which the operator who moves the store aside MUST run.
 - **Redelivery is idempotent (INV-ICD-19).** A crash between a commit and its acknowledgement redelivers rows,
   and feed rows are stored as given with no classifier diff, so a redelivered row would append a duplicate
-  change row and a new event id. pg-desk MUST therefore key idempotence on the feed's own sequence: it MUST
-  keep, in the same transaction as each row's commit, the highest feed `seq` it has committed per daemon
-  instance (a `meta` key, `change_flow.feed_seq.<instance>`), and MUST skip a row whose `seq` is at or below it
-  and a failed-ingest entry already recorded for that `seq`. A skipped row MUST NOT append a row, bump a
-  version or produce an event.
+  change row and a new event id. pg-desk MUST therefore key idempotence on the feed's own sequence AND on the
+  daemon's store identity (INV-ICD-20(e)), because `seq` alone would skip new rows: a moved-aside daemon store
+  restarts its AUTOINCREMENT sequence at 1, so every new row would look redelivered. It MUST keep, in the
+  same transaction as each row's commit, the highest feed `seq` it has committed for the pair (daemon
+  instance, store identity) (a `meta` key, `change_flow.feed_seq.<instance>`, whose value holds both), and MUST
+  skip a row whose store identity equals the marker's and whose `seq` is at or below it, and a failed-ingest
+  entry already recorded for that `seq`. A skipped row MUST NOT append a row, bump a version or produce an
+  event. A different store identity, or a `cursor_expired:` answer, MUST reset the marker before any row is
+  processed. The same-transaction write needs a new store parameter, because `writeEntity` opens its own
+  transaction (`store/changelog.go:102`). **Loss path, named:** `appendLocalRecords`, `UpsertInterpretation`
+  and `ReplaceDerivedXrefs` run AFTER that commit (`pipeline/entity_change.go:265-275`), so a crash between
+  the commit and them loses them and the redelivered row is skipped; the exposure is that one entity and the
+  recovery is `pg-desk issue refresh <id>` (section 10, item 11).
 - **A dropped key is a gap.** A feed key unseen for `consumer_stale_after` is dropped and its next poll starts
   at the tail (the GitHub design), a silent gap for the sole detector. The runbook for a dropped key is a
   `pg-desk issue refresh <id>` of every watched entity of that backend, and the daemon's `cursor_expired:`
@@ -751,9 +843,9 @@ EXISTS` and an `ALTER TABLE ... ADD COLUMN` guarded by a `pragma table_info` che
   read as removal, and, for owning backends, the list-and-diff. `pg-desk issue changes`, its consumer rows,
   `refresh`, `show` and any other reader of the verb all stay. The `sweep.*` keys remain for `pr` and
   `thread`; the issue flow stops reading them.
-- **The delivery gate (operator decision D2).** **INV-ICD-16.** pg-desk MUST NOT append, and so MUST NOT
-  deliver, a change-log row for an `issue` entity that is not watched, whatever the origin of the row.
-  INV-ICD-13(d) binds only the connector, but pg-desk has write paths of its own, and the consumer read
+- **The delivery gate (operator ruling 10).** **INV-ICD-16.** pg-desk MUST NOT append, and so MUST NOT
+  deliver, a change-log row for an `issue` entity that is not watched, whatever the origin of the row (the
+  causes of INV-ICD-15's list are the only ones, and each is subject to this gate). INV-ICD-13(d) binds only the connector, but pg-desk has write paths of its own, and the consumer read
   delivers every row of the entity type: `ReadChanges` and `ListChangesAfter` (`internal/store/cursor.go`,
   `internal/store/changelog.go`) select by `entity_type` and cursor only, with no origin or watched filter, and
   `deliver` in `internal/changes/changes.go` emits what they return. The paths that append a row for an issue
@@ -766,21 +858,29 @@ EXISTS` and an `ALTER TABLE ... ADD COLUMN` guarded by a `pragma table_info` che
      entity xref-linked to a changed PR, via `classify.PropagationRecords` in `classify/local.go`) and by
      `cmd/pg-desk/link.go`. An issue entity held only because `hydrateJiraIssue` stored it (section 4.2)
      receives these rows, so today every PR change re-emits `issue.changed` for each linked unwatched issue;
-     the draft 10 live check (T-18) would not have caught it.
+     a live check that only edits issues cannot see this, so T-18 includes a PR change linked to an
+     unwatched issue.
   3. **Annotation writes**, through `annotationTx` (`internal/store/annotation_kv.go`).
 
-  **The gate.** Inside `AppendChangeLogTx`, for `entity_type = issue`, the append MUST be skipped (no row, no
-  sequence, no error) unless the entity's `watched` column is non-NULL in the same transaction. The snapshot,
-  version, annotation and link writes themselves proceed; only the row is withheld, so no event can follow.
-  The first-observation or `removed` row of a write that sets the flag passes, because the hydration write sets
-  the flag in the same statement (INV-ICD-14(b)). The gate is on APPEND, not on read: filtering on the flag at
-  read time would hide a `closed` row after the flag is cleared (INV-ICD-13(c)). A WATCHED issue still
+  **The gate and its statement order.** Inside `AppendChangeLogTx`, for `entity_type = issue`, the append MUST
+  be skipped (no row, no sequence, no error) unless the entity is watched in the same transaction, where
+  "watched" means the flag as it stood BEFORE the statement or the flag this same write sets (the hydration
+  write sets it in the same statement, INV-ICD-14(b), so a first-observation row passes). A write that CLEARS
+  the flag MUST do so AFTER the append, in the same transaction. So a `closed` or `removed` row of a watched
+  entity is always appended and delivered, and the gate never hides the row that ends the watch. The
+  snapshot, version, annotation and link writes themselves proceed; only the row is withheld, so no event can
+  follow. A gated append returns sequence 0, and `SetAnnotationSeq` computes `changed = seq != 0`
+  (`store/annotation_kv.go:133`), so it MUST return the changed flag separately from the seq or an annotation
+  that WAS written would read as unchanged (its consumer is `focus/lock.go:454`). The gate is on APPEND, not
+  on read: filtering on the flag at read time would hide a `closed` row after the flag is cleared
+  (INV-ICD-13(c)). A WATCHED issue still
   receives propagated rows (a watched issue whose linked PR changed is worth a decider run). Rows already in
   `change_log` when the gate lands are not rewritten; they are consumed once through the cursors and their
   queued events drain with the backlog (section 8, step 6).
 
   **Rollout.** The gate ships in two scopes. In step 2 it applies to entities whose `backend` column marks an
-  owning backend (Jira), whose rows are watched-only already. In step 4 it applies to every `issue` entity, in
+  owning backend (Jira) and, until the step 3 backfill, to a NULL-`backend` id that resolves to one
+  (INV-ICD-10(c)), whose rows are watched-only already. In step 4 it applies to every `issue` entity, in
   the same release that retires the tiers and marks the baseline. A gate on every issue entity in step 2 would
   silence beads before any beads entity is watched, because until step 4 no beads entity has the flag and the
   old tiers still serve beads through the same append function.
@@ -815,10 +915,12 @@ outcome alert of INV-ICD-21 makes visible (section 7).
 
 - **pg-desk.** `pg_desk_watched_entities{type,backend}` (the count of watched entities),
   `pg_desk_ingest_failed{backend}` and its oldest age, `pg_desk_oldest_orphan_read_age_seconds{backend}`
-  (INV-ICD-17) and `pg_desk_issue_unflagged_members{backend}` (INV-ICD-21), persisted by the CLI in `meta` and
-  read at scrape time (the CLI is short-lived); instruments registered without `_total`. An alert on the
-  oldest failed-ingest age, modelled in `internal/alertrules` and registered with the router probe's rule-uid
-  list. `pg-desk-focus-consumer-lag` keeps working (the consumer rows stay).
+  (INV-ICD-17), `pg_desk_watched_source_observed_age_seconds{backend}` and
+  `pg_desk_issue_unflagged_members{backend}` (INV-ICD-21), all new series (the existing ones are
+  `pg_desk_due_backlog`, `pg_desk_consumer_lag` and `pg_desk_watch_listing_status`), persisted by the CLI in
+  `meta` and read at scrape time (the CLI is short-lived); instruments registered without `_total`. An alert
+  on the oldest failed-ingest age, modelled in `internal/alertrules` and registered with the router probe's
+  rule-uid list. `pg-desk-focus-consumer-lag` keeps working (the consumer rows stay).
 - **Beads.** The event-log fields and alerts of section 4.4.
 - **Jira daemon** (the GitHub design's catalogue, prefix `pg_connector_issue_jira.`): `daemon.up`,
   `governor.paused{reason}`, `jira.requests{result}`, `budget.remaining` as configured-rate headroom,
@@ -835,22 +937,33 @@ outcome alert of INV-ICD-21 makes visible (section 7).
   installed until cleanup).
 - **INV-ICD-21 (outcome alerts).** The PR design alerts on outcomes (its section on alerts adds an alert for
   PR work not created), and this design needs the same, because the process-liveness rules above cannot see a
-  watched issue that silently stopped being observed. These alerts MUST exist; each is modelled in
-  `internal/alertrules` (pg-desk side) or in the daemon's alert file, has a promtool test (T-24), has its uid
-  registered with the router probe, and uses `noDataState: Alerting` guarded by pg-desk liveness where its
-  series is derived from the store at scrape time:
+  watched issue that silently stopped being observed. These alerts MUST exist; each pg-desk alert is
+  an alert rule model in `internal/alertrules` with a model test (the convention of that package: there is no
+  `rule-tests/` directory under `packages/pg-desk`), and each daemon alert is in the daemon's alert file with a
+  promtool test; every one has its uid registered with the router probe and uses `noDataState: Alerting`
+  guarded by pg-desk liveness where its series is derived from the store at scrape time. Items 1 to 3 are
+  tested by T-24; item 4 is the router's existing generic rule until its per-event series exists, and gets its
+  own model test in the step that adds the series:
   1. **Orphan lag.** `pg_desk_oldest_orphan_read_age_seconds{backend}` above a threshold, which is a spike
      output. Recommended default: 30 minutes, which is `6 polls x 5 minutes`, the longest an orphan waits
-     under the recommended cap of INV-ICD-17 with up to `6 x 10 = 60` orphans.
-  2. **Watched issue not observed.** The age of the oldest successful observation of the source of any watched
-     open issue (beads: the last successful listing of its watched query, or its orphan read; Jira: the
-     daemon's `query.last_success_age_seconds` and `consumer.oldest_unacked_age_seconds`) above one day, the
-     PR design's revisit evidence ("more than a day"). This bounds how long a watched open issue's tracker
+     under the recommended cap of INV-ICD-17. The `6 x 10 = 60` orphans that cap would serve in that time is a
+     sizing assumption, not a measured orphan count.
+  2. **Watched issue not observed.** `pg_desk_watched_source_observed_age_seconds{backend}`: the age of the
+     oldest successful observation of the source of any watched open issue (beads: the last successful
+     listing of its watched query, from a NEW `meta` key `change_flow.listing_ok.<query>` because the stored
+     listing value is overwritten at every call, failures included, `changes/listing.go:46-51`, or the
+     orphan's `read_ok_at`; Jira: the daemon's `query.last_success_age_seconds` and
+     `consumer.oldest_unacked_age_seconds`) above one day, the PR design's revisit evidence ("more than a
+     day"). This bounds how long a watched open issue's tracker
      state can differ from pg-desk's. A direct comparison of tracker state with stored state would need a
      tracker read per watched issue and is not built by default (a spike output, item 13).
   3. **An issue that should be watched is not.** `pg_desk_issue_unflagged_members{backend}`: members of the
      last successful listing of a watched query (beads) or of the daemon's watched queries (Jira) whose pg-desk
-     entity has no `watched` flag; the alert fires on any non-zero value across two consecutive polls. The
+     entity has no `watched` flag; the alert fires on any non-zero value across two consecutive polls. Members
+     of a query whose baseline is in progress (INV-ICD-18) are excluded until it has been open one day:
+     at about 170 members (section 1) and `hydration.max_per_poll` of 50 a baseline takes
+     `ceil(170 / 50) = 4` polls, 20 minutes at 5 minutes per poll, which is longer than the `2 x 5 = 10`
+     minutes the alert needs. The
      `doctor` report "an entity nothing watches" stays a report, not an alert.
   4. **A failed decider run with no later change.** An issue whose decider dispatch ended failed after the
      router's retry window and which has not changed since. Its source is a per-event router series of failed
@@ -865,7 +978,8 @@ outcome alert of INV-ICD-21 makes visible (section 7).
   `pg-router-queue-depth-growing` and `queue-slow-growth` stay quiet for 7 days. Those two alerts are the
   regression alarm; each gets a positive promtool case (the measured growth fires, 113 per hour at the first
   measurement and 130 per hour at the second, section 1) and a negative one (the steady state does not).
-- **`doctor` and `status`.** Gates (can fail): a failed-ingest entity older than a bound; a `cursor_expired:`
+- **`doctor` and `status`.** Gates (can fail): a failed-ingest entity older than a bound; a baseline open for more than one day
+  (INV-ICD-18(h)); a `cursor_expired:`
   key; a dispatch-configuration mismatch with the capabilities answer, including a `watched` mismatch
   (INV-ICD-14); active issue entities of a backend with no watched query declared for it (so a missing
   declaration is loud, section 8 step 4). Reports: watched count per backend, the member count of each watched
@@ -880,7 +994,7 @@ FIRST, then the beads path.
    split, the watched-only emission, the removal of both sweep tiers and of the `reconcile` kind for `issue`,
    `fields_changed`, the delivery gate, baseline and late watch, orphan reads, redelivery idempotence,
    `--reset` for `issue` (watched entities only, kind `added`, not `reconcile`), and the invariant rewrites of
-   section 5), `store-schema.md` (the `backend` and `watched` columns, the column-only write, the failed-ingest
+   section 5), `store-schema.md` (the `backend`, `watched` and read-time columns, the column-only write, the failed-ingest
    side table, the gate in the append function, the `change_flow.baseline.<query>` and
    `change_flow.feed_seq.<instance>` meta keys), `consumer.md`, `config.md` (the query `watched` flag, the issue
    flow no longer reading `sweep.*`, `orphan_max_per_poll`), `operator-commands.md` (`refresh --watch`, the
@@ -895,55 +1009,55 @@ FIRST, then the beads path.
    `issue`; the invariants of section 5 rewritten), recording the operator rulings verbatim. Read-only spikes:
    what `bd list --json` returns against what the decider reads; the `bd` budget defaults; the active and the
    watched count per backend and the real-change rate (section 1); Jira's burst headroom on the shared tenant
-   and `search --expand`; whether the closed-at migration is safe for the GitHub store; the tracked-set size
+   and `search --expand`; whether the closed-at migration is safe for the GitHub store (a read-only check against the current
+   ladder; the rung's position is the hoist's, step 1.5, and it is proven again there); the tracked-set size
    threshold; and the other spike outputs of section 10, item 13. **Done when:** the behavior docs and the ADR
    are merged, each spike has a recorded output, and no code has changed.
 
-   **Step 1.5. Prerequisite: the shared-library hoist (bead `pg2-qbu5b`).** Section 3.6 gives the reason and the
-   requirements this design places on it (INV-ICD-20); the bead owns the design and the decomposition, and
-   this design designs none of it. **It moves** into the shared library: the generic change feed, the change
-   engine skeleton (settle, per-query baseline, membership, the watched flag), the query runner and the
-   non-provider-specific group rules, with entity-kind and key validation parameterised so each connector
-   registers its kinds. **It defines**, once, for both designs: the single shared configured-query shape with
-   a `watched` option, ONE feed cursor key (one cursor per consumer) and ONE order of the store-schema
-   migration rungs. **Its genericity rule:** the shared library MUST NOT contain anything specific to PRs, CI,
-   issues, Jira or beads; kinds, key shapes, grouping and classifier rules come from each connector as data or
-   interfaces; a guard test fails if the shared package names a concrete provider or kind. **Ordering:** the
-   Jira daemon (step 2) and the PR design's P2 amendment MUST wait for it, and GitHub behaves identically
-   afterwards. **Done when** (this design's part; the bead has its own acceptance): the shared package passes
-   the genericity guard, the GitHub daemon's existing tests pass unchanged, and the query shape, cursor key
-   and ladder order this design relies on (INV-ICD-20(b) to (d)) are recorded on the bead.
+   **Step 1.5. Prerequisite: the shared-library hoist (bead `pg2-qbu5b`).** Section 3.6 lists what it moves, its
+   starting inventory and what it defines and implements once for both designs (the query shape, the stored
+   watched flag, the cursor key, the ladder order, the store identity, delivery by the flag); INV-ICD-20 states
+   the requirements, including genericity. The bead owns the design and the decomposition, and this design
+   designs none of it. **Ordering:** the Jira daemon (step 2) and the PR design's P2 amendment MUST wait for it
+   and only consume what it builds, and GitHub behaves identically afterwards. **Done when** (this design's
+   part; the bead has its own acceptance): the genericity guard passes with its committed allowlist, the
+   GitHub daemon's existing tests pass unchanged, and the shape, key, store identity, delivery rule and ladder
+   order this design relies on (INV-ICD-20(b) to (f)) are recorded on the bead.
 
 2. **Jira daemon (first, after step 1.5):** library use (config-declared governor buckets, and the closed-at
-   migration of section 3.2 at the rung position the hoist assigns; the stored watched flag, the watch option
-   and the unified feed are the PR design's P2 and are built once in the shared library, section 14, by
-   whichever of this step and P2 lands first, the other rebasing onto it; both wait for the hoist), the
-   daemon, the Jira groups and
-   tracking, the budget, the feed, the umbrella manual-acknowledge mode, pg-desk's feed consumption,
-   `Issue.Version` and the comment summary, observability and packaging (home-manager options and launchd
-   entry with a distinct label, state directory, log name and `service_name`; exact-path `logSources`; the old
-   backend's error alert off to avoid a double page; an absolute `pjira` path because launchd gives no `PATH`;
-   the nix checks mirrored from the GitHub daemon), and the shadow run. The pieces that both backends need
-   LAND HERE, with the first consumer: the dispatch surface (INV-ICD-10) with the `backend` and `watched`
-   columns and the column-only write, the manual-acknowledge verbs and the failed-ingest side table
-   (INV-ICD-11), the normalised comparison (INV-ICD-6 and INV-ICD-7, which `fields_changed` needs: without it
-   every hydration that differs only in `as_of`, `stale` or `updated_at` would emit), `fields_changed`
-   (INV-ICD-5) in the daemon's classifier and in pg-desk's, and the `--retry-window` flag on the pg-desk
-   router source adapter. Two things follow from landing them here. (a) The old local and remote tiers MUST
-   skip an entity whose backend owns changes, so a Jira issue is never swept by the tiers the daemon
-   replaces (INV-ICD-10), and owning-backend entities MUST be excluded from `DueBacklog`,
-   `pg_desk_due_backlog` and `SweepInputs.ActiveCount` (a Jira entity that the old tiers skip never gets a new
-   `hydrated_at` and would otherwise be due for ever and inflate the sweep bound). (b) The pg-desk
-   observability of section 7 for the feed and the failed-ingest table (`pg_desk_ingest_failed{backend}`, its
-   oldest-age alert, the `cursor_expired:` and dispatch-mismatch doctor gates) lands here, so no row is
-   acknowledged past without an alert. The tests that step 2 invalidates (`changes/changes_test.go`,
-   `config_test.go`, `doctor_test.go`: feed consumption contradicts INV-CHANGES-5) are rewritten here, and
-   `changes/sweep_test.go` and `metrics/changeflow_test.go` gain additive cases here (the old-tier skip, the
-   `pg_desk_ingest_failed` series); the rest are rewritten in step 4. (c) The delivery gate of INV-ICD-16 ships
-   here in its first scope, for entities of an owning backend, together with the redelivery idempotence of
+   migration of section 3.2 at the rung position the hoist assigns; the stored watched flag, the cursor key,
+   the store identity and the delivery by flag are the hoist's and are consumed here, section 14), the
+   daemon, the Jira groups and tracking, the budget, the feed, the umbrella manual-acknowledge mode, pg-desk's
+   feed consumption, `Issue.Version` and the comment summary, observability and packaging (home-manager
+   options and launchd entry with a distinct label, state directory, log name and `service_name`; exact-path
+   `logSources`; the old backend's error alert off to avoid a double page; an absolute `pjira` path because
+   launchd gives no `PATH`; the nix checks mirrored from the GitHub daemon), and the shadow run. The pieces
+   that both backends need LAND HERE, with the first consumer: the dispatch surface (INV-ICD-10) with the
+   `backend` and `watched` columns, the column-only write, `hydrateJiraIssue` writing `backend`, and the
+   caller-facing umbrella `capabilities` verb with its `doctor` gate (INV-ICD-10(a), INV-ICD-14(a); each Jira
+   query's `watched` value is included, the beads backend's values follow in step 4), the manual-acknowledge
+   verbs and the failed-ingest side table (INV-ICD-11), the normalised comparison (INV-ICD-6 and INV-ICD-7,
+   which `fields_changed` needs: without it every hydration that differs only in `as_of`, `stale` or
+   `updated_at` would emit), `fields_changed` (INV-ICD-5) in the daemon's classifier and in pg-desk's, and the
+   `--retry-window` flag on the pg-desk router source adapter. Two things follow from landing them here.
+   (a) The old local and remote tiers MUST skip an entity whose backend owns changes, so a Jira issue is never
+   swept by the tiers the daemon replaces (INV-ICD-10), and owning-backend entities MUST be excluded from
+   `DueBacklog`, `pg_desk_due_backlog` and `SweepInputs.ActiveCount` (a Jira entity that the old tiers skip
+   never gets a new `hydrated_at` and would otherwise be due for ever and inflate the sweep bound). (b) The
+   pg-desk observability of section 7 for the feed and the failed-ingest table (`pg_desk_ingest_failed{backend}`,
+   its oldest-age alert, the `cursor_expired:` and dispatch-mismatch doctor gates) lands here, so no row is
+   acknowledged past without an alert, and so do the Jira halves of the outcome alerts of INV-ICD-21 items 2
+   and 3 (the daemon's `query.last_success_age_seconds` and `consumer.oldest_unacked_age_seconds`, and the
+   unflagged-member series for Jira), because the Jira cutover of step 3 precedes step 4. The tests that
+   step 2 invalidates (`changes/changes_test.go`, `config_test.go`, `doctor_test.go`: feed consumption
+   contradicts INV-CHANGES-5) are rewritten here, and `changes/sweep_test.go` and `metrics/changeflow_test.go`
+   gain additive cases here (the old-tier skip, the `pg_desk_ingest_failed` series); the rest are rewritten in
+   step 4. (c) The delivery gate of INV-ICD-16 ships here in its first scope, for entities of an owning
+   backend (and NULL-`backend` ids that resolve to one), together with the redelivery idempotence of
    INV-ICD-19. The Jira daemon does not stop the flood (section 1, Jira holds 3 to 4 entities in the sampled
-   ledgers); it does not depend on the beads path. **Done when:** T-5, T-8 (the owning-backend cases), T-9,
-   T-10, T-11, T-13, T-14, T-17, T-20 (its owning-backend cases), T-21, T-22 and T-23 pass; the daemon runs
+   ledgers); it does not depend on the beads path. **Done when:** T-3, T-5, T-7 (its row cases), T-8 (the
+   owning-backend and NULL cases), T-9, T-10, T-11, T-12 (its Jira cases), T-13, T-14, T-15 (its daemon rules),
+   T-17, T-20 (its owning-backend cases), T-21, T-22, T-23 and T-24 (its Jira cases) pass; the daemon runs
    under its launchd label with its alert rules registered and the shadow run of the GitHub design's rollout
    has completed; and the closed-at rung is proven against the GitHub store and its fixture (T-10).
 3. **Cutover for Jira:** the deployment declares which Jira queries are watched BEFORE the registry switch
@@ -951,21 +1065,25 @@ FIRST, then the beads path.
    form `[pg-connector-issue-jira, --config, <path>, --instance, <name>]` for every list that names the
    backend (the home-manager module rewrites them from one place, as for GitHub); the daemon baselines its
    queries (a baseline run, INV-ICD-18, so no row); pg-desk's first feed poll starts at the tail; run the
-   **one-time backfill**: for each owning watched query one `list` read of the daemon, then the column-only
-   write sets `backend` and `watched` for every returned id that pg-desk holds (INV-ICD-10(c)); `refresh`
-   cannot be that source, because it knows no backend. Then run `pg-desk issue refresh <id>` once for each
-   active Jira issue so its snapshot is current (the 3 to 4 entities of the sampled ledgers; the packet
-   records the real count). Clear the umbrella cache and ledger files for the Jira instance, and again at
-   rollback. Rollback is the registry switch back to the old instance. `pg-desk issue changes --reset`
-   replays every WATCHED active issue as `added` (INV-ICD-15) and MUST NOT be part of any runbook except after
-   a store move-aside. **Done when:** every active Jira entity has `backend` and `watched` set; an edit to a
-   watched Jira issue yields one event and one decider run, and an edit to an unwatched Jira issue yields none
-   (T-18); the old Jira instance is no longer in any registry list.
+   **one-time backfill** (INV-ICD-10(c)): for each owning watched query one `list` read of the daemon, then
+   the column-only write sets `backend` and `watched` for every returned id that pg-desk holds, and every
+   OTHER held Jira id gets `backend` set by the probe of INV-ICD-10(c), so no Jira entity keeps a NULL
+   `backend`; `refresh` cannot be that source, because it knows no backend. Then run `pg-desk issue refresh
+<id>` once for each active Jira issue so its snapshot is current (the 3 to 4 entities of the sampled
+   ledgers; the packet records the real count). Clear the umbrella cache and ledger files for the Jira
+   instance, and again at rollback. Rollback is the registry switch back to the old instance. `pg-desk issue
+changes --reset` replays every WATCHED active issue as `added` (INV-ICD-15) and MUST NOT be part of any
+   runbook except after a store move-aside. **Done when:** every Jira entity pg-desk holds has `backend` set
+   and `watched` set exactly for those the daemon reports as watched; an edit to a watched Jira issue yields
+   one event and one decider run, and neither an edit to an unwatched Jira issue nor a change to a PR linked
+   to one yields any (T-18); T-2 and T-19 pass for their Jira cases; the old Jira instance is no longer in any
+   registry list.
 4. **Beads path (stops the flood; follows the Jira daemon, build order only):** the `watched` flag on beads
-   queries and its rendering into pg-desk (INV-ICD-14), the `watched` column and the per-query baseline
-   markers (INV-ICD-18), the one-off `refresh --watch`, the orphan reads and their cap and metric
-   (INV-ICD-17), the delivery gate extended to every `issue` entity (INV-ICD-16), the retirement of both sweep
-   tiers and of the `reconcile` kind for `issue`, the `due backlog` change, the `bd` budget (INV-ICD-9), the
+   queries and its rendering into pg-desk (INV-ICD-14), with the beads backend's values in the `capabilities`
+   verb that step 2 added, the per-query baseline markers (INV-ICD-18), the one-off `refresh --watch`, the
+   orphan reads, their two read-time columns, cap and metric (INV-ICD-17), the delivery gate extended to every
+   `issue` entity (INV-ICD-16), the retirement of both sweep tiers and of the `reconcile` kind for `issue`
+   with the classifier rewrite of section 4.1, the `due backlog` change, the `bd` budget (INV-ICD-9), the
    beads, watched and outcome metrics and alerts of section 7, the sweep-bound change, and the sweep and
    metrics tests. **Consequence of the
    ordering, stated so it is not a surprise:** until this step deploys the flood continues (130 per hour
@@ -987,9 +1105,11 @@ FIRST, then the beads path.
    live check T-18: one edit to a watched bead yields one event, an edit to an unwatched bead yields none,
    and `pg-router run-query` on the source shows zero items in steady state. **Rollback** is reverting the
    release: the old tiers return and the flood resumes (which is why the revert is the last resort), and the
-   `watched` and `backend` columns, the meta keys and the side table stay in the store, because they are
+   `watched`, `backend` and read-time columns, the meta keys and the side table stay in the store, because they are
    additive, use no `user_version` change and are ignored by the old binary (INV-ICD-10(c)). **Done when:**
-   the success criterion of section 7 holds for 7 days and T-1, T-2, T-16, T-18, T-19, T-20 and T-24 pass.
+   the success criterion of section 7 holds for 7 days and T-1, T-2, T-4, T-6, T-7 (its fingerprint cases),
+   T-8 (its beads cases), T-12 (its beads cases), T-15 (its budget rules), T-16, T-18, T-19 (its beads cases),
+   T-20 and T-24 pass.
 
 5. **No migration off `PG_CONNECTOR_ISSUE_BEADS_DIR` is needed**, because beads stays one-shot with
    `--beads-dir` and the environment variable as today; a Jira instance takes its settings from its config file
@@ -1037,39 +1157,38 @@ uses a `bd` shim replaying transcripts recorded from the real tool (with a fresh
 `bd` version) and a fake `pjira` at the exec seam with a counting recorder; the real-`bd` tests are a named
 cutover gate with their own prefix and workspace per test, including two trackers on one dolt server.
 
-| Id   | Invariant                         | Property                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Mutation it must kill                                                                                                |
-| ---- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| T-1  | INV-ICD-15, -6, -7                | Steady state (beads): N watched entities (N from the spike of section 1), 100 polls at 5 minutes (`100 x 5 = 500` minutes, 8.3 hours), the fake `bd` returns identical snapshots that differ only in `as_of`, `served_from` and `age_seconds`: zero change rows, zero emissions and zero hydrations of listed members                                                                                                                                                                                                                                                                                                                                                                 | a tier that emits by age; an unchanged re-hydration appending a row; a normaliser that keeps `served_from`           |
-| T-2  | INV-ICD-13(a) to (d), -14(b), (c) | Watched: an issue that was only read or only tracked delivers no row and no event; a member of a `watched` query, and a one-off watch read, deliver rows; stickiness (INV-ICD-13(c)): the flag survives the issue leaving every query, its `closed` row is delivered, then the flag is cleared (beads at deactivation, Jira at eviction); a Jira `reopened` inside the 7-day window is delivered, and after eviction the issue is a first observation again                                                                                                                                                                                                                           | emit for every tracked issue; drop the flag when the issue leaves its query                                          |
-| T-3  | INV-ICD-5                         | `fields_changed`: a labels-only edit and a priority-only edit each produce exactly one content row and one emission; an exact kind is asserted for every other kind                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | restore "no kind, no row"; collapse every kind                                                                       |
-| T-4  | INV-ICD-15                        | No re-emission: a failed decider run is not re-emitted by pg-desk; the next change of that issue is emitted; no `reconcile` kind, `sweep` origin or `local-reconcile` origin exists for `issue`; no timer re-emits a focus-annotated issue; `pg-desk issue changes --reset` replays only WATCHED active issues, as `added` with origin `reset`; an `entered_query` or `left_query` row of an already-known issue appends no row                                                                                                                                                                                                                                                       | a timer, sweep or acknowledgement that re-emits; `--reset` emitting `reconcile`; a membership row stored as a change |
-| T-5  | INV-ICD-10(c)                     | Storage: the `backend` and `watched` columns and the failed-ingest table are created with no `user_version` change; an older binary still opens the store; a read-only open of a store without them works; the column-only write appends no row and does not bump `entity.version`                                                                                                                                                                                                                                                                                                                                                                                                    | bump `user_version`; bump the version on a column write                                                              |
-| T-6  | INV-ICD-9                         | `bd` budget: over `bd_max_concurrent` or `bd_max_per_minute` a call waits then answers `unavailable`; a SIGKILLed backend with a still-running `bd` child keeps its slot until the child exits; writes keep reserved slots; an unwritable state directory fails open and logs it                                                                                                                                                                                                                                                                                                                                                                                                      | slot tied to the backend process; no write reservation                                                               |
-| T-7  | INV-ICD-5, -7                     | Fingerprint completeness: for each field the issue rules and the view read, mutating only that field changes the fingerprint or yields a row; the field list is derived by parsing the rule sources                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | a hand-copied list                                                                                                   |
-| T-8  | INV-ICD-10(a) to (c)              | Dispatch: a beads query list-and-diffs, an owning Jira query consumes the feed, a mixed watch list does both in one poll; every `changes` call pins `--backend`; a mismatch with the capabilities answer is a doctor gate; the entity `backend` column drives the old-tier exclusion; `refresh` and the orphan read of an owning-backend entity read the column and pass `--backend` (a Jira id never costs a `bd` call), a NULL column resolves from the configured watched queries, and an id served by queries of two backends is a doctor gate                                                                                                                                    | dispatch by type; a `changes` call without `--backend`; an unpinned `issue show` on a Jira id                        |
-| T-9  | INV-ICD-11                        | Acknowledgement mechanics: `--no-ack` does not acknowledge; an empty poll acknowledges `next_seq`; a row that fails to hydrate is recorded and acknowledged past, and a following row still commits; the failed row is retried every poll and surfaces in the alert; two concurrent polls serialise on the consumer lock                                                                                                                                                                                                                                                                                                                                                              | acknowledge on flush; stop at the first failure                                                                      |
-| T-10 | INV-ICD-2, -20(d)                 | Jira tracking: an issue read by a caller is tracked; an open tracked issue is refreshed beyond 24 hours and 7 days; a closed issue is refreshed for 24 hours, served unrefreshed to 7 days, then evicted; the tracked-set alert fires above its size; the closed-at migration opens a GitHub store and the GitHub migration tests pass, with a fixture store for the version it produces                                                                                                                                                                                                                                                                                              | refresh after closure for ever; evict at closure                                                                     |
-| T-11 | INV-ICD-4                         | Jira budget: the rate and concurrency caps are hard; a 429 pauses background work for `Retry-After` (60 seconds when absent) and consecutive 429s double with jitter; interactive reads are served stale during a pause                                                                                                                                                                                                                                                                                                                                                                                                                                                               | drop the cap; ignore `Retry-After`                                                                                   |
-| T-12 | INV-ICD-6                         | Convergence: a decider write (a claim or label) on a watched issue comes back as a fingerprint change, one content row and one decider run, whose own run writes nothing; at most one extra run per write, for beads and Jira                                                                                                                                                                                                                                                                                                                                                                                                                                                         | a loop; counting `updated_at` as content                                                                             |
-| T-13 | INV-ICD-1, -5, -6                 | Jira detection: the entity carries a comment count and the time of the latest comment; `updated` alone triggers a `detail` re-pull and no row; a comment yields `comments_changed`; a daemon restart serves fresh groups with zero origin calls                                                                                                                                                                                                                                                                                                                                                                                                                                       | `updated` as a row trigger; no comment summary                                                                       |
-| T-14 | INV-ICD-3                         | Writes: a write succeeds with the daemon down; carries the caller's actor; with `write_begin` delivered a refresh before or during the write cannot store older content, even when `invalidate` is dropped                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | route writes through the daemon                                                                                      |
-| T-15 | INV-ICD-4, -9, -21                | Alert rules (promtool): each fires and clears; the queue-depth rule fires on the measured growth and not on the steady state; the Jira daemon-down rule fires when it is deployed and absent and not when it is undeployed; the `bd` budget rules (sustained `budget_denied`, `bd_timeouts`) fire and clear                                                                                                                                                                                                                                                                                                                                                                           | one rule for deployed and undeployed                                                                                 |
-| T-16 | INV-ICD-17                        | Orphan reads: at most the cap per poll, oldest-read first, so N orphans are each read within `ceil(N / cap)` polls; the comparison is on the normalised snapshot (a `list_fp`-only difference appends nothing), and an unchanged read writes nothing and leaves the version and `list_fp` untouched; `not_found` appends one `removed` row, clears the flag, deactivates and stops the reads; a failed or degraded read leaves the entity watched and due; closure yields `closed` and ends the flag; the oldest-read-age series is emitted                                                                                                                                           | deactivate on leaving the query; drop the flag at the query boundary; read all orphans every poll; compare `list_fp` |
-| T-17 | INV-ICD-3, -20                    | GitHub carry-over for the Jira daemon: `env -i` independence with an absolute `pjira`, migrations and move-aside, log rotation, client with the daemon absent answers `unavailable` and never `served_from: cache`, protocol N-1, SIGTERM drain, Linux cross-compile, nix render tests                                                                                                                                                                                                                                                                                                                                                                                                | a daemon that depends on the environment of its caller                                                               |
-| T-18 | INV-ICD-13(d), -15, -16           | Live exercise (repository rule, recorded on the bead): after each deployment `pg-router run-query` on the source shows zero items in steady state; one edit to a watched issue yields one event and one decider run; an edit to an unwatched issue yields none, and so does a change to a PR linked to an unwatched issue                                                                                                                                                                                                                                                                                                                                                             | n/a (a live check, not a mutation)                                                                                   |
-| T-19 | INV-ICD-18                        | Baseline and late watch: a query's first complete run appends no rows and marks its members; a query added later runs a baseline (zero rows for N members, no flood); a member present at the baseline never appends `added`; an entity first seen after the marker appends exactly one `added`; a known entity that becomes watched appends exactly one `added`; a baseline of more members than `hydration.max_per_poll` stays silent across polls and the marker is written only after the last one; a moved-aside store re-baselines silently; a baselined Jira query flipped to watched appends one `added` per known member, hydrated at most `hydration.max_per_poll` per poll | marker written at the first poll; "appears later" beating the baseline; two rows for one entity                      |
-| T-20 | INV-ICD-16                        | Delivery gate: on an UNWATCHED issue an edit hydrated by `refresh`, a `link_changed` or `work_changed` propagation from a PR change to a linked issue, an annotation write and a `--reset` replay each append NO row and produce NO event, while the snapshot, link or annotation write itself succeeds; on a WATCHED issue the same operations append rows; `refresh <id> --watch` sets the flag in the same write, so its row passes; a watched issue's `closed` row is appended before the flag clears; step 2 scope: only owning-backend entities are gated and a beads entity still emits through the old tiers; step 4 scope: every `issue` entity                              | gate on read instead of append (hides `closed`); gate missing on propagation; gate on every issue entity in step 2   |
-| T-21 | INV-ICD-10(d)                     | `--fresh` stays: a hydration after a detected change is never served from the umbrella read-through cache; an answer with `stale: true` or `served_from` of cache (including the fallback after a budget-denial `unavailable`) is DEGRADED: nothing is written and the entity stays due                                                                                                                                                                                                                                                                                                                                                                                               | drop `--fresh`; store a cache-served snapshot with the new `list_fp`                                                 |
-| T-22 | INV-ICD-19                        | Redelivery: a crash between a commit and its acknowledgement, then redelivery of the same rows, yields exactly one change row per feed `seq`; a row whose `seq` is at or below the committed marker appends no row, bumps no version and produces no event; the marker is written in the same transaction as the row                                                                                                                                                                                                                                                                                                                                                                  | a marker written after the transaction; duplicate rows on redelivery                                                 |
-| T-23 | INV-ICD-20                        | Shared library (the hoist owns and runs these; this design requires them): a guard test fails if the shared package names a concrete provider or kind; a bare string or list query parses as unwatched and an object query with `watched = true` parses as watched; the GitHub daemon's existing tests pass unchanged; one cursor per consumer; the ladder test asserts the one order of rungs                                                                                                                                                                                                                                                                                        | a shared package that imports a connector's `internal/` tree or names `pr`, `ci`, an issue or a Jira kind            |
-| T-24 | INV-ICD-21                        | Outcome alerts (promtool): orphan lag, watched issue not observed and unflagged member each fire on their series and clear; `noDataState: Alerting` is guarded by pg-desk liveness; each uid is registered with the router probe; the failed-decider alert is the router's generic failure-rate rule until the spike of section 10 item 13 decides on a per-event series                                                                                                                                                                                                                                                                                                              | an alert that reads process liveness only; an unregistered uid                                                       |
+| Id   | Invariant                         | Property                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Mutation it must kill                                                                                                                         |
+| ---- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| T-1  | INV-ICD-15, -6, -7                | Steady state (beads): N watched entities (N from the spike of section 1), 100 polls at 5 minutes (`100 x 5 = 500` minutes, 8.3 hours), the fake `bd` returns identical snapshots that differ only in `as_of`, `served_from` and `age_seconds`: zero change rows, zero emissions and zero hydrations of listed members                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | a tier that emits by age; an unchanged re-hydration appending a row; a normaliser that keeps `served_from`                                    |
+| T-2  | INV-ICD-13(a) to (d), -14(b), (c) | Watched: an issue that was only read or only tracked delivers no row and no event; a member of a `watched` query, and a one-off watch read, deliver rows; stickiness (INV-ICD-13(c)): the flag survives the issue leaving every query, its `closed` row is delivered, then the flag is cleared (beads at deactivation, Jira at eviction); a Jira `reopened` inside the 7-day window is delivered (pg-desk's Jira `watched` column is cleared at deactivation and set again by that feed row), and after eviction the issue is a first observation again                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | emit for every tracked issue; drop the flag when the issue leaves its query                                                                   |
+| T-3  | INV-ICD-5                         | `fields_changed`: a labels-only edit and a priority-only edit each produce exactly one content row and one emission; an exact kind is asserted for every other kind                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | restore "no kind, no row"; collapse every kind                                                                                                |
+| T-4  | INV-ICD-15                        | No re-emission: a failed decider run is not re-emitted by pg-desk; the next change of that issue is emitted; no `reconcile` kind, `sweep` origin or `local-reconcile` origin exists for `issue`; no timer re-emits a focus-annotated issue; `pg-desk issue changes --reset` replays only WATCHED active issues, as `added` with origin `reset`; an `entered_query` or `left_query` row of an already-known issue appends no row                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | a timer, sweep or acknowledgement that re-emits; `--reset` emitting `reconcile`; a membership row stored as a change                          |
+| T-5  | INV-ICD-10(c)                     | Storage: the `backend` and `watched` columns and the failed-ingest table are created with no `user_version` change; an older binary still opens the store; a read-only open of a store without them works; the column-only write appends no row and does not bump `entity.version`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | bump `user_version`; bump the version on a column write                                                                                       |
+| T-6  | INV-ICD-9                         | `bd` budget: over `bd_max_concurrent` or `bd_max_per_minute` a call waits then answers `unavailable`; a SIGKILLed backend with a still-running `bd` child keeps its slot until the child exits; writes keep reserved slots; an unwritable state directory fails open and logs it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | slot tied to the backend process; no write reservation                                                                                        |
+| T-7  | INV-ICD-5, -7                     | Fingerprint completeness: for each field the issue rules and the view read, mutating only that field changes the fingerprint or yields a row; the field list is derived by parsing the rule sources                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | a hand-copied list                                                                                                                            |
+| T-8  | INV-ICD-10(a) to (c), -14(a)      | Dispatch: a beads query list-and-diffs, an owning Jira query consumes the feed, a mixed watch list does both in one poll; every `changes` call pins `--backend`; a mismatch with the capabilities answer is a doctor gate; the entity `backend` column drives the old-tier exclusion; `refresh` of an owning-backend entity reads the column and passes `--backend` (a Jira id never costs a `bd` call), a NULL column resolves from the configured watched queries, and an id served by queries of two backends is a doctor gate; `hydrateJiraIssue` writes `backend` by the probe of INV-ICD-10(c), the step 3 backfill leaves no Jira entity with a NULL `backend`, and until then the step 2 gate covers a NULL-`backend` id that resolves to an owning backend (a PR change linked to it yields no row); the caller-facing `capabilities` verb returns each query's `watched` value, and a `watched` mismatch and a backend with no watched query declared are `doctor` gates                                                                            | dispatch by type; a `changes` call without `--backend`; an unpinned `issue show` on a Jira id; a NULL-`backend` Jira entity escaping the gate |
+| T-9  | INV-ICD-11                        | Acknowledgement mechanics: `--no-ack` does not acknowledge; an empty poll acknowledges `next_seq`; a row that fails to hydrate is recorded and acknowledged past, and a following row still commits; the failed row is retried every poll and surfaces in the alert; two concurrent polls serialise on the consumer lock                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | acknowledge on flush; stop at the first failure                                                                                               |
+| T-10 | INV-ICD-2, -20(d)                 | Jira tracking: an issue read by a caller is tracked; an open tracked issue is refreshed beyond 24 hours and 7 days; a closed issue is refreshed for 24 hours, served unrefreshed to 7 days, then evicted; the tracked-set alert fires above its size; the closed-at migration opens a GitHub store and the GitHub migration tests pass, with a fixture store for the version it produces                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | refresh after closure for ever; evict at closure                                                                                              |
+| T-11 | INV-ICD-4                         | Jira budget: the rate and concurrency caps are hard; a 429 pauses background work for `Retry-After` (60 seconds when absent) and consecutive 429s double with jitter; interactive reads are served stale during a pause                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | drop the cap; ignore `Retry-After`                                                                                                            |
+| T-12 | INV-ICD-6                         | Convergence: a decider write (a claim or label) on a watched issue comes back as a fingerprint change, one content row and one decider run, whose own run writes nothing; at most one extra run per write, for beads and Jira                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | a loop; counting `updated_at` as content                                                                                                      |
+| T-13 | INV-ICD-1, -5, -6                 | Jira detection: the entity carries a comment count and the time of the latest comment; `updated` alone triggers a `detail` re-pull and no row; a comment yields `comments_changed`; a daemon restart serves fresh groups with zero origin calls                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `updated` as a row trigger; no comment summary                                                                                                |
+| T-14 | INV-ICD-3                         | Writes: a write succeeds with the daemon down; carries the caller's actor; with `write_begin` delivered a refresh before or during the write cannot store older content, even when `invalidate` is dropped                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | route writes through the daemon                                                                                                               |
+| T-15 | INV-ICD-4, -9                     | Alert rules (promtool): each fires and clears; the queue-depth rule fires on the measured growth and not on the steady state; the Jira daemon-down rule fires when it is deployed and absent and not when it is undeployed; the `bd` budget rules (sustained `budget_denied`, `bd_timeouts`) fire and clear                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | one rule for deployed and undeployed                                                                                                          |
+| T-16 | INV-ICD-17                        | Orphan reads (beads): at most the cap per poll, read first out of the shared `hydration.max_per_poll` budget, oldest-ATTEMPT first, so N orphans are each attempted within `ceil(N / cap)` polls and a failing orphan rotates rather than holding a slot; the comparison is on the normalised snapshot (a `list_fp`-only difference appends nothing), and an unchanged read writes nothing and leaves the version and `list_fp` untouched; `not_found` appends one `removed` row (delivered although the same write then clears the flag), deactivates and stops the reads; a failed or degraded read leaves the entity watched and due; closure yields `closed` and ends the flag; the oldest-read-age series is emitted and counts from the last SUCCESSFUL read                                                                                                                                                                                                                                                                                            | deactivate on leaving the query; drop the flag at the query boundary; read all orphans every poll; compare `list_fp`                          |
+| T-17 | INV-ICD-3, -20                    | GitHub carry-over for the Jira daemon: `env -i` independence with an absolute `pjira`, migrations and move-aside, log rotation, client with the daemon absent answers `unavailable` and never `served_from: cache`, protocol N-1, SIGTERM drain, Linux cross-compile, nix render tests                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | a daemon that depends on the environment of its caller                                                                                        |
+| T-18 | INV-ICD-13(d), -15, -16           | Live exercise (repository rule, recorded on the bead): after each deployment `pg-router run-query` on the source shows zero items in steady state; one edit to a watched issue yields one event and one decider run; an edit to an unwatched issue yields none, and so does a change to a PR linked to an unwatched issue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | n/a (a live check, not a mutation)                                                                                                            |
+| T-19 | INV-ICD-18                        | Baseline and late watch: a query's first complete run appends no rows and marks its members; a query added later runs a baseline (zero rows for N members, no flood); a member present at the baseline never appends `added`; an entity first seen after the marker appends exactly one `added`; a known entity that becomes watched appends exactly one `added`; a baseline of more members than `hydration.max_per_poll` stays silent across polls and the marker is written only after the last one; a moved-aside store re-baselines silently; a held member whose `list_fp` differs at baseline is hydrated with no row; a known, active, unwatched entity of unchanged `list_fp` that becomes watched is selected and appends one `added`, and a late watch cut by the hydration budget is retried at the next poll; a member that never hydrates keeps the baseline open and trips the `doctor` gate after one day; a baselined Jira query flipped to watched appends one `added` per known member, hydrated at most `hydration.max_per_poll` per poll | marker written at the first poll; "appears later" beating the baseline; two rows for one entity                                               |
+| T-20 | INV-ICD-16                        | Delivery gate: on an UNWATCHED issue an edit hydrated by `refresh`, a `link_changed` or `work_changed` propagation from a PR change to a linked issue, an annotation write and a `--reset` replay each append NO row and produce NO event, while the snapshot, link or annotation write itself succeeds; on a WATCHED issue the same operations append rows; `refresh <id> --watch` sets the flag in the same write, so its row passes; a watched issue's `closed` row and a `removed` row (feed row or orphan `not_found`) are appended and delivered although the same write clears the flag; a gated annotation write on an unwatched issue still reports `changed` (the changed flag is separate from the seq); step 2 scope: only owning-backend entities are gated and a beads entity still emits through the old tiers; step 4 scope: every `issue` entity                                                                                                                                                                                             | gate on read instead of append (hides `closed`); gate missing on propagation; gate on every issue entity in step 2                            |
+| T-21 | INV-ICD-10(d)                     | `--fresh` stays: a hydration after a detected change is never served from the umbrella read-through cache; an answer with `stale: true` or `served_from` of cache (including the fallback after a budget-denial `unavailable`) is DEGRADED: nothing is written and the entity stays due                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | drop `--fresh`; store a cache-served snapshot with the new `list_fp`                                                                          |
+| T-22 | INV-ICD-19                        | Redelivery: a crash between a commit and its acknowledgement, then redelivery of the same rows, yields exactly one change row per feed `seq`; a row whose store identity matches and whose `seq` is at or below the committed marker appends no row, bumps no version and produces no event; a store identity change or `cursor_expired:` (the daemon store moved aside, its sequence restarting at 1) resets the marker, so new rows with `seq` below the old marker are NOT skipped; the marker is written in the same transaction as the row                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | a marker written after the transaction; duplicate rows on redelivery; a marker keyed on `seq` alone                                           |
+| T-23 | INV-ICD-20                        | Shared library (the hoist owns and runs these; this design requires them): a guard test fails if the hoisted code or a new identifier in `pkg/connectord` names a concrete provider or kind, with an explicit committed allowlist for the opaque PR-named store columns (`head_sha`, `last_known_mergeable`, `ChangeRow.HeadSHA`); the store identity is on every feed answer, and delivery by the watched flag is asserted (a non-member's `closed` row is delivered, an unwatched entity's row is not); a bare string or list query parses as unwatched and an object query with `watched = true` parses as watched; the GitHub daemon's existing tests pass unchanged; one cursor per consumer; the ladder test asserts the one order of rungs                                                                                                                                                                                                                                                                                                             | a shared package that imports a connector's `internal/` tree or names `pr`, `ci`, an issue or a Jira kind                                     |
+| T-24 | INV-ICD-21                        | Outcome alerts (alert rule model tests in `internal/alertrules`, promtool for the daemon's): orphan lag, watched issue not observed and unflagged member each fire on their series and clear, and a baseline in progress is excluded from the unflagged-member alert until it has been open one day; `noDataState: Alerting` is guarded by pg-desk liveness; each uid is registered with the router probe; the failed-decider alert is the router's generic failure-rate rule until the spike of section 10 item 13 decides on a per-event series                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | an alert that reads process liveness only; an unregistered uid                                                                                |
 
 **Invariant coverage.** Each invariant has at least one row, and each row above names its invariants.
 INV-ICD-1: T-13. INV-ICD-2: T-10. INV-ICD-3: T-14, T-17. INV-ICD-4: T-11, T-15. INV-ICD-5: T-3, T-7, T-13.
 INV-ICD-6: T-1, T-12, T-13. INV-ICD-7: T-1, T-7. INV-ICD-9: T-6, T-15. INV-ICD-10: T-5, T-8, T-21.
 INV-ICD-11: T-9. INV-ICD-13: T-2, T-18. INV-ICD-14: T-2, T-8. INV-ICD-15: T-1, T-4, T-18. INV-ICD-16: T-18,
-T-20. INV-ICD-17: T-16. INV-ICD-18: T-19. INV-ICD-19: T-22. INV-ICD-20: T-10, T-17, T-23. INV-ICD-21: T-15,
-T-24. `INV-ICD-8` and `INV-ICD-12` are withdrawn.
+T-20. INV-ICD-17: T-16. INV-ICD-18: T-19. INV-ICD-19: T-22. INV-ICD-20: T-10, T-17, T-23. INV-ICD-21: T-24. `INV-ICD-8` and `INV-ICD-12` are withdrawn.
 
 ## 10. Open questions and risks
 
@@ -1129,7 +1248,7 @@ are resolved items or recorded risks.
     loses the one-off watch flags and, for pg-desk, the failed-ingest side table after its rows were
     acknowledged (INV-ICD-11), bounded by the watched entities of the backend and recovered by the
     dropped-key runbook of section 5; query members are re-baselined silently (INV-ICD-18(g)); (c) a feed row
-    redelivered after a crash is neutralised by INV-ICD-19, not a loss; (d) a change reaches a watched bead only
+    redelivered after a crash is neutralised by INV-ICD-19, and a moved-aside daemon store by the store identity reset of that invariant, not a loss, except the post-commit writes of the crashed run (links, interpretation), which `pg-desk issue refresh <id>` recovers; (d) a change reaches a watched bead only
     through another bead: a blocker closing changes a dependant's stored recursive `issue_deps` without the
     dependant's own fingerprint moving (`INV-CHANGES-16` and `-17`), so the dependant is seen at its next
     change. No detector exists for (d); its detector is a spike output (item 13) and until then the gap is
@@ -1194,11 +1313,12 @@ draft.
 | 9 (review 2) | A second independent read-only review of the revised draft 9 (same dimensions, no memory of review 1)                                                           | REVISE, three majors (each confirmed in the code) and eleven minors, all applied except where noted. Majors: `--fresh` was wrongly called a no-op for beads and dropped, which would let hydration after a detected change read a stale cache entry for up to 120 seconds and lose the change, so it STAYS on hydration reads (INV-ICD-10(d)); the per-entity `backend` column had no source for existing rows or for `refresh`, so it is now set from the pinned backend on every listing, feed row and hydration, with NULL as non-owning until first set (INV-ICD-10(c)); INV-ICD-6 contradicted the classifier's `updated_at` comments proxy, so the proxy is retired for Jira and kept for beads pending the spike (INV-ICD-6, section 10 item 4). Minors: the storage-addition mechanism is stated; the normalisation extends `contentSignature`; section 12 labels; the 6-hour retry default marked provisional and below its own bound; the drain-window mixing noted; T-1 overrides `max_age`; the step 2 test list; the pull-forward fallback's two gaps; the role opt-in for router retry and the missing adapter behavior doc; kinds for an owning backend are taken from the feed row; four phrasings that went past what the operator ruled were trimmed to the quotes. Not verifiable from the repo and left as stated: the bead-state claims about `.44.37` and `.52.22`. That revision was reviewed in the next row |
 | 9 (review 3) | A third independent read-only review, told to spend most of its effort verifying code and doc claims against the repo                                           | REVISE, five majors (the two spot-checked were confirmed in the code) and eight minors, applied. Majors: `refresh` and hydration have no pinned backend, so the `backend` column is written only from feed rows and from changing listings and is READ (with resolution from the watched queries) elsewhere, with a step 3 backfill (INV-ICD-10(c)); the storage mechanism MUST be a new ensure function before `migrate()`'s early return, because the cited precedent runs only for a version-1 store (INV-ICD-10(c)); "extends `contentSignature`" did not work for issues, so a new payload-level normaliser is factored out of `stripAsOf` and also drops `served_from` and `age_seconds` (INV-ICD-7); the `--fresh` guarantee had a hole when the umbrella falls back to a stale cache on `unavailable`, so hydration treats a stale or cache-served answer as degraded (INV-ICD-10(d)); the kept beads comments proxy now bumps `content_seq` and the "MUST NOT" sentence says so (INV-ICD-6, Appendix A). Minors: the owning-entity exclusion from `DueBacklog` and `ActiveCount`, the missing kinds and link propagation for feed rows, `-6`, `-9` and `-11` scoping, the `sweep.max_age` key and scope, the unflagged drain windows, the unverifiable menu-bar claim, and ruling-fidelity labels ("this design's reading"). The revision has not been reviewed again                                                       |
 | 10           | The operator, 2026-10-22: ruling 7 (the watched-entity model)                                                                                                   | Draft 10, 2026-10-22: reshaped to the watched-entity model per operator ruling 7; not independently reviewed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| 11           | Two independent reviews of draft 10 (internal consistency; fit with the code and with the other designs), then the operator's decisions D1 to D3 of 2026-10-22  | Draft 11, 2026-10-22: applied the two independent reviews of draft 10 and operator decisions D1-D3 (hoist pg2-qbu5b, delivery gated on watched, ruling 8); not independently re-reviewed. Changes: section 13 renumbered to the bead's rulings 1 to 8 with verbatim quotes; the shared-library hoist as a prerequisite (section 3.6, step 1.5, INV-ICD-20); the delivery gate (INV-ICD-16); one first-observation kind `added`, baseline and late watch (INV-ICD-18), no re-emission (INV-ICD-15), orphan-read bounds (INV-ICD-17), redelivery idempotence (INV-ICD-19), outcome alerts (INV-ICD-21); every invariant restated with RFC 2119 words and mapped to a test row; a done-when per step, the beads cutover and rollback, the backfill in step 3, the three stale fragments of `pg2-2j5ac.44.37`; item 9 resolved by ruling 8 with the later bead `pg2-f7155`; unsourced figures dropped                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 11           | Two independent reviews of draft 10 (internal consistency; fit with the code and with the other designs), then the operator's rulings 8 to 10 of 2026-10-22     | Draft 11, 2026-10-22: applied the two independent reviews of draft 10 and the operator's rulings 8 to 10 (ruling 8, the hoist pg2-qbu5b, delivery gated on watched); not independently re-reviewed. Changes: section 13 renumbered to the bead's rulings 1 to 8 with verbatim quotes; the shared-library hoist as a prerequisite (section 3.6, step 1.5, INV-ICD-20); the delivery gate (INV-ICD-16); one first-observation kind `added`, baseline and late watch (INV-ICD-18), no re-emission (INV-ICD-15), orphan-read bounds (INV-ICD-17), redelivery idempotence (INV-ICD-19), outcome alerts (INV-ICD-21); every invariant restated with RFC 2119 words and mapped to a test row; a done-when per step, the beads cutover and rollback, the backfill in step 3, the three stale fragments of `pg2-2j5ac.44.37`; item 9 resolved by ruling 8 with the later bead `pg2-f7155`; unsourced figures dropped                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 12           | Two independent reviews of draft 11 (internal consistency; technical feasibility against main)                                                                  | Draft 12, 2026-10-22: applied the second round of two independent reviews (internal consistency, technical feasibility) of draft 11; not independently re-reviewed. Both REVISE, no blocker, no ruling contradicted. Changes: redelivery keyed on (instance, store identity) with the identity, delivery by the watched flag and the guard scope owned by the hoist (INV-ICD-19, -20); the gate reads the flag before the statement and clears it after the append (INV-ICD-16, -17); no Jira entity keeps a NULL `backend` (INV-ICD-10(c)); one list of append causes (INV-ICD-15); INV-ICD-17 is beads only with reserved capacity; baseline failure bound and late-watch selection (INV-ICD-18); the `capabilities` verb lands in step 2; every test row is cited by its step; section 13 records rulings 9 and 10                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ## 13. Operator rulings of 2026-10-20 to 2026-10-22
 
-Recorded on `pg2-oa1h4`. The numbering is the bead's (rulings 1 to 8), and each passage in quotation marks as
+Recorded on `pg2-oa1h4`. The numbering is the bead's (rulings 1 to 10), and each passage in quotation marks as
 "verbatim" is a continuous passage of the bead's text (the bead's line wrapping and doubled spaces after a full
 stop are normalised). Each ruling supersedes the draft text it names. Where this document says "first" or
 "follows", that is the design's reading of the ruling "higher priority" as build order only, not a separate
@@ -1234,7 +1354,7 @@ Ruled 2026-10-21:
 6. **Router selective-drop bead.** Not filed for now. Verbatim: "lets wait on the selective drop for now. see
    my previous comment about proper dedup" (section 8 step 6, section 10 item 8).
 
-Ruled 2026-10-22:
+Ruled 2026-10-22 (rulings 9 and 10 after the independent reviews of draft 10):
 
 7. **The watched-entity model.** Issue change emission follows the PR pattern for BOTH beads and Jira issues:
    "the implementation of beads and jira should be similar to how PR will work". Verbatim fragments: "the
@@ -1265,30 +1385,30 @@ Ruled 2026-10-22:
    deletes `watch.issue.queries` and pg-desk's beads list-and-diff, as the PR design does for PRs. Section 10
    item 9 is resolved accordingly (sections 2.2 and 4.2).
 
-Decisions of 2026-10-22 taken after the independent reviews of draft 10. D1 is recorded on `pg2-qbu5b`; D2 is
-not recorded as a numbered ruling on `pg2-oa1h4` and no verbatim text of it exists in this repository, so it is
-stated as the decision, not as a quotation, and the operator's session records it on the bead when this design
-lands:
-
-- **D1. The shared library is hoisted first and kept generic.** Bead `pg2-qbu5b`. Verbatim, from that bead:
-  "shared library is good, make sure the shared is generic enough and doesn't contain specifics of either
-  usage." The Jira daemon (step 2) and the PR design's P2 amendment wait for it (section 3.6, step 1.5,
-  INV-ICD-20).
-- **D2. Delivery of `issue.changed` is gated on `watched`.** pg-desk does not append or deliver a change row
-  for an unwatched issue entity, whatever the origin (section 5, INV-ICD-16).
-- **D3. Ruling 8 resolves open item 9.** The later bead is `pg2-f7155` (section 10 item 9).
+9. **The shared library is hoisted first and kept generic.** The reviews of draft 10 found that the GitHub
+   daemon library holds only the store, governor, scheduler and socket; the change feed, change engine and
+   query runner are GitHub-specific code. Verbatim (typos as in the bead): "1) yes, hsared library si good,
+   make sure the shared is generic enough and doesn't contain specifices of either usage." So the generic feed,
+   change engine and shared `watched` query shape are hoisted into the shared connector-daemon library by bead
+   `pg2-qbu5b`, with no PR, CI, issue, Jira or beads specifics in the shared code, and the Jira daemon (step 2)
+   and the PR design's P2 amendment wait for it (section 3.6, step 1.5, INV-ICD-20).
+10. **Delivery of `issue.changed` is gated on `watched`.** The reviews found that unwatched issue entities
+    still reach the decider through pg-desk-local paths (link and work propagation from a PR change,
+    `pg-desk issue refresh`, annotation writes). Verbatim: "2) yes" (gate delivery of `issue.changed` on
+    `watched`, as recommended). pg-desk MUST NOT append or deliver a change row for an unwatched issue entity,
+    whatever the origin (section 5, INV-ICD-16).
 
 ## 14. Relationship to other in-flight work
 
 The connector-owned, watched-only change pattern for issues is THIS design (`pg2-oa1h4`), not a separate
 effort.
 
-| Bead              | What it is                                                                                                                            | Relationship                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pg2-qbu5b`       | **Prerequisite hoist.** Hoist the generic change feed, change engine and watched-query shape into the shared connector-daemon library | The Jira daemon (step 2) and the PR design's P2 amendment MUST WAIT for it. It moves the feed, the change engine skeleton (settle, per-query baseline, membership, watched flag), the query runner and the non-provider-specific group rules into `pkg/connectord`, GENERIC: nothing specific to PRs, CI, issues, Jira or beads, kinds and key shapes supplied by each connector, and a guard test that fails if the shared package names a concrete provider or kind. It also owns the ONE configured-query shape with a `watched` option, the ONE feed cursor key and the ONE order of the store-schema rungs. THIS design only states those requirements (INV-ICD-20) |
-| `pg2-z5fax`       | The GitHub daemon program; its shared library has landed only in part (store, governor, scheduler, socket, process, router)           | The Jira daemon uses the shared library AFTER the hoist, not "the landed library"; the closed-at migration (section 3.2) MUST be proven safe against the GitHub store                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `pg2-z5fax.4`     | Phase 3b of that program, the change engine (open)                                                                                    | Edits the same area as the hoist; the hoist bead decides with that docket which lands first                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `pg2-6mo45`       | The PR lane refactor                                                                                                                  | Its phase P2 (tracked versus watched, a stored watched flag, the watch option, one cursor per consumer, no keep-alive decay) amends the SAME shared pieces as this design's Jira daemon and MUST wait for the hoist too. After it, the change is implemented once, in the shared library, by whichever of P2 and step 2 lands first; the other rebases onto it. The PR design is read at commit `23b7b33ac` of its own branch                                                                                                                                                                                                                                            |
-| `pg2-f7155`       | Beads connector owns change detection for beads issues (the later step of ruling 8)                                                   | Retires pg-desk's beads list-and-diff and `watch.issue.queries` after this design's step 4; not designed here (sections 2.2, 4.2, 10 item 9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `pg2-gudqw`       | pg-desk work item design: the work-item selection design, which drops `focus_selected` and focus-bead minting                         | The 30-minute focus re-emission is removed because the annotation it keyed on is dropped there. That bead does NOT own the focus coverage or the watched queries it needs (they are section 10 item 12 and the due-backlog paragraph of section 5 here), and it plans "a schema step beyond schema 2" that could meet this design's ensure-before-`migrate()` mechanism (INV-ICD-10(c)), a coordination point                                                                                                                                                                                                                                                            |
-| `pg2-2j5ac.44.37` | The Phase 15 operator-run checkpoint, gated by this design                                                                            | Its body has three stale fragments that the operator's session replaces when this design lands (section 8, step 7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Bead              | What it is                                                                                                                            | Relationship                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pg2-qbu5b`       | **Prerequisite hoist.** Hoist the generic change feed, change engine and watched-query shape into the shared connector-daemon library | The Jira daemon (step 2) and the PR design's P2 amendment MUST WAIT for it. It moves and defines what section 3.6 lists, GENERIC and guarded (INV-ICD-20(a)), and implements the query shape, the stored watched flag, the cursor key, the ladder order, the store identity and delivery by the flag; THIS design only consumes them and states the requirements (INV-ICD-20)                                 |
+| `pg2-z5fax`       | The GitHub daemon program; its shared library has landed only in part (store, governor, scheduler, socket, process, router)           | The Jira daemon uses the shared library AFTER the hoist, not "the landed library"; the closed-at migration (section 3.2) MUST be proven safe against the GitHub store                                                                                                                                                                                                                                         |
+| `pg2-z5fax.4`     | Phase 3b of that program, the change engine (open)                                                                                    | Edits the same area as the hoist; the hoist bead decides with that docket which lands first                                                                                                                                                                                                                                                                                                                   |
+| `pg2-6mo45`       | The PR lane refactor                                                                                                                  | Its phase P2 (tracked versus watched, a stored watched flag, the watch option, one cursor per consumer, no keep-alive decay) amends the SAME shared pieces as this design's Jira daemon and MUST wait for the hoist too. The hoist implements the shared pieces once; P2 and step 2 only consume them. The PR design is read at commit `23b7b33ac` of its own branch                                          |
+| `pg2-f7155`       | Beads connector owns change detection for beads issues (the later step of ruling 8)                                                   | Retires pg-desk's beads list-and-diff and `watch.issue.queries` after this design's step 4; not designed here (sections 2.2, 4.2, 10 item 9)                                                                                                                                                                                                                                                                  |
+| `pg2-gudqw`       | pg-desk work item design: the work-item selection design, which drops `focus_selected` and focus-bead minting                         | The 30-minute focus re-emission is removed because the annotation it keyed on is dropped there. That bead does NOT own the focus coverage or the watched queries it needs (they are section 10 item 12 and the due-backlog paragraph of section 5 here), and it plans "a schema step beyond schema 2" that could meet this design's ensure-before-`migrate()` mechanism (INV-ICD-10(c)), a coordination point |
+| `pg2-2j5ac.44.37` | The Phase 15 operator-run checkpoint, gated by this design                                                                            | Its body has three stale fragments that the operator's session replaces when this design lands (section 8, step 7)                                                                                                                                                                                                                                                                                            |
