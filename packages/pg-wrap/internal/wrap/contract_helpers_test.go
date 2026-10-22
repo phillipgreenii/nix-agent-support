@@ -77,6 +77,12 @@ func readReport(t *testing.T, prefix string) *report {
 	}
 	r := &report{env: map[string]string{}}
 	f := strings.Fields(string(procB))
+	if len(f) == 1 {
+		// Only the pid came back: ps printed nothing for the probe's pid, as in
+		// the nix build sandbox where process inspection is unavailable. Like a
+		// missing tool, that skips rather than fails.
+		t.Skip("ps cannot report process-group and tty info here")
+	}
 	if len(f) != 4 {
 		t.Fatalf("bad probe proc line %q", procB)
 	}
