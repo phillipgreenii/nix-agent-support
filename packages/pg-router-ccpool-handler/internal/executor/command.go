@@ -89,12 +89,22 @@ func (r *commandRun) run(ctx context.Context, d DispatchContext) error {
 	if err != nil {
 		return fmt.Errorf("command role %q: render argv: %w", d.Role.Name, err)
 	}
-	// The next packet (dispatch_start) records argv and the base env names from
-	// here; env is the payload env, baseNames the strict env's variable names.
-	env, _ := commandPayloadEnv(d.Role, d.Item)
-	if _, err := r.runPayload(ctx, argv, env); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == busyExitCode {
+	// env is the payload env, baseNames the strict env's variable names (nil when
+	// the strict switch is off); dispatch_start records the argv and the names,
+	// never an env value.
+	env, baseNames := commandPayloadEnv(d.Role, d.Item)
+	_, err = r.runPayload(ctx, argv, env)
+	var exitErr *exec.ExitError
+	exitedBusy := errors.As(err, &exitErr) && exitErr.ExitCode() == busyExitCode
+	// dispatch_start is per ACCEPTED dispatch and is written once acceptance is
+	// known: the payload ran to an exit of any code but 9 (exit 9 is a decline and
+	// gets dispatch_decline instead). A payload that could not start leaves none (and a
+	// payload that hangs never reaches here): core records that dispatch's error.
+	if err == nil || (exitErr != nil && !exitedBusy) {
+		r.emitCommandStart(d, argv, baseNames)
+	}
+	if err != nil {
+		if exitedBusy {
 			return fmt.Errorf("command role %q item %s: %w: %w", d.Role.Name, d.Item.ID, ErrBusy, err)
 		}
 		return fmt.Errorf("command role %q item %s: %w%s", d.Role.Name, d.Item.ID, err, stderrSuffix(err))

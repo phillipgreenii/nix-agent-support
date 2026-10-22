@@ -72,4 +72,9 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   role, the item's id and type, the rendered argv, whether `strictBaseEnv` is on, and the **names** of
   the base-environment variables the payload received, never their values and never the item-context
   values. A decline writes a `dispatch_decline` record with the role, the item id, the reason, the
-  kind and the evidence it has.
+  kind and the evidence it has. The `dispatch_start` fields are `role`, `item_id`, `item_type`,
+  `argv`, `strict_base_env` and `base_env_names`; it is written once the payload has exited with any
+  code but `9`, since exit `9` is a decline, so a payload that cannot start or never exits leaves
+  none. The `dispatch_decline` fields are `role`, `item_id`, `reason`, `decline_kind`,
+  `session_env` (an empty object for this adapter), `evidence` and `failure_signature` (`INV-CCH-35`
+  lists them in full).

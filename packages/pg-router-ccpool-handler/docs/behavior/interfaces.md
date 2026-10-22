@@ -60,9 +60,10 @@ and to the deployment. Each is fully defined by the invariant cited; none is dec
   `command-busy`, `origin-unavailable`, `launch-failed` and the `skipped-*` reasons), each mapped to
   a kind (`INV-CCH-37`).
 - **The `dispatch_start` and `dispatch_decline` event-log records** — what an accepted dispatch ran
-  (role, item id and type, the argv or the launch route, the names of the base-environment variables,
-  the `sessionEnv` entries) and why a dispatch declined (role, item id, reason, kind, `sessionEnv`,
-  redacted evidence, failure signature) (`INV-CCH-35`).
+  (`role`, `item_id`, `item_type`, then `argv`, `strict_base_env` and `base_env_names` for a
+  command-backed role, or `route` (`launched` or `adopted`), `session` and `session_env` for a
+  ccpool-backed one) and why a dispatch declined (`role`, `item_id`, `reason`, `decline_kind`,
+  `session_env`, `evidence`, `failure_signature`) (`INV-CCH-35`).
 - **The environment of a payload** — the three item-context variables `PG_ROUTER_ROLE`,
   `PG_ROUTER_ITEM_ID` and `PG_ROUTER_ITEM_TYPE` the handler sets for every payload, and, for a
   command-backed role, the keep-list of the base environment (`INV-CCH-32`).

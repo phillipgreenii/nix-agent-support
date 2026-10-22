@@ -99,7 +99,11 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   agent's own environment is the prefix tool's, which an operator reaches by following the
   `PG_WRAP_SPEC` entry to `pg-wrap show`. For every decline it **MUST** write a `dispatch_decline`
   record carrying the role, the item id, the reason, the kind, the `sessionEnv`, the redacted evidence
-  tail and the failure signature (`INV-CCH-35`).
+  tail and the failure signature (`INV-CCH-35`). The `dispatch_start` fields are `role`, `item_id`,
+  `item_type`, `route`, `session` and `session_env`, where `route` is `launched` (this dispatch ran
+  `ccpool new` and it returned ready) or `adopted` (it took over a live session of the same event's
+  turn); the `dispatch_decline` fields are `role`, `item_id`, `reason`, `decline_kind`,
+  `session_env`, `evidence` and `failure_signature` (`INV-CCH-35` lists them in full).
 
 ## Across a cutover
 

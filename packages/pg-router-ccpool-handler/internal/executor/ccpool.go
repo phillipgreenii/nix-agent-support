@@ -351,6 +351,8 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		slog.Warn("dispatch declined: the session failed before it was ready", "role", d.Role.Name, "bead", d.Item.ID, "err", err)
 		return report.Result{}, &LaunchFailedError{Tail: failsig.Redact(err.Error()), Err: launchErr}
 	}
+	// The dispatch is accepted once ccpool new returned ready (INV-CCH-35).
+	r.emitCCPoolStart(d, RouteLaunched, r.deps.ExternalID)
 	// From here until Dispatch returns (Send, the wait, the watchdog, the
 	// worktree cleanup's quiet wait and the settled-session close) a background
 	// ticker keeps the supervision lease fresh, so a later dispatch can tell this
@@ -1235,6 +1237,8 @@ func dispatchHeadSHA(it item.Item) string {
 func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, existing ccpool.Session) (report.Result, error) {
 	r.noteSession(existing)
 	cc := d.Role.CCPool
+	// Adopting a live session is the other way a dispatch is accepted (INV-CCH-35).
+	r.emitCCPoolStart(d, RouteAdopted, existing.ExternalID)
 	// The lease covers this absorbed session for as long as this dispatch is alive
 	// (takeOverForAbsorb already wrote the first refresh under the session lock).
 	defer r.startLease(ctx, existing.ExternalID)()

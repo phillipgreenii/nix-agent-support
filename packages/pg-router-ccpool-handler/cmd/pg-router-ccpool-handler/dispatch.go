@@ -172,8 +172,11 @@ func runDispatch(args []string) int {
 	// or ccpool call and mutates no bead. orchestrator.gated() is untouched —
 	// the gate lives here, at the handler boundary, because only the handler
 	// knows which repo a dispatch runs in.
+	// Every decline below writes one dispatch_decline record (INV-CCH-35) to the
+	// handler's event log just before its reply.
+	declineLog := newEventLog(cfg)
 	if reason, declined := originGate(context.Background(), newOriginProber(cfg), role, cfg, dctx.Item.ID); declined {
-		writeBusyReply(os.Stdout, neutralDecline(reason, ""))
+		declineAndReply(os.Stdout, declineLog, role, dctx.Item.ID, neutralDecline(reason, ""))
 		return conformance.ExitBusy
 	}
 	deps := buildDeps(cfg, role)
@@ -274,7 +277,7 @@ func runDispatch(args []string) int {
 	// the decline is the same pre-accept busy reply as every other, carrying the
 	// skip's own reason so pg-router core's declined metric counts it per reason.
 	if skip, skipped := executor.Precheck(ctx, dctx, deps, bead); skipped {
-		writeBusyReply(os.Stdout, neutralDecline(skip.Reason, skip.Detail))
+		declineAndReply(os.Stdout, declineLog, role, dctx.Item.ID, neutralDecline(skip.Reason, skip.Detail))
 		return conformance.ExitBusy
 	}
 	result, err := executor.For(role.Type).Dispatch(ctx, dctx, deps)
@@ -296,7 +299,7 @@ func runDispatch(args []string) int {
 		// backpressure" — confirmed live 2026-09-22 as otherwise
 		// indistinguishable without manually cross-referencing ccpool
 		// capacity by hand.
-		writeBusyReply(os.Stdout, decline)
+		declineAndReply(os.Stdout, declineLog, role, dctx.Item.ID, decline)
 		return conformance.ExitBusy
 	}
 	if err != nil {
@@ -632,6 +635,44 @@ func writeBusyReply(w io.Writer, d busyDecline) {
 		body["detail"] = d.Detail
 	}
 	writeReply(w, body)
+}
+
+// declineAndReply writes the dispatch_decline event-log record of d and then the
+// decline's reply body: the one place every decline passes through (INV-CCH-35).
+func declineAndReply(w io.Writer, log *eventlog.Writer, role roles.Role, itemID string, d busyDecline) {
+	emitDispatchDecline(log, role, itemID, d)
+	writeBusyReply(w, d)
+}
+
+// emitDispatchDecline writes the dispatch_decline record: the role, the item's
+// id, the reason, the kind (as decline_kind: the event log's own kind field names
+// the record), the role's sessionEnv (non-secret by rule, so values
+// are written as-is; empty for a command-backed role), the redacted evidence tail
+// and the failure signature. Only a launch-failed decline has evidence (the
+// redacted tail of the ccpool new error, bounded like the wire detail) and a
+// signature (launch-failed); both are "" for every other reason. A decline of
+// kind fault is logged at warn, the others at info. It never returns an error: a
+// log that cannot be written must not change the decline.
+func emitDispatchDecline(log *eventlog.Writer, role roles.Role, itemID string, d busyDecline) {
+	if log == nil {
+		return
+	}
+	sessionEnv := make(map[string]string, len(role.SessionEnv))
+	for k, v := range role.SessionEnv {
+		sessionEnv[k] = v
+	}
+	evidence, signature := "", ""
+	if d.Reason == busyReasonLaunchFailed {
+		evidence, signature = d.Detail, string(failsig.LaunchFailed)
+	}
+	level := "info"
+	if d.Kind == declineKindFault {
+		level = "warn"
+	}
+	_ = log.Emit(level, executor.DispatchDeclineKind, "dispatch declined: "+d.Reason, map[string]any{
+		"role": role.Name, "item_id": itemID, "reason": d.Reason, "decline_kind": d.Kind,
+		"session_env": sessionEnv, "evidence": evidence, "failure_signature": signature,
+	})
 }
 
 // handlerStateDir resolves the handler state directory exactly as the origin

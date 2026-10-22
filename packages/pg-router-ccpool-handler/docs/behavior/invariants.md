@@ -1002,6 +1002,24 @@ changes a core gate or `INV-LIFE-2`.
     each of the last two where the decline has one.
   - **What the records never hold.** Neither record holds an item-context value, a prompt, an item's
     content or an unredacted failure text.
+  - **The fields as implemented.** Both go to the handler's event log, `events.jsonl` in the handler
+    state directory, as one JSON object per line with the log's own `time`, `level`, `kind` and `msg`.
+    `dispatch_start` adds `role`, `item_id` and `item_type`, then for a command-backed role `argv`
+    (as rendered), `strict_base_env` (boolean) and `base_env_names` (sorted; empty when the switch is
+    off), and for a ccpool-backed role `route`, `session` (the session's external id) and
+    `session_env` (the role's entries, values included). `route` is `launched` when this dispatch
+    launched a fresh session through `ccpool new` and it returned ready, and `adopted` when it took
+    over a live session of the same event's turn (`INV-CCH-30`): ccpool does not report its own
+    internal route to its caller, so the record names the route the handler took. A command-backed
+    `dispatch_start` is written after the payload exits with any code but `9` (exit `9` is a decline);
+    a payload that cannot start, hangs or is killed before it exits leaves none, and the core records
+    that dispatch's error. A ccpool-backed one is written once `ccpool new` returned ready or the
+    adoption took over, before the nudge is sent. `dispatch_decline` adds `role`, `item_id`,
+    `reason`, `decline_kind` (the kind of `INV-CCH-37`: the record's own `kind` field names the
+    record), `session_env` (the role's entries; an empty object for a command-backed role),
+    `evidence` (the redacted, bounded tail of the `ccpool new` error, `""` unless the reason is
+    `launch-failed`) and `failure_signature` (`launch-failed` for that reason, else `""`). A decline
+    of kind `fault` is logged at `warn`, the others at `info`; `dispatch_start` at `info`.
 
 - **`INV-CCH-36`** <!-- uuid: aa67ccb6-b7ca-4d1d-b111-726493428b0a --> — the handler MUST provide
   `validate`, the adapter's one validation entry point, and `validate` MUST NOT run a payload.
