@@ -372,6 +372,13 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// DEC-OBS-4): one series per enabled, non-excluded PULL source with a
 	// period, last-success initialised to now (process start).
 	metricsOpts = append(metricsOpts, metrics.WithPullSources(pullSourceIntervals(cfg)))
+	// pg_router_busy{kind,name} (bead pg2-8ij5o): a source is busy while a fetch of
+	// it is in flight, read from the same activityObs the status reply's sources[]
+	// read, so the metric and status agree. activityObs is constructed here, ahead
+	// of the emitter, for that reason; the ring it writes to is built just below.
+	ring := activity.New(cfg.ActivityRingSize)
+	activityObs := newActivityObserver(ring)
+	metricsOpts = append(metricsOpts, metrics.WithBusySources(activityObs.InFlightSources))
 	emitter, err := metrics.New(mp, func() map[string]int { return queueRef.Load().DepthByType() }, metricsOpts...)
 	if err != nil {
 		_ = store.Close()
@@ -381,13 +388,12 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// (INV-FAIL-3, register gap R21 / bead pg2-00jpn) — the remaining seam
 	// discover.WithSourceFailureObserver's doc left for a follow-on to close.
 	o.SourceFailureObserver = emitter
-	// ring is the dispatch-outcome activity buffer (Task 3.4): a SECOND
+	// ring (built above, ahead of the emitter) is the dispatch-outcome activity buffer (Task 3.4): a SECOND
 	// eventqueue.Observer, fanned out alongside emitter at this one
 	// construction site rather than folded into a new composite-observer
 	// abstraction. Task 3.5 is what embeds *ring in the daemon's assembled
 	// state for Task 3.8's status verb to read live and directly; this
 	// function's own job stops at constructing it and keeping it fed.
-	ring := activity.New(cfg.ActivityRingSize)
 	// activityObs is the SAME instance wired both as one of the queue's
 	// eventqueue.Observer fan-out arms below AND as o.ResourceLimitObserver
 	// (this bead, pg2-fm2gw) — it must be the identical instance so
@@ -397,7 +403,6 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// well before the role-registration loop below calls o.NewListener,
 	// which captures it onto each roleListener at construction (the same
 	// capture-at-construction pattern o.Registry already uses).
-	activityObs := newActivityObserver(ring)
 	o.ResourceLimitObserver = activityObs
 	// activityObs ALSO implements discover.SourceActivityObserver and
 	// core.SourceInFlightReader (DEC-OBS-2, bead pg2-ugcrb) — the SAME

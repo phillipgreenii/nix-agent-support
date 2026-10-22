@@ -76,6 +76,41 @@ func TestStatusReply_ListenerProgressShape(t *testing.T) {
 	}
 }
 
+// TestStatusReply_BusyShape pins the busy state (bead pg2-8ij5o): each listener and
+// each source carries a required boolean `busy`, and the optional top-level `busy`
+// object is exactly {roles, sources}, both string arrays.
+func TestStatusReply_BusyShape(t *testing.T) {
+	mutate := func(f func(g map[string]any)) error {
+		g := loadGolden(t, "cli.status-reply")
+		f(g)
+		return Check("cli.status-reply", g)
+	}
+	row := func(g map[string]any, key string) map[string]any { return g[key].([]any)[0].(map[string]any) }
+	if err := mutate(func(map[string]any) {}); err != nil {
+		t.Fatalf("golden rejected: %v", err)
+	}
+	if err := mutate(func(g map[string]any) { delete(row(g, "listeners"), "busy") }); err == nil {
+		t.Error("a listener without busy was accepted")
+	}
+	if err := mutate(func(g map[string]any) { row(g, "listeners")["busy"] = "yes" }); err == nil {
+		t.Error("a non-boolean listener busy was accepted")
+	}
+	if err := mutate(func(g map[string]any) { delete(row(g, "sources"), "busy") }); err == nil {
+		t.Error("a source without busy was accepted")
+	}
+	if err := mutate(func(g map[string]any) { delete(g, "busy") }); err != nil {
+		t.Errorf("a reply without the top-level busy object was rejected: %v", err)
+	}
+	if err := mutate(func(g map[string]any) { g["busy"] = map[string]any{"roles": []any{}} }); err == nil {
+		t.Error("a busy object without sources was accepted")
+	}
+	if err := mutate(func(g map[string]any) {
+		g["busy"] = map[string]any{"roles": []any{}, "sources": []any{}, "queries": []any{}}
+	}); err == nil {
+		t.Error("a busy object with an extra key was accepted")
+	}
+}
+
 // schemaVersion mismatch is reported (not guessed) at the envelope layer
 // (INV-INTF-1).
 func TestSchemaVersionMismatch(t *testing.T) {

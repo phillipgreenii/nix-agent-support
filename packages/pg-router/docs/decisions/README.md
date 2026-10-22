@@ -78,6 +78,9 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   dispatch latency (config-bounded), and the latency buckets now span 100 ms to 1 hour.
 - [`DEC-OBS-6`](observability.md) — dispatch latency also carries a bounded entity `type` label (the
   event type's prefix before the first `.`; unparseable values map to `other`).
+- [`DEC-OBS-11`](observability.md) — busy is one gauge (`pg_router_busy{kind,name}`), one shared rule
+  and one `status` field, read from the decline kind and the in-flight state only, never a reason; a
+  query is a source.
 - [`DEC-RETRY-1`](retry.md) — exponential-backoff-with-a-cap shape, and its default values, for
   both the handler retry cadence and the pull-source failure backoff.
 - [`DEC-RETRY-2`](retry.md) — a role MAY opt in to a bounded (hard cap 3), transient-class-only

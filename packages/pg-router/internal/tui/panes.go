@@ -114,7 +114,7 @@ func listenerHealthText(l Listener, theme render.Theme) string {
 	default:
 		base = theme.OK.Render("ok")
 	}
-	return base + processingSuffix(l.InFlight)
+	return base + processingSuffix(l.InFlight) + busySuffix(l.Busy, l.InFlight)
 }
 
 // processingSuffix renders DEC-OBS-2's (bead pg2-ugcrb) "processing now"
@@ -127,6 +127,19 @@ func processingSuffix(inFlight bool) string {
 		return ""
 	}
 	return " [processing]"
+}
+
+// busySuffix renders the core's busy verdict (bead pg2-8ij5o) next to the
+// health text. A busy participant that is processing already says so through
+// processingSuffix, so this adds " [busy]" only for a busy one that is NOT in
+// flight: a role declined busy since its last progress. Like processingSuffix it
+// is orthogonal to the health ranking and empty when not busy, so a Listener or
+// Source built without the field renders as before.
+func busySuffix(busy, inFlight bool) string {
+	if !busy || inFlight {
+		return ""
+	}
+	return " [busy]"
 }
 
 // sourceHealthText ranks a source's health: disabled > excluded > failing >
@@ -156,7 +169,7 @@ func sourceHealthText(s Source, now time.Time, theme render.Theme) string {
 	default:
 		base = theme.OK.Render("ok")
 	}
-	return base + processingSuffix(s.InFlight)
+	return base + processingSuffix(s.InFlight) + busySuffix(s.Busy, s.InFlight)
 }
 
 // formatSeconds/formatMinutes render a non-negative duration coarsely (no

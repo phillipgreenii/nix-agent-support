@@ -1298,6 +1298,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 			reply["tickIntervalMs"] = tick.Config.PollInterval.Milliseconds()
 		}
 	}
+	reply["busy"] = statusBusy(reply["listeners"].([]map[string]any), reply["sources"].([]map[string]any))
 	// counters (Binding Decision 7, Task 4.1's operator-widened scope):
 	// read back VERBATIM from the already-landed
 	// internal/metrics.Emitter/MetricsReader mechanism (Task 3.6's mon.read
@@ -1457,6 +1458,10 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 			// role absent from inFlight has none right now.
 			"inFlight":          inFlightNow,
 			"inFlightEventType": inFlightType,
+			// busy (bead pg2-8ij5o): metrics.RoleBusy, the one definition the
+			// pg_router_busy gauge uses too -- an offer in flight, or busy-kind
+			// declines counted since the last progress; never a decline reason.
+			"busy": metrics.RoleBusy(inFlightNow, progress[r.Name]),
 			// description (pg2-ec754) is ALWAYS present, even "" — an
 			// operator-authored free-text note, matching this reply's
 			// existing always-present-key convention (e.g. binds, mode),
@@ -1490,6 +1495,24 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 		return out[i]["role"].(string) < out[j]["role"].(string)
 	})
 	return out
+}
+
+// statusBusy is the status reply's top-level `busy` object (bead pg2-8ij5o): the
+// names of the roles and of the sources that are busy right now, each sorted,
+// read off the already-rendered rows' own `busy` flags so the list and the rows
+// cannot disagree. Both lists are always present, empty when nothing is busy.
+func statusBusy(listeners, sources []map[string]any) map[string]any {
+	names := func(rows []map[string]any, key string) []string {
+		out := []string{}
+		for _, row := range rows {
+			if b, _ := row["busy"].(bool); b {
+				out = append(out, row[key].(string))
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+	return map[string]any{"roles": names(listeners, "role"), "sources": names(sources, "name")}
 }
 
 // readRoleProgress reads the per-role progress state for one status reply; nil
@@ -1556,6 +1579,10 @@ func statusSources(active []SourceReport, excludedSources []string, intervalsMs 
 			"failure":            nil,
 			"expectedIntervalMs": intervalsMs[sr.Name],
 			"inFlight":           inFlight[sr.Name],
+			// busy (bead pg2-8ij5o): a source is busy exactly while a fetch of
+			// it is in flight (a [[query]] is a pull source; there is no
+			// separate query entity).
+			"busy": inFlight[sr.Name],
 			// description (pg2-ec754) is ALWAYS present, even "" — an
 			// operator-authored free-text note, matching this reply's
 			// existing always-present-key convention (e.g. mode), never
@@ -1587,6 +1614,7 @@ func statusSources(active []SourceReport, excludedSources []string, intervalsMs 
 			// this run — STORY-OP-3), so this is always false, never a
 			// lookup into inFlight.
 			"inFlight":    false,
+			"busy":        false,
 			"description": descriptions[name],
 		})
 	}

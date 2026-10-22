@@ -224,6 +224,11 @@ type Listener struct {
 	// Type, empty when InFlight is false.
 	InFlight          bool   `json:"inFlight"`
 	InFlightEventType string `json:"inFlightEventType"`
+	// Busy (bead pg2-8ij5o) is the core's busy verdict for the role: an offer in
+	// flight, or busy-kind declines counted since its last progress. The core
+	// derives it from the decline kind and the in-flight state only, never from a
+	// decline's reason, so the TUI shows it as given.
+	Busy bool `json:"busy"`
 	// Description is the operator-authored free-text note (pg2-ec754), or
 	// "" if unset. Rendered as "-" by renderListenerDetail (drilldown.go),
 	// matching this package's existing absent-value convention.
@@ -266,6 +271,9 @@ type Source struct {
 	// InFlight (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2's "processing now"
 	// signal) is true exactly while this source has a fetch in progress.
 	InFlight bool `json:"inFlight"`
+	// Busy (bead pg2-8ij5o) is the core's busy verdict for the source: a fetch of
+	// it is in flight (a [[query]] is a pull source under the same name).
+	Busy bool `json:"busy"`
 	// Description is the operator-authored free-text note (pg2-ec754), or
 	// "" if unset. Rendered as "-" by renderSourceDetail (drilldown.go),
 	// matching this package's existing absent-value convention.

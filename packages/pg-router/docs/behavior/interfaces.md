@@ -671,7 +671,16 @@ sequenceDiagram
       core is shutting down is **not counted**; a hand-back for a dispatch retry (`DEC-RETRY-2`) is
       counted once.
 
-  Showing a role's busy state in the TUI and `status` is outside this set. **Two alert levels** read these gauges and nothing else (`INV-OBS-3`). Both require a **recent
+  and one more gauge, which is **not** a progress gauge and feeds no alert:
+  - **busy** (`INV-OBS-3`) — per `kind` (`role` or `source`) and `name`: `1` while that role or pull
+    source is **busy**, else `0`, one series for every enabled role and every pull source. A **role is
+    busy** while an offer to it is **in flight**, or while **busy declines** have been counted since it
+    last made progress (`role_busy_since_progress` above is at least one); a **source is busy** while
+    a fetch of it is in flight. A `[[query]]` is a pull source under the same name, so a query has no
+    series of its own. The state comes from the decline's **kind** and the in-flight state only, **never
+    from a decline's reason**. `status` and the TUI show the same state (`INTF-CLI`).
+
+  **Two alert levels** read the three progress gauges and nothing else (`INV-OBS-3`). Both require a **recent
   offer** to the role, so an idle role never fires, and both read the age as its **maximum over a
   recent window**, because the in-flight `0` would otherwise reset a hold; their thresholds are
   plain values in the alert rules file, not core configuration:
@@ -1004,6 +1013,15 @@ Inspection's **MUST** set has widened to also offer:
   additive schema change discovered **after** the widenings above, and carries the explicit
   operator note this section's own rule requires: **operator-approved** as part of
   `phillipgreenii-nix-agent-support` bead `pg2-ugcrb` (2026-09-23).
+- **Busy roles and sources** (`INV-OBS-3`, `INTF-MON`'s **busy** gauge): the `status` reply marks
+  each role and each source **busy** or not and names the busy ones in one top-level `busy` object (a
+  list of roles and a list of sources), the text form lists them in a **BUSY** section with what makes
+  each busy, and the TUI shows the same state beside each role's and source's health. The state is
+  the core's own (an offer or fetch in flight, or busy declines since a role's last progress, by the
+  decline kind), so the three places cannot disagree. This is **inspection only**: it adds no new
+  participant obligation. This reading is itself an additive schema change, **operator-approved**
+  as part of `phillipgreenii-nix-agent-support` bead `pg2-8ij5o` (operator ruling 30 of docket
+  `pg2-12gr4`, 2026-10-21).
 
 A **fourth** reading beyond this now-wider **MUST** set is still a **MAY**: a core **MAY** also
 report **which configured bindings have matched no event this run**, which is a debugging

@@ -686,3 +686,60 @@ func TestStatusCounters_NilMetricsReaderOmitsKey(t *testing.T) {
 		t.Fatalf("counters = %v, want omitted entirely when MetricsReader is nil", reply["counters"])
 	}
 }
+
+// TestStatusListeners_Busy proves each listener's `busy` (bead pg2-8ij5o) is
+// metrics.RoleBusy: true for a role with an offer in flight, true for a role with
+// busy declines counted since its last progress, false otherwise (an unsuccessful
+// count alone, or a disabled role with no progress series, is not busy).
+func TestStatusListeners_Busy(t *testing.T) {
+	declared := []roles.Role{
+		{Name: "flying", Enabled: true},
+		{Name: "declined", Enabled: true},
+		{Name: "calm", Enabled: true},
+		{Name: "failing", Enabled: true},
+		{Name: "off", Enabled: false},
+	}
+	inFlight := map[string]string{"flying": "pr.changed"}
+	progress := map[string]metrics.RoleProgress{
+		"flying": {}, "declined": {Busy: 2}, "calm": {}, "failing": {Unsuccessful: 4, AgeSeconds: 99999},
+	}
+	rows := statusListeners(declared, nil, nil, nil, inFlight, progress)
+	got := map[string]any{}
+	for _, r := range rows {
+		got[r["role"].(string)] = r["busy"]
+	}
+	want := map[string]any{"flying": true, "declined": true, "calm": false, "failing": false, "off": false}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("busy by role = %v, want %v", got, want)
+	}
+}
+
+// TestStatusSources_Busy proves a source's `busy` is true exactly while a fetch of
+// it is in flight, and always false for an excluded source.
+func TestStatusSources_Busy(t *testing.T) {
+	active := []SourceReport{{Name: "fetching", Type: "pull"}, {Name: "idle", Type: "pull"}}
+	inFlight := map[string]bool{"fetching": true, "skipped": true}
+	rows := statusSources(active, []string{"skipped"}, nil, inFlight, nil)
+	got := map[string]any{}
+	for _, r := range rows {
+		got[r["name"].(string)] = r["busy"]
+	}
+	want := map[string]any{"fetching": true, "idle": false, "skipped": false}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("busy by source = %v, want %v", got, want)
+	}
+}
+
+// TestStatusBusy_ListsTheBusyRowsSorted proves the top-level `busy` object names
+// exactly the rows whose own flag is set, sorted, with both lists always present.
+func TestStatusBusy_ListsTheBusyRowsSorted(t *testing.T) {
+	listeners := []map[string]any{
+		{"role": "zeta", "busy": true}, {"role": "alpha", "busy": true}, {"role": "mid", "busy": false},
+	}
+	sources := []map[string]any{{"name": "s2", "busy": false}}
+	got := statusBusy(listeners, sources)
+	want := map[string]any{"roles": []string{"alpha", "zeta"}, "sources": []string{}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("statusBusy = %#v, want %#v", got, want)
+	}
+}

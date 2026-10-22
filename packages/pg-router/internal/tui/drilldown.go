@@ -311,6 +311,7 @@ func renderListenerDetail(l Listener, theme render.Theme, activity []ActivityEnt
 	}
 	fmt.Fprintf(&b, "Fail:           %d\n", l.HandlerFailures)
 	fmt.Fprintf(&b, "Processing:     %s\n", processingText(l.InFlight, l.InFlightEventType))
+	fmt.Fprintf(&b, "Busy:           %s\n", busyText(l.Busy))
 	b.WriteString(renderRecentActivity(activity, l.Role))
 	return b.String()
 }
@@ -348,6 +349,7 @@ func renderSourceDetail(s Source, now time.Time, theme render.Theme, activity []
 		fmt.Fprintf(&b, "%-14s %s\n", "next eligible:", s.Failure.NextEligible.Format("15:04:05"))
 	}
 	fmt.Fprintf(&b, "%-14s %s\n", "Processing:", processingText(s.InFlight, ""))
+	fmt.Fprintf(&b, "%-14s %s\n", "Busy:", busyText(s.Busy))
 	b.WriteString(renderRecentActivity(activity, s.Name))
 	return b.String()
 }
@@ -366,6 +368,14 @@ func processingText(inFlight bool, eventType string) string {
 		return "yes"
 	}
 	return "yes (" + textsafe.Sanitize(eventType) + ")"
+}
+
+// busyText renders the drill-down "Busy" line (bead pg2-8ij5o): "yes" or "no".
+func busyText(busy bool) string {
+	if busy {
+		return "yes"
+	}
+	return "no"
 }
 
 // recentActivityWindow bounds how many of a participant's own recent

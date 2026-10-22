@@ -646,3 +646,33 @@ fewer from 21:15Z, inside the counters' first 6 hours, so a cross-check and not 
 **Not covered, by the ruling.** A wedged session that still counts as in flight (the session runner's own
 session rules, `pool-full-idle` and `needs_input`, own it); a type missing from the rule's role table; a born-expired
 lane whose queue empties between a decline and the re-emit (the "A lane whose queue empties" bullet above).
+
+### `DEC-OBS-11` — busy is one gauge, one shared rule and one status field, read from the decline kind and in-flight state only <!-- uuid: a0d43aec-3a07-4fad-be92-fe611c419b58 -->
+
+**Decided** (operator ruling 30 of docket `pg2-12gr4`, 2026-10-21: "we should be able to see in metrics
+and the tui and the cli status which roles/queries/... are busy"; bead `pg2-8ij5o`). The progress gauges
+(`INV-OBS-3`) already count busy declines per role, but an operator had to read
+three gauges and the in-flight gauge and combine them. Now the core says it.
+
+- **One definition.** A role is busy while an offer to it is in flight (`listener_in_flight`) or while
+  `role_busy_since_progress` is at least one; a pull source is busy while a fetch of it is in flight.
+  `metrics.RoleBusy` is the single place the role rule lives, used by the metric and by the `status`
+  reply, so the two cannot drift. It takes the in-flight flag and the progress counts, never a string:
+  the busy count is already counted from the decline kind (`INV-OBS-3`), so the reason cannot leak in
+  (`GOAL-MIN-1`). `internal/orchestrator/role_busy_test.go` pins it through a real listener and a real
+  emitter, with reasons that read as every kind.
+- **A query is a source.** Each `[[query]]` is a pull source under the same name (`status`'s `sources`
+  and the TUI's Sources pane are the same list), so "roles, queries and sources" is two kinds, `role`
+  and `source`. No separate query series exists.
+- **Metric.** `pg_router_busy{kind,name}` (a gauge, 1 or 0), registered with the role-progress gauges,
+  with source series for every pull source that has a period. The source reading is the same in-flight
+  reader the `status` reply uses, so metric and status agree. It is not read by any alert: the busy
+  alert stays the progress gauges' (`role busy a long time`).
+- **Status and TUI.** Each `listeners[]` and `sources[]` row carries a required boolean `busy`, the reply
+  carries an optional top-level `busy: {roles, sources}` (sorted names, both always present), and the
+  text form prints a `BUSY:` section naming each busy entity and why (offer in flight, N busy declines
+  since last progress, fetch in flight). The TUI decodes the same `busy` and shows ` [busy]` after a
+  role's or source's health when it is busy but not processing (a processing one already shows
+  ` [processing]`), plus a `Busy:` line in the drill-down.
+- **Not decided here.** Whether a busy role should also age out of the busy state without progress (as
+  it stands it stays busy until its next progress or a restart, exactly as the busy count does).

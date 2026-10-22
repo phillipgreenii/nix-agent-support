@@ -188,7 +188,8 @@
           "declined",
           "backoff",
           "description",
-          "progress"
+          "progress",
+          "busy"
         ],
         "properties": {
           "role": { "type": "string" },
@@ -205,6 +206,7 @@
           "unavailableReason": { "type": "string" },
           "inFlight": { "type": "boolean" },
           "inFlightEventType": { "type": "string" },
+          "busy": { "type": "boolean" },
           "progress": {
             "oneOf": [
               { "enum": [null] },
@@ -263,7 +265,8 @@
           "excluded",
           "mode",
           "failure",
-          "description"
+          "description",
+          "busy"
         ],
         "properties": {
           "name": { "type": "string" },
@@ -275,6 +278,7 @@
           "expectedIntervalMs": { "type": "integer", "minimum": 0 },
           "lastTick": { "type": "string" },
           "inFlight": { "type": "boolean" },
+          "busy": { "type": "boolean" },
           "failure": {
             "oneOf": [
               { "enum": [null] },
@@ -290,6 +294,15 @@
             ]
           }
         }
+      }
+    },
+    "busy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roles", "sources"],
+      "properties": {
+        "roles": { "type": "array", "items": { "type": "string" } },
+        "sources": { "type": "array", "items": { "type": "string" } }
       }
     },
     "unmatchedBindings": {

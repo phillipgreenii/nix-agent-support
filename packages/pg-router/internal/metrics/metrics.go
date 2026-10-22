@@ -567,6 +567,7 @@ type options struct {
 	queueReady    func() bool
 	progressRoles []string
 	progressOn    bool
+	busySources   func() []string
 }
 
 // WithQueueReady registers ready, the answer to "does the queue the gauges below read
@@ -928,6 +929,17 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	}
 	if cfg.progressOn {
 		if err := e.registerRoleProgress(m, cfg.progressRoles, cfg.now(), cfg.listenerBusy, ready); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.progressOn || cfg.busySources != nil {
+		var seeded []string
+		for name, iv := range cfg.pullSources {
+			if iv > 0 {
+				seeded = append(seeded, name)
+			}
+		}
+		if err := e.registerBusy(m, cfg.busySources, seeded); err != nil {
 			return nil, err
 		}
 	}

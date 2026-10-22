@@ -511,6 +511,11 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   role has had a **recent offer**, so an idle role never fires. The core exports the gauges and
   nothing more: the thresholds of both levels are plain values in the alert rules, not core
   configuration, and the gauges are the only thing the alerts need from the core.
+  The core also makes **busy** observable: each role and each pull source is marked busy or not
+  in the metrics, the `status` reply and the TUI (`INTF-MON`, `INTF-CLI`). A role is busy while an
+  offer to it is in flight or busy declines have been counted since its last progress, and a source
+  is busy while a fetch of it is in flight; this too is read from the decline **kind** and the
+  in-flight state, **never from a decline's `reason`** (`GOAL-MIN-1`).
 - **`INV-LIFE-1`** <!-- uuid: d3d2dbc8-e260-42cc-a6d3-204aaf8dbc59 --> — The core runs in either of
   **two modes**: a long-running **daemon** that routes events until it is stopped, and a one-off
   **drain-and-exit** run, which exits when the **queue is drained and no offer is outstanding** (every

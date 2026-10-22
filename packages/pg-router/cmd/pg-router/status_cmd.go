@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
@@ -256,6 +257,11 @@ type listenerView struct {
 	Delivered int          `json:"delivered"`
 	Declined  int          `json:"declined"`
 	Backoff   *backoffView `json:"backoff"`
+	// InFlight is true while the role has an offer outstanding; Busy is the
+	// core's busy verdict for it (an offer in flight, or busy-kind declines since
+	// its last progress; bead pg2-8ij5o).
+	InFlight bool `json:"inFlight"`
+	Busy     bool `json:"busy"`
 	// SelfReportState is the role's self-status (healthy / degraded /
 	// unavailable), "" when it never reported; UnavailableReason is why core
 	// marked it unavailable (docket pg2-12gr4.8), "" when it is available.
@@ -285,6 +291,9 @@ type sourceView struct {
 	Mode     string       `json:"mode"`
 	LastTick string       `json:"lastTick"`
 	Failure  *failureView `json:"failure"`
+	// InFlight and Busy are both true while a fetch of the source is in flight.
+	InFlight bool `json:"inFlight"`
+	Busy     bool `json:"busy"`
 }
 
 // activityRenderLimit is the human-form "ACTIVITY (last 10)" cap (Task 3.8
@@ -362,6 +371,8 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 		fmt.Fprintf(w, "  %s: depth=%d\n", dash(q.Type), q.Depth)
 	}
 
+	renderBusy(w, st)
+
 	renderSection(w, "DELIVERIES (live)", len(st.Deliveries), func() {
 		for _, d := range st.Deliveries {
 			fmt.Fprintf(w, "  %s: handler=%s event=%s\n", dash(d.ID), dash(d.Handler), dash(d.Event))
@@ -411,6 +422,39 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 	renderSection(w, "UNMATCHED BINDINGS", len(st.UnmatchedBindings), func() {
 		for _, b := range st.UnmatchedBindings {
 			fmt.Fprintf(w, "  %s\n", dash(b))
+		}
+	})
+}
+
+// renderBusy writes the BUSY section (bead pg2-8ij5o): every role and source the
+// core calls busy, each with what makes it so. A role is busy while an offer to
+// it is in flight, or while busy-kind declines have been counted since its last
+// progress; a source is busy while a fetch of it is in flight. The reasons come
+// from the same reply rows, never from a decline's reason text.
+func renderBusy(w io.Writer, st statusReply) {
+	type row struct{ kind, name, why string }
+	var rows []row
+	for _, l := range st.Listeners {
+		if !l.Busy {
+			continue
+		}
+		var why []string
+		if l.InFlight {
+			why = append(why, "offer in flight")
+		}
+		if l.Progress != nil && l.Progress.Busy > 0 {
+			why = append(why, fmt.Sprintf("%d busy declines since last progress", l.Progress.Busy))
+		}
+		rows = append(rows, row{"role", l.Role, strings.Join(why, ", ")})
+	}
+	for _, s := range st.Sources {
+		if s.Busy {
+			rows = append(rows, row{"source", s.Name, "fetch in flight"})
+		}
+	}
+	renderSection(w, "BUSY", len(rows), func() {
+		for _, r := range rows {
+			fmt.Fprintf(w, "  %s %s: %s\n", r.kind, textsafe.Sanitize(r.name), r.why)
 		}
 	})
 }

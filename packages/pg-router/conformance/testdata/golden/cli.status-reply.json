@@ -98,6 +98,8 @@
       "handlerFailures": 0,
       "selfReportState": "",
       "unavailableReason": "",
+      "inFlight": true,
+      "busy": true,
       "progress": { "ageSeconds": 12.5, "unsuccessful": 0, "busy": 0 },
       "backoff": null,
       "description": "reviews incoming PRs for policy violations"
@@ -113,6 +115,7 @@
       "handlerFailures": 0,
       "selfReportState": "unavailable",
       "unavailableReason": "stub problem",
+      "busy": false,
       "progress": null,
       "backoff": null,
       "description": ""
@@ -135,6 +138,8 @@
       "mode": "pull",
       "expectedIntervalMs": 0,
       "lastTick": "2026-09-01T00:05:00Z",
+      "inFlight": false,
+      "busy": false,
       "failure": null,
       "description": "polls the tracker for feedback-ready items"
     },
@@ -145,10 +150,12 @@
       "excluded": true,
       "mode": "pull",
       "expectedIntervalMs": 0,
+      "busy": false,
       "failure": null,
       "description": ""
     }
   ],
+  "busy": { "roles": ["review"], "sources": [] },
   "unmatchedBindings": ["declared-but-inactive-this-run"],
   "activity": [
     {

@@ -372,3 +372,33 @@ func TestRenderStatusText_UnavailableListenerShowsReason(t *testing.T) {
 		t.Errorf("stdout = %q, want %q", text, want)
 	}
 }
+
+// TestRenderStatusText_BusySection proves the BUSY section (bead pg2-8ij5o) lists
+// each busy role with what makes it busy and each busy source, and reads "(none)"
+// when nothing is busy.
+func TestRenderStatusText_BusySection(t *testing.T) {
+	var st statusReply
+	st.Listeners = []listenerView{
+		{Role: "flying", InFlight: true, Busy: true, Progress: &progressView{}},
+		{Role: "declined", Busy: true, Progress: &progressView{Busy: 3}},
+		{Role: "both", InFlight: true, Busy: true, Progress: &progressView{Busy: 1}},
+		{Role: "calm", Progress: &progressView{Unsuccessful: 9}},
+	}
+	st.Sources = []sourceView{{Name: "fetching", Busy: true, InFlight: true}, {Name: "idle"}}
+	var sb strings.Builder
+	renderStatusText(&sb, "sock", st)
+	want := "BUSY:\n" +
+		"  role flying: offer in flight\n" +
+		"  role declined: 3 busy declines since last progress\n" +
+		"  role both: offer in flight, 1 busy declines since last progress\n" +
+		"  source fetching: fetch in flight\n"
+	if !strings.Contains(sb.String(), want) {
+		t.Errorf("status text lacks the BUSY section:\n%s\nwant it to contain:\n%s", sb.String(), want)
+	}
+
+	sb.Reset()
+	renderStatusText(&sb, "sock", statusReply{})
+	if !strings.Contains(sb.String(), "BUSY:\n  (none)\n") {
+		t.Errorf("status text lacks the empty BUSY marker:\n%s", sb.String())
+	}
+}
