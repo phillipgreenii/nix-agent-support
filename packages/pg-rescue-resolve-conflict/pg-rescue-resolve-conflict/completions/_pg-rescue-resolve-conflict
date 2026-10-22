@@ -1,0 +1,13 @@
+#compdef pg-rescue-resolve-conflict
+
+_arguments \
+  '--item-id[Work item to resolve]:item id:' \
+  '--repo[Repository (last path component keys the map)]:repo:' \
+  '--branch[PR branch to rebase and push]:branch:' \
+  '--base[Base branch to rebase onto]:branch:' \
+  '--head-sha[PR branch head recorded by the item (40 hex)]:sha:' \
+  '*--repo-dir-map[NAME=DIR repository clone]:name=dir:' \
+  '--worktree-root[Directory for worktrees]:directory:_files -/' \
+  '--tracker-dir[Directory containing .beads]:directory:_files -/' \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]'
