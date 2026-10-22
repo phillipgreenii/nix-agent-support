@@ -76,8 +76,12 @@ flowchart LR
 
 ## `INTF-SHOW` — show the composed layers <!-- uuid: a9f0e3d5-6b28-4c71-8d4a-e3c1b95f0a62 -->
 
-- **In (caller → pg-wrap)** — `show --spec <file>` (`INV-ENTRY-4`).
-- **Out (pg-wrap → caller)** — the composed layers (`INV-COMP-1`), without running any of them.
+- **In (caller → pg-wrap)** — `show --spec <file>` (`INV-ENTRY-4`), optionally with
+  `--env-from <dump>`, a file of `NAME=value` lines (`INV-ENTRY-6`).
+- **Out (pg-wrap → caller)** — the composed layers (`INV-COMP-1`), without running any of them;
+  with a dump, also the names the spec's environment would keep and the names it would drop, never
+  a value (`INV-ENTRY-6`); a dump that cannot be read or has a malformed line is exit 97 with a
+  `pg-wrap[env]:` message naming the file and line (`INV-FAIL-1`, `INV-FAIL-2`).
 
 ## `INTF-LAYER` — the wrapper contract toward each layer <!-- uuid: 4e7b2c91-f5d8-4a06-a9b3-7d8e0c1f4b95 -->
 

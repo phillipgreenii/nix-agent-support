@@ -194,3 +194,176 @@ func TestEqualsFormOfTheSpecFlag(t *testing.T) {
 		t.Fatalf("code=%d path=%q stderr=%q", code, r.path, se)
 	}
 }
+
+// ---- show --env-from (INV-ENTRY-6) ----
+
+func writeDump(t *testing.T, text string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "dump.env")
+	if err := os.WriteFile(p, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+const secretDump = "HOME=/home/secret-home-value\n" +
+	"TMUX=secret-tmux-value\n" +
+	"TMUX_PANE=secret-pane-value\n" +
+	"TMUXX=secret-xx-value\n" +
+	"tmux=secret-lower-value\n" +
+	"API_TOKEN=secret-token-value\n" +
+	"PATH=/secret/path/value\n" +
+	"PG_WRAP_SPEC=/secret/spec/value\n" +
+	"EMPTY=\n" +
+	"WITH_EQ=a=b=secret-eq-value\n" +
+	"\n" +
+	"TMUX=secret-again-value\n"
+
+var secrets = []string{
+	"secret-home-value", "secret-tmux-value", "secret-pane-value", "secret-xx-value",
+	"secret-lower-value", "secret-token-value", "/secret/path/value", "/secret/spec/value",
+	"secret-eq-value", "secret-again-value", "a=b",
+}
+
+func showEnvFrom(t *testing.T, specText, dump string) (code int, stdout, stderr string) {
+	t.Helper()
+	p, so, se := process(&recorder{}, []string{"LEAK_FROM_OWN_ENV=secret-own-env-value"},
+		"show", "--spec", writeSpec(t, specText), "--env-from", writeDump(t, dump))
+	code = Main(p)
+	return code, so.String(), se.String()
+}
+
+func TestShowEnvFromListsKeptAndDroppedByExactName(t *testing.T) {
+	code, so, se := showEnvFrom(t, "schema_version = 1\nstrict_env = true\nkeep = [\"TMUX\", \"EMPTY\"]\n", secretDump)
+	if code != 0 || se != "" {
+		t.Fatalf("code=%d stderr=%q", code, se)
+	}
+	// TMUX_PANE, TMUXX and tmux merely share a stem with the kept TMUX and are
+	// dropped. PATH is dropped: the minimal environment sets its own. The spec
+	// variable is dropped everywhere.
+	want := "env-from:\n" +
+		"  kept: EMPTY HOME TMUX\n" +
+		"  dropped: API_TOKEN PATH PG_WRAP_SPEC TMUXX TMUX_PANE WITH_EQ tmux\n"
+	if !strings.HasSuffix(so, want) {
+		t.Fatalf("stdout:\n%s\nwant suffix:\n%s", so, want)
+	}
+	if !strings.HasPrefix(so, "schema_version: 1\nenv: minimal, keep: TMUX EMPTY\n") {
+		t.Fatalf("the usual show output must come first: %q", so)
+	}
+}
+
+func TestShowEnvFromInheritedKeepsEverythingButTheSpecVariable(t *testing.T) {
+	code, so, se := showEnvFrom(t, "schema_version = 1\n", "A=1\nPG_WRAP_SPEC=/s\nPATH=/x\n")
+	want := "env-from:\n  kept: A PATH\n  dropped: PG_WRAP_SPEC\n"
+	if code != 0 || se != "" || !strings.HasSuffix(so, want) {
+		t.Fatalf("code=%d stderr=%q stdout:\n%s", code, se, so)
+	}
+}
+
+func TestShowEnvFromEmptyDumpAndEmptyLists(t *testing.T) {
+	code, so, _ := showEnvFrom(t, "schema_version = 1\nstrict_env = true\n", "")
+	if want := "env-from:\n  kept: (none)\n  dropped: (none)\n"; code != 0 || !strings.HasSuffix(so, want) {
+		t.Fatalf("code=%d stdout:\n%s", code, so)
+	}
+	_, so, _ = showEnvFrom(t, "schema_version = 1\nstrict_env = true\n", "ZZ=1\n")
+	if want := "  kept: (none)\n  dropped: ZZ\n"; !strings.HasSuffix(so, want) {
+		t.Fatalf("stdout:\n%s", so)
+	}
+}
+
+func TestShowEnvFromNeverPrintsAValue(t *testing.T) {
+	for _, specText := range []string{
+		"schema_version = 1\nstrict_env = true\nkeep = [\"TMUX\", \"API_TOKEN\", \"WITH_EQ\"]\n",
+		"schema_version = 1\n",
+	} {
+		_, so, se := showEnvFrom(t, specText, secretDump)
+		for _, s := range secrets {
+			if strings.Contains(so, s) || strings.Contains(se, s) {
+				t.Errorf("value %q leaked:\nstdout=%q\nstderr=%q", s, so, se)
+			}
+		}
+		if strings.Contains(so, "secret-own-env-value") {
+			t.Errorf("pg-wrap's own environment leaked: %q", so)
+		}
+	}
+}
+
+func TestShowEnvFromRefusalsExit97NameTheLineAndNeverTheValue(t *testing.T) {
+	for _, tc := range []struct{ name, dump, line string }{
+		{"no equals sign", "A=1\nsecret-continuation-value\nB=2\n", "line 2"},
+		{"empty name", "A=1\n=secret-orphan-value\n", "line 2"},
+		{"NUL in the name", "A\x00B=secret-nul-value\n", "line 1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, so, se := showEnvFrom(t, "schema_version = 1\n", tc.dump)
+			if code != 97 || so != "" {
+				t.Fatalf("code=%d stdout=%q", code, so)
+			}
+			if !strings.HasPrefix(se, "pg-wrap[env]: --env-from: ") || !strings.Contains(se, tc.line+" is not NAME=value") {
+				t.Fatalf("stderr = %q", se)
+			}
+			if strings.Contains(se, "secret-") {
+				t.Fatalf("a value reached stderr: %q", se)
+			}
+		})
+	}
+}
+
+func TestShowEnvFromMissingOrUnreadableFileExits97(t *testing.T) {
+	spec := writeSpec(t, "schema_version = 1\n")
+	missing := filepath.Join(t.TempDir(), "absent.env")
+	p, so, se := process(&recorder{}, nil, "show", "--spec", spec, "--env-from", missing)
+	if code := Main(p); code != 97 || so.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q", code, so)
+	}
+	if want := "pg-wrap[env]: --env-from: cannot read " + missing + ": no such file or directory\n"; se.String() != want {
+		t.Fatalf("stderr = %q, want %q", se, want)
+	}
+	// A directory is readable as a path and not as a file.
+	p, so, se = process(&recorder{}, nil, "show", "--spec", spec, "--env-from", t.TempDir())
+	if code := Main(p); code != 97 || so.Len() != 0 || !strings.HasPrefix(se.String(), "pg-wrap[env]: --env-from: cannot read ") {
+		t.Fatalf("directory: code=%d stdout=%q stderr=%q", code, so, se)
+	}
+}
+
+func TestShowEnvFromUsageErrors(t *testing.T) {
+	spec := writeSpec(t, "schema_version = 1\n")
+	dump := writeDump(t, "A=1\n")
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"flag without a value", []string{"show", "--spec", spec, "--env-from"}, "pg-wrap[spec]: show: flag needs an argument: -env-from; usage:"},
+		{"empty value", []string{"show", "--spec", spec, "--env-from", ""}, "pg-wrap[spec]: show: --env-from needs a file; usage:"},
+		{"no spec", []string{"show", "--env-from", dump}, "pg-wrap[spec]: show: --spec <file> is required; usage:"},
+		{"stray argument", []string{"show", "--spec", spec, "--env-from", dump, "extra"}, `pg-wrap[spec]: show: unexpected argument "extra"; usage:`},
+		{"run does not take it", []string{"run", "--spec", spec, "--env-from", dump, "--", "/x"}, "pg-wrap[spec]: run: flag provided but not defined: -env-from; usage:"},
+		{"check does not take it", []string{"check", "--spec", spec, "--env-from", dump}, "pg-wrap[spec]: check: flag provided but not defined: -env-from; usage:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &recorder{}
+			p, so, se := process(r, nil, tc.args...)
+			if code := Main(p); code != 97 || so.Len() != 0 || r.called {
+				t.Fatalf("code=%d stdout=%q called=%v", code, so, r.called)
+			}
+			if !strings.HasPrefix(se.String(), tc.want) {
+				t.Fatalf("stderr = %q, want prefix %q", se, tc.want)
+			}
+		})
+	}
+}
+
+func TestShowEnvFromRefusesABadKeepName(t *testing.T) {
+	code, so, se := showEnvFrom(t, "schema_version = 1\nstrict_env = true\nkeep = [\"A=B\"]\n", "A=1\n")
+	if code != 97 || so != "" || !strings.HasPrefix(se, "pg-wrap[env]: keep[0]: ") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, so, se)
+	}
+}
+
+func TestShowWithoutEnvFromIsUnchanged(t *testing.T) {
+	p, so, _ := process(&recorder{}, nil, "show", "--spec", writeSpec(t, "schema_version = 1\n"))
+	if code := Main(p); code != 0 || strings.Contains(so.String(), "env-from") {
+		t.Fatalf("code=%d stdout=%q", code, so)
+	}
+}

@@ -627,3 +627,38 @@ func TestHelpGoesToStdoutAndExitsZero(t *testing.T) {
 		t.Fatalf("exit=%d stdout=%q", o.exit, o.stdout)
 	}
 }
+
+// ---- show --env-from ----
+
+func TestShowEnvFromListsNamesOnlyThroughTheRealBinary(t *testing.T) {
+	f := newFixture(t)
+	spec := f.spec("schema_version = 1\nstrict_env = true\nkeep = [\"TMUX\"]\n")
+	dump := filepath.Join(f.dir, "dump.env")
+	if err := os.WriteFile(dump, []byte("HOME=/h\nTMUX=e2e-secret-1\nTMUX_PANE=e2e-secret-2\nTOKEN=e2e-secret-3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := run(t, "pg-wrap", baseEnv(), "show", "--spec", spec, "--env-from", dump)
+	want := "env-from:\n  kept: HOME TMUX\n  dropped: TMUX_PANE TOKEN\n"
+	if o.exit != 0 || o.stderr != "" || !strings.HasSuffix(o.stdout, want) {
+		t.Fatalf("exit=%d stderr=%q stdout:\n%s", o.exit, o.stderr, o.stdout)
+	}
+	if strings.Contains(o.stdout+o.stderr, "e2e-secret") {
+		t.Fatalf("a value was printed: %q %q", o.stdout, o.stderr)
+	}
+}
+
+func TestShowEnvFromFailuresExit97ThroughTheRealBinary(t *testing.T) {
+	f := newFixture(t)
+	spec := f.spec("schema_version = 1\n")
+	bad := filepath.Join(f.dir, "bad.env")
+	if err := os.WriteFile(bad, []byte("A=1\ne2e-secret-continuation\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{bad, filepath.Join(f.dir, "absent.env")} {
+		o := run(t, "pg-wrap", baseEnv(), "show", "--spec", spec, "--env-from", file)
+		if o.exit != 97 || o.stdout != "" || !strings.HasPrefix(o.stderr, "pg-wrap[env]: --env-from: ") ||
+			strings.Contains(o.stderr, "e2e-secret") {
+			t.Fatalf("%s: exit=%d stdout=%q stderr=%q", file, o.exit, o.stdout, o.stderr)
+		}
+	}
+}

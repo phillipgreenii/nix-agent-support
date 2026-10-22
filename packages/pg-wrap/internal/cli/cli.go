@@ -85,13 +85,14 @@ func ExecMain(p Process) int {
 	return report(p, launch(p, s, p.Args))
 }
 
-const usage = "usage: pg-wrap run --spec <file> -- <cmd> [args...] | check --spec <file> | show --spec <file>"
+const usage = "usage: pg-wrap run --spec <file> -- <cmd> [args...] | check --spec <file> | show --spec <file> [--env-from <file>]"
 
 const helpText = usage + `
 
 run    read the spec, build the environment, apply the layers and exec the payload
 check  decode the spec strictly and verify every referenced path is an executable file
-show   print the composed layers without running anything
+show   print the composed layers without running anything; with --env-from <file>, a NAME=value
+       dump (values ignored), also list the names the spec's environment keeps and drops
 
 Every failure pg-wrap detects exits 97 before the payload, with a pg-wrap[<stage>]: message.`
 
@@ -107,16 +108,37 @@ func report(p Process, err error) int {
 
 // parseSpecFlag parses "--spec <file>" and returns the remaining arguments.
 func parseSpecFlag(name string, args []string) (string, []string, error) {
+	specPath, _, rest, err := parseFlags(name, args, false)
+	return specPath, rest, err
+}
+
+// parseFlags parses "--spec <file>" and, when withEnvFrom, "--env-from <file>"
+// (the second result, "" when absent), and returns the remaining arguments.
+func parseFlags(name string, args []string, withEnvFrom bool) (specPath, envFrom string, rest []string, err error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	specPath := fs.String("spec", "", "path of the wrap spec")
+	specFlag := fs.String("spec", "", "path of the wrap spec")
+	var envFromFlag *string
+	if withEnvFrom {
+		envFromFlag = fs.String("env-from", "", "path of a NAME=value environment dump")
+	}
 	if err := fs.Parse(args); err != nil {
-		return "", nil, fail.New(fail.StageSpec, "%s: %v; %s", name, err, usage)
+		return "", "", nil, fail.New(fail.StageSpec, "%s: %v; %s", name, err, usage)
 	}
-	if *specPath == "" {
-		return "", nil, fail.New(fail.StageSpec, "%s: --spec <file> is required; %s", name, usage)
+	if *specFlag == "" {
+		return "", "", nil, fail.New(fail.StageSpec, "%s: --spec <file> is required; %s", name, usage)
 	}
-	return *specPath, fs.Args(), nil
+	if envFromFlag != nil {
+		envFrom = *envFromFlag
+		if envFrom == "" {
+			set := false
+			fs.Visit(func(f *flag.Flag) { set = set || f.Name == "env-from" })
+			if set {
+				return "", "", nil, fail.New(fail.StageSpec, "%s: --env-from needs a file; %s", name, usage)
+			}
+		}
+	}
+	return *specFlag, envFrom, fs.Args(), nil
 }
 
 func runCmd(p Process, args []string) int {
@@ -256,7 +278,7 @@ func checkCmd(p Process, args []string) int {
 }
 
 func showCmd(p Process, args []string) int {
-	path, rest, err := parseSpecFlag("show", args)
+	path, envFrom, rest, err := parseFlags("show", args, true)
 	if err != nil {
 		return report(p, err)
 	}
@@ -266,6 +288,18 @@ func showCmd(p Process, args []string) int {
 	s, err := spec.Load(path)
 	if err != nil {
 		return report(p, err)
+	}
+	// The dump is read and classified before anything is printed, so a refusal
+	// leaves stdout empty.
+	var kept, dropped []string
+	if envFrom != "" {
+		names, err := readEnvNames(envFrom)
+		if err != nil {
+			return report(p, err)
+		}
+		if kept, dropped, err = classifyEnv(s, names); err != nil {
+			return report(p, err)
+		}
 	}
 	w := p.Stdout
 	_, _ = fmt.Fprintf(w, "schema_version: %d\n", s.SchemaVersion)
@@ -290,6 +324,9 @@ func showCmd(p Process, args []string) int {
 		_, _ = fmt.Fprintf(w, "exec: %s\n", wrap.Display(s.Exec))
 	}
 	_, _ = fmt.Fprintf(w, "payload: %s\n", payloadText(s))
+	if envFrom != "" {
+		printEnvFrom(w, kept, dropped)
+	}
 	return 0
 }
 

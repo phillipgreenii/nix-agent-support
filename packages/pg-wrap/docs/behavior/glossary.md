@@ -31,6 +31,9 @@ launcher slot" and "a payload".
   of the inherited one (`INV-ENV-1`).
 - **Keep list** — the spec's `keep`: variable names kept in addition to the minimal environment, by
   exact name and never by prefix (`INV-SPEC-4`).
+- **Environment dump** — a text file of `NAME=value` lines, one per variable, given to
+  `show --env-from`. Only its names are read; every value is ignored and never printed
+  (`INV-ENTRY-6`).
 - **Exec prefix** — the spec's `exec`: an argv prefix, absolute first element, put in front of the
   payload's args (`INV-SPEC-5`).
 

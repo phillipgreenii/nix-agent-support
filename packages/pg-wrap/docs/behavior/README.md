@@ -37,7 +37,8 @@ however it was authored (`INV-SPEC-6`).
 ## Scope (extent + floor)
 
 - **Extent (in)** — the wrap spec's format and its decode errors; the entry points (`run`, the
-  second binary `pg-wrap-exec`, `check`, `show`); composition of one layer per spec entry; the
+  second binary `pg-wrap-exec`, `check`, `show`, and `show`'s names-only kept/dropped listing for an
+  environment dump); composition of one layer per spec entry; the
   minimal environment and the exact-name keep list; the exec prefix; the absolute-path rule; the
   `pg-wrap[<stage>]:` messages; exit 97 before the payload; removal of the spec-path variable from
   the payload's environment; the wrapper contract (`INV-WC-1` to `INV-WC-9`) every layer a spec

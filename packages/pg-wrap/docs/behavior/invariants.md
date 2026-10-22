@@ -65,6 +65,21 @@ clause here is stated at pg-wrap's own floor: it speaks only of "a caller", "a l
   never reaches the payload.** pg-wrap MUST remove it from the payload's environment in every mode
   (`run`, `pg-wrap-exec`, `check`, `show`), so a payload that itself uses pg-wrap is not pointed at
   its caller's spec.
+- **`INV-ENTRY-6`** <!-- uuid: f7f31d28-59e3-4262-964c-bd69b773f771 --> — **`pg-wrap show --spec
+<file> --env-from <dump>` lists which names the spec's environment would keep and which it would
+  drop.** The dump is a text file of `NAME=value` lines, one per variable; blank lines are skipped
+  and every value is ignored. For each distinct name in the dump, pg-wrap reports whether the
+  starting environment of `INV-ENV-1` would carry it: with `strict_env` false every name is kept
+  except the spec-path variable; with `strict_env` true a name is kept only when it is one of the
+  minimal environment's names or is listed in `keep`, matched by EXACT name (`INV-SPEC-4`), so a
+  name that merely shares a stem with a kept one is dropped. The spec-path variable is dropped in
+  both cases (`INV-ENTRY-5`), and `PATH` is dropped under `strict_env` because the minimal
+  environment sets its own fixed `PATH`. The output is names only: pg-wrap MUST NOT print, log or
+  quote any value from the dump, in its listing or in any message, and nothing is run. The listing
+  follows the layers `show` prints (`INV-ENTRY-4`). A dump that cannot be read, or that has a line
+  that is not `NAME=value`, is a failure (`INV-FAIL-1`) at the `env` stage; the message names the
+  file and the line number and never the line's text. This is how a spec author finds a `keep`
+  entry the spec is missing.
 
 ## Composition (`INV-COMP-*`)
 

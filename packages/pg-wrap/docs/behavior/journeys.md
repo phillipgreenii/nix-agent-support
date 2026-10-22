@@ -22,6 +22,10 @@ rules: **user-goal** level elements are `USECASE-`; **summary**-level multi-acto
 - **`STORY-WRAP-INSPECT`** <!-- uuid: c7d2f6b1-85a0-4e39-a4c8-3e9b1f7d2a05 --> — As a caller, I want
   to see the layers a spec composes without running them, so I can tell what a run would do.
   _(→ `USECASE-WRAP-SHOW`; `INV-ENTRY-4`.)_
+- **`STORY-WRAP-ENVCHECK`** <!-- uuid: f81bfe72-beb0-45e6-b7ff-e998f088fe73 --> — As a spec author, I
+  want to give pg-wrap an environment dump and learn which names the spec's environment would keep
+  and which it would drop, so I can find a missing `keep` entry without running anything or exposing
+  a value. _(→ `USECASE-WRAP-SHOW`; `INV-ENTRY-6`, `INV-SPEC-4`.)_
 - **`STORY-WRAP-FAILFAST`** <!-- uuid: 2a5e8c0d-b4f3-4719-9d6a-f0c7b3e1a846 --> — As a caller, I want
   pg-wrap's own failures to look different from the payload's, with a message naming where it
   failed, so I never mistake a launch problem for the payload's result.
@@ -93,13 +97,20 @@ Extensions:
 
 ### `USECASE-WRAP-SHOW` — show the composed layers <!-- uuid: b4d1c8f0-7a36-4e5b-9c0a-d29e5f1b7a43 -->
 
-**Primary actor:** `ACTOR-WRAP-CALLER`.
+**Primary actor:** `ACTOR-WRAP-CALLER` (or `ACTOR-WRAP-AUTHOR`).
 **Level:** user-goal.
-**Preconditions:** a spec file.
-_Requires:_ `INV-ENTRY-4`, `INV-COMP-1`.
+**Preconditions:** a spec file; optionally an environment dump of `NAME=value` lines.
+_Requires:_ `INV-ENTRY-4`, `INV-ENTRY-6`, `INV-COMP-1`, `INV-ENV-1`, `INV-SPEC-4`, `INV-FAIL-1`.
 
-1. The caller runs `show --spec <file>`.
+1. The caller runs `show --spec <file>`, adding `--env-from <dump>` to test an environment.
 2. pg-wrap prints the layers the spec composes, outermost first, and runs none of them.
+3. With a dump, pg-wrap also prints the names the spec's environment would keep and the names it
+   would drop (`INV-ENTRY-6`), never a value.
+
+Extensions:
+
+- 3a. The dump cannot be read, or a line is not `NAME=value`: pg-wrap prints nothing to stdout and
+  exits 97 with a `pg-wrap[env]:` message naming the file and line, never the line's text.
 
 ## Journeys
 
