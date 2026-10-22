@@ -20,7 +20,9 @@ is removed.
 
 Start here, then the [glossary](glossary.md); the rules are in [invariants](invariants.md), the
 boundaries in [interfaces](interfaces.md), the actors in [actors](actors.md), and the stories,
-journeys, and open questions in [journeys](journeys.md).
+journeys, and open questions in [journeys](journeys.md). To read a stalled role or hand-run ccpool on
+a handler pool, see the runbook
+[stalled-role-and-handler-pool-ccpool](../../../../docs/runbooks/stalled-role-and-handler-pool-ccpool.md).
 
 ## The model
 
