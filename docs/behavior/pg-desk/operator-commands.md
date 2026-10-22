@@ -1,4 +1,4 @@
-# pg-desk — show, status, sweep, reconcile, pr head-check, doctor, heartbeat, heartbeat-item, freshness
+# pg-desk — show, status, sweep, reconcile, pr head-check, issue refresh --watch, issue backfill-backend, issue changes --reset, doctor, heartbeat, heartbeat-item, freshness
 
 ## show
 
@@ -27,16 +27,28 @@ and non-transient — see [`sync.md`](sync.md)'s "Automatic retry"), the age of 
 
 It prints a `change_flow` section, human-readable, per entity type and per consumer, matching the
 change-flow families `serve` exposes on `/metrics` (see [`serve.md`](serve.md)). Per type it
-reports the active entity count, the due backlog (active entities whose `hydrated_at` is older than
-the sweep max age, or that were never hydrated), the change-log records by kind and origin, the
+reports the active entity count, the due backlog, the change-log records by kind and origin, the
 hydration and hydration-failure totals, the optimistic-concurrency retries, and the entities with
-repeated degraded hydrations. Per consumer it reports the cursor, the lag (the type's highest change
+repeated degraded hydrations. For `pr` and `thread` the due backlog is the active entities whose
+`hydrated_at` is older than the sweep max age, or that were never hydrated. For `issue`, which has no
+age-driven sweep, the due backlog counts ONLY hydrations that are pending: a changed or watched entity
+not yet hydrated, plus the entries of the failed-ingest table. An unchanged issue is never due for its
+age. Per consumer it reports the cursor, the lag (the type's highest change
 sequence minus the cursor) and `seen_at`, which is the consumer's liveness now that the heartbeat is
-retired. For the sweep bound (`active_count / N x poll_interval <= D`), `status` reports only its
-inputs (`active_count`, `N`, `D`) and `poll_interval: unknown`, with NO verdict: the poll interval is
+retired. For the sweep bound of `pr` and `thread` (`active_count / N x poll_interval <= D`), `status`
+reports only its inputs (`active_count`, `N`, `D`) and `poll_interval: unknown`, with NO verdict:
+`issue` has no sweep tiers and so no sweep bound (both of its former bounds went with the tiers). The
+poll interval is
 the router's timer period, which `pg-desk` does not own, so only `doctor` evaluates the bound (with
-`--router-config`). On a store that has not been cut over, the section reads `unmigrated` instead of
-failing.
+`--router-config`). For the watched-only `issue` flow `status` also prints counts, and only counts,
+per backend: the watched entities by type, the failed-ingest entries and the age of the oldest, the
+oldest orphan read age, the age of the oldest successful observation of the source of a watched open
+issue, and the members of a watched query whose entity carries no watched mark (the same figures the
+`pg_desk_watched_entities`, `pg_desk_ingest_failed`, `pg_desk_oldest_orphan_read_age_seconds`,
+`pg_desk_watched_source_observed_age_seconds` and `pg_desk_issue_unflagged_members` series carry, which
+the CLI persists in `meta` and the metrics endpoint reads at scrape time). `status` never judges them:
+the gates and reports are `doctor`'s. On a store that has not been cut over, the section reads
+`unmigrated` instead of failing.
 
 `status` also prints the `focus:` block described under `doctor` below, from the same shared
 health model, with every tripped gate marked `FAIL` (`status` itself never fails on one: its exit
@@ -168,6 +180,78 @@ before it submits, and stop early on exit `4`; the next review request, for the 
 created by sync once that head settles (see [`sync.md`](sync.md)). The prompt belongs to the
 deployment that runs the review, not to this repo.
 
+## issue refresh --watch
+
+`pg-desk issue refresh <id> --watch` is the one-off watch: the lookup of one issue (the verb is
+described in [`refresh.md`](refresh.md)) that also marks that issue watched. It is the only way an
+issue reaches a watch other than being listed by a configured watched query; there is no ad-hoc query
+run with the option, because a query would watch a set, which the configuration declares instead.
+
+- It works for a beads issue and for a Jira issue; for Jira it forwards the option to the daemon, which
+  then tracks the issue's rows for the feed. Which backend serves `<id>` is resolved as
+  [`refresh.md`](refresh.md) describes.
+- The `watched` mark is set by the hydration write itself, in the same statement as the snapshot, so
+  the row of a first observation passes the delivery gate (see [`store-schema.md`](store-schema.md),
+  "The delivery gate"). An issue that is new to pg-desk, or known but not watched until now, gets
+  exactly one change row of kind `added`, so it is hydrated and emitted once. An issue that is already
+  watched is unchanged by the option.
+- The watch is sticky, like any other: it lasts until the issue is closed and pg-desk has deactivated it
+  after delivering the `closed` row. A pg-desk store move-aside loses the mark; nothing re-asserts a
+  one-off watch, so the operator repeats the command.
+- Without `--watch`, a refresh of an issue that is not watched hydrates it and appends no row (see
+  [`refresh.md`](refresh.md), "Behavior").
+
+Exit codes are `refresh`'s own (see [`refresh.md`](refresh.md), "Failure semantics and exit codes").
+
+## issue backfill-backend
+
+`pg-desk issue backfill-backend` is the one-shot backfill that runs once, at the cutover of the `issue`
+flow to the per-backend watched-only flow. Existing entity rows carry no `backend` and no `watched`
+mark (both NULL; see [`store-schema.md`](store-schema.md), "Columns, and the one additive mechanism"),
+and `refresh` cannot supply them because it takes only an id. The command covers EVERY Jira issue
+pg-desk holds, not only the members of watched queries:
+
+- For each watched query served by a backend that owns its changes, it reads that query's members from
+  the backend once. For every returned id that pg-desk holds, it sets `backend` and `watched` through
+  the column-only write. An id pg-desk does not hold is not created; it gets both columns from its first
+  feed row.
+- Every other held Jira id whose `backend` is still NULL is resolved by probing the configured
+  owning backend instances in turn with a read of that id; the first instance that holds the id sets
+  the column, and an id none holds is set to the backend that does not own its changes. A probe is a
+  read of the daemon, never a `bd` call.
+- When it finishes, no Jira entity MUST keep a NULL `backend`.
+
+The command appends no change row and bumps no version, and it makes no change to a beads entity's
+`watched` mark: beads members are marked by their query's baseline run (see [`changes.md`](changes.md)).
+Exit codes: `0` when it completes; `1` when the config or store cannot be opened, or when a list read
+or a probe failed (naming which), so a partial backfill is never reported as complete.
+
+## issue changes --reset
+
+For `issue`, `pg-desk issue changes --reset` is NOT a routine verb. It is a runbook step, to be taken
+only after a pg-desk store move-aside (see "Dropped-key runbook" below), and the other operations in
+this document do not require it. It replays only the WATCHED active issues, each as kind `added` with
+origin `reset`, never as `reconcile`: an issue that is not watched is not replayed. The flag's other
+semantics (no cursor movement, exemption from the hydration budget, every consumer of the type
+receiving the replay) are in [`changes.md`](changes.md), "Behavior".
+
+## Dropped-key runbook
+
+A feed key that its backend has not seen for `consumer_stale_after` is dropped, and the next poll
+starts at the tail of the feed: a silent gap for the only detector of that backend's changes. The
+backend's answer that the key expired (`cursor_expired:`) is a `doctor` gate (see "doctor" below), and
+it is the signal to run this runbook:
+
+1. Select the watched entities of the backend: the issues listed by the backend's watched queries as
+   configured, together with the issues watched one-off. The backend column alone is not enough,
+   because an entity pg-desk holds may carry the column without being watched.
+2. Run `pg-desk issue refresh <id>` for each. Each hydrates the entity from a fresh read and appends a
+   row if its content differs from the stored snapshot, so the gap is closed with no replay.
+
+The same runbook recovers a pg-desk store move-aside, which loses the failed-ingest table after its rows
+were already acknowledged, so those entities are never hydrated from the feed again. The operator who
+moves a store aside MUST run it for every backend whose feed pg-desk consumes.
+
 ## doctor
 
 `pg-desk doctor` checks: the config resolves; `pg-connector` is on `PATH` and its `config
@@ -201,14 +285,29 @@ has been cut over to the change-flow schema:
   `consumer_stale_after` (default 7 days) instead, because no period is known. A consumer that was
   never seen counts as stalled.
 - **The sweep sizing bound** (`active_count / N x poll_interval <= D`, see [`changes.md`](changes.md))
-  per entity type and per capped age tier (`remote`: `sweep.max_age`; `local`:
-  `sweep.reconcile_age`), one line per type and tier. A violated bound also alerts: `/metrics`
+  per entity type of `pr` and `thread` and per capped age tier (`remote`: `sweep.max_age`; `local`:
+  `sweep.reconcile_age`), one line per type and tier. `issue` has no line: it has no sweep tiers, so
+  neither of its former bounds is evaluated. A violated bound also alerts: `/metrics`
   exports the same evaluation as `pg_desk_sweep_bound_violated{type,tier}` (see
   [`serve.md`](serve.md)). `doctor` evaluates it ONLY when `--router-config` supplies the poll interval: the
   period of the router `[[query]]` entries whose command names the type and carries a `--consumer`,
   taking the smallest when several match. Otherwise it prints the bound's inputs (`active_count`,
   `max_per_poll`, `max_age`) with `poll_interval: unknown` and no verdict, exactly as `status`
   does. A violated bound fails `doctor`.
+- **Issue change-flow gates** (each can fail `doctor`, naming what tripped it):
+  - a failed-ingest entity older than the configured bound (the bound is a configured value; no default
+    is fixed here);
+  - a watched query whose baseline has been open for more than one day, naming the query and the members
+    that fail to hydrate (a baseline that cannot finish);
+  - a feed key the backend reported as expired (`cursor_expired:`), whose recovery is the dropped-key
+    runbook above;
+  - a mismatch between pg-desk's dispatch configuration (which backend instance serves each watched
+    query, whether it owns changes, and whether the query is `watched`) and what the backend reports
+    about itself, and an issue id served by watched queries of two different backends;
+  - active `issue` entities of a backend for which no watched query is declared, so that a missing
+    declaration is loud.
+- **Issue change-flow reports** (never gates): the watched count per backend, the member count of each
+  watched query, and an entity pg-desk holds that nothing watches.
 - **Repeated degraded hydrations.** The entities whose hydration degraded or failed on at least two
   consecutive attempts, per type, with their count and the time the run began. A report, not a gate.
 - **Jira issues lacking a status category.** One line, `jira status category: N active Jira issues
@@ -297,8 +396,9 @@ primary-checkout relocation), update the deployment's pg-desk `repos[].beads_dir
 change, then run `pg-desk doctor` and confirm the config check passes.
 
 Exit codes: `0` when every check passes; `1` when any check fails (naming which one) — including an
-unresolvable watched query, a stalled consumer, a violated sweep bound, an unreadable
-`--router-config` and a tripped `focus:` gate, so an alert can hang off the exit code.
+unresolvable watched query, a stalled consumer, a violated sweep bound, a tripped issue change-flow
+gate, an unreadable `--router-config` and a tripped `focus:` gate, so an alert can hang off the exit
+code.
 
 ## heartbeat / heartbeat-item
 
@@ -321,6 +421,29 @@ only (no network, no connector call, no write): `schemaVersion`, `now`, `stale_a
 The contract, the invariants and the configuration are in [`freshness.md`](freshness.md).
 
 Exit codes: `0` whenever the store is readable; `1` when it is not.
+
+## Invariants
+
+- **INV-OPERATOR-1.** <!-- uuid: 2e9cf9b1-9424-4957-9ed5-fa2326b9e413 --> `pg-desk issue refresh <id> --watch` MUST mark exactly that one issue watched, for a beads issue
+  and (by forwarding the option to the daemon) for a Jira issue, set the mark in the hydration write, and
+  append exactly one `added` row for an issue that was new to pg-desk or not yet watched.
+- **INV-OPERATOR-2.** <!-- uuid: 0b4d2dad-f428-4ec5-a68c-afd6d6c7f1ba --> The one-shot backfill MUST cover every held Jira id, set `backend` and `watched` for each returned
+  member of a watched query that pg-desk holds, resolve every other held id with a NULL `backend` by
+  probing the owning backend instances, and leave no Jira entity with a NULL `backend`. It MUST append no
+  row and bump no version.
+- **INV-OPERATOR-3.** <!-- uuid: f5fc2b99-756e-4ba2-bafe-3ba356c3d279 --> For `issue`, `--reset` MUST replay only watched active issues, as kind `added` with origin
+  `reset`, never as `reconcile`, and MUST be a runbook step only after a pg-desk store move-aside.
+- **INV-OPERATOR-4.** <!-- uuid: b46a8a55-ea7a-4acc-b31d-dbc627a75d9e --> A backend's `cursor_expired:` answer MUST be a `doctor` gate, and the recovery for a dropped key
+  or a moved-aside store MUST be a `pg-desk issue refresh <id>` of every watched entity of that backend,
+  selected through the configured watched queries and the one-off watches.
+- **INV-OPERATOR-5.** <!-- uuid: e9637463-0d4e-4d05-a70a-6db1eee73a03 --> `doctor` MUST gate on a failed-ingest entity older than its configured bound, on a baseline open for
+  more than one day, on a `cursor_expired:` key, on a dispatch-configuration mismatch (including a
+  `watched` mismatch), and on active `issue` entities of a backend with no watched query declared; the
+  reports MUST never fail it.
+- **INV-OPERATOR-6.** <!-- uuid: 7bf954d5-73a6-465b-847a-64cd422dd1bf --> `status` MUST print the issue change-flow figures as counts only, with no verdict.
+- **INV-OPERATOR-7.** <!-- uuid: 83ea533e-e2c1-4e45-ba8a-0a113c0aceea --> For `issue` the due backlog MUST count only pending hydrations (a changed or watched entity not yet
+  hydrated, and the failed-ingest entries), and neither the local nor the remote sweep bound MUST be
+  evaluated or reported.
 
 ## Telemetry and logs
 

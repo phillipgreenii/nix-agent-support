@@ -182,6 +182,10 @@ entity_id)` is unique, and `(repo, entity_type, entity_id)` is a foreign key to 
 The cutover does not append to `change_log`, register any consumer, write any row of the focus
 tables, or write any key other than the reserved keys above; those belong to the work that uses these tables.
 
+The columns, the table and the `meta` keys that the watched-only `issue` change flow adds on top of
+this schema are NOT part of the cutover and are not a new schema version: see "Watched-entity columns,
+the failed-ingest table and the feed markers (schema version 2)" below.
+
 ## Entity versions and the change log (schema version 2)
 
 `entity.version` and `change_log` move together, through one write primitive.
@@ -208,6 +212,9 @@ tables, or write any key other than the reserved keys above; those belong to the
   by `seq`, limited) and per entity (newest first, limited). A caller that must append inside its
   own transaction uses the same append primitive.
 - These operations need the version-2 schema and refuse a version-1 store.
+- For an `issue` entity the append that this primitive performs is subject to the delivery gate, and
+  the entity row carries two further kinds of write that bump no version; both are described in
+  "Watched-entity columns, the failed-ingest table and the feed markers (schema version 2)" below.
 
 ## Annotations and cross-reference links (schema version 2)
 
@@ -215,7 +222,10 @@ tables, or write any key other than the reserved keys above; those belong to the
   `annotation_changed` in the SAME transaction as the write; if the append fails the annotation
   write is rolled back. The record carries the entity's CURRENT version (a version of 0, a migrated
   never-rehydrated entity, is valid) and the annotation's `origin` and time. An annotation write
-  MUST NOT bump `entity.version`.
+  MUST NOT bump `entity.version`. For an `issue` entity that is not watched the delivery gate
+  withholds that record (the annotation itself is still written), and the write MUST report that it
+  changed something separately from the record's sequence number, so a written annotation never reads
+  as unchanged because no record was appended.
 - Annotating (or deleting an annotation of) an entity that has no `entity` row MUST return an error
   and write nothing. Deleting a key that does not exist changes nothing and appends nothing.
 - The reserved keys are `hidden` (JSON `{"value": true|false, "reason": text|null}`), `wip`
@@ -266,6 +276,145 @@ A consumer is a named reader of `change_log` for one entity type. Its `consumer`
   every row older than retention is prunable. A consumer is stale when its `seen_at` is NULL or older
   than the stale-after parameter (default 7 days) and is excluded from the horizon. Retention and
   stale-after are parameters; wiring them to configuration belongs to the `changes` phase.
+
+## Watched-entity columns, the failed-ingest table and the feed markers (schema version 2)
+
+The `issue` change flow is per backend and watched-only: only an entity the operator's configuration
+or a one-off lookup has marked watched produces change rows, and each backend instance is served by its
+own detector (a feed for a backend that owns its changes, a list-and-diff for one that does not). That
+needs per-entity facts the version-2 schema above does not carry, and the store keeps them without a
+new schema version.
+
+### Columns, and the one additive mechanism
+
+`entity` carries four further nullable columns, none of them part of the cutover:
+
+- **`backend`** is the name of the backend instance that serves the entity, so a per-backend rule is
+  applied per entity and never per type. NULL means the backend is not known yet.
+- **`watched`** marks the entity as watched. NULL means not watched; clearing the mark
+  sets it back to NULL.
+- **`read_attempt_at`** and **`read_ok_at`** are the time of the entity's last attempted and last
+  successful by-id read of a watched entity that no watched query lists any longer, the figures that
+  order those reads and the age that alerts on them (see [`changes.md`](changes.md)). NULL means never.
+
+The storage additions (these columns and the failed-ingest table below) use ONE additive mechanism, and
+no other:
+
+- A table is created only if it does not already exist, and a column is added only when the table's own
+  declared columns show it absent, because SQLite has no add-column-if-absent. The check and the add
+  run on every ordinary open of the store, before the open path decides that a store already at version
+  2 needs no migration, so a version-2 store gains them too.
+- `user_version` and `meta.schema_version` MUST NOT change: a newer version would make a binary built
+  before the additions refuse the store, and an older binary MUST still open it (it neither reads nor
+  writes the additions).
+- A read-only open never migrates, so every read-only verb MUST tolerate a store that lacks a column or
+  the table: the column reads as NULL (an unwatched entity with no known backend and no read times) and
+  the table reads as empty.
+
+### The column-only write
+
+The store has a write primitive that sets only the columns above. It appends no `change_log` row,
+does not bump `entity.version`, and leaves the snapshot, `list_fp`, `hydrated_at` and `active`
+untouched (the one version-bumping write remains the entity write above). It is used:
+
+- from a feed row, to record the `backend` the row's pinned call came from and the `watched` mark of an
+  entity the feed reports;
+- from a listing, for a listed entity whether it was just created, changed or unchanged, so a listed
+  entity learns its `backend` and `watched` mark without a hydration;
+- by the one-shot backfill of `backend` and `watched` (see [`operator-commands.md`](operator-commands.md),
+  "issue backfill-backend");
+- to stamp `read_attempt_at` and `read_ok_at`. An unchanged by-id read of a watched entity writes
+  nothing else: no row and no version bump.
+
+A first write of an entity (the hydration write itself) MAY set `watched` in the same statement as the
+snapshot, as it sets `list_fp`, so that a first observation passes the delivery gate below.
+
+### The delivery gate
+
+Every row appended to `change_log` goes through one function. For an `issue` entity that function
+withholds the append (no row, no sequence number, no error) unless the entity is watched. "Watched"
+means the `watched` mark as it stood before the statement, or the mark the same write sets. The gate
+applies whatever the origin of the row: a hydration or `refresh`, link and work propagation from a pull
+request change, and an annotation write.
+
+- A write that CLEARS the mark does so after the append, in the same transaction, so a `closed` or
+  `removed` row of a watched entity is always appended and delivered and the gate never hides the row
+  that ends the watch.
+- The snapshot, version, annotation and link writes proceed whether or not the row is withheld; only
+  the row is withheld, so no event can follow from the write.
+- A withheld append reports sequence `0`. A caller that must know whether its own write changed
+  anything (an annotation write) gets that as a separate flag, never inferred from the sequence.
+- The gate is on APPEND, not on read: filtering the log by the mark when it is read would hide a
+  `closed` row once the mark is cleared. A WATCHED issue still receives propagated rows.
+- Rows already in `change_log` when the gate takes effect are not rewritten; each is consumed once
+  through the consumers' cursors.
+
+### The failed-ingest table
+
+`ingest_failed` is a small table holding the feed rows that could not be hydrated: one row per
+`(backend instance, feed seq)` with the entity id and the time the failure was first recorded. The feed
+is acknowledged by position, so a row that fails is recorded here and passed over, and one permanently
+failing issue never blocks every other issue's feed.
+
+- Every entry is retried at every poll. There is no attempt counter, no backoff and no timer: the
+  entry is level-triggered, and it is deleted when its entity hydrates.
+- Its oldest age and its count (the `pg_desk_ingest_failed` series and the `doctor` gate; see
+  [`operator-commands.md`](operator-commands.md), "doctor") are the signal that ingest is failing.
+- A redelivered feed row for a `seq` that already has an entry is skipped and adds no second entry.
+- A store move-aside loses the table after its rows were already acknowledged, so those entities are
+  not hydrated from the feed again; the recovery is the dropped-key runbook of
+  [`operator-commands.md`](operator-commands.md), "Dropped-key runbook".
+
+### Feed and baseline markers in `meta`
+
+`meta` keeps three more families of keys for the issue flow, none written by the cutover:
+
+- **`change_flow.feed_seq.<instance>`** holds, for one backend instance's change feed, the identity of
+  that backend's own store and the highest feed `seq` pg-desk has committed from it. It is written in
+  the SAME transaction as the commit of each feed row, so a crash between a commit and its
+  acknowledgement can never leave the marker behind the data. A row whose store identity equals the
+  marker's and whose `seq` is at or below it is a redelivery and is skipped: it appends no row, bumps
+  no version and produces no event. A different store identity (a moved-aside backend store restarts
+  its sequence at 1, so `seq` alone would skip new rows) or an answer that the consumer's key expired
+  (`cursor_expired:`) resets the marker before any row is processed. The records that follow the
+  commit (derived links, interpretation, cross-references) are written after it, so a crash in between
+  loses them for that one entity and the redelivered row is skipped; the recovery is
+  `pg-desk issue refresh <id>`.
+- **`change_flow.baseline.<query>`** holds the time a watched query's baseline completed, for the
+  backends that keep no baseline of their own. A watched query with no marker is in its baseline run: its
+  members are marked watched and appended no row (see [`changes.md`](changes.md)). The marker is
+  written only in the poll in which the last unhydrated member was hydrated, so a baseline that takes
+  several polls stays silent throughout. A store move-aside loses every marker, and each watched query
+  then baselines again, silently.
+- **`change_flow.listing_ok.<query>`** holds the time of the last successful listing of a watched
+  query. `change_flow.listing.<type>.<query>` above is overwritten by every call, failures included, so
+  it cannot say when a query was last observed; this key can.
+
+## Invariants
+
+- **INV-STORE-1.** <!-- uuid: 9489e4b0-84a9-4c17-acae-982ab8b8b5bd --> The `backend`, `watched`, `read_attempt_at` and `read_ok_at` columns and the failed-ingest
+  table MUST be added by one additive mechanism that creates a table only if absent and adds a column
+  only when the table lacks it, run on every ordinary open of the store, and MUST NOT change
+  `user_version` or `meta.schema_version`.
+- **INV-STORE-2.** <!-- uuid: c94fa528-0030-4085-ad67-d1a84680a320 --> An ordinary open by a binary built before these additions MUST succeed, and a read-only open
+  of a store without them MUST succeed and read each missing column as NULL and the missing table as empty.
+- **INV-STORE-3.** <!-- uuid: 03d2cfe4-d3e0-4c45-8964-0e7c2760b8f6 --> The column-only write MUST append no `change_log` row and MUST NOT bump `entity.version`, and
+  MUST NOT change the snapshot, `list_fp`, `hydrated_at` or `active`.
+- **INV-STORE-4.** <!-- uuid: 5a812909-a964-4e30-a82b-1a6fe2d2796d --> For an `issue` entity the one append function MUST withhold the row (no row, no sequence number,
+  no error) unless the entity's `watched` mark, as it stood before the statement or as the same write sets
+  it, is set, whatever the origin of the row.
+- **INV-STORE-5.** <!-- uuid: 24948b53-d6eb-44a9-9e5e-a74d91475e8f --> A write that clears the `watched` mark MUST do so after the append and in the same transaction, and
+  the gate MUST be applied on append, never on read.
+- **INV-STORE-6.** <!-- uuid: e8ecda4e-b010-439c-a267-2e88b9874b80 --> A write whose row the gate withholds MUST still apply its snapshot, version, annotation and link
+  changes, and a write that needs to know whether it changed anything MUST receive that separately from
+  the sequence number.
+- **INV-STORE-7.** <!-- uuid: a7e60418-44e4-4b06-ab1f-75a1c751c977 --> A feed row that fails to hydrate MUST be recorded in the failed-ingest table with its entity id
+  and `seq`, and every entry MUST be retried at every poll with no attempt counter, backoff or timer.
+- **INV-STORE-8.** <!-- uuid: 7e7a860b-63c9-41ee-a1f4-df62c58545f2 --> `change_flow.feed_seq.<instance>` MUST be written in the same transaction as the commit of each
+  feed row, MUST hold both the backend store's identity and the highest committed `seq`, and a row it
+  identifies as a redelivery MUST append no row, bump no version and produce no event.
+- **INV-STORE-9.** <!-- uuid: 5f21abb6-468d-4cdb-8d1b-efb1335bc922 --> `change_flow.baseline.<query>` MUST be written only in the poll in which the last unhydrated
+  member of the query's baseline run was hydrated.
 
 ## Exit codes, telemetry, and logs
 
