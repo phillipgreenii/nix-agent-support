@@ -11,13 +11,14 @@
   llm-agents,
 }:
 let
-  # The module's default `spec.exec` reads `pkgs.llm-agentsPkgs.claude-code`,
-  # which the flake's check `pkgs` lacks (a real consumer gets it from the
-  # overlay); supply it from the llm-agents input, as flake.nix does for beads.
+  # The module's default `spec.exec` reads `pkgs.llm-agentsPkgs.claude-code`
+  # and its `claudeBaseline` reads `pkgs.llm-agentsPkgs.beads`, which the
+  # flake's check `pkgs` lacks (a real consumer gets them from the overlay);
+  # supply them from the llm-agents input, as flake.nix does for beads.
   hmPkgs = pkgs // {
     llm-agentsPkgs =
       pkgs.llm-agentsPkgs or {
-        inherit (llm-agents.packages.${pkgs.stdenv.hostPlatform.system}) claude-code;
+        inherit (llm-agents.packages.${pkgs.stdenv.hostPlatform.system}) claude-code beads;
       };
   };
 

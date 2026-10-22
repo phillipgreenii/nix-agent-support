@@ -4336,6 +4336,122 @@
                   touch $out
                 '';
 
+              # test-claude-baseline-hook-commands (bead pg2-12gr4.8.31, design ruling
+              # 30): the "hook-command scan". The ccpool handler module's
+              # `claudeBaseline` (an INTERIM helper until flox environments exist for
+              # the claude roles) lists the store bin directories its spec PATH is made
+              # of; this check DERIVES the bare-command list it must cover instead of
+              # hand-keeping it. It scans the hooks/hooks.json of every
+              # `defaultEnabled: true` marketplace plugin (the idiom of
+              # test-claude-plugin-binary-default-parity above) AND of
+              # packages/ccpool/ccpool-plugin (which that check does not scan), and
+              # fails when a bare command (no '/' and no '$') has no executable in
+              # any of the baseline's PATH directories. Script hooks
+              # (${CLAUDE_PLUGIN_ROOT}/...) are not bare commands; the end-to-end test
+              # covers them. Two negative fixtures prove the scan can fail.
+              test-claude-baseline-hook-commands =
+                let
+                  surface = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./claude-marketplace
+                      ./packages/ccpool/ccpool-plugin
+                    ];
+                  };
+                  inherit (import ./tests/pg-router-ccpool-handler-eval-hm.nix { inherit lib pkgs llm-agents; })
+                    evalHM
+                    ;
+                  baseline = (evalHM { }).phillipgreenii.programs.pg-router-ccpool-handler.claudeBaseline;
+                  pathDirsFile = pkgs.writeText "claude-baseline-pathdirs" (
+                    lib.concatStringsSep "\n" baseline.pathDirs + "\n"
+                  );
+                in
+                pkgs.runCommand "test-claude-baseline-hook-commands" { nativeBuildInputs = [ pkgs.jq ]; } ''
+                  # resolves <command> <pathdirs-file>: some listed dir holds an
+                  # executable <dir>/<command>.
+                  resolves() {
+                    local c="$1" d
+                    while IFS= read -r d; do
+                      [ -n "$d" ] || continue
+                      [ -x "$d/$c" ] && return 0
+                    done < "$2"
+                    return 1
+                  }
+
+                  # scan <marketplace-dir> <ccpool-plugin-dir> <pathdirs-file>;
+                  # violations to stderr, exit status = violation count (0 = ok).
+                  scan() {
+                    local mkt="$1" ccp="$2" dirs="$3" bad=0 scanned=0 pj name hooks cmds c
+                    hooks_files=()
+                    for pj in "$mkt"/*/.claude-plugin/plugin.json; do
+                      [ -f "$pj" ] || continue
+                      name="$(basename "$(dirname "$(dirname "$pj")")")"
+                      [ "$(jq -r '.defaultEnabled // false' "$pj")" = true ] || continue
+                      [ -f "$mkt/$name/hooks/hooks.json" ] || continue
+                      hooks_files+=("$mkt/$name/hooks/hooks.json")
+                    done
+                    [ -f "$ccp/hooks/hooks.json" ] && hooks_files+=("$ccp/hooks/hooks.json")
+                    for hooks in "''${hooks_files[@]}"; do
+                      # bare = first word has no '/' and no '$' (not a path / plugin-root ref)
+                      cmds="$(jq -r '[.. | objects | select(.type? == "command") | .command | split(" ")[0]] | unique[]' "$hooks")"
+                      for c in $cmds; do
+                        case "$c" in */*|*'$'*) continue ;; esac
+                        scanned=$((scanned + 1))
+                        if ! resolves "$c" "$dirs"; then
+                          echo "FAIL: $hooks invokes bare command '$c', which is not on claudeBaseline's PATH" >&2
+                          bad=$((bad + 1))
+                        else
+                          echo "ok: $c" >&2
+                        fi
+                      done
+                    done
+                    echo "scanned $scanned bare hook command(s)" >&2
+                    [ "$scanned" -gt 0 ] || { echo "FAIL: scan found no bare hook commands -- scan is broken" >&2; return 99; }
+                    return "$bad"
+                  }
+
+                  # The baseline resolves the commands the design names, whatever
+                  # the scan finds.
+                  for c in claude ccpool claude-extended-tool-approver session-mode claude-work-start claude-work-end gh bd jq pg-connector; do
+                    resolves "$c" ${pathDirsFile} || { echo "FAIL: baseline PATH lacks '$c'" >&2; exit 1; }
+                  done
+
+                  # Positive: the real tree passes, and the scan reaches the ccpool plugin.
+                  scan "${surface}/claude-marketplace" "${surface}/packages/ccpool/ccpool-plugin" ${pathDirsFile} 2>pos.log \
+                    || { cat pos.log >&2; echo "FAIL: the real tree has an unresolved bare hook command" >&2; exit 1; }
+                  cat pos.log >&2
+                  for c in ccpool claude-work-start claude-work-end claude-extended-tool-approver session-mode; do
+                    grep -qx "ok: $c" pos.log || { echo "FAIL: scan never saw '$c'" >&2; exit 1; }
+                  done
+
+                  fx="$PWD/fixture"
+                  mkdir -p "$fx/empty-mkt" "$fx/empty-ccpool"
+
+                  # Negative 1: a default-enabled marketplace plugin whose hook
+                  # invokes a command nothing provides.
+                  mkdir -p "$fx/mkt/k31neg/.claude-plugin" "$fx/mkt/k31neg/hooks"
+                  echo '{"name":"k31neg","defaultEnabled":true}' > "$fx/mkt/k31neg/.claude-plugin/plugin.json"
+                  echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"k31-missing-cmd x"}]}]}}' > "$fx/mkt/k31neg/hooks/hooks.json"
+                  if scan "$fx/mkt" "$fx/empty-ccpool" ${pathDirsFile} 2>neg.log; then
+                    echo "FAIL: negative fixture (missing marketplace hook command) was NOT flagged" >&2
+                    exit 1
+                  fi
+                  grep -q "k31-missing-cmd" neg.log
+
+                  # Negative 2: the ccpool plugin's own hooks.json invokes a command
+                  # nothing provides.
+                  mkdir -p "$fx/ccpool-plugin/hooks"
+                  echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"k31-missing-ccpool-cmd x"}]}]}}' > "$fx/ccpool-plugin/hooks/hooks.json"
+                  if scan "$fx/empty-mkt" "$fx/ccpool-plugin" ${pathDirsFile} 2>neg2.log; then
+                    echo "FAIL: negative fixture (missing ccpool plugin hook command) was NOT flagged" >&2
+                    exit 1
+                  fi
+                  grep -q "k31-missing-ccpool-cmd" neg2.log
+
+                  echo "ok: baseline PATH covers every bare hook command; violating fixtures are flagged"
+                  touch $out
+                '';
+
               # ── Full-module Go test gates (bead pg2-adhga; converged onto the
               # fleet builder by bead pg2-spwj9) ────────────────────────────────
               #
@@ -7473,6 +7589,36 @@
                   wrapHandlerPoolSpecA = (wrapMod wrapHandlerPool).specFiles.triage-a;
                   wrapHandlerPoolConfig = (wrapMod wrapHandlerPool).poolConfigFiles.handler;
 
+                  # claudeBaseline (bead pg2-12gr4.8.31): a role whose spec is built
+                  # from the evaluated baseline renders a spec that passes
+                  # `pg-wrap check`. An absolute store `exec` (true) keeps the check
+                  # from needing claude. evalHM passes no osConfig, so the baseline
+                  # carries no OTel variable here.
+                  k31Baseline = (wrapMod (evalHM { })).claudeBaseline;
+                  k31Eval = evalHM {
+                    enable = true;
+                    pool = {
+                      enable = true;
+                      dir = "/tmp/pg2-k31-pool";
+                    };
+                    roles.k31-baseline = {
+                      type = "ccpool";
+                      ccpool = wrapRoleBase;
+                      spec = {
+                        inherit (k31Baseline) wrap keep;
+                        strictEnv = true;
+                        exec = [ "${pkgs.coreutils}/bin/true" ];
+                      };
+                    };
+                  };
+                  k31Fired = wrapFired k31Eval;
+                  k31SpecFile = (wrapMod k31Eval).specFiles.k31-baseline;
+                  k31WrapJson = builtins.toJSON k31Baseline.wrap;
+                  k31SpecCheck = pkgs.runCommand "test-claude-baseline-spec-pg-wrap-check" { } ''
+                    ${pkgs.pg-wrap}/bin/pg-wrap check --spec ${k31SpecFile}
+                    touch $out
+                  '';
+
                   # Case 1: a spec role whose pool's `settings.claude.bin` is overridden.
                   wrapOverriddenFired = wrapFired (evalHM {
                     enable = true;
@@ -7581,6 +7727,9 @@
                           wrapHandlerPoolDir
                           wrapHandlerPoolSpecA
                           wrapHandlerPoolConfig
+                          k31SpecFile
+                          k31SpecCheck
+                          k31WrapJson
                           handlerCommandDir
                           emptyHandlerCommandDir
                           launchConfigFile
@@ -7800,6 +7949,18 @@
                         [ "$(toml2json "$wrapOwnPoolConfig" | jq -r .pool.max_sessions)" = 1 ]
                         [ "$(toml2json "$wrapHandlerPoolConfig" | jq -r .claude.bin)" = "$pgWrapExecPath" ]
                         toml2json "$wrapPlainPoolConfig" | jq -e '(.claude // {}) | has("bin") | not' >/dev/null
+
+                        # claudeBaseline (bead pg2-12gr4.8.31): the spec built from it
+                        # passes `pg-wrap check` (k31SpecCheck is built as an input);
+                        # every wrap entry starts with an absolute store path and none
+                        # sets OTEL_SERVICE_NAME; keep carries TMUX, TMUX_PANE and the
+                        # markers; the baseline wrap is ONE env PATH=... entry.
+                        test -f "$k31SpecCheck"
+                        jq -e '. | length == 1 and (.[0] | type == "array" and (.[0] | endswith("/bin/env")) and (.[1] | startswith("PATH=/nix/store/")))' <<<"$k31WrapJson" >/dev/null
+                        k31_json="$(toml2json "$k31SpecFile")"
+                        jq -e '[.wrap[] | (if type == "array" then .[0] else (split(" ")[0]) end) | startswith("/nix/store/")] | all' <<<"$k31_json" >/dev/null
+                        jq -e '.strict_env == true and (.keep | index("TMUX") != null and index("TMUX_PANE") != null and index("CCPOOL_EXTERNAL_ID") != null and index("BEADS_ACTOR") != null)' <<<"$k31_json" >/dev/null
+                        if grep -q OTEL_SERVICE_NAME "$k31SpecFile"; then echo "FAIL: baseline spec sets OTEL_SERVICE_NAME" >&2; exit 1; fi
                         touch $out
                       '';
                 in
@@ -7921,6 +8082,8 @@
                 assert lib.attrNames (wrapMod wrapHandlerPool).poolConfigFiles == [ "handler" ];
                 assert wrapOwnPoolFired == null;
                 assert wrapHandlerPoolFired == null;
+                # claudeBaseline (bead pg2-12gr4.8.31): a spec built from it fires no assertion.
+                assert k31Fired == null;
                 assert wrapMessageNames wrapOverriddenFired "overridden" "/tmp/pg2-12gr4-overridden-pool";
                 assert wrapMessageNames wrapDefaultPoolFired "stray" "default pool";
                 assert wrapMessageNames wrapSharedFired "without-spec" "/tmp/pg2-12gr4-shared-pool";

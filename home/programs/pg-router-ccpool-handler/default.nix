@@ -2,6 +2,9 @@
   config,
   lib,
   pkgs,
+  # Set by the nix-darwin / NixOS home-manager integration; null for a
+  # standalone home-manager activation (no system scope to read from).
+  osConfig ? null,
   ...
 }:
 let
@@ -65,6 +68,70 @@ let
     "CCPOOL_POOL"
     "CCPOOL_AUTONOMOUS"
   ];
+
+  # claudeBaseline (design ruling 20, INTERIM until flox environments exist for
+  # the claude roles; bead pg2-12gr4.8.31): the pg-wrap spec `wrap` entries and
+  # `keep` names covering everything claude needs to RUN in a pool session, for
+  # `roles.<name>.spec = { inherit (cfg.claudeBaseline) wrap keep; strictEnv = ..; }`.
+  # `wrap` is ONE entry (an argv array: env, then PATH=<pathDirs>, then one
+  # NAME=value per OTel variable), so a consumer may append its own entries after
+  # it. Its PATH holds claude, every bare command the enabled plugins' hooks
+  # invoke (ccpool, claude-extended-tool-approver, session-mode, claude-work-start,
+  # claude-work-end; the nix check test-claude-baseline-hook-commands derives and
+  # asserts that list from the hooks.json files) and the prompts' tools (gh, bd,
+  # jq, pg-connector, pn).
+  #
+  # Stated gap: this repo does not package `pn` (a flake package of
+  # phillipgreenii/nix-repo-base, absent from the overlays this flake applies), so
+  # `pn` joins the PATH only when the consumer's `pkgs` carries `pkgs.pn`; when it
+  # is null (as in this repo's own checks) `pn` is left out.
+  #
+  # OTel: read null-safely from the system observability stack (as pa-monitor
+  # does), restricted to the OTEL_EXPORTER_OTLP_* names, so OTEL_SERVICE_NAME is
+  # dropped. No osConfig, or no mkEmitterEnv, sets no OTel variable.
+  claudeObs = if osConfig == null then { } else osConfig.phillipgreenii.observability or { };
+  claudeEmitterEnv =
+    if claudeObs ? mkEmitterEnv then
+      claudeObs.mkEmitterEnv {
+        serviceName = "pg-router-ccpool-handler-claude";
+        protocol = "grpc";
+      }
+    else
+      { };
+  claudeOtelEnv = lib.filterAttrs (n: _v: lib.hasPrefix "OTEL_EXPORTER_OTLP_" n) claudeEmitterEnv;
+  # nixpkgs carries a `pn` alias that THROWS ("removed as upstream was archived"),
+  # so a plain `pkgs ? pn` is not enough: tryEval turns that throw into "absent".
+  claudeBaselinePn = builtins.tryEval (pkgs.pn or null);
+  claudeBaselinePathPkgs = [
+    pkgs.llm-agentsPkgs.claude-code
+    pkgs.ccpool
+    pkgs.claude-extended-tool-approver
+    pkgs.session-mode
+    pkgs.claude-activity
+    pkgs.pg-connector
+    pkgs.gh
+    pkgs.jq
+    pkgs.llm-agentsPkgs.beads
+  ]
+  ++ lib.optional (claudeBaselinePn.success && claudeBaselinePn.value != null) claudeBaselinePn.value;
+  claudeBaselinePathDirs = map (p: "${lib.getBin p}/bin") claudeBaselinePathPkgs;
+  claudeBaseline = {
+    pathDirs = claudeBaselinePathDirs;
+    wrap = [
+      (
+        [
+          "${pkgs.coreutils}/bin/env"
+          "PATH=${lib.concatStringsSep ":" claudeBaselinePathDirs}"
+        ]
+        ++ lib.mapAttrsToList (n: v: "${n}=${toString v}") claudeOtelEnv
+      )
+    ];
+    keep = [
+      "TMUX"
+      "TMUX_PANE"
+    ]
+    ++ wrapSpecOwnedKeep;
+  };
 
   # renderWrapSpec: `{ wrap, keep, strictEnv, exec } -> <spec file derivation>`,
   # the pg-wrap spec as TOML (`schema_version = 1` plus the four keys). `keep`
@@ -1461,6 +1528,22 @@ in
       '';
     };
 
+    claudeBaseline = lib.mkOption {
+      type = lib.types.raw;
+      readOnly = true;
+      description = ''
+        Read-only INTERIM helper (design ruling 20): `{ wrap; keep; pathDirs; }`
+        covering everything claude needs to run in a pool session (claude, the
+        enabled plugins' bare hook commands, the prompts' tools, the OTel endpoint
+        and protocol without OTEL_SERVICE_NAME). Use as `roles.<name>.spec = {
+        inherit (cfg.claudeBaseline) wrap keep; strictEnv = ...; }`. `wrap` is a
+        single env PATH=... entry, so a consumer may append its own entries after
+        it; `pathDirs` is the list of store bin directories that PATH is made of.
+        `pn` joins the PATH only when the consumer's `pkgs` carries `pkgs.pn`.
+        Set unconditionally, like the other read-only outputs.
+      '';
+    };
+
     poolConfigFiles = lib.mkOption {
       type = lib.types.attrsOf lib.types.package;
       readOnly = true;
@@ -1970,6 +2053,7 @@ in
         # handlerCommandDir: this bead, pg2-pteab.
         inherit handlerCommandDir specFiles;
         lib.renderWrapSpec = renderWrapSpec;
+        inherit claudeBaseline;
         poolConfigFiles =
           lib.optionalAttrs cfg.pool.enable { handler = poolConfigFile; }
           // lib.mapAttrs poolConfigFileFor ccpoolRolesWithOwnPool;
