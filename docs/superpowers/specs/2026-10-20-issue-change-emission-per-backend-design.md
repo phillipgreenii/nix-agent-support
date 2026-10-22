@@ -749,8 +749,11 @@ recorded risks.
    router's event-identity invariant (INV-EVT-3), so it needs its own behavior-doc change and the operator's
    decision. The operator asked for the check and ruled the selective-drop bead NOT filed for now; this item
    is the recorded question, and no bead is filed until it is decided.
-9. **Where pg-desk learns which beads queries are watched (OPEN, the one place the codebase does not settle).**
-   Option 1, the working assumption of INV-ICD-14: the deployment declares `watched` once; the home-manager
+9. **Where pg-desk learns which beads queries are watched (RESOLVED, operator ruling 2026-10-22: option 1
+   now, "A is fine until the beads connector handles it").** pg-desk keeps detecting beads changes and so
+   keeps the watched query list; a later bead moves beads change detection into the beads connector, which
+   deletes `watch.issue.queries` and pg-desk's beads list-and-diff, as the PR design does for PRs. The two
+   options that were weighed follow. Option 1, the adopted assumption of INV-ICD-14: the deployment declares `watched` once; the home-manager
    module renders it into the connector's `config.queries` and into pg-desk's existing `watch.issue.queries`
    (now only the watched queries), with a `doctor` gate against the capabilities answer. It is the smallest
    change, because pg-desk's list-and-diff, coverage and `doctor` already iterate that list. Option 2: pg-desk
