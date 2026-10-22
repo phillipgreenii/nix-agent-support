@@ -93,6 +93,7 @@ The terms this set owns. Every doc reuses them and MUST NOT redefine them.
 | Adopt           | A keeper taking over, unchanged, the assertion an earlier keeper started                                                             |
 | Shim            | The `caffeinate`-compatible command that turns a caller's request into a lease                                                       |
 | External holder | A power-assertion holder that is not this product's own assertion, shown by the status view                                          |
+| Managed holder  | An external holder the keeper stops at the release level: the keep-awake that Claude Code starts for itself (`INV-BATT-13`)          |
 | Realization gap | Settled intended behavior the product has not yet built; recorded in the register below                                              |
 
 ## The docs
@@ -125,32 +126,33 @@ The invariants are numbered by area, in RFC 2119 language:
 
 - `INV-KCLI-1` to `INV-KCLI-15` are in [`cli-contract.md`](cli-contract.md).
 - `INV-LEASE-1` to `INV-LEASE-10` are in [`lease-lifecycle.md`](lease-lifecycle.md).
-- `INV-BATT-1` to `INV-BATT-12` are in [`battery-rule.md`](battery-rule.md).
+- `INV-BATT-1` to `INV-BATT-13` are in [`battery-rule.md`](battery-rule.md).
 - `INV-SHIM-1` to `INV-SHIM-14` are in [`caffeinate-shim.md`](caffeinate-shim.md).
 - `INV-KEEP-1` to `INV-KEEP-12` are in [`keeper.md`](keeper.md).
 
 ### Operator rulings and where they are stated
 
-| Ruling (operator, 2026-10-14 unless noted)                                                                | Stated in                                  |
-| --------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| No forced sleep or shutdown: release the assertion at low battery (R1)                                    | `INV-BATT-4`                               |
-| One tool abstracts `caffeinate` for every client and caller (R2)                                          | `INV-KCLI-1`, `INV-SHIM-1`                 |
-| A `PATH` shim is acceptable (R3)                                                                          | `INV-SHIM-1`, `INV-SHIM-14`                |
-| Clients only record state; the keeper reads it; a client lives until it ends or is killed (R4)            | `INV-KCLI-6`, `INV-LEASE-2`                |
-| No fallback to the real `caffeinate` when the keeper is down (R5)                                         | `INV-KEEP-8`                               |
-| The anchor does not end merely because the keeper is gone; it MAY end without a heartbeat (R6)            | `INV-BATT-9`, `INV-KEEP-5`                 |
-| Configuration is managed, not hand-edited: durations, battery rule, telemetry (R7)                        | `INV-KEEP-9`                               |
-| On shutdown the keeper removes dead leases and its heartbeat and leaves valid leases (R8)                 | `INV-LEASE-9`, `INV-KEEP-6`                |
-| The assertion's flags are the union of the live leases' flags, `-s` included (R9)                         | `INV-KEEP-1`                               |
-| The command line is the only contract; pa-monitor uses it; the health check is in the first version (R10) | `INV-KCLI-1`, `INV-KCLI-10`, `INV-KCLI-15` |
-| Logging and metrics follow the existing OTel pattern (R11)                                                | `INV-KEEP-10`                              |
-| Tick 10 s and watchdog 10 min (O1, confirmed 2026-10-15)                                                  | `INV-KEEP-2`, `INV-BATT-9`                 |
-| The shim rejects `-u` (O2, confirmed 2026-10-15)                                                          | `INV-SHIM-3`                               |
-| The shim failure policy: pure form exits 3, utility form warns and runs (O3, confirmed 2026-10-15)        | `INV-SHIM-11`                              |
-| Linger of 30 seconds, configurable (O4, confirmed 2026-10-15)                                             | `INV-KEEP-3`, `INV-KEEP-9`                 |
-| Pause, resume and release of every lease of an owner (O5, confirmed 2026-10-15)                           | `INV-KCLI-4`, `INV-KCLI-13`                |
-| The status view lists external holders (O6, confirmed 2026-10-15)                                         | `INV-KCLI-9`, `INV-SHIM-13`                |
-| A bad configuration falls back to the last good one, then to defaults (O7, confirmed 2026-10-15)          | `INV-KEEP-9`                               |
+| Ruling (operator, 2026-10-14 unless noted)                                                                                                | Stated in                                  |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| No forced sleep or shutdown: release the assertion at low battery (R1)                                                                    | `INV-BATT-4`                               |
+| One tool abstracts `caffeinate` for every client and caller (R2)                                                                          | `INV-KCLI-1`, `INV-SHIM-1`                 |
+| A `PATH` shim is acceptable (R3)                                                                                                          | `INV-SHIM-1`, `INV-SHIM-14`                |
+| Clients only record state; the keeper reads it; a client lives until it ends or is killed (R4)                                            | `INV-KCLI-6`, `INV-LEASE-2`                |
+| No fallback to the real `caffeinate` when the keeper is down (R5)                                                                         | `INV-KEEP-8`                               |
+| The anchor does not end merely because the keeper is gone; it MAY end without a heartbeat (R6)                                            | `INV-BATT-9`, `INV-KEEP-5`                 |
+| Configuration is managed, not hand-edited: durations, battery rule, telemetry (R7)                                                        | `INV-KEEP-9`                               |
+| On shutdown the keeper removes dead leases and its heartbeat and leaves valid leases (R8)                                                 | `INV-LEASE-9`, `INV-KEEP-6`                |
+| The assertion's flags are the union of the live leases' flags, `-s` included (R9)                                                         | `INV-KEEP-1`                               |
+| The command line is the only contract; pa-monitor uses it; the health check is in the first version (R10)                                 | `INV-KCLI-1`, `INV-KCLI-10`, `INV-KCLI-15` |
+| Logging and metrics follow the existing OTel pattern (R11)                                                                                | `INV-KEEP-10`                              |
+| Tick 10 s and watchdog 10 min (O1, confirmed 2026-10-15)                                                                                  | `INV-KEEP-2`, `INV-BATT-9`                 |
+| The shim rejects `-u` (O2, confirmed 2026-10-15)                                                                                          | `INV-SHIM-3`                               |
+| The shim failure policy: pure form exits 3, utility form warns and runs (O3, confirmed 2026-10-15)                                        | `INV-SHIM-11`                              |
+| The keep-awake Claude Code starts for itself is stopped under the low-battery rule (operator, 2026-10-22, "(a) then (b)", bead pg2-0n6og) | `INV-BATT-13`, `INV-BATT-10`               |
+| Linger of 30 seconds, configurable (O4, confirmed 2026-10-15)                                                                             | `INV-KEEP-3`, `INV-KEEP-9`                 |
+| Pause, resume and release of every lease of an owner (O5, confirmed 2026-10-15)                                                           | `INV-KCLI-4`, `INV-KCLI-13`                |
+| The status view lists external holders (O6, confirmed 2026-10-15)                                                                         | `INV-KCLI-9`, `INV-SHIM-13`                |
+| A bad configuration falls back to the last good one, then to defaults (O7, confirmed 2026-10-15)                                          | `INV-KEEP-9`                               |
 
 ## Scope
 
@@ -161,8 +163,9 @@ keeper; survival of a keeper restart; the status view and the health check; paus
 configuration; and what the keeper exports to be observed.
 
 **Extent (out)** — forcing the Mac to sleep or shut down; stopping any assertion holder that is not
-`caffeinate` (audio, browsers, other apps); a holder that calls the real `caffeinate` by absolute path,
-which is reported and not intercepted; changing Claude Code itself; pa-monitor's own mode toggle, busy
+`caffeinate` (audio, browsers, other apps); a holder that calls the real `caffeinate` by absolute path
+or with a search path of its own, which is reported and not intercepted, except the Claude Code CLI's own
+(a managed holder), which the keeper stops at the release level; changing Claude Code itself; pa-monitor's own mode toggle, busy
 detection and grace period; the alert rules' exact expressions and dashboards; the test plan, the packaging and
 the home-manager module's options, which are the design's and the deployment's.
 

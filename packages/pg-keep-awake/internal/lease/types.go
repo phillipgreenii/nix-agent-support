@@ -239,7 +239,15 @@ type StatusExternal struct {
 	Process string  `json:"process"`
 	Type    string  `json:"type"`
 	AgeS    float64 `json:"age_s"`
+	// ManagedBy names the program whose sleep inhibitor this holder is when
+	// the keeper recognised it as one it governs under the low-battery rule
+	// (ManagedByClaude); empty for every other holder. Additive, omitted when
+	// empty.
+	ManagedBy string `json:"managed_by,omitempty"`
 }
+
+// ManagedByClaude marks Claude Code's own `caffeinate -i -t N` inhibitor.
+const ManagedByClaude = "claude"
 
 // StatusFile is status.json: the snapshot the keeper writes each tick and
 // `status` reads. `status` MUST NOT read the configuration, so everything it

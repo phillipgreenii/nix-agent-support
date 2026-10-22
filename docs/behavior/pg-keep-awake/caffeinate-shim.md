@@ -1,9 +1,11 @@
 # pg-keep-awake — the `caffeinate` shim
 
-Some callers spawn `caffeinate` by name and cannot be changed: the Claude Code CLI re-arms
-`caffeinate -i -t 300` while a turn is busy and offers no switch to turn that off, and shells and wrapper
-scripts do the same. The shim is a command that looks like `caffeinate` to those callers and turns each
-call into a lease, so the call obeys the battery rule without the caller knowing. This doc owns how
+Some callers spawn `caffeinate` by name and cannot be changed: shells and wrapper scripts do. The shim
+is a command that looks like `caffeinate` to those callers and turns each call into a lease, so the call
+obeys the battery rule without the caller knowing. The Claude Code CLI re-arms `caffeinate -i -t 300`
+while a turn is busy and offers no switch to turn that off, but it gives the program it starts a search
+path of its own, so the shim never sees that call; the keeper governs that holder directly
+(`INV-BATT-13` in [`battery-rule.md`](battery-rule.md)). This doc owns how
 faithfully the shim mirrors `caffeinate` (flags, times, watched processes, the utility form, signals and
 exit statuses), what its lifetime is, what it does when it cannot record a lease and what it does not
 cover. The lease is in [`lease-lifecycle.md`](lease-lifecycle.md) and the rule that then governs it in
@@ -46,7 +48,8 @@ ADR 0100 decision 3.
 6. The battery falls to the release level. The leases, shim ones included, stop holding the Mac awake;
    the shims keep running and their callers see nothing (`INV-SHIM-1`).
 7. The operator reads the status and sees every shim lease and, separately, every other holder the host
-   reports, including any that called the real tool by its full path (`INV-SHIM-13`).
+   reports, including any that called the real tool by its full path and the Claude Code CLI's own, marked
+   as managed (`INV-SHIM-13`).
 
 Extensions:
 
@@ -117,10 +120,12 @@ Extensions:
   call costs one lease and nothing else, and a caller that is rejected leaves no record but its own
   standard error. _(Design sections 7, 12 and 17 (O2).)_
 - **`INV-SHIM-13`** <!-- uuid: 1b86d3f9-e72a-4a05-8c43-5d0f9a6e2b81 --> — The shim's coverage MUST be bounded and stated: a caller that runs the real
-  `caffeinate` by its full path, and any holder that is not `caffeinate`, is not intercepted, and a
+  `caffeinate` by its full path or with a search path of its own (the Claude Code CLI does the latter),
+  and any holder that is not `caffeinate`, is not intercepted, and a
   session or shell that started before the shim was installed keeps its earlier holder until it ends.
-  The status view MUST list these as external holders, which is the proof of coverage. _(Design sections
-  12, 15 and 17 (O6); ADR 0100 Consequences.)_
+  The status view MUST list these as external holders, which is the proof of coverage. The one such
+  holder the product stops itself is the Claude Code CLI's, under `INV-BATT-13`. _(Design sections
+  1, 8, 12, 15 and 17 (O6); ADR 0100 Consequences and decision 8.)_
 - **`INV-SHIM-14`** <!-- uuid: e4a9b106-5c38-4d72-b7e5-0a3f81c9d6a7 --> — Disabling the shim MUST remove the `caffeinate` name it presented, MUST leave
   shim leases valid until their callers end, and MUST NOT stop the keeper or the anchor. The assertion
   drains only when the keeper is also disabled, after the watchdog timeout. _(Design section 11.)_

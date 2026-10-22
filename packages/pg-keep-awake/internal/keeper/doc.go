@@ -17,6 +17,10 @@
 //     atomically (mode 0600), once per tick before the heartbeat is touched
 //     (snapshot.go); ExternalProbe lists the non-keeper `pmset -g assertions`
 //     holders, failing soft (snapshot_external.go);
+//   - Claude Code's own inhibitor: ClaudeHolders (claude_holders.go) recognises the
+//     external `caffeinate -i -t N` whose parent is a `claude` process, which the shim
+//     cannot intercept, marks it managed in the status snapshot and stops it while the
+//     gate is released;
 //   - the tick loop: the keeper process takes the singleton keeper.lock
 //     (TryLockInstance); Keeper (keeper.go) creates keeper.heartbeat first,
 //     adopts a running pair and then runs the six steps every

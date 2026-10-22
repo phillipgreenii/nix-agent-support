@@ -14,6 +14,8 @@ type ProcState struct {
 	// Zombie is true for SZOMB: the process has exited but is not yet reaped,
 	// so it MUST NOT count as live.
 	Zombie bool
+	// PPID is the parent's pid (0 when unknown or !Exists).
+	PPID int
 }
 
 // Prober looks a pid up. SysProber is the real one; tests and other packets
@@ -39,6 +41,9 @@ func (SysProber) Probe(pid int) ProcState {
 
 // ProcInfo is a process's executable name and argv.
 type ProcInfo struct {
+	// Exe is the full executable path from KERN_PROCARGS2, exactly as the
+	// kernel recorded it (it may be a symlink spelling of the real file).
+	Exe string
 	// Name is the basename of the full executable path from KERN_PROCARGS2,
 	// never the 16-byte truncated p_comm, so a name over 16 characters
 	// (pg-caffeinate-shim) matches.

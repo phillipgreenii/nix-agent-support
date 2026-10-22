@@ -449,8 +449,12 @@ func batteryCell(b lease.StatusBattery) string {
 
 func renderExternal(w io.Writer, r *statusReport) {
 	for _, e := range r.External {
-		fmt.Fprintf(w, "other    pid %d %s  %s  %s\n", e.PID, e.Process, e.Type,
-			formatAge(time.Duration(e.AgeS*float64(time.Second))))
+		managed := ""
+		if e.ManagedBy != "" {
+			managed = "  managed by " + e.ManagedBy
+		}
+		fmt.Fprintf(w, "other    pid %d %s  %s  %s%s\n", e.PID, e.Process, e.Type,
+			formatAge(time.Duration(e.AgeS*float64(time.Second))), managed)
 	}
 }
 

@@ -162,6 +162,29 @@ func TestStatusEmptySystem(t *testing.T) {
 	}
 }
 
+func TestStatusShowsManagedExternalHolders(t *testing.T) {
+	s := newStateFixture(t)
+	body := statusFixture{heartbeatAgeS: 3}.json(time.Now().UTC())
+	const plain = `"external": [{"pid": 419, "process": "powerd", "type": "PreventUserIdleSystemSleep", "age_s": 14040}]`
+	if !strings.Contains(body, plain) {
+		t.Fatal("fixture no longer carries the external holder this test rewrites")
+	}
+	s.write("status.json", strings.Replace(body, plain, `"external": [`+
+		`{"pid": 419, "process": "powerd", "type": "PreventUserIdleSystemSleep", "age_s": 14040},`+
+		`{"pid": 4321, "process": "caffeinate", "type": "PreventUserIdleSystemSleep", "age_s": 90, "managed_by": "claude"}]`, 1))
+	_, stdout, _ := runCLI(t, "status")
+	if !strings.Contains(stdout, "other    pid 4321 caffeinate  PreventUserIdleSystemSleep  1m  managed by claude") {
+		t.Errorf("managed holder not marked:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "pid 419 powerd  PreventUserIdleSystemSleep  3h54m  managed") {
+		t.Errorf("an unmanaged holder is marked managed:\n%s", stdout)
+	}
+	_, js, _ := runCLI(t, "status", "--json")
+	if !strings.Contains(js, `"managed_by":"claude"`) && !strings.Contains(js, `"managed_by": "claude"`) {
+		t.Errorf("json lacks managed_by:\n%s", js)
+	}
+}
+
 func TestStatusHumanLayout(t *testing.T) {
 	s := newStateFixture(t)
 	s.status(statusFixture{heartbeatAgeS: 4, held: true})

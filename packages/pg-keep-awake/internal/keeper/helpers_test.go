@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -21,8 +23,23 @@ import (
 //
 //	sleep        sleep for two minutes
 //	flock:<path> take LOCK_EX on <path>, print "locked", then sleep
+//	parent:<exe> start <exe> as `caffeinate -i -t 300` (argv[0] "caffeinate",
+//	             helper mode sleep), print its pid, then sleep: a stand-in for
+//	             the process that spawns a caffeinate
 func TestMain(m *testing.M) {
 	switch h := os.Getenv("KEEPER_TEST_HELPER"); {
+	case strings.HasPrefix(h, "parent:"):
+		c := exec.Command(h[len("parent:"):], "-i", "-t", "300")
+		c.Args[0] = "caffeinate"
+		c.Env = append(os.Environ(), "KEEPER_TEST_HELPER=sleep")
+		if err := c.Start(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		fmt.Println(c.Process.Pid)
+		go func() { _ = c.Wait() }() // reap the child when the keeper stops it
+		time.Sleep(2 * time.Minute)
+		os.Exit(0)
 	case h == "sleep":
 		time.Sleep(2 * time.Minute)
 		os.Exit(0)

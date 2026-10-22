@@ -40,6 +40,7 @@ func ProcStateOf(pid int) (ProcState, error) {
 		Exists:  true,
 		StartUS: int64(tv.Sec)*1_000_000 + int64(tv.Usec),
 		Zombie:  kp.Proc.P_stat == szomb,
+		PPID:    int(kp.Eproc.Ppid),
 	}, nil
 }
 
@@ -101,5 +102,5 @@ func parseProcArgs2(raw []byte) (ProcInfo, error) {
 		argv = append(argv, string(rest[:e]))
 		rest = rest[e+1:]
 	}
-	return ProcInfo{Name: filepath.Base(exe), Argv: argv}, nil
+	return ProcInfo{Exe: exe, Name: filepath.Base(exe), Argv: argv}, nil
 }

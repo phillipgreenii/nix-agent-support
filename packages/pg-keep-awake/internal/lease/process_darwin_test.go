@@ -113,6 +113,18 @@ func TestChildStateInfoAndEnumeration(t *testing.T) {
 		t.Errorf("own info = %+v, %v", self2, err)
 	}
 
+	// The child is ours: its parent is this process, and its executable path
+	// is the full path of sleep (what the claude-holder check compares).
+	if st, _ := ProcStateOf(pid); st.PPID != os.Getpid() {
+		t.Errorf("child PPID = %d, want %d", st.PPID, os.Getpid())
+	}
+	if !filepath.IsAbs(info.Exe) || filepath.Base(info.Exe) != "sleep" {
+		t.Errorf("child Exe = %q", info.Exe)
+	}
+	if st, _ := ProcStateOf(os.Getpid()); st.PPID != os.Getppid() {
+		t.Errorf("own PPID = %d, want %d", st.PPID, os.Getppid())
+	}
+
 	pids, err := ListPIDs()
 	if err != nil {
 		t.Fatal(err)

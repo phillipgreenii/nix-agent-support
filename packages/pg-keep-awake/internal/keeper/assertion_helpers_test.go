@@ -21,6 +21,10 @@ type fproc struct {
 	argv    []string
 	startUS int64
 	up      bool
+	// ppid and exe are optional: a zero ppid reads as unknown, and an empty
+	// exe reads as argv[0] (what a keeper-started process has).
+	ppid int
+	exe  string
 }
 
 func (p *fproc) name() string { return filepath.Base(p.argv[0]) }
@@ -66,6 +70,15 @@ func (f *fakeProcs) seed(argv []string, startUS int64) int {
 	f.next++
 	f.procs[f.next] = &fproc{argv: slices.Clone(argv), startUS: startUS, up: true}
 	return f.next
+}
+
+// seedChild adds a running process with a parent and an executable path.
+func (f *fakeProcs) seedChild(ppid int, exe string, argv []string) int {
+	pid := f.seed(argv, 5_000_000)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.procs[pid].ppid, f.procs[pid].exe = ppid, exe
+	return pid
 }
 
 func (f *fakeProcs) kill(pid int) {
@@ -136,7 +149,7 @@ func (f *fakeProcs) Probe(pid int) lease.ProcState {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if p, ok := f.procs[pid]; ok && p.up {
-		return lease.ProcState{Exists: true, StartUS: p.startUS}
+		return lease.ProcState{Exists: true, StartUS: p.startUS, PPID: p.ppid}
 	}
 	return lease.ProcState{}
 }
@@ -148,7 +161,11 @@ func (f *fakeProcs) Info(pid int) (lease.ProcInfo, error) {
 	if !ok || !p.up {
 		return lease.ProcInfo{}, lease.ErrNoProcess
 	}
-	return lease.ProcInfo{Name: p.name(), Argv: slices.Clone(p.argv)}, nil
+	exe := p.exe
+	if exe == "" {
+		exe = p.argv[0]
+	}
+	return lease.ProcInfo{Exe: exe, Name: filepath.Base(exe), Argv: slices.Clone(p.argv)}, nil
 }
 
 func (f *fakeProcs) PIDs() ([]int, error) {

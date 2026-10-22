@@ -68,6 +68,10 @@ type KeeperOptions struct {
 	// External lists the non-keeper assertion holders; the argument is the
 	// held caffeinate's pid. Default is ExternalProbe{}.Probe.
 	External func(ownCaffeinatePID int) []lease.StatusExternal
+	// ClaudeCaffeinateExe is the caffeinate binary Claude Code's own sleep
+	// inhibitor runs (default ClaudeCaffeinateExe, /usr/bin/caffeinate).
+	// Tests point it at a copy of the test binary.
+	ClaudeCaffeinateExe string
 	// Now is the clock (default time.Now).
 	Now func() time.Time
 	// Log receives one line per notable event (default io.Discard).
@@ -90,7 +94,9 @@ type Keeper struct {
 	procs ProcControl
 	em    telemetry.Emitter
 	probe func(int) []lease.StatusExternal
-	now   func() time.Time
+	// claude recognises and reaps Claude Code's own caffeinate inhibitors.
+	claude ClaudeHolders
+	now    func() time.Time
 
 	// step is called at each stage of a pass; tests record the order.
 	step func(string)
@@ -140,14 +146,15 @@ func NewKeeper(opts KeeperOptions) *Keeper {
 	}
 	cfg := opts.Config
 	k := &Keeper{
-		dir:   opts.Dir,
-		opts:  opts,
-		cfg:   cfg,
-		procs: opts.Procs,
-		em:    opts.Emitter,
-		probe: opts.External,
-		now:   opts.Now,
-		step:  func(string) {},
+		dir:    opts.Dir,
+		opts:   opts,
+		cfg:    cfg,
+		procs:  opts.Procs,
+		em:     opts.Emitter,
+		probe:  opts.External,
+		claude: ClaudeHolders{Procs: opts.Procs, Exe: opts.ClaudeCaffeinateExe},
+		now:    opts.Now,
+		step:   func(string) {},
 		acfg: AssertionConfig{
 			HoldPct:       cfg.Battery.HoldPct,
 			ReleasePct:    cfg.Battery.ReleasePct,
@@ -300,7 +307,7 @@ func (k *Keeper) Tick() error {
 	k.noteWatch(rr)
 
 	// 6. Write status.json, then touch the heartbeat.
-	ext := k.external(rr, now)
+	ext := k.governClaudeHolders(k.external(rr, now), gate)
 	snap := BuildSnapshot(SnapshotInputs{
 		Now:                  now,
 		KeeperPID:            os.Getpid(),
@@ -426,6 +433,32 @@ func (k *Keeper) external(rr ReconcileResult, now time.Time) []lease.StatusExter
 		k.extAt, k.extPID = now, rr.CaffeinatePID
 	}
 	return slices.Clone(k.extList)
+}
+
+// governClaudeHolders applies the low-battery rule to Claude Code's own
+// caffeinate inhibitors, which bypass the shim (ADR 0100 decision 8): it marks
+// every recognised one in ext (managed_by) and, while the gate is released
+// (the release level, or the blind rule), stops them and drops them from the
+// returned list and from the cached probe answer. Any other holder is left
+// alone. A stop that fails is logged and retried on the next tick.
+func (k *Keeper) governClaudeHolders(ext []lease.StatusExternal, gate policy.Status) []lease.StatusExternal {
+	ext = k.claude.Mark(ext)
+	if gate.Gate != policy.GateReleased {
+		return ext
+	}
+	res := k.claude.Reap(ext)
+	for _, err := range res.Errs {
+		k.logf("claude holder: %v", err)
+	}
+	if len(res.Reaped) == 0 {
+		return ext
+	}
+	gone := func(e lease.StatusExternal) bool { return slices.Contains(res.Reaped, e.PID) }
+	for _, pid := range res.Reaped {
+		k.logf("stopped Claude Code's caffeinate %d under the released gate", pid)
+	}
+	k.extList = slices.DeleteFunc(k.extList, gone)
+	return slices.DeleteFunc(ext, gone)
 }
 
 // emit records the tick's metrics and logs. It never blocks: the emitter's

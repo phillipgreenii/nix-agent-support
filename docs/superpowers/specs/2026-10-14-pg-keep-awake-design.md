@@ -20,19 +20,25 @@ until macOS hibernated it at 1%.
 
 Holders observed on 2026-10-14 (`pmset -g assertions`, `ps`):
 
-| Holder                                          | Command                      | Battery rule   |
-| ----------------------------------------------- | ---------------------------- | -------------- |
-| pa-monitor daemon                               | `caffeinate -w <daemon pid>` | yes (ADR 0095) |
-| Claude Code CLI (2.1.296), one per busy session | `caffeinate -i -t 300`       | no             |
-| an interactive shell                            | `caffeinate -s -i -t 180000` | no             |
-| downstream wrapper scripts (outside this repo)  | `caffeinate -w $$ &`         | no             |
-| `agent-activity-api wait --caffeinate`          | `caffeinate -w $$ &`         | no             |
-| `wait-for-agents-to-finish --caffeinate`        | `caffeinate -w $$ &`         | no             |
+| Holder                                          | Command                      | Battery rule                                                 |
+| ----------------------------------------------- | ---------------------------- | ------------------------------------------------------------ |
+| pa-monitor daemon                               | `caffeinate -w <daemon pid>` | yes (ADR 0095)                                               |
+| Claude Code CLI (2.1.296), one per busy session | `caffeinate -i -t 300`       | no (the shim never sees it; the keeper stops it, 2026-10-22) |
+| an interactive shell                            | `caffeinate -s -i -t 180000` | no                                                           |
+| downstream wrapper scripts (outside this repo)  | `caffeinate -w $$ &`         | no                                                           |
+| `agent-activity-api wait --caffeinate`          | `caffeinate -w $$ &`         | no                                                           |
+| `wait-for-agents-to-finish --caffeinate`        | `caffeinate -w $$ &`         | no                                                           |
 
 Claude Code spawns `["caffeinate", ["-i","-t","300"]]` by bare name, reference-counted and re-armed
 while a turn is busy. Its documentation, settings and environment variables expose no switch to turn
-this off (checked 2026-10-14; the open upstream request is issue 21432). A `caffeinate` found earlier
-on `PATH` therefore intercepts it.
+this off (checked 2026-10-14; the open upstream request is issue 21432).
+
+**Amended 2026-10-22 (bead pg2-0n6og): a `caffeinate` earlier on `PATH` does NOT intercept it.** The
+original text here assumed it would. Inspection of Claude Code 2.1.303 shows the bare name is resolved
+against a child environment whose `PATH` is the constant `/usr/bin:/bin:/usr/sbin:/sbin`, so the real
+`/usr/bin/caffeinate` always runs (evidence in ADR 0100, "Mechanism evidence"). Claude Code's holder is
+covered by the keeper's identification of it, "Claude Code's own inhibitor" under the keeper section
+below, not by the shim.
 
 macOS idle-sleeps when no assertion is held and the user is idle. This Mac's battery profile is
 `sleep 1`, `displaysleep 5`, `hibernatemode 3`, `standby 1`, so releasing every keep-awake assertion lets
@@ -448,6 +454,21 @@ The keeper MUST NOT signal a pid taken from an `acquire` lease (it may be pa-mon
   completes well inside it. A crash gets the same effect from the last touch.
 - Both keep valid leases, `assertion.json`, the anchor and `caffeinate`.
 
+**Claude Code's own inhibitor (added 2026-10-22, ADR 0100 decision 8).** The shim cannot cover Claude
+Code (section 1), so the keeper governs it by identity. Each tick, after the external probe, the keeper
+marks every `external` entry named `caffeinate` that is Claude Code's inhibitor: the process runs
+`/usr/bin/caffeinate`, its argv is exactly `caffeinate -i -t <seconds>`, and its parent is a running
+process whose argv[0] (or executable name) is `claude`. The check reads the live process table of the
+keeper's own user and fails closed (an unreadable argv, a missing parent or any mismatch means "not
+managed"). Marked entries carry `managed_by: "claude"` in `status.json`. While the gate is `released` (the
+release level or the blind rule) the keeper stops each marked holder: SIGTERM, then SIGKILL one second
+later, re-reading the holder's start time before each signal so a recycled pid is never hit. It stops
+nothing in the gates `ok` and `no_spawn`, and nothing that fails the identification. Claude Code re-arms
+every 240 seconds while a turn is busy, so a replacement that appears while the gate is still released is
+stopped on a later tick (within one `external` probe interval, 10 seconds, plus a tick). No
+configuration key controls this; a future Claude Code that changes its request leaves the rule inert and
+shows as an unmanaged holder.
+
 ## 9. The anchor
 
 `pg-keep-awake anchor --release-pct R --blind-pct B --watchdog D --heartbeat PATH --interval I --state-dir DIR`
@@ -661,8 +682,10 @@ home/programs/pg-keep-awake/default.nix
   `/etc/profiles/per-user/<user>/bin`). A pool session's `PATH` lists that directory before `/usr/bin`
   but not `~/.nix-profile/bin`, so a shim that lands only there is bypassed.
 - Sessions and shells that started before the first apply keep their old `caffeinate` holders until they
-  end, and a holder that calls `/usr/bin/caffeinate` by absolute path is never intercepted. `status`
-  `external` shows both, which is the proof of coverage.
+  end, and a holder that calls `/usr/bin/caffeinate` by absolute path (or that spawns it with a `PATH` of
+  its own, as Claude Code does) is never intercepted by the shim. `status` `external` shows both, which
+  is the proof of coverage. Claude Code's holder is the one such holder the keeper stops itself (section
+  8, "Claude Code's own inhibitor").
 - Ship `--help`, bash and zsh completions and a tldr page, copying the pa-monitor layout.
 
 ## 16. Evidence and what is not yet verified
@@ -681,9 +704,16 @@ Verified on 2026-10-14:
 - The profile bin precedes `/usr/bin` on `PATH` in an interactive shell and in a pool session (the pool
   session's `PATH` lists the profile bin before `/usr/bin`).
 
-Not verified: that Claude Code resolves `caffeinate` through `PATH` at spawn (the bundle shows a bare
-name); whether the real tool counts `-t` across sleep; pa-monitor's launchd `PATH`; a write to the state
-directory from inside a live pool session.
+Verified on 2026-10-22 (bead pg2-0n6og), read-only, on Claude Code 2.1.303: Claude Code does NOT
+resolve `caffeinate` through the user's `PATH`. It spawns the bare name with a replaced child `PATH` of
+`/usr/bin:/bin:/usr/sbin:/sbin`, which is why the shim never saw it. This falsifies the earlier "Not
+verified" item, which assumed the shim would intercept it; the exact bundle text is in ADR 0100,
+"Mechanism evidence". The earlier "PATH order in a pool session" bullet above stays true and is
+irrelevant to this holder.
+
+Not verified: whether the real tool counts `-t` across sleep; pa-monitor's launchd `PATH`; a write to the
+state directory from inside a live pool session; that the keeper's stop of Claude Code's inhibitor under
+a released gate happens on a live machine with a fresh session (a post-apply check).
 
 ## 17. Decisions O1-O9 (confirmed as proposed)
 

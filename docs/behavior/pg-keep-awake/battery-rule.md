@@ -23,6 +23,10 @@ decisions 4 and 5, and takes over, for the keep-awake path, the rule of ADR 0095
   shut down, only to stop holding it awake, so the Mac sleeps when it would have anyway and anything I
   chose to keep it awake in another way is respected. _(→ `JOURNEY-BATT-DISCHARGE`; `INV-BATT-4`,
   `INV-BATT-5`, `INV-BATT-10`, `INV-BATT-12`.)_
+- **`STORY-BATT-AGENT-HOLDERS`** <!-- uuid: 3c8e51a7-90d2-4f64-b1a8-d7e0425f6b93 --> — As the operator, I want the keep-awake that Claude Code starts for itself, which no
+  `caffeinate` command on my path can intercept, to stop at the release level as well, so the many
+  agent sessions I run cannot hold the Mac awake on an empty battery. _(→ `JOURNEY-BATT-DISCHARGE`;
+  `INV-BATT-13`, `INV-BATT-10`.)_
 
 ## Journeys
 
@@ -30,7 +34,7 @@ decisions 4 and 5, and takes over, for the keep-awake path, the rule of ADR 0095
 
 **Primary actor:** `ACTOR-OPERATOR`. **Other actors:** `ACTOR-HOST`, `ACTOR-CLIENT`. _Requires:_
 `INV-BATT-1`, `INV-BATT-2`, `INV-BATT-3`, `INV-BATT-4`, `INV-BATT-5`, `INV-BATT-6`, `INV-BATT-7`,
-`INV-BATT-8`, `INV-BATT-9`, `INV-BATT-10`, `INV-BATT-11`, `INV-BATT-12`. _Includes:_ none.
+`INV-BATT-8`, `INV-BATT-9`, `INV-BATT-10`, `INV-BATT-11`, `INV-BATT-12`, `INV-BATT-13`. _Includes:_ none.
 
 1. Agents are working, so leases are live and the Mac is held awake on its power source (`INV-BATT-2`).
 2. The power source is lost with the battery at 64%. The hold continues: the battery is above the hold
@@ -56,6 +60,10 @@ Extensions:
   the assertion is released with the reason `blind_threshold` (`INV-BATT-8`).
 - 4c. The keeper is gone for good. After the watchdog timeout without a heartbeat, the anchor ends the
   assertion with the reason `watchdog` (`INV-BATT-9`).
+- 4c2. Agent sessions are running and each holds the Mac awake through the keep-awake Claude Code starts for
+  itself. At the release level the keeper stops each of those too and the status view no longer lists
+  them; a session that starts another while the gate is still `released` has it stopped on a later pass
+  (`INV-BATT-13`). Any other `caffeinate` on the Mac keeps running (`INV-BATT-10`).
 - 4d. A client asks again right after the release. The keeper does not start an assertion on a battery
   already at or below the release level, and does not respawn one that ended within moments of starting
   (`INV-BATT-12`).
@@ -108,7 +116,8 @@ Extensions:
 - **`INV-BATT-10`** <!-- uuid: 0a47c9e2-b81d-4f35-a6c8-d3e7f2051b96 --> — Only the battery rule, the watchdog, an empty set of live leases, a pause
   and the keeper's own reconciliation MAY end the hold. The product MUST NOT stop any assertion that it did not start, and
   MUST NOT stop another `caffeinate` holder or a non-`caffeinate` holder, though the status view lists
-  them. _(Design sections 2 (non-goals) and 12.)_
+  them, with one exception: the keep-awake that Claude Code starts for itself, as `INV-BATT-13` defines
+  it. _(Design sections 2 (non-goals) and 12; ADR 0100 decision 8.)_
 - **`INV-BATT-11`** <!-- uuid: 59d3a8b1-e670-4c42-8f9d-b2a0c64e1d37 --> — Why the hold last ended MUST be recorded and shown. The reason is one of
   `release_threshold`, `blind_threshold`, `watchdog`, `no_leases`, `paused`, `keeper_stop` or `unknown`
   (an anchor that was killed without a record). An anchor MUST record its reason before ending, and the
@@ -117,10 +126,21 @@ Extensions:
   battery at or below the release level. If an anchor ends within moments of being started, the keeper
   MUST NOT start another for a longer interval, so a failing start is not retried in a tight loop. _(Design section 8 (anchor churn guard).)_
 
+- **`INV-BATT-13`** <!-- uuid: 8f2b64d9-1ea7-4c05-a93b-5d70c8e1f4a2 --> — The keep-awake that Claude Code starts for itself is a managed holder: an external
+  `caffeinate` that runs the system's own `caffeinate`, whose command line is exactly `caffeinate -i -t`
+  and a number of seconds, and whose parent is a running `claude` process. It is identified from the live
+  process table of the product's own user at the moment of use, and anything that fails any part of that
+  test MUST be left alone. The status view MUST mark a managed holder as managed by `claude`. While the gate is
+  `released`, including by the blind rule, the keeper MUST stop each managed holder, and MUST only signal
+  a process whose start time still matches the one it identified. In every other gate it MUST leave them
+  running. A managed holder started while the gate is `released` MUST be stopped on a later pass. The product
+  MUST NOT stop the `claude` process itself. _(Design section 8 (Claude Code's own inhibitor); ADR 0100
+  decision 8; operator ruling 2026-10-22, bead pg2-0n6og.)_
+
 ## The interface catalog
 
 - **`INTF-HOST`** <!-- uuid: 17c94e8a-6d05-4b31-9a7f-e2b5d08c4163 --> — what the product reads from and asks of the host. What crosses in: the
   battery's percentage and power source (a read that can fail), the state of a process (running, a zombie,
-  gone) and its start time, and the assertions the host reports for other holders. What crosses out: the one
-  held assertion, and the status view's list of other holders. What MUST hold: `INV-BATT-7`, `INV-BATT-8`,
-  `INV-BATT-10`, `INV-LEASE-3`. The counterparty is `ACTOR-HOST`.
+  gone), its start time, its parent, its executable and its command line, and the assertions the host reports for other holders. What crosses out: the one
+  held assertion, a stop of each managed holder, and the status view's list of other holders. What MUST hold: `INV-BATT-7`, `INV-BATT-8`,
+  `INV-BATT-10`, `INV-BATT-13`, `INV-LEASE-3`. The counterparty is `ACTOR-HOST`.

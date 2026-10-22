@@ -138,7 +138,8 @@ Extensions:
 - **`INV-KCLI-9`** <!-- uuid: b6014f8d-d29a-4e73-a5c8-7c3e9f1b0d24 --> — `status` MUST show every live lease (owner, key, process, expiry and
   state), the keeper's health and how long since its last heartbeat, the assertion with its flags, the
   battery with its percentage and power source, the gate, why the hold last ended, and every external
-  holder with its process, kind of assertion and age. It MUST read what the keeper wrote plus a live
+  holder with its process, kind of assertion and age, marking a holder the keeper manages (`INV-BATT-13`)
+  with the program that manages it. It MUST read what the keeper wrote plus a live
   process check, and so MUST work with the keeper down. A lease of a newer version than the reader understands MUST be shown
   as unreadable and MUST NOT be deleted. An empty system MUST print one line saying there are no leases,
   no assertion and the keeper's state, and a state directory that does not exist MUST print that the

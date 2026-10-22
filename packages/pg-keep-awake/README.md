@@ -71,6 +71,11 @@ pg-keep-awake resume
 An owner and a key are each 1 to 64 letters, digits, underscores or hyphens. The key is `default` when
 `--key` is not given. `-d`, `-i`, `-m` and `-s` follow `caffeinate`; `-i` is the default.
 
+`status` marks an external holder `managed by claude` when it is Claude Code's own `caffeinate -i -t N`
+(its parent is a `claude` process). Claude Code starts that holder with a search path of its own, so the
+shim never sees it; instead the keeper stops it while the battery gate is `released` and leaves it alone
+otherwise (ADR 0100 decision 8). No other holder is ever stopped.
+
 ## Exit codes
 
 | Code | Meaning                                           |
