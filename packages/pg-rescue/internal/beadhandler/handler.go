@@ -104,6 +104,14 @@ func finish(err error, stderr io.Writer) int {
 
 // run does the work and returns the deferred result.
 func run(rt *Runtime, o *options, kid *child) (contract.Result, error) {
+	annotateID := o.annotate
+	if o.annotateEnv != "" {
+		// The id is passed to the tracker as-is; only the emptiness check trims.
+		annotateID = rt.Getenv(o.annotateEnv)
+		if strings.TrimSpace(annotateID) == "" {
+			return contract.Result{}, fmt.Errorf("--annotate-from-env %s: the environment variable is unset or empty", o.annotateEnv)
+		}
+	}
 	rep, err := loadReport(rt.Getenv("PG_RESCUE_REPORT"))
 	if err != nil {
 		return contract.Result{}, err
@@ -128,16 +136,16 @@ func run(rt *Runtime, o *options, kid *child) (contract.Result, error) {
 		return contract.Result{}, err
 	}
 
-	if o.annotate != "" {
-		if err := conn.comment(o.annotate, body); err != nil {
+	if annotateID != "" {
+		if err := conn.comment(annotateID, body); err != nil {
 			return contract.Result{}, err
 		}
 		if len(o.addLabels) > 0 {
-			if err := conn.addLabels(o.annotate, o.addLabels); err != nil {
+			if err := conn.addLabels(annotateID, o.addLabels); err != nil {
 				return contract.Result{}, err
 			}
 		}
-		return result(ActionAnnotated, o.annotate, "Annotated "+o.annotate), nil
+		return result(ActionAnnotated, annotateID, "Annotated "+annotateID), nil
 	}
 
 	fingerprint := rt.Getenv("PG_RESCUE_FINGERPRINT")

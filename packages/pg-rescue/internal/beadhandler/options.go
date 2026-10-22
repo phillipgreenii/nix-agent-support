@@ -31,7 +31,7 @@ const Usage = `usage: pg-rescue-bead [--priority N] [--issue-type T] [--label L]
                       [--body-template TEXT | --body-template-file F]
                       [--append-instructions TEXT | --append-instructions-file F]
                       [--output-tail-lines N] [--dedup-query NAME]
-                      [--annotate ID [--add-label L]...]
+                      [--annotate ID | --annotate-from-env NAME] [--add-label L]...
                       [--print-default-template | --print-template-vars]
 `
 
@@ -58,7 +58,9 @@ type options struct {
 	tailLines  int
 	dedupQuery string
 	annotate   string
-	addLabels  []string
+	// annotateEnv names the environment variable that holds the id to annotate.
+	annotateEnv string
+	addLabels   []string
 
 	printTemplate bool
 	printVars     bool
@@ -93,7 +95,8 @@ func parseOptions(args []string) (*options, error) {
 	fs.IntVar(&o.tailLines, "output-tail-lines", defaultTailLines, "output tail lines inlined in the body")
 	fs.StringVar(&o.dedupQuery, "dedup-query", "", "named pg-connector query listing non-closed pg-rescue items")
 	fs.StringVar(&o.annotate, "annotate", "", "comment on this existing item instead of creating one")
-	fs.StringArrayVar(&o.addLabels, "add-label", nil, "with --annotate: label to add (repeatable)")
+	fs.StringVar(&o.annotateEnv, "annotate-from-env", "", "like --annotate, but the item id is read from the environment variable NAME")
+	fs.StringArrayVar(&o.addLabels, "add-label", nil, "with --annotate or --annotate-from-env: label to add (repeatable)")
 	fs.BoolVar(&o.printTemplate, "print-default-template", false, "print the built-in templates and exit")
 	fs.BoolVar(&o.printVars, "print-template-vars", false, "print the template data model and exit")
 	fs.BoolVar(&o.help, "help", false, "show usage")
@@ -141,8 +144,17 @@ func parseOptions(args []string) (*options, error) {
 	if o.annotate != "" && o.dedupQuery != "" {
 		return nil, errors.New("--annotate and --dedup-query are mutually exclusive: annotate targets one item, dedup searches for one")
 	}
-	if len(o.addLabels) > 0 && o.annotate == "" {
-		return nil, errors.New("--add-label requires --annotate")
+	if o.annotateEnv != "" && o.dedupQuery != "" {
+		return nil, errors.New("--annotate-from-env and --dedup-query are mutually exclusive: annotate targets one item, dedup searches for one")
+	}
+	if fs.Changed("annotate") && fs.Changed("annotate-from-env") {
+		return nil, errors.New("--annotate and --annotate-from-env are mutually exclusive: both name the item to annotate")
+	}
+	if fs.Changed("annotate-from-env") && o.annotateEnv == "" {
+		return nil, errors.New("--annotate-from-env needs the name of an environment variable")
+	}
+	if len(o.addLabels) > 0 && o.annotate == "" && o.annotateEnv == "" {
+		return nil, errors.New("--add-label requires --annotate or --annotate-from-env")
 	}
 	var err error
 	if o.repoLabelMap, err = parseRepoMap("repo-label-map", "REPO=LABEL", repoLabelMap); err != nil {

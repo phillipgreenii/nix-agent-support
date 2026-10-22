@@ -616,6 +616,12 @@ instance depends on the failing command's repo.
   `--annotate`'s comment and label update. A later entry for the same `REPO` wins.
 - `--backend NAME` (default `pg-connector-issue-beads`) serves every other repo, and a failure that
   ran outside a git repository.
+- `--annotate-from-env NAME` is `--annotate` with the item id read from the environment variable
+  `NAME` instead of the command line, for a chain handler whose argv is static while the id is known
+  only at dispatch time (the role shim exports it, for example as `PG_RESCUE_ITEM_ID`). It takes
+  `--add-label` exactly as `--annotate` does, exits `3` (deferred) on success, and is mutually
+  exclusive with `--annotate` and `--dedup-query`. An unset, empty or whitespace-only variable is a
+  usage error and exits `1`; a non-empty value is passed to the tracker as-is, unvalidated.
 - A malformed entry (no `=`, an empty `REPO`, an empty `INSTANCE`) is a usage error and exits `1`.
 - There is no fallback. If the instance cannot be reached, or is not registered, the handler exits
   `1`; it never retries on `--backend`.

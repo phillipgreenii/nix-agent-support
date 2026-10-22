@@ -1213,3 +1213,88 @@ func readFile(t *testing.T, p string) string {
 	}
 	return string(b)
 }
+
+func TestAnnotateFromEnv(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	s.env["PG_RESCUE_ITEM_ID"] = "pg2-env1"
+	code, stdout, stderr := s.run("--annotate-from-env", "PG_RESCUE_ITEM_ID", "--add-label", "script-gave-up", "--add-label", "x")
+	if code != 3 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	_, rep := resultOf(t, code, stdout)
+	if m := metaOf(t, rep); m["item_id"] != "pg2-env1" || m["action"] != "annotated" || rep.Summary != "Annotated pg2-env1" {
+		t.Errorf("meta %v summary %q", m, rep.Summary)
+	}
+	calls := s.fake.Calls()
+	if len(calls) != 2 || calls[0].Verb() != "comment" || calls[1].Verb() != "update" {
+		t.Fatalf("calls %v", calls)
+	}
+	if calls[0].Args[2] != "pg2-env1" || !strings.Contains(calls[0].Value("body"), "Run id: 20261002T140311Z-7f3a9c2e") {
+		t.Errorf("comment %v", calls[0].Args)
+	}
+	if calls[1].Args[2] != "pg2-env1" || strings.Join(calls[1].Values("add-label"), "|") != "script-gave-up|x" {
+		t.Errorf("update %v", calls[1].Args)
+	}
+}
+
+func TestAnnotateFromEnvWithoutLabelsOnlyComments(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	s.env["ITEM"] = "pg2-env2"
+	if code, _, e := s.run("--annotate-from-env", "ITEM"); code != 3 {
+		t.Fatalf("exit %d: %s", code, e)
+	}
+	if calls := s.fake.Calls(); len(calls) != 1 || calls[0].Verb() != "comment" || calls[0].Args[2] != "pg2-env2" {
+		t.Errorf("calls %v", calls)
+	}
+}
+
+func TestAnnotateFromEnvPassesTheIdAsIs(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	s.env["ITEM"] = " odd id "
+	if code, _, e := s.run("--annotate-from-env", "ITEM"); code != 3 {
+		t.Fatalf("exit %d: %s", code, e)
+	}
+	if calls := s.fake.Calls(); len(calls) != 1 || calls[0].Args[2] != " odd id " {
+		t.Errorf("calls %v", calls)
+	}
+}
+
+func TestAnnotateFromEnvErrorsExit1NamingTheOption(t *testing.T) {
+	for name, tc := range map[string]struct {
+		env  map[string]string
+		args []string
+	}{
+		"unset variable":      {nil, []string{"--annotate-from-env", "ITEM"}},
+		"empty variable":      {map[string]string{"ITEM": ""}, []string{"--annotate-from-env", "ITEM"}},
+		"blank variable":      {map[string]string{"ITEM": " \t "}, []string{"--annotate-from-env", "ITEM"}},
+		"with annotate":       {map[string]string{"ITEM": "pg2-x"}, []string{"--annotate", "pg2-y", "--annotate-from-env", "ITEM"}},
+		"with empty annotate": {map[string]string{"ITEM": "pg2-x"}, []string{"--annotate", "", "--annotate-from-env", "ITEM"}},
+		"with dedup":          {map[string]string{"ITEM": "pg2-x"}, []string{"--annotate-from-env", "ITEM", "--dedup-query", "q"}},
+		"empty name":          {nil, []string{"--annotate-from-env", ""}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newScene(t, "first-attempt")
+			for k, v := range tc.env {
+				s.env[k] = v
+			}
+			code, stdout, stderr := s.run(tc.args...)
+			if code != 1 || stdout != "" || !strings.Contains(stderr, "--annotate-from-env") || len(s.fake.Calls()) != 0 {
+				t.Errorf("code=%d stdout=%q stderr=%q calls=%v", code, stdout, stderr, s.fake.Calls())
+			}
+		})
+	}
+}
+
+func TestAnnotateFromEnvFailuresExit1(t *testing.T) {
+	for _, failing := range []string{"comment", "update"} {
+		t.Run(failing, func(t *testing.T) {
+			s := newScene(t, "first-attempt")
+			s.env["ITEM"] = "pg2-abc"
+			s.fake.Fail(failing, 1, "boom")
+			code, stdout, stderr := s.run("--annotate-from-env", "ITEM", "--add-label", "x")
+			if code != 1 || stdout != "" || !strings.Contains(stderr, "boom") {
+				t.Errorf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+		})
+	}
+}
