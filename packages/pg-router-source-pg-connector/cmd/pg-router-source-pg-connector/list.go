@@ -2,7 +2,8 @@
 // `pg-connector <type> list --query <query> --backend <binary> --output
 // json` (a FULL, non---ids-only fetch), applies the two post-filters
 // (--title-prefix, --issue-type) exactly reproducing today's jq
-// pipelines, and prints one pg-router rawItem per surviving entity
+// pipelines, plus the repeatable --exclude-title-prefix drop filter, and
+// prints one pg-router rawItem per surviving entity
 // [design: section 6.1].
 package main
 
@@ -40,6 +41,7 @@ type listEntity struct {
 
 func newListCmd() *cobra.Command {
 	var backend, beadsDir, titlePrefix, issueType string
+	var excludeTitlePrefixes []string
 	cmd := &cobra.Command{
 		Use:   "list <type> <query>",
 		Short: "List entities matching a named query, as pg-router rawItems",
@@ -49,9 +51,16 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&beadsDir, "beads-dir", "", "sets PG_CONNECTOR_ISSUE_BEADS_DIR in the pg-connector child's environment")
 	cmd.Flags().StringVar(&titlePrefix, "title-prefix", "", "keep only entities whose title field starts with this prefix (case-sensitive, exact prefix match)")
 	cmd.Flags().StringVar(&issueType, "issue-type", "", "keep only entities whose own issue-type field equals this exactly")
+	cmd.Flags().StringArrayVar(&excludeTitlePrefixes, "exclude-title-prefix", nil, "drop every entity whose title field starts with this prefix (case-sensitive, exact prefix match); repeatable, ANDed with --title-prefix and --issue-type; an empty prefix is a usage error")
 	_ = cmd.MarkFlagRequired("backend")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		entityType, query := args[0], args[1]
+		for _, p := range excludeTitlePrefixes {
+			if p == "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), "pg-router-source-pg-connector list: --exclude-title-prefix must not be empty (it would match every title)")
+				return errFailed
+			}
+		}
 		out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(),
 			[]string{entityType, "list", "--query", query, "--backend", backend, "--output", "json"},
 			beadsDirEnv(beadsDir))
@@ -81,6 +90,9 @@ func newListCmd() *cobra.Command {
 			if issueType != "" && e.IssueType != issueType {
 				continue
 			}
+			if hasAnyPrefix(e.Title, excludeTitlePrefixes) {
+				continue
+			}
 			title := e.Title
 			if title == "" {
 				title = e.ID
@@ -95,4 +107,16 @@ func newListCmd() *cobra.Command {
 		return writeItems(cmd.OutOrStdout(), items)
 	}
 	return cmd
+}
+
+// hasAnyPrefix reports whether s starts with any of prefixes
+// (case-sensitive, exact prefix, like --title-prefix); an empty prefixes
+// slice never matches.
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }

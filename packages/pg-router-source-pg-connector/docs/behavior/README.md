@@ -107,11 +107,15 @@ flowchart LR
   id with `title` equal to the id and `metadata` exactly `{"change": "sweep"}`. It never runs a
   second, full fetch to backfill title/other fields — its purpose is a cheap reconciliation
   signal by id, not a content refresh.
-- **`list <type> <query> --backend <binary> [--beads-dir <path>] [--title-prefix <p>] [--issue-type <t>]`**
+- **`list <type> <query> --backend <binary> [--beads-dir <path>] [--title-prefix <p>] [--issue-type <t>] [--exclude-title-prefix <p>]...`**
   — runs `pg-connector <type> list --query <query> --backend <binary> --output json` (a full,
-  non-`--ids-only` fetch), applies the two post-filters (case-sensitive exact title prefix; exact
-  issue-type equality; ANDed when both given), and prints one rawItem per surviving entity, with
-  `metadata` copied from the entity's own metadata map as-is.
+  non-`--ids-only` fetch), applies the post-filters (case-sensitive exact title prefix; exact issue-type equality; and the
+  repeatable `--exclude-title-prefix`, which drops every entity whose title starts with any given
+  prefix, case-sensitive and exact like `--title-prefix`), all ANDed together, and prints one
+  rawItem per surviving entity, with `metadata` copied from the entity's own metadata map as-is.
+  An empty `--exclude-title-prefix ""` is a usage error (it would match every title); with no
+  `--exclude-title-prefix` the output is unchanged. Only `list` has this flag (not `changes` or
+  `sweep`).
 
 ## Exit codes
 
