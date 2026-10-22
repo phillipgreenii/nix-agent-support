@@ -11,14 +11,17 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/executor"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/failsig"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/originprobe"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
@@ -170,7 +173,7 @@ func runDispatch(args []string) int {
 	// the gate lives here, at the handler boundary, because only the handler
 	// knows which repo a dispatch runs in.
 	if reason, declined := originGate(context.Background(), newOriginProber(cfg), role, cfg, dctx.Item.ID); declined {
-		writeBusyReply(os.Stdout, reason)
+		writeBusyReply(os.Stdout, neutralDecline(reason, ""))
 		return conformance.ExitBusy
 	}
 	deps := buildDeps(cfg, role)
@@ -271,11 +274,11 @@ func runDispatch(args []string) int {
 	// the decline is the same pre-accept busy reply as every other, carrying the
 	// skip's own reason so pg-router core's declined metric counts it per reason.
 	if skip, skipped := executor.Precheck(ctx, dctx, deps, bead); skipped {
-		writeBusyReply(os.Stdout, skip.Reason)
+		writeBusyReply(os.Stdout, neutralDecline(skip.Reason, skip.Detail))
 		return conformance.ExitBusy
 	}
 	result, err := executor.For(role.Type).Dispatch(ctx, dctx, deps)
-	if reason, busy := busyDeclineReason(err); busy {
+	if decline, busy := busyDeclineFor(err); busy {
 		// Pre-accept busy decline (INV-CONC-1, DEC-WIRE-1 exit 9): the core's
 		// listener re-offers the event with backoff; the activity ring
 		// records it as "declined", distinct from "dispatch_failed" — for
@@ -293,7 +296,7 @@ func runDispatch(args []string) int {
 		// backpressure" — confirmed live 2026-09-22 as otherwise
 		// indistinguishable without manually cross-referencing ccpool
 		// capacity by hand.
-		writeBusyReply(os.Stdout, reason)
+		writeBusyReply(os.Stdout, decline)
 		return conformance.ExitBusy
 	}
 	if err != nil {
@@ -509,35 +512,107 @@ const (
 	// persistently unreadable pool pages (under session-in-flight it was hidden
 	// by that exclusion).
 	busyReasonPoolUnreadable = "pool-unreadable"
+	// busyReasonLaunchFailed (INV-CCH-34): a failure before ccpool new returned
+	// ready (executor.ErrLaunchFailed). A pre-accept decline of kind fault; it
+	// mutates no bead, and the failure-rate alert counts it.
+	busyReasonLaunchFailed = "launch-failed"
 )
 
-// busyDeclineReason maps err to the wire's busy-decline reason tag when err
-// is one of executor's six "decline and retry later" sentinels (bead
-// pg2-j4uwg's capacity pair, widened by pg2-8vn8t's low-disk sentinel,
-// pg2-358u3's command-busy sentinel, pg2-qaeb8's session-in-flight
-// sentinel and pg2-s3pjt's pool-unreadable sentinel): ok is false for any
-// other err (including nil), matching none of them. All six still map to the SAME wire-level conformance.ExitBusy — the core's
-// retry/backoff cadence never depends on which reason applied (INV-FAIL-1)
-// — reason exists purely so pg-router core's declined metric/status
-// breakdown can tell them apart (see this file's runDispatch call site and
-// ErrPoolCapacityUnknown/ErrPoolAtCapacity/ErrLowDisk/ErrBusy's own doc
-// comments).
-func busyDeclineReason(err error) (reason string, ok bool) {
+// The decline kinds of the wire's decline body (schemas' handler.dispatch-reply
+// schema, DEC-WIRE-1): what core's progress gauges count. busy is routine
+// backpressure, fault is a condition worth an operator's look, and neutral is a
+// decline that says nothing about the dispatch's health.
+const (
+	declineKindBusy    = "busy"
+	declineKindFault   = "fault"
+	declineKindNeutral = "neutral"
+)
+
+// busyDecline is one pre-accept decline: the wire body's reason, kind and the
+// optional, redacted, bounded detail. Every decline goes through one before
+// writeBusyReply.
+type busyDecline struct{ Reason, Kind, Detail string }
+
+// neutralDecline is a decline of kind neutral (origin-unavailable and skipped-*):
+// the dispatch was not wanted or could not run for a reason that is neither
+// backpressure nor a fault. detail is redacted and bounded; "" omits it.
+func neutralDecline(reason, detail string) busyDecline {
+	return busyDecline{Reason: reason, Kind: declineKindNeutral, Detail: boundedDetail(detail)}
+}
+
+// boundedDetail redacts text and truncates it, by bytes at a UTF-8 boundary, to
+// the schema's maxLength (schemas.DeclineDetailMaxLen), keeping the START of the
+// text. The schema bound is in characters, so a byte bound also satisfies it.
+func boundedDetail(text string) string {
+	text = failsig.Redact(strings.TrimSpace(text))
+	if len(text) <= schemas.DeclineDetailMaxLen {
+		return text
+	}
+	cut := schemas.DeclineDetailMaxLen
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
+}
+
+// boundedTailDetail is boundedDetail keeping the END of the text. A ccpool new
+// error reads "ccpool new <long argv>: <exit> (<stderr>)", so the diagnosis is at
+// the end, and a head cut would keep only the argv.
+func boundedTailDetail(text string) string {
+	text = failsig.Redact(strings.TrimSpace(text))
+	if len(text) <= schemas.DeclineDetailMaxLen {
+		return text
+	}
+	cut := len(text) - schemas.DeclineDetailMaxLen
+	for cut < len(text) && !utf8.RuneStart(text[cut]) {
+		cut++
+	}
+	return text[cut:]
+}
+
+// busyDeclineFor maps err to the wire's pre-accept decline (reason, kind and
+// detail) when err is one of executor's "decline and retry later" sentinels
+// (bead pg2-j4uwg's capacity pair, widened by pg2-8vn8t's low-disk sentinel,
+// pg2-358u3's command-busy sentinel, pg2-qaeb8's session-in-flight sentinel,
+// pg2-s3pjt's pool-unreadable sentinel and INV-CCH-34's launch-failed): ok is
+// false for any other err (including nil), matching none of them. All still map
+// to the SAME wire-level conformance.ExitBusy, so the core's retry/backoff
+// cadence never depends on which reason applied (INV-FAIL-1); the reason and the
+// kind exist so pg-router core's declined metric, status breakdown and progress
+// gauges can tell them apart (see this file's runDispatch call site).
+//
+// The kind per reason:
+//
+//	busy:    at-capacity (usage-limit refusals map here, so a usage window never
+//	         pages), session-in-flight, command-busy
+//	fault:   capacity-unknown, pool-unreadable, low-disk, launch-failed
+//	neutral: origin-unavailable and skipped-* (neutralDecline)
+//
+// Only launch-failed carries a detail: the redacted ccpool new error text, its
+// last bytes up to the schema bound (the stderr diagnosis is at the end).
+func busyDeclineFor(err error) (busyDecline, bool) {
 	switch {
 	case errors.Is(err, executor.ErrPoolCapacityUnknown):
-		return busyReasonCapacityUnknown, true
+		return busyDecline{Reason: busyReasonCapacityUnknown, Kind: declineKindFault}, true
 	case errors.Is(err, executor.ErrPoolAtCapacity):
-		return busyReasonAtCapacity, true
+		return busyDecline{Reason: busyReasonAtCapacity, Kind: declineKindBusy}, true
 	case errors.Is(err, executor.ErrLowDisk):
-		return busyReasonLowDisk, true
+		return busyDecline{Reason: busyReasonLowDisk, Kind: declineKindFault}, true
 	case errors.Is(err, executor.ErrBusy):
-		return busyReasonCommandBusy, true
+		return busyDecline{Reason: busyReasonCommandBusy, Kind: declineKindBusy}, true
 	case errors.Is(err, executor.ErrSessionInFlight):
-		return busyReasonSessionInFlight, true
+		return busyDecline{Reason: busyReasonSessionInFlight, Kind: declineKindBusy}, true
 	case errors.Is(err, executor.ErrPoolUnreadable):
-		return busyReasonPoolUnreadable, true
+		return busyDecline{Reason: busyReasonPoolUnreadable, Kind: declineKindFault}, true
+	case errors.Is(err, executor.ErrLaunchFailed):
+		d := busyDecline{Reason: busyReasonLaunchFailed, Kind: declineKindFault}
+		var lf *executor.LaunchFailedError
+		if errors.As(err, &lf) {
+			d.Detail = boundedTailDetail(lf.Tail)
+		}
+		return d, true
 	default:
-		return "", false
+		return busyDecline{}, false
 	}
 }
 
@@ -546,14 +621,17 @@ func busyDeclineReason(err error) (reason string, ok bool) {
 // busy decline with ("a reply body, where the participant supplies one,
 // still carries which case applies") — reusing writeReply, the SAME
 // lowest-level body-writing helper writeErrorReply and the success path
-// both already use, rather than inventing a second one. No handler.dispatch-
-// reply schema branch covers this shape yet (that schema's oneOf enumerates
-// only the sync-outcome/deferred-ack success shapes); wireclient.Dispatch on
-// the core side reads this OPPORTUNISTICALLY on exit 9 and tolerates an
-// absent/empty body exactly as before this bead (DEC-WIRE-1: "no body
-// required").
-func writeBusyReply(w io.Writer, reason string) {
-	writeReply(w, map[string]any{"schemaVersion": schemas.SchemaVersion, "reason": reason})
+// both already use. The body is the decline branch of the handler.dispatch-reply
+// schema: a required reason, the kind (busy | fault | neutral), and an OPTIONAL
+// bounded, redacted detail, written only when non-empty. wireclient.Dispatch on
+// the core side reads it OPPORTUNISTICALLY on exit 9 and tolerates an
+// absent/empty body (DEC-WIRE-1: "no body required").
+func writeBusyReply(w io.Writer, d busyDecline) {
+	body := map[string]any{"schemaVersion": schemas.SchemaVersion, "reason": d.Reason, "kind": d.Kind}
+	if d.Detail != "" {
+		body["detail"] = d.Detail
+	}
+	writeReply(w, body)
 }
 
 // handlerStateDir resolves the handler state directory exactly as the origin

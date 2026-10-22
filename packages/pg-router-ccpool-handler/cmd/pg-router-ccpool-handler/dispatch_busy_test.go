@@ -110,13 +110,14 @@ func TestRunDispatch_unreadablePoolExitsBusyPoolUnreadable(t *testing.T) {
 	}
 }
 
-// TestRunDispatch_busyDeclineReasonAtCapacity is dispatch.go's own
-// busyDeclineReason mapping tested directly (unit-level, no process/CLI
+// TestRunDispatch_busyDeclineForAtCapacity is dispatch.go's own
+// busyDeclineFor mapping tested directly (unit-level, no process/CLI
 // faking needed): the at-capacity branch — the OTHER admission-gate
 // sentinel from the capacity-unknown case above — maps to
 // busyReasonAtCapacity, and neither sentinel matches the other's tag.
-func TestRunDispatch_busyDeclineReasonAtCapacity(t *testing.T) {
-	reason, busy := busyDeclineReason(executor.ErrPoolAtCapacity)
+func TestRunDispatch_busyDeclineForAtCapacity(t *testing.T) {
+	decl, busy := busyDeclineFor(executor.ErrPoolAtCapacity)
+	reason := decl.Reason
 	if !busy {
 		t.Fatalf("ErrPoolAtCapacity must be recognized as a busy decline")
 	}
@@ -125,13 +126,14 @@ func TestRunDispatch_busyDeclineReasonAtCapacity(t *testing.T) {
 	}
 }
 
-// TestRunDispatch_busyDeclineReasonLowDisk is dispatch.go's own
-// busyDeclineReason mapping tested directly for the low-disk sentinel (bead
+// TestRunDispatch_busyDeclineForLowDisk is dispatch.go's own
+// busyDeclineFor mapping tested directly for the low-disk sentinel (bead
 // pg2-8vn8t, widening ADR 0072's Decision item 3's busy-decline set): an
 // isolation failure caused by a full filesystem (executor.ErrLowDisk) maps to
 // busyReasonLowDisk, distinct from either capacity reason above.
-func TestRunDispatch_busyDeclineReasonLowDisk(t *testing.T) {
-	reason, busy := busyDeclineReason(executor.ErrLowDisk)
+func TestRunDispatch_busyDeclineForLowDisk(t *testing.T) {
+	decl, busy := busyDeclineFor(executor.ErrLowDisk)
+	reason := decl.Reason
 	if !busy {
 		t.Fatalf("ErrLowDisk must be recognized as a busy decline")
 	}
@@ -140,26 +142,27 @@ func TestRunDispatch_busyDeclineReasonLowDisk(t *testing.T) {
 	}
 }
 
-// TestRunDispatch_busyDeclineReasonNilAndOtherErrors proves busyDeclineReason
+// TestRunDispatch_busyDeclineForNilAndOtherErrors proves busyDeclineFor
 // reports ok=false for nil and for an unrelated error — it must not
 // misclassify a genuine dispatch failure as a busy decline.
-func TestRunDispatch_busyDeclineReasonNilAndOtherErrors(t *testing.T) {
-	if _, busy := busyDeclineReason(nil); busy {
+func TestRunDispatch_busyDeclineForNilAndOtherErrors(t *testing.T) {
+	if _, busy := busyDeclineFor(nil); busy {
 		t.Fatal("nil err must not be classified as a busy decline")
 	}
-	if _, busy := busyDeclineReason(errors.New("some other failure")); busy {
+	if _, busy := busyDeclineFor(errors.New("some other failure")); busy {
 		t.Fatal("an unrelated error must not be classified as a busy decline")
 	}
 }
 
-// TestRunDispatch_busyDeclineReasonCommandBusy is dispatch.go's own
-// busyDeclineReason mapping tested directly for the command role's exit-9
+// TestRunDispatch_busyDeclineForCommandBusy is dispatch.go's own
+// busyDeclineFor mapping tested directly for the command role's exit-9
 // sentinel (bead pg2-358u3): executor.ErrBusy, wrapped exactly as
 // internal/executor/command.go wraps it, maps to busyReasonCommandBusy,
 // distinct from the capacity and low-disk reasons.
-func TestRunDispatch_busyDeclineReasonCommandBusy(t *testing.T) {
+func TestRunDispatch_busyDeclineForCommandBusy(t *testing.T) {
 	wrapped := fmt.Errorf("command role %q item %s: %w: %w", "r", "b1", executor.ErrBusy, errors.New("exit status 9"))
-	reason, busy := busyDeclineReason(wrapped)
+	decl, busy := busyDeclineFor(wrapped)
+	reason := decl.Reason
 	if !busy {
 		t.Fatalf("a wrapped executor.ErrBusy must be recognized as a busy decline")
 	}
@@ -168,13 +171,14 @@ func TestRunDispatch_busyDeclineReasonCommandBusy(t *testing.T) {
 	}
 }
 
-// TestRunDispatch_busyDeclineReasonSessionInFlight: the executor's
+// TestRunDispatch_busyDeclineForSessionInFlight: the executor's
 // session-in-flight sentinel (bead pg2-qaeb8, INV-CCH-30), wrapped as the
 // executor wraps it, maps to its own reason tag, distinct from every other
 // busy reason (the failure-rate alert excludes exactly this tag).
-func TestRunDispatch_busyDeclineReasonSessionInFlight(t *testing.T) {
+func TestRunDispatch_busyDeclineForSessionInFlight(t *testing.T) {
 	wrapped := fmt.Errorf("%w: session s-1: its turn is in progress for another event (e-0)", executor.ErrSessionInFlight)
-	reason, busy := busyDeclineReason(wrapped)
+	decl, busy := busyDeclineFor(wrapped)
+	reason := decl.Reason
 	if !busy {
 		t.Fatalf("a wrapped executor.ErrSessionInFlight must be recognized as a busy decline")
 	}
@@ -189,13 +193,14 @@ func TestRunDispatch_busyDeclineReasonSessionInFlight(t *testing.T) {
 	}
 }
 
-// TestRunDispatch_busyDeclineReasonPoolUnreadable: the executor's
+// TestRunDispatch_busyDeclineForPoolUnreadable: the executor's
 // pool-unreadable sentinel (bead pg2-s3pjt), wrapped as the executor wraps it,
 // maps to its own reason tag, distinct from every other busy reason and in
 // particular from session-in-flight, which the failure-rate alert excludes.
-func TestRunDispatch_busyDeclineReasonPoolUnreadable(t *testing.T) {
+func TestRunDispatch_busyDeclineForPoolUnreadable(t *testing.T) {
 	wrapped := fmt.Errorf("%w: ccpool list: boom", executor.ErrPoolUnreadable)
-	reason, busy := busyDeclineReason(wrapped)
+	decl, busy := busyDeclineFor(wrapped)
+	reason := decl.Reason
 	if !busy {
 		t.Fatalf("a wrapped executor.ErrPoolUnreadable must be recognized as a busy decline")
 	}

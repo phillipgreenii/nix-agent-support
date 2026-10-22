@@ -97,7 +97,7 @@ var ErrPoolCapacityUnknown = errors.New("ccpool: pool capacity unknown")
 // SAME error value as worktree.ErrLowDisk (not a distinct wrapping sentinel),
 // so errors.Is(err, ErrLowDisk) and errors.Is(err, worktree.ErrLowDisk) match
 // identically; this alias exists purely so callers outside this file (e.g.
-// cmd/pg-router-ccpool-handler/dispatch.go's busyDeclineReason, which already
+// cmd/pg-router-ccpool-handler/dispatch.go's busyDeclineFor, which already
 // references this package's other two sentinels this same way) never need
 // their own import of internal/worktree just to check it.
 var ErrLowDisk = worktree.ErrLowDisk
@@ -121,6 +121,40 @@ var ErrSessionInFlight = errors.New("ccpool: an earlier attempt of this bead and
 // exclusion hid a persistently unreadable pool. The failure-rate alert counts
 // pool-unreadable, so it pages when the condition persists.
 var ErrPoolUnreadable = errors.New("ccpool: the pool's sessions cannot be read")
+
+// ErrLaunchFailed: a failure BEFORE ccpool new returned ready (the call failed,
+// timed out, the pane's wrapper failed, or claude died or stalled before ready).
+// It is a pre-accept DECLINE: nothing was delivered, and no bead was mutated
+// (the handler never claims beads; the session does). The abandoned session is
+// purged and its worktree reclaimed first. The cmd layer maps it to exit 9,
+// reason launch-failed, kind fault (INV-CCH-34). A launch failure is not
+// retried per bead: the old launch-failure label stamp and the second-failure human
+// escalation are retired, so a persistently failing launch is seen by the
+// failure-rate alert, never by a label on one bead. The usage-limit-at-launch
+// case is NOT this error: it stays ErrPoolAtCapacity (busy).
+var ErrLaunchFailed = errors.New("ccpool: the session failed before it was ready")
+
+// errSessionNotLive: the session was ready but is no longer live when the nudge
+// is about to be sent. It takes the same post-ready path as a dropped nudge.
+var errSessionNotLive = errors.New("ccpool: the session is not live")
+
+// LaunchFailedError is the error run returns for an ErrLaunchFailed decline.
+type LaunchFailedError struct {
+	// Tail is the ccpool new error text after failsig.Redact. It is NOT bounded
+	// here: the decline writer truncates it to the wire's detail bound.
+	Tail string
+	// Err is the underlying launch error.
+	Err error
+}
+
+// Error reports the underlying launch error.
+func (e *LaunchFailedError) Error() string { return "launch failed: " + e.Err.Error() }
+
+// Unwrap returns the underlying launch error.
+func (e *LaunchFailedError) Unwrap() error { return e.Err }
+
+// Is reports whether target is ErrLaunchFailed.
+func (e *LaunchFailedError) Is(target error) bool { return target == ErrLaunchFailed }
 
 // run is the ccpool dispatch: Ensure a fresh per-attempt session, Send the
 // rendered nudge (async), then wait for completion — racing the budget watchdog when
@@ -207,8 +241,8 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 
 	// Prepare WORKSPACE_ROOT per the role's isolation strategy (roles.IsolationConfig;
 	// default "worktree" — a fresh per-bead worktree so the worker never runs on a
-	// stale unrelated branch, pg2-yukh root cause #2). On failure, treat it like a
-	// launch failure (escalate per ADR 0015) — running in the shared monorepo is
+	// stale unrelated branch, pg2-yukh root cause #2). On failure, fail the
+	// dispatch — running in the shared monorepo is
 	// exactly the bug the worktree default is fixing, so we do NOT silently fall
 	// back to RepoRoot for that strategy (a role using "none" gets RepoRoot on
 	// purpose, by its own explicit config, not as a fallback).
@@ -237,17 +271,17 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			// (distinguishable from a generic exit-128 at a glance, unlike
 			// before this fix) and returned with no bead mutation at all, so the
 			// caller (cmd/pg-router-ccpool-handler/dispatch.go's
-			// busyDeclineReason) can map it to a pre-accept busy decline instead
+			// busyDeclineFor) can map it to a pre-accept decline instead
 			// — the core simply re-offers later with backoff, same as
 			// ErrPoolAtCapacity.
 			slog.Warn("dispatch declined: low disk space preparing isolation", "role", d.Role.Name, "bead", d.Item.ID, "err", wtErr)
 			return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
 		}
-		var res report.Result
-		if r.escalateLaunchFailure(ctx, d.Item.ID) {
-			res = failureAction(report.Escalated, d.Item.ID)
-		}
-		return res, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
+		// Any other isolation failure (a per-bead worktree defect, before any
+		// session exists) is NOT a decline: it is an accepted failure (exit 1)
+		// that mutates no bead and carries no label. The old launch-failure label
+		// stamp and the second-failure human escalation are retired.
+		return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
 	}
 
 	// Handler-side pre-fetch (bead pg2-hh32y): pin the worktree to the item's
@@ -276,11 +310,12 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	env["BEADS_DIR"] = beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads"
 	env["WORKSPACE_ROOT"] = wt
 	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID, dispatchHeadSHA(d.Item))); err != nil {
-		// Could not even create the session. The bead was never dispatched, so we
-		// do not flag/unclaim it on a transient hiccup. But a bead that fails to
-		// launch repeatedly is escalated (ADR 0015): stamp pool-launch-fail on the
-		// first failure; on a subsequent failure (label already present) add human
-		// so discovery stops retrying it (worker discovery excludes human).
+		// Could not create a READY session. The bead was never dispatched and no
+		// bead is mutated here (the handler never claims beads; the session does).
+		// Whatever the failure was (a failed or timed-out ccpool new, a wrapper
+		// failure in the pane, claude dying or stalling before ready), it is a
+		// pre-accept decline below (INV-CCH-34), unless the handler's own context
+		// was cancelled or the usage window filled.
 		//
 		// Best-effort purge-close the abandoned session (pg2-u2v2p): `ccpool new`
 		// may have already inserted a store row (state=starting) before it failed
@@ -300,36 +335,47 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		if ccpool.IsUsageLimited(err) {
 			// ccpool declined the launch because the account's usage window filled
 			// between the capacity pre-check and `new` (exit 8). That is "not right
-			// now", never a defect of THIS bead: no pool-launch-fail stamp, no
+			// now", never a defect of THIS bead: no launch-failure label, no
 			// escalation to human. The abandoned session and worktree are already
 			// reclaimed above; the busy decline re-offers the event with backoff.
 			slog.Info("dispatch declined: usage limit hit at launch", "role", d.Role.Name, "bead", d.Item.ID, "err", err)
 			return report.Result{}, fmt.Errorf("%w: ensure %s: %v", ErrPoolAtCapacity, r.deps.ExternalID, err)
 		}
-		var res report.Result
-		if r.escalateLaunchFailure(ctx, d.Item.ID) {
-			res = failureAction(report.Escalated, d.Item.ID)
+		launchErr := fmt.Errorf("ensure %s: %w", r.deps.ExternalID, err)
+		if ctx.Err() != nil {
+			// The handler's own context is cancelled (shutdown): no decline. Core
+			// checks busy before shutdown in Offer, so a shutdown declined here
+			// would be counted as a fault. The error returns as a plain failure.
+			return report.Result{}, launchErr
 		}
-		return res, fmt.Errorf("ensure %s: %w", r.deps.ExternalID, err)
+		slog.Warn("dispatch declined: the session failed before it was ready", "role", d.Role.Name, "bead", d.Item.ID, "err", err)
+		return report.Result{}, &LaunchFailedError{Tail: failsig.Redact(err.Error()), Err: launchErr}
 	}
 	// From here until Dispatch returns (Send, the wait, the watchdog, the
 	// worktree cleanup's quiet wait and the settled-session close) a background
 	// ticker keeps the supervision lease fresh, so a later dispatch can tell this
 	// live session from an orphan (INV-CCH-18).
 	defer r.startLease(ctx, r.deps.ExternalID)()
-	// The bead was dispatched: clear any pool-launch-fail from a prior attempt so
-	// the escalation counts CONSECUTIVE launch failures, not lifetime ones (ADR
-	// 0015). Best-effort.
-	_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, "pool-launch-fail")
 	nudge := r.renderNudge(cc, d, wt)
-	if err := r.deps.CC.Send(ctx, r.deps.ExternalID, nudge, ccpool.ModeNoWait); err != nil {
+	// Every send through ccpool reply first checks the session is live (INV-CCH-38):
+	// reply resumes a cold session with an EMPTY env. The session was ready, so a
+	// not-live one takes the post-ready failure path below (the exit-7 branch),
+	// as an accepted dispatch. The check-then-send race is accepted.
+	var err error
+	if r.sessionLive(ctx, r.deps.ExternalID) {
+		err = r.deps.CC.Send(ctx, r.deps.ExternalID, nudge, ccpool.ModeNoWait)
+	} else {
+		slog.Warn("nudge not sent: the session is not live", "session", r.deps.ExternalID, "bead", d.Item.ID)
+		err = errSessionNotLive
+	}
+	if err != nil {
 		var res report.Result
 		// A confirmed dropped nudge (exit 7): the model never ingested the task, so
 		// hand the bead back unclaimed regardless of on_dispatch_fail — leaving it
 		// claimed would let the budget watchdog later nudge a context-less model
 		// (the pg2-yukh incident). The session never did anything, so no other bead
 		// can have been touched.
-		if ccpool.IsNotIngested(err) {
+		if ccpool.IsNotIngested(err) || errors.Is(err, errSessionNotLive) {
 			// The session never took the task: close it (reason handler, via
 			// the CLI runner) so a ready-but-empty row does not hold a
 			// counted slot until idle_ttl — cap eviction no longer reclaims
@@ -572,8 +618,8 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 		}
 		// A successful completion resets the eviction strike counter so
 		// escalateEviction's two-strike count stays CONSECUTIVE, not lifetime
-		// (mirrors run()'s own pool-launch-fail removal after a successful
-		// Ensure, line 118). Best-effort.
+		// (as the other consecutive-strike labels reset on success).
+		// Best-effort.
 		_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, "pool-evicted")
 		// The budget-stop record is cleared only once the bead is CLOSED; a
 		// reopened bead keeps its history (pg2-6akgz).
@@ -1247,27 +1293,6 @@ func (r *ccpoolRun) renderNudge(cc *roles.CCPoolConfig, d DispatchContext, workt
 	return sb.String()
 }
 
-// escalateLaunchFailure escalates a bead that ccpool could not launch. First
-// failure: add pool-launch-fail. Repeat failure (label already present): add
-// human and stop retrying (worker discovery excludes the human label). Reads are
-// best-effort — a bd hiccup here just means we retry next pass rather than
-// escalate, which is the safe direction. (ADR 0015)
-//
-// Returns true iff it escalated to human (repeat failure); false on the first
-// failure (label only) or on a bd read hiccup. (pg2-kj7j)
-func (r *ccpoolRun) escalateLaunchFailure(ctx context.Context, beadID string) bool {
-	already, err := beads.HasLabel(ctx, r.deps.BD, beadID, "pool-launch-fail")
-	if err != nil {
-		return false // can't tell ⇒ do nothing this pass; the next launch failure retries
-	}
-	if already {
-		_ = beads.AddHuman(ctx, r.deps.BD, beadID)
-		return true
-	}
-	_ = beads.AddLabel(ctx, r.deps.BD, beadID, "pool-launch-fail")
-	return false
-}
-
 // workerWaitWithWatchdog runs waitDone and the budget watchdog concurrently.
 // First to return a terminal result wins and cancels the other. The cancelled
 // loser returns ctx.Err() (and skips its terminal action by design), so only
@@ -1736,8 +1761,8 @@ func unclaimedEndExempt(s failsig.Signature) bool {
 	return s == failsig.APIRateLimit || s == failsig.APITransient
 }
 
-// escalateUnclaimedEnd is the two-strike idiom of escalateLaunchFailure and
-// escalateEviction for an unclaimed end: label on the first, human on the
+// escalateUnclaimedEnd is the two-strike idiom of escalateEviction
+// for an unclaimed end: label on the first, human on the
 // second. Returns true iff it escalated to human.
 func (r *ccpoolRun) escalateUnclaimedEnd(ctx context.Context, beadID string) bool {
 	already, err := beads.HasLabel(ctx, r.deps.BD, beadID, unclaimedEndLabel)
@@ -1778,7 +1803,7 @@ func (r *ccpoolRun) closeReason(ctx context.Context, externalID string) string {
 	return reason
 }
 
-// escalateEviction mirrors escalateLaunchFailure for external closes: label on
+// escalateEviction is the two-strike idiom for external closes: label on
 // the first, human on the second consecutive one (INV-CCH-7). Returns true iff
 // it escalated to human (repeat external close); false on the first (label
 // only) or on a bd read hiccup.
@@ -1818,6 +1843,14 @@ func (r *ccpoolRun) active(ctx context.Context, externalID string) bool {
 	}
 	r.noteAbsent()
 	return false // absent ⇒ gone
+}
+
+// sessionLive reports whether the session addressed by externalID is present in
+// the pool and live (tmux has-session): the check every send through ccpool reply
+// makes first (INV-CCH-38). A list that cannot be read counts as live (can't tell
+// => let the send decide; its own failure is handled as today).
+func (r *ccpoolRun) sessionLive(ctx context.Context, externalID string) bool {
+	return ccpool.SessionLive(ctx, r.deps.CC, externalID)
 }
 
 // sessionState returns the current ccpool state of the session addressed by

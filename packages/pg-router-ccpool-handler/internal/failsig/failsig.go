@@ -109,6 +109,12 @@ const (
 	SessionErrored Signature = "session-errored" // ccpool state errored, cause unstated
 	SessionIdle    Signature = "session-idle"    // turn ended; bead not completed
 	SessionGone    Signature = "session-gone"    // pane dead or row absent
+
+	// LaunchFailed is the signature of a pre-ready launch failure (a pre-accept
+	// decline, reason launch-failed, kind fault). No text row yields it: the
+	// executor assigns it directly, because the failure happens before any
+	// session transcript exists.
+	LaunchFailed Signature = "launch-failed"
 )
 
 // signatures is the closed set, in declaration order.
@@ -116,6 +122,7 @@ var signatures = []Signature{
 	GitAuth, GitNetwork, MountOrPath, Budget, IndexLock,
 	APITransient, APIRateLimit, APIAuth, ContextLimit,
 	SessionErrored, SessionIdle, SessionGone,
+	LaunchFailed,
 	Unknown,
 }
 

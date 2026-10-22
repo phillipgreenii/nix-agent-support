@@ -30,6 +30,25 @@ func IsNotIngested(err error) bool {
 	return errors.As(err, &ec) && ec.ExitCode() == 7
 }
 
+// SessionLive reports whether the session addressed by externalID is present in
+// the pool's list and live (`tmux has-session`). Every send through ccpool reply
+// checks it first: reply resumes a cold session with an empty environment, so a
+// session that is not live is treated as ended and never sent to (INV-CCH-38).
+// A list that cannot be read counts as live (can't tell, so the send decides and
+// its own failure is handled as today). The check-then-send race is accepted.
+func SessionLive(ctx context.Context, r Runner, externalID string) bool {
+	sessions, err := r.List(ctx)
+	if err != nil {
+		return true
+	}
+	for _, s := range sessions {
+		if s.ExternalID == externalID {
+			return s.Live
+		}
+	}
+	return false
+}
+
 // ErrUsageLimited mirrors ccpool's exit code 8: `ccpool new`/`reply` declined to
 // accept work because an account usage window (5-hour block or weekly limit) is
 // at its limit. It is the race backstop for the capacity pre-check (the window

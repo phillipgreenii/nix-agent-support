@@ -24,7 +24,7 @@ import (
 // ExitCode()==9 and wraps it into the error returned through
 // Executor.Dispatch, so errors.Is on that error resolves to this sentinel
 // through the existing %w chain — no production interface change.
-// cmd/pg-router-ccpool-handler's dispatch.go busyDeclineReason maps it to the
+// cmd/pg-router-ccpool-handler's dispatch.go busyDeclineFor maps it to the
 // wire's pre-accept busy decline (conformance.ExitBusy, reason command-busy,
 // bead pg2-358u3) and the core's roleListener.Offer turns that into
 // eventqueue.DeclineBusy: a graceful "not right now" PRE-ACCEPT decline

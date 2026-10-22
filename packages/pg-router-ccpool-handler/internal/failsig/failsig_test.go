@@ -358,6 +358,7 @@ func TestSignaturesIsClosedSet(t *testing.T) {
 		"git-auth", "git-network", "mount-or-path", "budget", "index-lock",
 		"api-transient", "api-rate-limit", "api-auth", "context-limit",
 		"session-errored", "session-idle", "session-gone",
+		"launch-failed",
 		"unknown",
 	}
 	got := Signatures()

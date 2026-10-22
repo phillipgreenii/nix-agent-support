@@ -1767,11 +1767,14 @@ func TestDispatch_ensureFailFirst_noVerb(t *testing.T) {
 	bd := &dtest.ScriptBD{Show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":[]}`}}
 	cc := &dtest.FakeCC{EnsureErr: errors.New("ccpool new: did not reach ready")}
 	res, err := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w")
-	if err == nil {
-		t.Fatal("ensure failure should error")
+	if !errors.Is(err, ErrLaunchFailed) {
+		t.Fatalf("a failed ccpool new is the launch-failed decline, got %v", err)
 	}
 	if v := verbOf(res); v != "" {
-		t.Errorf("first launch-fail (label only) must report NO verb, got %q", v)
+		t.Errorf("a launch failure must report NO verb, got %q", v)
+	}
+	if len(bd.Updates) != 0 {
+		t.Errorf("a launch failure must not mutate the bead (no label, no human); updates=%v", bd.Updates)
 	}
 	// pg2-u2v2p regression: an ensure failure/timeout must purge-close the
 	// abandoned external_id so the underlying ccpool session (possibly already
@@ -1797,8 +1800,10 @@ func TestDispatch_ensureFailCloseFails_loggedAndRetried(t *testing.T) {
 	cfg := fastCfg()
 	bd := &dtest.ScriptBD{Show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":[]}`}}
 	cc := &dtest.FakeCC{EnsureErr: errors.New("ccpool new: did not reach ready"), CloseErr: errors.New("ccpool close: boom")}
-	if _, err := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w"); err == nil {
-		t.Fatal("ensure failure should error")
+	// A purge failure is handled: logged, retried once, and the dispatch still
+	// declines with launch-failed.
+	if _, err := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w"); !errors.Is(err, ErrLaunchFailed) {
+		t.Fatalf("a failed purge must not change the launch-failed decline, got %v", err)
 	}
 	if len(cc.Closed) != 2 {
 		t.Errorf("failing close must be retried once (2 attempts), got Closed=%v", cc.Closed)
@@ -1809,16 +1814,25 @@ func TestDispatch_ensureFailCloseFails_loggedAndRetried(t *testing.T) {
 	}
 }
 
-func TestDispatch_ensureFailRepeat_escalated(t *testing.T) {
+// TestDispatch_ensureFailRepeat_noEscalation: the second-failure human escalation
+// is retired (INV-CCH-34). A bead that already carries the old pool-launch-fail
+// label (left by the previous handler) is declined like any other, with no
+// escalation and no bead write.
+func TestDispatch_ensureFailRepeat_noEscalation(t *testing.T) {
 	cfg := fastCfg()
 	bd := &dtest.ScriptBD{Show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":["pool-launch-fail"]}`}}
 	cc := &dtest.FakeCC{EnsureErr: errors.New("ccpool new: did not reach ready")}
-	res, _ := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w")
-	if v := verbOf(res); v != report.Escalated {
-		t.Errorf("repeat launch-fail must report Escalated, got %q", v)
+	res, err := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w")
+	if !errors.Is(err, ErrLaunchFailed) {
+		t.Fatalf("err = %v, want the launch-failed decline", err)
 	}
-	// pg2-u2v2p regression: still purge-closes the abandoned session even on
-	// the escalated (repeat-failure) path.
+	if v := verbOf(res); v != "" {
+		t.Errorf("a repeat launch failure must report NO verb (no escalation), got %q", v)
+	}
+	if len(bd.Updates) != 0 {
+		t.Errorf("a repeat launch failure must not mutate the bead; updates=%v", bd.Updates)
+	}
+	// pg2-u2v2p regression: still purge-closes the abandoned session.
 	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-w" || len(cc.ClosedPurge) != 1 || !cc.ClosedPurge[0] {
 		t.Errorf("repeat ensure failure must purge-close the abandoned session, got Closed=%v ClosedPurge=%v", cc.Closed, cc.ClosedPurge)
 	}
@@ -1827,7 +1841,9 @@ func TestDispatch_ensureFailRepeat_escalated(t *testing.T) {
 func TestDispatch_sendFailWorkerLeave_noVerb(t *testing.T) {
 	cfg := fastCfg() // worker on_dispatch_fail = leave
 	bd := &dtest.ScriptBD{}
-	cc := &dtest.FakeCC{SendErr: dtest.ErrSend}
+	// The session is live when the nudge's liveness check runs; the send itself
+	// then fails (also the check-then-send race: it dies after the check).
+	cc := &dtest.FakeCC{SendErr: dtest.ErrSend, ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-worker-zr-w", Live: true, State: ccpool.StateReady}}}}
 	res, err := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w")
 	if err == nil {
 		t.Fatal("send failure should error")
@@ -1841,7 +1857,7 @@ func TestDispatch_sendFailFeedbackUnclaim_unclaimed(t *testing.T) {
 	cfg := fastCfg() // feedback on_dispatch_fail = unclaim
 	cfg.WorktreeDir = t.TempDir()
 	bd := &dtest.ScriptBD{}
-	cc := &dtest.FakeCC{SendErr: dtest.ErrSend}
+	cc := &dtest.FakeCC{SendErr: dtest.ErrSend, ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-feedback-zr-c", Live: true, State: ccpool.StateReady}}}}
 	d := DispatchContext{Role: feedbackRole(cfg), Item: item.Item{ID: "zr-c"}}
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = "pg-router-feedback-zr-c"
@@ -1861,7 +1877,7 @@ func TestDispatch_droppedNudge_handsBackNoOtherBeadTouched(t *testing.T) {
 	cfg := fastCfg() // worker on_dispatch_fail = leave
 	cfg.WorktreeDir = t.TempDir()
 	bd := &dtest.ScriptBD{}
-	cc := &dtest.FakeCC{SendErr: ccpool.ErrPromptNotIngested}
+	cc := &dtest.FakeCC{SendErr: ccpool.ErrPromptNotIngested, ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-worker-zr-w", Live: true, State: ccpool.StateReady}}}}
 	res, err := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w")
 	if err == nil {
 		t.Fatal("dropped nudge must return an error")
@@ -2024,6 +2040,9 @@ func TestRun_usageLimitAtLaunchDeclinesBusyNoEscalation(t *testing.T) {
 	_, err := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w")
 	if !errors.Is(err, ErrPoolAtCapacity) {
 		t.Fatalf("err = %v, want ErrPoolAtCapacity (the busy decline)", err)
+	}
+	if errors.Is(err, ErrLaunchFailed) {
+		t.Fatalf("a usage-limit refusal stays at-capacity (busy), never launch-failed: %v", err)
 	}
 	for _, u := range bd.Updates {
 		if strings.Contains(u, "pool-launch-fail") || strings.Contains(u, "human") {
@@ -2206,6 +2225,7 @@ func TestDispatch_redeliveryAfterSettle_launchesFreshSession(t *testing.T) {
 	}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
 		{}, // the FIRST dispatch's prior-session check: nothing yet
+		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}}, // the nudge's liveness check
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},

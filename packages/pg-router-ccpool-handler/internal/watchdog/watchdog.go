@@ -187,9 +187,10 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 			switch level {
 			case budget.Reminder:
 				if w.firstTurnStarted(ctx, sessionName) {
-					_ = w.CC.Send(ctx, sessionName, renderMsg(w.ReminderMsg, beadID), ccpool.ModeQueue)
-					w.emit("info", "reminder", "budget reminder threshold reached",
-						map[string]any{"session": sessionName, "bead": beadID})
+					if w.sendIfLive(ctx, sessionName, beadID, renderMsg(w.ReminderMsg, beadID)) {
+						w.emit("info", "reminder", "budget reminder threshold reached",
+							map[string]any{"session": sessionName, "bead": beadID})
+					}
 				} else {
 					w.emit("warn", "reminder-suppressed", "budget reminder suppressed: no model turn yet",
 						map[string]any{"session": sessionName, "bead": beadID})
@@ -200,7 +201,7 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 				// the row to ready. When it did not (still needs_input), the wrap-up
 				// message is held back for the same reason as the reminder above.
 				if w.firstTurnStarted(ctx, sessionName) && !w.sessionNeedsInput(ctx, sessionName) {
-					_ = w.CC.Send(ctx, sessionName, renderMsg(w.WrapUpMsg, beadID), ccpool.ModeQueue)
+					w.sendIfLive(ctx, sessionName, beadID, renderMsg(w.WrapUpMsg, beadID))
 				}
 				w.emit("warn", "cancel", "budget cancel threshold reached",
 					map[string]any{"session": sessionName, "bead": beadID})
@@ -222,6 +223,22 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 		case <-time.After(w.Poll):
 		}
 	}
+}
+
+// sendIfLive sends msg to the session through ccpool reply, but only when the
+// session is live (INV-CCH-38): reply resumes a cold session with an empty
+// environment, so a session that is not live is treated as ended. The send is
+// skipped, and the wait loop's dead-session handling classifies the end. It
+// reports whether the send was attempted. The check-then-send race is accepted,
+// and a failed send is ignored, as it always was.
+func (w *Watchdog) sendIfLive(ctx context.Context, sessionName, beadID, msg string) bool {
+	if !ccpool.SessionLive(ctx, w.CC, sessionName) {
+		w.emit("warn", "send-skipped", "budget message not sent: the session is not live",
+			map[string]any{"session": sessionName, "bead": beadID})
+		return false
+	}
+	_ = w.CC.Send(ctx, sessionName, msg, ccpool.ModeQueue)
+	return true
 }
 
 // transcriptPath looks up the session's transcript path from ccpool.List. The
