@@ -72,11 +72,6 @@ occurred to someone, so a missing one shows up as an empty cell instead of as si
   runner, or a changed environment, is configuration and never a change to the core. _(→
   `USECASE-CONFIGURE-WIRING`, `USECASE-CREATE-HANDLER`; `INV-ROLE-1`, `INV-ROLE-2`, `INV-ROLE-3`,
   `INV-ROLE-4`.)_
-- **`STORY-OP-14`** <!-- uuid: 5e9df2da-69fb-41d8-b543-d9b71749f4d4 --> — **Retired.** Removed:
-  pg-router has no wrap concept since the operator's ruling 30, so there is no declared prefix list
-  and no wrapper contract to trust; `STORY-OP-15` replaces it. The retired elements it listed stay
-  as stubs until the set that imports them re-points its imports. _(→ `USECASE-CREATE-HANDLER`,
-  `USECASE-CREATE-SOURCE`; `INV-ENV-1`, `INV-ENV-3`, `INV-ENV-5`.)_
 - **`STORY-OP-15`** <!-- uuid: 14f9b6c3-7e2d-4a85-9c10-d8e35b7a62f1 --> — trust that a role or a
   `[[query]]` is a **command** that starts from a **minimal base environment**, and that a role
   which fails **before it is ready** is **declined and re-offered**, never counted as delivered, so

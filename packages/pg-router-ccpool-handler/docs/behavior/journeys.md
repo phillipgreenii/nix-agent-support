@@ -15,7 +15,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
   `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`,
   `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`,
   `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`, `INV-CCH-32`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-35`,
-  `INV-CCH-36`.)_
+  `INV-CCH-36`, `INV-CCH-37`, `INV-CCH-38`.)_
 - **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pg-router's core, I
   want a registered source to query beads for events on my behalf, so pg-router itself never needs
   to know beads' query language. _(→ `USECASE-CCH-QUERY`; `INV-CCH-1`, `INV-CCH-4`, `INV-CCH-5`.)_
@@ -28,8 +28,8 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-8`, `INV-CCH-11`, `INV-CCH-12`, `INV-CCH-13`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-16`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`, `INV-CCH-32`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-35`, `INV-CCH-36`.
-_Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind; `USECASE-CCH-RELEASE-END` for a role whose completion is `close-or-release`; `USECASE-CCH-SPLIT-TRIAGE` for a role whose completion is `close-or-split-triage`; `USECASE-CCH-WRAP-BROKEN` for a dispatch whose wrap chain failed before its payload started.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-8`, `INV-CCH-11`, `INV-CCH-12`, `INV-CCH-13`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-16`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`, `INV-CCH-32`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-35`, `INV-CCH-36`, `INV-CCH-37`, `INV-CCH-38`.
+_Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind; `USECASE-CCH-RELEASE-END` for a role whose completion is `close-or-release`; `USECASE-CCH-SPLIT-TRIAGE` for a role whose completion is `close-or-split-triage`; `USECASE-CCH-LAUNCH-DECLINED` for a dispatch whose session failed before it was ready.
 
 1. The core dispatches one event under one tracking id to a bound role.
 2. This module starts a fresh handler session of its own (`INV-CCH-30`; extension 2k is the one
@@ -63,17 +63,17 @@ Extensions:
 - 2b. The git origin the dispatch runs against is unavailable (`INV-CCH-10`): this module declines
   `busy` with reason `origin-unavailable` before touching any bead; dispatches into other origins
   are unaffected, and dispatch resumes on the first successful probe.
-- 2w. The role is paused by a wrap failure (`INV-CCH-34`): this module declines `busy` with reason
-  `wrap-gated` before any capacity, isolation or launch step, writes nothing to any bead and makes
-  no beads or ccpool call; other roles are unaffected, and the core re-offers the event. The pause
-  ends when the role's configuration changes or an operator runs `wrap-gate clear <role>`.
-- 2x. This module starts the payload (`INV-CCH-32`, `INV-CCH-33`): it sets the item-context
-  variables and the ready-marker path for the chain, the chain starts from the base environment's
-  keep-list and the role's wrap, the marker stage is always the innermost layer, and one
-  `dispatch_start` record names the wrap entries, the base-environment variable names and the
-  launcher, never a value (`INV-CCH-35`). For a ccpool-backed role every launch and every resume of
-  its session passes the marker path and item context again, and the pool's launcher runs the wrap
-  (`INV-CCH-36`).
+- 2w. The session fails before it is ready (`INV-CCH-34`): this module declines `busy` with reason
+  `launch-failed` and kind `fault`, purges the abandoned session and reclaims its worktree, and
+  writes nothing to any bead (no stamp, no `human`); the core re-offers the event while it is
+  unexpired. It is settled as described in `USECASE-CCH-LAUNCH-DECLINED`.
+- 2x. This module starts the payload (`INV-CCH-32`, `INV-CCH-33`): it sets the three item-context
+  variables for every payload, a command-backed payload starts from the base environment's keep-list
+  when its switch is on, and a ccpool-backed session is launched with the role's `sessionEnv`
+  passed through uninterpreted. One `dispatch_start` record names the argv or the launch route, the
+  base-environment variable names and the `sessionEnv` entries, never a secret (`INV-CCH-35`). Every
+  start of a ccpool-backed session passes the whole environment again, and a send first checks that
+  the session is live (`INV-CCH-38`).
 - 2h. A dispatch whose role opts in to the pre-launch check and whose check says the dispatch is
   not worth running (`INV-CCH-22`): this module declines `busy` before any capacity, isolation or
   launch step, with a reason that starts `skipped-`. For a REVIEW role that is a bead already
@@ -89,9 +89,11 @@ Extensions:
 - 2m. Preparing the per-bead isolation fails because the filesystem has run out of room
   (`INV-CCH-8`): the ccpool-backed handler executor does not count this as a launch failure of
   this bead, because a full disk is a transient, system-wide condition that would hit whichever
-  bead dispatched next. This module declines `busy` with reason `low-disk` before any session is
-  launched and writes nothing to any bead (no launch-failure stamp, no `human`); the core
-  re-offers the event later with backoff, as for 2a.
+  bead dispatched next. This module declines `busy` with reason `low-disk` (kind `fault`,
+  `INV-CCH-37`) before any session is launched and writes nothing to any bead (no stamp, no
+  `human`); the core re-offers the event later with backoff, as for 2a. Any other isolation failure
+  is not a decline: the dispatch is accepted and fails (exit `1`) with no label on the bead
+  (`INV-CCH-8`).
 - 2i. A session dies unexplained before its bead completes (`INV-CCH-7`): this module also logs
   the pool's usage-limit reading once (`INV-CCH-26`), as evidence only; the failure is unchanged.
 - 2j. A drain session (completion `close-or-release`) raises a permission dialog nobody can answer
@@ -155,8 +157,9 @@ Extensions:
   and replaced by this dispatch's own session. Any other session is never reused, whoever closed
   it: a re-review after a head advance, a re-request after a hand-back and a reopened bead each
   get a fresh session.
-- 3f. The wrap chain failed before the payload started, so the ready marker was never written
-  (`INV-CCH-33`): this module settles the dispatch as described in `USECASE-CCH-WRAP-BROKEN`.
+- 3f. A command-backed payload fails, a prefix tool in its argv included: the dispatch is accepted
+  and ends in a handler error (exit `1`) carrying the redacted stderr tail, unless the command
+  exited `9`, which is the `command-busy` decline (`INV-CCH-6`, `INV-CCH-34`).
 - 3d. The role's completion is `close-or-release` and its session has ended (`INV-CCH-28`): this
   module settles it as described in `USECASE-CCH-RELEASE-END`, which includes the case of a
   session that ended without ever claiming its bead.
@@ -249,42 +252,37 @@ Extensions:
   stop's escalation (`INV-CCH-12`) and also has `needs-split-review` removed, and the role never
   re-enters the split path. No part of this role changes a budget.
 
-### `USECASE-CCH-WRAP-BROKEN` — settle a dispatch whose wrap chain failed, and pause its role <!-- uuid: c93a9d47-0c8e-4986-9f91-202c3373dbf7 -->
+### `USECASE-CCH-LAUNCH-DECLINED` — decline a dispatch whose session failed before it was ready <!-- uuid: 35635711-082f-43b9-881d-658c87fc660d -->
 
 **Primary actor:** `ACTOR-CCH-CORE`.
-**Level:** subfunction (the start and settle steps of `USECASE-CCH-DISPATCH`, for a dispatch whose wrap chain fails).
-**Preconditions:** a dispatch to a role has started its payload's chain (`INV-CCH-32`) and the role's wrap, its base environment or an activation step in it is broken, so the chain stops before the payload starts.
-_Requires:_ `INV-CCH-9`, `INV-CCH-28`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-36`.
-_Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind.
+**Level:** subfunction (the start step of `USECASE-CCH-DISPATCH`, for a ccpool-backed role whose session never becomes ready).
+**Preconditions:** a dispatch to a ccpool-backed role has passed capacity and isolation and has asked the session tool to launch its session.
+_Requires:_ `INV-CCH-9`, `INV-CCH-34`, `INV-CCH-35`, `INV-CCH-37`.
+_Includes:_ `INTF-CCH-CCPOOL`.
 
-1. The chain fails before the payload starts, so the marker stage never writes the ready marker
-   (`INV-CCH-33`). The failing stage's stderr is kept: for a command-backed role as the redacted
-   tail of the run's stderr, for a ccpool-backed role in the per-dispatch file the launcher writes
-   beside the marker (`INV-CCH-36`).
-2. This module classifies the end as `wrap-failed` from the missing marker alone, outranking any
-   other signature, and returns an error carrying the wrap-failed sentinel followed by the redacted
-   evidence (`INV-CCH-9`). The core counts it under its own reason, not as a payload failure.
-3. The end is no strike on the bead: nothing is added to it, no `human`, no change to an existing
-   strike label (`INV-CCH-28`).
-4. This module pauses the one role: it writes the role's gate file with the time, the evidence and
-   the hash of the role's rendered configuration (`INV-CCH-34`). Every later dispatch to that role
-   is declined `busy` with reason `wrap-gated` (extension 2w of `USECASE-CCH-DISPATCH`) until the
-   pause is cleared; every other role keeps dispatching.
-5. An operator reads `wrap-gate list` for the role, the time and the stderr tail, and either fixes
-   the role's configuration, which clears the pause on the next dispatch because the rendered
-   configuration's hash changed, or runs `wrap-gate clear <role>` once the cause outside the
-   configuration is repaired. A successful `run-role` does not clear it.
+1. The launch fails before the session is ready: the session tool's launch fails or times out, the
+   session's payload fails in its pane, or the agent dies or stalls (`INV-CCH-34`). The failure's
+   tail is kept: for a dead pane its exit status or signal and its output tail, for a timeout the
+   pane's tail.
+2. This module classifies the end as `launch-failed` from the point of failure alone, outranking any
+   other signature (`INV-CCH-9`), and purges the abandoned session and reclaims its worktree.
+3. It replies with the pre-accept busy decline, reason `launch-failed`, kind `fault`, with the
+   redacted evidence as `detail` (`INV-CCH-37`), and writes one `dispatch_decline` record
+   (`INV-CCH-35`). It writes nothing to any bead.
+4. The core re-offers the event while it is unexpired, and counts the decline toward the role's
+   unsuccessful outcomes, never its busy ones (`INV-OBS-3`).
+5. An operator reads the `dispatch_decline` record for the role's `sessionEnv`, the reason and the
+   evidence, and follows a `sessionEnv` entry that names a prefix tool's spec to that tool's own
+   `show` command.
 
 Extensions:
 
-- 1a. The marker stage was started without its variable (`INV-CCH-33`): it exits non-zero before the
-  payload with a `pg-wrap[marker]:` line on stderr, which is a wrap failure like any other, and the
-  evidence names it.
-- 1b. The payload ran, wrote the marker, and then failed or the session died: this is the payload's
-  own outcome, classified as before (`INV-CCH-9`), not a wrap failure, and the role is not paused.
-- 5a. The operator clears a role that is not paused: the clear succeeds and changes nothing.
-- 5b. The cause is still there after a clear: the next dispatch fails the same way and pauses the
-  role again.
+- 1a. The handler's own context is cancelled while the launch is in flight: the shutdown keeps its
+  own path and is not declined as a fault (`INV-CCH-34`).
+- 2a. The bead carried a `pool-launch-fail` label from an earlier handler: it is ignored, and the
+  handler neither escalates the bead nor removes the label (`INV-CCH-34`).
+- 4a. The event was born expired: it is dropped, and returns on the source's next poll if it is still
+  eligible.
 
 ### `USECASE-CCH-QUERY` — answer a source query from beads <!-- uuid: c73f0cd4-5c9b-4862-84da-1b80716ad937 -->
 

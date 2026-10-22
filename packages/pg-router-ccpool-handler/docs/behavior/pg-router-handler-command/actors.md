@@ -6,7 +6,7 @@ Who this adapter interacts with. A behavior docs set MUST define all of its acto
 
 - **`ACTOR-CMA-OP` — Operator** <!-- uuid: 5e548f57-023f-40e7-bc1b-803146f9ae86 --> — a **principal, a human or an agent**, that declares
   a role in pg-router's configuration, names this adapter as its `handler`, and writes the role's
-  command and its wrap. The operator never talks to the adapter directly: everything the operator
+  command. The operator never talks to the adapter directly: everything the operator
   gives it arrives in the role object (`INV-ROLE-2`).
 
 ## System actors (participants behind interfaces)

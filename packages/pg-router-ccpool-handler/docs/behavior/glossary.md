@@ -53,24 +53,22 @@ Realization gaps for the build's one remaining residual.
   launching a fresh session; allowed only for the same event, a session nobody has closed and a
   bead not yet closed, and the one exception to a fresh session (`INV-CCH-30`).
 
-- **Item context** — the four variables the handler sets for a payload's chain (`PG_WRAP_ROLE`,
-  `PG_WRAP_ITEM_ID`, `PG_WRAP_ITEM_TYPE`, `PG_WRAP_READY_MARKER`); the item's title is never one of
+- **Item context** — the three variables the handler sets for every payload of both backing kinds
+  (`PG_ROUTER_ROLE`, `PG_ROUTER_ITEM_ID`, `PG_ROUTER_ITEM_TYPE`); the item's title is never one of
   them (`INV-CCH-32`).
-- **Keep-list** — the base environment of this module's payloads, each variable by explicit name and
-  never by prefix; the variables ccpool blanks are never added back (`INV-CCH-32`).
-- **Ready marker** — the per-dispatch mark the handler's own innermost stage writes just before
-  starting the payload, as the core's glossary defines it; its absence at a non-zero end is what
-  makes the end a wrap failure (`INV-CCH-33`).
-- **Wrap failure** — an end whose wrap chain failed before the payload started; recorded with the
-  failure signature `wrap-failed` and the wrap-failed sentinel (`INV-CCH-9`).
-- **Role gate** — the handler-side pause of one role after a wrap failure, a per-role state file
-  that declines the role's dispatches with the reason `wrap-gated` until a changed configuration or
-  `wrap-gate clear <role>` clears it; not a core gate (`INV-CCH-34`).
-- **Launcher** — the fixed script rendered for a ccpool-backed pool and set as the pool's agent
-  executable: it resets the environment to the keep-list, runs the role's wrap, ends with the marker
-  stage and starts the agent (`INV-CCH-36`).
-- **`dispatch_start`** — the event-log record of what environment a dispatch was given: wrap entries,
-  base-environment variable names, launcher path (`INV-CCH-35`).
+- **Keep-list** — the base environment of a command-backed role's payload, each variable by explicit
+  name and never by prefix (`INV-CCH-32`).
+- **`sessionEnv`** — a ccpool-backed role's generic string-to-string map, passed to the session tool
+  uninterpreted at every launch; it carries no secret (`INV-CCH-33`).
+- **Pre-ready decline** — the pre-accept busy decline, reason `launch-failed`, kind `fault`, a
+  ccpool-backed dispatch gives when its session never became ready; it escalates no bead
+  (`INV-CCH-34`).
+- **Decline kind** — the `busy`, `fault` or `neutral` class this module maps each decline reason to,
+  by which the core counts a role's progress (`INV-CCH-37`).
+- **`dispatch_start` and `dispatch_decline`** — the event-log records of what an accepted dispatch
+  ran and of why a dispatch declined (`INV-CCH-35`).
+- **`validate`** — the handler's one validation entry point, the optional generic subcommand of the
+  wire decision, which runs no payload (`INV-CCH-36`).
 
 ## Source-side vocabulary
 

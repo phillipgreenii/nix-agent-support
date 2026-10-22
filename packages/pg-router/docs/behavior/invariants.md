@@ -330,11 +330,6 @@ for a role, the **item context** it is given. What the command itself is, and wh
 with, is opaque to the core: pg-router invokes it and never reads inside it (`GOAL-MIN-1`). Nothing
 here changes a gate or `INV-LIFE-2`.
 
-- **`INV-ENV-1`** <!-- uuid: 47e93315-907d-4169-9c6e-9dc779e5da26 --> — **Retired.** Removed:
-  pg-router has no wrap concept since the operator's ruling 30 of the role-environment design; a
-  command is opaque to it, and anything that prefixes a command is a standalone tool with its own
-  configuration, outside pg-router. The ID and uuid are kept as a stub only so a set that still
-  imports this element resolves, until that set re-points its import; then the stub is deleted.
 - **`INV-ENV-2`** <!-- uuid: 6e2d52e6-b43b-4894-84a4-8e5538d24b47 --> — **A command starts from a
   minimal base environment, plus the item context, and nothing else.** The base environment holds
   only: the **system variables** (the user and home identity, the temporary directory and the locale,
@@ -353,11 +348,6 @@ here changes a gate or `INV-LIFE-2`.
   ambient environment, because its own work still needs it. It is applied through a **strict-env
   switch**, **off by default**; **while a switch is off the process inherits its parent's
   environment**, as it does today.
-- **`INV-ENV-3`** <!-- uuid: 932ae0f1-b0d4-466f-9971-2fb73a47d74d --> — **Retired.** Removed: the
-  nine-rule contract that every wrapping entry obeyed belonged to the wrap concept, which pg-router
-  no longer has (`INV-ENV-1`). Its process-group cancellation rule lives on as `INV-ENV-4`. The ID
-  and uuid are kept as a stub only so a set that still imports this element resolves, until that set
-  re-points its import; then the stub is deleted.
 - **`INV-ENV-4`** <!-- uuid: 9b643f31-384c-41a5-a6c9-95382b0fa936 --> — **The processes pg-router
   starts itself get the base environment when their switch is on, run in their own process group,
   and exit 9 stays "busy".** A `[[query]]` carries **`strict_base_env`** (a boolean, **default
@@ -368,11 +358,6 @@ here changes a gate or `INV-LIFE-2`.
   is cancelled. **Exit 9 stays "busy" for a command role** (`DEC-WIRE-1`): a command that ends with
   9 for any other reason is read as a busy decline, which is a consequence of the code's meaning and
   not a defect.
-- **`INV-ENV-5`** <!-- uuid: 56c3fe86-ca47-43d8-b659-394c9663c751 --> — **Retired.** Removed: the
-  ready marker and the wrap-failed reporting belonged to the wrap concept (`INV-ENV-1`). A failure
-  before a payload is ready is now a pre-accept decline (`INV-FAIL-1`), and it is never a gate. The
-  ID and uuid are kept as a stub only so a set that still imports this element resolves, until that
-  set re-points its import; then the stub is deleted.
 
 ## Wiring
 

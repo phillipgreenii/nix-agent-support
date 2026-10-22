@@ -8,10 +8,11 @@ requires and includes (`INV-22`).
 - **`STORY-CCA-RUN`** <!-- uuid: e07c24a8-add4-4335-ba53-6860749d18dc --> — As pg-router's core, I want a role to run an agent session for one
   event and tell me whether it was accepted, declined or finished, and I want a restart of me never
   to lose the session. _(→ `USECASE-CCA-DISPATCH`; `INV-CCA-1`, `INV-CCA-2`, `INV-CCA-3`.)_
-- **`STORY-CCA-ENV`** <!-- uuid: 9738bd68-28f8-4537-b371-958ed721ffde --> — As an operator, I want each role's session to start in the
-  environment I declared for it, resumed or new, so a tool the role needs is on its path and nothing
-  else leaks in. _(→ `USECASE-CCA-LAUNCH`, `USECASE-CCA-VALIDATE`; `INV-CCA-2`, `INV-CCA-4`,
-  `INV-CCA-5`, `INV-CCA-6`, `INV-CCA-7`, `INV-CCA-8`.)_
+- **`STORY-CCA-ENV`** <!-- uuid: 9738bd68-28f8-4537-b371-958ed721ffde --> — As an operator, I want each role's session to start with the
+  environment I declared for it, and to see why a session that never became ready was declined, so a
+  tool the role needs is on its path and a broken launch tells me what failed without touching the
+  bead. _(→ `USECASE-CCA-LAUNCH`, `USECASE-CCA-VALIDATE`; `INV-CCA-2`, `INV-CCA-4`, `INV-CCA-5`,
+  `INV-CCA-6`, `INV-CCA-7`, `INV-CCA-8`, `INV-CCA-10`.)_
 - **`STORY-CCA-CUTOVER`** <!-- uuid: c0325999-4547-4f9a-ab61-11550f8d94c6 --> — As an operator, I want to move one role at a time from the
   earlier handler to this adapter without dropping a running session or changing what my alerts
   read. _(→ `USECASE-CCA-CUTOVER`; `INV-CCA-9`.)_
@@ -38,53 +39,66 @@ Extensions:
 - 2a. The configuration has an unknown or mistyped field: the call fails with the field named and
   nothing is launched.
 - 2b. The role is at capacity, its origin is unavailable, or its precheck proves the dispatch moot:
-  the adapter declines before launching, exactly as the earlier set states (`INV-CCA-1`).
+  the adapter declines before launching, exactly as the earlier set states (`INV-CCA-1`), with the
+  kind its reason maps to (`INV-CCA-6`).
+- 2c. The session never becomes ready: the adapter declines, as `USECASE-CCA-LAUNCH` describes.
 
-### `USECASE-CCA-LAUNCH` — start or resume a session in the role's environment <!-- uuid: f08ab96e-3e53-4f99-9930-861e0dce87bd -->
+### `USECASE-CCA-LAUNCH` — start a session with the role's environment <!-- uuid: f08ab96e-3e53-4f99-9930-861e0dce87bd -->
 
 **Primary actor:** `ACTOR-CCA-CORE`.
 **Level:** subfunction, included by `USECASE-CCA-DISPATCH`.
-**Preconditions:** the deployment has rendered the role's launcher and set it as its pool's agent
+**Preconditions:** the deployment has set the role's `sessionEnv` and named the pool's agent
 executable.
-_Requires:_ `INV-CCA-4`, `INV-CCA-5`, `INV-CCA-6`, `INV-CCA-7`, `INV-CCA-8`.
-_Includes:_ `INTF-CCA-LAUNCHER`.
+_Requires:_ `INV-CCA-4`, `INV-CCA-5`, `INV-CCA-6`, `INV-CCA-7`, `INV-CCA-10`.
+_Includes:_ `INTF-CCA-SESSION`.
 
-1. The adapter asks the session tool to start the session, or to resume a record that exists,
-   passing the dispatch's marker path and item-context variables explicitly (`INV-CCA-7`).
-2. The session tool starts the pool's launcher, which resets the environment to the keep-list
-   (`INV-CCA-5`), runs the wrap layers, writes the ready marker and starts the agent
-   (`INV-CCA-4`).
+1. The adapter asks the session tool to start the session, passing the role's `sessionEnv`, the
+   markers and the item context explicitly (`INV-CCA-4`, `INV-CCA-5`), and writes one
+   `dispatch_start` record (`INV-CCA-10`).
+2. The session tool starts the pool's agent executable, which is opaque to it, and the session
+   becomes ready.
+3. Before any later send, the adapter checks that the session is live (`INV-CCA-7`).
 
 Extensions:
 
-- 2a. The launcher dies before it writes the marker: the session failed in its environment, and the
-  adapter reads the per-stage standard error to say why (`INV-CCA-7`).
-- 2b. The marker variable is unset: the marker stage fails loudly, never silently (`INV-CCA-7`).
+- 2a. The launch fails or times out, the session's payload fails in its pane, or the agent dies or
+  stalls before ready: the adapter purges the abandoned session, reclaims its worktree, writes no
+  bead and declines `busy` with reason `launch-failed` and kind `fault`, with the redacted evidence
+  as `detail`, and one `dispatch_decline` record (`INV-CCA-6`, `INV-CCA-10`). The core re-offers
+  the event while it is unexpired.
+- 2b. The adapter's own context is cancelled during the launch: no decline is given (`INV-CCA-6`).
+- 3a. The session is not live when a reminder, a wrap-up or the nudge would be sent: the dispatch
+  treats it as ended by the dead-session path and never resumes it (`INV-CCA-7`).
 
 ```mermaid
 sequenceDiagram
     participant A as pg-router-handler-ccpool
     participant S as session tool
-    participant L as launcher
     participant G as agent
-    A->>S: start or resume, with the marker path and item variables
-    S->>L: start the pool's agent executable
-    L->>L: reset to the keep-list, run the wrap layers
-    L->>L: marker stage writes the ready marker
-    L->>G: start the agent with the arguments it received
+    A->>S: start, with sessionEnv, markers and item context
+    S->>G: start the pool's agent executable
+    alt ready
+      G-->>A: the session is ready
+    else fails before ready
+      S-->>A: failure with status and output tail
+      A->>A: purge, reclaim, decline launch-failed (fault)
+    end
 ```
 
-### `USECASE-CCA-VALIDATE` — check a role's configuration and environment at build time <!-- uuid: 5873b485-f027-4242-ab5b-74aa10b92fd8 -->
+### `USECASE-CCA-VALIDATE` — check a role's configuration at build time <!-- uuid: 5873b485-f027-4242-ab5b-74aa10b92fd8 -->
 
 **Primary actor:** `ACTOR-CCA-OP`.
 **Level:** user-goal.
 **Preconditions:** the role's configuration has been rendered by the deployment.
-_Requires:_ `INTF-CCA-CONFIG`, `INV-CCA-2`, `INV-CCA-6`, `INV-CCA-8`.
+_Requires:_ `INTF-CCA-CONFIG`, `INV-CCA-2`, `INV-CCA-4`, `INV-CCA-8`.
 
-1. The deployment's build runs the adapter's check over each role's rendered table.
-2. A table with an unknown or mistyped field fails the build, naming the role and the field.
-3. A role with a templated wrap entry, or two roles on a shared pool with different wraps, fail the
-   evaluation (`INV-CCA-6`, `INV-CCA-8`).
+1. The deployment's build runs the adapter's `validate` over each role's rendered table.
+2. A table with an unknown or mistyped field, a `sessionEnv` key that collides with a marker, is
+   empty or contains `=`, or a referenced pool directory that does not exist, fails the build, naming
+   the role and the problem.
+3. A `sessionEnv` key that looks like a secret is a warning, and the build finishes.
+4. The core runs the same `validate` at startup and `doctor` runs it on demand, so a role that fails
+   it stays registered and is unavailable (`INV-ROLE-5`). The adapter never runs `pg-wrap` there.
 
 ### `USECASE-CCA-CUTOVER` — move one role from the earlier handler to this adapter <!-- uuid: f31b9c82-83ee-4d1d-acd6-1b5947a829f1 -->
 
