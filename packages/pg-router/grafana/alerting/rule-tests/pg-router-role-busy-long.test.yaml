@@ -1,0 +1,138 @@
+# promtool unit tests for the pg-router-role-busy-long alert (docket pg2-12gr4.8, design section
+# 5, ruling 30): "role busy a long time" is age > 4h AND busy >= 1 AND a recent offer. Run by the
+# flake check test-pg-router-alert-rules, which generates rules.yml next to this file: the
+# Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for: 10m`
+# and labels (severity: warning), plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: every series has a 1m interval, so "0+60xN" is an age that grows one minute per
+# scrape. The age exceeds 14400s (4h) at minute 241, so with `for: 10m` the alert is Pending
+# from 241m and Firing from 251m: not firing at 245m, firing at 260m.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: age over 4h with one busy decline and a recent offer fires, warning, by role
+    interval: 1m
+    input_series:
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x400"
+      - series: pg_router_role_busy_since_progress{role="worker",job="pg-router"}
+        values: "1x400"
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="worker",job="pg-router"}
+        values: "0+1x400"
+    alert_rule_test:
+      - eval_time: 200m
+        alertname: pg-router-role-busy-long
+        exp_alerts: []
+      - eval_time: 245m
+        alertname: pg-router-role-busy-long
+        exp_alerts: []
+      - eval_time: 260m
+        alertname: pg-router-role-busy-long
+        exp_alerts:
+          - exp_labels:
+              role: worker
+              severity: warning
+
+  - name: no busy decline since progress never fires, however old the age
+    interval: 1m
+    input_series:
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x400"
+      - series: pg_router_role_busy_since_progress{role="worker",job="pg-router"}
+        values: "0x400"
+      - series: pg_router_failures_total{class="handler-error",role="worker",job="pg-router"}
+        values: "0+1x400"
+    alert_rule_test:
+      - eval_time: 300m
+        alertname: pg-router-role-busy-long
+        exp_alerts: []
+
+  - name: idle after a decline never fires, the offers are no longer recent
+    interval: 1m
+    input_series:
+      # Declined busy in the first 20 minutes, nothing offered since: the failures counter
+      # is flat from minute 20, so by minute 300 the last rise is more than an hour old.
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x400"
+      - series: pg_router_role_busy_since_progress{role="worker",job="pg-router"}
+        values: "3x400"
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="worker",job="pg-router"}
+        values: "0+1x20 20x380"
+    alert_rule_test:
+      - eval_time: 300m
+        alertname: pg-router-role-busy-long
+        exp_alerts: []
+
+  - name: a role with no offers never alerts, whatever its age
+    interval: 1m
+    input_series:
+      - series: pg_router_role_last_progress_age_seconds{role="idle",job="pg-router"}
+        values: "0+60x400"
+      - series: pg_router_role_unsuccessful_since_progress{role="idle",job="pg-router"}
+        values: "0x400"
+      - series: pg_router_role_busy_since_progress{role="idle",job="pg-router"}
+        values: "0x400"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_role_busy_long)
+        eval_time: 300m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 300m
+        alertname: pg-router-role-busy-long
+        exp_alerts: []
+
+  - name: a role in flight for a long time is not busy, the in-flight zeros clear the alert
+    interval: 1m
+    input_series:
+      # Busy-stalled to minute 260 (age 15600s), then an offer goes in flight and the age
+      # reads 0: once 15 minutes of zeros pass, the max falls to 0 and the alert clears.
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x260 0x140"
+      - series: pg_router_role_busy_since_progress{role="worker",job="pg-router"}
+        values: "1x400"
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="worker",job="pg-router"}
+        values: "0+1x400"
+    alert_rule_test:
+      - eval_time: 260m
+        alertname: pg-router-role-busy-long
+        exp_alerts:
+          - exp_labels:
+              role: worker
+              severity: warning
+      - eval_time: 290m
+        alertname: pg-router-role-busy-long
+        exp_alerts: []
+
+  - name: only the role with all three clauses fires
+    interval: 1m
+    input_series:
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x400"
+      - series: pg_router_role_busy_since_progress{role="worker",job="pg-router"}
+        values: "2x400"
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="worker",job="pg-router"}
+        values: "0+1x400"
+      # The reviewer is busy and old, but its failures counter is flat: no recent offer.
+      - series: pg_router_role_last_progress_age_seconds{role="reviewer",job="pg-router"}
+        values: "0+60x400"
+      - series: pg_router_role_busy_since_progress{role="reviewer",job="pg-router"}
+        values: "2x400"
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="reviewer",job="pg-router"}
+        values: "9x400"
+      # The triager's age is only 3h: not old enough.
+      - series: pg_router_role_last_progress_age_seconds{role="triager",job="pg-router"}
+        values: "0+60x180 10800x220"
+      - series: pg_router_role_busy_since_progress{role="triager",job="pg-router"}
+        values: "2x400"
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="triager",job="pg-router"}
+        values: "0+1x400"
+    alert_rule_test:
+      - eval_time: 300m
+        alertname: pg-router-role-busy-long
+        exp_alerts:
+          - exp_labels:
+              role: worker
+              severity: warning

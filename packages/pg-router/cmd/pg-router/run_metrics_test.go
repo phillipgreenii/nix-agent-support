@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +31,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/metrics"
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
 // Tests for the metric callbacks bootCore registers before it has a queue to read
@@ -210,6 +213,75 @@ func TestBootCore_ACollectBeforeTheQueueExistsReadsNothing(t *testing.T) {
 	}
 	if got, ok := int64GaugePoint(built, metrics.MetricActiveGates, "type", "SYSTEM_PAUSE"); !ok || got != 1 {
 		t.Errorf("%s{type=SYSTEM_PAUSE} = %d (present %v), want 1: the restored gate", metrics.MetricActiveGates, got, ok)
+	}
+}
+
+// The per-role progress gauges (docket pg2-12gr4.8) reach a real scrape of a running core:
+// a role whose handler exits 9 with a decline body of kind fault is counted by Offer into
+// pg_router_role_unsuccessful_since_progress{role}, and its age gauge exists too, with the
+// busy count still 0. The handler is a real subprocess behind the real wire client, so the
+// exit-9 body decoding (reason, kind) is what is under test, not a fake of it. The scrape
+// also proves the gauges start at daemon start for an idle role.
+func TestBootCore_RoleProgressGaugesReachAScrapeAfterAFaultDecline(t *testing.T) {
+	var ln net.Listener
+	mp, shutdown, err := startMetricsServer("127.0.0.1:0", func(l net.Listener) { ln = l })
+	if err != nil {
+		t.Fatalf("startMetricsServer: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = shutdown(ctx)
+	})
+
+	cfg := config.Config{
+		LogDir:        shortDir(t),
+		MeterProvider: mp,
+		Roles: roles.RoleSet{
+			{Name: "r1", Enabled: true, Binds: []string{"t1"}},
+			{Name: "idle", Enabled: true, Binds: []string{"t2"}},
+		},
+	}
+	stub := []string{"/bin/sh", "-c", `printf '%s' '{"schemaVersion":"1","reason":"x","kind":"fault"}'; exit 9`}
+	o := &orchestrator.Orchestrator{Cfg: cfg, Handler: wireclient.New(func(roles.Role, string) ([]string, error) {
+		return slices.Clone(stub), nil
+	})}
+	ctx := context.Background()
+	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	if _, err := q.Enqueue(eventqueue.Event{ID: "e1", Type: "t1", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	q.Dispatch() // one pass: one offer to r1, declined fault
+
+	if err := forceFlush(ctx, mp); err != nil {
+		t.Fatal(err)
+	}
+	body := scrape(t, fmt.Sprintf("http://%s/metrics", ln.Addr().String()))
+	for _, tc := range []struct {
+		name string
+		role string
+		want float64
+	}{
+		{"pg_router_role_unsuccessful_since_progress", "r1", 1},
+		{"pg_router_role_busy_since_progress", "r1", 0},
+		{"pg_router_role_unsuccessful_since_progress", "idle", 0},
+		{"pg_router_role_busy_since_progress", "idle", 0},
+	} {
+		got := seriesValue(body, tc.name, map[string]string{"role": tc.role})
+		if len(got) != 1 || got[0] != tc.want {
+			t.Errorf("%s{role=%q} = %v, want %v:\n%s", tc.name, tc.role, got, tc.want, body)
+		}
+	}
+	for _, role := range []string{"r1", "idle"} {
+		if got := seriesValue(body, "pg_router_role_last_progress_age_seconds", map[string]string{"role": role}); len(got) != 1 {
+			t.Errorf("pg_router_role_last_progress_age_seconds{role=%q} = %v, want one series:\n%s", role, got, body)
+		}
 	}
 }
 

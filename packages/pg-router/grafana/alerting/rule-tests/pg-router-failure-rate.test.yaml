@@ -1,0 +1,81 @@
+# promtool unit tests for the pg-router-failure-rate alert's reason exclusion (docket
+# pg2-12gr4.8, design section 5): launch-failed joins at-capacity, budget-exceeded and the
+# other causes handled elsewhere. Run by the flake check test-pg-router-alert-rules, which
+# generates rules.yml next to this file: the Grafana rule's refId A wrapped as
+# `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for: 10m` and labels (severity: warning),
+# plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: 1m series, a counter that rises by one per scrape. rate(...[10m]) is above 0 from
+# the second scrape, so a counted failure is Pending from about 1m and Firing from about 11m:
+# not firing at 8m, firing at 20m.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a rising launch-failed decline does not fire, it is excluded
+    interval: 1m
+    input_series:
+      - series: pg_router_failures_total{class="declined",reason="launch-failed",role="worker",job="pg-router"}
+        values: "0+1x120"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_failure_rate)
+        eval_time: 60m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-failure-rate
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-router-failure-rate
+        exp_alerts: []
+
+  - name: a rising decline with another reason still fires, so the exclusion is only launch-failed
+    interval: 1m
+    input_series:
+      - series: pg_router_failures_total{class="declined",reason="capacity-unknown",role="worker",job="pg-router"}
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: pg-router-failure-rate
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-router-failure-rate
+        exp_alerts:
+          - exp_labels:
+              class: declined
+              role: worker
+              severity: warning
+
+  - name: launch-failed does not mask a real failure of the same role
+    interval: 1m
+    input_series:
+      - series: pg_router_failures_total{class="declined",reason="launch-failed",role="worker",job="pg-router"}
+        values: "0+1x120"
+      # A handler error with no reason label.
+      - series: pg_router_failures_total{class="handler-error",role="worker",job="pg-router"}
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-failure-rate
+        exp_alerts:
+          - exp_labels:
+              class: handler-error
+              role: worker
+              severity: warning
+
+  - name: a name that only starts with launch-failed is not excluded
+    interval: 1m
+    input_series:
+      # The matcher is anchored: launch-failed-extra is a different reason and keeps paging.
+      - series: pg_router_failures_total{class="declined",reason="launch-failed-extra",role="worker",job="pg-router"}
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-failure-rate
+        exp_alerts:
+          - exp_labels:
+              class: declined
+              role: worker
+              severity: warning

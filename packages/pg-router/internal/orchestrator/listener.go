@@ -89,6 +89,31 @@ type HandlerFailureObserver interface {
 	OnHandlerFailure(eventID, evtType, listenerID string, err error)
 }
 
+// RoleProgressObserver is notified of what each offer to a role came to, for
+// the per-role progress gauges (pg_router_role_last_progress_age_seconds,
+// pg_router_role_unsuccessful_since_progress, pg_router_role_busy_since_progress;
+// docket pg2-12gr4.8, design section 5). Offer calls it where the handler error
+// and the decline kind are in hand. The observer, not Offer, decides what counts:
+// internal/metrics.Emitter treats a nil error and a routine-sentinel error as
+// progress, any other error as unsuccessful, and classifies a decline kind
+// (fault: unsuccessful, neutral: neither, anything else: busy).
+//
+// Stated gaps in the design, implemented as the literal list: an unavailable
+// role (Offer's first return, no handler called) moves no counter, and "a
+// dispatch-retry hand-back is counted once" is read as the handler error that
+// precedes the hand-back being counted once (OnRoleFailed), the hand-back itself
+// adding nothing. A shutdown hand-back is not counted.
+type RoleProgressObserver interface {
+	// OnRoleSucceeded: an accepted offer whose handler returned no error.
+	OnRoleSucceeded(role string)
+	// OnRoleFailed: the handler returned err (not a decline, not a shutdown
+	// hand-back); the offer may then be handed back for a dispatch retry.
+	OnRoleFailed(role string, err error)
+	// OnRoleDeclined: the handler declined with exit 9; kind is the body's raw
+	// optional kind, "" when absent.
+	OnRoleDeclined(role, kind string)
+}
+
 // roleListener implements eventqueue.BackoffListener (INV-FAIL-2, Task 1.3):
 // a compile-time check that a future signature drift on either interface
 // fails the build here rather than silently degrading a role back to the
@@ -168,6 +193,9 @@ type roleListener struct {
 	// dispatch (bead pg2-yu5y2), captured at construction like the observers
 	// above; nil disables the notification, not the retry.
 	retryObs DispatchRetryObserver
+	// progressObs is notified of each offer's outcome for the role-progress
+	// gauges, captured at construction like the observers above; nil disables it.
+	progressObs RoleProgressObserver
 	// maxRetries is role.MaxDispatchRetries clamped to
 	// roles.MaxDispatchRetriesCap; 0 disables the retry entirely.
 	maxRetries int
@@ -193,6 +221,7 @@ func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqu
 		reg: o.Registry, resourceLimitObs: o.ResourceLimitObserver,
 		handlerFailureObs: o.HandlerFailureObserver,
 		retryObs:          o.DispatchRetryObserver,
+		progressObs:       o.RoleProgressObserver,
 		maxRetries:        clampRetries(role.MaxDispatchRetries),
 	}
 }
@@ -413,6 +442,9 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 			detail = bd.Reason
 			kind = bd.Kind
 		}
+		if l.progressObs != nil {
+			l.progressObs.OnRoleDeclined(l.role.Name, kind)
+		}
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy, DeclineDetail: detail, DeclineKind: kind}
 	}
 	if err != nil && l.ctx.Err() != nil {
@@ -438,6 +470,17 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	// regression this task introduces.
 	if err != nil && l.handlerFailureObs != nil {
 		l.handlerFailureObs.OnHandlerFailure(evt.ID, evt.Type, l.role.Name, err)
+	}
+	// Role progress (design section 5): a handler error is counted here, once,
+	// whether or not the failed attempt is then handed back for a dispatch retry
+	// (the hand-back adds nothing); a clean finish is progress. A routine-sentinel
+	// error is progress too, which the observer decides.
+	if l.progressObs != nil {
+		if err != nil {
+			l.progressObs.OnRoleFailed(l.role.Name, err)
+		} else {
+			l.progressObs.OnRoleSucceeded(l.role.Name)
+		}
 	}
 	if err != nil && l.shouldRetry(evt, err) {
 		// A transient failure with retries left: hand the event back as a

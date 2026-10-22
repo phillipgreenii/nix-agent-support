@@ -223,6 +223,23 @@ func TestListenerOffer_UnavailableSelfStatusDeclines(t *testing.T) {
 	}
 }
 
+// unavailableRegistry returns a registry whose entry for role self-reports
+// unavailable (shared by the unavailable-path tests).
+func unavailableRegistry(t *testing.T, role string) *core.Registry {
+	t.Helper()
+	reg := core.NewRegistry(nil)
+	if _, err := reg.RegisterInProcess(role, core.KindHandler); err != nil {
+		t.Fatalf("RegisterInProcess: %v", err)
+	}
+	if err := reg.SetLifecycle(role, conformance.Started); err != nil {
+		t.Fatalf("SetLifecycle: %v", err)
+	}
+	if err := reg.SetSelfStatus(role, core.SelfUnavailable); err != nil {
+		t.Fatalf("SetSelfStatus: %v", err)
+	}
+	return reg
+}
+
 // fakeHandlerFailureObserver is a scripted orchestrator.HandlerFailureObserver
 // test double recording every OnHandlerFailure call.
 type fakeHandlerFailureObserver struct {

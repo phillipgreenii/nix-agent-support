@@ -346,6 +346,17 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// pg2-n7da9), read live off the queue on each collect.
 	metricsOpts = append(metricsOpts, metrics.WithQueueAges(func() map[string]time.Duration { return queueRef.Load().OldestPendingAgeByType() }))
 	metricsOpts = append(metricsOpts, metrics.WithListenerInFlight(func() map[string]int { return queueRef.Load().InFlightByListener() }))
+	// Per-role progress gauges (docket pg2-12gr4.8): last-progress age and the
+	// unsuccessful and busy counts since it, one series per ENABLED role (the
+	// roles that get a listener below), all starting at daemon start. The age
+	// reads 0 while the role's offer is in flight (the in-flight read above).
+	enabledRoles := make([]string, 0, len(cfg.Roles))
+	for _, r := range cfg.Roles {
+		if r.Enabled {
+			enabledRoles = append(enabledRoles, r.Name)
+		}
+	}
+	metricsOpts = append(metricsOpts, metrics.WithRoleProgress(enabledRoles...))
 	// Per-source last-success / expected-interval gauges (bead pg2-tv11a,
 	// DEC-OBS-4): one series per enabled, non-excluded PULL source with a
 	// period, last-success initialised to now (process start).
@@ -407,6 +418,9 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	o.HandlerFailureObserver = fanOutHandlerFailureObserver{emitter, &handlerFailureCountObserver{counts: listenerCounts}}
 	// pg_router_dispatch_retries_total{role,class} (bead pg2-yu5y2).
 	o.DispatchRetryObserver = emitter
+	// pg_router_role_{last_progress_age_seconds,unsuccessful_since_progress,
+	// busy_since_progress}{role}, counted in roleListener.Offer (docket pg2-12gr4.8).
+	o.RoleProgressObserver = emitter
 	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithGateObserver(emitter),
 		// Compact queue.jsonl down to live state: once at startup (before the queue
 		// replays it or accepts an event) and, at runtime, whenever it outgrows

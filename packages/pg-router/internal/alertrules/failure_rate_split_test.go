@@ -13,7 +13,7 @@ import (
 // matched by the first two.
 const (
 	wantBudgetExpr   = `sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[1h])) >= 2`
-	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|session-in-flight|skipped-.+"}[10m]))`
+	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|launch-failed|session-in-flight|skipped-.+"}[10m]))`
 	wantTriagerExpr  = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="triager-failure"}[10m]))`
 )
 
@@ -100,8 +100,17 @@ func TestResidualFailureRateRule(t *testing.T) {
 	// declines (skipped-*, pg2-5x29j), which are healthy and moot by construction, and
 	// the handler's session-in-flight decline (pg2-qaeb8), routine
 	// backpressure like at-capacity. Nothing else.
-	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|session-in-flight|skipped-.+"`) {
-		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure, upstream-killed, usage-limit, session-in-flight and skipped-*: %q", got)
+	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|launch-failed|session-in-flight|skipped-.+"`) {
+		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure, upstream-killed, usage-limit, launch-failed, session-in-flight and skipped-*: %q", got)
+	}
+	// docket pg2-12gr4.8: launch-failed (a ccpool session that failed before it was
+	// ready, a fault decline) is excluded in the rule's expr AND its description, and
+	// the progress rule that pages a role that keeps failing this way is named.
+	if !strings.Contains(r, `reason=launch-failed`) || !strings.Contains(r, "pg-router-role-stalled") {
+		t.Error("residual annotation must name the launch-failed exclusion and the rule that covers it")
+	}
+	if n := strings.Count(r, "usage-limit|launch-failed|session-in-flight"); n != 2 {
+		t.Errorf("the exclusion regex (with launch-failed) must appear in both the description and the expr, found %d", n)
 	}
 	// pg2-e0imq: the annotation names the new carve-out, and the rule's own
 	// comment documents it, so the exclusion is never an unexplained matcher.
@@ -174,6 +183,9 @@ func TestResidualExcludesUpstreamKilledOnly(t *testing.T) {
 		"skipped-pr-merged":  true,
 		"usage-limit":        true, // pg2-e0imq: an external usage/spend limit or API outage
 		"session-in-flight":  true, // pg2-qaeb8: routine backpressure
+		"launch-failed":      true, // docket pg2-12gr4.8: covered by the role-progress rule
+		"launch-failed2":     false,
+		"launch":             false,
 		"low-disk":           false,
 		"command-busy":       false,
 		"":                   false, // plain handler-error, dispatch-failure: keep paging

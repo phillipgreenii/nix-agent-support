@@ -585,6 +585,12 @@ groups:
       # expected and healthy; their per-reason counts stay visible on
       # pg_router_failures_total{class="declined"} for dashboards.
       #
+      # reason=launch-failed is EXCLUDED too (docket pg2-12gr4.8): a ccpool session
+      # that failed before it was ready is declined with kind fault, and a role that
+      # keeps failing that way is paged by the role-progress rule pg-router-role-
+      # stalled (age and unsuccessful count), which does not page a single transient
+      # failure. Leaving it here too would page every one-off launch failure.
+      #
       # reason=session-in-flight is EXCLUDED too (pg2-qaeb8, pg-router-ccpool-
       # handler, ADR 0094): the handler declines a dispatch while an
       # earlier attempt of the same bead and role is in flight instead of
@@ -604,7 +610,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router failure rate for class {{ $labels.class }} role {{ $labels.role }} has been non-zero"
-          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|session-in-flight|skipped-.+"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is set for every class as of pg2-nimab, DEC-OBS-5) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the six causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops), reason=origin-unavailable (its own rule, pg-router-origin-unavailable), reason=triager-failure (escalation-triage roles, bulkheaded by pg2-u2yub so they cannot fire this alert; their own rule, pg-router-triager-failures) and reason=upstream-killed (a gh call killed by the pg-connector 30s scriptout timeout, transient GitHub slowness healed by the 30-minute pr-sweep; pages only on a sustained burst via pg-router-upstream-killed, pg2-fy2pm) and reason=usage-limit (a session that ended without claiming its bead because it died on an account usage or spend limit or an API outage, an external limit and not a defect of this system, operator ruling 2026-10-14, pg2-e0imq; it has no page of its own and stays visible as pg_router_failures_total{reason="usage-limit"}). Routine backpressure declines are excluded as well: reason=session-in-flight (pg-router-ccpool-handler declining while an earlier attempt of the same bead and role is in flight, pg2-qaeb8) and the review precheck''s skipped-* reasons. See pg2-97539 for the failure-class catalog''s provenance.'
+          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|launch-failed|session-in-flight|skipped-.+"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is set for every class as of pg2-nimab, DEC-OBS-5) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the seven causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops), reason=origin-unavailable (its own rule, pg-router-origin-unavailable), reason=triager-failure (escalation-triage roles, bulkheaded by pg2-u2yub so they cannot fire this alert; their own rule, pg-router-triager-failures) and reason=upstream-killed (a gh call killed by the pg-connector 30s scriptout timeout, transient GitHub slowness healed by the 30-minute pr-sweep; pages only on a sustained burst via pg-router-upstream-killed, pg2-fy2pm) and reason=usage-limit (a session that ended without claiming its bead because it died on an account usage or spend limit or an API outage, an external limit and not a defect of this system, operator ruling 2026-10-14, pg2-e0imq; it has no page of its own and stays visible as pg_router_failures_total{reason="usage-limit"}) and reason=launch-failed (a ccpool session that failed before it was ready, declined with kind fault; a role that keeps failing this way is paged by the progress rule pg-router-role-stalled instead, which counts the decline as unsuccessful, so this rule need not page it a second time; its count stays visible as pg_router_failures_total{class="declined",reason="launch-failed"}). Routine backpressure declines are excluded as well: reason=session-in-flight (pg-router-ccpool-handler declining while an earlier attempt of the same bead and role is in flight, pg2-qaeb8) and the review precheck''s skipped-* reasons. See pg2-97539 for the failure-class catalog''s provenance.'
         data:
           - refId: A
             relativeTimeRange:
@@ -615,7 +621,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|session-in-flight|skipped-.+"}[10m]))
+              expr: sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|launch-failed|session-in-flight|skipped-.+"}[10m]))
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1313,6 +1319,124 @@ groups:
               editorMode: code
               instant: true
               expr: max by (type)(last_over_time(pg_router_gates_active[10m])) > 0
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Role progress, two alert levels (docket pg2-12gr4.8, design section 5, rulings
+      # 30 and 31). Core exports only three per-role gauges, counted in roleListener.
+      # Offer: pg_router_role_last_progress_age_seconds (0 while an offer is in flight),
+      # pg_router_role_unsuccessful_since_progress and pg_router_role_busy_since_progress
+      # (both reset by progress, all three start at daemon start). Progress is an
+      # accepted offer with no handler error, or with a routine budget-stop, usage-limit
+      # or triager error (the role did run). The thresholds below are plain values here,
+      # not in core (ruling 31).
+      #
+      # Each rule has three clauses:
+      #   1. the age, as max_over_time(<age>[15m]): while an offer is in flight the age
+      #      reads 0, and without the 15 minute max a role that is declined all day but
+      #      briefly in flight would reset a `for:` hold every time;
+      #   2. the count (unsuccessful >= 5 for "stalled", busy >= 1 for "busy a long time");
+      #   3. a RECENT offer: `and on(role) increase(pg_router_failures_total{class=~
+      #      "declined|handler-error"}[1h]) > 0`, so a role that has simply been idle
+      #      (nothing bound to it arrived) never fires, however old its age and however
+      #      many failures the counters still hold from before the idle spell.
+      # The age alone, the count alone or the recent offer alone never fires. The value
+      # the rule evaluates is the age (seconds), so the usual `gt 0` threshold node over
+      # the filtered result applies. The age is by role only; the alert keeps the `role`
+      # label.
+      #
+      # "role stalled" (severity critical, the higher level): age > 30m (1800 s) and
+      # unsuccessful >= 5. A role that has not made progress for half an hour while its
+      # last five offers ended in handler errors or fault declines (a launch that fails
+      # before the session is ready, the pre-ready decline). for: 5m, because the 30m age
+      # and the five failures already encode persistence.
+      #
+      # "role busy a long time" (severity warning, the lower level): age > 4h (14400 s)
+      # and busy >= 1. A role that has been declined busy (a full pool, an unknown or
+      # absent decline kind counts as busy) with no progress for four hours. for: 10m.
+      #
+      # increase() takes a NEW series' first sample as its baseline, so the first failure
+      # of a role after a router restart does not by itself make an offer "recent"; the
+      # unsuccessful >= 5 clause of the stalled rule needs at least five counted failures
+      # anyway, and the busy rule needs only one decline, so a role whose very first
+      # post-restart event is its only decline is picked up by its next one.
+      - uid: pg-router-role-stalled
+        title: pg-router role is stalled (by role)
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pg-router role {{ $labels.role }} has made no progress for over 30 minutes and its last offers keep failing"
+          description: "pg_router_role_last_progress_age_seconds for role {{ $labels.role }} stayed above 30 minutes (1800 s, max over 15 minutes so an in-flight 0 does not reset it) while pg_router_role_unsuccessful_since_progress is 5 or more, and the role was offered work in the last hour (pg_router_failures_total, class declined or handler-error, rose). Progress is an accepted offer with no handler error, or with a budget-stop, usage-limit or triager error (the role did run); the unsuccessful count is handler errors and exit-9 declines of kind fault (a ccpool session that failed before it was ready, launch-failed). Check `pg-router status` for the role, the handler's error text in events.jsonl, and `ccpool list`. A role with nothing to do never fires this."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: (max by (role) (max_over_time(pg_router_role_last_progress_age_seconds[15m])) > 1800) and on(role) (max by (role) (pg_router_role_unsuccessful_since_progress) >= 5) and on(role) (sum by (role) (increase(pg_router_failures_total{class=~"declined|handler-error"}[1h])) > 0)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      - uid: pg-router-role-busy-long
+        title: pg-router role has been busy a long time (by role)
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router role {{ $labels.role }} has made no progress for over 4 hours and has been declined busy"
+          description: "pg_router_role_last_progress_age_seconds for role {{ $labels.role }} stayed above 4 hours (14400 s, max over 15 minutes so an in-flight 0 does not reset it) while pg_router_role_busy_since_progress is 1 or more, and the role was offered work in the last hour (pg_router_failures_total, class declined or handler-error, rose). Busy is an exit-9 decline of kind busy, no kind, or a kind core does not know (a full pool, a session already in flight); neutral declines and shutdown hand-backs do not count. Lower severity than pg-router-role-stalled, which covers a role whose offers fail outright. Check `pg-router status` and the handler's pool for what the role is waiting on. A role with nothing to do never fires this."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: (max by (role) (max_over_time(pg_router_role_last_progress_age_seconds[15m])) > 14400) and on(role) (max by (role) (pg_router_role_busy_since_progress) >= 1) and on(role) (sum by (role) (increase(pg_router_failures_total{class=~"declined|handler-error"}[1h])) > 0)
           - refId: B
             datasourceUid: __expr__
             model:

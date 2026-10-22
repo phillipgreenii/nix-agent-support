@@ -191,6 +191,22 @@ const (
 	// at 1; the time-average of it is the lane's utilisation. Exposed as
 	// pg_router_listener_in_flight.
 	MetricListenerInFlight = "pg_router_listener_in_flight"
+	// MetricRoleLastProgressAge, MetricRoleUnsuccessfulSinceProgress and
+	// MetricRoleBusySinceProgress are the per-role progress gauges (docket
+	// pg2-12gr4.8, design section 5, rulings 30 and 31). Core counts them in
+	// roleListener.Offer, where the handler error and the decline kind are in
+	// hand; the "role stalled" and "role busy a long time" alerts read them.
+	// The age is in seconds since the role last made progress (an accepted
+	// offer with no handler error or only a routine-sentinel one), 0 while an
+	// offer is in flight; the two counts are the offers since that moment that
+	// ended unsuccessfully (a handler error, an exit-9 decline of kind fault) or
+	// busy (an exit-9 decline of kind busy, absent or unknown). All three start
+	// at daemon start, like MetricSourceLastSuccessAge.
+	MetricRoleLastProgressAge = "pg_router_role_last_progress_age"
+	// MetricRoleUnsuccessfulSinceProgress: see MetricRoleLastProgressAge.
+	MetricRoleUnsuccessfulSinceProgress = "pg_router_role_unsuccessful_since_progress"
+	// MetricRoleBusySinceProgress: see MetricRoleLastProgressAge.
+	MetricRoleBusySinceProgress = "pg_router_role_busy_since_progress"
 	// MetricSourceFailures counts a pull-source query failure, per source and
 	// reason (see ClassifySourceFailure; the alert sums the reason away) —
 	// the metrics half of INV-FAIL-3's "reported to logs and metrics, never a
@@ -471,6 +487,11 @@ type Emitter struct {
 	// age back into wall-clock time, which a host sleep inflates.
 	srcMu          sync.Mutex
 	srcLastSuccess map[string]time.Time
+	// progMu guards progress, the per-role progress state behind the three
+	// role-progress gauges (nil unless WithRoleProgress was given). Keys are role
+	// names, bounded by the config.
+	progMu   sync.Mutex
+	progress map[string]*roleProgress
 	// awakeSince measures how much awake (monotonic) time has passed since a
 	// stored last-success time; see WithAwakeSince. Set once in New, before any
 	// gauge callback can run.
@@ -532,6 +553,8 @@ type options struct {
 	queueAges     func() map[string]time.Duration
 	listenerBusy  func() map[string]int
 	queueReady    func() bool
+	progressRoles []string
+	progressOn    bool
 }
 
 // WithQueueReady registers ready, the answer to "does the queue the gauges below read
@@ -570,6 +593,19 @@ func WithQueueAges(fn func() map[string]time.Duration) Option {
 // option the gauge is not registered.
 func WithListenerInFlight(fn func() map[string]int) Option {
 	return func(o *options) { o.listenerBusy = fn }
+}
+
+// WithRoleProgress registers the three per-role progress gauges
+// (MetricRoleLastProgressAge, MetricRoleUnsuccessfulSinceProgress and
+// MetricRoleBusySinceProgress), seeded for roles: each starts at the Emitter's
+// clock at construction (daemon start) with both counts 0, so the age reads 0 at
+// start and a restart resets all three. A role not seeded here is seeded by its
+// first reported outcome. The age reads 0 while the role has an offer in flight,
+// which it learns from WithListenerInFlight's function when that option is set.
+// Without this option the gauges are not registered and the outcome methods
+// (OnRoleSucceeded, OnRoleFailed, OnRoleDeclined) record nothing.
+func WithRoleProgress(roles ...string) Option {
+	return func(o *options) { o.progressOn = true; o.progressRoles = roles }
 }
 
 // WithPullSources registers the per-source liveness gauges
@@ -845,6 +881,11 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	}
 	if len(cfg.pullSources) > 0 {
 		if err := e.registerSourceGauges(m, cfg.pullSources, cfg.now()); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.progressOn {
+		if err := e.registerRoleProgress(m, cfg.progressRoles, cfg.now(), cfg.listenerBusy, ready); err != nil {
 			return nil, err
 		}
 	}
@@ -1312,14 +1353,32 @@ func (e *Emitter) OnHandlerFailure(_, _, listenerID string, err error) {
 		// Bulkhead (pg2-u2yub): triager failures never share the worker/
 		// review failure-rate series, whatever their cause.
 		attrs = append(attrs, attribute.String("reason", ReasonTriagerFailure))
-	case err != nil && strings.Contains(err.Error(), BudgetExceededSentinel):
+	case hasBudgetSentinel(err):
 		attrs = append(attrs, attribute.String("reason", ReasonBudgetExceeded))
 	case err != nil && isUpstreamKilled(err.Error()):
 		attrs = append(attrs, attribute.String("reason", ReasonUpstreamKilled))
-	case err != nil && strings.Contains(err.Error(), UsageLimitSentinel):
+	case hasUsageLimitSentinel(err):
 		attrs = append(attrs, attribute.String("reason", ReasonUsageLimit))
 	}
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(attrs...))
+}
+
+func hasBudgetSentinel(err error) bool {
+	return err != nil && strings.Contains(err.Error(), BudgetExceededSentinel)
+}
+
+func hasUsageLimitSentinel(err error) bool {
+	return err != nil && strings.Contains(err.Error(), UsageLimitSentinel)
+}
+
+// IsRoutineHandlerError reports whether a handler error is a routine sentinel:
+// the role ran, and the error says only that it stopped on its budget or on a
+// usage limit, or the role is a triager (whose failures are bulkheaded, see
+// ReasonTriagerFailure). OnHandlerFailure's own classification uses the same
+// three tests, so the progress gauges (OnRoleFailed) and the failure counter agree
+// on what is routine.
+func IsRoutineHandlerError(role string, err error) bool {
+	return IsTriagerRole(role) || hasBudgetSentinel(err) || hasUsageLimitSentinel(err)
 }
 
 // isUpstreamKilled reports whether a handler error text carries

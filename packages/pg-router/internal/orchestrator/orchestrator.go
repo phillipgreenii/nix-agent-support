@@ -139,6 +139,11 @@ type Orchestrator struct {
 	// notification; captured by NewListener like the observers above.
 	// cmd/pg-router's bootCore wires the metrics.Emitter in here.
 	DispatchRetryObserver DispatchRetryObserver
+	// RoleProgressObserver is notified of each offer's outcome for the per-role
+	// progress gauges (docket pg2-12gr4.8). nil disables it; captured by
+	// NewListener like the observers above. cmd/pg-router's bootCore wires the
+	// metrics.Emitter in here.
+	RoleProgressObserver RoleProgressObserver
 	// lastTick is the per-source next-fire substrate ProduceTick threads into
 	// discover.ProduceWithCadence (Task 1.3, discover.Cadence.LastTick): an
 	// Orchestrator OUTLIVES a single Produce call across `run`'s whole ticker

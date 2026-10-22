@@ -1,0 +1,190 @@
+# promtool unit tests for the pg-router-role-stalled alert (docket pg2-12gr4.8, design section
+# 5, ruling 30): "role stalled" is age > 30m AND unsuccessful >= 5 AND a recent offer. Run by
+# the flake check test-pg-router-alert-rules, which generates rules.yml next to this file: the
+# Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for: 5m`
+# and labels (severity: critical), plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: every series here has a 1m interval, so "0+60xN" is an age that grows one minute
+# per scrape (the real gauge is scraped every 30s; only the shape matters). The age gauge is
+# 0 while an offer is in flight, which these cases model as zeros inside a growing age.
+# pg_router_failures_total{class=~"declined|handler-error"} is the recent-offer clause: a
+# counter that rose in the last hour.
+#
+# The age exceeds 1800s at minute 31 (the 32nd scrape), so with `for: 5m` the alert is Pending
+# from 31m and Firing from 36m: not firing at 34m, firing at 40m.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: age over 30m with five unsuccessful offers and a recent offer fires, critical, by role
+    interval: 1m
+    input_series:
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x300"
+      - series: pg_router_role_unsuccessful_since_progress{role="worker",job="pg-router"}
+        values: "5x300"
+      - series: pg_router_failures_total{class="declined",reason="launch-failed",role="worker",job="pg-router"}
+        values: "0+1x300"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-router-role-stalled
+        exp_alerts: []
+      - eval_time: 34m
+        alertname: pg-router-role-stalled
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-router-role-stalled
+        exp_alerts:
+          - exp_labels:
+              role: worker
+              severity: critical
+
+  - name: only the count is short, four unsuccessful offers never fire
+    interval: 1m
+    input_series:
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x300"
+      - series: pg_router_role_unsuccessful_since_progress{role="worker",job="pg-router"}
+        values: "4x300"
+      - series: pg_router_failures_total{class="handler-error",role="worker",job="pg-router"}
+        values: "0+1x300"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-router-role-stalled
+        exp_alerts: []
+
+  - name: only the age is short, five unsuccessful offers inside 30m never fire
+    interval: 1m
+    input_series:
+      # Progress 10m ago: the age sits at 600s, then keeps growing only to 29m.
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "600+60x18 0x300"
+      - series: pg_router_role_unsuccessful_since_progress{role="worker",job="pg-router"}
+        values: "5x300"
+      - series: pg_router_failures_total{class="handler-error",role="worker",job="pg-router"}
+        values: "0+1x300"
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: pg-router-role-stalled
+        exp_alerts: []
+
+  - name: idle after a decline never fires, the offers are no longer recent
+    interval: 1m
+    input_series:
+      # The role was declined for its first 20 minutes and nothing has been offered since:
+      # the age keeps growing and the unsuccessful count keeps its 5, but the failures counter
+      # is flat from minute 20, so once the last rise is more than an hour old the recent-offer
+      # clause is false.
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x300"
+      - series: pg_router_role_unsuccessful_since_progress{role="worker",job="pg-router"}
+        values: "5x300"
+      - series: pg_router_failures_total{class="declined",reason="launch-failed",role="worker",job="pg-router"}
+        values: "0+1x20 20x280"
+    alert_rule_test:
+      # The last rise (minute 20) is still inside the [1h] window here.
+      - eval_time: 50m
+        alertname: pg-router-role-stalled
+        exp_alerts:
+          - exp_labels:
+              role: worker
+              severity: critical
+      # More than an hour after it, the offer is no longer recent.
+      - eval_time: 100m
+        alertname: pg-router-role-stalled
+        exp_alerts: []
+
+  - name: a role with no offers never alerts, whatever its age
+    interval: 1m
+    input_series:
+      # Idle since daemon start: the age grows, both counts are 0, and no failures series
+      # exists for the role at all.
+      - series: pg_router_role_last_progress_age_seconds{role="idle",job="pg-router"}
+        values: "0+60x300"
+      - series: pg_router_role_unsuccessful_since_progress{role="idle",job="pg-router"}
+        values: "0x300"
+      - series: pg_router_role_busy_since_progress{role="idle",job="pg-router"}
+        values: "0x300"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_role_stalled)
+        eval_time: 200m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 200m
+        alertname: pg-router-role-stalled
+        exp_alerts: []
+
+  - name: a brief in-flight zero does not reset the hold, the 15m max keeps the age
+    interval: 1m
+    input_series:
+      # The age grows, reads 0 for three scrapes while an offer is in flight (minutes 33-35),
+      # then continues from where it was: without max_over_time[15m] the zeros would reset
+      # the `for` hold and the alert would not be firing at 38m.
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x32 0x2 2160+60x200"
+      - series: pg_router_role_unsuccessful_since_progress{role="worker",job="pg-router"}
+        values: "5x300"
+      - series: pg_router_failures_total{class="declined",reason="launch-failed",role="worker",job="pg-router"}
+        values: "0+1x300"
+    alert_rule_test:
+      - eval_time: 38m
+        alertname: pg-router-role-stalled
+        exp_alerts:
+          - exp_labels:
+              role: worker
+              severity: critical
+
+  - name: a role in flight for a long time is not stalled, the in-flight zeros clear the alert
+    interval: 1m
+    input_series:
+      # Stalled to minute 40 (age 2400s), then an offer goes in flight and the age reads 0
+      # for the next 100 minutes: once 15 minutes of zeros pass, the max falls to 0.
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x40 0x260"
+      - series: pg_router_role_unsuccessful_since_progress{role="worker",job="pg-router"}
+        values: "5x300"
+      - series: pg_router_failures_total{class="declined",reason="launch-failed",role="worker",job="pg-router"}
+        values: "0+1x300"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-router-role-stalled
+        exp_alerts:
+          - exp_labels:
+              role: worker
+              severity: critical
+      - eval_time: 70m
+        alertname: pg-router-role-stalled
+        exp_alerts: []
+
+  - name: only the role with all three clauses fires
+    interval: 1m
+    input_series:
+      - series: pg_router_role_last_progress_age_seconds{role="worker",job="pg-router"}
+        values: "0+60x300"
+      - series: pg_router_role_unsuccessful_since_progress{role="worker",job="pg-router"}
+        values: "6x300"
+      - series: pg_router_failures_total{class="handler-error",role="worker",job="pg-router"}
+        values: "0+1x300"
+      - series: pg_router_role_last_progress_age_seconds{role="reviewer",job="pg-router"}
+        values: "0+60x300"
+      - series: pg_router_role_unsuccessful_since_progress{role="reviewer",job="pg-router"}
+        values: "6x300"
+      # The reviewer's failures counter is flat: no recent offer.
+      - series: pg_router_failures_total{class="handler-error",role="reviewer",job="pg-router"}
+        values: "9x300"
+      - series: pg_router_role_last_progress_age_seconds{role="triager",job="pg-router"}
+        values: "0+60x300"
+      # The triager has only busy declines.
+      - series: pg_router_role_unsuccessful_since_progress{role="triager",job="pg-router"}
+        values: "0x300"
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="triager",job="pg-router"}
+        values: "0+1x300"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-router-role-stalled
+        exp_alerts:
+          - exp_labels:
+              role: worker
+              severity: critical
