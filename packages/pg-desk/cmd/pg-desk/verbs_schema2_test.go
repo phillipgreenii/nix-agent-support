@@ -115,21 +115,18 @@ func verbClasses() map[string]verbClass {
 		"attention explain": safe("pr:" + testPR),
 		"attention list":    safe(),
 		"doctor":            safe(),
-		"feedback list": unsafe("reads the per-comment rows of the old per-column annotation table, which schema 2 " +
-			"replaced with key/value annotations; pr feedback list is the schema-2 verb"),
-		"feedback set": unsafe("writes the old per-column annotation table, which schema 2 replaced; " +
-			"pr feedback set is the schema-2 verb"),
-		"focus close":    safe("--dry-run"),
-		"focus explain":  safe("pr:" + testPR),
-		"focus pull":     safe("--dry-run"),
-		"focus replan":   safe(),
-		"focus select":   safe("--dry-run"),
-		"focus show":     safe(),
-		"freshness":      safe(),
-		"heartbeat":      safe(),
-		"heartbeat-item": safe(),
-		"hide": unsafe("reads the old per-column annotation table (its comment_id column), which schema 2 " +
-			"replaced; pr hide is the schema-2 verb"),
+		"feedback list":     safe("1"),
+		"feedback set":      safe("1", "c1", "--disposition", "will-fix"),
+		"focus close":       safe("--dry-run"),
+		"focus explain":     safe("pr:" + testPR),
+		"focus pull":        safe("--dry-run"),
+		"focus replan":      safe(),
+		"focus select":      safe("--dry-run"),
+		"focus show":        safe(),
+		"freshness":         safe(),
+		"heartbeat":         safe(),
+		"heartbeat-item":    safe(),
+		"hide":              safe("1", "test"),
 		"import-pg-pr-annotations": unsafe("one-shot cutover import that reads the retired pg-pr annotation " +
 			"store and writes the old per-column annotation table, which schema 2 replaced"),
 		"ledger":    unsafe("reads the entity-to-bead ledger that the schema-2 cutover drops (the verb is a stub)"),
@@ -143,8 +140,8 @@ func verbClasses() map[string]verbClass {
 			"dropped; pr show is the schema-2 verb"),
 		"status": safe(),
 		"sweep":  safe(),
-		"unhide": unsafe("reads the old per-column annotation table, which schema 2 replaced; pr unhide is the schema-2 verb"),
-		"wip":    unsafe("reads the old per-column annotation table, which schema 2 replaced; pr wip is the schema-2 verb"),
+		"unhide": safe("1"),
+		"wip":    safe("on", "1"),
 	}
 	for k, v := range typedVerbs("pr", "1") {
 		m[k] = v
@@ -614,22 +611,23 @@ func TestSchemaErrorDetectionRejectsAMigrationBreak(t *testing.T) {
 }
 
 // TestHarnessSeesARealMigrationBreak is the negative control for the whole
-// walk: the legacy top-level hide reads an annotation column that schema 2
-// removed, so running it on the migrated store MUST be flagged. It proves the
+// walk: the legacy top-level reconcile lists the entity-to-bead ledger that the
+// schema-2 cutover dropped, so running it on the migrated store MUST be flagged. It proves the
 // fixture really is at schema 2 and the check really reads the verbs' output;
-// without it a harness that ran nothing would pass every verb. If hide is ever
-// ported to schema 2, point this at another verb the table marks unsafe for
-// that reason.
+// without it a harness that ran nothing would pass every verb. If reconcile is
+// ever ported to schema 2, point this at another verb the table marks unsafe
+// for a dropped-table or dropped-column reason (it was hide until pg2-ifsje
+// ported the top-level hide, unhide, wip and feedback verbs).
 func TestHarnessSeesARealMigrationBreak(t *testing.T) {
 	classes := verbClasses()
-	if classes["hide"].Safe {
-		t.Fatal("this control needs hide to be classified unsafe")
+	if classes["reconcile"].Safe {
+		t.Fatal("this control needs reconcile to be classified unsafe")
 	}
-	res := newVerbFixture(t).run("hide", []string{"1", "test"})
+	res := newVerbFixture(t).run("reconcile", nil)
 	if res.err != nil {
 		t.Fatal(res.err)
 	}
 	if schemaOrLedgerError(res) == "" {
-		t.Errorf("legacy hide ran clean on a schema-2 store; the check would miss a migration break:\nstdout: %s\nstderr: %s", res.stdout, res.stderr)
+		t.Errorf("legacy reconcile ran clean on a schema-2 store; the check would miss a migration break:\nstdout: %s\nstderr: %s", res.stdout, res.stderr)
 	}
 }

@@ -5,6 +5,8 @@
 attention explain
 attention list
 doctor
+feedback list
+feedback set
 focus close
 focus explain
 focus pull
@@ -14,6 +16,7 @@ focus show
 freshness
 heartbeat
 heartbeat-item
+hide
 issue annotate
 issue changes
 issue consumer forget
@@ -65,4 +68,6 @@ thread suppress
 thread unhide
 thread unsuppress
 thread wip
+unhide
 version
+wip

@@ -442,10 +442,11 @@ and the tree MUST agree: a verb added without a classification fails the test, a
 classification naming a verb that does not exist. Every safe verb is run, in its own process, against
 a real store migrated to schema 2 under a deployment-style configuration; it passes when it runs
 without a schema or ledger error (it MAY still exit non-zero for another reason, such as a missing
-entity or no reachable connector). The unsafe verbs today are the legacy top-level `show`, `hide`,
-`unhide`, `wip` and `feedback` (replaced by the typed `pr` forms), `reconcile` and `ledger` (both read
-the dropped ledger), `import-pg-pr-annotations` and `migrate` (one-shot cutover verbs), and the `open`
-verbs (they exec the configured browser opener). `run` and `sweep` are safe only while `sync.mode` is
+entity or no reachable connector). The unsafe verbs today are the legacy top-level `show` (replaced by
+`pr show`), `reconcile` and `ledger` (both read the dropped ledger), `import-pg-pr-annotations` and
+`migrate` (one-shot cutover verbs), and the `open` verbs (they exec the configured browser opener). The
+top-level `hide`, `unhide`, `wip` and `feedback list|set` are safe: they dispatch on the store schema
+like the typed `pr` forms. `run` and `sweep` are safe only while `sync.mode` is
 `off`: the sync stage reads the ledger.
 
 The list of safe verbs is written into the package output as `share/pg-desk/safe-verbs.txt`, one verb
