@@ -1,0 +1,103 @@
+# promtool unit tests for the pg-router-worktree-growth alert (pg2-hxxtt). Run by the
+# flake check test-pg-router-alert-rules, which generates rules.yml next to this file:
+# the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the
+# rule's `for: 30m` and labels, plus a recording rule `wrapped:<uid with _>` over the
+# same expression.
+#
+# What this proves: the PromQL itself (the rise of the pool's 12h FLOOR over the floor
+# of the 12h before it, >= 10) evaluated by the real engine, including that a spike that
+# is cleaned up, a daily churn that returns to the same floor and a rise under the bar do
+# not fire, and that the rule has no result until 24h of history exist.
+#
+# Time model: promtool's clock starts at 0, every series has a 10m interval (the cached
+# scan refreshes every 10m), so 6 samples are an hour and 72 are 12h. A leak is a floor
+# that climbs 0.2 per sample (1.2 an hour: 14.4 over 12h). The older window needs data, so
+# nothing can fire before about 12h, and `for: 30m` is on top of the first true evaluation.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a pool that only ever rises (1.2 an hour, a 14.4 rise of its 12h floor) fires, but not in the first hours
+    interval: 10m
+    input_series:
+      - series: pg_router_worktree_count{job="pg-router"}
+        values: "10+0.2x300"
+    promql_expr_test:
+      # Only the newer window has samples: no result, so no alert.
+      - expr: count(wrapped:pg_router_worktree_growth)
+        eval_time: 4h
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: pg-router-worktree-growth
+        exp_alerts: []
+      - eval_time: 36h
+        alertname: pg-router-worktree-growth
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a daily churn between 3 and 12 worktrees that returns to the same floor never fires
+    interval: 10m
+    input_series:
+      # 6h at 3, then 6h at 12, repeated: the floor of every 12h window is 3.
+      - series: pg_router_worktree_count{job="pg-router"}
+        values: "3x36 12x36 3x36 12x36 3x36 12x36 3x36 12x36"
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: pg-router-worktree-growth
+        exp_alerts: []
+      - eval_time: 46h
+        alertname: pg-router-worktree-growth
+        exp_alerts: []
+
+  - name: a burst of parallel worktrees that is cleaned up leaves the floor alone and never fires
+    interval: 10m
+    input_series:
+      # 5 worktrees, a 3h burst to 40 at 20h, then back to 5.
+      - series: pg_router_worktree_count{job="pg-router"}
+        values: "5x120 40x18 5x200"
+    alert_rule_test:
+      - eval_time: 21h
+        alertname: pg-router-worktree-growth
+        exp_alerts: []
+      - eval_time: 36h
+        alertname: pg-router-worktree-growth
+        exp_alerts: []
+
+  - name: a floor that rises by 7, under the bar of 10, does not fire
+    interval: 10m
+    input_series:
+      # 0.1 per sample is 7.2 over 12h.
+      - series: pg_router_worktree_count{job="pg-router"}
+        values: "10+0.1x300"
+    alert_rule_test:
+      - eval_time: 36h
+        alertname: pg-router-worktree-growth
+        exp_alerts: []
+
+  - name: the pool total is summed over every series, so two pools that each grow 7 fire together
+    interval: 10m
+    input_series:
+      - series: pg_router_worktree_count{job="pg-router",pool="a"}
+        values: "10+0.1x300"
+      - series: pg_router_worktree_count{job="pg-router",pool="b"}
+        values: "10+0.1x300"
+    alert_rule_test:
+      - eval_time: 36h
+        alertname: pg-router-worktree-growth
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: an absent series (no pool configured, or no scan yet) never fires
+    interval: 10m
+    input_series:
+      - series: pg_router_liveness{job="pg-router"}
+        values: "1x300"
+    alert_rule_test:
+      - eval_time: 36h
+        alertname: pg-router-worktree-growth
+        exp_alerts: []

@@ -1456,3 +1456,72 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+
+      # Worktree pool growth (pg2-hxxtt, carried out of handoff pg2-z9ede):
+      # pg_router_worktree_count (internal/metrics/poolstat.go) is the number of
+      # per-bead directories under the pool's worktree_dir, refreshed by a cached
+      # scan (10m TTL), with the pg-router dashboard's "pg-router worktree count"
+      # panel as its only consumer until now. A pool that is being used and cleaned
+      # up rises and falls with the beads in flight; a pool that LEAKS (worktrees
+      # that are never reaped after their bead lands or is released) only ever
+      # rises, and each worktree of a monorepo checkout is a large directory (see
+      # pg2-8vn8t), so unattended growth ends in a full disk.
+      #
+      # Growth is the rise of the pool's FLOOR, not of its instantaneous value: the
+      # lowest count of the last 12h minus the lowest count of the 12h before that
+      # (min_over_time over a 10m-step subquery of the pool total, with the older
+      # window shifted by `offset 12h`), >= 10. A busy day, a burst of parallel
+      # drains or a spike that is cleaned up leaves the floor where it was, so it
+      # does not fire; a pool that never drops back to where it was 12h ago does.
+      # The 24h of history this needs is also its warm-up: until the older window
+      # holds samples the expression has no result (noDataState OK, as for an
+      # absent series: the pool is not configured, or its first scan has not
+      # completed). The pool total is summed over every series, so the alert has
+      # no per-pool labels. `for: 30m`, because the 12h floors already encode
+      # persistence.
+      #
+      # Severity: warning, deliberately (the notifier pages on critical only, see
+      # pg2-lu6dm); it surfaces in Grafana and the pg-router-probe bead flow. The
+      # 10 is a tunable chosen without a recorded baseline of the pool: if a
+      # healthy pool legitimately steps up by more than that in 12h, raise it here
+      # and in internal/alertrules/worktree_growth_test.go together. Annotations
+      # are STATIC (see the escalation convention above).
+      - uid: pg-router-worktree-growth
+        title: pg-router worktree pool is growing
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "the pg-router worktree pool has grown by 10 or more over the last 12 hours and never dropped back"
+          description: "The lowest pg_router_worktree_count of the last 12 hours is at least 10 above the lowest of the 12 hours before that, so the number of per-bead worktree directories under the pool's worktree_dir keeps rising without being cleaned up. Worktrees of a monorepo checkout are large, so a leak ends in a full disk (the disk watchdog's LOW_DISK_USAGE gate would then halt every role). Inspect the pool directory (PG_ROUTER_WORKTREE_DIR, default <state>/pg-router/worktrees) for worktrees whose bead is closed or released, and check the pg-router worktree size panel on the pg-router dashboard (pg_router_worktree_bytes). Remove spent worktrees with git worktree remove; a worktree whose bead is still open is not a leak."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: min_over_time(sum(pg_router_worktree_count)[12h:10m]) - min_over_time(sum(pg_router_worktree_count)[12h:10m] offset 12h) >= 10
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
