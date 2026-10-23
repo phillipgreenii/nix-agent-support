@@ -209,8 +209,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261015022436-7b4c351b3c34'
-    hash = 'sha256-IgDjbWSCmJEBqaZMa86YVkEXAwWR6M5R6wRvwH3uCRw='
+    version = 'v0.0.0-20261020124917-7ab78bebcb0b'
+    hash = 'sha256-xJ8r9MBhtYKdhGTpV/XeSFnf8IUifE1adJnk9XU9iik='
 
   [mod.'github.com/prometheus/client_golang']
     version = 'v1.24.1'
@@ -305,11 +305,11 @@ cachePackages = [
     hash = 'sha256-gykmMKFe61Tc4tblLPd3IyMKCqL0MSTQpgb6yE5EnDA='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20261012220534-4341edf3f941'
-    hash = 'sha256-MlST4MvkHobgSWbCS3GCUaffvSnPXIQC+UMMsDuOGZs='
+    version = 'v0.0.0-20261019180522-ce908d29299b'
+    hash = 'sha256-qUTuVBTbGwE/GeuuO+2s0/PCEWi9vLt+HJQ9x0AQjRg='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20261012220534-4341edf3f941'
+    version = 'v0.0.0-20261019180522-ce908d29299b'
     hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
 
   [mod.'google.golang.org/grpc']
@@ -337,5 +337,5 @@ cachePackages = [
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.60.1'
-    hash = 'sha256-NEuPcq63wseHfHZ0BorTAesJ0dPBwaPepsbFQOjM8Jo='
+    version = 'v1.61.0'
+    hash = 'sha256-hkdsithYwoAc5svUA878mPtOs2eIhtQnmGnSabXfTtc='
