@@ -12,10 +12,10 @@ import (
 )
 
 // The typed homes of the kept verbs: pg-desk <type> hide|unhide|wip and
-// pg-desk pr feedback list|set [design 6.9]. Until the cutover is done
-// everywhere the top-level hide/unhide/wip/feedback keep working untouched,
-// so each typed form is schema-dual: on an old-schema store a pr verb runs
-// exactly the top-level verb; on a new-schema store it writes the key/value
+// pg-desk pr feedback list|set [design 6.9]. The top-level
+// hide/unhide/wip/feedback are the pr forms and share the same code, so every
+// verb is schema-dual: on an old-schema store a pr verb runs the old
+// per-column path; on a new-schema store it writes the key/value
 // annotation API (hidden, wip, disposition.<comment_id>). issue and thread
 // have no old-schema counterpart and refuse an old-schema store.
 
@@ -151,10 +151,7 @@ func newTypedFeedbackCmd() *cobra.Command {
 		Short: "Print the PR's comments and threads with their current dispositions",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSchemaDual(
-				func() error { return runFeedbackList(cmd, args[0]) },
-				func(st *store.Store) error { return runTypedFeedbackList(cmd, st, args[0]) },
-			)
+			return runFeedbackListDual(cmd, args[0])
 		},
 	})
 	var disposition, actor string
@@ -163,19 +160,37 @@ func newTypedFeedbackCmd() *cobra.Command {
 		Short: "Record a disposition override, attributed to the caller",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !validDisposition(disposition) {
-				return fmt.Errorf("feedback set: --disposition must be one of open|will-fix|wont-fix|no-action, got %q", disposition)
-			}
-			return runSchemaDual(
-				func() error { return runFeedbackSetWith(cmd, args[0], args[1], disposition, actor) },
-				func(st *store.Store) error { return runTypedFeedbackSet(cmd, st, args[0], args[1], disposition, actor) },
-			)
+			return runFeedbackSetDual(cmd, args[0], args[1], disposition, actor)
 		},
 	}
 	set.Flags().StringVar(&disposition, "disposition", "", "open|will-fix|wont-fix|no-action (required)")
 	set.Flags().StringVar(&actor, "actor", "", "Attribute this override to this actor (defaults to the configured actor)")
 	g.AddCommand(set)
 	return g
+}
+
+// runFeedbackListDual is feedback list for pr: the old-schema reader on an
+// old-schema store, the key/value overlay on a migrated one. The top-level
+// `feedback list` and `pr feedback list` both call it.
+func runFeedbackListDual(cmd *cobra.Command, ref string) error {
+	return runSchemaDual(
+		func() error { return runFeedbackList(cmd, ref) },
+		func(st *store.Store) error { return runTypedFeedbackList(cmd, st, ref) },
+	)
+}
+
+// runFeedbackSetDual is feedback set for pr: the old per-column annotation on
+// an old-schema store, disposition.<comment_id> on a migrated one. The
+// top-level `feedback set` and `pr feedback set` both call it. The
+// disposition is validated before the store is opened.
+func runFeedbackSetDual(cmd *cobra.Command, ref, commentID, disposition, actor string) error {
+	if !validDisposition(disposition) {
+		return fmt.Errorf("feedback set: --disposition must be one of open|will-fix|wont-fix|no-action, got %q", disposition)
+	}
+	return runSchemaDual(
+		func() error { return runFeedbackSetWith(cmd, ref, commentID, disposition, actor) },
+		func(st *store.Store) error { return runTypedFeedbackSet(cmd, st, ref, commentID, disposition, actor) },
+	)
 }
 
 // feedbackBase resolves ref and reads the PR's stored base dispositions.

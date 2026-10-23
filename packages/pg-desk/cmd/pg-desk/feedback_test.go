@@ -178,3 +178,42 @@ func TestFeedbackSetRequiresAnActor(t *testing.T) {
 		t.Errorf("error %q does not mention the missing actor", err)
 	}
 }
+
+// The top-level feedback list/set are schema-dual like `pg-desk pr feedback`:
+// on a real schema-2 store they must not touch the old per-column annotation
+// table (which no longer has comment_id) and write/read the key/value
+// disposition.<comment_id> annotation instead.
+func TestTopLevelFeedbackSetListOnNewSchema(t *testing.T) {
+	open, seed := newStoreAt(t, "new")
+	seedFeedbackPR(t, seed, "o/r", "o/r#1", [][2]string{{"c1", dispositionOpen}, {"c2", dispositionNoAction}})
+	withOpenSeams(t, linkTestConfig(), open)
+
+	if err := runFeedbackSetCmd(t, "1", "c1", "will-fix", "bob"); err != nil {
+		t.Fatalf("feedback set: %v", err)
+	}
+	wantAnnotation(t, seed, "pr", "o/r#1", "disposition.c1", "will-fix", "pg-desk", "bob")
+	wantOneAnnotationChange(t, seed, "pr", "o/r#1", nil, "pg-desk")
+
+	out, err := runFeedbackListCmd(t, "1")
+	if err != nil {
+		t.Fatalf("feedback list: %v", err)
+	}
+	if out != "c1\twill-fix (overridden)\nc2\tno-action\n" {
+		t.Errorf("list = %q", out)
+	}
+
+	// Default actor; an unknown comment and a bogus disposition write nothing.
+	if err := runFeedbackSetCmd(t, "1", "c2", "wont-fix", ""); err != nil {
+		t.Fatalf("feedback set (default actor): %v", err)
+	}
+	wantAnnotation(t, seed, "pr", "o/r#1", "disposition.c2", "wont-fix", "pg-desk", "alice")
+	if err := runFeedbackSetCmd(t, "1", "nope", "will-fix", ""); err == nil {
+		t.Error("set on unknown comment: error = nil")
+	}
+	if err := runFeedbackSetCmd(t, "1", "c1", "bogus", ""); err == nil {
+		t.Error("set with bogus disposition: error = nil")
+	}
+	if got, _ := seed.ListKVAnnotations("o/r", "pr", "o/r#1"); len(got) != 2 {
+		t.Errorf("annotations = %+v, want exactly the two disposition rows", got)
+	}
+}

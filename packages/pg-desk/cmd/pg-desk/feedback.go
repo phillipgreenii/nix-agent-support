@@ -37,7 +37,7 @@ var feedbackListCmd = &cobra.Command{
 	Short: "Print the PR's comments and threads with their current dispositions",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runFeedbackList(cmd, args[0])
+		return runFeedbackListDual(cmd, args[0])
 	},
 }
 
@@ -51,7 +51,7 @@ var feedbackSetCmd = &cobra.Command{
 	Short: "Record a disposition override, attributed to the caller",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runFeedbackSet(cmd, args[0], args[1])
+		return runFeedbackSetDual(cmd, args[0], args[1], feedbackSetFlags.disposition, feedbackSetFlags.actor)
 	},
 }
 
@@ -97,6 +97,8 @@ func applyFeedbackOverrides(base []feedbackDisposition, overrides map[string]str
 	return out
 }
 
+// runFeedbackList is the old-schema `feedback list`; runFeedbackListDual
+// calls it on an old-schema store only.
 func runFeedbackList(cmd *cobra.Command, ref string) error {
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
@@ -154,13 +156,10 @@ func renderFeedbackList(w io.Writer, rows []feedbackDisposition) error {
 	return nil
 }
 
-func runFeedbackSet(cmd *cobra.Command, ref, commentID string) error {
-	return runFeedbackSetWith(cmd, ref, commentID, feedbackSetFlags.disposition, feedbackSetFlags.actor)
-}
-
-// runFeedbackSetWith is runFeedbackSet with the flag values passed in, so the
-// typed `pg-desk pr feedback set` can run the old-schema behavior from its
-// own flags without sharing feedbackSetFlags.
+// runFeedbackSetWith is the old-schema `feedback set`: the per-column
+// annotation. runFeedbackSetDual calls it on an old-schema store only; a
+// migrated store has no per-column annotation table (pg2-3w8hn: it failed
+// with "no column named comment_id").
 func runFeedbackSetWith(cmd *cobra.Command, ref, commentID, disposition, actorFlag string) error {
 	if !validDisposition(disposition) {
 		return fmt.Errorf("feedback set: --disposition must be one of open|will-fix|wont-fix|no-action, got %q", disposition)

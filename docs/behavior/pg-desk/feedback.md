@@ -14,10 +14,12 @@ the retired PR tool's `feedback disposition`.
 
 `pg-desk pr feedback list <id>` and `pg-desk pr feedback set <id> <comment-id> --disposition ...
 [--actor A]` are the typed homes of the verbs above (entity-change-flow design 6.9); feedback is
-built for `pr` only. The top-level verbs are unchanged. The typed forms depend on the store's schema:
+built for `pr` only. The top-level `pg-desk feedback list|set` are the same verbs: they behave
+exactly like the typed forms on both schemas. The verbs depend on the store's schema:
 
-- On an old-schema store they behave exactly like the top-level verbs.
-- On a migrated store `set` records the override as the annotation `disposition.<comment-id>` (see
+- On an old-schema store `set` records the override in the old per-column `annotation` table and
+  `list` reads it from there.
+- On a migrated store the top-level verbs MUST NOT read or write the old per-column table. `set` records the override as the annotation `disposition.<comment-id>` (see
   [`annotate.md`](annotate.md)) with the disposition as given, attributed to the caller, and
   appends one `annotation_changed` record; `list` overlays those annotations on the stored
   verdicts and marks them `(overridden)`. The checks are the same: the PR and the comment must
