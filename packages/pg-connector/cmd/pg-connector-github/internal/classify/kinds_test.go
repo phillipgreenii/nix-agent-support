@@ -29,26 +29,3 @@ func TestKindsAreTheSpecsFourteenInCanonicalOrder(t *testing.T) {
 		t.Fatal("Kinds() returned a shared slice")
 	}
 }
-
-func TestResultEmpty(t *testing.T) {
-	if !(Result{}).Empty() {
-		t.Error("zero Result is not Empty")
-	}
-	if (Result{Kinds: []string{KindClosed}}).Empty() {
-		t.Error("a Result with a kind is Empty")
-	}
-	if (Result{Fields: []Field{{Name: "x"}}}).Empty() {
-		t.Error("a Result with a field is Empty")
-	}
-}
-
-func TestOrderKinds(t *testing.T) {
-	got := orderKinds([]string{KindLeftQuery, KindClosed, "zzz", KindClosed, KindReopened, "aaa"})
-	want := []string{KindReopened, KindClosed, KindLeftQuery, "aaa", "zzz"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("orderKinds = %v, want %v", got, want)
-	}
-	if orderKinds(nil) != nil {
-		t.Error("orderKinds(nil) is not nil")
-	}
-}

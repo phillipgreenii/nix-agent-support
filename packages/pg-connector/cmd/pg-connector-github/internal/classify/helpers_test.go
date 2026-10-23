@@ -84,5 +84,3 @@ func wantResult(t *testing.T, got Result, kinds []string, names []string) {
 		t.Errorf("field names = %v, want %v", gn, names)
 	}
 }
-
-func raw(s string) json.RawMessage { return json.RawMessage(s) }

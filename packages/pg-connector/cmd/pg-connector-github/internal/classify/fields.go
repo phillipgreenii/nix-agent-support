@@ -1,123 +1,23 @@
 package classify
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"slices"
 	"unicode/utf8"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine"
 )
 
-// Field is one changed field of a row. Before and After are JSON values; a
-// JSON null, or a missing side, is the empty RawMessage.
-type Field struct {
-	Name   string          `json:"name"`
-	Before json.RawMessage `json:"before"`
-	After  json.RawMessage `json:"after"`
-}
-
-// wireField is Field's JSON form: the same names, with an empty side spelled
-// null (an empty RawMessage is not valid JSON on its own).
-type wireField struct {
-	Name   string          `json:"name"`
-	Before json.RawMessage `json:"before"`
-	After  json.RawMessage `json:"after"`
-}
-
-// MarshalJSON writes a missing side as null.
-func (f Field) MarshalJSON() ([]byte, error) {
-	return json.Marshal(wireField{Name: f.Name, Before: nullIfEmpty(f.Before), After: nullIfEmpty(f.After)})
-}
-
-// UnmarshalJSON reads a null or absent side as the empty RawMessage and keeps
-// the other values in compact form.
-func (f *Field) UnmarshalJSON(b []byte) error {
-	var w wireField
-	if err := json.Unmarshal(b, &w); err != nil {
-		return err
-	}
-	f.Name, f.Before, f.After = w.Name, tidy(w.Before), tidy(w.After)
-	return nil
-}
-
-func nullIfEmpty(r json.RawMessage) json.RawMessage {
-	if len(bytes.TrimSpace(r)) == 0 {
-		return json.RawMessage("null")
-	}
-	return r
-}
-
-// tidy returns r compacted, or nil when r is empty or the JSON null.
-func tidy(r json.RawMessage) json.RawMessage {
-	t := bytes.TrimSpace(r)
-	if len(t) == 0 || bytes.Equal(t, []byte("null")) {
-		return nil
-	}
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, t); err != nil {
-		return slices.Clone(t)
-	}
-	return json.RawMessage(buf.Bytes())
-}
+// Field is one changed field of a row (the shared engine's type, re-exported).
+type Field = engine.Field
 
 // EncodeFields is the stored form of Result.Fields: a JSON array, [] for none.
-func EncodeFields(fs []Field) (json.RawMessage, error) {
-	if len(fs) == 0 {
-		return json.RawMessage("[]"), nil
-	}
-	for _, f := range fs {
-		for _, side := range []json.RawMessage{f.Before, f.After} {
-			if len(bytes.TrimSpace(side)) > 0 && !json.Valid(side) {
-				return nil, fmt.Errorf("classify: field %q holds a value that is not JSON", f.Name)
-			}
-		}
-	}
-	raw, err := json.Marshal(fs)
-	if err != nil {
-		return nil, fmt.Errorf("classify: encode fields: %w", err)
-	}
-	return raw, nil
-}
+func EncodeFields(fs []Field) (json.RawMessage, error) { return engine.EncodeFields(fs) }
 
 // DecodeFields reads the stored form back. An empty or null input is no fields.
-func DecodeFields(raw json.RawMessage) ([]Field, error) {
-	if tidy(raw) == nil {
-		return nil, nil
-	}
-	var fs []Field
-	if err := json.Unmarshal(raw, &fs); err != nil {
-		return nil, fmt.Errorf("classify: decode fields: %w", err)
-	}
-	if fs == nil {
-		fs = []Field{}
-	}
-	return fs, nil
-}
-
-// normalize returns fs without the fields whose after equals their before,
-// with compact values, sorted by name.
-func normalize(fs []Field) []Field {
-	var out []Field
-	for _, f := range fs {
-		f.Before, f.After = tidy(f.Before), tidy(f.After)
-		if bytes.Equal(f.Before, f.After) {
-			continue
-		}
-		out = append(out, f)
-	}
-	slices.SortStableFunc(out, func(a, b Field) int {
-		switch {
-		case a.Name < b.Name:
-			return -1
-		case a.Name > b.Name:
-			return 1
-		}
-		return 0
-	})
-	return out
-}
+func DecodeFields(raw json.RawMessage) ([]Field, error) { return engine.DecodeFields(raw) }
 
 // builder collects the kinds and fields of one classification.
 type builder struct {
@@ -132,7 +32,7 @@ func (b *builder) field(name string, before, after json.RawMessage) {
 }
 
 func (b *builder) result() Result {
-	return Result{Kinds: orderKinds(b.kinds), Fields: normalize(b.fields)}
+	return Result{Kinds: engine.OrderKinds(Kinds(), b.kinds), Fields: engine.Normalize(b.fields)}
 }
 
 // jsonOf encodes v; the values passed are strings, numbers, bools and small

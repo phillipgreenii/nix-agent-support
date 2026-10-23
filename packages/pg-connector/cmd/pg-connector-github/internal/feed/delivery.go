@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/classify"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
@@ -14,10 +15,6 @@ const (
 	ChangeRemoved = "removed"
 	ChangeChanged = "changed"
 )
-
-// queryFieldPrefix starts the name of the field that names a membership row's
-// query (classify: one field query:<name> per query).
-const queryFieldPrefix = "query:"
 
 // naming says which of a row's membership kinds name a given query.
 type naming struct{ entered, left, removed bool }
@@ -49,7 +46,7 @@ func namesQuery(row store.ChangeRow, query string) naming {
 	}
 	var n naming
 	for _, f := range fields {
-		if f.Name != queryFieldPrefix+query {
+		if f.Name != engine.QueryFieldPrefix+query {
 			continue
 		}
 		n.entered = has.entered && isString(f.After, query)
