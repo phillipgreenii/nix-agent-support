@@ -21,25 +21,9 @@ type classifier struct{}
 
 var _ engine.Classifier = classifier{}
 
-// Describe decodes the stored summary content.
+// Describe decodes the stored summary content (the leaf's Describer).
 func (classifier) Describe(content []byte) (engine.Primary, error) {
-	var s summary.Summary
-	if err := json.Unmarshal(content, &s); err != nil {
-		return engine.Primary{}, fmt.Errorf("changes: decode stored summary: %w", err)
-	}
-	return engine.Primary{
-		Ref: s.Ref(), Stamp: s.HeadRefOid, Stamp2: s.BaseRefOid,
-		OriginAt: originTime(s), Gone: s.Gone,
-	}, nil
-}
-
-// originTime is the summary's updated_at when it parses, else zero.
-func originTime(s summary.Summary) time.Time {
-	t, err := time.Parse(time.RFC3339, s.UpdatedAt)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
+	return groups.Describer{}.Describe(content)
 }
 
 // Primary classifies a summary change and names the groups it stales. The facts

@@ -37,6 +37,9 @@ type Lister interface {
 type Aliases interface {
 	Put(ctx context.Context, id, ref string) error
 	Resolve(ctx context.Context, refs []string) (map[string]Alias, error) // keyed by the ref given
+	// Ref is the reverse lookup: the display reference recorded for the stable
+	// id, and whether one is recorded.
+	Ref(ctx context.Context, id string) (ref string, ok bool, err error)
 }
 
 // Alias is what a display reference resolves to: the stable id and the reference

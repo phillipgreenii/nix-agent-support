@@ -602,6 +602,10 @@ func (s skippingAliases) Put(ctx context.Context, id, ref string) error {
 	return s.inner.Put(ctx, id, ref)
 }
 
+func (s skippingAliases) Ref(ctx context.Context, id string) (string, bool, error) {
+	return s.inner.Ref(ctx, id)
+}
+
 func (s skippingAliases) Resolve(ctx context.Context, refs []string) (map[string]Alias, error) {
 	out, err := s.inner.Resolve(ctx, refs)
 	if err != nil {

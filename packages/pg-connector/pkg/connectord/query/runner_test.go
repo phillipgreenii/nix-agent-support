@@ -196,6 +196,13 @@ func (a *fakeAliases) resolveCalls() int {
 	return a.resolves
 }
 
+func (a *fakeAliases) Ref(_ context.Context, id string) (string, bool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	ref, ok := a.byID[id]
+	return ref, ok, nil
+}
+
 func (a *fakeAliases) Resolve(_ context.Context, refs []string) (map[string]Alias, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

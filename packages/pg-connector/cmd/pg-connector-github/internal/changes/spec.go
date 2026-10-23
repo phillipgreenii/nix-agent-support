@@ -1,8 +1,6 @@
 package changes
 
 import (
-	"strings"
-
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/classify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groups"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
@@ -38,11 +36,5 @@ func Spec() registry.Spec {
 
 // foldOwnerRepo is a wire reference with owner/repo folded to lower case and the
 // number kept exactly: the one fold two references of one pull request compare
-// equal under. It is reached through Spec().FoldRef.
-func foldOwnerRepo(ref string) string {
-	i := strings.LastIndex(ref, "#")
-	if i < 0 {
-		return strings.ToLower(ref)
-	}
-	return strings.ToLower(ref[:i]) + ref[i:]
-}
+// equal under. It is reached through Spec().FoldRef and is the leaf's fold.
+func foldOwnerRepo(ref string) string { return groups.FoldRef(ref) }

@@ -2,17 +2,18 @@ package groups
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/entity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ratefeed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/groupsvc"
 )
 
 // ErrGone is the Fetch error for a PR that is deleted or no longer accessible;
-// the engine turns it into a tombstone.
-var ErrGone = errors.New("groups: pull request is gone")
+// the engine turns it into a tombstone. It is the shared sentinel itself, so a
+// fetcher that returns it tombstones through the shared group refresh service.
+var ErrGone = groupsvc.ErrGone
 
 // Target is one PR a Fetcher is asked to fetch a group for.
 type Target struct {

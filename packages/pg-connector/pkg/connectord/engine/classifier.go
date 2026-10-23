@@ -13,6 +13,12 @@ type Primary struct {
 	Stamp2   string    // opaque; stored with a pending row
 	OriginAt time.Time // the origin's own update time, zero when unknown
 	Gone     bool
+	// Terminal is true when the entity has reached a final state, so its groups
+	// are judged by the terminal rules.
+	Terminal bool
+	// Attrs are opaque connector attributes the connector's fetchers read back
+	// from the stored primary content; the shared code only carries them.
+	Attrs map[string]string
 }
 
 // Classifier is the connector's change classifier. It is pure and store-free.
