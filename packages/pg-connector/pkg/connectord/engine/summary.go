@@ -24,11 +24,16 @@ type PrimaryChange struct {
 // the awaited set: merged into the entity's pending row when there is one (the
 // deadline does not move), written as a new pending row when there is none and
 // something is awaited (even when the primary's own result is empty), and
-// appended at once when nothing is awaited.
+// appended at once when nothing is awaited. Under registry.EmitWatchedOnly an
+// entity that is not watched gets nothing: no pending row, no version bump, no
+// row.
 func (e *Engine) DetectPrimary(ctx context.Context, tx *store.Tx, c PrimaryChange) error {
 	origin := e.originFor(c.ID, e.spec.PrimaryGroup, c.Info.Purpose)
 	if c.Prev == nil || c.ID == "" {
 		return nil
+	}
+	if skip, err := e.watchedGate(ctx, tx, c.ID); err != nil || skip {
+		return err
 	}
 	next, err := e.cls.Describe(c.Next)
 	if err != nil {

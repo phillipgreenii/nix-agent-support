@@ -15,13 +15,17 @@ import (
 // A nil prev is the group's baseline and adds no fields, but still satisfies the
 // barrier for an awaited group when the fetch counts (Classifier.Counts). With a
 // pending row the group's fields merge into it; without one a non-empty result
-// appends at once.
+// appends at once. Under registry.EmitWatchedOnly an entity that is not watched
+// gets nothing.
 func (e *Engine) DetectGroup(ctx context.Context, tx *store.Tx, prev *store.GroupRow, next store.GroupRow, info RefreshInfo) error {
 	if next.Kind != e.spec.EntityKind || next.Group == e.spec.PrimaryGroup {
 		return nil
 	}
 	id := next.ID
 	origin := e.originFor(id, next.Group, info.Purpose)
+	if skip, err := e.watchedGate(ctx, tx, id); err != nil || skip {
+		return err
+	}
 
 	var res Result
 	if prev != nil {

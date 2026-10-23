@@ -68,8 +68,10 @@ func (e *Engine) putPending(ctx context.Context, tx *store.Tx, p store.PendingCh
 }
 
 // appendRow appends one change row for the entity id: it bumps the entity's
-// version once, appends the row and tells the observer. It appends nothing, and
-// reports false, when the result is empty or the entity row is gone.
+// version once, appends the row and tells the observer. The row carries the
+// entity's watched flag as it stands in tx (true when the same write set it). It
+// appends nothing, and reports false, when the result is empty or the entity row
+// is gone.
 func (e *Engine) appendRow(ctx context.Context, tx *store.Tx, id, ref, stamp string, res Result, origin string, originAt time.Time) (bool, error) {
 	if res.Empty() || ref == "" {
 		return false, nil
@@ -85,10 +87,15 @@ func (e *Engine) appendRow(ctx context.Context, tx *store.Tx, id, ref, stamp str
 	if err != nil {
 		return false, err
 	}
+	watched, err := tx.IsWatched(ctx, e.spec.EntityKind, id)
+	if err != nil {
+		return false, err
+	}
 	at := e.now()
 	row := store.ChangeRow{
 		Kind: e.spec.EntityKind, ID: ref, Version: version,
 		Kinds: res.Kinds, Fields: fields, Origin: origin, OriginUpdatedAt: originAt, At: at,
+		Watched: watched,
 	}
 	row.SetStamp(stamp)
 	if _, err := tx.AppendChange(ctx, row); err != nil {

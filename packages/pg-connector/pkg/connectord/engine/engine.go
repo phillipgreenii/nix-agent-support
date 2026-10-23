@@ -79,8 +79,10 @@ type hint struct {
 // Engine detects changes and appends them. It is safe for concurrent use; the
 // store transaction a call runs in serialises the store work.
 //
-// The engine appends a row for every tracked entity (Spec.Emission is read as
-// registry.EmitAll: the emission gate is not part of this engine yet).
+// Spec.Emission picks which entities get rows: registry.EmitAll appends for every
+// tracked entity, registry.EmitWatchedOnly only for an entity whose watched flag
+// is set (see Watch). Every appended row carries the flag as the same transaction
+// reads it.
 type Engine struct {
 	spec    registry.Spec
 	cls     Classifier

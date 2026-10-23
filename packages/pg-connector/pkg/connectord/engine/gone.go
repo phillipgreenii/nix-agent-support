@@ -20,9 +20,13 @@ func removedMetaKey(id string) string { return "changes.removed." + id }
 // the entity (compared through Spec.FoldRef), merged with the entity's pending
 // row when there is one (a tombstone ends the barrier: nothing more will be
 // fetched). With no stored primary content it appends nothing and deletes any
-// pending row. A repeat call for the same tombstone appends nothing.
+// pending row. A repeat call for the same tombstone appends nothing. Under
+// registry.EmitWatchedOnly an entity that is not watched gets nothing.
 func (e *Engine) DetectGone(ctx context.Context, tx *store.Tx, id string, purpose governor.Purpose) error {
 	origin := e.originFor(id, e.spec.PrimaryGroup, purpose)
+	if skip, err := e.watchedGate(ctx, tx, id); err != nil || skip {
+		return err
+	}
 	p, has, err := tx.GetPending(ctx, e.spec.EntityKind, id)
 	if err != nil {
 		return err
