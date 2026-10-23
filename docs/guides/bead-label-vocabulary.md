@@ -204,7 +204,7 @@ a marker for script-first execution of resolve-conflict and fix-ci work items, n
 attention label, and it is in neither `ESCALATED_LABELS` nor `HUMAN_LABELS`.
 
 - It is written by the `give-up` handler of the `pg-rescue` home-manager module (the last handler of
-  the `conflict` and `fix-ci` chains, `pg-rescue-bead --annotate-from-env PG_RESCUE_ITEM_ID
+  the `conflict` and `fix-ci` chains, `pg-rescue-bead --annotate-from-env PG_ROUTER_ITEM_ID
 --add-label script-gave-up`), and by nothing else.
 - It never replaces `worker-ready`: the item keeps `worker-ready`, and the marker only tells the
   worker role that the script rung already failed for it.

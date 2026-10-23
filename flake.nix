@@ -9148,10 +9148,13 @@
               # home-manager module standalone, builds the config.toml it
               # generates, and runs the real wrapper against it.
               #   - disabled: installs nothing, renders nothing.
-              #   - defaults: the six default instances (the five and `give-up`)
-              #     and the `sync`, `conflict` and `fix-ci` chains render,
+              #   - defaults: the eight default instances (the five, `give-up`
+              #     and the push-denied `conflict-fix-small` / `conflict-fix-large`)
+              #     and the `sync`, `conflict`, `fix-ci` and `give-up` chains render,
+              #     the two conflict instances carry the `agent` tag and a
+              #     `--disallowed-tools` value that denies `git push`,
               #     `give-up` carries the `deferral` tag and its fixed
-              #     `--annotate-from-env PG_RESCUE_ITEM_ID --add-label
+              #     `--annotate-from-env PG_ROUTER_ITEM_ID --add-label
               #     script-gave-up` argv, `flake-lock-conflict` carries the `deterministic`
               #     tag (the design's section 7.2 common-case rate keys on it),
               #     `pg-rescue check --chain sync` exits 0 (every default
@@ -9233,11 +9236,36 @@
                   hmOverride.phillipgreenii.programs.pg-rescue.handlers.give-up.command == [
                     "pg-rescue-bead"
                     "--annotate-from-env"
-                    "PG_RESCUE_ITEM_ID"
+                    "PG_ROUTER_ITEM_ID"
                     "--add-label"
                     "script-gave-up"
                   ];
                 assert hmOverride.phillipgreenii.programs.pg-rescue.handlers.give-up.tags == [ "deferral" ];
+                # The conflict chain's agent instances are the fix-small /
+                # fix-large commands plus --disallowed-tools denying git push.
+                assert
+                  hmDefault.phillipgreenii.programs.pg-rescue.handlers.conflict-fix-small.command
+                  == hmDefault.phillipgreenii.programs.pg-rescue.handlers.fix-small.command
+                  ++ [
+                    "--disallowed-tools"
+                    "Bash(git push:*),Bash(git remote:*),Bash(git config:*)"
+                  ];
+                assert
+                  hmDefault.phillipgreenii.programs.pg-rescue.handlers.conflict-fix-large.command
+                  == hmDefault.phillipgreenii.programs.pg-rescue.handlers.fix-large.command
+                  ++ [
+                    "--disallowed-tools"
+                    "Bash(git push:*),Bash(git remote:*),Bash(git config:*)"
+                  ];
+                assert
+                  hmDefault.phillipgreenii.programs.pg-rescue.chains.conflict.handlers == [
+                    "flake-lock-conflict"
+                    "conflict-fix-small"
+                    "conflict-fix-large"
+                    "give-up"
+                  ];
+                assert hmDefault.phillipgreenii.programs.pg-rescue.chains.fix-ci.handlers == [ "give-up" ];
+                assert hmDefault.phillipgreenii.programs.pg-rescue.chains.give-up.handlers == [ "give-up" ];
                 pkgs.runCommand "test-pg-rescue-module-ok"
                   {
                     nativeBuildInputs = [
@@ -9259,14 +9287,24 @@
                     pg-rescue check --config ${defaultCfg} --chain sync
                     pg-rescue check --config ${defaultCfg} --chain conflict
                     pg-rescue check --config ${defaultCfg} --chain fix-ci
+                    pg-rescue check --config ${defaultCfg} --chain give-up
 
                     toml() { yq -p toml -o json "$@"; }
                     [ "$(toml -r '.chain.sync.handlers | join(",")' ${defaultCfg})" = "flake-lock-conflict,fix-small,fix-large,p1-later,notify" ]
-                    [ "$(toml -r '.chain.conflict.handlers | join(",")' ${defaultCfg})" = "flake-lock-conflict,fix-small,fix-large,give-up" ]
+                    [ "$(toml -r '.chain.conflict.handlers | join(",")' ${defaultCfg})" = "flake-lock-conflict,conflict-fix-small,conflict-fix-large,give-up" ]
                     [ "$(toml -r '.chain.fix-ci.handlers | join(",")' ${defaultCfg})" = give-up ]
-                    [ "$(toml -r '.chain | keys | join(",")' ${defaultCfg})" = "conflict,fix-ci,sync" ]
-                    [ "$(toml -r '.handler | keys | join(",")' ${defaultCfg})" = "fix-large,fix-small,flake-lock-conflict,give-up,notify,p1-later" ]
-                    [ "$(toml -r '.handler.give-up.command | join(" ")' ${defaultCfg})" = "pg-rescue-bead --annotate-from-env PG_RESCUE_ITEM_ID --add-label script-gave-up" ]
+                    [ "$(toml -r '.chain.give-up.handlers | join(",")' ${defaultCfg})" = give-up ]
+                    [ "$(toml -r '.chain | keys | join(",")' ${defaultCfg})" = "conflict,fix-ci,give-up,sync" ]
+                    [ "$(toml -r '.handler | keys | join(",")' ${defaultCfg})" = "conflict-fix-large,conflict-fix-small,fix-large,fix-small,flake-lock-conflict,give-up,notify,p1-later" ]
+                    [ "$(toml -r '.handler.conflict-fix-small.command | join(" ")' ${defaultCfg})" = "pg-rescue-claude --model haiku --time-limit 2m --strict-mcp-config --disallowed-tools Bash(git push:*),Bash(git remote:*),Bash(git config:*)" ]
+                    [ "$(toml -r '.handler.conflict-fix-large.command | join(" ")' ${defaultCfg})" = "pg-rescue-claude --model sonnet --time-limit 8m --allowed-tools Bash,Read,Edit --disallowed-tools Bash(git push:*),Bash(git remote:*),Bash(git config:*)" ]
+                    toml -r '.handler.conflict-fix-small.command[-1]' ${defaultCfg} | grep -q 'git push'
+                    toml -r '.handler.conflict-fix-large.command[-1]' ${defaultCfg} | grep -q 'git push'
+                    [ "$(toml -r '.handler.conflict-fix-small.tags | join(",")' ${defaultCfg})" = agent ]
+                    [ "$(toml -r '.handler.conflict-fix-large.tags | join(",")' ${defaultCfg})" = agent ]
+                    [ "$(toml -r '.handler.conflict-fix-small.timeout' ${defaultCfg})" = 3m ]
+                    [ "$(toml -r '.handler.conflict-fix-large.timeout' ${defaultCfg})" = 10m ]
+                    [ "$(toml -r '.handler.give-up.command | join(" ")' ${defaultCfg})" = "pg-rescue-bead --annotate-from-env PG_ROUTER_ITEM_ID --add-label script-gave-up" ]
                     [ "$(toml -r '.handler.give-up.tags | join(",")' ${defaultCfg})" = deferral ]
                     [ "$(toml -r '.handler.flake-lock-conflict.tags | join(",")' ${defaultCfg})" = deterministic ]
                     [ "$(toml -r '.handler.flake-lock-conflict.timeout' ${defaultCfg})" = 2m ]
@@ -9285,9 +9323,9 @@
                     [ "$(toml -r '.handler.fix-small.tags | join(",")' ${overrideCfg})" = agent ]
                     [ "$(toml -r '.handler.extra.tags | join(",")' ${overrideCfg})" = deterministic ]
                     [ "$(toml -r '.chain.mine.handlers | join(",")' ${overrideCfg})" = extra ]
-                    [ "$(toml -r '.chain | keys | join(",")' ${overrideCfg})" = "conflict,fix-ci,mine,sync" ]
+                    [ "$(toml -r '.chain | keys | join(",")' ${overrideCfg})" = "conflict,fix-ci,give-up,mine,sync" ]
                     [ "$(toml -r '.handler.give-up.description' ${overrideCfg})" = overridden ]
-                    [ "$(toml -r '.handler.give-up.command | join(" ")' ${overrideCfg})" = "pg-rescue-bead --annotate-from-env PG_RESCUE_ITEM_ID --add-label script-gave-up" ]
+                    [ "$(toml -r '.handler.give-up.command | join(" ")' ${overrideCfg})" = "pg-rescue-bead --annotate-from-env PG_ROUTER_ITEM_ID --add-label script-gave-up" ]
                     [ "$(toml -r '.handler.give-up.tags | join(",")' ${overrideCfg})" = deferral ]
                     [ "$(toml -r '.redact[0]' ${overrideCfg})" = 'ghp_[A-Za-z0-9]{36}' ]
                     touch $out

@@ -98,7 +98,20 @@ let
   # each instance, so a consumer can override one field of a default instance
   # (say `handlers.fix-small.timeout`) and keep the rest. Overriding a whole
   # instance's `command` is likewise a plain assignment.
-  defaultHandlers = {
+  #
+  # The conflict chain's agent instances are the `fix-small` / `fix-large`
+  # commands plus `--disallowed-tools`, which pg-rescue-claude passes through
+  # to claude: an agent in that chain must not publish by itself, because a
+  # push made by a handler would bypass the lease, containment and ancestry
+  # checks of the push helper (design D5). They are derived from the two
+  # defaults below so they cannot drift.
+  conflictDenyPush = [
+    "--disallowed-tools"
+    "Bash(git push:*),Bash(git remote:*),Bash(git config:*)"
+  ];
+  restrictForConflict = h: h // { command = h.command ++ conflictDenyPush; };
+
+  defaultHandlers = rec {
     flake-lock-conflict = {
       command = [ "pg-rescue-flake-lock-conflict" ];
       timeout = "2m";
@@ -132,6 +145,8 @@ let
       description = "sonnet, 8m";
       tags = [ "agent" ];
     };
+    conflict-fix-small = restrictForConflict fix-small;
+    conflict-fix-large = restrictForConflict fix-large;
     p1-later = {
       command = [
         "pg-rescue-bead"
@@ -159,7 +174,7 @@ let
       command = [
         "pg-rescue-bead"
         "--annotate-from-env"
-        "PG_RESCUE_ITEM_ID"
+        "PG_ROUTER_ITEM_ID"
         "--add-label"
         "script-gave-up"
       ];
@@ -179,11 +194,13 @@ let
     ];
     conflict.handlers = [
       "flake-lock-conflict"
-      "fix-small"
-      "fix-large"
+      "conflict-fix-small"
+      "conflict-fix-large"
       "give-up"
     ];
     fix-ci.handlers = [ "give-up" ];
+    # For a shim that must hand an item over without running any other handler.
+    give-up.handlers = [ "give-up" ];
   };
 in
 {
@@ -233,10 +250,13 @@ in
       default = { };
       description = ''
         Named handler instances, rendered as `[handler.NAME]` tables. The
-        defaults (`flake-lock-conflict`, `fix-small`, `fix-large`, `p1-later`,
-        `notify`, `give-up`) are set per field with `mkDefault`, so any of them can be
+        defaults (`flake-lock-conflict`, `fix-small`, `fix-large`,
+        `conflict-fix-small`, `conflict-fix-large`, `p1-later`, `notify`,
+        `give-up`) are set per field with `mkDefault`, so any of them can be
         overridden wholesale or one field at a time, and further instances can
-        be added.
+        be added. `conflict-fix-small` and `conflict-fix-large` are `fix-small`
+        and `fix-large` plus `--disallowed-tools` denying `git push`, so an
+        agent in the `conflict` chain cannot publish by itself.
 
         WARNING: the generated config is world-readable (it lives in
         `/nix/store`). Keep secrets out of `command` and `env`; use `env_file`.
@@ -264,8 +284,10 @@ in
         `pg-rescue --chain NAME`. The default `sync` chain runs
         `flake-lock-conflict`, `fix-small`, `fix-large`, `p1-later`, `notify`
         in that order. The default `conflict` chain runs `flake-lock-conflict`,
-        `fix-small`, `fix-large`, `give-up`; the default `fix-ci` chain runs
-        `give-up` alone (the script-first chains of the work-item roles).
+        `conflict-fix-small`, `conflict-fix-large`, `give-up`; the default
+        `fix-ci` chain and the default `give-up` chain each run `give-up`
+        alone (the script-first chains of the work-item roles; `give-up` is
+        for a shim that must hand an item over without any other handler).
       '';
       example = {
         quick.handlers = [

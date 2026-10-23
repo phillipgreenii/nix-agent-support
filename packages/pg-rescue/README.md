@@ -618,7 +618,7 @@ instance depends on the failing command's repo.
   ran outside a git repository.
 - `--annotate-from-env NAME` is `--annotate` with the item id read from the environment variable
   `NAME` instead of the command line, for a chain handler whose argv is static while the id is known
-  only at dispatch time (the role shim exports it, for example as `PG_RESCUE_ITEM_ID`). It takes
+  only at dispatch time (the role shim exports it, `PG_ROUTER_ITEM_ID`, which pg-router exports to every command role). It takes
   `--add-label` exactly as `--annotate` does, exits `3` (deferred) on success, and is mutually
   exclusive with `--annotate` and `--dedup-query`. An unset, empty or whitespace-only variable is a
   usage error and exits `1`; a non-empty value is passed to the tracker as-is, unvalidated.
