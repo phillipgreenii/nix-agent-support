@@ -2,7 +2,11 @@
 // the contracts a connector implements so the daemon can fetch, store, serve
 // and expire the non-primary groups of its entities.
 //
-// This file set holds the contracts only (the first of the hoist's five steps):
+// The package is built up in five steps. The first step is the contracts; the
+// second adds the booking of the background cycle (book.go), Rebuild
+// (rebuild.go) and the write helpers (write.go: SerializeWrite, DrainWrites,
+// InvalidateAndQueue and InvalidateAndQueueAs, QueueGroup, RescheduleGroup and
+// Inspect) over the Service struct of service.go. The contracts are:
 //
 //   - Fetcher, Target, Outcome and CallMeta are what a connector supplies per
 //     group: the service hands it batches of Targets and stores what comes back.
