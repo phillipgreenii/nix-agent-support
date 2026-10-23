@@ -55,7 +55,7 @@ let
   # a different binary: only the package differs
   launchdOnOtherBinary = case darwin (githubOn // { package = pkgs.hello; }) osWithObs;
   # a different config setting: only the cap differs
-  launchdOnOtherCap = case darwin (githubOn // { graphqlPointsPerHour = 4000; }) osWithObs;
+  launchdOnOtherCap = case darwin (githubOn // { graphqlPointsPerHour = 3000; }) osWithObs;
   launchdOnDefaultSupervisor = case darwin {
     enable = true;
     inherit (githubOn) host;

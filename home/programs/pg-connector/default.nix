@@ -742,10 +742,12 @@ in
 
       graphqlPointsPerHour = lib.mkOption {
         type = lib.types.ints.positive;
-        default = 1500;
+        default = 4000;
         description = ''
-          The daemon's GraphQL points-per-hour cap. 1500 is the shadow-run
-          value; the cutover work raises it to 4000.
+          The daemon's GraphQL points-per-hour cap. 4000 is the post-cutover
+          budget; the shadow run used 1500. The spend-over-cap alert rule and
+          the dashboard's cap line carry the same literal, so a deployment
+          that sets a different cap MUST change both.
         '';
       };
 

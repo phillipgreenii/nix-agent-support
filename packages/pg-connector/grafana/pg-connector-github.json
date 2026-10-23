@@ -19,7 +19,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Budget against the cap",
-      "description": "GraphQL points remaining in the current window (budget_remaining, bucket graphql), the trailing-hour spend (the sum of budget_spent increases over 1h) and the cap line. The cap line is the literal 1500, because the daemon's graphql_points_per_hour is daemon configuration that a dashboard cannot read: 1500 stands for the SHADOW-RUN value of graphql_points_per_hour and is the same literal as the gt threshold of the alert rule pg-conn-github-spend-over-cap. The cutover value defaults to 4000, so the cutover phase MUST raise this literal and that rule's literal together.",
+      "description": "GraphQL points remaining in the current window (budget_remaining, bucket graphql), the trailing-hour spend (the sum of budget_spent increases over 1h) and the cap line. The cap line is the literal 4000, because the daemon's graphql_points_per_hour is daemon configuration that a dashboard cannot read: 4000 stands for the CUTOVER value of graphql_points_per_hour (the module default; the shadow run used 1500) and is the same literal as the gt threshold of the alert rule pg-conn-github-spend-over-cap. A deployment that sets a different cap MUST change this literal and that rule's literal together.",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -57,7 +57,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "vector(1500)",
+          "expr": "vector(4000)",
           "range": true,
           "legendFormat": "cap (shadow-run literal)"
         }

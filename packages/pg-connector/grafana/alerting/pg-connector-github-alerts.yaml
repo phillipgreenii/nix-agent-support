@@ -129,14 +129,12 @@ groups:
                     params: [240]
 
       # Spend within budget. The spec's threshold is graphql_points_per_hour,
-      # which this static file cannot read. The literal 1500 STANDS FOR the
-      # SHADOW-RUN value of graphql_points_per_hour (the default of the shadow
-      # run, the first consumer of this rule; the spec's shadow criterion is
-      # "points per hour inside the cap for the whole run"). It does NOT cover
-      # the cutover value: after cutover graphql_points_per_hour defaults to
-      # 4000, so the cutover phase MUST raise this literal to 4000 (and the
-      # dashboard's cap line with it). A cap other than these two needs its
-      # own literal. The rule reads the GraphQL bucket only.
+      # which this static file cannot read. The literal 4000 STANDS FOR the
+      # cutover value of graphql_points_per_hour (the module default after
+      # cutover; the shadow run used 1500, and the shadow report recommended
+      # keeping the cap, so the budget is 4000). A deployment that sets a
+      # different cap needs its own literal here and in the dashboard's cap
+      # line. The rule reads the GraphQL bucket only.
       - uid: pg-conn-github-spend-over-cap
         title: pg-connector-github GraphQL spend above the hourly cap
         condition: C
@@ -146,8 +144,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "pg-connector-github spent more than 1500 GraphQL points in the last hour"
-          description: "The daemon's GraphQL spend over the trailing hour is above 1500 points, the shadow-run value of graphql_points_per_hour. See pg_connector_github_budget_spent by purpose and group for what is spending it; the governor should be pausing refreshes at the cap, so a sustained breach means the cap is not holding or the configured cap is lower than this rule's literal."
+          summary: "pg-connector-github spent more than 4000 GraphQL points in the last hour"
+          description: "The daemon's GraphQL spend over the trailing hour is above 4000 points, the cutover value of graphql_points_per_hour. See pg_connector_github_budget_spent by purpose and group for what is spending it; the governor should be pausing refreshes at the cap, so a sustained breach means the cap is not holding or the configured cap is lower than this rule's literal."
         data:
           - refId: A
             relativeTimeRange:
@@ -175,7 +173,7 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [1500]
+                    params: [4000]
 
       # Interactive work keeping up: the oldest overdue interactive request has
       # waited more than 30 seconds for 5 minutes, so a caller is being made to

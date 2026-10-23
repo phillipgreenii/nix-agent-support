@@ -1,25 +1,25 @@
 # promtool unit tests for the pg-conn-github-spend-over-cap alert. Run by the flake check
 # test-pg-connector-github-alert-rules, which generates rules.yml next to this file: the Grafana
 # rule's refId A wrapped as `alert: <uid>` with
-# `expr: (sum(increase(pg_connector_github_budget_spent{bucket="graphql"}[1h]))) > 1500`, the
+# `expr: (sum(increase(pg_connector_github_budget_spent{bucket="graphql"}[1h]))) > 4000`, the
 # rule's `for: 5m` and labels, plus a recording rule `wrapped:<uid with _>`.
 #
 # Time model: counters are written the way the collector delivers them, one sample per 1m scrape,
 # no _total suffix, with the labels bucket, purpose and group (group may be `none`) plus
-# service_name and job. `0+24x120` is 24 points a minute, so 1440 an hour; the 1h increase is
+# service_name and job. `0+64x120` is 64 points a minute, so 3840 an hour; the 1h increase is
 # read at 90m, when the window holds only steady-state history. `sum()` has no `by`, so a firing
-# alert carries severity only. The literal 1500 stands for the shadow-run graphql_points_per_hour.
+# alert carries severity only. The literal 4000 stands for the cutover graphql_points_per_hour (the shadow run used 1500).
 rule_files:
   - rules.yml
 
 evaluation_interval: 1m
 
 tests:
-  - name: 1560 points an hour on the graphql bucket fires after the for, with severity only
+  - name: 4200 points an hour on the graphql bucket fires after the for, with severity only
     interval: 1m
     input_series:
       - series: pg_connector_github_budget_spent{bucket="graphql",purpose="refresh",group="none",service_name="pg-connector-github",job="pg-connector-github"}
-        values: "0+26x120"
+        values: "0+70x120"
     alert_rule_test:
       - eval_time: 90m
         alertname: pg-conn-github-spend-over-cap
@@ -27,11 +27,11 @@ tests:
           - exp_labels:
               severity: warning
 
-  - name: 1440 points an hour, just under the 1500 cap, does not fire
+  - name: 3840 points an hour, just under the 4000 cap, does not fire
     interval: 1m
     input_series:
       - series: pg_connector_github_budget_spent{bucket="graphql",purpose="refresh",group="none",service_name="pg-connector-github",job="pg-connector-github"}
-        values: "0+24x120"
+        values: "0+64x120"
     promql_expr_test:
       - expr: count(wrapped:pg_conn_github_spend_over_cap)
         eval_time: 90m
@@ -57,7 +57,7 @@ tests:
     interval: 1m
     input_series:
       - series: pg_connector_github_budget_spent{bucket="graphql",purpose="refresh",group="none",service_name="pg-connector-github",job="pg-connector-github"}
-        values: "0+24x120"
+        values: "0+64x120"
       - series: pg_connector_github_budget_spent{bucket="rest_core",purpose="refresh",group="none",service_name="pg-connector-github",job="pg-connector-github"}
         values: "0+500x120"
     alert_rule_test:
@@ -68,11 +68,11 @@ tests:
   - name: graphql series of different purposes and groups are summed (each alone is under the cap, together over it)
     interval: 1m
     input_series:
-      # 14 a minute each is 840 an hour, 1680 together.
+      # 36 a minute each is 2160 an hour, 4320 together.
       - series: pg_connector_github_budget_spent{bucket="graphql",purpose="refresh",group="mine",service_name="pg-connector-github",job="pg-connector-github"}
-        values: "0+14x120"
+        values: "0+36x120"
       - series: pg_connector_github_budget_spent{bucket="graphql",purpose="fill",group="none",service_name="pg-connector-github",job="pg-connector-github"}
-        values: "0+14x120"
+        values: "0+36x120"
     alert_rule_test:
       - eval_time: 90m
         alertname: pg-conn-github-spend-over-cap
@@ -93,13 +93,13 @@ tests:
   - name: a one-scrape spike shorter than the 5m for never fires
     interval: 1m
     input_series:
-      # 24 a minute (1440 an hour) to 60m, a 100 point spike at 61m, then flat: the 1h increase is
-      # over 1500 only while the spike sits in the window together with the not yet expired steady
+      # 64 a minute (3840 an hour) to 60m, a 240 point spike at 61m, then flat: the 1h increase is
+      # over 4000 only while the spike sits in the window together with the not yet expired steady
       # increments, which the flat tail drains within a few scrapes, well inside the 5m for.
       - series: pg_connector_github_budget_spent{bucket="graphql",purpose="refresh",group="none",service_name="pg-connector-github",job="pg-connector-github"}
-        values: "0+24x60 1540x60"
+        values: "0+64x60 4080x60"
     promql_expr_test:
-      # The breach is real but one eval long: about 1517 at 61m, back under the bar (about 1493) at 62m.
+      # The breach is real but one eval long: about 4016 at 61m, back under the bar (about 3952) at 62m.
       - expr: count(wrapped:pg_conn_github_spend_over_cap)
         eval_time: 61m
         exp_samples:

@@ -14044,7 +14044,7 @@
                       and .state_dir == "/example/home/.local/state/pg-connector-github"
                       and .socket_path == "/example/home/.local/state/pg-connector-github/sock"
                       and .supervisor_label == "com.phillipg.pg-connector-github-daemon"
-                      and .graphql_points_per_hour == 1500
+                      and .graphql_points_per_hour == 4000
                       and .otel_endpoint == "http://otel.example.invalid:4317"
                       and .rate_reserve_points == 500
                       and .pr.queries.mine == "is:pr is:open author:@me"
