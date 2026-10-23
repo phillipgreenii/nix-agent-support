@@ -5,14 +5,14 @@ _pg_rescue_push_branch() {
   _init_completion || return
 
   case $prev in
-  --worktree)
+  --worktree | --worktree-root)
     _filedir -d
     return
     ;;
   esac
 
   if [[ $cur == -* ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "--worktree --branch --base --expected-sha --remote --help -h --version -v" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "--worktree --worktree-root --branch --base --expected-sha --help -h --version -v" -- "$cur")
   fi
 }
 

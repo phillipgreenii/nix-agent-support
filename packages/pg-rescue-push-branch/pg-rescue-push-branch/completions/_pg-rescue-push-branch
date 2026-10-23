@@ -2,9 +2,9 @@
 
 _arguments \
   '--worktree[Linked worktree to push from]:directory:_files -/' \
+  '--worktree-root[Directory the worktree must be strictly inside]:directory:_files -/' \
   '--branch[PR branch to push]:branch:' \
   '--base[Base branch (never pushed)]:branch:' \
   '--expected-sha[Remote branch expected head (40 hex)]:sha:' \
-  '--remote[Remote to push to (default origin)]:remote:' \
   '(-h --help)'{-h,--help}'[Show help message]' \
   '(-v --version)'{-v,--version}'[Show version information]'
