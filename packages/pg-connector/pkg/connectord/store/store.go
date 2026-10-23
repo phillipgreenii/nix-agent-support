@@ -23,7 +23,18 @@
 //     ErrSchemaNewer); the file is never moved and never modified, because
 //     moving it aside would cost a full refill and the change log.
 //
-// Moved-aside stores older than Options.Expiry are deleted at every Open.
+// Moved-aside stores older than Options.Expiry are deleted at every Open, and so
+// are the pre-migration backups described next.
+//
+// # Backup before migrating
+//
+// Before the first rung runs on a populated store (PRAGMA user_version above 0
+// and below the ladder's top), Open writes a consistent copy with VACUUM INTO to
+// <path>.pre-schema-<from>-<yyyymmddThhmmssZ>, opens it and checks it reports
+// the same user_version, and only then migrates. When the copy cannot be made or
+// verified Open fails with a plain error (the store is untouched and is NOT moved
+// aside) rather than migrating unprotected. Result.BackupPath names the copy;
+// Options.BackupBeforeMigrate (nil means true) turns the copy off.
 //
 // # Observing a migration
 //
@@ -100,9 +111,14 @@ type Result struct {
 	// Cause is why the store was moved aside (set only for
 	// OutcomeMovedAside): the corruption or migration error.
 	Cause error
-	// Pruned lists moved-aside paths deleted because they were older than
-	// the expiry.
+	// Pruned lists moved-aside stores and pre-migration backups deleted
+	// because they were older than the expiry.
 	Pruned []string
+	// BackupPath is the verified copy Open took before migrating a populated
+	// store (<path>.pre-schema-<from>-<yyyymmddThhmmssZ>); empty when no copy
+	// was taken. It is also set when the outcome is OutcomeMovedAside after a
+	// failed rung, which is what makes the move-aside recoverable.
+	BackupPath string
 }
 
 // Options tune Open. The zero value is production-ready.
@@ -122,6 +138,14 @@ type Options struct {
 	// on every connection. Production leaves it empty (SQLite's default,
 	// FULL, so every commit is durable); tests may set "OFF".
 	Synchronous string
+	// BackupBeforeMigrate, when it points at false, skips the verified copy
+	// Open takes before it migrates a populated store; nil means true. The
+	// pruning of old copies is not skipped.
+	BackupBeforeMigrate *bool
+}
+
+func (o Options) backupBeforeMigrate() bool {
+	return o.BackupBeforeMigrate == nil || *o.BackupBeforeMigrate
 }
 
 func (o Options) now() time.Time {
@@ -199,7 +223,8 @@ func Open(path string, opts Options) (*Store, Result, error) {
 	res := Result{ToVersion: latest}
 	// Prune first so an expired store is deleted even when this open
 	// refuses or fails.
-	res.Pruned = pruneMovedAside(path, opts.now(), opts.expiry())
+	res.Pruned = append(pruneMovedAside(path, opts.now(), opts.expiry()),
+		pruneBackups(path, opts.now(), opts.expiry())...)
 
 	opts.Progress.begin("opening store")
 	defer opts.Progress.finish()
@@ -217,7 +242,9 @@ func Open(path string, opts Options) (*Store, Result, error) {
 		return refuseNewer(path, latest, hdr.version, res)
 	}
 
-	s, from, err := openAndMigrate(path, opts, ladder)
+	var backup string
+	s, from, err := openAndMigrate(path, opts, ladder, &backup)
+	res.BackupPath = backup
 	var newer *SchemaNewerError
 	switch {
 	case errors.As(err, &newer):
@@ -253,7 +280,8 @@ func reopenAfterMoveAside(path string, opts Options, res Result, cause error) (*
 	if err != nil {
 		return nil, res, fmt.Errorf("store: move aside unusable store (%v): %w", cause, err)
 	}
-	s, from, err := openAndMigrate(path, opts, opts.ladder())
+	var backup string
+	s, from, err := openAndMigrate(path, opts, opts.ladder(), &backup)
 	if err != nil {
 		return nil, res, fmt.Errorf("store: create fresh store after moving %s aside to %s (%v): %w",
 			path, to, cause, err)
@@ -278,7 +306,7 @@ var uriPathEscaper = strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23")
 // openAndMigrate opens the database with the connection pragmas, checks it
 // is a database and brings it to the ladder's top. It returns the schema
 // version the file had before migrating.
-func openAndMigrate(path string, opts Options, ladder []Migration) (*Store, int, error) {
+func openAndMigrate(path string, opts Options, ladder []Migration, backup *string) (*Store, int, error) {
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)",
 		uriPath(path), busyTimeoutMillis)
 	if opts.Synchronous != "" {
@@ -292,7 +320,7 @@ func openAndMigrate(path string, opts Options, ladder []Migration) (*Store, int,
 	// so WAL writers do not contend within the process.
 	db.SetMaxOpenConns(1)
 
-	from, err := runMigrations(db, path, opts, ladder)
+	from, err := runMigrations(db, path, opts, ladder, backup)
 	if err != nil {
 		_ = db.Close()
 		return nil, 0, err

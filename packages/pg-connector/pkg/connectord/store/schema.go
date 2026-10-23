@@ -1,13 +1,15 @@
 package store
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 )
 
 // SchemaVersion is the newest schema version this binary knows. A store
 // above it is refused (ErrSchemaNewer); a store below it is migrated up.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // builtinMigrations is the ladder; len(builtinMigrations) == SchemaVersion
 // (asserted by a test). A migration, once shipped, MUST NOT change: add a
@@ -16,6 +18,7 @@ var builtinMigrations = []Migration{
 	{Version: 1, Name: "query, alias, entity, entity_group, budget", Apply: migrateV1},
 	{Version: 2, Name: "job", Apply: migrateV2},
 	{Version: 3, Name: "pending_change, change_log, consumer", Apply: migrateV3},
+	{Version: 4, Name: "store identity", Apply: migrateV4},
 }
 
 // BuiltinMigrations returns a copy of the built-in ladder. A caller that wants
@@ -199,6 +202,27 @@ func migrateV3(tx *sql.Tx, report func(string)) error {
 	report("creating the change log, pending change, consumer and meta tables")
 	if _, err := tx.Exec(schemaV3); err != nil {
 		return fmt.Errorf("create version 3 schema: %w", err)
+	}
+	return nil
+}
+
+// schemaV4 gives the store its identity: one store_meta row, store_id, written
+// when absent (INSERT OR IGNORE, so a store that somehow has one keeps it). It is
+// data only, no DDL. The value is 128 random bits as 32 lowercase hex characters,
+// bound as the parameter.
+const schemaV4 = `INSERT OR IGNORE INTO store_meta (key, value) VALUES ('store_id', ?)`
+
+// storeIDBytes is the identity's entropy: 16 bytes, 32 hex characters.
+const storeIDBytes = 16
+
+func migrateV4(tx *sql.Tx, report func(string)) error {
+	report("recording the store identity")
+	b := make([]byte, storeIDBytes)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Errorf("create version 4 store identity: %w", err)
+	}
+	if _, err := tx.Exec(schemaV4, hex.EncodeToString(b)); err != nil {
+		return fmt.Errorf("create version 4 store identity: %w", err)
 	}
 	return nil
 }

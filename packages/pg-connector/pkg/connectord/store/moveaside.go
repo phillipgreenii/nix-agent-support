@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -83,4 +84,51 @@ func pruneMovedAside(path string, now time.Time, expiry time.Duration) []string 
 // escapeGlob quotes the glob metacharacters in a literal path.
 func escapeGlob(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`).Replace(s)
+}
+
+// pruneBackups deletes pre-migration backups (and any sidecars) whose timestamp
+// is older than expiry and returns the main-file paths it deleted. A name is
+// <path>.pre-schema-<from>-<timestamp>[-<n>]. It is best effort: a file it cannot
+// parse or delete is left.
+func pruneBackups(path string, now time.Time, expiry time.Duration) []string {
+	matches, err := filepath.Glob(escapeGlob(path) + backupInfix + "*")
+	if err != nil {
+		return nil
+	}
+	var pruned []string
+	for _, m := range matches {
+		rest := strings.TrimPrefix(m, path+backupInfix)
+		main := m
+		for _, sfx := range sidecars {
+			if strings.HasSuffix(rest, sfx) {
+				rest = strings.TrimSuffix(rest, sfx)
+				main = strings.TrimSuffix(m, sfx)
+				break
+			}
+		}
+		at, ok := parseBackupStamp(rest)
+		if !ok || now.Sub(at) <= expiry {
+			continue
+		}
+		if err := os.Remove(m); err != nil {
+			continue
+		}
+		if main == m {
+			pruned = append(pruned, m)
+		}
+	}
+	return pruned
+}
+
+// backupName matches "<from>-<timestamp>" with an optional "-<n>" suffix.
+var backupName = regexp.MustCompile(`^\d+-(\d{8}T\d{6}Z)(?:-\d+)?$`)
+
+// parseBackupStamp reads the time out of what follows ".pre-schema-".
+func parseBackupStamp(rest string) (time.Time, bool) {
+	m := backupName.FindStringSubmatch(rest)
+	if m == nil {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(backupLayout, m[1])
+	return at, err == nil
 }

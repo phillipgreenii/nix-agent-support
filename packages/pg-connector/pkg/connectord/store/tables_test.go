@@ -23,6 +23,8 @@ import (
 // SchemaVersion and refuses to overwrite one that exists: a shipped fixture
 // MUST NOT be regenerated, a new schema version adds a new vN.sqlite3 instead.
 // A migration that adds a table adds that table's sample row to the seed below.
+// A rung that writes its own row (version 4's store identity) needs no seed
+// line: opening the empty generator store climbs the whole ladder.
 const updateFixturesEnv = "PG_CONNECTOR_STORE_UPDATE_FIXTURES"
 
 func TestGenerateFixture(t *testing.T) {

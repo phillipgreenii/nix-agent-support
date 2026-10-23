@@ -30,8 +30,8 @@ func appendRow(t *testing.T, s *Store, row ChangeRow) int64 {
 // ---- migration to version 3 --------------------------------------------
 
 func TestVersion1And2FixturesMigrateToVersion3KeepingTheirData(t *testing.T) {
-	if SchemaVersion != 3 {
-		t.Fatalf("SchemaVersion = %d, this test describes the step to version 3", SchemaVersion)
+	if SchemaVersion < 3 {
+		t.Fatalf("SchemaVersion = %d, this test describes the step to version 3 and above", SchemaVersion)
 	}
 	ctx := context.Background()
 	for _, from := range []int{1, 2} {
@@ -43,8 +43,8 @@ func TestVersion1And2FixturesMigrateToVersion3KeepingTheirData(t *testing.T) {
 			path := dbPath(t)
 			copyFile(t, fx, path)
 			s, res := mustOpen(t, path, fastOpts())
-			if res.Outcome != OutcomeMigrated || res.FromVersion != from || res.ToVersion != 3 {
-				t.Fatalf("result = %+v, want migrated %d -> 3", res, from)
+			if res.Outcome != OutcomeMigrated || res.FromVersion != from || res.ToVersion != SchemaVersion {
+				t.Fatalf("result = %+v, want migrated %d -> %d", res, from, SchemaVersion)
 			}
 			assertFixtureData(t, ctx, s)
 			assertFixtureJobs(t, ctx, s, from)
@@ -67,8 +67,8 @@ func TestVersion3FixtureIsAPlainOpenAndReopenIsIdempotent(t *testing.T) {
 	path := dbPath(t)
 	copyFile(t, fx, path)
 	s, res := mustOpen(t, path, fastOpts())
-	if res.Outcome != OutcomeOpened || res.FromVersion != 3 || res.ToVersion != 3 {
-		t.Fatalf("result = %+v, want opened at version 3", res)
+	if res.Outcome != OutcomeMigrated || res.FromVersion != 3 || res.ToVersion != SchemaVersion {
+		t.Fatalf("result = %+v, want migrated 3 -> %d", res, SchemaVersion)
 	}
 	assertFixtureData(t, ctx, s)
 	assertFixtureJobs(t, ctx, s, 3)
@@ -79,8 +79,8 @@ func TestVersion3FixtureIsAPlainOpenAndReopenIsIdempotent(t *testing.T) {
 
 	// A second run of the same open changes nothing.
 	s2, res2 := mustOpen(t, path, fastOpts())
-	if res2.Outcome != OutcomeOpened || res2.FromVersion != 3 {
-		t.Errorf("re-run result = %+v, want opened at version 3", res2)
+	if res2.Outcome != OutcomeOpened || res2.FromVersion != SchemaVersion {
+		t.Errorf("re-run result = %+v, want opened at version %d", res2, SchemaVersion)
 	}
 	assertFixtureChanges(t, ctx, s2, 3)
 }

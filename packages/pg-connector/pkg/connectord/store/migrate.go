@@ -114,8 +114,11 @@ func (p *Progress) finish() {
 
 // runMigrations reads the file's schema version, refuses a newer one,
 // checks integrity of an existing store and applies the missing steps. It
-// returns the version the file had on entry.
-func runMigrations(db *sql.DB, path string, opts Options, ladder []Migration) (int, error) {
+// returns the version the file had on entry. A populated store below the
+// ladder's top is copied first (see backupBeforeMigrating); the copy's path is
+// stored in *backup as soon as it is verified, so a caller sees it even when a
+// later rung fails.
+func runMigrations(db *sql.DB, path string, opts Options, ladder []Migration, backup *string) (int, error) {
 	latest := len(ladder)
 
 	var from int
@@ -131,6 +134,15 @@ func runMigrations(db *sql.DB, path string, opts Options, ladder []Migration) (i
 		if err := quickCheck(db); err != nil {
 			return from, fmt.Errorf("store: %s: %w", path, err)
 		}
+	}
+
+	if from > 0 && from < latest && opts.backupBeforeMigrate() {
+		opts.Progress.set(fmt.Sprintf("backing up schema %d before migrating", from))
+		to, err := backupBeforeMigrating(db, path, from, opts.now())
+		if err != nil {
+			return from, err
+		}
+		*backup = to
 	}
 
 	for _, m := range ladder[from:] {

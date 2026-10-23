@@ -130,10 +130,7 @@ func TestValidateLadderRejectsGapsAndNilApply(t *testing.T) {
 // store_meta, with query.baseline_at. A migration that bumps the version updates this test, its
 // table list and its column lists with it.
 func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
-	const wantVersion = 3
-	if SchemaVersion != wantVersion {
-		t.Fatalf("SchemaVersion = %d, this test describes version %d", SchemaVersion, wantVersion)
-	}
+	wantVersion := SchemaVersion
 	path := dbPath(t)
 	s, res := mustOpen(t, path, fastOpts())
 
