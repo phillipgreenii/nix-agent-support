@@ -1,51 +1,23 @@
 package query
 
 import (
-	"net/url"
 	"sort"
 	"strings"
+
+	shared "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/query"
 )
 
 // Key is a query's identity: the configured name plus the arguments that change
-// what GitHub is asked.
+// what GitHub is asked (see the shared query.Key, which this aliases).
 //
-// Arguments that only filter a configured query's result (list_since and
-// list_before) are NOT part of a Key: they are applied locally to the cached
-// ids. A Key with no Args is the configured query itself (its row is stored as
-// configured and the scheduler re-runs it); a Key with Args is an AD-HOC key
-// (cached under adhoc_query_ttl, never re-run).
-type Key struct {
-	// Name is the configured query name.
-	Name string
-	// Args are the arguments that change what GitHub is asked: each pair is
-	// appended to every expression of the configured query as the GitHub search
-	// qualifier "k:v" (a value with white space is quoted). Nil or empty means
-	// none.
-	Args map[string]string
-}
+// A Key's Args are appended to every expression of the configured query as the
+// GitHub search qualifier "k:v" (a value with white space is quoted); see
+// qualifiers.
+type Key = shared.Key
 
-// Adhoc reports whether k differs from the configured query itself.
-func (k Key) Adhoc() bool { return len(k.Args) > 0 }
-
-// String is the canonical key text, the key of the query row in the store: the
-// name alone for the configured query, otherwise the name, "?" and the
-// arguments as sorted, URL-escaped k=v pairs joined by "&". Two Keys with the
-// same name and the same arguments, however the map was built, have the same
-// String.
-func (k Key) String() string {
-	if !k.Adhoc() {
-		return k.Name
-	}
-	v := url.Values{}
-	for name, val := range k.Args {
-		v.Set(name, val)
-	}
-	return k.Name + "?" + v.Encode() // Encode sorts by key
-}
-
-// qualifiers renders the arguments as GitHub search qualifiers in a stable
+// qualifiers renders k's arguments as GitHub search qualifiers in a stable
 // order, each prefixed by a space; empty when there are none.
-func (k Key) qualifiers() string {
+func qualifiers(k Key) string {
 	names := make([]string, 0, len(k.Args))
 	for name := range k.Args {
 		names = append(names, name)

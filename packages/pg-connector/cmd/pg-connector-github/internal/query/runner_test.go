@@ -267,23 +267,17 @@ query($q: String!, $after: String) {
 	}
 }
 
-func TestKey_IsCanonical(t *testing.T) {
-	if got := (Key{Name: "mine"}).String(); got != "mine" {
-		t.Errorf("configured key = %q, want the bare name", got)
-	}
+func TestKey_QualifiersAreStableAndQuoted(t *testing.T) {
 	a := Key{Name: "mine", Args: map[string]string{"label": "bug", "base": "main"}}
 	b := Key{Name: "mine", Args: map[string]string{"base": "main", "label": "bug"}}
-	if a.String() != b.String() || a.String() != "mine?base=main&label=bug" {
-		t.Errorf("keys %q and %q differ or are not canonical", a, b)
+	if qualifiers(a) != qualifiers(b) || qualifiers(a) != " base:main label:bug" {
+		t.Errorf("qualifiers %q and %q differ or are not canonical", qualifiers(a), qualifiers(b))
 	}
-	if !a.Adhoc() || (Key{Name: "mine"}).Adhoc() || (Key{Name: "mine", Args: map[string]string{}}).Adhoc() {
-		t.Error("only a key with arguments is ad-hoc")
-	}
-	if a.String() == (Key{Name: "mine", Args: map[string]string{"label": "bug"}}).String() {
-		t.Error("a differing argument must differ in the key")
-	}
-	if got := (Key{Name: "x", Args: map[string]string{"label": "needs work"}}).qualifiers(); got != ` label:"needs work"` {
+	if got := qualifiers(Key{Name: "x", Args: map[string]string{"label": "needs work"}}); got != ` label:"needs work"` {
 		t.Errorf("qualifiers = %q", got)
+	}
+	if got := qualifiers(Key{Name: "x"}); got != "" {
+		t.Errorf("qualifiers of a configured key = %q, want none", got)
 	}
 }
 
@@ -446,20 +440,6 @@ func TestSchedule_DueTimeSurvivesARestart(t *testing.T) {
 	}
 }
 
-func TestSchedule_DemotesAStoredQueryTheConfigNoLongerDefines(t *testing.T) {
-	r := newRig(t)
-	ctx := context.Background()
-	if err := r.st.PutQuery(ctx, store.QueryRow{Key: "retired", Configured: true, IDs: []string{"Acme-Org/Widget#3"}, Complete: true}); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.runner.Schedule(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if r.row(t, "retired").Configured {
-		t.Error("a query the config no longer defines must stop being configured (its members stop being keep-alive)")
-	}
-}
-
 func TestExecutor_TracksTheMembersSoTheyAreRefreshedWithoutAnyListCall(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
@@ -523,174 +503,6 @@ func TestFetch_AnAdhocKeyIsCachedUnderAdhocTTLAndNeverRerun(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // let the (real-time) loop poll
 	if r.gh.count() != 1 {
 		t.Errorf("an ad-hoc key was re-run: %d gh calls", r.gh.count())
-	}
-}
-
-func TestFetch_ADifferingArgumentIsADifferentKey(t *testing.T) {
-	r := newRig(t)
-	r.run(t)
-	ctx := context.Background()
-	for _, label := range []string{"bug", "chore"} {
-		if _, err := r.runner.Fetch(ctx, Key{Name: "mine", Args: map[string]string{"label": label}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	rows, _ := r.st.ListQueries(ctx, false)
-	if len(rows) != 2 || r.gh.count() != 2 {
-		t.Errorf("rows = %d, gh calls = %d, want 2 and 2", len(rows), r.gh.count())
-	}
-}
-
-func TestFetch_AnUnknownNameIsRefused(t *testing.T) {
-	r := newRig(t)
-	if _, err := r.runner.Fetch(context.Background(), Key{Name: "nope"}); err == nil || r.gh.count() != 0 {
-		t.Errorf("err = %v after %d calls, want an error and no call", err, r.gh.count())
-	}
-}
-
-func TestQueueRun_AClass2RerunRunsTheQueryEvenInsideItsTTLAndAClass3OneDoesNot(t *testing.T) {
-	r := newRig(t)
-	ctx := context.Background()
-	if err := r.runner.Schedule(ctx); err != nil {
-		t.Fatal(err)
-	}
-	r.sched.Drain(ctx)
-	if r.gh.count() != 3 {
-		t.Fatalf("first drain made %d gh calls, want 3", r.gh.count())
-	}
-
-	r.clk.Advance(10 * time.Second) // inside query_ttl
-	if err := r.runner.QueueRun(Key{Name: "mine"}, governor.ClassQuery); err != nil {
-		t.Fatal(err)
-	}
-	r.sched.Drain(ctx)
-	if r.gh.count() != 3 {
-		t.Fatalf("a class 3 task re-ran a fresh query: %d gh calls, want 3", r.gh.count())
-	}
-
-	if err := r.runner.QueueRun(Key{Name: "mine"}, governor.ClassInvalidated); err != nil {
-		t.Fatal(err)
-	}
-	if c, queued := r.sched.InspectQueued(entityOf(Key{Name: "mine"}), Group); !queued || c != governor.ClassInvalidated {
-		t.Fatalf("queued = %v at class %d, want a class 2 task", queued, c)
-	}
-	r.sched.Drain(ctx)
-	if r.gh.count() != 4 {
-		t.Errorf("a class 2 re-run made %d gh calls in total, want 4 (mine only)", r.gh.count())
-	}
-	if got := r.row(t, "mine").FetchedAt; !got.Equal(t0.Add(10 * time.Second)) {
-		t.Errorf("mine fetched_at = %v, want the re-run's time", got)
-	}
-	// The run booked the next cycle at class 3 from the new result.
-	if c, queued := r.sched.InspectQueued(entityOf(Key{Name: "mine"}), Group); !queued || c != governor.ClassQuery {
-		t.Errorf("after the run the next cycle is queued = %v at class %d, want class 3", queued, c)
-	}
-}
-
-func TestQueueRun_RefusesAnUnknownNameAnAdhocKeyAndAnInvalidClass(t *testing.T) {
-	r := newRig(t)
-	for _, tc := range []struct {
-		key   Key
-		class governor.Class
-	}{
-		{Key{Name: "nope"}, governor.ClassInvalidated},
-		{Key{Name: "mine", Args: map[string]string{"author": "someone"}}, governor.ClassInvalidated},
-		{Key{Name: "mine"}, governor.Class(9)},
-	} {
-		if err := r.runner.QueueRun(tc.key, tc.class); err == nil {
-			t.Errorf("QueueRun(%v, %d) = nil, want an error", tc.key, tc.class)
-		}
-	}
-	if r.sched.State().Classes[1].Depth != 0 || r.gh.count() != 0 {
-		t.Error("a refused QueueRun queued or ran something")
-	}
-}
-
-func TestFetch_ConcurrentCallersShareOneRun(t *testing.T) {
-	r := newRig(t)
-	release := make(chan struct{})
-	entered := make(chan struct{})
-	var once sync.Once
-	r.gh.answer = func(call) ([]byte, error) {
-		once.Do(func() { close(entered) })
-		<-release
-		return fixture(t, "search_three.json"), nil
-	}
-	r.run(t)
-	var wg sync.WaitGroup
-	for range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := r.runner.Fetch(context.Background(), Key{Name: "mine"}); err != nil {
-				t.Error(err)
-			}
-		}()
-	}
-	<-entered
-	time.Sleep(50 * time.Millisecond) // the other callers join the flight
-	close(release)
-	wg.Wait()
-	if r.gh.count() != 1 {
-		t.Errorf("3 concurrent callers made %d gh calls, want 1", r.gh.count())
-	}
-}
-
-func TestFetch_ARunStillGoingAtTheDeadlineCompletesAndIsStored(t *testing.T) {
-	r := newRig(t)
-	release := make(chan struct{})
-	entered := make(chan struct{})
-	r.gh.answer = func(call) ([]byte, error) {
-		close(entered)
-		<-release
-		return fixture(t, "search_three.json"), nil
-	}
-	r.run(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	_, err := r.runner.Fetch(ctx, Key{Name: "mine"})
-	if !errors.Is(err, ErrPending) {
-		t.Fatalf("err = %v, want ErrPending", err)
-	}
-	<-entered
-	close(release)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if row, ok, _ := r.st.GetQuery(context.Background(), "mine"); ok && len(row.IDs) == 3 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the run that outlived its caller was never stored")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-func TestRun_AFailureKeepsThePreviousIDsAndRecordsLastError(t *testing.T) {
-	r := newRig(t)
-	r.run(t)
-	ctx := context.Background()
-	if _, err := r.runner.Fetch(ctx, Key{Name: "mine"}); err != nil {
-		t.Fatal(err)
-	}
-	r.clk.Advance(2 * time.Minute)
-	r.gh.setAnswer(func(call) ([]byte, error) { return nil, errors.New("gh: HTTP 502: bad gateway") })
-	_, err := r.runner.Fetch(ctx, Key{Name: "mine"})
-	if err == nil || !strings.Contains(err.Error(), "502") {
-		t.Fatalf("err = %v, want the origin failure", err)
-	}
-	row := r.row(t, "mine")
-	if !strings.Contains(row.LastError, "502") || len(row.IDs) != 3 || !row.LastSuccessAt.Equal(t0) || !row.FetchedAt.Equal(t0) {
-		t.Errorf("row after the failure = %+v, want the old ids and times with last_error", row)
-	}
-	// The next success clears it.
-	r.gh.answer = func(call) ([]byte, error) { return fixture(t, "search_three.json"), nil }
-	r.clk.Advance(2 * time.Minute) // past the scheduler's retry hold
-	if _, err := r.runner.Fetch(ctx, Key{Name: "mine"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := r.row(t, "mine"); got.LastError != "" || !got.LastSuccessAt.Equal(r.clk.Now()) {
-		t.Errorf("row after recovery = %+v", got)
 	}
 }
 
@@ -762,32 +574,6 @@ func TestRun_AnEmptyAnswerIsAnError(t *testing.T) {
 	_, err := r.runner.Fetch(context.Background(), Key{Name: "mine"})
 	if err == nil || !strings.Contains(err.Error(), "search is unavailable") {
 		t.Errorf("err = %v", err)
-	}
-}
-
-func TestExpire_DeletesStaleAdhocRowsOnly(t *testing.T) {
-	r := newRig(t)
-	ctx := context.Background()
-	put := func(key string, configured bool, fetched time.Time) {
-		if err := r.st.PutQuery(ctx, store.QueryRow{Key: key, Configured: configured, FetchedAt: fetched}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	put("mine", true, t0.Add(-30*24*time.Hour))
-	put("mine?label=old", false, t0.Add(-8*24*time.Hour))
-	put("mine?label=new", false, t0.Add(-time.Hour))
-	put("mine?label=failed", false, time.Time{})
-	n, err := r.runner.Expire(ctx, 7*24*time.Hour)
-	if err != nil || n != 2 {
-		t.Fatalf("expired %d (%v), want 2", n, err)
-	}
-	rows, _ := r.st.ListQueries(ctx, false)
-	var keys []string
-	for _, row := range rows {
-		keys = append(keys, row.Key)
-	}
-	if !slices.Equal(keys, []string{"mine", "mine?label=new"}) {
-		t.Errorf("keys left = %v", keys)
 	}
 }
 

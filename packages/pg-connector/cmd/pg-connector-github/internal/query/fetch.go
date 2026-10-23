@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/entity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ratefeed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
+	shared "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/query"
 )
 
 // PageSize is the first: argument of the membership-only document. The 2026-10-05
@@ -45,20 +46,16 @@ query($q: String!, $after: String) {
 }
 `
 
-// member is one listed PR.
-type member struct {
-	nodeID string
-	ref    entity.Ref
+// lister is the GitHub implementation of the shared query.Lister: it pages the
+// membership document of each expression through the governor and the rate feed.
+type lister struct {
+	gh       ratefeed.Runner
+	governor *governor.Governor
+	feed     *ratefeed.Feed
+	auth     Auth
 }
 
-// listing is what running a query returned: its members in the order GitHub
-// listed them (the expressions of a multi-expression query in turn, a member
-// that several of them match kept at its first position) and whether the list
-// is the whole result.
-type listing struct {
-	members  []member
-	complete bool
-}
+var _ shared.Lister = (*lister)(nil)
 
 type wireSearch struct {
 	Data struct {
@@ -83,26 +80,27 @@ type wireSearch struct {
 	} `json:"errors"`
 }
 
-// list runs every expression of a query (with key's arguments appended as
+// List runs every expression of a query (with key's arguments appended as
 // qualifiers) and unions the members. Each page is one admitted, metered call
 // of the given class. The listing is complete only when every expression's
 // pages were read to the end and none matched more than SearchResultLimit
 // results (GitHub then answers the first SearchResultLimit and says nothing
 // else, so a listing past the limit is flagged by its issueCount).
-func (r *Runner) list(ctx context.Context, key Key, exprs []string, call ratefeed.Meta) (listing, error) {
-	out := listing{complete: true}
+func (l *lister) List(ctx context.Context, key Key, exprs []string, cm shared.CallMeta) (shared.Listing, error) {
+	call := ratefeed.Meta{Class: cm.Class, Purpose: cm.Purpose}
+	out := shared.Listing{Complete: true}
 	seen := map[string]bool{}
 	for _, expr := range exprs {
-		q := "is:pr " + strings.TrimSpace(expr) + key.qualifiers()
+		q := "is:pr " + strings.TrimSpace(expr) + qualifiers(key)
 		after := ""
 		for page := 1; ; page++ {
-			resp, err := r.searchPage(ctx, call, q, after)
+			resp, err := l.searchPage(ctx, call, q, after)
 			if err != nil {
-				return listing{}, err
+				return shared.Listing{}, err
 			}
 			s := resp.Data.Search
 			if page == 1 && s.IssueCount > SearchResultLimit {
-				out.complete = false
+				out.Complete = false
 			}
 			for _, n := range s.Nodes {
 				if n.Number == 0 || n.ID == "" {
@@ -110,19 +108,19 @@ func (r *Runner) list(ctx context.Context, key Key, exprs []string, call ratefee
 				}
 				ref, err := entity.NewRef(n.Repository.NameWithOwner, n.Number)
 				if err != nil {
-					return listing{}, fmt.Errorf("query %q: %w", key.Name, err)
+					return shared.Listing{}, fmt.Errorf("query %q: %w", key.Name, err)
 				}
 				if seen[n.ID] {
 					continue
 				}
 				seen[n.ID] = true
-				out.members = append(out.members, member{nodeID: n.ID, ref: ref})
+				out.Members = append(out.Members, shared.Member{ID: n.ID, Ref: ref.String()})
 			}
 			if !s.PageInfo.HasNextPage || s.PageInfo.EndCursor == "" {
 				break
 			}
 			if page >= maxPages {
-				out.complete = false // more pages than the limit lets us read
+				out.Complete = false // more pages than the limit lets us read
 				break
 			}
 			after = s.PageInfo.EndCursor
@@ -133,9 +131,9 @@ func (r *Runner) list(ctx context.Context, key Key, exprs []string, call ratefee
 
 // searchPage admits, runs and books one page of the membership document and
 // parses its answer.
-func (r *Runner) searchPage(ctx context.Context, call ratefeed.Meta, q, after string) (wireSearch, error) {
+func (l *lister) searchPage(ctx context.Context, call ratefeed.Meta, q, after string) (wireSearch, error) {
 	// A page is 1 point (see PageSize).
-	tk, err := r.cfg.Governor.Admit(governor.Request{Bucket: governor.BucketGraphQL, Class: call.Class, Cost: 1})
+	tk, err := l.governor.Admit(governor.Request{Bucket: governor.BucketGraphQL, Class: call.Class, Cost: 1})
 	if err != nil {
 		return wireSearch{}, err
 	}
@@ -143,15 +141,17 @@ func (r *Runner) searchPage(ctx context.Context, call ratefeed.Meta, q, after st
 	if after != "" {
 		args = append(args, "-f", "after="+after)
 	}
-	body, runErr := r.cfg.GH.Run(ctx, args...)
-	call.Group = Group
+	body, runErr := l.gh.Run(ctx, args...)
+	call.Group = shared.Group
 	var resp wireSearch
 	jsonErr := json.Unmarshal(body, &resp)
 	if jsonErr == nil && resp.Data.Search != nil {
 		call.BatchSize = len(resp.Data.Search.Nodes)
 	}
-	_ = r.cfg.Feed.SettleGraphQL(tk, call, body, runErr)
-	r.observe(runErr)
+	_ = l.feed.SettleGraphQL(tk, call, body, runErr)
+	if l.auth != nil {
+		l.auth.Observe(runErr)
+	}
 	switch {
 	case runErr != nil:
 		return wireSearch{}, runErr

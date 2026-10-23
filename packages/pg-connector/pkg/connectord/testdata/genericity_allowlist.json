@@ -261,6 +261,13 @@
       "why": "fixture or word list of an existing test file"
     },
     {
+      "file": "query/runner_test.go",
+      "token": "graphql",
+      "max": 1,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
       "file": "router/dispatch_test.go",
       "token": "ci",
       "max": 3,

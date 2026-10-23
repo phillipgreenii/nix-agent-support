@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/entity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
+	shared "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
@@ -29,6 +30,18 @@ var (
 	_ InteractiveReader = (*summary.Service)(nil)
 	_ StoreReader       = (*store.Store)(nil)
 )
+
+// Confirmer makes the one entity read that tells a PR that closed or merged
+// apart from one that was merely filtered out of a query: the shared
+// query.Confirmer, of which NewConfirmer is the GitHub implementation. node is
+// the entity key and ref the wire reference. Any failure, a governor refusal
+// included, is an error: the departure is then retried by the next run.
+type Confirmer = shared.Confirmer
+
+// Confirmation is what one confirming entity read found: the PR's stored state
+// (GitHub's spelling: OPEN, MERGED or CLOSED) or Gone when the read found the PR
+// gone (the entity is tombstoned).
+type Confirmation = shared.Confirmation
 
 type confirmer struct {
 	svc InteractiveReader
