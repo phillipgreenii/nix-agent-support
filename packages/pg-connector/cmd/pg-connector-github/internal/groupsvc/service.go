@@ -40,6 +40,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groups"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ratefeed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/scheduler"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
@@ -87,22 +88,16 @@ type AuthMarker interface {
 	Clear()
 }
 
-// RefreshInfo says how a refreshed group was fetched.
-type RefreshInfo struct {
-	// Started is when the fetch began.
-	Started time.Time
-	// Class and Purpose are what the call was admitted as.
-	Class   governor.Class
-	Purpose governor.Purpose
-}
+// RefreshInfo says how a refreshed group was fetched (the shared engine's type).
+type RefreshInfo = engine.RefreshInfo
 
 // The origins a refresh request can note, as the change engine reads them when
-// it classifies the refresh that follows.
+// it classifies the refresh that follows (the shared engine's words).
 const (
-	OriginQuery   = "query"
-	OriginRefresh = "refresh"
-	OriginWrite   = "write"
-	OriginRead    = "read"
+	OriginQuery   = engine.OriginQuery
+	OriginRefresh = engine.OriginRefresh
+	OriginWrite   = engine.OriginWrite
+	OriginRead    = engine.OriginRead
 )
 
 // OriginHints receives the origin of a refresh the service is about to queue

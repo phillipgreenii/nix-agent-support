@@ -1,12 +1,10 @@
-package changes
+package engine
 
 import (
 	"encoding/json"
 	"fmt"
 	"slices"
 	"time"
-
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groups"
 )
 
 // Awaiting is one group a pending row waits for: a fetch of Group counts only
@@ -24,7 +22,7 @@ func DecodeAwaited(raw json.RawMessage) ([]Awaiting, error) {
 	}
 	var aw []Awaiting
 	if err := json.Unmarshal(raw, &aw); err != nil {
-		return nil, fmt.Errorf("changes: decode awaited groups: %w", err)
+		return nil, fmt.Errorf("engine: decode awaited groups: %w", err)
 	}
 	return aw, nil
 }
@@ -35,23 +33,23 @@ func encodeAwaited(aw []Awaiting) (json.RawMessage, error) {
 	}
 	raw, err := json.Marshal(aw)
 	if err != nil {
-		return nil, fmt.Errorf("changes: encode awaited groups: %w", err)
+		return nil, fmt.Errorf("engine: encode awaited groups: %w", err)
 	}
 	return raw, nil
 }
 
-// groupRank orders awaited groups the way groups.All lists them.
-func groupRank(g string) int {
-	if i := slices.Index(groups.All(), g); i >= 0 {
+// groupRank orders awaited groups the way Spec.Groups lists them.
+func (e *Engine) groupRank(g string) int {
+	if i := slices.Index(e.spec.Groups, g); i >= 0 {
 		return i
 	}
-	return len(groups.All())
+	return len(e.spec.Groups)
 }
 
 // await returns aw with every group of queue awaited since now: a group already
-// awaited gets the new Since, a new one is added. The result is in groups.All
+// awaited gets the new Since, a new one is added. The result is in Spec.Groups
 // order.
-func await(aw []Awaiting, queue []string, now time.Time) []Awaiting {
+func (e *Engine) await(aw []Awaiting, queue []string, now time.Time) []Awaiting {
 	out := slices.Clone(aw)
 	for _, g := range queue {
 		if i := slices.IndexFunc(out, func(a Awaiting) bool { return a.Group == g }); i >= 0 {
@@ -60,6 +58,6 @@ func await(aw []Awaiting, queue []string, now time.Time) []Awaiting {
 		}
 		out = append(out, Awaiting{Group: g, Since: now})
 	}
-	slices.SortStableFunc(out, func(a, b Awaiting) int { return groupRank(a.Group) - groupRank(b.Group) })
+	slices.SortStableFunc(out, func(a, b Awaiting) int { return e.groupRank(a.Group) - e.groupRank(b.Group) })
 	return out
 }

@@ -329,26 +329,6 @@ func TestAnAppendedRowReportsItsOriginFromAHintThenFromThePurpose(t *testing.T) 
 	}
 }
 
-func TestAMergedPendingRowKeepsTheOriginOfTheChangeThatCreatedIt(t *testing.T) {
-	r := newRig(t)
-	r.seed(sample())
-	r.seedGroup(groups.Runs, runsContent("success"), "h1", "b1")
-	r.purpose = governor.PurposeInteractive
-	r.must(r.changeSummary(func(s *summary.Summary) { s.ChecksState = "FAILURE" }, nil))
-	r.purpose = governor.PurposeRefresh
-	r.e.NoteOrigin(node, groups.Runs, "write")
-	r.clk.Advance(time.Second)
-	r.must(r.refresh(groups.Runs, runsContent("failure"), "h1", "b1", r.clk.Now()))
-	rows := r.changes()
-	if len(rows) != 1 || rows[0].Origin != "read" {
-		t.Fatalf("rows = %+v, want the creator's origin read", rows)
-	}
-	// The unused hint for runs was consumed by the refresh, not left behind.
-	if got := r.e.originFor(node, groups.Runs, governor.PurposeRefresh); got != "refresh" {
-		t.Errorf("a hint outlived its detection: %q", got)
-	}
-}
-
 func TestAnUnparseableUpdatedAtLeavesTheOriginTimeUnknownAndSkipsDetected(t *testing.T) {
 	r := newRig(t)
 	s := sample()

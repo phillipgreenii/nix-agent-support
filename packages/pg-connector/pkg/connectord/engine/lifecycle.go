@@ -1,4 +1,4 @@
-package changes
+package engine
 
 import (
 	"context"
@@ -100,7 +100,7 @@ func (l *Lifecycle) Run(ctx context.Context) {
 func (l *Lifecycle) Sweep(ctx context.Context) (completed int, err error) {
 	rows, err := l.Store.ListPending(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("changes: list pending rows: %w", err)
+		return 0, fmt.Errorf("engine: list pending rows: %w", err)
 	}
 	now := l.now()
 	var errs []error
@@ -127,7 +127,7 @@ func (l *Lifecycle) Sweep(ctx context.Context) (completed int, err error) {
 func (l *Lifecycle) FlushAll(ctx context.Context) (completed int, err error) {
 	rows, err := l.Store.ListPending(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("changes: list pending rows: %w", err)
+		return 0, fmt.Errorf("engine: list pending rows: %w", err)
 	}
 	now := l.now()
 	var errs []error
@@ -152,7 +152,7 @@ func (l *Lifecycle) FlushAll(ctx context.Context) (completed int, err error) {
 func (l *Lifecycle) Recover(ctx context.Context) (queued, completed int, err error) {
 	rows, err := l.Store.ListPending(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("changes: list pending rows: %w", err)
+		return 0, 0, fmt.Errorf("engine: list pending rows: %w", err)
 	}
 	now := l.now()
 	var errs []error
@@ -168,16 +168,16 @@ func (l *Lifecycle) Recover(ctx context.Context) (queued, completed int, err err
 		}
 		aw, err := DecodeAwaited(p.Awaited)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("changes: pending %s/%s: %w", p.Kind, p.ID, err))
+			errs = append(errs, fmt.Errorf("engine: pending %s/%s: %w", p.Kind, p.ID, err))
 			continue
 		}
 		for _, a := range aw {
 			if l.Queue == nil {
-				errs = append(errs, fmt.Errorf("changes: no queue to re-queue %s of %s", a.Group, p.ID))
+				errs = append(errs, fmt.Errorf("engine: no queue to re-queue %s of %s", a.Group, p.ID))
 				continue
 			}
 			if err := l.Queue.QueueGroup(ctx, p.ID, a.Group, governor.ClassInvalidated, now); err != nil {
-				errs = append(errs, fmt.Errorf("changes: re-queue %s of %s: %w", a.Group, p.ID, err))
+				errs = append(errs, fmt.Errorf("engine: re-queue %s of %s: %w", a.Group, p.ID, err))
 				continue
 			}
 			queued++
@@ -191,7 +191,7 @@ func (l *Lifecycle) Recover(ctx context.Context) (queued, completed int, err err
 func (l *Lifecycle) Stats(ctx context.Context) (Stats, error) {
 	n, err := l.Store.CountPending(ctx)
 	if err != nil {
-		return Stats{}, fmt.Errorf("changes: count pending rows: %w", err)
+		return Stats{}, fmt.Errorf("engine: count pending rows: %w", err)
 	}
 	s := Stats{Pending: n}
 	l.mu.Lock()
@@ -252,7 +252,7 @@ func (l *Lifecycle) end(ctx context.Context, p store.PendingChange, now time.Tim
 		return nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("changes: end pending %s/%s: %w", p.Kind, p.ID, err)
+		return false, fmt.Errorf("engine: end pending %s/%s: %w", p.Kind, p.ID, err)
 	}
 	if done {
 		l.record(now, result)

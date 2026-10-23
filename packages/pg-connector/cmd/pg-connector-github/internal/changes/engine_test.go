@@ -300,44 +300,6 @@ func detailContent(additions int) string {
 
 func conversationContent() string { return `{}` }
 
-func TestNewAppliesTheDefaultsAndRejectsNegatives(t *testing.T) {
-	e, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if e.settle != 30*time.Second || e.bodyCap != 4*1024 || e.clock == nil {
-		t.Errorf("defaults = settle %s, body cap %d, clock %v", e.settle, e.bodyCap, e.clock)
-	}
-	if _, err := New(Config{SettleTimeout: -1}); err == nil {
-		t.Error("a negative settle timeout was accepted")
-	}
-	if _, err := New(Config{BodyCap: -1}); err == nil {
-		t.Error("a negative body cap was accepted")
-	}
-}
-
-func TestHintsAreUsedOnceAndExpire(t *testing.T) {
-	r := newRig(t)
-	r.e.NoteOrigin(node, groups.Summary, groupsvc.OriginWrite)
-	if got := r.e.originFor(node, groups.Summary, governor.PurposeInteractive); got != groupsvc.OriginWrite {
-		t.Errorf("origin with a hint = %q, want write", got)
-	}
-	if got := r.e.originFor(node, groups.Summary, governor.PurposeInteractive); got != groupsvc.OriginRead {
-		t.Errorf("the hint was not cleared: origin = %q, want read", got)
-	}
-	if got := r.e.originFor(node, groups.Summary, governor.PurposeFill); got != groupsvc.OriginRefresh {
-		t.Errorf("origin of a background purpose = %q, want refresh", got)
-	}
-	r.e.NoteOrigin(node, groups.Detail, groupsvc.OriginWrite)
-	if got := r.e.originFor(node, groups.Summary, governor.PurposeRefresh); got != groupsvc.OriginRefresh {
-		t.Errorf("a hint for another group leaked: %q", got)
-	}
-	r.clk.Advance(11 * time.Minute)
-	if got := r.e.originFor(node, groups.Detail, governor.PurposeRefresh); got != groupsvc.OriginRefresh {
-		t.Errorf("a hint older than ten minutes was used: %q", got)
-	}
-}
-
 func TestEngineIsAnOriginHintsReceiver(t *testing.T) {
 	var _ groupsvc.OriginHints = (*Engine)(nil)
 	var _ Observer = (*recorder)(nil)

@@ -526,61 +526,6 @@ func TestRecoverQueuesOnlyTheStillAwaitedGroupsAndKeepsGoingAfterAQueueError(t *
 	}
 }
 
-func TestARowEndedByAnotherPathBetweenTheListAndTheTransactionIsSkippedWithoutError(t *testing.T) {
-	l := newLifeRig(t)
-	l.rollupPending()
-	l.clk.Advance(time.Minute)
-	listed, ok := l.pending()
-	if !ok {
-		t.Fatal("no pending row")
-	}
-
-	// Another path ends the row after the sweep listed it.
-	l.must(l.inTx(func(tx *store.Tx) error {
-		return l.e.Complete(context.Background(), tx, listed, ResultSettled)
-	}))
-	if rows := l.changes(); len(rows) != 1 {
-		t.Fatalf("rows = %d, want 1", len(rows))
-	}
-
-	done, err := l.lc.end(context.Background(), listed, l.clk.Now(), true)
-	if err != nil || done {
-		t.Errorf("end = %v, %v; want false, nil", done, err)
-	}
-	if rows := l.changes(); len(rows) != 1 {
-		t.Errorf("the skipped row appended again: %d rows", len(rows))
-	}
-	if v := l.version(); v != 6 {
-		t.Errorf("version = %d, want 6", v)
-	}
-	if s := l.stats(); s.Timeouts != 0 {
-		t.Errorf("a skipped row was counted: %+v", s)
-	}
-}
-
-func TestARowRecreatedWithALaterDeadlineIsNotEndedByAStaleListing(t *testing.T) {
-	l := newLifeRig(t)
-	l.rollupPending()
-	stale, _ := l.pending()
-	l.clk.Advance(time.Minute)
-	l.must(l.inTx(func(tx *store.Tx) error {
-		return l.e.Complete(context.Background(), tx, stale, ResultSettled)
-	}))
-	// A fresh detection creates a new pending row with a later deadline.
-	l.must(l.changeSummary(func(s *summary.Summary) { s.ChecksState = "SUCCESS" }, nil))
-	fresh, ok := l.pending()
-	if !ok || !fresh.Deadline.After(l.clk.Now()) {
-		t.Fatalf("fresh = %+v, %v", fresh, ok)
-	}
-	done, err := l.lc.end(context.Background(), stale, l.clk.Now(), true)
-	if err != nil || done {
-		t.Errorf("end = %v, %v; want false, nil", done, err)
-	}
-	if _, ok := l.pending(); !ok {
-		t.Error("the fresh pending row was ended by a stale listing")
-	}
-}
-
 func TestStatsCountsTheLastHourOnlyAndAnEventExactlyOneHourOldStillCounts(t *testing.T) {
 	l := newLifeRig(t)
 	l.rollupPending()
@@ -625,17 +570,5 @@ func TestStatsReportsTheStoredPendingCountAndARestartResetsTheEventCounts(t *tes
 	l.restart()
 	if s := l.stats(); s.Pending != 1 || s.Timeouts != 0 || s.Failures != 0 {
 		t.Errorf("after a restart stats = %+v, want pending 1 and zero counts", s)
-	}
-}
-
-func TestTheZeroValuesOfClockIntervalAndLogAreUsable(t *testing.T) {
-	l := newLifeRig(t)
-	lc := &Lifecycle{Engine: l.e, Store: l.st}
-	if lc.now().IsZero() {
-		t.Error("the zero clock did not read the system clock")
-	}
-	lc.log("anything", "k", "v") // a nil Log discards
-	if n, err := lc.Sweep(context.Background()); err != nil || n != 0 {
-		t.Errorf("Sweep = %d, %v", n, err)
 	}
 }
