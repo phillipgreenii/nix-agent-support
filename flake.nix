@@ -10121,8 +10121,9 @@
                   ! grep -q 'active_window' "$p"
 
                   # pr_lane.mode (PR lane refactor, P0b): rendered unconditionally,
-                  # "off" by default, and under the loader's key names when set.
-                  sed -n '/^pr_lane:/,/^[a-z]/p' "$d" | grep -q '^  mode: off$'
+                  # "off" by default (YAML quotes it: a bare off is a boolean), and under
+                  # the loader's key names when set.
+                  sed -n '/^pr_lane:/,/^[a-z]/p' "$d" | grep -qE "^  mode: 'off'$"
                   sed -n '/^pr_lane:/,/^[a-z]/p' ${
                     hmPRLanePlan.xdg.configFile."pg-desk/config.yaml".source
                   } | grep -q '^  mode: plan$'
