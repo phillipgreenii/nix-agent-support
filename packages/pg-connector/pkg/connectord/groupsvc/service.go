@@ -31,8 +31,29 @@ type Service struct {
 	mu       sync.Mutex
 	fetchers map[string]Fetcher
 	hints    OriginHints
+	// commits counts the refreshes stored per (entity, group) since start; an
+	// Ensure compares it before and after its fetch to say whether the origin was
+	// asked.
+	commits map[pairKey]uint64
 
 	writes writeLocks
+}
+
+type pairKey struct{ id, group string }
+
+func (s *Service) commitCount(id, group string) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.commits[pairKey{id, group}]
+}
+
+func (s *Service) countCommit(id, group string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.commits == nil {
+		s.commits = map[pairKey]uint64{}
+	}
+	s.commits[pairKey{id, group}]++
 }
 
 func (s *Service) now() time.Time { return s.clock.Now() }

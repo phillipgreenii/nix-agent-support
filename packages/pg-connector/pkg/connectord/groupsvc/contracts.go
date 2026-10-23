@@ -48,6 +48,7 @@ const (
 	sentinelGone sentinel = iota + 1
 	sentinelNoFetcher
 	sentinelUnknownGroup
+	sentinelNoReference
 )
 
 func (e sentinel) Error() string {
@@ -58,6 +59,8 @@ func (e sentinel) Error() string {
 		return "groupsvc: no fetcher registered for the group"
 	case sentinelUnknownGroup:
 		return "groupsvc: unknown group"
+	case sentinelNoReference:
+		return "the stored primary content names no entity reference"
 	default:
 		return "groupsvc: unknown error"
 	}
@@ -73,6 +76,11 @@ var ErrNoFetcher error = sentinelNoFetcher
 // ErrUnknownGroup is the error of a group name outside Config.Spec.Groups. It is
 // returned wrapped with the group name: `groupsvc: unknown group "name"`.
 var ErrUnknownGroup error = sentinelUnknownGroup
+
+// errNoReference is the per-target error of an entity whose stored primary
+// content has no reference to fetch with (it is gone, or names none); the target
+// is failed with it and never fetched.
+var errNoReference error = sentinelNoReference
 
 // CallMeta is what one group fetch is admitted as.
 type CallMeta struct {
