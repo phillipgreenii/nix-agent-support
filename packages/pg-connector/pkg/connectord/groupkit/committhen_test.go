@@ -1,4 +1,4 @@
-package groups
+package groupkit
 
 import (
 	"context"
@@ -10,13 +10,13 @@ import (
 
 func TestCommitThenRunsThenInTheSameTransactionOnlyWhenStored(t *testing.T) {
 	s, ctx := openStore(t), context.Background()
-	tok, _ := Begin(ctx, s, KindPR, "PR_1", Detail)
+	tok, _ := Begin(ctx, s, testKind, "example-1", Detail)
 
 	calls := 0
 	stored, err := CommitThen(ctx, s, tok, detailRow("one"), func(tx *store.Tx) error {
 		calls++
 		// The group is already written, and visible to the transaction only.
-		g, ok, err := tx.GetGroup(ctx, KindPR, "PR_1", Detail)
+		g, ok, err := tx.GetGroup(ctx, testKind, "example-1", Detail)
 		if err != nil || !ok || string(g.Content) != "one" || g.Generation != 1 {
 			t.Errorf("inside the transaction the row = %+v ok=%v err=%v", g, ok, err)
 		}
@@ -25,7 +25,7 @@ func TestCommitThenRunsThenInTheSameTransactionOnlyWhenStored(t *testing.T) {
 	if err != nil || !stored || calls != 1 {
 		t.Fatalf("CommitThen = %v, %v, then called %d times", stored, err, calls)
 	}
-	if g, _ := contentOf(t, s, Detail); string(g.Content) != "one" || g.Generation != 1 || g.Kind != KindPR || g.Group != Detail {
+	if g, _ := contentOf(t, s, Detail); string(g.Content) != "one" || g.Generation != 1 || g.Kind != testKind || g.Group != Detail {
 		t.Errorf("row = %+v", g)
 	}
 
@@ -44,11 +44,11 @@ func TestCommitThenRunsThenInTheSameTransactionOnlyWhenStored(t *testing.T) {
 
 func TestCommitThenRollsTheGroupBackWhenThenFails(t *testing.T) {
 	s, ctx := openStore(t), context.Background()
-	tok, _ := Begin(ctx, s, KindPR, "PR_1", Detail)
+	tok, _ := Begin(ctx, s, testKind, "example-1", Detail)
 	if ok, err := Commit(ctx, s, tok, detailRow("old")); err != nil || !ok {
 		t.Fatal(ok, err)
 	}
-	tok, _ = Begin(ctx, s, KindPR, "PR_1", Detail)
+	tok, _ = Begin(ctx, s, testKind, "example-1", Detail)
 	boom := errors.New("boom")
 	stored, err := CommitThen(ctx, s, tok, detailRow("new"), func(*store.Tx) error { return boom })
 	if !errors.Is(err, boom) || stored {
