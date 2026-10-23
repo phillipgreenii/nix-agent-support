@@ -81,7 +81,15 @@ let
   # invoke (ccpool, claude-extended-tool-approver, session-mode, claude-work-start,
   # claude-work-end; the nix check test-claude-baseline-hook-commands derives and
   # asserts that list from the hooks.json files) and the prompts' tools (gh, bd,
-  # jq, pg-connector, pn).
+  # jq, git, nix, pg-connector, pn), then the system directories (/usr/bin:/bin:
+  # /usr/sbin:/sbin). Scope (bead pg2-hou7i): only what the GENERIC allowed tools
+  # and hooks name belongs here. A role's own toolchain (go, gofmt, gofumpt,
+  # prek, pre-commit, pg-hooks, and any site-specific tool) is declared by that
+  # role through `claudeBaseline.extend { extraPathPkgs = [ ... ]; }`; the nix
+  # check test-claude-baseline-role-tool-commands fails when a role's allowed
+  # tools name a bare command its spec PATH lacks. `bd` defaults to the llm-agents
+  # package; a deployment whose pool sessions need its own wrapped bd (claim
+  # guard, dolt on PATH) passes `extend { bd = ...; }`.
   #
   # Stated gap: this repo does not package `pn` (a flake package of
   # phillipgreenii/nix-repo-base, absent from the overlays this flake applies), so
@@ -104,36 +112,73 @@ let
   # nixpkgs carries a `pn` alias that THROWS ("removed as upstream was archived"),
   # so a plain `pkgs ? pn` is not enough: tryEval turns that throw into "absent".
   claudeBaselinePn = builtins.tryEval (pkgs.pn or null);
-  claudeBaselinePathPkgs = [
-    pkgs.llm-agentsPkgs.claude-code
-    pkgs.ccpool
-    pkgs.claude-extended-tool-approver
-    pkgs.session-mode
-    pkgs.claude-activity
-    pkgs.pg-connector
-    pkgs.gh
-    pkgs.jq
-    pkgs.llm-agentsPkgs.beads
-  ]
-  ++ lib.optional (claudeBaselinePn.success && claudeBaselinePn.value != null) claudeBaselinePn.value;
-  claudeBaselinePathDirs = map (p: "${lib.getBin p}/bin") claudeBaselinePathPkgs;
-  claudeBaseline = {
-    pathDirs = claudeBaselinePathDirs;
-    wrap = [
-      (
-        [
-          "${pkgs.coreutils}/bin/env"
-          "PATH=${lib.concatStringsSep ":" claudeBaselinePathDirs}"
-        ]
-        ++ lib.mapAttrsToList (n: v: "${n}=${toString v}") claudeOtelEnv
-      )
-    ];
-    keep = [
-      "TMUX"
-      "TMUX_PANE"
-    ]
-    ++ wrapSpecOwnedKeep;
-  };
+  # System directories appended AFTER the store directories (bead pg2-hou7i): a
+  # strict session otherwise has no ls/cat/grep/sed/sh/security/ssh/curl by bare
+  # name. Last, so a store tool (git, nix, bd, ...) always wins over a system
+  # shim of the same name. They are not in `pathDirs` (which the hook-command
+  # scan resolves inside the nix sandbox, where these directories do not exist).
+  claudeBaselineSystemDirs = [
+    "/usr/bin"
+    "/bin"
+    "/usr/sbin"
+    "/sbin"
+  ];
+  # mkClaudeBaseline: the baseline for a given `bd` and extra PATH packages.
+  # `claudeBaseline` is `mkClaudeBaseline { }`; `claudeBaseline.extend` is this
+  # function, so a consumer swaps the bd or adds its role's own tools:
+  #   claudeBaseline.extend { bd = <workspace-wrapped bd>; extraPathPkgs = [ pkgs.go ]; }
+  mkClaudeBaseline =
+    {
+      bd ? pkgs.llm-agentsPkgs.beads,
+      extraPathPkgs ? [ ],
+    }:
+    let
+      pathPkgs = [
+        pkgs.llm-agentsPkgs.claude-code
+        pkgs.ccpool
+        pkgs.claude-extended-tool-approver
+        pkgs.session-mode
+        pkgs.claude-activity
+        pkgs.pg-connector
+        pkgs.gh
+        pkgs.jq
+        # git and nix: the handler-wide allowed tools name both (`Bash(git ...)`,
+        # `Bash(nix flake check:*)`, `Bash(nix fmt:*)`), so every claude role needs
+        # them by bare name (evidence: `nix: command not found` exit 127 in the
+        # drain-pg2 transcripts, pg2-12gr4.3).
+        pkgs.git
+        pkgs.nix
+        bd
+      ]
+      ++ lib.optional (claudeBaselinePn.success && claudeBaselinePn.value != null) claudeBaselinePn.value
+      ++ extraPathPkgs;
+      pathDirs = map (p: "${lib.getBin p}/bin") pathPkgs;
+    in
+    {
+      inherit pathDirs;
+      systemDirs = claudeBaselineSystemDirs;
+      extend = mkClaudeBaseline;
+      wrap = [
+        (
+          [
+            "${pkgs.coreutils}/bin/env"
+            "PATH=${lib.concatStringsSep ":" (pathDirs ++ claudeBaselineSystemDirs)}"
+            # A bd of ANY provenance must not spawn its own dolt server or write
+            # backups from a pool session (the machine-wide rule is delivered by the
+            # workspace bd wrapper, which a strict env cannot assume).
+            "BEADS_DOLT_AUTO_START=0"
+            "BD_BACKUP_ENABLED=0"
+          ]
+          ++ lib.mapAttrsToList (n: v: "${n}=${toString v}") claudeOtelEnv
+        )
+      ];
+      keep = [
+        "TMUX"
+        "TMUX_PANE"
+      ]
+      ++ wrapSpecOwnedKeep;
+    };
+  claudeBaseline = mkClaudeBaseline { };
 
   # renderWrapSpec: `{ wrap, keep, strictEnv, exec } -> <spec file derivation>`,
   # the pg-wrap spec as TOML (`schema_version = 1` plus the four keys). `keep`
@@ -1585,8 +1630,11 @@ in
         losing it, or replace it): `go`, the Go toolchain's code-executing verbs
         (go build/test/vet/mod, gofmt, gofumpt), and `hooks`, the repo hook
         runners (prek, pre-commit; bead pg2-bg9qq), both deliberately NOT in the
-        handler-wide list. Granting a command does not put it on PATH; the
-        binaries come from the primary user's home-manager profile.
+        handler-wide list. Granting a command does not put it on PATH: a role
+        whose spec is built from `claudeBaseline` adds the set's binaries with
+        `claudeBaseline.extend { extraPathPkgs = [ ... ]; }` (the check
+        test-claude-baseline-role-tool-commands fails when they are absent); a
+        role without a spec gets them from the primary user's home-manager profile.
       '';
     };
 
@@ -1647,13 +1695,19 @@ in
       type = lib.types.raw;
       readOnly = true;
       description = ''
-        Read-only INTERIM helper (design ruling 20): `{ wrap; keep; pathDirs; }`
-        covering everything claude needs to run in a pool session (claude, the
-        enabled plugins' bare hook commands, the prompts' tools, the OTel endpoint
+        Read-only INTERIM helper (design ruling 20): `{ wrap; keep; pathDirs;
+        systemDirs; extend; }` covering everything claude needs to run in a pool
+        session (claude, the enabled plugins' bare hook commands, the prompts'
+        tools including git and nix, the system directories, the OTel endpoint
         and protocol without OTEL_SERVICE_NAME). Use as `roles.<name>.spec = {
         inherit (cfg.claudeBaseline) wrap keep; strictEnv = ...; }`. `wrap` is a
-        single env PATH=... entry, so a consumer may append its own entries after
-        it; `pathDirs` is the list of store bin directories that PATH is made of.
+        single env PATH=... entry (store directories, then the system directories
+        /usr/bin:/bin:/usr/sbin:/sbin; it also pins BEADS_DOLT_AUTO_START=0 and
+        BD_BACKUP_ENABLED=0), so a consumer may append its own entries after it;
+        `pathDirs` is the list of store bin directories and `systemDirs` the system
+        ones. `extend { bd ? <llm-agents beads>; extraPathPkgs ? [ ]; }` returns
+        the same shape with another bd and/or the role's own toolchain packages on
+        PATH (a role that declares a tool set, e.g. `go`, adds its binaries here).
         `pn` joins the PATH only when the consumer's `pkgs` carries `pkgs.pn`.
         Set unconditionally, like the other read-only outputs.
       '';

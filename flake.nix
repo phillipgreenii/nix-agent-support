@@ -4493,7 +4493,7 @@
 
                   # The baseline resolves the commands the design names, whatever
                   # the scan finds.
-                  for c in claude ccpool claude-extended-tool-approver session-mode claude-work-start claude-work-end gh bd jq pg-connector; do
+                  for c in claude ccpool claude-extended-tool-approver session-mode claude-work-start claude-work-end gh bd jq git nix pg-connector; do
                     resolves "$c" ${pathDirsFile} || { echo "FAIL: baseline PATH lacks '$c'" >&2; exit 1; }
                   done
 
@@ -4530,6 +4530,158 @@
                   grep -q "k31-missing-ccpool-cmd" neg2.log
 
                   echo "ok: baseline PATH covers every bare hook command; violating fixtures are flagged"
+                  touch $out
+                '';
+
+              # test-claude-baseline-role-tool-commands (bead pg2-hou7i): the role
+              # half of the hook-command scan above. Every `Bash(<cmd> ...)` grant in
+              # a role's EFFECTIVE allowed tools (the handler-wide `allowedTools` +
+              # `extraAllowedTools`, the role's own `extraAllowedTools` and the grants
+              # of every tool set it declares) names a bare command; that command
+              # MUST resolve in a store directory of the PATH the role's spec sets
+              # (the LAST `PATH=` entry of its wrap, as sequential `env` calls
+              # replace it). Roles: one on the plain baseline (pure generic
+              # grants: git, nix, bd, pg-connector, ccpool) and one that declares the
+              # `go` and `hooks` tool sets and adds its own toolchain with
+              # `claudeBaseline.extend`. Negative fixtures: the same role WITHOUT its
+              # toolchain, and a grant naming a command nothing provides, are flagged.
+              test-claude-baseline-role-tool-commands =
+                let
+                  inherit (import ./tests/pg-router-ccpool-handler-eval-hm.nix { inherit lib pkgs llm-agents; })
+                    evalHM
+                    ;
+                  baseline0 = (evalHM { }).phillipgreenii.programs.pg-router-ccpool-handler.claudeBaseline;
+                  goBaseline = baseline0.extend {
+                    extraPathPkgs = [
+                      pkgs.go
+                      pkgs.gofumpt
+                      pkgs.prek
+                      pkgs.pre-commit
+                    ];
+                  };
+                  roleBase = {
+                    actor = "k-actor";
+                    completion = "close-only";
+                    onFailure = "unclaim";
+                    onDispatchFail = "leave";
+                    promptBody = "p";
+                  };
+                  mkRole = baseline: extra: {
+                    type = "ccpool";
+                    ccpool = roleBase // extra;
+                    spec = {
+                      inherit (baseline) wrap keep;
+                      strictEnv = true;
+                      exec = [ "${pkgs.coreutils}/bin/true" ];
+                    };
+                  };
+                  eval = evalHM {
+                    enable = true;
+                    pool = {
+                      enable = true;
+                      dir = "/tmp/hou7i-pool";
+                    };
+                    roles = {
+                      plain = mkRole baseline0 { };
+                      golang = mkRole goBaseline {
+                        toolSets = [
+                          "go"
+                          "hooks"
+                        ];
+                      };
+                      # A go role that forgot its toolchain: the scan must flag it.
+                      forgot = mkRole baseline0 { toolSets = [ "go" ]; };
+                    };
+                  };
+                  cfg = eval.phillipgreenii.programs.pg-router-ccpool-handler;
+                  effectiveTools =
+                    r:
+                    lib.concatStringsSep "," (
+                      [ cfg.launchConfig.allowedTools ]
+                      ++ cfg.launchConfig.extraAllowedTools
+                      ++ r.ccpool.extraAllowedTools
+                      ++ lib.concatMap (n: cfg.toolSets.${n}) r.ccpool.toolSets
+                    )
+                    + "\n";
+                  specPathDirs =
+                    r:
+                    let
+                      entries = lib.concatMap (e: if builtins.isList e then e else [ e ]) r.spec.wrap;
+                      paths = lib.filter (lib.hasPrefix "PATH=") entries;
+                    in
+                    lib.concatStringsSep "\n" (lib.splitString ":" (lib.removePrefix "PATH=" (lib.last paths))) + "\n";
+                  files = name: {
+                    tools = pkgs.writeText "${name}-tools" (effectiveTools cfg.roles.${name});
+                    dirs = pkgs.writeText "${name}-pathdirs" (specPathDirs cfg.roles.${name});
+                  };
+                  plain = files "plain";
+                  golang = files "golang";
+                  forgot = files "forgot";
+                in
+                pkgs.runCommand "test-claude-baseline-role-tool-commands" { } ''
+                  # resolves <command> <pathdirs-file>: some listed STORE dir holds an
+                  # executable <dir>/<command> (system dirs do not exist in the sandbox
+                  # and are never counted as providing a role's tool).
+                  resolves() {
+                    local c="$1" d
+                    while IFS= read -r d; do
+                      case "$d" in /nix/store/*) ;; *) continue ;; esac
+                      [ -x "$d/$c" ] && return 0
+                    done < "$2"
+                    return 1
+                  }
+
+                  # scan <tools-file> <pathdirs-file> <label>: every bare Bash(<cmd>
+                  # grant resolves; violations to stderr, exit status = their count.
+                  scan() {
+                    local bad=0 scanned=0 c
+                    for c in $(grep -o 'Bash([^ :)]*' "$1" | sed 's/^Bash(//' | sort -u); do
+                      scanned=$((scanned + 1))
+                      if resolves "$c" "$2"; then
+                        echo "ok: $3 $c" >&2
+                      else
+                        echo "FAIL: $3 grants bare command '$c', which is not on its spec PATH" >&2
+                        bad=$((bad + 1))
+                      fi
+                    done
+                    echo "$3: scanned $scanned bare tool command(s)" >&2
+                    [ "$scanned" -gt 0 ] || { echo "FAIL: scan found no Bash grants -- scan is broken" >&2; return 99; }
+                    return "$bad"
+                  }
+
+                  scan ${plain.tools} ${plain.dirs} plain 2>pos1.log || { cat pos1.log >&2; echo "FAIL: the plain baseline role has an unresolved tool command" >&2; exit 1; }
+                  cat pos1.log >&2
+                  for c in git nix bd pg-connector ccpool; do
+                    grep -qx "ok: plain $c" pos1.log || { echo "FAIL: scan never saw '$c'" >&2; exit 1; }
+                  done
+
+                  scan ${golang.tools} ${golang.dirs} golang 2>pos2.log || { cat pos2.log >&2; echo "FAIL: the go role has an unresolved tool command" >&2; exit 1; }
+                  cat pos2.log >&2
+                  for c in go gofmt gofumpt prek pre-commit; do
+                    grep -qx "ok: golang $c" pos2.log || { echo "FAIL: scan never saw '$c'" >&2; exit 1; }
+                  done
+
+                  # Negative 1: a role declaring the go set on the plain baseline.
+                  if scan ${forgot.tools} ${forgot.dirs} forgot 2>neg1.log; then
+                    echo "FAIL: negative fixture (go tool set without the toolchain) was NOT flagged" >&2
+                    exit 1
+                  fi
+                  grep -q "bare command 'go'" neg1.log
+
+                  # Negative 2: a grant naming a command nothing provides.
+                  printf '%s\n' 'Read,Bash(k-hou7i-missing-cmd:*)' > neg2-tools
+                  if scan neg2-tools ${plain.dirs} neg 2>neg2.log; then
+                    echo "FAIL: negative fixture (unprovided command) was NOT flagged" >&2
+                    exit 1
+                  fi
+                  grep -q "k-hou7i-missing-cmd" neg2.log
+
+                  # The rendered baseline PATH carries the system directories, last.
+                  grep -qx '/nix/store/.*' ${plain.dirs}
+                  [ "$(tail -n 4 ${plain.dirs} | paste -sd: -)" = "/usr/bin:/bin:/usr/sbin:/sbin" ] \
+                    || { echo "FAIL: system dirs are not the last four PATH entries" >&2; exit 1; }
+
+                  echo "ok: every role tool command resolves on its spec PATH; violating fixtures are flagged"
                   touch $out
                 '';
 
