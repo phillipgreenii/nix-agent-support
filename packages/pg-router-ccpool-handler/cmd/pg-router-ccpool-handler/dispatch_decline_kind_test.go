@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/executor"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/wire"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -38,7 +39,7 @@ func TestBusyDeclineFor_kindPerReason(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			d, ok := busyDeclineFor(c.err)
+			d, ok := wire.BusyDeclineFor(c.err)
 			if !ok {
 				t.Fatalf("%v must be a decline", c.err)
 			}
@@ -54,9 +55,9 @@ func TestBusyDeclineFor_kindPerReason(t *testing.T) {
 
 func TestNeutralDecline_originUnavailableAndSkipped(t *testing.T) {
 	for _, reason := range []string{busyReasonOriginUnavailable, executor.SkipBeadClosed, executor.SkipPRMerged, executor.SkipPendingReview, executor.SkipBeadNotOpen, executor.SkipBeadClaimed, executor.SkipBeadHuman} {
-		d := neutralDecline(reason, "")
+		d := wire.NeutralDecline(reason, "")
 		if d.Reason != reason || d.Kind != "neutral" || d.Detail != "" {
-			t.Errorf("neutralDecline(%q) = %+v", reason, d)
+			t.Errorf("wire.NeutralDecline(%q) = %+v", reason, d)
 		}
 	}
 }
@@ -66,7 +67,7 @@ func TestNeutralDecline_originUnavailableAndSkipped(t *testing.T) {
 func TestBusyDeclineFor_launchFailedDetailIsBoundedAndRedacted(t *testing.T) {
 	secret := "Bearer abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"
 	long := "ccpool new: " + secret + " " + strings.Repeat("é", schemas.DeclineDetailMaxLen) + " the diagnosis" // 2-byte runes
-	d, ok := busyDeclineFor(&executor.LaunchFailedError{Tail: long, Err: errors.New("x")})
+	d, ok := wire.BusyDeclineFor(&executor.LaunchFailedError{Tail: long, Err: errors.New("x")})
 	if !ok {
 		t.Fatal("must decline")
 	}
@@ -88,16 +89,16 @@ func TestBusyDeclineFor_launchFailedDetailIsBoundedAndRedacted(t *testing.T) {
 }
 
 func TestBoundedDetail_edges(t *testing.T) {
-	if got := boundedDetail("  short  "); got != "short" {
-		t.Errorf("boundedDetail trims: %q", got)
+	if got := wire.BoundedDetail("  short  "); got != "short" {
+		t.Errorf("wire.BoundedDetail trims: %q", got)
 	}
-	if got := boundedDetail(""); got != "" {
+	if got := wire.BoundedDetail(""); got != "" {
 		t.Errorf("empty stays empty: %q", got)
 	}
 	// Words, not one run, so the redactor's generic long-token pattern leaves it.
 	exact := strings.Repeat("ab ", schemas.DeclineDetailMaxLen/3) + "ab"
 	exact = exact[:schemas.DeclineDetailMaxLen]
-	for name, f := range map[string]func(string) string{"head": boundedDetail, "tail": boundedTailDetail} {
+	for name, f := range map[string]func(string) string{"head": wire.BoundedDetail, "tail": wire.BoundedTailDetail} {
 		if got := f(exact); got != strings.TrimSpace(exact) {
 			t.Errorf("%s: a detail at the bound is kept whole, got %d bytes", name, len(got))
 		}
@@ -105,22 +106,22 @@ func TestBoundedDetail_edges(t *testing.T) {
 			t.Errorf("%s: a detail over the bound is cut to it, got %d bytes", name, len(got))
 		}
 	}
-	if got := boundedDetail(exact + " zz"); strings.HasSuffix(got, "zz") {
+	if got := wire.BoundedDetail(exact + " zz"); strings.HasSuffix(got, "zz") {
 		t.Errorf("head cut keeps the start: %q", got)
 	}
-	if got := boundedTailDetail(exact + " zz"); !strings.HasSuffix(got, "zz") {
+	if got := wire.BoundedTailDetail(exact + " zz"); !strings.HasSuffix(got, "zz") {
 		t.Errorf("tail cut keeps the end: %q", got)
 	}
 }
 
 func TestWriteBusyReply_bodyMatchesSchemaAndCarriesKind(t *testing.T) {
-	for _, d := range []busyDecline{
+	for _, d := range []wire.BusyDecline{
 		{Reason: "at-capacity", Kind: "busy"},
 		{Reason: "launch-failed", Kind: "fault", Detail: "ccpool new: boom"},
-		neutralDecline("skipped-bead-closed", "the review bead is already closed"),
+		wire.NeutralDecline("skipped-bead-closed", "the review bead is already closed"),
 	} {
 		var sb strings.Builder
-		writeBusyReply(&sb, d)
+		wire.WriteBusyReply(&sb, d)
 		if err := schemas.ValidateBytes("handler.dispatch-reply", []byte(sb.String())); err != nil {
 			t.Fatalf("body %s does not match the schema: %v", sb.String(), err)
 		}

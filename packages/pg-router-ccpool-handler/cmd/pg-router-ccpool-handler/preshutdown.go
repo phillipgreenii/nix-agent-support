@@ -14,25 +14,13 @@ import (
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/rolefile"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/wire"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/worktree"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 	"github.com/phillipgreenii/x/gitclient"
 )
-
-// gitWorktreeOpener is the production worktree.Opener wired into
-// servePreShutdown by runPreShutdown below: gitclient.New adapted to
-// worktree.Opener's covariant WorktreeManager return (mirrors
-// internal/executor.Deps.gitOpener's identical adapter closure). It anchors
-// directly at whatever dir it is given (closeUnlessNeedsInput passes s.CWD
-// itself, never RepoRoot) -- proven equivalent to `git worktree remove` run
-// from the repo root, since `git -C <worktree> worktree remove <worktree>`
-// removes a linked worktree from within itself just as well. Tests call
-// teardownAllSessions/closeUnlessNeedsInput directly with a fake
-// worktree.Opener instead of this default.
-var gitWorktreeOpener worktree.Opener = func(ctx context.Context, dir string) (gitclient.WorktreeManager, error) {
-	return gitclient.New(ctx, dir)
-}
 
 // runPreShutdown implements the `preShutdown` INTF-HANDLER subcommand
 // (pg2-oju6w.15): dispatched once per daemon shutdown, at the same point
@@ -56,8 +44,8 @@ var gitWorktreeOpener worktree.Opener = func(ctx context.Context, dir string) (g
 func runPreShutdown(args []string) int {
 	fs := flag.NewFlagSet("preShutdown", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	roleConfig := fs.String("role-config", os.Getenv(envRoleConfig), "path to this process's own role config JSON (or "+envRoleConfig+")")
-	cfgPath := fs.String("config", os.Getenv(envConfig), "path to this process's own launch config JSON (or "+envConfig+")")
+	roleConfig := fs.String("role-config", os.Getenv(rolefile.EnvRoleConfig), "path to this process's own role config JSON (or "+rolefile.EnvRoleConfig+")")
+	cfgPath := fs.String("config", os.Getenv(rolefile.EnvConfig), "path to this process's own launch config JSON (or "+rolefile.EnvConfig+")")
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Print(helpText)
@@ -74,18 +62,18 @@ func runPreShutdown(args []string) int {
 
 	// --role-config is deliberately NOT loaded here: teardownAllSessions
 	// below sweeps by SessionPrefix alone (config.Config, not the per-role
-	// roleFile) — every enabled role shares the same sweep, per this
+	// rolefile.RoleFile) — every enabled role shares the same sweep, per this
 	// function's own doc comment above. Parsed and accepted anyway (like
 	// dispatch's own --role-config) purely for CLI-surface symmetry; unused
 	// on purpose.
 	_ = roleConfig
-	cfg, err := loadConfig(*cfgPath)
+	cfg, err := rolefile.LoadConfig(*cfgPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "preShutdown:", err)
 		return conformance.ExitError
 	}
 
-	return servePreShutdown(ccpool.NewCLIRunner(cfg), gitWorktreeOpener, beads.NewCLIRunnerForRepo(cfg.RepoRoot, ""), cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, os.Stdin, os.Stdout)
+	return servePreShutdown(ccpool.NewCLIRunner(cfg), worktree.GitOpener, beads.NewCLIRunnerForRepo(cfg.RepoRoot, ""), cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, os.Stdin, os.Stdout)
 }
 
 // servePreShutdown is runPreShutdown's testable core, factored out so a test
@@ -100,20 +88,20 @@ func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, s
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
-		writeErrorReply(stdout, "malformed JSON: "+err.Error())
+		wire.WriteErrorReply(stdout, "malformed JSON: "+err.Error())
 		return conformance.ExitError
 	}
 	if err := conformance.Check("handler.preShutdown", v); err != nil {
-		writeErrorReply(stdout, err.Error())
+		wire.WriteErrorReply(stdout, err.Error())
 		return conformance.ExitError
 	}
-	var req lifecycleRequest
+	var req wire.LifecycleRequest
 	_ = json.Unmarshal(raw, &req)
 
 	closed := teardownAllSessions(context.Background(), cc, open, br, sessionPrefix, repoRoot, worktreeDir)
 	slog.Info("preShutdown: teardown", "closed", closed)
 
-	writeReply(stdout, map[string]any{
+	wire.WriteReply(stdout, map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
 		"id":            req.ID,
 		"outcome":       "ok",

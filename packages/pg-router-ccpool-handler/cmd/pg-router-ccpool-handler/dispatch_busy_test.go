@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/executor"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/wire"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -26,8 +27,8 @@ import (
 // (ADR 0072's Decision item 3).
 //
 // runDispatch has no seam to inject a fake executor (it builds Deps itself
-// from loadRole/loadConfig/buildDeps), so this goes through the REAL
-// buildDeps wiring — a real ccpool.CLIRunner shelling out to a `ccpool`
+// from rolefile.LoadRole/rolefile.LoadConfig/dispatchlib.BuildDeps), so this goes through the REAL
+// dispatchlib.BuildDeps wiring — a real ccpool.CLIRunner shelling out to a `ccpool`
 // binary. PATH holds only a stub `ccpool` (plus /usr/bin and /bin for its
 // shell) that lists an empty pool and fails every other subcommand, so the
 // prior-session read (INV-CCH-30) finds nothing in flight and the very next
@@ -66,8 +67,8 @@ func TestRunDispatch_poolCapacityUnknownExitsBusyWithReason(t *testing.T) {
 	if err := json.Unmarshal([]byte(got), &reply); err != nil {
 		t.Fatalf("stdout = %q, not valid JSON: %v", got, err)
 	}
-	if reply.Reason != busyReasonCapacityUnknown {
-		t.Fatalf("reason = %q, want %q", reply.Reason, busyReasonCapacityUnknown)
+	if reply.Reason != wire.BusyReasonCapacityUnknown {
+		t.Fatalf("reason = %q, want %q", reply.Reason, wire.BusyReasonCapacityUnknown)
 	}
 }
 
@@ -102,72 +103,72 @@ func TestRunDispatch_unreadablePoolExitsBusyPoolUnreadable(t *testing.T) {
 	if err := json.Unmarshal([]byte(got), &reply); err != nil {
 		t.Fatalf("stdout = %q, not valid JSON: %v", got, err)
 	}
-	if reply.Reason != "pool-unreadable" || busyReasonPoolUnreadable != "pool-unreadable" {
-		t.Fatalf("reason = %q (constant %q), want %q", reply.Reason, busyReasonPoolUnreadable, "pool-unreadable")
+	if reply.Reason != "pool-unreadable" || wire.BusyReasonPoolUnreadable != "pool-unreadable" {
+		t.Fatalf("reason = %q (constant %q), want %q", reply.Reason, wire.BusyReasonPoolUnreadable, "pool-unreadable")
 	}
-	if reply.Reason == busyReasonSessionInFlight {
-		t.Fatalf("an unreadable pool must not hide behind the alert-excluded %q", busyReasonSessionInFlight)
+	if reply.Reason == wire.BusyReasonSessionInFlight {
+		t.Fatalf("an unreadable pool must not hide behind the alert-excluded %q", wire.BusyReasonSessionInFlight)
 	}
 }
 
 // TestRunDispatch_busyDeclineForAtCapacity is dispatch.go's own
-// busyDeclineFor mapping tested directly (unit-level, no process/CLI
+// wire.BusyDeclineFor mapping tested directly (unit-level, no process/CLI
 // faking needed): the at-capacity branch — the OTHER admission-gate
 // sentinel from the capacity-unknown case above — maps to
-// busyReasonAtCapacity, and neither sentinel matches the other's tag.
+// wire.BusyReasonAtCapacity, and neither sentinel matches the other's tag.
 func TestRunDispatch_busyDeclineForAtCapacity(t *testing.T) {
-	decl, busy := busyDeclineFor(executor.ErrPoolAtCapacity)
+	decl, busy := wire.BusyDeclineFor(executor.ErrPoolAtCapacity)
 	reason := decl.Reason
 	if !busy {
 		t.Fatalf("ErrPoolAtCapacity must be recognized as a busy decline")
 	}
-	if reason != busyReasonAtCapacity {
-		t.Fatalf("reason = %q, want %q", reason, busyReasonAtCapacity)
+	if reason != wire.BusyReasonAtCapacity {
+		t.Fatalf("reason = %q, want %q", reason, wire.BusyReasonAtCapacity)
 	}
 }
 
 // TestRunDispatch_busyDeclineForLowDisk is dispatch.go's own
-// busyDeclineFor mapping tested directly for the low-disk sentinel (bead
+// wire.BusyDeclineFor mapping tested directly for the low-disk sentinel (bead
 // pg2-8vn8t, widening ADR 0072's Decision item 3's busy-decline set): an
 // isolation failure caused by a full filesystem (executor.ErrLowDisk) maps to
-// busyReasonLowDisk, distinct from either capacity reason above.
+// wire.BusyReasonLowDisk, distinct from either capacity reason above.
 func TestRunDispatch_busyDeclineForLowDisk(t *testing.T) {
-	decl, busy := busyDeclineFor(executor.ErrLowDisk)
+	decl, busy := wire.BusyDeclineFor(executor.ErrLowDisk)
 	reason := decl.Reason
 	if !busy {
 		t.Fatalf("ErrLowDisk must be recognized as a busy decline")
 	}
-	if reason != busyReasonLowDisk {
-		t.Fatalf("reason = %q, want %q", reason, busyReasonLowDisk)
+	if reason != wire.BusyReasonLowDisk {
+		t.Fatalf("reason = %q, want %q", reason, wire.BusyReasonLowDisk)
 	}
 }
 
-// TestRunDispatch_busyDeclineForNilAndOtherErrors proves busyDeclineFor
+// TestRunDispatch_busyDeclineForNilAndOtherErrors proves wire.BusyDeclineFor
 // reports ok=false for nil and for an unrelated error — it must not
 // misclassify a genuine dispatch failure as a busy decline.
 func TestRunDispatch_busyDeclineForNilAndOtherErrors(t *testing.T) {
-	if _, busy := busyDeclineFor(nil); busy {
+	if _, busy := wire.BusyDeclineFor(nil); busy {
 		t.Fatal("nil err must not be classified as a busy decline")
 	}
-	if _, busy := busyDeclineFor(errors.New("some other failure")); busy {
+	if _, busy := wire.BusyDeclineFor(errors.New("some other failure")); busy {
 		t.Fatal("an unrelated error must not be classified as a busy decline")
 	}
 }
 
 // TestRunDispatch_busyDeclineForCommandBusy is dispatch.go's own
-// busyDeclineFor mapping tested directly for the command role's exit-9
+// wire.BusyDeclineFor mapping tested directly for the command role's exit-9
 // sentinel (bead pg2-358u3): executor.ErrBusy, wrapped exactly as
-// internal/executor/command.go wraps it, maps to busyReasonCommandBusy,
+// internal/executor/command.go wraps it, maps to wire.BusyReasonCommandBusy,
 // distinct from the capacity and low-disk reasons.
 func TestRunDispatch_busyDeclineForCommandBusy(t *testing.T) {
 	wrapped := fmt.Errorf("command role %q item %s: %w: %w", "r", "b1", executor.ErrBusy, errors.New("exit status 9"))
-	decl, busy := busyDeclineFor(wrapped)
+	decl, busy := wire.BusyDeclineFor(wrapped)
 	reason := decl.Reason
 	if !busy {
 		t.Fatalf("a wrapped executor.ErrBusy must be recognized as a busy decline")
 	}
-	if reason != busyReasonCommandBusy {
-		t.Fatalf("reason = %q, want %q", reason, busyReasonCommandBusy)
+	if reason != wire.BusyReasonCommandBusy {
+		t.Fatalf("reason = %q, want %q", reason, wire.BusyReasonCommandBusy)
 	}
 }
 
@@ -177,16 +178,16 @@ func TestRunDispatch_busyDeclineForCommandBusy(t *testing.T) {
 // busy reason (the failure-rate alert excludes exactly this tag).
 func TestRunDispatch_busyDeclineForSessionInFlight(t *testing.T) {
 	wrapped := fmt.Errorf("%w: session s-1: its turn is in progress for another event (e-0)", executor.ErrSessionInFlight)
-	decl, busy := busyDeclineFor(wrapped)
+	decl, busy := wire.BusyDeclineFor(wrapped)
 	reason := decl.Reason
 	if !busy {
 		t.Fatalf("a wrapped executor.ErrSessionInFlight must be recognized as a busy decline")
 	}
 	// The literal is pinned too: the failure-rate alert's exclusion matches it.
-	if reason != "session-in-flight" || busyReasonSessionInFlight != "session-in-flight" {
-		t.Fatalf("reason = %q (constant %q), want %q", reason, busyReasonSessionInFlight, "session-in-flight")
+	if reason != "session-in-flight" || wire.BusyReasonSessionInFlight != "session-in-flight" {
+		t.Fatalf("reason = %q (constant %q), want %q", reason, wire.BusyReasonSessionInFlight, "session-in-flight")
 	}
-	for _, other := range []string{busyReasonAtCapacity, busyReasonCapacityUnknown, busyReasonLowDisk, busyReasonCommandBusy} {
+	for _, other := range []string{wire.BusyReasonAtCapacity, wire.BusyReasonCapacityUnknown, wire.BusyReasonLowDisk, wire.BusyReasonCommandBusy} {
 		if other == reason {
 			t.Fatalf("session-in-flight must carry its own tag, not %q", other)
 		}
@@ -199,7 +200,7 @@ func TestRunDispatch_busyDeclineForSessionInFlight(t *testing.T) {
 // particular from session-in-flight, which the failure-rate alert excludes.
 func TestRunDispatch_busyDeclineForPoolUnreadable(t *testing.T) {
 	wrapped := fmt.Errorf("%w: ccpool list: boom", executor.ErrPoolUnreadable)
-	decl, busy := busyDeclineFor(wrapped)
+	decl, busy := wire.BusyDeclineFor(wrapped)
 	reason := decl.Reason
 	if !busy {
 		t.Fatalf("a wrapped executor.ErrPoolUnreadable must be recognized as a busy decline")
@@ -207,7 +208,7 @@ func TestRunDispatch_busyDeclineForPoolUnreadable(t *testing.T) {
 	if reason != "pool-unreadable" {
 		t.Fatalf("reason = %q, want %q", reason, "pool-unreadable")
 	}
-	for _, other := range []string{busyReasonAtCapacity, busyReasonCapacityUnknown, busyReasonLowDisk, busyReasonCommandBusy, busyReasonSessionInFlight} {
+	for _, other := range []string{wire.BusyReasonAtCapacity, wire.BusyReasonCapacityUnknown, wire.BusyReasonLowDisk, wire.BusyReasonCommandBusy, wire.BusyReasonSessionInFlight} {
 		if other == reason {
 			t.Fatalf("pool-unreadable must carry its own tag, not %q", other)
 		}
@@ -249,8 +250,8 @@ func TestRunDispatch_commandRoleExit9ExitsBusyWithReason(t *testing.T) {
 	if err := json.Unmarshal([]byte(got), &reply); err != nil {
 		t.Fatalf("stdout = %q, not valid JSON: %v", got, err)
 	}
-	if reply.Reason != busyReasonCommandBusy {
-		t.Fatalf("reason = %q, want %q", reply.Reason, busyReasonCommandBusy)
+	if reply.Reason != wire.BusyReasonCommandBusy {
+		t.Fatalf("reason = %q, want %q", reply.Reason, wire.BusyReasonCommandBusy)
 	}
 	if reply.Error != "" {
 		t.Fatalf("busy reply must carry no error text; got %q", reply.Error)

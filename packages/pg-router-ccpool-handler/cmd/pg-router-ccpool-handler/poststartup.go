@@ -8,19 +8,11 @@ import (
 	"io"
 	"os"
 
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/rolefile"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/wire"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
-
-// lifecycleRequest / lifecycleReply mirror
-// packages/pg-router/schemas/handler.postStartup{,-reply}.schema.json and
-// .../handler.preShutdown{,-reply}.schema.json (pg2-oju6w.15) — both hooks
-// share one wire shape (no event, no deferred branch), so one pair of types
-// backs both this file's runPostStartup and preshutdown.go's runPreShutdown.
-type lifecycleRequest struct {
-	SchemaVersion string `json:"schemaVersion"`
-	ID            string `json:"id"`
-}
 
 // runPostStartup implements the `postStartup` INTF-HANDLER subcommand
 // (pg2-oju6w.15): dispatched once per process lifetime, immediately after
@@ -34,8 +26,8 @@ type lifecycleRequest struct {
 func runPostStartup(args []string) int {
 	fs := flag.NewFlagSet("postStartup", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	_ = fs.String("role-config", os.Getenv(envRoleConfig), "path to this process's own role config JSON (or "+envRoleConfig+")")
-	_ = fs.String("config", os.Getenv(envConfig), "path to this process's own launch config JSON (or "+envConfig+")")
+	_ = fs.String("role-config", os.Getenv(rolefile.EnvRoleConfig), "path to this process's own role config JSON (or "+rolefile.EnvRoleConfig+")")
+	_ = fs.String("config", os.Getenv(rolefile.EnvConfig), "path to this process's own launch config JSON (or "+rolefile.EnvConfig+")")
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Print(helpText)
@@ -67,17 +59,17 @@ func servePostStartup(stdin io.Reader, stdout io.Writer) int {
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
-		writeErrorReply(stdout, "malformed JSON: "+err.Error())
+		wire.WriteErrorReply(stdout, "malformed JSON: "+err.Error())
 		return conformance.ExitError
 	}
 	if err := conformance.Check("handler.postStartup", v); err != nil {
-		writeErrorReply(stdout, err.Error())
+		wire.WriteErrorReply(stdout, err.Error())
 		return conformance.ExitError
 	}
-	var req lifecycleRequest
+	var req wire.LifecycleRequest
 	_ = json.Unmarshal(raw, &req)
 
-	writeReply(stdout, map[string]any{
+	wire.WriteReply(stdout, map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
 		"id":            req.ID,
 		"outcome":       "ok",

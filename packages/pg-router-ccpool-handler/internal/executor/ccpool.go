@@ -138,7 +138,7 @@ var ErrPoolCapacityUnknown = errors.New("ccpool: pool capacity unknown")
 // SAME error value as worktree.ErrLowDisk (not a distinct wrapping sentinel),
 // so errors.Is(err, ErrLowDisk) and errors.Is(err, worktree.ErrLowDisk) match
 // identically; this alias exists purely so callers outside this file (e.g.
-// cmd/pg-router-ccpool-handler/dispatch.go's busyDeclineFor, which already
+// internal/wire's BusyDeclineFor, which already
 // references this package's other two sentinels this same way) never need
 // their own import of internal/worktree just to check it.
 var ErrLowDisk = worktree.ErrLowDisk
@@ -312,7 +312,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			// (distinguishable from a generic exit-128 at a glance, unlike
 			// before this fix) and returned with no bead mutation at all, so the
 			// caller (cmd/pg-router-ccpool-handler/dispatch.go's
-			// busyDeclineFor) can map it to a pre-accept decline instead
+			// wire.BusyDeclineFor) can map it to a pre-accept decline instead
 			// — the core simply re-offers later with backoff, same as
 			// ErrPoolAtCapacity.
 			slog.Warn("dispatch declined: low disk space preparing isolation", "role", d.Role.Name, "bead", d.Item.ID, "err", wtErr)

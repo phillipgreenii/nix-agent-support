@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/originprobe"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/rolefile"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
@@ -89,7 +90,7 @@ func runOrigin(args []string) int { return runOriginTo(args, os.Stdout, os.Stder
 func runOriginTo(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("origin", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	cfgPath := fs.String("config", os.Getenv(envConfig), "path to this process's own launch config JSON (or "+envConfig+")")
+	cfgPath := fs.String("config", os.Getenv(rolefile.EnvConfig), "path to this process's own launch config JSON (or "+rolefile.EnvConfig+")")
 	// flag stops at the first non-flag, so the verb comes first: origin <verb> [flags] [key].
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "origin: a verb is required (status|ignore|unignore)")
@@ -104,7 +105,7 @@ func runOriginTo(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "origin:", err)
 		return conformance.ExitUsage
 	}
-	cfg, err := loadConfig(*cfgPath)
+	cfg, err := rolefile.LoadConfig(*cfgPath)
 	if err != nil {
 		fmt.Fprintln(stderr, "origin:", err)
 		return conformance.ExitError

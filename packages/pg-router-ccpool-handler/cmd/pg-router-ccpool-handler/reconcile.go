@@ -33,7 +33,7 @@ import (
 //
 // Scope: it runs against ONE pool -- the runner it is handed. From
 // dispatch.go's runDispatch that is the dispatching role's own pool
-// (deps.CC, scoped by buildDeps), so a role reconciles only its own pool's
+// (deps.CC, scoped by dispatchlib.BuildDeps), so a role reconciles only its own pool's
 // sessions; query.go's call is the guarded default-pool pass. It handles closed
 // beads only; sessions whose HANDLER died while the bead is still open are the
 // separate, role-scoped orphan reconcile (orphan.go, INV-CCH-18), which

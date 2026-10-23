@@ -1,4 +1,4 @@
-package main
+package rolefile
 
 import (
 	"os"
@@ -8,13 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/budget"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
 
-// TestLoadConfig_rejectsInvalidPermissionMode proves loadConfig — this
+// TestLoadConfig_rejectsInvalidPermissionMode proves LoadConfig — this
 // module's own config-decoding entrypoint (dispatch.go calls it on every
 // dispatch) — rejects an invalid claude --permission-mode value AT ITS OWN
 // config-load time (docket pg2-oju6w Task 5.7's acceptance criterion), by
@@ -24,10 +23,10 @@ func TestLoadConfig_rejectsInvalidPermissionMode(t *testing.T) {
 	if err := os.WriteFile(p, []byte(`{"permissionMode":"yolo"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadConfig(p); err == nil {
-		t.Fatal("loadConfig with an invalid permissionMode must fail, got nil error")
+	if _, err := LoadConfig(p); err == nil {
+		t.Fatal("LoadConfig with an invalid permissionMode must fail, got nil error")
 	} else if !strings.Contains(err.Error(), "invalid permissionMode") {
-		t.Errorf("loadConfig error must name the invalid permissionMode; got %v", err)
+		t.Errorf("LoadConfig error must name the invalid permissionMode; got %v", err)
 	}
 }
 
@@ -38,9 +37,9 @@ func TestLoadConfig_acceptsValidPermissionMode(t *testing.T) {
 	if err := os.WriteFile(p, []byte(`{"permissionMode":"plan"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadConfig(p)
+	cfg, err := LoadConfig(p)
 	if err != nil {
-		t.Fatalf("loadConfig with a valid permissionMode must succeed: %v", err)
+		t.Fatalf("LoadConfig with a valid permissionMode must succeed: %v", err)
 	}
 	if cfg.PermissionMode != "plan" {
 		t.Errorf("PermissionMode = %q, want plan", cfg.PermissionMode)
@@ -56,9 +55,9 @@ func TestLoadConfig_ignoresRetiredPRToolKey(t *testing.T) {
 	if err := os.WriteFile(p, []byte(`{"prTool":"legacy-pr-tool","permissionMode":"plan"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadConfig(p)
+	cfg, err := LoadConfig(p)
 	if err != nil {
-		t.Fatalf("loadConfig with a retired prTool key must still succeed: %v", err)
+		t.Fatalf("LoadConfig with a retired prTool key must still succeed: %v", err)
 	}
 	if cfg.PermissionMode != "plan" {
 		t.Errorf("PermissionMode = %q, want plan (other keys must still decode)", cfg.PermissionMode)
@@ -74,16 +73,16 @@ func TestLoadConfig_ignoresRetiredPRToolKey(t *testing.T) {
 // TestLoadConfig_emptyPathValidatesDefault proves the empty-path/Default()
 // shortcut is validated too, not skipped.
 func TestLoadConfig_emptyPathValidatesDefault(t *testing.T) {
-	cfg, err := loadConfig("")
+	cfg, err := LoadConfig("")
 	if err != nil {
-		t.Fatalf("loadConfig(\"\") must succeed against config.Default(): %v", err)
+		t.Fatalf("LoadConfig(\"\") must succeed against config.Default(): %v", err)
 	}
 	if cfg.PermissionMode != "dontAsk" {
 		t.Errorf("PermissionMode = %q, want dontAsk (config.Default())", cfg.PermissionMode)
 	}
 }
 
-// budgetRoleTemplate is a minimal valid ccpool roleFile carrying a
+// budgetRoleTemplate is a minimal valid ccpool RoleFile carrying a
 // budget.tokens/budget.cost/budget.time block, used by the budget-decode
 // tests below (pg2-r8al1).
 const budgetRoleTemplate = `{
@@ -111,12 +110,12 @@ func mustWriteRoleFile(t *testing.T, body string) string {
 // TestLoadRole_decodesCCPoolBudget proves --role-config JSON's
 // budget.tokens/budget.cost/budget.time decode into
 // roles.CCPoolConfig.Budget correctly (pg2-r8al1 acceptance criterion 1) —
-// before this, roleFile.CCPool carried no Budget field at all, so a role
+// before this, RoleFile.CCPool carried no Budget field at all, so a role
 // config could never populate anything but the unlimited Go zero value.
 func TestLoadRole_decodesCCPoolBudget(t *testing.T) {
-	role, err := loadRole(mustWriteRoleFile(t, budgetRoleTemplate))
+	role, err := LoadRole(mustWriteRoleFile(t, budgetRoleTemplate))
 	if err != nil {
-		t.Fatalf("loadRole: %v", err)
+		t.Fatalf("LoadRole: %v", err)
 	}
 	got := role.CCPool.Budget
 	if got.Tokens != 5000 {
@@ -131,11 +130,11 @@ func TestLoadRole_decodesCCPoolBudget(t *testing.T) {
 }
 
 // TestLoadRole_ccpoolBudgetAbsentIsUnlimited is the positive control: a
-// roleFile with no "budget" block at all still decodes cleanly to the
+// RoleFile with no "budget" block at all still decodes cleanly to the
 // unlimited zero value (today's unchanged behavior for a role that never
 // wants a watchdog, e.g. "feedback").
 func TestLoadRole_ccpoolBudgetAbsentIsUnlimited(t *testing.T) {
-	role, err := loadRole(mustWriteRoleFile(t, `{
+	role, err := LoadRole(mustWriteRoleFile(t, `{
 		"name": "feedback",
 		"type": "ccpool",
 		"ccpool": {
@@ -147,7 +146,7 @@ func TestLoadRole_ccpoolBudgetAbsentIsUnlimited(t *testing.T) {
 		}
 	}`))
 	if err != nil {
-		t.Fatalf("loadRole: %v", err)
+		t.Fatalf("LoadRole: %v", err)
 	}
 	b := role.CCPool.Budget
 	if !b.Tokens.Unlimited() || !b.Cost.Unlimited() || b.Time > 0 {
@@ -160,7 +159,7 @@ func TestLoadRole_ccpoolBudgetAbsentIsUnlimited(t *testing.T) {
 // dedicated ccpool pool override buildDeps (dispatch.go) reads to scope this
 // role's own CLIRunner via ccpool.NewCLIRunnerForPool.
 func TestLoadRole_decodesPoolDir(t *testing.T) {
-	role, err := loadRole(mustWriteRoleFile(t, `{
+	role, err := LoadRole(mustWriteRoleFile(t, `{
 		"name": "review",
 		"type": "ccpool",
 		"ccpool": {
@@ -173,20 +172,20 @@ func TestLoadRole_decodesPoolDir(t *testing.T) {
 		}
 	}`))
 	if err != nil {
-		t.Fatalf("loadRole: %v", err)
+		t.Fatalf("LoadRole: %v", err)
 	}
 	if role.CCPool.PoolDir != "/state/pg-router-ccpool-review" {
 		t.Errorf("PoolDir = %q, want %q", role.CCPool.PoolDir, "/state/pg-router-ccpool-review")
 	}
 }
 
-// TestLoadRole_poolDirAbsentIsEmpty is the positive control: a roleFile with
+// TestLoadRole_poolDirAbsentIsEmpty is the positive control: a RoleFile with
 // no "poolDir" key at all still decodes cleanly to "" (today's unchanged
 // behavior — buildDeps only overrides the pool when PoolDir is non-empty).
 func TestLoadRole_poolDirAbsentIsEmpty(t *testing.T) {
-	role, err := loadRole(mustWriteRoleFile(t, budgetRoleTemplate))
+	role, err := LoadRole(mustWriteRoleFile(t, budgetRoleTemplate))
 	if err != nil {
-		t.Fatalf("loadRole: %v", err)
+		t.Fatalf("LoadRole: %v", err)
 	}
 	if role.CCPool.PoolDir != "" {
 		t.Errorf("PoolDir = %q, want \"\" (no poolDir key in budgetRoleTemplate)", role.CCPool.PoolDir)
@@ -198,7 +197,7 @@ func TestLoadRole_poolDirAbsentIsEmpty(t *testing.T) {
 // "unlimited, no watchdog" per role — the bug report's "feedback" example)
 // decodes to Time == 0, not an error and not a nonzero duration.
 func TestLoadRole_ccpoolBudgetExplicitZeroTimeIsUnlimited(t *testing.T) {
-	role, err := loadRole(mustWriteRoleFile(t, `{
+	role, err := LoadRole(mustWriteRoleFile(t, `{
 		"name": "feedback",
 		"type": "ccpool",
 		"ccpool": {
@@ -211,7 +210,7 @@ func TestLoadRole_ccpoolBudgetExplicitZeroTimeIsUnlimited(t *testing.T) {
 		}
 	}`))
 	if err != nil {
-		t.Fatalf("loadRole: %v", err)
+		t.Fatalf("LoadRole: %v", err)
 	}
 	if role.CCPool.Budget.Time != 0 {
 		t.Errorf("explicit budget.time=0s must decode to Time==0 (unlimited), got %v", role.CCPool.Budget.Time)
@@ -219,7 +218,7 @@ func TestLoadRole_ccpoolBudgetExplicitZeroTimeIsUnlimited(t *testing.T) {
 }
 
 // TestLoadRole_ccpoolBudgetInvalidTimeErrors proves a malformed budget.time
-// fails loadRole with an error naming budget.time, rather than silently
+// fails LoadRole with an error naming budget.time, rather than silently
 // zeroing it or panicking.
 func TestLoadRole_ccpoolBudgetInvalidTimeErrors(t *testing.T) {
 	p := mustWriteRoleFile(t, `{
@@ -234,29 +233,29 @@ func TestLoadRole_ccpoolBudgetInvalidTimeErrors(t *testing.T) {
 			"budget": {"time": "not-a-duration"}
 		}
 	}`)
-	if _, err := loadRole(p); err == nil {
-		t.Fatal("loadRole with an invalid budget.time must fail, got nil error")
+	if _, err := LoadRole(p); err == nil {
+		t.Fatal("LoadRole with an invalid budget.time must fail, got nil error")
 	} else if !strings.Contains(err.Error(), "budget.time") {
-		t.Errorf("loadRole error must name budget.time; got %v", err)
+		t.Errorf("LoadRole error must name budget.time; got %v", err)
 	}
 }
 
 // TestOverlayBudgetThresholds_ccpoolRoleGetsCfgThresholds proves
-// overlayBudgetThresholds fills a ccpool role's Budget.Thresholds from the
+// OverlayBudgetThresholds fills a ccpool role's Budget.Thresholds from the
 // launch cfg's pool-wide Reminder/Cancel/HardPct, without disturbing the
-// per-role Tokens/Cost/Time loadRole already decoded — without this, a role
+// per-role Tokens/Cost/Time LoadRole already decoded — without this, a role
 // with any finite budget would evaluate against a Thresholds{0,0,0} zero
 // value and hard-stop on its very first watchdog tick (see the function's
 // own doc comment).
 func TestOverlayBudgetThresholds_ccpoolRoleGetsCfgThresholds(t *testing.T) {
-	role, err := loadRole(mustWriteRoleFile(t, budgetRoleTemplate))
+	role, err := LoadRole(mustWriteRoleFile(t, budgetRoleTemplate))
 	if err != nil {
-		t.Fatalf("loadRole: %v", err)
+		t.Fatalf("LoadRole: %v", err)
 	}
 	cfg := config.Default()
 	cfg.ReminderPct, cfg.CancelPct, cfg.HardPct = 0.5, 0.75, 0.95
 
-	overlayBudgetThresholds(role, cfg)
+	OverlayBudgetThresholds(role, cfg)
 
 	want := budget.Thresholds{Reminder: 0.5, Cancel: 0.75, Hard: 0.95}
 	if role.CCPool.Budget.Thresholds != want {
@@ -267,18 +266,18 @@ func TestOverlayBudgetThresholds_ccpoolRoleGetsCfgThresholds(t *testing.T) {
 	}
 }
 
-// TestOverlayBudgetThresholds_commandRoleNoop proves overlayBudgetThresholds
+// TestOverlayBudgetThresholds_commandRoleNoop proves OverlayBudgetThresholds
 // is a safe no-op for a command role (CCPool == nil), rather than panicking
 // on a nil-pointer dereference.
 func TestOverlayBudgetThresholds_commandRoleNoop(t *testing.T) {
-	overlayBudgetThresholds(roles.Role{Name: "worker", Type: "command"}, config.Default())
+	OverlayBudgetThresholds(roles.Role{Name: "worker", Type: "command"}, config.Default())
 }
 
 // TestLoadRole_decodesBeadsDir proves the "beadsDir" key (bead pg2-2grpj)
 // decodes into roles.CCPoolConfig.BeadsDir, alongside the close-or-triage
 // completion the escalation triager uses.
 func TestLoadRole_decodesBeadsDir(t *testing.T) {
-	role, err := loadRole(mustWriteRoleFile(t, `{
+	role, err := LoadRole(mustWriteRoleFile(t, `{
 		"name": "pg2-escalation-triager",
 		"type": "ccpool",
 		"ccpool": {
@@ -291,7 +290,7 @@ func TestLoadRole_decodesBeadsDir(t *testing.T) {
 		}
 	}`))
 	if err != nil {
-		t.Fatalf("loadRole: %v", err)
+		t.Fatalf("LoadRole: %v", err)
 	}
 	if role.CCPool.BeadsDir != "/Users/x/pg2" || role.CCPool.Completion != roles.CloseOrTriage {
 		t.Errorf("BeadsDir=%q Completion=%q", role.CCPool.BeadsDir, role.CCPool.Completion)
@@ -315,7 +314,7 @@ func TestLoadRole_budgetStopEscalateAfter(t *testing.T) {
 		{"negative rejected", `,"budgetStopEscalateAfter":-1`, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			role, err := loadRole(mustWriteRoleFile(t, mk(tc.extra)))
+			role, err := LoadRole(mustWriteRoleFile(t, mk(tc.extra)))
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("want error")
@@ -337,35 +336,17 @@ func TestLoadRole_budgetStopEscalateAfter(t *testing.T) {
 }
 
 // pg2-lhi3b: an empty ccpool.actor would make bd fall back to git user.name
-// (the operator) for the role's claims, so loadRole rejects it.
+// (the operator) for the role's claims, so LoadRole rejects it.
 func TestLoadRole_rejectsEmptyCCPoolActor(t *testing.T) {
 	for _, actor := range []string{`""`, `"   "`} {
 		body := `{"name":"worker","type":"ccpool","ccpool":{"actor":` + actor + `,"completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"p"}}`
-		if _, err := loadRole(mustWriteRoleFile(t, body)); err == nil || !strings.Contains(err.Error(), "ccpool.actor is required") {
+		if _, err := LoadRole(mustWriteRoleFile(t, body)); err == nil || !strings.Contains(err.Error(), "ccpool.actor is required") {
 			t.Errorf("actor %s: err = %v, want ccpool.actor is required", actor, err)
 		}
 	}
 }
 
-// pg2-lhi3b: the production bd runner for a role carries that role's actor, so
-// the handler's own bd writes (unclaim, labels, comments) are attributed to the
-// role identity rather than to git user.name.
-func TestBuildDeps_bdRunnerCarriesRoleActor(t *testing.T) {
-	role, err := loadRole(mustWriteRoleFile(t, budgetRoleTemplate))
-	if err != nil {
-		t.Fatalf("loadRole: %v", err)
-	}
-	deps := buildDeps(config.Default(), role)
-	r, ok := deps.BD.(*beads.CLIRunner)
-	if !ok {
-		t.Fatalf("deps.BD is %T, want *beads.CLIRunner", deps.BD)
-	}
-	if r.Actor != "pgii-pool__worker" {
-		t.Errorf("bd runner Actor = %q, want pgii-pool__worker", r.Actor)
-	}
-}
-
-// prefetchRoleBody builds a ccpool roleFile whose isolation block is iso
+// prefetchRoleBody builds a ccpool RoleFile whose isolation block is iso
 // (bead pg2-hh32y). The sub-field names are Go's own (roles.IsolationConfig
 // carries no json tags), exactly what the nix module renders.
 func prefetchRoleBody(iso string) string {
@@ -376,9 +357,9 @@ func prefetchRoleBody(iso string) string {
 func TestLoadRole_decodesIsolationPrefetch(t *testing.T) {
 	iso := `{"Type":"worktree","Prefetch":{"Remote":"origin","Refspec":"pull/{{index .Item.Metadata \"pr_number\"}}/head",` +
 		`"Rev":"{{index .Item.Metadata \"head_sha\"}}","DiffBase":"origin/main","Timeout":"3m"}}`
-	r, err := loadRole(mustWriteRoleFile(t, prefetchRoleBody(iso)))
+	r, err := LoadRole(mustWriteRoleFile(t, prefetchRoleBody(iso)))
 	if err != nil {
-		t.Fatalf("loadRole: %v", err)
+		t.Fatalf("LoadRole: %v", err)
 	}
 	pf := r.CCPool.Isolation.Prefetch
 	if pf == nil || pf.Remote != "origin" || pf.DiffBase != "origin/main" || pf.Timeout != "3m" ||
@@ -388,7 +369,7 @@ func TestLoadRole_decodesIsolationPrefetch(t *testing.T) {
 }
 
 func TestLoadRole_prefetchAbsentIsNil(t *testing.T) {
-	r, err := loadRole(mustWriteRoleFile(t, prefetchRoleBody(`{"Type":"worktree"}`)))
+	r, err := LoadRole(mustWriteRoleFile(t, prefetchRoleBody(`{"Type":"worktree"}`)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +388,7 @@ func TestLoadRole_rejectsInvalidPrefetch(t *testing.T) {
 	}
 	for name, iso := range tests {
 		t.Run(name, func(t *testing.T) {
-			if _, err := loadRole(mustWriteRoleFile(t, prefetchRoleBody(iso))); err == nil {
+			if _, err := LoadRole(mustWriteRoleFile(t, prefetchRoleBody(iso))); err == nil {
 				t.Fatal("want an error")
 			}
 		})
@@ -435,7 +416,7 @@ func TestLoadRole_worktreeQuietWindow(t *testing.T) {
 		{"negative rejected", `,"worktreeQuietWindow":"-5s"`, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			role, err := loadRole(mustWriteRoleFile(t, mk(tc.extra)))
+			role, err := LoadRole(mustWriteRoleFile(t, mk(tc.extra)))
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "worktreeQuietWindow") {
 					t.Fatalf("err = %v, want a worktreeQuietWindow error", err)
@@ -474,7 +455,7 @@ func TestLoadRole_needsInputStall(t *testing.T) {
 		{"negative rejected", `,"needsInputStall":"-5m"`, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			role, err := loadRole(mustWriteRoleFile(t, mk(tc.extra)))
+			role, err := LoadRole(mustWriteRoleFile(t, mk(tc.extra)))
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "needsInputStall") {
 					t.Fatalf("err = %v, want a needsInputStall error", err)
@@ -502,19 +483,19 @@ func TestLoadConfig_needsInputStall(t *testing.T) {
 		}
 		return p
 	}
-	c, err := loadConfig(write(`{}`))
+	c, err := LoadConfig(write(`{}`))
 	if err != nil || c.NeedsInputStall != 15*time.Minute {
 		t.Fatalf("absent: %v, %v", c.NeedsInputStall, err)
 	}
-	c, err = loadConfig(write(`{"NeedsInputStall":0}`))
+	c, err = LoadConfig(write(`{"NeedsInputStall":0}`))
 	if err != nil || c.NeedsInputStall != 0 {
 		t.Fatalf("zero must disable: %v, %v", c.NeedsInputStall, err)
 	}
-	c, err = loadConfig(write(`{"NeedsInputStall":1200000000000}`))
+	c, err = LoadConfig(write(`{"NeedsInputStall":1200000000000}`))
 	if err != nil || c.NeedsInputStall != 20*time.Minute {
 		t.Fatalf("20m in nanoseconds: %v, %v", c.NeedsInputStall, err)
 	}
-	if _, err = loadConfig(write(`{"NeedsInputStall":30000000000}`)); err == nil || !strings.Contains(err.Error(), "needsInputStall") {
+	if _, err = LoadConfig(write(`{"NeedsInputStall":30000000000}`)); err == nil || !strings.Contains(err.Error(), "needsInputStall") {
 		t.Fatalf("30s is under six polls and must be rejected naming the key, got %v", err)
 	}
 }
@@ -537,7 +518,7 @@ func TestLoadRole_extraAllowedTools(t *testing.T) {
 		{"empty entry rejected", `,"extraAllowedTools":[""]`, nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			role, err := loadRole(mustWriteRoleFile(t, mk(tc.extra)))
+			role, err := LoadRole(mustWriteRoleFile(t, mk(tc.extra)))
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "extraAllowedTools") {
 					t.Fatalf("err = %v, want an extraAllowedTools error", err)
@@ -581,7 +562,7 @@ func TestLoadRole_precheckAndCloseOrRelease(t *testing.T) {
 		{"unknown completion", "close-or-bogus", "", "", "invalid completion"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			role, err := loadRole(mustWriteRoleFile(t, mk(tc.completion, tc.extra)))
+			role, err := LoadRole(mustWriteRoleFile(t, mk(tc.completion, tc.extra)))
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err = %v, want %q", err, tc.wantErr)
@@ -625,7 +606,7 @@ func TestLoadRole_effort(t *testing.T) {
 		{"whitespace rejected", `,"effort":" high"`, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			role, err := loadRole(mustWriteRoleFile(t, mk(tc.extra)))
+			role, err := LoadRole(mustWriteRoleFile(t, mk(tc.extra)))
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "effort") || !strings.Contains(err.Error(), "xhigh") {
 					t.Fatalf("err = %v, want an effort error listing the valid levels", err)
@@ -647,9 +628,9 @@ const sessionEnvCCPoolBlock = `"ccpool":{"actor":"a","completion":"close-only","
 // INV-CCH-32/33: the per-role JSON decodes strictBaseEnv (bool, default false)
 // and sessionEnv (string map, default empty) onto roles.Role.
 func TestLoadRole_decodesSessionEnvAndStrictBaseEnv(t *testing.T) {
-	role, err := loadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","strictBaseEnv":true,"sessionEnv":{"K12_PROBE":"yes","PG_WRAP_SPEC":"/x.toml","EMPTY":""},`+sessionEnvCCPoolBlock+`}`))
+	role, err := LoadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","strictBaseEnv":true,"sessionEnv":{"K12_PROBE":"yes","PG_WRAP_SPEC":"/x.toml","EMPTY":""},`+sessionEnvCCPoolBlock+`}`))
 	if err != nil {
-		t.Fatalf("loadRole: %v", err)
+		t.Fatalf("LoadRole: %v", err)
 	}
 	if !role.StrictBaseEnv {
 		t.Error("StrictBaseEnv = false, want true")
@@ -661,9 +642,9 @@ func TestLoadRole_decodesSessionEnvAndStrictBaseEnv(t *testing.T) {
 }
 
 func TestLoadRole_sessionEnvAndStrictBaseEnvAbsentAreZero(t *testing.T) {
-	role, err := loadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool",`+sessionEnvCCPoolBlock+`}`))
+	role, err := LoadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool",`+sessionEnvCCPoolBlock+`}`))
 	if err != nil {
-		t.Fatalf("loadRole: %v", err)
+		t.Fatalf("LoadRole: %v", err)
 	}
 	if role.StrictBaseEnv {
 		t.Error("StrictBaseEnv = true, want false when absent")
@@ -676,10 +657,10 @@ func TestLoadRole_sessionEnvAndStrictBaseEnvAbsentAreZero(t *testing.T) {
 // strictBaseEnv on a ccpool role and sessionEnv on a command role are ignored at
 // dispatch, never a load error (validate warns, in a later packet).
 func TestLoadRole_crossTypeKeysAreNotLoadErrors(t *testing.T) {
-	if _, err := loadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","strictBaseEnv":true,`+sessionEnvCCPoolBlock+`}`)); err != nil {
+	if _, err := LoadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","strictBaseEnv":true,`+sessionEnvCCPoolBlock+`}`)); err != nil {
 		t.Errorf("strictBaseEnv on a ccpool role: %v", err)
 	}
-	role, err := loadRole(mustWriteRoleFile(t, `{"name":"c","type":"command","sessionEnv":{"K":"v"},"strictBaseEnv":true,"command":{"argv":["/bin/true"]}}`))
+	role, err := LoadRole(mustWriteRoleFile(t, `{"name":"c","type":"command","sessionEnv":{"K":"v"},"strictBaseEnv":true,"command":{"argv":["/bin/true"]}}`))
 	if err != nil {
 		t.Fatalf("sessionEnv on a command role: %v", err)
 	}
@@ -706,9 +687,9 @@ func TestLoadRole_rejectsBadSessionEnvKeys(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := mustWriteRoleFile(t, `{"name":"w","type":"ccpool","sessionEnv":{"`+tc.key+`":"v"},`+sessionEnvCCPoolBlock+`}`)
-			_, err := loadRole(p)
+			_, err := LoadRole(p)
 			if err == nil {
-				t.Fatalf("key %q: loadRole succeeded, want a load error", tc.key)
+				t.Fatalf("key %q: LoadRole succeeded, want a load error", tc.key)
 			}
 			for _, want := range []string{p, "sessionEnv", tc.wantKey} {
 				if !strings.Contains(err.Error(), want) {
@@ -722,7 +703,7 @@ func TestLoadRole_rejectsBadSessionEnvKeys(t *testing.T) {
 // Env var names are case-sensitive, so a lowercase near-miss is a valid key.
 func TestLoadRole_sessionEnvCollisionIsCaseSensitive(t *testing.T) {
 	for _, k := range []string{"beads_actor", "pg_router_role", "PG_ROUTE", "XPG_ROUTER_ROLE"} {
-		if _, err := loadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","sessionEnv":{"`+k+`":"v"},`+sessionEnvCCPoolBlock+`}`)); err != nil {
+		if _, err := LoadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","sessionEnv":{"`+k+`":"v"},`+sessionEnvCCPoolBlock+`}`)); err != nil {
 			t.Errorf("key %q must load: %v", k, err)
 		}
 	}
@@ -730,7 +711,7 @@ func TestLoadRole_sessionEnvCollisionIsCaseSensitive(t *testing.T) {
 
 // A non-string sessionEnv value is a decode error (a string-to-string map).
 func TestLoadRole_sessionEnvNonStringValueFails(t *testing.T) {
-	if _, err := loadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","sessionEnv":{"K":1},`+sessionEnvCCPoolBlock+`}`)); err == nil {
+	if _, err := LoadRole(mustWriteRoleFile(t, `{"name":"w","type":"ccpool","sessionEnv":{"K":1},`+sessionEnvCCPoolBlock+`}`)); err == nil {
 		t.Error("a numeric sessionEnv value must fail to decode")
 	}
 }

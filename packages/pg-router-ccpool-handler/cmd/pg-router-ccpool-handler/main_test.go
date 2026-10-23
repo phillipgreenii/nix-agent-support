@@ -3,6 +3,9 @@ package main
 import (
 	"os"
 	"testing"
+
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/corecall"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/rolefile"
 )
 
 // ambientEnvInputs are the process-environment variables this module reads
@@ -15,11 +18,11 @@ import (
 // (bead pg2-sljo4). The nix sandbox has none of them set, which is why the
 // failure only appeared in a plain `go test` run.
 var ambientEnvInputs = []string{
-	envConfig,
-	envRoleConfig,
+	rolefile.EnvConfig,
+	rolefile.EnvRoleConfig,
 	envQueryConfig,
-	envSocket,
-	envToken,
+	corecall.EnvSocket,
+	corecall.EnvToken,
 	"CCPOOL_POOL",
 }
 
@@ -33,7 +36,7 @@ func isolateAmbientEnv() {
 }
 
 // TestMain points XDG_STATE_HOME at a throwaway directory so that any test
-// that builds production deps (buildDeps opens <stateDir>/events.jsonl,
+// that builds production deps (dispatchlib.BuildDeps opens <stateDir>/events.jsonl,
 // bead pg2-ui2gk) never writes into the developer's real handler state dir,
 // and drops the ambient configuration inputs (see isolateAmbientEnv).
 func TestMain(m *testing.M) {

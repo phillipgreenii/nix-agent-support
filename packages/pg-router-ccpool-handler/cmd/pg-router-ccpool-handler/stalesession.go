@@ -65,8 +65,8 @@ func reconcileStaleDefaultPoolSessions(ctx context.Context, cc ccpool.Runner, op
 // real git opener, and the real clock and transcript scan. A session whose
 // bead lives in another tracker fails the bd lookup and is preserved.
 func reconcileDefaultPool(ctx context.Context, cfg config.Config) int {
-	guard := newStaleSessionGuard(gitWorktreeOpener, cfg.RepoRoot, staleSessionMinIdle, nil, nil)
-	return reconcileStaleDefaultPoolSessions(ctx, ccpool.NewCLIRunnerDefaultPool(cfg), gitWorktreeOpener,
+	guard := newStaleSessionGuard(worktree.GitOpener, cfg.RepoRoot, staleSessionMinIdle, nil, nil)
+	return reconcileStaleDefaultPoolSessions(ctx, ccpool.NewCLIRunnerDefaultPool(cfg), worktree.GitOpener,
 		beads.NewCLIRunnerForRepo(cfg.RepoRoot, ""), cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir,
 		newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil), guard)
 }

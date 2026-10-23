@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/wire"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -39,7 +40,7 @@ func TestOutcomeReply_carriesStartedAtOnlyWhenReported(t *testing.T) {
 		{"a fresh session reports none", time.Time{}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			b, err := json.Marshal(outcomeReply("d-1", `{"actions":[]}`, tc.startedAt))
+			b, err := json.Marshal(wire.OutcomeReply("d-1", `{"actions":[]}`, tc.startedAt))
 			if err != nil {
 				t.Fatal(err)
 			}

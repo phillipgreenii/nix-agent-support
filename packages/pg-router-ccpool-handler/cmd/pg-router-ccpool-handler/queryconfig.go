@@ -8,9 +8,9 @@ import (
 
 // envQueryConfig names this module's own per-process query configuration
 // input — the beads-backed filters ONE `query` invocation answers with
-// (docket pg2-oju6w's Task 5.8, mirroring envRoleConfig's own per-process
+// (docket pg2-oju6w's Task 5.8, mirroring rolefile.EnvRoleConfig's own per-process
 // role convention). An ABSENT --query-config/envQueryConfig is deliberately
-// NOT an error (unlike loadRole's own empty-path rejection): it is what
+// NOT an error (unlike rolefile.LoadRole's own empty-path rejection): it is what
 // keeps this module's `query` subcommand answering the same schema-legal,
 // zero-event stub reply it always has (see runQuery's own doc comment) for
 // any invocation that has not opted into the real beads-backed source yet.

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/rolefile"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -303,7 +304,7 @@ func TestRunValidate_cliFlags(t *testing.T) {
 	if code, r := reply("--role-config", role, "--skip-pool-dirs"); code != 0 || len(r.Problems) != 0 {
 		t.Fatalf("exit=%d problems=%q, want 0 and none with --skip-pool-dirs", code, r.Problems)
 	}
-	t.Setenv(envRoleConfig, role)
+	t.Setenv(rolefile.EnvRoleConfig, role)
 	if code, r := reply(); code != 0 || len(r.Problems) != 1 {
 		t.Fatalf("env fallback: exit=%d problems=%q", code, r.Problems)
 	}

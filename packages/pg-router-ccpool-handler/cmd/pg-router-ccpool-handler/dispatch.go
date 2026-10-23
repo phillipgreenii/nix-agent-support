@@ -10,69 +10,17 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
-	"time"
-	"unicode/utf8"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
-	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
-	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
-	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/eventlog"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/dispatchlib"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/executor"
-	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/failsig"
-	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
-	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/originprobe"
-	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
-	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/sessionlock"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/handlerstate"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/rolefile"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/wire"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/worktree"
 	"github.com/phillipgreenii/pg-router/conformance"
-	"github.com/phillipgreenii/pg-router/schemas"
 )
-
-// itemFromPayload reconstructs an item.Item from a dispatch event's opaque
-// payload object — this module's own local replacement for
-// packages/pg-router/internal/discover.ItemFromPayload, which is
-// unreachable from here (Go's internal-package visibility rule) and, as of
-// docket pg2-oju6w's Task 5.6, deleted entirely: the core-side
-// discover.ToQueueEvent now writes the item's fields directly at Payload's
-// top level (no wrapping key), and this function reads that same flat
-// shape — the SAME field names ItemFromPayload used to read, just no
-// longer nested under an "item" key (Task 5.6's "same shape, different
-// side" framing; docs/adr/0065's Addendum). A payload missing the expected
-// fields yields a zero item.Item rather than an error, matching
-// ItemFromPayload's own "absent path is a non-match, not an error" posture.
-func itemFromPayload(payload map[string]any) item.Item {
-	var it item.Item
-	if v, ok := payload["id"].(string); ok {
-		it.ID = v
-	}
-	if v, ok := payload["type"].(string); ok {
-		it.Type = v
-	}
-	if v, ok := payload["title"].(string); ok {
-		it.Title = v
-	}
-	if v, ok := payload["metadata"].(map[string]any); ok {
-		it.Metadata = v
-	}
-	return it
-}
-
-// dispatchRequest/dispatchEvent decode the handler.dispatch wire message
-// (packages/pg-router/schemas/handler.dispatch.schema.json /
-// .../event.schema.json).
-type dispatchRequest struct {
-	SchemaVersion string        `json:"schemaVersion"`
-	ID            string        `json:"id"`
-	Event         dispatchEvent `json:"event"`
-}
-
-type dispatchEvent struct {
-	ID      string         `json:"id"`
-	Type    string         `json:"type"`
-	Payload map[string]any `json:"payload"`
-}
 
 // runDispatch implements the `dispatch` INTF-HANDLER subcommand
 // (interfaces.md's "Dispatch (core -> handler)"): reads the request as JSON
@@ -100,15 +48,15 @@ func runDispatch(args []string) int {
 	// closes the read end of our stdout pipe. Everything the dispatch does is
 	// finished before the one reply write, so losing that write must not be a
 	// signalled death: subscribe to SIGPIPE so the write fails with EPIPE, is
-	// logged by writeReply, and the process exits normally. Notify, NOT
+	// logged by wire.WriteReply, and the process exits normally. Notify, NOT
 	// signal.Ignore: an ignored disposition is inherited across exec, so every
 	// child this dispatch starts (ccpool, bd, and through it the claude session)
 	// would run with SIGPIPE ignored; a Notify handler resets to the default.
 	pipeSignals := make(chan os.Signal, 1)
 	signal.Notify(pipeSignals, syscall.SIGPIPE)
 	defer signal.Stop(pipeSignals)
-	roleConfig := fs.String("role-config", os.Getenv(envRoleConfig), "path to this process's own role config JSON (or "+envRoleConfig+")")
-	cfgPath := fs.String("config", os.Getenv(envConfig), "path to this process's own launch config JSON (or "+envConfig+")")
+	roleConfig := fs.String("role-config", os.Getenv(rolefile.EnvRoleConfig), "path to this process's own role config JSON (or "+rolefile.EnvRoleConfig+")")
+	cfgPath := fs.String("config", os.Getenv(rolefile.EnvConfig), "path to this process's own launch config JSON (or "+rolefile.EnvConfig+")")
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Print(helpText)
@@ -130,26 +78,26 @@ func runDispatch(args []string) int {
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
-		writeErrorReply(os.Stdout, "malformed JSON: "+err.Error())
+		wire.WriteErrorReply(os.Stdout, "malformed JSON: "+err.Error())
 		return conformance.ExitError
 	}
 	if err := conformance.Check("handler.dispatch", v); err != nil {
-		writeErrorReply(os.Stdout, err.Error())
+		wire.WriteErrorReply(os.Stdout, err.Error())
 		return conformance.ExitError
 	}
 	// Check already proved raw decodes AND matches handler.dispatch's
 	// schema, so this second Unmarshal (into the typed shape) cannot fail —
 	// mirrors packages/pg-router/internal/core.DiscriminateReply's own
 	// "validate first, decode second" ordering.
-	var req dispatchRequest
+	var req wire.DispatchRequest
 	_ = json.Unmarshal(raw, &req)
 
-	role, err := loadRole(*roleConfig)
+	role, err := rolefile.LoadRole(*roleConfig)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "dispatch:", err)
 		return conformance.ExitError
 	}
-	cfg, err := loadConfig(*cfgPath)
+	cfg, err := rolefile.LoadConfig(*cfgPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "dispatch:", err)
 		return conformance.ExitError
@@ -164,22 +112,22 @@ func runDispatch(args []string) int {
 			return conformance.ExitError
 		}
 	}
-	overlayBudgetThresholds(role, cfg)
+	rolefile.OverlayBudgetThresholds(role, cfg)
 
-	dctx := executor.DispatchContext{Role: role, Item: itemFromPayload(req.Event.Payload), EventID: req.Event.ID}
+	dctx := executor.DispatchContext{Role: role, Item: dispatchlib.ItemFromPayload(req.Event.Payload), EventID: req.Event.ID}
 	// Origin availability gate (INV-CCH-10, bead pg2-4gi2c): decline BEFORE
-	// buildDeps, reconciliation, or any executor step, so a decline makes no bd
+	// dispatchlib.BuildDeps, reconciliation, or any executor step, so a decline makes no bd
 	// or ccpool call and mutates no bead. orchestrator.gated() is untouched —
 	// the gate lives here, at the handler boundary, because only the handler
 	// knows which repo a dispatch runs in.
 	// Every decline below writes one dispatch_decline record (INV-CCH-35) to the
 	// handler's event log just before its reply.
-	declineLog := newEventLog(cfg)
+	declineLog := handlerstate.NewEventLog(cfg)
 	if reason, declined := originGate(context.Background(), newOriginProber(cfg), role, cfg, dctx.Item.ID); declined {
-		declineAndReply(os.Stdout, declineLog, role, dctx.Item.ID, neutralDecline(reason, ""))
+		wire.DeclineAndReply(os.Stdout, declineLog, role, dctx.Item.ID, wire.NeutralDecline(reason, ""))
 		return conformance.ExitBusy
 	}
-	deps := buildDeps(cfg, role)
+	deps := dispatchlib.BuildDeps(cfg, role)
 	// The event payload's metadata is a snapshot from enqueue time. Re-read the
 	// bead's CURRENT metadata so the rendered prompt (e.g. a review's pinned
 	// head_sha) reflects the bead as it is at dispatch time, not as it was when
@@ -202,7 +150,7 @@ func runDispatch(args []string) int {
 	// (internal/executor/executor.go) — rather than an independent time.Now()
 	// call, so a caller that fakes Deps.Now for a deterministic test gets one
 	// consistent clock, not two.
-	deps.ExternalID = stampExternalID(role, cfg.SessionPrefix, dctx.Item.ID, deps.Now)
+	deps.ExternalID = dispatchlib.StampExternalID(role, cfg.SessionPrefix, dctx.Item.ID, deps.Now)
 	ctx := context.Background()
 	// Opportunistic reconciliation (pg2-hrppg): dispatch is this binary's own
 	// invocation that actually recurs frequently in production. query.go's
@@ -211,15 +159,15 @@ func runDispatch(args []string) int {
 	// sets --query-config there), so that hook never fires — this dispatch
 	// path, run once per queued item for every enabled ccpool role
 	// (review/feedback/worker), is the one that does. Scoped to
-	// role.CCPool != nil (mirrors overlayBudgetThresholds's own guard just
+	// role.CCPool != nil (mirrors rolefile.OverlayBudgetThresholds's own guard just
 	// above): a "command" role has no ccpool sessions to reconcile, and
 	// gating on it keeps a command-role dispatch (TestLiveDispatch_command)
 	// from touching ccpool/bd at all, exactly as it does today. Reuses
-	// deps.CC/deps.BD (buildDeps, above) rather than constructing a second
+	// deps.CC/deps.BD (dispatchlib.BuildDeps, above) rather than constructing a second
 	// pair of runners. Best effort: logged, never turned into a dispatch
 	// failure — the actual dispatch below is this subcommand's primary job.
 	if role.CCPool != nil {
-		if closed := reconcileClosedBeadSessions(ctx, deps.CC, gitWorktreeOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil)); closed > 0 {
+		if closed := reconcileClosedBeadSessions(ctx, deps.CC, worktree.GitOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil)); closed > 0 {
 			slog.Info("dispatch: reconciled sessions with closed beads", "closed", closed)
 		}
 		// Default-pool pass (pg2-wqi3e): a role with its own pool (or a process
@@ -241,7 +189,7 @@ func runDispatch(args []string) int {
 		// for this very dispatch. Deliberately NOT called from query.go's default-pool
 		// reconcile, which has no role. Best effort: never a dispatch failure.
 		if reclaimed, stopped := reconcileOrphanSessions(ctx, role, deps, orphanEnv{
-			open:    gitWorktreeOpener,
+			open:    worktree.GitOpener,
 			quiet:   newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil),
 			lockDir: deps.LockDir,
 		}); reclaimed+stopped > 0 {
@@ -253,7 +201,7 @@ func runDispatch(args []string) int {
 		// After the orphan reconcile, so a worktree that reconcile just released is
 		// not double-handled; best effort, never a dispatch failure.
 		if swept := sweepLeakedWorktrees(ctx, role, deps, orphanEnv{
-			open:    gitWorktreeOpener,
+			open:    worktree.GitOpener,
 			cwds:    processCWDs,
 			lockDir: deps.LockDir,
 		}); swept > 0 {
@@ -278,17 +226,17 @@ func runDispatch(args []string) int {
 	// the decline is the same pre-accept busy reply as every other, carrying the
 	// skip's own reason so pg-router core's declined metric counts it per reason.
 	if skip, skipped := executor.Precheck(ctx, dctx, deps, bead); skipped {
-		decline := neutralDecline(skip.Reason, skip.Detail)
+		decline := wire.NeutralDecline(skip.Reason, skip.Detail)
 		if skip.Retryable {
 			// A retryable skip (the review precheck's connector-unavailable) proves
 			// nothing moot: it is routine backpressure the router re-offers.
-			decline.Kind = declineKindBusy
+			decline.Kind = wire.DeclineKindBusy
 		}
-		declineAndReply(os.Stdout, declineLog, role, dctx.Item.ID, decline)
+		wire.DeclineAndReply(os.Stdout, declineLog, role, dctx.Item.ID, decline)
 		return conformance.ExitBusy
 	}
 	result, err := executor.For(role.Type).Dispatch(ctx, dctx, deps)
-	if decline, busy := busyDeclineFor(err); busy {
+	if decline, busy := wire.BusyDeclineFor(err); busy {
 		// Pre-accept busy decline (INV-CONC-1, DEC-WIRE-1 exit 9): the core's
 		// listener re-offers the event with backoff; the activity ring
 		// records it as "declined", distinct from "dispatch_failed" — for
@@ -306,11 +254,11 @@ func runDispatch(args []string) int {
 		// backpressure" — confirmed live 2026-09-22 as otherwise
 		// indistinguishable without manually cross-referencing ccpool
 		// capacity by hand.
-		declineAndReply(os.Stdout, declineLog, role, dctx.Item.ID, decline)
+		wire.DeclineAndReply(os.Stdout, declineLog, role, dctx.Item.ID, decline)
 		return conformance.ExitBusy
 	}
 	if err != nil {
-		writeErrorReply(os.Stdout, err.Error())
+		wire.WriteErrorReply(os.Stdout, err.Error())
 		return conformance.ExitError
 	}
 	// outcome is an opaque STRING on the wire (packages/pg-router's
@@ -331,364 +279,9 @@ func runDispatch(args []string) int {
 	// distinguishable failure class.
 	outcomeJSON, err := json.Marshal(result.Fields())
 	if err != nil {
-		writeErrorReply(os.Stdout, "encode outcome: "+err.Error())
+		wire.WriteErrorReply(os.Stdout, "encode outcome: "+err.Error())
 		return conformance.ExitError
 	}
-	writeReply(os.Stdout, outcomeReply(req.ID, string(outcomeJSON), result.StartedAt))
+	wire.WriteReply(os.Stdout, wire.OutcomeReply(req.ID, string(outcomeJSON), result.StartedAt))
 	return conformance.ExitOK
-}
-
-// outcomeReply builds the inline-outcome handler.dispatch-reply. startedAt is
-// the launch time of a session this dispatch adopted (report.Result.StartedAt,
-// DEC-EVENT-5, INV-CCH-30): the reply carries it as the optional startedAt
-// (RFC3339, UTC) so the core times the dispatch from its real start and not
-// from the re-offer. A zero startedAt (a fresh session, or an adopted one that
-// recorded no launch time) omits the field entirely.
-func outcomeReply(id, outcome string, startedAt time.Time) map[string]any {
-	reply := map[string]any{
-		"schemaVersion": schemas.SchemaVersion,
-		"id":            id,
-		"outcome":       outcome,
-	}
-	if !startedAt.IsZero() {
-		reply["startedAt"] = ccpool.FormatMetaTime(startedAt)
-	}
-	return reply
-}
-
-// externalIDStampLayout is the per-attempt ccpool ExternalID's timestamp
-// layout. This module's own internal/dtest.TestStamp fixture
-// ("20260616T010203") already reserves the second-precision "20060102T150405"
-// layout as this codebase's stamp-generation convention (matching
-// internal/ccpool/cli_test.go's "pg-router-worker-zr-1-20260616T010203"
-// fixture) — reused here rather than inventing an unrelated format — with
-// nanosecond precision appended so two attempts stamped within the same
-// wall-clock second still mint distinct ids; a bare second-resolution stamp
-// cannot promise that on its own.
-const externalIDStampLayout = "20060102T150405.000000000"
-
-// stampExternalID builds role's per-attempt ccpool ExternalID
-// (roles.Role.ExternalID's own documented <prefix><name>-<beadid>-<stamp>
-// shape), stamping it fresh from now on every call (pg2-nmpvs). now nil
-// (buildDeps never sets Deps.Now in production) defaults to time.Now,
-// mirroring executor.Deps.Now's own "clock seam; nil ⇒ time.Now" doc
-// comment — Deps' own clock() method implementing that default is
-// unexported, so this package (main) cannot call it directly and
-// re-implements the same nil-check here instead of inventing a second,
-// independent clock seam.
-func stampExternalID(role roles.Role, prefix, beadID string, now func() time.Time) string {
-	if now == nil {
-		now = time.Now
-	}
-	return role.ExternalID(prefix, beadID, now().UTC().Format(externalIDStampLayout))
-}
-
-// buildDeps wires the executor.Deps seam bag for production use from cfg and
-// role: a real ccpool.CLIRunner and beads.CLIRunner, everything else left at
-// its own nil-safe default (Deps.git/gitOpener/clock/reader/commander/
-// waitPoll — internal/executor/executor.go).
-//
-// role.CCPool.PoolDir (bead pg2-mr0sl), when this role sets one, scopes the
-// ccpool.CLIRunner to that role's own dedicated pool via
-// ccpool.NewCLIRunnerForPool — every ccpool call this dispatch call makes
-// (the admission-gate Capacity check, Ensure/Send, and every List/Close call
-// the wait-loop and worktree cleanup make) then targets that pool, not
-// whatever CCPOOL_POOL this process inherited. This is scoped to buildDeps'
-// one production call site (runDispatch) deliberately: preshutdown.go's
-// once-per-process-lifetime sweep and query.go's own reconciliation call
-// still build a plain ccpool.NewCLIRunner(cfg) — both act once across every
-// enabled role sharing this process, with no single role to scope to (see
-// each of those call sites' own doc comments on that pre-existing,
-// unchanged-by-this-bead posture).
-func buildDeps(cfg config.Config, role roles.Role) executor.Deps {
-	// Per-role tool grants (bead pg2-nk6th.5): cfg is a by-value parameter, so
-	// merging the role's ExtraAllowedTools onto the handler-wide AllowedTools
-	// here scopes the grants to this role's runner (and its Deps.Cfg) only.
-	if role.CCPool != nil {
-		cfg.AllowedTools = config.MergeAllowedTools(cfg.AllowedTools, role.CCPool.ExtraAllowedTools)
-		// Per-role effort (bead pg2-svkob, INV-CCH-31): a non-empty role value
-		// replaces the handler-wide launch-config effort for this role's runner
-		// (and its Deps.Cfg) only; "" leaves it unchanged.
-		if role.CCPool.Effort != "" {
-			cfg.Effort = role.CCPool.Effort
-		}
-	}
-	cc := ccpool.NewCLIRunner(cfg)
-	if role.CCPool != nil && role.CCPool.PoolDir != "" {
-		cc = ccpool.NewCLIRunnerForPool(cfg, role.CCPool.PoolDir)
-	}
-	// Every bd call for this role's items resolves against the tracker the
-	// items live in: the role's own BeadsDir when set (pg2-2grpj, e.g. the pg2
-	// tracker for the escalation triager), else the monorepo at cfg.RepoRoot.
-	bdDir := cfg.RepoRoot
-	if role.CCPool != nil && role.CCPool.BeadsDir != "" {
-		bdDir = role.CCPool.BeadsDir
-	}
-	return executor.Deps{
-		CC:  cc,
-		BD:  beads.NewCLIRunnerForRepo(bdDir, roleActor(role)),
-		Cfg: cfg,
-		Log: newEventLog(cfg),
-		// Per-session flocks under the handler state directory (the same one as
-		// events.jsonl) serialize the orphan reconcile against an absorbing
-		// dispatch (pg2-g2u9m, INV-CCH-18).
-		LockDir: sessionlock.Dir(handlerStateDir(cfg)),
-	}
-}
-
-// roleActor is the bd identity the handler's own bd writes for role are
-// attributed to (bead pg2-lhi3b): the role's ccpool actor, i.e. the same
-// identity its dispatched worker sessions claim under via BEADS_ACTOR
-// (internal/executor/ccpool.go). "" for a role with no ccpool block.
-func roleActor(role roles.Role) string {
-	if role.CCPool != nil {
-		return role.CCPool.Actor
-	}
-	return ""
-}
-
-// handlerEventLogName is the JSONL file, inside the handler state directory,
-// that the executor's and watchdog's structured events (hard_stop,
-// needs_input, reminder, ...) are appended to (bead pg2-ui2gk).
-const handlerEventLogName = "events.jsonl"
-
-// newEventLog opens the handler's event log at
-// <stateDir>/events.jsonl (stateDir resolved exactly as the origin prober
-// resolves it: cfg.OriginProbe.StateDir, else the XDG/home default). It
-// never returns nil: executor.Deps.Log and watchdog.Watchdog.Log treat nil as
-// a silent no-op, which is the defect this fixes. If the file cannot be
-// opened the handler still must dispatch, so it falls back to a writer on
-// os.DevNull (events dropped, warning logged via slog) rather than nil.
-func newEventLog(cfg config.Config) *eventlog.Writer {
-	w, err := eventlog.New(filepath.Join(handlerStateDir(cfg), handlerEventLogName))
-	if err != nil {
-		slog.Warn("dispatch: event log unavailable; events dropped", "err", err)
-		if w, err = eventlog.New(os.DevNull); err != nil {
-			slog.Warn("dispatch: null event log unavailable", "err", err)
-		}
-	}
-	return w
-}
-
-func writeReply(w io.Writer, v any) {
-	b, _ := json.Marshal(v)
-	if _, err := w.Write(b); err != nil {
-		// Not fatal: the reader (the daemon) may be gone already, e.g. a dispatch
-		// that outlived a daemon restart (ADR 0085). The dispatch's work is done.
-		slog.Warn("reply undeliverable; the process that read this handler's stdout is gone", "err", err)
-	}
-}
-
-func writeErrorReply(w io.Writer, msg string) {
-	writeReply(w, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": msg})
-}
-
-// busyReasonCapacityUnknown / busyReasonAtCapacity are the short, stable
-// classification tags writeBusyReply carries for executor's two admission-
-// gate sentinels (bead pg2-j4uwg). Kept as constants, never a free-text
-// diagnostic sentence, so a wireclient caller on the other side of the wire
-// can classify on the exact string rather than pattern-match prose (the
-// slog.Warn/Info calls inside internal/executor/ccpool.go's run() already
-// carry the human-readable detail for the operator's own logs).
-const (
-	busyReasonCapacityUnknown = "capacity-unknown"
-	busyReasonAtCapacity      = "at-capacity"
-	// busyReasonLowDisk (bead pg2-8vn8t): the isolation step's `git worktree
-	// add` failed because the filesystem ran out of room (executor.ErrLowDisk)
-	// — a transient, system-wide condition, not a per-bead defect, so it is
-	// mapped to the SAME busy-decline treatment as the two capacity reasons
-	// above rather than an escalation (see ccpool.go's own doc comment at its
-	// isolation-Ensure error branch).
-	busyReasonLowDisk = "low-disk"
-	// busyReasonCommandBusy (bead pg2-358u3): a "command" role's argv exited 9
-	// (conformance.ExitBusy's own code — the command's "not right now" signal),
-	// which internal/executor/command.go turns into executor.ErrBusy. It gets
-	// its OWN tag, not at-capacity's, because the cause is opaque to this
-	// module (the command, not ccpool, decided it was busy) and the Grafana
-	// failure-rate rule excludes at-capacity as routine backpressure — a
-	// command that stays busy MUST remain visible, not hide inside that
-	// exclusion.
-	busyReasonCommandBusy = "command-busy"
-	// busyReasonSessionInFlight (bead pg2-qaeb8, INV-CCH-30, ADR 0094): an
-	// earlier attempt of the same bead and role is in flight and this dispatch
-	// may not absorb it (executor.ErrSessionInFlight). Routine backpressure like
-	// a full pool: the Grafana failure-rate rule excludes this reason, and the
-	// decline stays visible per reason on the declined counter.
-	busyReasonSessionInFlight = "session-in-flight"
-	// busyReasonPoolUnreadable (bead pg2-s3pjt, INV-CCH-30): the pool's sessions
-	// cannot be read (executor.ErrPoolUnreadable). The dispatch still declines
-	// as if an attempt were in flight, but this is NOT routine backpressure, so
-	// it gets its own reason: the failure-rate rule does not exclude it, and a
-	// persistently unreadable pool pages (under session-in-flight it was hidden
-	// by that exclusion).
-	busyReasonPoolUnreadable = "pool-unreadable"
-	// busyReasonLaunchFailed (INV-CCH-34): a failure before ccpool new returned
-	// ready (executor.ErrLaunchFailed). A pre-accept decline of kind fault; it
-	// mutates no bead, and the failure-rate alert counts it.
-	busyReasonLaunchFailed = "launch-failed"
-)
-
-// The decline kinds of the wire's decline body (schemas' handler.dispatch-reply
-// schema, DEC-WIRE-1): what core's progress gauges count. busy is routine
-// backpressure, fault is a condition worth an operator's look, and neutral is a
-// decline that says nothing about the dispatch's health.
-const (
-	declineKindBusy    = "busy"
-	declineKindFault   = "fault"
-	declineKindNeutral = "neutral"
-)
-
-// busyDecline is one pre-accept decline: the wire body's reason, kind and the
-// optional, redacted, bounded detail. Every decline goes through one before
-// writeBusyReply.
-type busyDecline struct{ Reason, Kind, Detail string }
-
-// neutralDecline is a decline of kind neutral (origin-unavailable and skipped-*):
-// the dispatch was not wanted or could not run for a reason that is neither
-// backpressure nor a fault. detail is redacted and bounded; "" omits it.
-func neutralDecline(reason, detail string) busyDecline {
-	return busyDecline{Reason: reason, Kind: declineKindNeutral, Detail: boundedDetail(detail)}
-}
-
-// boundedDetail redacts text and truncates it, by bytes at a UTF-8 boundary, to
-// the schema's maxLength (schemas.DeclineDetailMaxLen), keeping the START of the
-// text. The schema bound is in characters, so a byte bound also satisfies it.
-func boundedDetail(text string) string {
-	text = failsig.Redact(strings.TrimSpace(text))
-	if len(text) <= schemas.DeclineDetailMaxLen {
-		return text
-	}
-	cut := schemas.DeclineDetailMaxLen
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
-		cut--
-	}
-	return text[:cut]
-}
-
-// boundedTailDetail is boundedDetail keeping the END of the text. A ccpool new
-// error reads "ccpool new <long argv>: <exit> (<stderr>)", so the diagnosis is at
-// the end, and a head cut would keep only the argv.
-func boundedTailDetail(text string) string {
-	text = failsig.Redact(strings.TrimSpace(text))
-	if len(text) <= schemas.DeclineDetailMaxLen {
-		return text
-	}
-	cut := len(text) - schemas.DeclineDetailMaxLen
-	for cut < len(text) && !utf8.RuneStart(text[cut]) {
-		cut++
-	}
-	return text[cut:]
-}
-
-// busyDeclineFor maps err to the wire's pre-accept decline (reason, kind and
-// detail) when err is one of executor's "decline and retry later" sentinels
-// (bead pg2-j4uwg's capacity pair, widened by pg2-8vn8t's low-disk sentinel,
-// pg2-358u3's command-busy sentinel, pg2-qaeb8's session-in-flight sentinel,
-// pg2-s3pjt's pool-unreadable sentinel and INV-CCH-34's launch-failed): ok is
-// false for any other err (including nil), matching none of them. All still map
-// to the SAME wire-level conformance.ExitBusy, so the core's retry/backoff
-// cadence never depends on which reason applied (INV-FAIL-1); the reason and the
-// kind exist so pg-router core's declined metric, status breakdown and progress
-// gauges can tell them apart (see this file's runDispatch call site).
-//
-// The kind per reason:
-//
-//	busy:    at-capacity (usage-limit refusals map here, so a usage window never
-//	         pages), session-in-flight, command-busy
-//	fault:   capacity-unknown, pool-unreadable, low-disk, launch-failed
-//	neutral: origin-unavailable and skipped-* (neutralDecline)
-//
-// Only launch-failed carries a detail: the redacted ccpool new error text, its
-// last bytes up to the schema bound (the stderr diagnosis is at the end).
-func busyDeclineFor(err error) (busyDecline, bool) {
-	switch {
-	case errors.Is(err, executor.ErrPoolCapacityUnknown):
-		return busyDecline{Reason: busyReasonCapacityUnknown, Kind: declineKindFault}, true
-	case errors.Is(err, executor.ErrPoolAtCapacity):
-		return busyDecline{Reason: busyReasonAtCapacity, Kind: declineKindBusy}, true
-	case errors.Is(err, executor.ErrLowDisk):
-		return busyDecline{Reason: busyReasonLowDisk, Kind: declineKindFault}, true
-	case errors.Is(err, executor.ErrBusy):
-		return busyDecline{Reason: busyReasonCommandBusy, Kind: declineKindBusy}, true
-	case errors.Is(err, executor.ErrSessionInFlight):
-		return busyDecline{Reason: busyReasonSessionInFlight, Kind: declineKindBusy}, true
-	case errors.Is(err, executor.ErrPoolUnreadable):
-		return busyDecline{Reason: busyReasonPoolUnreadable, Kind: declineKindFault}, true
-	case errors.Is(err, executor.ErrLaunchFailed):
-		d := busyDecline{Reason: busyReasonLaunchFailed, Kind: declineKindFault}
-		var lf *executor.LaunchFailedError
-		if errors.As(err, &lf) {
-			d.Detail = boundedTailDetail(lf.Tail)
-		}
-		return d, true
-	default:
-		return busyDecline{}, false
-	}
-}
-
-// writeBusyReply writes the OPTIONAL reply body DEC-WIRE-1 / interfaces.md's
-// "Coarse outcome, rich reply" allows a participant to accompany an exit-9
-// busy decline with ("a reply body, where the participant supplies one,
-// still carries which case applies") — reusing writeReply, the SAME
-// lowest-level body-writing helper writeErrorReply and the success path
-// both already use. The body is the decline branch of the handler.dispatch-reply
-// schema: a required reason, the kind (busy | fault | neutral), and an OPTIONAL
-// bounded, redacted detail, written only when non-empty. wireclient.Dispatch on
-// the core side reads it OPPORTUNISTICALLY on exit 9 and tolerates an
-// absent/empty body (DEC-WIRE-1: "no body required").
-func writeBusyReply(w io.Writer, d busyDecline) {
-	body := map[string]any{"schemaVersion": schemas.SchemaVersion, "reason": d.Reason, "kind": d.Kind}
-	if d.Detail != "" {
-		body["detail"] = d.Detail
-	}
-	writeReply(w, body)
-}
-
-// declineAndReply writes the dispatch_decline event-log record of d and then the
-// decline's reply body: the one place every decline passes through (INV-CCH-35).
-func declineAndReply(w io.Writer, log *eventlog.Writer, role roles.Role, itemID string, d busyDecline) {
-	emitDispatchDecline(log, role, itemID, d)
-	writeBusyReply(w, d)
-}
-
-// emitDispatchDecline writes the dispatch_decline record: the role, the item's
-// id, the reason, the kind (as decline_kind: the event log's own kind field names
-// the record), the role's sessionEnv (non-secret by rule, so values
-// are written as-is; empty for a command-backed role), the redacted evidence tail
-// and the failure signature. Only a launch-failed decline has evidence (the
-// redacted tail of the ccpool new error, bounded like the wire detail) and a
-// signature (launch-failed); both are "" for every other reason. A decline of
-// kind fault is logged at warn, the others at info. It never returns an error: a
-// log that cannot be written must not change the decline.
-func emitDispatchDecline(log *eventlog.Writer, role roles.Role, itemID string, d busyDecline) {
-	if log == nil {
-		return
-	}
-	sessionEnv := make(map[string]string, len(role.SessionEnv))
-	for k, v := range role.SessionEnv {
-		sessionEnv[k] = v
-	}
-	evidence, signature := "", ""
-	if d.Reason == busyReasonLaunchFailed {
-		evidence, signature = d.Detail, string(failsig.LaunchFailed)
-	}
-	level := "info"
-	if d.Kind == declineKindFault {
-		level = "warn"
-	}
-	_ = log.Emit(level, executor.DispatchDeclineKind, "dispatch declined: "+d.Reason, map[string]any{
-		"role": role.Name, "item_id": itemID, "reason": d.Reason, "decline_kind": d.Kind,
-		"session_env": sessionEnv, "evidence": evidence, "failure_signature": signature,
-	})
-}
-
-// handlerStateDir resolves the handler state directory exactly as the origin
-// prober does: cfg.OriginProbe.StateDir, else $XDG_STATE_HOME/pg-router-
-// ccpool-handler, else ~/.local/state/pg-router-ccpool-handler. It holds
-// events.jsonl, the origin state, and the per-session locks.
-func handlerStateDir(cfg config.Config) string {
-	if sd := cfg.OriginProbe.StateDir; sd != "" {
-		return sd
-	}
-	return originprobe.DefaultStateDir()
 }

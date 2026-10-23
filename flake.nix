@@ -1120,7 +1120,7 @@
             }
           }/bin/pg-router-ccpool-handler-bd-contract-test-hook";
           language = "system";
-          files = "^packages/pg-router-ccpool-handler/(internal/(watchdog|beads|executor|complete|parknote|dtest|roles)/|cmd/pg-router-ccpool-handler/dispatch[^/]*\\.go$|go\\.(mod|sum)$)";
+          files = "^packages/pg-router-ccpool-handler/(internal/(watchdog|beads|executor|complete|parknote|dtest|roles|wire|dispatchlib|handlerstate|rolefile)/|cmd/pg-router-ccpool-handler/dispatch[^/]*\\.go$|go\\.(mod|sum)$)";
           pass_filenames = false;
           require_serial = true;
         };
@@ -7204,14 +7204,14 @@
               # field values, so a wrong-block-entirely bug is caught too)
               # renders 2 distinct `<role.Name>.json` files under one
               # `handlerCommandDir`, matching
-              # cmd/pg-router-ccpool-handler/roleconfig.go's `roleFile`
+              # internal/rolefile/rolefile.go's `RoleFile`
               # shape exactly (including its untagged, Go-field-cased
               # `Isolation.{Type,Path}` -- roles.IsolationConfig carries no
               # json tags, see roleFileFor's own doc comment in that
               # default.nix). Also proves (pg2-r8al1) that the "feedback"
               # role's `ccpool.budget.{tokens,cost,time}` renders into the
               # same `roleFile.CCPool.Budget` shape
-              # cmd/pg-router-ccpool-handler/roleconfig.go's `loadRole` now
+              # internal/rolefile/rolefile.go's `LoadRole` now
               # decodes — before pg2-r8al1, neither the Go `roleFile.CCPool`
               # struct nor this nix option carried a `budget` field at all,
               # so a role's watchdog budget could never be populated from
@@ -8190,8 +8190,8 @@
                         # overrides render, and everything left untouched
                         # matches internal/config.Default() -- field names
                         # are the exact lowerCamelCase keys
-                        # cmd/pg-router-ccpool-handler/roleconfig.go's
-                        # loadConfig decodes directly into
+                        # internal/rolefile/rolefile.go's
+                        # LoadConfig decodes directly into
                         # internal/config.Config (no wrapper struct, unlike
                         # roleFile above).
                         [ "$(jq -r .repoRoot "$launchConfigFile")" = /tmp/pg2-qsred-repo ]

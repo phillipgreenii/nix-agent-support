@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/complete"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/dispatchlib"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/dtest"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
@@ -21,8 +22,8 @@ import (
 // (e.g. internal/executor/ccpool_test.go's Deps.Now overrides).
 func fixedClock(t time.Time) func() time.Time { return func() time.Time { return t } }
 
-// TestStampExternalID_matchesDocumentedShape proves stampExternalID — the
-// fix for pg2-nmpvs (buildDeps never stamped Deps.ExternalID, so it stayed
+// TestStampExternalID_matchesDocumentedShape proves dispatchlib.StampExternalID — the
+// fix for pg2-nmpvs (dispatchlib.BuildDeps never stamped Deps.ExternalID, so it stayed
 // Go's zero value "" and every real ccpool dispatch failed at `ccpool new`
 // with "ExternalID is required") — produces a non-empty id in
 // roles.Role.ExternalID's own documented <prefix><name>-<beadid>-<stamp>
@@ -36,14 +37,14 @@ func TestStampExternalID_matchesDocumentedShape(t *testing.T) {
 	role := roles.Role{Name: "worker"}
 	at := time.Date(2026, 6, 16, 1, 2, 3, 0, time.UTC)
 
-	got := stampExternalID(role, "pg-router-", "TEST-VERIFY-000", fixedClock(at))
+	got := dispatchlib.StampExternalID(role, "pg-router-", "TEST-VERIFY-000", fixedClock(at))
 
 	if got == "" {
-		t.Fatal("stampExternalID returned the empty string — the original pg2-nmpvs bug's zero value")
+		t.Fatal("dispatchlib.StampExternalID returned the empty string — the original pg2-nmpvs bug's zero value")
 	}
 	wantPrefix := role.ExternalID("pg-router-", "TEST-VERIFY-000", dtest.TestStamp)
 	if !strings.HasPrefix(got, wantPrefix) {
-		t.Errorf("stampExternalID = %q, want it to start with %q (role.ExternalID with this module's dtest.TestStamp convention)", got, wantPrefix)
+		t.Errorf("dispatchlib.StampExternalID = %q, want it to start with %q (role.ExternalID with this module's dtest.TestStamp convention)", got, wantPrefix)
 	}
 	const wantNamePrefix = "pg-router-worker-TEST-VERIFY-000-"
 	if !strings.HasPrefix(got, wantNamePrefix) {
@@ -54,18 +55,18 @@ func TestStampExternalID_matchesDocumentedShape(t *testing.T) {
 	}
 }
 
-// TestStampExternalID_defaultsToTimeNow proves a nil clock — buildDeps/
-// runDispatch's own production call, since buildDeps never sets Deps.Now —
+// TestStampExternalID_defaultsToTimeNow proves a nil clock — dispatchlib.BuildDeps/
+// runDispatch's own production call, since dispatchlib.BuildDeps never sets Deps.Now —
 // does not panic and still mints a real, non-zero-value stamp rather than
 // reproducing the original bug's empty ExternalID.
 func TestStampExternalID_defaultsToTimeNow(t *testing.T) {
 	role := roles.Role{Name: "worker"}
 
-	got := stampExternalID(role, "pg-router-", "TEST-VERIFY-000", nil)
+	got := dispatchlib.StampExternalID(role, "pg-router-", "TEST-VERIFY-000", nil)
 
 	zero := role.ExternalID("pg-router-", "TEST-VERIFY-000", "")
 	if got == "" || got == zero {
-		t.Fatalf("stampExternalID(nil clock) = %q, want a real time.Now()-stamped id, not the zero-stamp value %q", got, zero)
+		t.Fatalf("dispatchlib.StampExternalID(nil clock) = %q, want a real time.Now()-stamped id, not the zero-stamp value %q", got, zero)
 	}
 }
 
@@ -80,11 +81,11 @@ func TestStampExternalID_distinctPerAttempt(t *testing.T) {
 	t1 := time.Date(2026, 6, 16, 1, 2, 3, 0, time.UTC)
 	t2 := t1.Add(time.Second)
 
-	id1 := stampExternalID(role, "pg-router-", "TEST-VERIFY-000", fixedClock(t1))
-	id2 := stampExternalID(role, "pg-router-", "TEST-VERIFY-000", fixedClock(t2))
+	id1 := dispatchlib.StampExternalID(role, "pg-router-", "TEST-VERIFY-000", fixedClock(t1))
+	id2 := dispatchlib.StampExternalID(role, "pg-router-", "TEST-VERIFY-000", fixedClock(t2))
 
 	if id1 == "" || id2 == "" {
-		t.Fatalf("stampExternalID must never return the zero value; got %q and %q", id1, id2)
+		t.Fatalf("dispatchlib.StampExternalID must never return the zero value; got %q and %q", id1, id2)
 	}
 	if id1 == id2 {
 		t.Fatalf("two attempts for the same role+bead at different times collided: both %q", id1)
@@ -101,15 +102,15 @@ func TestStampExternalID_distinctWithinSameSecond(t *testing.T) {
 	t1 := time.Date(2026, 6, 16, 1, 2, 3, 123, time.UTC)
 	t2 := time.Date(2026, 6, 16, 1, 2, 3, 456, time.UTC) // same second, different nanosecond
 
-	id1 := stampExternalID(role, "pg-router-", "TEST-VERIFY-000", fixedClock(t1))
-	id2 := stampExternalID(role, "pg-router-", "TEST-VERIFY-000", fixedClock(t2))
+	id1 := dispatchlib.StampExternalID(role, "pg-router-", "TEST-VERIFY-000", fixedClock(t1))
+	id2 := dispatchlib.StampExternalID(role, "pg-router-", "TEST-VERIFY-000", fixedClock(t2))
 
 	if id1 == id2 {
 		t.Fatalf("two attempts within the same wall-clock second collided: both %q", id1)
 	}
 }
 
-// TestBuildDeps_scopesCCToRolePoolDir proves buildDeps (bead pg2-mr0sl)
+// TestBuildDeps_scopesCCToRolePoolDir proves dispatchlib.BuildDeps (bead pg2-mr0sl)
 // actually threads a ccpool role's own PoolDir into the returned Deps.CC —
 // not merely accept it as a parameter and drop it — by asserting the
 // concrete *ccpool.CLIRunner's own PoolDir field. Without this wiring, dev-
@@ -119,7 +120,7 @@ func TestStampExternalID_distinctWithinSameSecond(t *testing.T) {
 func TestBuildDeps_scopesCCToRolePoolDir(t *testing.T) {
 	role := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{PoolDir: "/state/pg-router-ccpool-review"}}
 
-	deps := buildDeps(config.Default(), role)
+	deps := dispatchlib.BuildDeps(config.Default(), role)
 
 	cli, ok := deps.CC.(*ccpool.CLIRunner)
 	if !ok {
@@ -137,7 +138,7 @@ func TestBuildDeps_scopesCCToRolePoolDir(t *testing.T) {
 func TestBuildDeps_noPoolDirLeavesCCUnscoped(t *testing.T) {
 	role := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{}}
 
-	deps := buildDeps(config.Default(), role)
+	deps := dispatchlib.BuildDeps(config.Default(), role)
 
 	cli, ok := deps.CC.(*ccpool.CLIRunner)
 	if !ok {
@@ -169,12 +170,12 @@ func TestBuildDeps_BD_resolvesRoleTracker(t *testing.T) {
 	role := roles.Role{Name: "pg2-escalation-triager", CCPool: &roles.CCPoolConfig{Completion: roles.CloseOrTriage, BeadsDir: pg2}}
 
 	// Without BeadsDir the ZR tracker cannot see the bead (the bug).
-	plain := buildDeps(cfg, roles.Role{Name: "x", CCPool: &roles.CCPoolConfig{}})
+	plain := dispatchlib.BuildDeps(cfg, roles.Role{Name: "x", CCPool: &roles.CCPoolConfig{}})
 	if iss, err := beads.ShowObj(context.Background(), plain.BD, "pg2-x"); err == nil {
 		t.Fatalf("control: ZR-rooted runner unexpectedly saw the pg2 bead: %+v", iss)
 	}
 
-	deps := buildDeps(cfg, role)
+	deps := dispatchlib.BuildDeps(cfg, role)
 	iss, err := beads.ShowObj(context.Background(), deps.BD, "pg2-x")
 	if err != nil {
 		t.Fatalf("role-tracker read failed: %v", err)
@@ -195,25 +196,25 @@ func mustEval(t *testing.T, p string) string {
 	return r
 }
 
-// buildDeps wires the per-session lock directory under the handler state dir
+// dispatchlib.BuildDeps wires the per-session lock directory under the handler state dir
 // (the one holding events.jsonl), so the orphan reconcile and an absorbing
 // dispatch share their flocks (pg2-g2u9m, INV-CCH-18).
 func TestBuildDeps_lockDirUnderHandlerStateDir(t *testing.T) {
 	cfg := config.Default()
 	cfg.OriginProbe.StateDir = "/state/handler"
-	deps := buildDeps(cfg, roles.Role{Name: "worker", Type: "ccpool", CCPool: &roles.CCPoolConfig{}})
+	deps := dispatchlib.BuildDeps(cfg, roles.Role{Name: "worker", Type: "ccpool", CCPool: &roles.CCPoolConfig{}})
 	if deps.LockDir != "/state/handler/locks" {
 		t.Errorf("LockDir = %q, want /state/handler/locks", deps.LockDir)
 	}
 	t.Setenv("XDG_STATE_HOME", "/xdg")
 	cfg.OriginProbe.StateDir = ""
-	deps = buildDeps(cfg, roles.Role{Name: "worker", Type: "ccpool", CCPool: &roles.CCPoolConfig{}})
+	deps = dispatchlib.BuildDeps(cfg, roles.Role{Name: "worker", Type: "ccpool", CCPool: &roles.CCPoolConfig{}})
 	if deps.LockDir != "/xdg/pg-router-ccpool-handler/locks" {
 		t.Errorf("default LockDir = %q, want /xdg/pg-router-ccpool-handler/locks", deps.LockDir)
 	}
 }
 
-// TestBuildDeps_mergesRoleExtraAllowedTools (bead pg2-nk6th.5) proves buildDeps
+// TestBuildDeps_mergesRoleExtraAllowedTools (bead pg2-nk6th.5) proves dispatchlib.BuildDeps
 // merges a ccpool role's ExtraAllowedTools onto the handler-wide AllowedTools
 // for that role's runner only: handler-wide grants first, then the role's own,
 // duplicates dropped; a sibling role with none, and the caller's cfg, are
@@ -226,7 +227,7 @@ func TestBuildDeps_mergesRoleExtraAllowedTools(t *testing.T) {
 	}}
 	plain := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{}}
 
-	zrCLI, ok := buildDeps(cfg, zr).CC.(*ccpool.CLIRunner)
+	zrCLI, ok := dispatchlib.BuildDeps(cfg, zr).CC.(*ccpool.CLIRunner)
 	if !ok {
 		t.Fatalf("Deps.CC is not a *ccpool.CLIRunner")
 	}
@@ -234,7 +235,7 @@ func TestBuildDeps_mergesRoleExtraAllowedTools(t *testing.T) {
 	if zrCLI.AllowedTools != want {
 		t.Errorf("zr runner AllowedTools = %q, want %q", zrCLI.AllowedTools, want)
 	}
-	plainDeps := buildDeps(cfg, plain)
+	plainDeps := dispatchlib.BuildDeps(cfg, plain)
 	if got := plainDeps.CC.(*ccpool.CLIRunner).AllowedTools; got != "Read,Bash(bd:*)" {
 		t.Errorf("role without extras AllowedTools = %q, want the handler-wide list unchanged", got)
 	}
@@ -242,13 +243,13 @@ func TestBuildDeps_mergesRoleExtraAllowedTools(t *testing.T) {
 		t.Errorf("caller cfg.AllowedTools mutated to %q", cfg.AllowedTools)
 	}
 	// A command role (no CCPool block) must not panic and keeps the list.
-	if got := buildDeps(cfg, roles.Role{Name: "cmd", Type: "command"}).CC.(*ccpool.CLIRunner).AllowedTools; got != cfg.AllowedTools {
+	if got := dispatchlib.BuildDeps(cfg, roles.Role{Name: "cmd", Type: "command"}).CC.(*ccpool.CLIRunner).AllowedTools; got != cfg.AllowedTools {
 		t.Errorf("command role AllowedTools = %q, want %q", got, cfg.AllowedTools)
 	}
 }
 
 // TestBuildDeps_goToolSetReachesOnlyTheDeclaringRole (bead pg2-cwn44): through
-// the real buildDeps merge, a role whose role file carries the go tool set in
+// the real dispatchlib.BuildDeps merge, a role whose role file carries the go tool set in
 // extraAllowedTools (what the nix module renders for toolSets = [ "go" ]) runs
 // with `go test` permitted, while a sibling that declares no set (review,
 // feedback, triager shaped) is denied it by the handler-wide default.
@@ -260,7 +261,7 @@ func TestBuildDeps_goToolSetReachesOnlyTheDeclaringRole(t *testing.T) {
 	review := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{ExtraAllowedTools: []string{"Bash(pg-connector pr review:*)"}}}
 	bare := roles.Role{Name: "feedback", CCPool: &roles.CCPoolConfig{}}
 
-	allowed := func(r roles.Role) string { return buildDeps(cfg, r).CC.(*ccpool.CLIRunner).AllowedTools }
+	allowed := func(r roles.Role) string { return dispatchlib.BuildDeps(cfg, r).CC.(*ccpool.CLIRunner).AllowedTools }
 	permits := func(list, cmd string) bool {
 		for _, g := range config.SplitAllowedTools(list) {
 			p, ok := strings.CutPrefix(g, "Bash(")
@@ -300,7 +301,7 @@ func TestBuildDeps_hooksToolSetReachesOnlyTheDeclaringRole(t *testing.T) {
 	review := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{ExtraAllowedTools: []string{"Bash(pg-connector pr review:*)"}}}
 	bare := roles.Role{Name: "feedback", CCPool: &roles.CCPoolConfig{}}
 
-	allowed := func(r roles.Role) string { return buildDeps(cfg, r).CC.(*ccpool.CLIRunner).AllowedTools }
+	allowed := func(r roles.Role) string { return dispatchlib.BuildDeps(cfg, r).CC.(*ccpool.CLIRunner).AllowedTools }
 	permits := func(list, cmd string) bool {
 		for _, g := range config.SplitAllowedTools(list) {
 			p, ok := strings.CutPrefix(g, "Bash(")
@@ -326,7 +327,7 @@ func TestBuildDeps_hooksToolSetReachesOnlyTheDeclaringRole(t *testing.T) {
 }
 
 // TestBuildDeps_roleEffortOverridesHandlerEffort (bead pg2-svkob, INV-CCH-31)
-// proves buildDeps replaces the handler-wide launch-config Effort with a
+// proves dispatchlib.BuildDeps replaces the handler-wide launch-config Effort with a
 // ccpool role's own Effort for that role's runner (and its Deps.Cfg) only: a
 // sibling role with no Effort, a command role, and the caller's cfg keep the
 // handler-wide value.
@@ -338,17 +339,17 @@ func TestBuildDeps_roleEffortOverridesHandlerEffort(t *testing.T) {
 	drain := roles.Role{Name: "drain-zr", CCPool: &roles.CCPoolConfig{Effort: "high"}}
 	plain := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{}}
 
-	drainDeps := buildDeps(cfg, drain)
+	drainDeps := dispatchlib.BuildDeps(cfg, drain)
 	if got := drainDeps.CC.(*ccpool.CLIRunner).Effort; got != "high" {
 		t.Errorf("drain runner Effort = %q, want the role override high", got)
 	}
 	if drainDeps.Cfg.Effort != "high" {
 		t.Errorf("drain Deps.Cfg.Effort = %q, want high", drainDeps.Cfg.Effort)
 	}
-	if got := buildDeps(cfg, plain).CC.(*ccpool.CLIRunner).Effort; got != "max" {
+	if got := dispatchlib.BuildDeps(cfg, plain).CC.(*ccpool.CLIRunner).Effort; got != "max" {
 		t.Errorf("role without an effort override Effort = %q, want the handler-wide max unchanged", got)
 	}
-	if got := buildDeps(cfg, roles.Role{Name: "cmd", Type: "command"}).CC.(*ccpool.CLIRunner).Effort; got != "max" {
+	if got := dispatchlib.BuildDeps(cfg, roles.Role{Name: "cmd", Type: "command"}).CC.(*ccpool.CLIRunner).Effort; got != "max" {
 		t.Errorf("command role Effort = %q, want max", got)
 	}
 	if cfg.Effort != "max" {

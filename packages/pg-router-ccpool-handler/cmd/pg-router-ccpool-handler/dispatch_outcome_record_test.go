@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/handlerstate"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -39,7 +40,7 @@ func runCommandRoleDispatch(t *testing.T, script string) (int, []string, []map[s
 	defer restoreIn()
 	var code int
 	_ = captureStdout(t, func() { code = runDispatch([]string{"--role-config", rolePath, "--config", cfgPath}) })
-	b, err := os.ReadFile(filepath.Join(stateDir, handlerEventLogName))
+	b, err := os.ReadFile(filepath.Join(stateDir, handlerstate.EventLogName))
 	if err != nil {
 		t.Fatalf("read event log: %v", err)
 	}

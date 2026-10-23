@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/wire"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -88,8 +89,8 @@ func TestRunDispatch_reviewPrecheck(t *testing.T) {
 		{"bead closed", "closed", prOpen, noPending, "skipped-bead-closed", 0},
 		{"PR merged", "open", prMerged, noPending, "skipped-pr-merged", 1},
 		{"pending review covers the head", "open", prOpen, freshReview, "skipped-pending-review", 2},
-		{"launch path: nothing to skip", "open", prOpen, noPending, busyReasonPoolUnreadable, 2},
-		{"launch path: stale pending review", "open", prOpen, staleReview, busyReasonPoolUnreadable, 2},
+		{"launch path: nothing to skip", "open", prOpen, noPending, wire.BusyReasonPoolUnreadable, 2},
+		{"launch path: stale pending review", "open", prOpen, staleReview, wire.BusyReasonPoolUnreadable, 2},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -134,9 +135,9 @@ func TestRunDispatch_reviewPrecheckConnectorErrors(t *testing.T) {
 		wantKind   string
 	}{
 		{"unavailable declines retryably", `printf '%s' '{"error":{"code":"unavailable","message":"daemon down"}}'; exit 1`, "connector-unavailable", "busy"},
-		{"not_found fails open", `printf '%s' '{"error":{"code":"not_found","message":"gone"}}'; exit 4`, busyReasonPoolUnreadable, "fault"},
-		{"unauthenticated fails open", `printf '%s' '{"error":{"code":"unauthenticated","message":"no token"}}'; exit 1`, busyReasonPoolUnreadable, "fault"},
-		{"bare failure fails open", `echo boom >&2; exit 1`, busyReasonPoolUnreadable, "fault"},
+		{"not_found fails open", `printf '%s' '{"error":{"code":"not_found","message":"gone"}}'; exit 4`, wire.BusyReasonPoolUnreadable, "fault"},
+		{"unauthenticated fails open", `printf '%s' '{"error":{"code":"unauthenticated","message":"no token"}}'; exit 1`, wire.BusyReasonPoolUnreadable, "fault"},
+		{"bare failure fails open", `echo boom >&2; exit 1`, wire.BusyReasonPoolUnreadable, "fault"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -171,7 +172,7 @@ func TestRunDispatch_reviewPrecheckFailsOpenWithoutConnector(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, reason := runPrecheckDispatch(t, rolePath)
-	if code != conformance.ExitBusy || reason != busyReasonPoolUnreadable {
+	if code != conformance.ExitBusy || reason != wire.BusyReasonPoolUnreadable {
 		t.Fatalf("got exit %d reason %q, want the unchanged launch path (pool-unreadable: no ccpool on PATH)", code, reason)
 	}
 }
@@ -227,7 +228,7 @@ func TestRunDispatch_readyPrecheck(t *testing.T) {
 		bead       string
 		wantReason string
 	}{
-		{"groomed open bead launches", `{"id":"zr-d","status":"open",` + groomed + `}`, busyReasonPoolUnreadable},
+		{"groomed open bead launches", `{"id":"zr-d","status":"open",` + groomed + `}`, wire.BusyReasonPoolUnreadable},
 		{"closed", `{"id":"zr-d","status":"closed",` + groomed + `}`, "skipped-bead-not-open"},
 		{"claimed by a peer", `{"id":"zr-d","status":"in_progress","assignee":"someone-else",` + groomed + `}`, "skipped-bead-not-open"},
 		{"human", `{"id":"zr-d","status":"open","labels":["has-acceptance-criteria","human"]}`, "skipped-bead-human"},
@@ -235,7 +236,7 @@ func TestRunDispatch_readyPrecheck(t *testing.T) {
 		{"deferred status", `{"id":"zr-d","status":"deferred",` + groomed + `}`, "skipped-bead-deferred"},
 		{"future defer_until", `{"id":"zr-d","status":"open","defer_until":"2999-01-01T00:00:00Z",` + groomed + `}`, "skipped-bead-deferred"},
 		{"open blocker, bd show dependency shape", `{"id":"zr-d","status":"open",` + groomed + `,"dependencies":[{"id":"zr-b","status":"open","issue_type":"task","dependency_type":"blocks"}]}`, "skipped-bead-blocked"},
-		{"own-actor in_progress is absorbed, not declined", `{"id":"zr-d","status":"in_progress","assignee":"test-actor","labels":["human"]}`, busyReasonPoolUnreadable},
+		{"own-actor in_progress is absorbed, not declined", `{"id":"zr-d","status":"in_progress","assignee":"test-actor","labels":["human"]}`, wire.BusyReasonPoolUnreadable},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

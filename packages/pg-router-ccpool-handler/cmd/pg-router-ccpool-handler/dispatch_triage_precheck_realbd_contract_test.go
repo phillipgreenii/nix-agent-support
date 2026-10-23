@@ -15,6 +15,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/dtest"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/wire"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -191,14 +192,14 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 		id         string
 		wantReason string
 	}{
-		{"open escalated bead launches as before", openEscalated, busyReasonPoolUnreadable},
-		{"open escalated bead held by a peer launches as before", peerHeld, busyReasonPoolUnreadable},
+		{"open escalated bead launches as before", openEscalated, wire.BusyReasonPoolUnreadable},
+		{"open escalated bead held by a peer launches as before", peerHeld, wire.BusyReasonPoolUnreadable},
 		{"closed bead is declined", closed, "skipped-bead-not-open"},
 		{"human bead is declined", human, "skipped-bead-human"},
 		{"de-escalated bead is declined", deEscalated, "skipped-bead-not-escalated"},
 		{"deferred bead is declined", deferred, "skipped-bead-deferred"},
 		{"blocked bead is declined", blocked, "skipped-bead-blocked"},
-		{"unreadable bead fails open", unreadable, busyReasonPoolUnreadable},
+		{"unreadable bead fails open", unreadable, wire.BusyReasonPoolUnreadable},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -231,7 +232,7 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 				t.Fatalf("bead refresh failed = %v for %s, want %v:\n%s", refreshFailed, tc.id, tc.id == unreadable, logs.String())
 			}
 			skipRecords := precheckSkipRecords(t, filepath.Join(stateHome, "pg-router-ccpool-handler", "events.jsonl"))
-			if tc.wantReason == busyReasonPoolUnreadable {
+			if tc.wantReason == wire.BusyReasonPoolUnreadable {
 				if len(skipRecords) != 0 {
 					t.Fatalf("a dispatch that launches must write no precheck_skip record, got %v", skipRecords)
 				}

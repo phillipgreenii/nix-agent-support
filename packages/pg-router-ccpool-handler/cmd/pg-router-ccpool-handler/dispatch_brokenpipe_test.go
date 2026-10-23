@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/wire"
 )
 
 // A dispatch outlives the daemon that spawned it across a restart (ADR 0085),
@@ -32,7 +34,7 @@ func runBrokenPipeHelper(mode string) int {
 		return run([]string{"dispatch"})
 	case helperModeBareWrite:
 		_, _ = io.ReadAll(os.Stdin)
-		writeReply(os.Stdout, map[string]any{"ok": true})
+		wire.WriteReply(os.Stdout, map[string]any{"ok": true})
 		return 0
 	}
 	return 99

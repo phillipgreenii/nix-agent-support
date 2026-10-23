@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/rolefile"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/wire"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -56,7 +58,7 @@ func runQuery(args []string) int {
 	fs := flag.NewFlagSet("query", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	queryConfigPath := fs.String("query-config", os.Getenv(envQueryConfig), "path to this process's own beads-backed query config JSON (or "+envQueryConfig+")")
-	cfgPath := fs.String("config", os.Getenv(envConfig), "path to this process's own launch config JSON (or "+envConfig+")")
+	cfgPath := fs.String("config", os.Getenv(rolefile.EnvConfig), "path to this process's own launch config JSON (or "+rolefile.EnvConfig+")")
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Print(helpText)
@@ -78,11 +80,11 @@ func runQuery(args []string) int {
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
-		writeErrorReply(os.Stdout, "malformed JSON: "+err.Error())
+		wire.WriteErrorReply(os.Stdout, "malformed JSON: "+err.Error())
 		return conformance.ExitError
 	}
 	if err := conformance.Check("source.query", v); err != nil {
-		writeErrorReply(os.Stdout, err.Error())
+		wire.WriteErrorReply(os.Stdout, err.Error())
 		return conformance.ExitError
 	}
 	var req queryRequest
@@ -90,11 +92,11 @@ func runQuery(args []string) int {
 
 	qf, configured, err := loadQueryConfig(*queryConfigPath)
 	if err != nil {
-		writeErrorReply(os.Stdout, err.Error())
+		wire.WriteErrorReply(os.Stdout, err.Error())
 		return conformance.ExitError
 	}
 	if !configured {
-		writeReply(os.Stdout, map[string]any{
+		wire.WriteReply(os.Stdout, map[string]any{
 			"schemaVersion": schemas.SchemaVersion,
 			"id":            req.ID,
 			"events":        []any{},
@@ -102,15 +104,15 @@ func runQuery(args []string) int {
 		return conformance.ExitOK
 	}
 
-	cfg, err := loadConfig(*cfgPath)
+	cfg, err := rolefile.LoadConfig(*cfgPath)
 	if err != nil {
-		writeErrorReply(os.Stdout, err.Error())
+		wire.WriteErrorReply(os.Stdout, err.Error())
 		return conformance.ExitError
 	}
 	ctx := context.Background()
 	br := beads.NewCLIRunnerForRepo(cfg.RepoRoot, "")
 	if err := precheck(ctx, cfg.RepoRoot, cfg.BeadsPrefix, br); err != nil {
-		writeErrorReply(os.Stdout, err.Error())
+		wire.WriteErrorReply(os.Stdout, err.Error())
 		return conformance.ExitError
 	}
 	// Opportunistic reconciliation (pg2-hrppg): DEFENSE IN DEPTH, not the
@@ -130,10 +132,10 @@ func runQuery(args []string) int {
 	}
 	events, err := queryBeadsReady(ctx, br, qf)
 	if err != nil {
-		writeErrorReply(os.Stdout, err.Error())
+		wire.WriteErrorReply(os.Stdout, err.Error())
 		return conformance.ExitError
 	}
-	writeReply(os.Stdout, map[string]any{
+	wire.WriteReply(os.Stdout, map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
 		"id":            req.ID,
 		"events":        events,
@@ -149,7 +151,7 @@ func runQuery(args []string) int {
 // EmitType+":"+issue.ID, the same FingerprintID dedup convention that
 // file used (INV-EVT-3). payload carries the item's id/type/title/metadata
 // fields flat — the SAME shape discover.ToQueueEvent writes on the
-// pg-router side (Task 5.6) and this module's own itemFromPayload
+// pg-router side (Task 5.6) and this module's own dispatchlib.ItemFromPayload
 // (dispatch.go) reads back, so an event this source emits round-trips
 // through the core unchanged.
 func queryBeadsReady(ctx context.Context, br beads.Runner, qf queryFile) ([]map[string]any, error) {
@@ -221,5 +223,5 @@ func postFilterIssues(in []beads.Issue, titlePrefix, itemType string) []beads.Is
 	return out
 }
 
-// writeReply/writeErrorReply are dispatch.go's own — this file uses them
+// wire.WriteReply/wire.WriteErrorReply are dispatch.go's own — this file uses them
 // unchanged (same package, single definition).

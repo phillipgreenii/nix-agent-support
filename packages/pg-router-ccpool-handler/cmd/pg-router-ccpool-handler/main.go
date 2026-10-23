@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/cliutil"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -33,7 +34,7 @@ func main() {
 
 func run(args []string) int {
 	if len(args) == 0 {
-		printUsageErr("pg-router-ccpool-handler: a subcommand is required")
+		cliutil.PrintUsageErr("pg-router-ccpool-handler: a subcommand is required", usageLine)
 		return conformance.ExitUsage
 	}
 	switch args[0] {
@@ -64,14 +65,7 @@ func run(args []string) int {
 	case "split":
 		return runSplit(args[1:])
 	default:
-		printUsageErr(fmt.Sprintf("pg-router-ccpool-handler: unknown subcommand %q", args[0]))
+		cliutil.PrintUsageErr(fmt.Sprintf("pg-router-ccpool-handler: unknown subcommand %q", args[0]), usageLine)
 		return conformance.ExitUsage
 	}
-}
-
-// printUsageErr writes a usage diagnostic and the short usage line to stderr,
-// mirroring cmd/pg-router/main.go's own printUsageErr.
-func printUsageErr(msg string) {
-	fmt.Fprintln(os.Stderr, msg)
-	fmt.Fprintln(os.Stderr, usageLine)
 }

@@ -150,7 +150,7 @@ func (w *Watchdog) emit(level, kind, msg string, fields map[string]any) {
 // behavior/invariants.md): each is surfaced only on this module's own
 // logs/metrics — w.emit below, into eventlog — never reported to the core
 // except through the opaque completion-outcome string
-// cmd/pg-router-ccpool-handler/dispatch.go's writeReply produces.
+// internal/wire's WriteReply produces.
 func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 	start := w.Start
 	if start.IsZero() {

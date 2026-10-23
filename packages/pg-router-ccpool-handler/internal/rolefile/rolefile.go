@@ -1,4 +1,13 @@
-package main
+// Package rolefile loads and validates a handler process's own role file and
+// launch config: the role-file decode (RoleFile, LoadRole, DecodeRole), the
+// sessionEnv key rules, the handler-wide LoadConfig and
+// OverlayBudgetThresholds, the env var names that name those inputs, and the
+// strict ShapeChecker the `validate` subcommand runs over the role JSON.
+//
+// Shared by every adapter binary of this module (bead pg2-12gr4.10.3); moved
+// verbatim out of package main of cmd/pg-router-ccpool-handler (roleconfig.go
+// and validate.go); no behavior change.
+package rolefile
 
 import (
 	"encoding/json"
@@ -15,7 +24,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
 
-// envRoleConfig/envConfig name this module's OWN configuration inputs — a
+// EnvRoleConfig/EnvConfig name this module's OWN configuration inputs — a
 // per-process role (this handler process dispatches ONE role, registered
 // under its own `register --id`; DEC-WIRE-1's register message names the
 // participant, not a per-dispatch role selection) and the launch/prompt
@@ -23,26 +32,26 @@ import (
 // story — a fuller one (this module's own TOML file, decoded like
 // packages/pg-router/internal/config/registry.go decodes pg-router's own
 // [[role]] table) is still not built. Docket pg2-oju6w's Task 5.7 DID land
-// here, though, narrower than that: loadConfig below now calls
+// here, though, narrower than that: LoadConfig below now calls
 // config.Config.Validate(), which rejects an invalid claude
 // --permission-mode value at THIS module's own config-load time (the real
 // enum check pg-router's own config used to duplicate).
 const (
-	envRoleConfig = "PG_ROUTER_CCPOOL_HANDLER_ROLE"
-	envConfig     = "PG_ROUTER_CCPOOL_HANDLER_CONFIG"
+	EnvRoleConfig = "PG_ROUTER_CCPOOL_HANDLER_ROLE"
+	EnvConfig     = "PG_ROUTER_CCPOOL_HANDLER_CONFIG"
 )
 
-// defaultBudgetStopEscalateAfter is the default budget_stop_escalate_after
+// DefaultBudgetStopEscalateAfter is the default budget_stop_escalate_after
 // (bead pg2-6akgz): stops of one bead before escalation; 0 disables.
-const defaultBudgetStopEscalateAfter = 3
+const DefaultBudgetStopEscalateAfter = 3
 
-// roleFile is the on-disk JSON shape --role-config decodes. Completion/
+// RoleFile is the on-disk JSON shape --role-config decodes. Completion/
 // FailureAction/DispatchFailAction already implement encoding.TextUnmarshaler
 // (internal/roles/enums.go), so encoding/json calls those directly for the
 // matching string fields — only PromptBody/Argv need a second pass to parse
 // into internal/prompt's *template.Template form roles.CCPoolConfig/
 // CommandConfig actually carry.
-type roleFile struct {
+type RoleFile struct {
 	Name string `json:"name"`
 	Type string `json:"type"` // "ccpool" | "command"
 	// StrictBaseEnv (INV-CCH-32): the command-role strict switch; absent = false.
@@ -50,7 +59,7 @@ type roleFile struct {
 	StrictBaseEnv bool `json:"strictBaseEnv"`
 	// SessionEnv (INV-CCH-33): a generic string-to-string map the ccpool adapter
 	// passes through `ccpool new --env`; absent = empty. Ignored at dispatch for
-	// a command role. Keys are checked by validateSessionEnv at load.
+	// a command role. Keys are checked by ValidateSessionEnv at load.
 	SessionEnv map[string]string `json:"sessionEnv"`
 	CCPool     *struct {
 		Actor           string                   `json:"actor"`
@@ -62,7 +71,7 @@ type roleFile struct {
 		PromptBody      string                   `json:"promptBody"`
 		// Budget carries this role's own Tokens/Cost/Time ceiling
 		// (roles.CCPoolConfig.Budget's own shape, minus Thresholds/Prices —
-		// those stay pool-wide, see overlayBudgetThresholds below; the OLD
+		// those stay pool-wide, see OverlayBudgetThresholds below; the OLD
 		// TOML schema's per-role [role.ccpool.budget] had this same
 		// three-key shape). Time is a time.ParseDuration string ("25m"), not
 		// raw nanoseconds, for the same human-friendly reason
@@ -88,7 +97,7 @@ type roleFile struct {
 		// roles.CCPoolConfig.BeadsDir.
 		BeadsDir string `json:"beadsDir"`
 		// BudgetStopEscalateAfter (TOML key budget_stop_escalate_after, bead
-		// pg2-6akgz): per-bead budget-stop threshold. Absent => defaultBudgetStopEscalateAfter
+		// pg2-6akgz): per-bead budget-stop threshold. Absent => DefaultBudgetStopEscalateAfter
 		// (3); 0 => disabled (kill switch). A pointer distinguishes absent from 0.
 		BudgetStopEscalateAfter *int `json:"budgetStopEscalateAfter"`
 		// WorktreeQuietWindow (bead pg2-uyahp, INV-CCH-23): per-role override of
@@ -125,33 +134,33 @@ type roleFile struct {
 	} `json:"command,omitempty"`
 }
 
-// loadRole reads and decodes a roleFile from path into a roles.Role, parsing
+// LoadRole reads and decodes a RoleFile from path into a roles.Role, parsing
 // its prompt/argv templates. An empty path is a configuration error — every
 // dispatch invocation needs to know which role it is.
-func loadRole(path string) (roles.Role, error) {
+func LoadRole(path string) (roles.Role, error) {
 	if path == "" {
-		return roles.Role{}, fmt.Errorf("no role config given (--role-config, or " + envRoleConfig + ")")
+		return roles.Role{}, fmt.Errorf("no role config given (--role-config, or " + EnvRoleConfig + ")")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return roles.Role{}, fmt.Errorf("read role config %s: %w", path, err)
 	}
-	return decodeRole(path, data, true)
+	return DecodeRole(path, data, true)
 }
 
-// decodeRole is loadRole after the file read: it decodes data (the content of
+// DecodeRole is LoadRole after the file read: it decodes data (the content of
 // the role file at path, named only in error text) into a roles.Role. The
-// sessionEnv key rules (validateSessionEnv) are applied only when
+// sessionEnv key rules (ValidateSessionEnv) are applied only when
 // checkSessionEnv is set; the validate subcommand passes false because it
 // reports every offending key itself, one problem per key, rather than the
 // first one only.
-func decodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, error) {
-	var rf roleFile
+func DecodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, error) {
+	var rf RoleFile
 	if err := json.Unmarshal(data, &rf); err != nil {
 		return roles.Role{}, fmt.Errorf("decode role config %s: %w", path, err)
 	}
 	if checkSessionEnv {
-		if err := validateSessionEnv(rf.SessionEnv); err != nil {
+		if err := ValidateSessionEnv(rf.SessionEnv); err != nil {
 			return roles.Role{}, fmt.Errorf("role config %s: sessionEnv: %w", path, err)
 		}
 	}
@@ -175,7 +184,7 @@ func decodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, err
 		if err != nil {
 			return roles.Role{}, fmt.Errorf("role config %s: parse promptBody: %w", path, err)
 		}
-		// budget.time is a "25m"-style duration string (see roleFile's own
+		// budget.time is a "25m"-style duration string (see RoleFile's own
 		// doc comment above); "" (absent) means no time bound, matching
 		// budget.Budget's own zero value rather than erroring on
 		// time.ParseDuration("").
@@ -186,7 +195,7 @@ func decodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, err
 				return roles.Role{}, fmt.Errorf("role config %s: parse budget.time %q: %w", path, rf.CCPool.Budget.Time, err)
 			}
 		}
-		stopAfter := defaultBudgetStopEscalateAfter
+		stopAfter := DefaultBudgetStopEscalateAfter
 		if rf.CCPool.BudgetStopEscalateAfter != nil {
 			stopAfter = *rf.CCPool.BudgetStopEscalateAfter
 		}
@@ -269,22 +278,22 @@ func decodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, err
 	return r, nil
 }
 
-// sessionEnvReserved are the env names the ccpool adapter sets itself on every
+// SessionEnvReserved are the env names the ccpool adapter sets itself on every
 // launch; a sessionEnv key may not collide with them (the PG_ROUTER_ item-context
-// names are covered by the prefix test in validateSessionEnv).
-var sessionEnvReserved = map[string]bool{
+// names are covered by the prefix test in ValidateSessionEnv).
+var SessionEnvReserved = map[string]bool{
 	"BEADS_ACTOR":    true,
 	"BEADS_DIR":      true,
 	"WORKSPACE_ROOT": true,
 }
 
-// validateSessionEnv enforces the load-time rules on a role's sessionEnv keys
+// ValidateSessionEnv enforces the load-time rules on a role's sessionEnv keys
 // (INV-CCH-33): a key MUST be non-empty, MUST NOT contain "=", and MUST NOT
 // collide with an adapter marker (BEADS_ACTOR, BEADS_DIR, WORKSPACE_ROOT, or any
 // name starting PG_ROUTER_). The collision test is case-sensitive, because env
 // var names are. Keys are checked in sorted order so the error is deterministic.
 // Values are passed through uninterpreted and are not checked.
-func validateSessionEnv(env map[string]string) error {
+func ValidateSessionEnv(env map[string]string) error {
 	keys := make([]string, 0, len(env))
 	for k := range env {
 		keys = append(keys, k)
@@ -296,7 +305,7 @@ func validateSessionEnv(env map[string]string) error {
 			return fmt.Errorf("key \"\" is empty")
 		case strings.Contains(k, "="):
 			return fmt.Errorf("key %q contains =", k)
-		case sessionEnvReserved[k]:
+		case SessionEnvReserved[k]:
 			return fmt.Errorf("key %q collides with an adapter-set variable", k)
 		case strings.HasPrefix(k, "PG_ROUTER_"):
 			return fmt.Errorf("key %q collides with the reserved PG_ROUTER_ prefix", k)
@@ -305,7 +314,7 @@ func validateSessionEnv(env map[string]string) error {
 	return nil
 }
 
-// loadConfig reads and decodes the launch/prompt config.Config from path,
+// LoadConfig reads and decodes the launch/prompt config.Config from path,
 // overlaying config.Default() so an absent/partial file still yields sane
 // values. An empty path uses config.Default() outright (still validated: a
 // mis-edited Default() would otherwise ship silently).
@@ -314,7 +323,7 @@ func validateSessionEnv(env map[string]string) error {
 // — so an invalid PermissionMode (docket pg2-oju6w Task 5.7's real claude
 // --permission-mode enum check) is rejected HERE, at this module's own
 // config-load time, rather than surfacing later as a rejected ccpool argv.
-func loadConfig(path string) (config.Config, error) {
+func LoadConfig(path string) (config.Config, error) {
 	c := config.Default()
 	if path != "" {
 		data, err := os.ReadFile(path)
@@ -331,20 +340,20 @@ func loadConfig(path string) (config.Config, error) {
 	return c, nil
 }
 
-// overlayBudgetThresholds sets a ccpool role's budget escalation Thresholds
+// OverlayBudgetThresholds sets a ccpool role's budget escalation Thresholds
 // from cfg's pool-wide Config.WorkerBudget() — Thresholds (Reminder/Cancel/
-// Hard fractions) are pool-wide only: roleFile.CCPool.Budget carries no
+// Hard fractions) are pool-wide only: RoleFile.CCPool.Budget carries no
 // thresholds field of its own (see its doc comment above), so every ccpool
 // role's watchdog escalates against the SAME percentages, while
-// Tokens/Cost/Time (loadRole's own per-role decode) is the one per-role
+// Tokens/Cost/Time (LoadRole's own per-role decode) is the one per-role
 // override. A no-op for a non-ccpool role (role.CCPool == nil).
 //
-// This is load-bearing, not cosmetic: without it, a role whose roleFile sets
+// This is load-bearing, not cosmetic: without it, a role whose RoleFile sets
 // any finite Tokens/Cost/Time would evaluate against a Thresholds{0,0,0}
 // zero value — Hard == 0 makes budget.Budget.Evaluate return Hard on its
 // very first tick (pct >= 0 is always true) — an instant false-positive
 // hard-stop rather than the working watchdog this bead exists to restore.
-func overlayBudgetThresholds(role roles.Role, cfg config.Config) {
+func OverlayBudgetThresholds(role roles.Role, cfg config.Config) {
 	if role.CCPool == nil {
 		return
 	}

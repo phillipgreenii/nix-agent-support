@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/eventlog"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/handlerstate"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/wire"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -19,7 +21,7 @@ import (
 
 func readDeclineRecords(t *testing.T, stateDir string) []map[string]any {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(stateDir, handlerEventLogName))
+	b, err := os.ReadFile(filepath.Join(stateDir, handlerstate.EventLogName))
 	if err != nil {
 		t.Fatalf("read event log: %v", err)
 	}
@@ -149,9 +151,9 @@ func TestEmitDispatchDecline_commandRoleAndNeutral(t *testing.T) {
 		t.Fatal(err)
 	}
 	role := roles.Role{Name: "k15-live", Type: "command"}
-	emitDispatchDecline(log, role, "b-9", busyDecline{Reason: busyReasonCommandBusy, Kind: declineKindBusy})
-	emitDispatchDecline(log, role, "b-9", neutralDecline("skipped-bead-closed", "the bead is closed"))
-	emitDispatchDecline(nil, role, "b-9", busyDecline{}) // a nil log is a no-op
+	wire.EmitDispatchDecline(log, role, "b-9", wire.BusyDecline{Reason: wire.BusyReasonCommandBusy, Kind: wire.DeclineKindBusy})
+	wire.EmitDispatchDecline(log, role, "b-9", wire.NeutralDecline("skipped-bead-closed", "the bead is closed"))
+	wire.EmitDispatchDecline(nil, role, "b-9", wire.BusyDecline{}) // a nil log is a no-op
 	recs := readDeclineRecords(t, filepath.Dir(path))
 	if len(recs) != 2 {
 		t.Fatalf("want 2 records, got %v", recs)

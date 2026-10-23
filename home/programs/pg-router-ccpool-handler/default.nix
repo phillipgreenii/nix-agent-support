@@ -786,7 +786,7 @@ let
   '';
 
   # roleFileFor renders one role's `roles` entry into the on-disk JSON shape
-  # cmd/pg-router-ccpool-handler/roleconfig.go's `loadRole` decodes
+  # internal/rolefile/rolefile.go's `LoadRole` decodes
   # (`--role-config <dir>/<role.Name>.json`, this bead pg2-pteab, wiring the
   # now-landed Go-level PG_ROUTER_HANDLER_COMMAND_DIR support -- pg2-ymb3v).
   # Field names below are NOT freely chosen: `name`/`type`/the `ccpool`
@@ -890,7 +890,7 @@ let
           // lib.optionalAttrs roleCfg.ccpool.pool.enable {
             # poolDir (bead pg2-mr0sl): only rendered when this role opted
             # into its own dedicated pool -- omitted (not merely "") when
-            # disabled, so `roleconfig.go`'s `loadRole` sees an absent JSON
+            # disabled, so `internal/rolefile/rolefile.go`'s `LoadRole` sees an absent JSON
             # key and decodes the zero-value "" exactly like every field
             # this schema already omits when unset, keeping a
             # non-opted-in role's dispatch pointed at whatever CCPOOL_POOL
@@ -967,14 +967,14 @@ let
   # launchConfigFile (this bead, pg2-qsred: home-manager module has no
   # launch-config surface, so real dispatch fails on empty WorktreeDir).
   # Renders `launchConfig` into the on-disk JSON shape
-  # cmd/pg-router-ccpool-handler/roleconfig.go's `loadConfig` decodes
+  # internal/rolefile/rolefile.go's `LoadConfig` decodes
   # DIRECTLY into `internal/config.Config` (`json.Unmarshal(data, &c)` where
   # `c := config.Default()`) -- unlike `roleFile` above, there is NO wrapper
   # struct here. `internal/config.Config` carries no `json:"..."` tags of its
   # own, so `encoding/json`'s case-insensitive fallback matches these
   # lowerCamelCase keys onto Config's own PascalCase fields -- confirmed
-  # against `loadConfig` and its own test fixtures
-  # (`cmd/pg-router-ccpool-handler/roleconfig_test.go`'s
+  # against `LoadConfig` and its own test fixtures
+  # (`internal/rolefile/rolefile_test.go`'s
   # `{"permissionMode":"yolo"}`/`{"permissionMode":"plan"}`) and against this
   # bead's own live probe. `confirmIngest`/`budgetTime` render as NANOSECOND
   # integers, not `"25m"`-style duration strings: `Config`'s `time.Duration`
@@ -1682,7 +1682,7 @@ in
       default = { };
       description = ''
         Per-role dispatch config, keyed by role name -- shaped like
-        `cmd/pg-router-ccpool-handler/roleconfig.go`'s `roleFile` (the
+        `internal/rolefile/rolefile.go`'s `RoleFile` (the
         `--role-config`/`PG_ROUTER_CCPOOL_HANDLER_ROLE` JSON shape). Each
         entry renders to its own `pkgs.writeText "<name>.json"`, joined into
         one directory exposed as `handlerCommandDir` below. Populate 2+
@@ -2093,7 +2093,7 @@ in
       description = ''
         Read-only output: the rendered `launchConfig` JSON file, suitable for
         `--config`/`PG_ROUTER_CCPOOL_HANDLER_CONFIG`
-        (`cmd/pg-router-ccpool-handler/roleconfig.go`'s `loadConfig`, which
+        (`internal/rolefile/rolefile.go`'s `LoadConfig`, which
         decodes it DIRECTLY into `internal/config.Config` -- see that
         struct's own field docs and `launchConfig` above). `null` when
         `enable` is false: `repoRoot`/`worktreeDir` above have no default, so
