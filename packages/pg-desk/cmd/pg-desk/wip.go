@@ -28,7 +28,7 @@ var wipCmd = &cobra.Command{
 		default:
 			return fmt.Errorf("wip: %q is not \"on\" or \"off\"", state)
 		}
-		return setWIPAnnotation(cmd, args[1], wip)
+		return runTypedWIP(cmd, entityTypePR, args[1], wip)
 	},
 }
 

@@ -163,3 +163,45 @@ func TestHideDoesNotClobberWIP(t *testing.T) {
 		t.Errorf("hide did not set hidden: %+v", ann)
 	}
 }
+
+// pg2-ifsje: the top-level hide/unhide/wip verbs used to read the old
+// per-column annotation table unconditionally and failed on a migrated store
+// with "no such column: comment_id". On a real schema-2 store they now write
+// the key/value annotations exactly as `pg-desk pr hide|unhide|wip` do.
+func TestTopLevelHideUnhideWIPWriteKeyValueAnnotationsOnNewSchema(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"})
+	withOpenSeams(t, linkTestConfig(), open)
+
+	if err := runCmdArgs(t, "hide", []string{"5", "noisy PR"}); err != nil {
+		t.Fatalf("hide: %v", err)
+	}
+	wantAnnotation(t, seed, "pr", "o/r#5", "hidden", `{"value":true,"reason":"noisy PR"}`, "pg-desk", "alice")
+	wantOneAnnotationChange(t, seed, "pr", "o/r#5", []string{"created@sync"}, "pg-desk")
+
+	if err := runCmdArgs(t, "wip", []string{"on", "5"}); err != nil {
+		t.Fatalf("wip on: %v", err)
+	}
+	wantAnnotation(t, seed, "pr", "o/r#5", "wip", "true", "pg-desk", "alice")
+	// hide and wip are independent keys: wip left the hidden value alone.
+	wantAnnotation(t, seed, "pr", "o/r#5", "hidden", `{"value":true,"reason":"noisy PR"}`, "pg-desk", "alice")
+
+	if err := runCmdArgs(t, "unhide", []string{"5"}); err != nil {
+		t.Fatalf("unhide: %v", err)
+	}
+	wantAnnotation(t, seed, "pr", "o/r#5", "hidden", `{"value":false,"reason":null}`, "pg-desk", "alice")
+	wantAnnotation(t, seed, "pr", "o/r#5", "wip", "true", "pg-desk", "alice")
+
+	if err := runCmdArgs(t, "wip", []string{"off", "5"}); err != nil {
+		t.Fatalf("wip off: %v", err)
+	}
+	wantAnnotation(t, seed, "pr", "o/r#5", "wip", "false", "pg-desk", "alice")
+}
+
+func TestTopLevelHideUnknownPROnNewSchemaFails(t *testing.T) {
+	open, _ := seedLinkStore(t, [2]string{"pr", "o/r#5"})
+	withOpenSeams(t, linkTestConfig(), open)
+	err := runCmdArgs(t, "hide", []string{"99"})
+	if err == nil || !strings.Contains(err.Error(), "does not resolve to a stored entity") {
+		t.Errorf("error = %v, want a does-not-resolve error", err)
+	}
+}

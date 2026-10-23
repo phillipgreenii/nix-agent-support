@@ -114,23 +114,29 @@ func newTypedWIPCmd(entityType string) *cobra.Command {
 			default:
 				return fmt.Errorf("wip: %q is not \"on\" or \"off\"", args[0])
 			}
-			ref := args[1]
-			return runSchemaDual(
-				oldPathFor(entityType, func() error { return setWIPAnnotation(cmd, ref, wip) }),
-				func(st *store.Store) error {
-					cfg, err := deskConfigLoad(cmd.Context())
-					if err != nil {
-						return fmt.Errorf("wip: load config: %w", err)
-					}
-					w, err := newKVWrite(cfg, "wip", entityType, ref, store.AnnotationWIP, boolValue(wip), annotationChangeOrigin, "", false)
-					if err != nil {
-						return err
-					}
-					return w.set(st)
-				},
-			)
+			return runTypedWIP(cmd, entityType, args[1], wip)
 		},
 	}
+}
+
+// runTypedWIP is wip on|off for entityType: the old-schema pr form on an
+// old-schema store, the key/value wip annotation on a migrated one. The
+// top-level `wip` verb calls it with the pr type.
+func runTypedWIP(cmd *cobra.Command, entityType, ref string, wip bool) error {
+	return runSchemaDual(
+		oldPathFor(entityType, func() error { return setWIPAnnotation(cmd, ref, wip) }),
+		func(st *store.Store) error {
+			cfg, err := deskConfigLoad(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("wip: load config: %w", err)
+			}
+			w, err := newKVWrite(cfg, "wip", entityType, ref, store.AnnotationWIP, boolValue(wip), annotationChangeOrigin, "", false)
+			if err != nil {
+				return err
+			}
+			return w.set(st)
+		},
+	)
 }
 
 // newTypedFeedbackCmd builds `pg-desk pr feedback list|set`; feedback is

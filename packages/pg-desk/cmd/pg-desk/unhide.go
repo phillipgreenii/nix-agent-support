@@ -9,7 +9,7 @@ var unhideCmd = &cobra.Command{
 	Short: "Unhide a PR on the triage board",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return setHiddenAnnotation(cmd, "unhide", args[0], false, "")
+		return runTypedHidden(cmd, "unhide", entityTypePR, args[0], false, "")
 	},
 }
 

@@ -17,6 +17,10 @@ var annotationNow = func() string { return time.Now().UTC().Format(time.RFC3339)
 
 // hideCmd implements `pg-desk hide <pr> [reason]`: writes the annotation
 // table only, never any pipeline table [docs/behavior/pg-desk/hide-unhide-wip.md].
+// It is schema-dual like `pg-desk pr hide`: the old per-column annotation on
+// an old-schema store (setHiddenAnnotation), the key/value hidden annotation
+// on a migrated one (pg2-ifsje: it used to read the old table unconditionally
+// and failed with "no such column: comment_id" on a migrated store).
 var hideCmd = &cobra.Command{
 	Use:   "hide <pr> [reason]",
 	Short: "Hide a PR from the triage board",
@@ -26,7 +30,7 @@ var hideCmd = &cobra.Command{
 		if len(args) == 2 {
 			reason = args[1]
 		}
-		return setHiddenAnnotation(cmd, "hide", args[0], true, reason)
+		return runTypedHidden(cmd, "hide", entityTypePR, args[0], true, reason)
 	},
 }
 
