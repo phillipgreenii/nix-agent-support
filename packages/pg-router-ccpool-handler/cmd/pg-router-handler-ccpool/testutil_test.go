@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,4 +121,73 @@ func decodeReply(t *testing.T, reply string) map[string]any {
 		t.Fatalf("reply %q is not a JSON object: %v", reply, err)
 	}
 	return m
+}
+
+// fakeBR is a fake beads.Runner: it returns canned output keyed by joined args,
+// or a single error for every call.
+type fakeBR struct {
+	out map[string]string
+	err error
+}
+
+func (f fakeBR) Run(_ context.Context, args ...string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.out[strings.Join(args, " ")], nil
+}
+
+// mustCfg decodes a JSON role config.
+func mustCfg(body string) map[string]any {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		panic(err)
+	}
+	return m
+}
+
+// redirectStdin temporarily replaces os.Stdin with a pipe pre-loaded with body
+// and already closed for writing (so a reader never blocks), returning a restore
+// func.
+func redirectStdin(t *testing.T, body string) (restore func()) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	if _, err := w.WriteString(body); err != nil {
+		t.Fatalf("write stdin pipe: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdin pipe writer: %v", err)
+	}
+	old := os.Stdin
+	os.Stdin = r
+	return func() {
+		os.Stdin = old
+		_ = r.Close()
+	}
+}
+
+// captureStdout temporarily replaces os.Stdout with a pipe, runs fn, restores
+// os.Stdout, and returns everything fn wrote.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	fn()
+	os.Stdout = old
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout pipe writer: %v", err)
+	}
+	return <-done
 }

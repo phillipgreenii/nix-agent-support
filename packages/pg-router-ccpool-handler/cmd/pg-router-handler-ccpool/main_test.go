@@ -86,15 +86,15 @@ func TestRun_SubcommandSet(t *testing.T) {
 			t.Errorf("%s: exit %d, want 0", ok, got)
 		}
 	}
-	// The lifecycle requests and the remaining ccpool subcommands belong to the
-	// next packets of the split; until then they are usage errors, never a stub.
-	for _, notYet := range []string{"postStartup", "preShutdown", "pool-capacity", "split", "query", "register", "self-status", "bogus"} {
+	// The remaining ccpool subcommands belong to the next packet of the split;
+	// until then they are usage errors, never a stub.
+	for _, notYet := range []string{"pool-capacity", "split", "query", "bogus"} {
 		if got := run([]string{notYet}); got != conformance.ExitUsage {
 			t.Errorf("%s: exit %d, want %d (not a subcommand yet)", notYet, got, conformance.ExitUsage)
 		}
 	}
 	// Requests are JSON on stdin, never arguments.
-	for _, sub := range []string{"dispatch", "validate"} {
+	for _, sub := range []string{"dispatch", "postStartup", "preShutdown", "validate"} {
 		if got := run([]string{sub, "stray"}); got != conformance.ExitUsage {
 			t.Errorf("%s with an argument: exit %d, want %d", sub, got, conformance.ExitUsage)
 		}

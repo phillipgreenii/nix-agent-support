@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
@@ -39,8 +38,9 @@ import (
 // PG_ROUTER_CCPOOL_HANDLER_ROLE are NOT read: the role comes from stdin.
 //
 // The opportunistic reconcile and sweep passes the old dispatch runs before the
-// executor (closed-bead sessions, orphans, leaked worktrees, stale locks) are
-// the lifecycle packet's (pg2-12gr4.10.6): they are not run here yet.
+// executor (closed-bead sessions, orphans, leaked worktrees, stale locks) run
+// here too (runSweeps), after the per-attempt external id and before the
+// precheck.
 func runDispatch(args []string) int {
 	fs := flag.NewFlagSet("dispatch", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -79,28 +79,10 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	var req wire.DispatchRequest
 	_ = json.Unmarshal(raw, &req)
 
-	role, problems := decodeRole(ro)
-	if len(problems) > 0 {
-		msg := fmt.Sprintf("role %q: invalid config: %s", ro.Name, strings.Join(problems, "; "))
-		fmt.Fprintln(os.Stderr, "dispatch:", msg)
-		wire.WriteErrorReply(stdout, msg)
-		return conformance.ExitError
-	}
-	cfg, err := rolefile.LoadConfig(cfgPath)
+	role, cfg, err := loadRoleAndConfig(ro, cfgPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "dispatch:", err)
-		wire.WriteErrorReply(stdout, err.Error())
-		return conformance.ExitError
+		return failDispatch(stdout, err.Error())
 	}
-	// The bounds that depend on the handler-wide config (poll interval, quiet
-	// window maximum) can only be checked here, where both are loaded.
-	if err := cfg.ValidateQuietWindowOverride(role.CCPool.WorktreeQuietWindow); err != nil {
-		return failDispatch(stdout, fmt.Sprintf("role %s: %v", role.Name, err))
-	}
-	if err := cfg.ValidateNeedsInputStall(role.CCPool.NeedsInputStall); err != nil {
-		return failDispatch(stdout, fmt.Sprintf("role %s: needsInputStall: %v", role.Name, err))
-	}
-	rolefile.OverlayBudgetThresholds(role, cfg)
 
 	dctx := executor.DispatchContext{Role: role, Item: dispatchlib.ItemFromPayload(req.Event.Payload), EventID: req.Event.ID}
 	// Origin availability gate (INV-CCH-10, bead pg2-4gi2c): decline BEFORE
@@ -125,6 +107,12 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	// library's, so a session this binary starts and one the old binary starts
 	// are adopted alike (ADR 0085).
 	deps.ExternalID = dispatchlib.StampExternalID(role, cfg.SessionPrefix, dctx.Item.ID, deps.Now)
+	// The housekeeping passes the old binary's dispatch runs before the executor
+	// (closed-bead sessions, default pool, orphans, leaked worktrees, stale locks),
+	// in the same place and order, so a reclaimed orphan frees its slot for this
+	// very dispatch. Best effort, never a dispatch failure; postStartup runs the
+	// same passes.
+	runSweeps(ctx, "dispatch", role, cfg, deps)
 
 	// Zero-model-cost precheck (INV-CCH-22): a dispatch whose bead no longer
 	// warrants a session launches none. Read-only; fails open, except that a

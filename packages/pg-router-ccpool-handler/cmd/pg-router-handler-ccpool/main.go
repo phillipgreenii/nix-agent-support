@@ -8,13 +8,19 @@
 // launch, prompt, wait and budget watchdog, completion and failure policy,
 // cleanup).
 //
-// Subcommands: dispatch and validate (INTF-HANDLER, DEC-WIRE-1: JSON on stdin,
-// JSON on stdout, a coarse exit code), the operator tool origin, version and
-// help. The lifecycle requests (postStartup, preShutdown) and the remaining
-// ccpool-specific subcommands (pool-capacity, split, query, register,
-// self-status) are not part of this binary yet: they are the next packets of
-// the same split (pg2-12gr4.10.6 and .10.7), and an unknown subcommand is a
-// usage error.
+// Subcommands: dispatch, postStartup, preShutdown and validate (INTF-HANDLER,
+// DEC-WIRE-1: JSON on stdin, JSON on stdout, a coarse exit code), the outbound
+// manager-contract subcommands register and self-status (the launchd agent runs
+// register; they speak to the core's socket), the operator tool origin, version
+// and help. The remaining ccpool-specific subcommands (pool-capacity, split,
+// query) are not part of this binary yet: they are the next packet of the same
+// split (pg2-12gr4.10.7), and an unknown subcommand is a usage error.
+//
+// Sessions outlive daemon restarts (ADR 0085), so besides dispatch this adapter
+// carries the lifecycle: postStartup runs the post-startup reconcile and orphan
+// and worktree sweeps for the request's role (sweeps.go), the same passes a
+// dispatch runs before its executor; preShutdown runs the shutdown teardown
+// (preshutdown.go).
 //
 // The shape of [role.config] is this adapter's own, defined by the decoder in
 // roleconfig.go: the ccpool-role fields of the former per-role JSON, names
@@ -53,8 +59,16 @@ func run(args []string) int {
 	case "-v", "--version", "version":
 		fmt.Println(version)
 		return conformance.ExitOK
+	case "register":
+		return runRegister(args[1:])
+	case "self-status":
+		return runSelfStatus(args[1:])
 	case "dispatch":
 		return runDispatch(args[1:])
+	case "postStartup":
+		return runPostStartup(args[1:])
+	case "preShutdown":
+		return runPreShutdown(args[1:])
 	case "validate":
 		return runValidate(args[1:])
 	case "origin":
