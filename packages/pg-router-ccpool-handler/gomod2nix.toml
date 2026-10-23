@@ -3,6 +3,7 @@ cachePackages = [
   'github.com/phillipgreenii/claude-transcript',
   'github.com/phillipgreenii/pg-router/conformance',
   'github.com/phillipgreenii/pg-router/conformance/driver',
+  'github.com/phillipgreenii/pg-router/procenv',
   'github.com/phillipgreenii/pg-router/schemas',
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
