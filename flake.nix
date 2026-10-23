@@ -1115,12 +1115,12 @@
 
                 top="$(git rev-parse --show-toplevel)"
                 cd "$top/packages/pg-router-ccpool-handler"
-                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Terminal|Park|Triage)_RealBD_' ./internal/watchdog/ ./internal/executor/ ./cmd/pg-router-ccpool-handler/ ./cmd/pg-router-handler-command/
+                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Terminal|Park|Triage)_RealBD_' ./internal/watchdog/ ./internal/executor/ ./cmd/pg-router-ccpool-handler/ ./cmd/pg-router-handler-command/ ./cmd/pg-router-handler-ccpool/
               '';
             }
           }/bin/pg-router-ccpool-handler-bd-contract-test-hook";
           language = "system";
-          files = "^packages/pg-router-ccpool-handler/(internal/(watchdog|beads|executor|complete|parknote|dtest|roles|wire|dispatchlib|handlerstate|rolefile)/|cmd/(pg-router-ccpool-handler|pg-router-handler-command)/dispatch[^/]*\\.go$|go\\.(mod|sum)$)";
+          files = "^packages/pg-router-ccpool-handler/(internal/(watchdog|beads|executor|complete|parknote|dtest|roles|wire|dispatchlib|handlerstate|rolefile)/|cmd/(pg-router-ccpool-handler|pg-router-handler-command|pg-router-handler-ccpool)/dispatch[^/]*\\.go$|go\\.(mod|sum)$)";
           pass_filenames = false;
           require_serial = true;
         };
