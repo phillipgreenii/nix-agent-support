@@ -213,6 +213,35 @@ let
     }
   ) specRoles;
 
+  # commandSpecFiles (bead pg2-8puhw): a COMMAND role's pg-wrap spec, declared as
+  # `roles.<name>.command.spec`. The spec has no `exec` (pg-wrap prepends it to the
+  # payload, and a command role's payload is its own argv) and no pool: it carries
+  # the role's static env wrappers (`wrap`), and the rendered role file's argv is
+  # `[ pg-wrap run --spec <spec> -- <argv...> ]` (design section 4, "Per-item
+  # values for a wrapper"). `handlerCommandDir` runs `pg-wrap check` over each one.
+  commandSpecRoles = lib.filterAttrs (
+    _name: roleCfg: roleCfg.type == "command" && roleCfg.command != null && roleCfg.command.spec != null
+  ) cfg.roles;
+  commandSpecFiles = lib.mapAttrs (
+    _name: roleCfg:
+    renderWrapSpec {
+      inherit (roleCfg.command.spec) wrap keep strictEnv;
+      exec = [ ];
+    }
+  ) commandSpecRoles;
+  # The argv a command role's rendered file carries: the role's own, behind
+  # `pg-wrap run --spec <spec> --` when it declares a `command.spec`.
+  commandArgvFor =
+    name: roleCfg:
+    lib.optionals (commandSpecFiles ? ${name}) [
+      "${pkgs.pg-wrap}/bin/pg-wrap"
+      "run"
+      "--spec"
+      "${commandSpecFiles.${name}}"
+      "--"
+    ]
+    ++ roleCfg.command.argv;
+
   ccpoolRoles = lib.filterAttrs (_name: roleCfg: roleCfg.type == "ccpool") cfg.roles;
   # The ccpool roles that share the handler-wide pool (only meaningful while
   # `pool.enable`; otherwise they run on ccpool's unmanaged default pool).
@@ -308,6 +337,16 @@ let
       only on a ccpool role; a command role is wrapped through its argv.
     '';
   }) specRoles;
+  commandSpecAssertions =
+    lib.mapAttrsToList
+      (name: roleCfg: {
+        assertion = roleCfg.type == "command";
+        message = ''
+          phillipgreenii.programs.pg-router-ccpool-handler.roles.${name}: `command.spec` is
+          valid only on a command role; a ccpool role's pg-wrap spec is `spec`.
+        '';
+      })
+      (lib.filterAttrs (_n: roleCfg: roleCfg.command != null && roleCfg.command.spec != null) cfg.roles);
   wrapSessionEnvAssertions = lib.mapAttrsToList (name: roleCfg: {
     assertion = !(roleCfg.sessionEnv ? PG_WRAP_SPEC);
     message = ''
@@ -861,7 +900,7 @@ let
         }
         // lib.optionalAttrs (roleCfg.type == "command") {
           command = {
-            inherit (roleCfg.command) argv;
+            argv = commandArgvFor name roleCfg;
           };
           # strictBaseEnv (design ruling 30): command roles only; a ccpool
           # role's minimal env comes from its spec's `strict_env`.
@@ -882,7 +921,7 @@ let
   #
   # Build-time check (bead pg2-12gr4.8.32): the directory is built by a
   # derivation that first runs `checkRenderedScript` over every role file and
-  # every rendered spec (`specFiles`), so a spec that fails `pg-wrap check` or a
+  # every rendered spec (`specFiles` and `commandSpecFiles`), so a spec that fails `pg-wrap check` or a
   # role file that fails the handler's `validate` fails the build of
   # `handlerCommandDir`, and with it everything that consumes it. The layout is
   # unchanged: one `<role>.json` symlink per role and nothing else.
@@ -891,6 +930,7 @@ let
       ${checkRenderedScript} ${
         lib.concatStringsSep " " (
           (lib.mapAttrsToList (_name: file: "--spec ${file}") specFiles)
+          ++ (lib.mapAttrsToList (_name: file: "--spec ${file}") commandSpecFiles)
           ++ (lib.mapAttrsToList (name: roleCfg: "--role ${roleFileFor name roleCfg}") cfg.roles)
         )
       }
@@ -1424,6 +1464,49 @@ let
               type = lib.types.listOf lib.types.str;
               description = "The argv this command role dispatches (`roleFile.Command.Argv`).";
             };
+            options.spec = lib.mkOption {
+              type = lib.types.nullOr (
+                lib.types.submodule {
+                  options = {
+                    wrap = lib.mkOption {
+                      type = lib.types.listOf (lib.types.either lib.types.str (lib.types.listOf lib.types.str));
+                      default = [ ];
+                      description = ''
+                        pg-wrap's `wrap` chain, outermost first (a string entry is
+                        shell-parsed, a list is an argv entry; the first word or element of
+                        each MUST be an absolute path). The usual entry is one argv entry
+                        `[ "''${pkgs.coreutils}/bin/env" "PATH=..." "NAME=value" ]`.
+                      '';
+                    };
+                    keep = lib.mkOption {
+                      type = lib.types.listOf lib.types.str;
+                      default = [ ];
+                      description = ''
+                        Extra variable names `strictEnv` keeps, on top of the ten this
+                        module always adds.
+                      '';
+                    };
+                    strictEnv = lib.mkOption {
+                      type = lib.types.bool;
+                      default = false;
+                      description = ''
+                        The spec's `strict_env`: start the wrap chain from pg-wrap's minimal
+                        environment. Independent of the role's `strictBaseEnv`, which the
+                        handler applies before pg-wrap starts; a family's rollout flips both.
+                      '';
+                    };
+                  };
+                }
+              );
+              default = null;
+              description = ''
+                This command role's pg-wrap spec (design ruling 30, bead pg2-8puhw), or
+                `null` for none. A role with a spec gets a rendered spec file (no `exec`)
+                and its rendered argv becomes `pg-wrap run --spec <spec> -- <argv...>`;
+                `handlerCommandDir` runs `pg-wrap check` over the spec, so a broken spec
+                fails the build. Valid only on a `type = "command"` role.
+              '';
+            };
           }
         );
         default = null;
@@ -1511,8 +1594,8 @@ let
         default = null;
         description = ''
           This role's pg-wrap spec (design ruling 30), or `null` for none. Valid only
-          on a ccpool role (a command role is wrapped through its argv; a `spec` on
-          one fails evaluation). A role with a spec gets a rendered spec file, the
+          on a ccpool role (a command role declares `command.spec`, which wraps its
+          argv; a `spec` on a command role fails evaluation). A role with a spec gets a rendered spec file, the
           `PG_WRAP_SPEC` entry in its `sessionEnv`, and `claude.bin = pg-wrap-exec`
           in the config.toml of the pool it runs on; evaluation fails when that pool's
           rendered `claude.bin` is anything else, and when a role WITHOUT a spec runs
@@ -1679,6 +1762,16 @@ in
         non-empty `problems`; warnings are printed and never fail.
         `handlerCommandDir` runs it over every role file and every `specFiles`
         entry, so a failing file fails the build.
+      '';
+    };
+
+    commandSpecFiles = lib.mkOption {
+      type = lib.types.attrsOf lib.types.package;
+      readOnly = true;
+      description = ''
+        Read-only output: command role name -> that role's rendered pg-wrap spec
+        file (`roles.<name>.command.spec`), for every command role with one.
+        `handlerCommandDir` runs `pg-wrap check` over each.
       '';
     };
 
@@ -2220,7 +2313,7 @@ in
           "Bash(pre-commit:*)"
         ];
         # handlerCommandDir: this bead, pg2-pteab.
-        inherit handlerCommandDir specFiles;
+        inherit handlerCommandDir specFiles commandSpecFiles;
         lib.renderWrapSpec = renderWrapSpec;
         lib.checkRenderedScript = checkRenderedScript;
         inherit claudeBaseline;
@@ -2354,6 +2447,7 @@ in
       ++ wrapPoolAssertions
       ++ unmanagedPoolAssertions
       ++ wrapSpecAssertions
+      ++ commandSpecAssertions
       ++ wrapSessionEnvAssertions;
 
       systemd.user = {

@@ -7794,11 +7794,32 @@
                         command.argv = [ "cmd-bin" ];
                         strictBaseEnv = true;
                       };
+                      # A command role with a pg-wrap spec (bead pg2-8puhw).
+                      cmd-wrapped = {
+                        type = "command";
+                        command = {
+                          argv = [
+                            "cmd-bin"
+                            "--flag"
+                          ];
+                          spec = {
+                            wrap = [
+                              [
+                                wrapFakePrefix
+                                "CMD_VAR=cmd-value"
+                              ]
+                            ];
+                            keep = [ "CMD_KEEP" ];
+                          };
+                        };
+                      };
                     };
                   };
                   wrapOwnPoolFired = wrapFired wrapOwnPool;
                   wrapOwnPoolDir = (wrapMod wrapOwnPool).handlerCommandDir;
                   wrapOwnPoolSpec = (wrapMod wrapOwnPool).specFiles.wrapped;
+                  wrapOwnPoolCmdSpec = (wrapMod wrapOwnPool).commandSpecFiles.cmd-wrapped;
+                  wrapPgWrapBin = "${pkgs.pg-wrap}/bin/pg-wrap";
                   wrapOwnPoolConfig = (wrapMod wrapOwnPool).poolConfigFiles.wrapped;
                   wrapPlainPoolConfig = (wrapMod wrapOwnPool).poolConfigFiles.plain;
 
@@ -8011,6 +8032,23 @@
                       spec.exec = [ "/nix/store/fake/bin/claude" ];
                     };
                   });
+                  # A `command.spec` on a ccpool role (bead pg2-8puhw).
+                  wrapCcpoolCommandSpecFired = wrapFired (evalHM {
+                    enable = true;
+                    roles.ccpool-cmd-spec = {
+                      type = "ccpool";
+                      ccpool = wrapRoleBase // {
+                        pool = {
+                          enable = true;
+                          dir = "/tmp/pg2-8puhw-ccpool-cmd-spec-pool";
+                        };
+                      };
+                      command = {
+                        argv = [ "cmd-bin" ];
+                        spec = { };
+                      };
+                    };
+                  });
                   # A role that sets PG_WRAP_SPEC itself AND has a spec.
                   wrapEnvClashFired = wrapFired (evalHM {
                     enable = true;
@@ -8049,6 +8087,8 @@
                           wrapFakeOther
                           wrapOwnPoolDir
                           wrapOwnPoolSpec
+                          wrapOwnPoolCmdSpec
+                          wrapPgWrapBin
                           wrapOwnPoolConfig
                           wrapPlainPoolConfig
                           wrapHandlerPoolDir
@@ -8248,6 +8288,19 @@
                         [ "$(jq -r .strictBaseEnv "$wrapOwnPoolDir/cmd.json")" = true ]
                         jq -e 'has("sessionEnv") | not' "$wrapOwnPoolDir/cmd.json" >/dev/null
                         jq -e 'has("spec") | not' "$wrapOwnPoolDir/cmd.json" >/dev/null
+                        # A command role WITHOUT command.spec keeps its argv verbatim.
+                        [ "$(jq -c .command.argv "$wrapOwnPoolDir/cmd.json")" = '["cmd-bin"]' ]
+                        # A command role WITH command.spec (bead pg2-8puhw): the argv is
+                        # pg-wrap run --spec <commandSpecFiles entry> -- <argv>, the role
+                        # file carries no spec or sessionEnv key, and the spec has an empty
+                        # exec, the wrap entry, the keep names and strict_env = false.
+                        [ "$(jq -c .command.argv "$wrapOwnPoolDir/cmd-wrapped.json")" = "$(jq -cn --arg b "$wrapPgWrapBin" --arg s "$wrapOwnPoolCmdSpec" '[$b,"run","--spec",$s,"--","cmd-bin","--flag"]')" ]
+                        jq -e 'has("sessionEnv") or has("spec") | not' "$wrapOwnPoolDir/cmd-wrapped.json" >/dev/null
+                        cmd_spec_json="$(toml2json "$wrapOwnPoolCmdSpec")"
+                        [ "$(jq -c .exec <<<"$cmd_spec_json")" = '[]' ]
+                        [ "$(jq -r .strict_env <<<"$cmd_spec_json")" = false ]
+                        [ "$(jq -c .wrap <<<"$cmd_spec_json")" = "[[\"$wrapFakePrefix\",\"CMD_VAR=cmd-value\"]]" ]
+                        jq -e '.keep | index("CMD_KEEP") != null and index("BEADS_ACTOR") != null' <<<"$cmd_spec_json" >/dev/null
                         # The rendered spec: version, strict_env, default exec = claude,
                         # keep = the ten module-owned names + the role's own keep + its
                         # sessionEnv extra, de-duplicated, and no child-session marker.
@@ -8406,6 +8459,8 @@
                 # failure names the role and the pool.
                 assert builtins.isFunction (wrapMod wrapOwnPool).lib.renderWrapSpec;
                 assert lib.attrNames (wrapMod wrapOwnPool).specFiles == [ "wrapped" ];
+                # command.spec (bead pg2-8puhw): its own output, never in specFiles.
+                assert lib.attrNames (wrapMod wrapOwnPool).commandSpecFiles == [ "cmd-wrapped" ];
                 assert
                   lib.attrNames (wrapMod wrapOwnPool).poolConfigFiles == [
                     "plain"
@@ -8422,6 +8477,7 @@
                 assert wrapMessageNames wrapUserBinFired "user-bin" "/tmp/pg2-12gr4-user-bin-pool";
                 assert wrapMessageNames wrapUnmanagedFired "unmanaged" "neither its own pool";
                 assert wrapMessageNames wrapCommandSpecFired "cmd-spec" "command role";
+                assert wrapMessageNames wrapCcpoolCommandSpecFired "ccpool-cmd-spec" "command.spec";
                 assert wrapMessageNames wrapEnvClashFired "clash" "PG_WRAP_SPEC";
                 # pg2-4roho decision item 4: exactly one registry entry,
                 # scoped to this handler's own configured worktreeDir, with
