@@ -107,8 +107,8 @@ func TestCIHandlersCarryTheCISchemaVersionAndTheTwoOps(t *testing.T) {
 			t.Errorf("%s: handle nil %t, schema version %d (want %d)", op, h.Handle == nil, h.SchemaVersion, schema.CISchemaVersion)
 		}
 	}
-	if schema.CISchemaVersion != 7 {
-		t.Errorf("CI schema version = %d, want 7", schema.CISchemaVersion)
+	if schema.CISchemaVersion != 8 {
+		t.Errorf("CI schema version = %d, want 8", schema.CISchemaVersion)
 	}
 	if resp := r.callCI(OpChangesAck, ackArgs("c", "mine", 0)); resp.SchemaVersion != schema.CISchemaVersion || resp.Error != nil {
 		t.Errorf("answer = schemaVersion %d, error %+v; want %d and none", resp.SchemaVersion, resp.Error, schema.CISchemaVersion)

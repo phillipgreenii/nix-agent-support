@@ -60,12 +60,16 @@ func TestSourceFreshness_OmitsEmptyTimesAndError(t *testing.T) {
 
 func TestPRChangesResult_NamesAndAckResult(t *testing.T) {
 	raw, _ := json.Marshal(PRChangesResult{Sources: []ChangeSource{}, Changes: []PRChange{}, SourcesFreshness: []SourceFreshness{}})
-	if string(raw) != `{"sources":[],"changes":[],"sources_freshness":[]}` {
+	if string(raw) != `{"sources":[],"changes":[],"sources_freshness":[],"store_identity":""}` {
 		t.Errorf("result = %s", raw)
 	}
 	raw, _ = json.Marshal(ChangesAckResult{Consumer: "c", Query: "q", AckedSeq: 5})
-	if string(raw) != `{"consumer":"c","query":"q","acked_seq":5}` {
+	if string(raw) != `{"consumer":"c","query":"q","acked_seq":5,"store_identity":""}` {
 		t.Errorf("ack result = %s", raw)
+	}
+	raw, _ = json.Marshal(ChangesAckResult{Consumer: "c", AckedSeq: 5, StoreIdentity: "id"})
+	if string(raw) != `{"consumer":"c","acked_seq":5,"store_identity":"id"}` {
+		t.Errorf("ack result without a query = %s", raw)
 	}
 }
 
@@ -100,7 +104,7 @@ func TestCIChangesResult_JSONNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"sources":[],"changes":[],"sources_freshness":[]}`
+	const want = `{"sources":[],"changes":[],"sources_freshness":[],"store_identity":""}`
 	if string(raw) != want {
 		t.Errorf("result = %s, want %s", raw, want)
 	}
@@ -137,7 +141,7 @@ func TestChangesResult_MarshalsLikeTheTypedAnswers(t *testing.T) {
 	if string(typed) != string(generic) {
 		t.Fatalf("generic answer differs from the typed answer:\n got %s\nwant %s", generic, typed)
 	}
-	if strings.Contains(string(generic), "store_identity") {
-		t.Errorf("the answer carries a store_identity before the packet that adds it: %s", generic)
+	if !strings.Contains(string(generic), `"store_identity":""`) {
+		t.Errorf("the answer carries no store_identity: %s", generic)
 	}
 }

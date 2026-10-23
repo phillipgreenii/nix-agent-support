@@ -26,6 +26,15 @@
 //   - A registry that mixes owning and non-owning ci backends answers the
 //     owning ones normally and carries the others' reasons on their rows.
 //
+// A call that names no query (--query is optional, for a backend whose
+// registration delivers by watched marker) takes the same route for EVERY entity
+// type: an owning backend is forwarded without a query argument, and a backend
+// that does not own its changes (whose ledger path keys on the query) is
+// answered here as disabled, with a reason naming the instance and saying a query
+// is required for a backend that does not own its changes; when every queried
+// backend is such a source the call fails as invalid_argument. With --query a pr
+// or issue backend keeps its ledger path unchanged.
+//
 // The daemon's own refusals (the key conflict between (consumer, pr, query) and
 // (consumer, ci, query), cursor_expired:) are relayed as the source's failure
 // with the message intact: forwardChangesOne does that for every failed call.
@@ -43,15 +52,27 @@ import (
 // newCiChangesCmd is the "ci changes" verb: newChangesCmd's flags exactly.
 func newCiChangesCmd() *cobra.Command { return newChangesCmd("ci") }
 
-// ciNotOwningResult is the umbrella's own answer for a ci backend that does not
-// own changes. capsErr is the failure of its capabilities call, or nil when the
-// call answered without owns_changes.
+// ciNotOwningResult is the umbrella's own answer for a backend that does not own
+// changes and has no ledger path for the call: a ci backend, or any backend when
+// the call names no query. capsErr is the failure of its capabilities call, or
+// nil when the call answered without owns_changes. With no query the reason says
+// that a query is required for a backend that does not own its changes.
 func ciNotOwningResult(entityType, backend, query string, capsErr error) changesBackendResult {
 	res := changesBackendResult{
 		backend:     backend,
 		key:         LedgerKey{Type: entityType, Backend: backend, Query: query, Instance: ledgerInstanceDiscriminator(entityType)},
 		skipAdvance: true,
 		notOwning:   true,
+	}
+	if query == "" {
+		detail := "its capabilities do not declare owns_changes"
+		res.status = SourceDisabled
+		if capsErr != nil {
+			detail = fmt.Sprintf("its capabilities call failed: %v", capsErr)
+			res.status = SourceDegraded
+		}
+		res.reason = fmt.Sprintf("%s instance %q does not own changes (%s): a query is required for a backend that does not own its changes", entityType, backend, detail)
+		return res
 	}
 	if capsErr != nil {
 		res.status = SourceDegraded

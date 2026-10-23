@@ -33,9 +33,12 @@ type Deps struct {
 }
 
 // Handlers builds the two ops of the change feed for one view, keyed "changes"
-// and "changes_ack": changes {consumer, query, cached, reset} and changes_ack
-// {consumer, query, next_seq}, each stamped with Deps.SchemaVersion and acting on
-// the cursor (consumer, Deps.View, query).
+// and "changes_ack": changes {consumer, query?, cached, reset} and changes_ack
+// {consumer, query?, next_seq}, each stamped with Deps.SchemaVersion and acting on
+// the consumer's one cursor (bound to Deps.View and the query it names). The query
+// is required for a registration that delivers by membership and optional for
+// one that delivers by watched marker. Every answer carries the store's identity
+// (store_identity).
 func Handlers(d Deps) map[string]scriptout.OpHandler {
 	if d.Clock == nil {
 		d.Clock = governor.SystemClock{}
@@ -48,6 +51,12 @@ func Handlers(d Deps) map[string]scriptout.OpHandler {
 }
 
 type handler struct{ deps Deps }
+
+// queryRequired reports whether a call must name a query: a registration that
+// delivers by membership has no rows without one.
+func (h *handler) queryRequired() bool {
+	return h.deps.Feed.Spec().Delivery == registry.DeliverByMembership
+}
 
 // view is the registered view the instance serves; a name the Spec does not
 // register is the zero view (the feed itself refuses such a poll).
@@ -71,7 +80,7 @@ func (h *handler) changes(ctx context.Context, raw json.RawMessage) (any, error)
 	if err := noTimeBound(m, "before"); err != nil {
 		return nil, err
 	}
-	consumer, query, err := keyArgs(m)
+	consumer, query, err := keyArgs(m, h.queryRequired())
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +109,7 @@ func (h *handler) changes(ctx context.Context, raw json.RawMessage) (any, error)
 		}},
 		Changes:          []schema.Change{},
 		SourcesFreshness: freshness(configured),
+		StoreIdentity:    res.StoreID,
 	}
 
 	if reset {
@@ -156,7 +166,7 @@ func (h *handler) ack(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	consumer, query, err := keyArgs(m)
+	consumer, query, err := keyArgs(m, h.queryRequired())
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +184,7 @@ func (h *handler) ack(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, h.mapError("changes_ack", err)
 	}
-	return schema.ChangesAckResult{Consumer: consumer, Query: query, AckedSeq: res.AckedSeq}, nil
+	return schema.ChangesAckResult{Consumer: consumer, Query: query, AckedSeq: res.AckedSeq, StoreIdentity: res.StoreID}, nil
 }
 
 func (h *handler) mapError(op string, err error) error {

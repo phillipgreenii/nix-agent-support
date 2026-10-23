@@ -1,6 +1,6 @@
 // changes.go: the wire shapes of the pr instance's `changes` and `changes_ack`
 // ops, served by the pg-connector-github daemon from its change log (bead
-// pg2-z5fax.4.8; PRSchemaVersion 12). The shape extends the umbrella's own
+// pg2-z5fax.4.8; PRSchemaVersion 14). The shape extends the umbrella's own
 // changes answer (sources[] of {backend, status, version, truncated, reason}
 // and changes[] of {change, source, entity}): each change gains seq, kinds
 // and fields, each source gains next_seq, and the answer gains
@@ -62,6 +62,9 @@ type PRChangesResult struct {
 	Sources          []ChangeSource    `json:"sources"`
 	Changes          []PRChange        `json:"changes"`
 	SourcesFreshness []SourceFreshness `json:"sources_freshness"`
+	// StoreIdentity is the daemon store's persisted identity: it differs after
+	// the store is replaced, so a consumer keys its redelivery marker on it.
+	StoreIdentity string `json:"store_identity"`
 }
 
 // CIChangeEntity is the entity of a ci changes entry: the PR's CURRENT stored CI
@@ -97,14 +100,20 @@ type CIChangesResult struct {
 	Sources          []ChangeSource    `json:"sources"`
 	Changes          []CIChange        `json:"changes"`
 	SourcesFreshness []SourceFreshness `json:"sources_freshness"`
+	// StoreIdentity is the daemon store's persisted identity (see
+	// PRChangesResult.StoreIdentity).
+	StoreIdentity string `json:"store_identity"`
 }
 
-// ChangesAckResult is the answer of the changes_ack op: the key's stored
-// position after the acknowledgement.
+// ChangesAckResult is the answer of the changes_ack op: the consumer's stored
+// position after the acknowledgement. Query is omitted when the call named none
+// (a registration that delivers by watched marker); StoreIdentity is the daemon
+// store's persisted identity.
 type ChangesAckResult struct {
-	Consumer string `json:"consumer"`
-	Query    string `json:"query"`
-	AckedSeq int64  `json:"acked_seq"`
+	Consumer      string `json:"consumer"`
+	Query         string `json:"query,omitempty"`
+	AckedSeq      int64  `json:"acked_seq"`
+	StoreIdentity string `json:"store_identity"`
 }
 
 // ChangesResult is the answer every connector's changes op returns: the shape of
@@ -115,6 +124,8 @@ type ChangesResult struct {
 	Sources          []ChangeSource    `json:"sources"`
 	Changes          []Change          `json:"changes"`
 	SourcesFreshness []SourceFreshness `json:"sources_freshness"`
+	// StoreIdentity is the daemon store's persisted identity.
+	StoreIdentity string `json:"store_identity"`
 }
 
 // Change is one changes[] entry of a ChangesResult; Entity is the connector's

@@ -16,7 +16,9 @@ package changesop
 // repo's formatter re-indents committed JSON, so the whitespace of the file is
 // not part of the oracle; key order, values and every byte of a string are). A
 // later packet of the hoist MUST leave these files untouched: a diff means the
-// wire answer changed.
+// wire answer changed. Packet H10b regenerated them once, for store_identity
+// (random per store, so the recorder replaces its value with a fixed token after
+// asserting it is present) and the bumped schema versions.
 //
 // To regenerate the files (only after an intended, reviewed wire change), run
 // from the module root:
@@ -31,6 +33,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 
@@ -79,9 +82,32 @@ func (g *goldenRecorder) call(t *testing.T, view, op, args string) scriptout.Res
 	if err != nil {
 		t.Fatal(err)
 	}
+	raw = normalizeStoreIdentity(t, resp, raw)
 	key := "changes_" + view + "_" + op + ".json"
 	g.steps[key] = append(g.steps[key], goldenStep{Call: op + " " + args, Answer: raw})
 	return resp
+}
+
+// storeIdentityRE matches the store_identity of an answer: 32 lowercase hex
+// characters, random per store.
+var storeIdentityRE = regexp.MustCompile(`"store_identity":"[0-9a-f]{32}"`)
+
+// goldenStoreIdentity is the fixed token the recorded answers carry in place of
+// the random store identity.
+const goldenStoreIdentity = "example-store-identity"
+
+// normalizeStoreIdentity replaces the store identity of a success answer with the
+// fixed token after asserting that the answer carries exactly one, non-empty. An
+// error answer has no result and so no identity.
+func normalizeStoreIdentity(t *testing.T, resp scriptout.Response, raw []byte) []byte {
+	t.Helper()
+	if resp.Error != nil {
+		return raw
+	}
+	if n := len(storeIdentityRE.FindAll(raw, -1)); n != 1 {
+		t.Fatalf("the answer carries %d store identities, want exactly one: %s", n, raw)
+	}
+	return storeIdentityRE.ReplaceAll(raw, []byte(`"store_identity":"`+goldenStoreIdentity+`"`))
 }
 
 // goldenPutPR stores the alias, the entity row and the summary of a pull

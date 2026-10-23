@@ -3,7 +3,7 @@
     "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 7,
+      "schemaVersion": 8,
       "error": {
         "code": "invalid_argument",
         "message": "invalid_argument: consumer example-consumer is bound to view pr, scope mine, so it cannot use view ci: one consumer acting on both feeds would act twice on one CI event"
@@ -14,7 +14,7 @@
     "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 7,
+      "schemaVersion": 8,
       "result": {
         "sources": [
           {
@@ -35,7 +35,8 @@
             "query": "team",
             "last_error": "example error"
           }
-        ]
+        ],
+        "store_identity": "example-store-identity"
       }
     }
   },
@@ -43,7 +44,7 @@
     "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 7,
+      "schemaVersion": 8,
       "result": {
         "sources": [
           {
@@ -199,7 +200,8 @@
             "query": "team",
             "last_error": "example error"
           }
-        ]
+        ],
+        "store_identity": "example-store-identity"
       }
     }
   },
@@ -207,7 +209,7 @@
     "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 7,
+      "schemaVersion": 8,
       "result": {
         "sources": [
           {
@@ -363,7 +365,8 @@
             "query": "team",
             "last_error": "example error"
           }
-        ]
+        ],
+        "store_identity": "example-store-identity"
       }
     }
   },
@@ -371,7 +374,7 @@
     "call": "changes {\"consumer\":\"example-ci-reset-consumer\",\"query\":\"team\",\"reset\":true}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 7,
+      "schemaVersion": 8,
       "result": {
         "sources": [
           {
@@ -448,7 +451,8 @@
             "query": "team",
             "last_error": "example error"
           }
-        ]
+        ],
+        "store_identity": "example-store-identity"
       }
     }
   },
@@ -456,7 +460,7 @@
     "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 7,
+      "schemaVersion": 8,
       "result": {
         "sources": [
           {
@@ -477,7 +481,8 @@
             "query": "team",
             "last_error": "example error"
           }
-        ]
+        ],
+        "store_identity": "example-store-identity"
       }
     }
   },
@@ -485,7 +490,7 @@
     "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"example-unknown\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 7,
+      "schemaVersion": 8,
       "error": {
         "code": "query_not_recognized",
         "message": "scriptout: query not recognized: \"example-unknown\" is not a configured query"

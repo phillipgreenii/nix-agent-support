@@ -18,5 +18,6 @@
       "last_success_at": "(time)",
       "query": "team"
     }
-  ]
+  ],
+  "store_identity": "(store-identity)"
 }

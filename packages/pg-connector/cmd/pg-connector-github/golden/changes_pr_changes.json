@@ -3,7 +3,7 @@
     "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 13,
+      "schemaVersion": 14,
       "result": {
         "sources": [
           {
@@ -24,7 +24,8 @@
             "query": "team",
             "last_error": "example error"
           }
-        ]
+        ],
+        "store_identity": "example-store-identity"
       }
     }
   },
@@ -32,7 +33,7 @@
     "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 13,
+      "schemaVersion": 14,
       "result": {
         "sources": [
           {
@@ -206,7 +207,8 @@
             "query": "team",
             "last_error": "example error"
           }
-        ]
+        ],
+        "store_identity": "example-store-identity"
       }
     }
   },
@@ -214,7 +216,7 @@
     "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 13,
+      "schemaVersion": 14,
       "result": {
         "sources": [
           {
@@ -388,7 +390,8 @@
             "query": "team",
             "last_error": "example error"
           }
-        ]
+        ],
+        "store_identity": "example-store-identity"
       }
     }
   },
@@ -396,7 +399,7 @@
     "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\",\"cached\":true}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 13,
+      "schemaVersion": 14,
       "result": {
         "sources": [
           {
@@ -570,7 +573,8 @@
             "query": "team",
             "last_error": "example error"
           }
-        ]
+        ],
+        "store_identity": "example-store-identity"
       }
     }
   },
@@ -578,7 +582,7 @@
     "call": "changes {\"consumer\":\"example-reset-consumer\",\"query\":\"team\",\"reset\":true}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 13,
+      "schemaVersion": 14,
       "result": {
         "sources": [
           {
@@ -648,7 +652,8 @@
             "query": "team",
             "last_error": "example error"
           }
-        ]
+        ],
+        "store_identity": "example-store-identity"
       }
     }
   },
@@ -656,7 +661,7 @@
     "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 13,
+      "schemaVersion": 14,
       "result": {
         "sources": [
           {
@@ -677,7 +682,8 @@
             "query": "team",
             "last_error": "example error"
           }
-        ]
+        ],
+        "store_identity": "example-store-identity"
       }
     }
   },
@@ -685,7 +691,7 @@
     "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"example-unknown\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 13,
+      "schemaVersion": 14,
       "error": {
         "code": "query_not_recognized",
         "message": "scriptout: query not recognized: \"example-unknown\" is not a configured query"

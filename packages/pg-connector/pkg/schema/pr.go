@@ -121,7 +121,13 @@ import "encoding/json"
 // consumer keeps decoding unchanged and a backend without the op simply never
 // registers it; the bump follows this const's own rule that ANY field-shape
 // change bumps the version, additive or not.
-const PRSchemaVersion = 13
+//
+// Bumped 13 -> 14 by the connector-daemon hoist (packet H10b), which added
+// store_identity to every changes answer and to ChangesAckResult (and made
+// ChangesAckResult.Query omitempty). Additive, so every version-13 consumer
+// keeps decoding unchanged; the bump follows this const's own rule that ANY
+// field-shape change bumps the version, additive or not.
+const PRSchemaVersion = 14
 
 // PRListFields is the authoritative set of schema.PR JSON field names the
 // cheap `list` populates (bead pg2-x3h8c.2). The list's batched search

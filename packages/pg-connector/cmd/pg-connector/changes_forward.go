@@ -8,7 +8,8 @@
 //
 // Per backend, one forwarded call does the following:
 //
-//  1. Send changes {consumer, query, cached, reset} through invokeOne, so the
+//  1. Send changes {consumer, query?, cached, reset} through invokeOne (query is
+//     left out when the call named none), so the
 //     backend's registered config block travels with it as for every other op.
 //     A failed call (unavailable, cursor_expired: invalid_argument, anything)
 //     leaves that source degraded with the error as its reason, delivers
@@ -18,8 +19,10 @@
 //     output step already consumes (changesBackendResult).
 //  3. Stamp the ledger key (type, backend, query) from the answer
 //     (INV-LEDGER-FRESH-5), before the output is written. See stampForwarded.
+//     A call with no query has no key to stamp: nothing is stamped on either
+//     the success or the failure path, and no ledger file is created.
 //  4. After the caller's output is written and flushed, newChangesCmd's RunE
-//     sends changes_ack {consumer, query, next_seq} per source that answered
+//     sends changes_ack {consumer, query?, next_seq} per source that answered
 //     (commitForwardedAcks); a backend that did not answer is never
 //     acknowledged.
 //
@@ -114,6 +117,30 @@ type forwardedChangesResult struct {
 	Sources          []schema.ChangeSource    `json:"sources"`
 	Changes          []forwardedChange        `json:"changes"`
 	SourcesFreshness []schema.SourceFreshness `json:"sources_freshness"`
+	// StoreIdentity is the daemon store's identity; the umbrella passes it
+	// through on the source row.
+	StoreIdentity string `json:"store_identity"`
+}
+
+// changesCallArgs is the argument object of a forwarded changes call: the query
+// is left out when empty, so a registration that delivers by watched marker
+// sees no query.
+func changesCallArgs(consumerID, query string, cached, reset bool) map[string]any {
+	a := map[string]any{"consumer": consumerID, "cached": cached, "reset": reset}
+	if query != "" {
+		a["query"] = query
+	}
+	return a
+}
+
+// ackCallArgs is the argument object of a forwarded changes_ack call; the query
+// is left out when empty.
+func ackCallArgs(consumerID, query string, nextSeq int64) map[string]any {
+	a := map[string]any{"consumer": consumerID, "next_seq": nextSeq}
+	if query != "" {
+		a["query"] = query
+	}
+	return a
 }
 
 // forwardChangesOne is the per-backend forward path fanOutChangesOne calls for
@@ -130,15 +157,16 @@ func forwardChangesOne(ctx context.Context, reg *Registry, entityType, backend, 
 		sr := classifyListSource(backend, err)
 		res.status = sr.Status
 		res.reason = sr.Reason
+		if query == "" {
+			return res
+		}
 		if serr := stampForwarded(reg, key, consumerID, time.Now(), nil, err); serr != nil {
 			res.notes = append(res.notes, serr.Error())
 		}
 		return res
 	}
 
-	resp, err := invokeOne(ctx, reg, backend, "changes", map[string]any{
-		"consumer": consumerID, "query": query, "cached": cached, "reset": reset,
-	})
+	resp, err := invokeOne(ctx, reg, backend, "changes", changesCallArgs(consumerID, query, cached, reset))
 	if err != nil {
 		return fail(err)
 	}
@@ -157,6 +185,7 @@ func forwardChangesOne(ctx context.Context, reg *Registry, entityType, backend, 
 	res.truncated = src.Truncated
 	res.version = src.Version
 	res.nextSeq = &nextSeq
+	res.storeIdentity = ans.StoreIdentity
 	res.answered = true
 	res.freshness = ans.SourcesFreshness
 	if res.freshness == nil {
@@ -176,6 +205,11 @@ func forwardChangesOne(ctx context.Context, reg *Registry, entityType, backend, 
 		})
 	}
 
+	if query == "" {
+		// No query: no per-query ledger key exists, so nothing is created or
+		// stamped (the daemon's status positions carry the consumer's last_seen).
+		return res
+	}
 	var fresh *schema.SourceFreshness
 	for i := range ans.SourcesFreshness {
 		if ans.SourcesFreshness[i].Query == query {
@@ -280,8 +314,8 @@ func parseFreshnessTime(s string) (time.Time, bool) {
 }
 
 // commitForwardedAcks is the post-flush step of a forwarded call: for every
-// forwarded source that answered, send changes_ack {consumer, query, next_seq}
-// with THAT source's own next_seq, also when it returned no change. A source
+// forwarded source that answered, send changes_ack {consumer, query?, next_seq}
+// (no query when the call named none) with THAT source's own next_seq, also when it returned no change. A source
 // that did not answer is never acknowledged. The ack's own payload is ignored.
 // An ack that fails is not retried and is reported as one line on errOut only:
 // the rows were already delivered, and the next poll redelivers them.
@@ -290,9 +324,7 @@ func commitForwardedAcks(ctx context.Context, reg *Registry, results []changesBa
 		if !r.forwarded || !r.answered || r.nextSeq == nil {
 			continue
 		}
-		_, err := invokeOne(ctx, reg, r.backend, "changes_ack", map[string]any{
-			"consumer": consumerID, "query": query, "next_seq": *r.nextSeq,
-		})
+		_, err := invokeOne(ctx, reg, r.backend, "changes_ack", ackCallArgs(consumerID, query, *r.nextSeq))
 		if err != nil {
 			fmt.Fprintf(errOut, "pg-connector: changes: acknowledging position %d of consumer %q query %q on backend %q failed (the changes were delivered; the next poll redelivers them): %v\n",
 				*r.nextSeq, consumerID, query, r.backend, err)

@@ -89,10 +89,10 @@ func TestAnnotations_SetFieldsWireNames(t *testing.T) {
 }
 
 func TestCurrentSchemaVersions_FollowTheAnnotationBumps(t *testing.T) {
-	if got := CurrentSchemaVersions["pr"]; got != 13 {
-		t.Errorf("pr = %d, want 13", got)
+	if got := CurrentSchemaVersions["pr"]; got != 14 {
+		t.Errorf("pr = %d, want 14", got)
 	}
-	if got := CurrentSchemaVersions["ci"]; got != 7 {
-		t.Errorf("ci = %d, want 7", got)
+	if got := CurrentSchemaVersions["ci"]; got != 8 {
+		t.Errorf("ci = %d, want 8", got)
 	}
 }

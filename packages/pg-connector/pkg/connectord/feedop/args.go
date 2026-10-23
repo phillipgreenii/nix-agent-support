@@ -67,8 +67,10 @@ func WatchArg(raw json.RawMessage) (bool, error) {
 	return boolArg(m, "watch")
 }
 
-// keyArgs reads the two arguments every op of the feed requires.
-func keyArgs(m map[string]json.RawMessage) (consumer, query string, err error) {
+// keyArgs reads the arguments every op of the feed takes: the consumer is always
+// required, the query only when queryRequired (a registration that delivers by
+// membership); an absent query is the empty scope otherwise.
+func keyArgs(m map[string]json.RawMessage, queryRequired bool) (consumer, query string, err error) {
 	if consumer, err = stringArg(m, "consumer"); err != nil {
 		return "", "", err
 	}
@@ -78,7 +80,7 @@ func keyArgs(m map[string]json.RawMessage) (consumer, query string, err error) {
 	if consumer == "" {
 		return "", "", invalid(`the argument "consumer" is required`)
 	}
-	if query == "" {
+	if query == "" && queryRequired {
 		return "", "", invalid(`the argument "query" is required`)
 	}
 	return consumer, query, nil

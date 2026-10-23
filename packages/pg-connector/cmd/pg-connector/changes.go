@@ -224,6 +224,10 @@ type changesSourceRow struct {
 	// backend's log position scanned up to, which the umbrella acknowledges
 	// after the output is flushed.
 	NextSeq *int64 `json:"next_seq,omitempty"`
+	// StoreIdentity is set only on a forwarded source: the identity of the
+	// backend's own store, passed through unchanged. A fan-out answer has one
+	// store per source, so it sits on the source row.
+	StoreIdentity string `json:"store_identity,omitempty"`
 }
 
 type changesWire struct {
@@ -261,14 +265,18 @@ type changesBackendResult struct {
 	forwarded bool
 	// answered is true when the forwarded backend answered; only an answered
 	// source is acknowledged, with nextSeq.
-	answered  bool
-	nextSeq   *int64
-	version   int64                    // the backend's own sources[].version
-	freshness []schema.SourceFreshness // the answer's sources_freshness[]
-	notes     []string                 // lines for stderr after the flush
+	answered bool
+	nextSeq  *int64
+	// storeIdentity is the forwarded answer's store_identity.
+	storeIdentity string
+	version       int64                    // the backend's own sources[].version
+	freshness     []schema.SourceFreshness // the answer's sources_freshness[]
+	notes         []string                 // lines for stderr after the flush
 
-	// notOwning is true for a ci backend that does not declare owns_changes:
-	// answered by the umbrella itself (ci_changes.go), never forwarded.
+	// notOwning is true for a backend that does not declare owns_changes and is
+	// answered by the umbrella itself (ci_changes.go), never forwarded: a ci
+	// backend (no ledger path exists for it) or any backend of a call that
+	// names no query (the ledger path keys on the query).
 	notOwning bool
 }
 
@@ -284,7 +292,7 @@ func newChangesCmd(entityType string) *cobra.Command {
 		Args:  cobra.NoArgs,
 	}
 	backendFlag := addBackendFlag(cmd, "pin the fan-out to exactly this backend instead of every registered "+entityType+" backend")
-	cmd.Flags().StringVar(&query, "query", "", "named query to run, resolved against each backend's own config.queries (required)")
+	cmd.Flags().StringVar(&query, "query", "", "named query to run, resolved against each backend's own config.queries (optional for a backend that owns its changes; required for one that does not)")
 	cmd.Flags().StringVar(&consumer, "consumer", "", "consumer id whose cursor this call reads and advances (required)")
 	cmd.Flags().BoolVar(&cached, "cached", false, "skip the backend refresh entirely; return only what the ledger already knows past the cursor")
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset this consumer's cursor to zero before computing changes, so the next call replays every live entity as added")
@@ -296,7 +304,6 @@ func newChangesCmd(entityType string) *cobra.Command {
 	cmd.Flags().String(beforeFlagName, "", "not supported: changes never takes a time bound (use list --before)")
 	_ = cmd.Flags().MarkHidden(sinceFlagName)
 	_ = cmd.Flags().MarkHidden(beforeFlagName)
-	_ = cmd.MarkFlagRequired("query")
 	_ = cmd.MarkFlagRequired("consumer")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if err := rejectChangesTimeBounds(cmd); err != nil {
@@ -439,9 +446,11 @@ func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, 
 	if ownsErr == nil && owns {
 		return forwardChangesOne(ctx, reg, entityType, b, query, consumerID, cached, reset)
 	}
-	// ci has no list op, so there is no ledger path for it: a ci backend that
-	// does not own changes is answered here and never sent anything (ci_changes.go).
-	if entityType == "ci" {
+	// ci has no list op, so there is no ledger path for it, and the ledger path
+	// of every other type keys on the query: a ci backend, or a call that names
+	// no query, is answered here for a backend that does not own changes and the
+	// backend is never sent anything (ci_changes.go).
+	if entityType == "ci" || query == "" {
 		return ciNotOwningResult(entityType, b, query, ownsErr)
 	}
 
@@ -794,7 +803,7 @@ func changesWireFor(results []changesBackendResult) changesWire {
 			version = r.version
 			freshness = append(freshness, r.freshness...)
 		}
-		w.Sources = append(w.Sources, changesSourceRow{Backend: r.backend, Status: r.status, Version: version, Truncated: r.truncated, Reason: r.reason, NextSeq: r.nextSeq})
+		w.Sources = append(w.Sources, changesSourceRow{Backend: r.backend, Status: r.status, Version: version, Truncated: r.truncated, Reason: r.reason, NextSeq: r.nextSeq, StoreIdentity: r.storeIdentity})
 		w.Changes = append(w.Changes, r.entries...)
 	}
 	if anyForwarded {

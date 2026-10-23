@@ -63,11 +63,14 @@ type PollRequest struct {
 // and equals the log head when the scan reached it; the consumer acknowledges it
 // with Ack once it has flushed the rows. Position is the cursor's acknowledged
 // sequence number (0 for a cursor that does not exist). Replay is set only by
-// Reset: the current members' references to replay as added.
+// Reset: the current members' references to replay as added. StoreID is the
+// store's identity (store.Identity), carried on every answer so a consumer can
+// tell a replaced store from the one it knew.
 type PollResult struct {
 	Rows              []store.ChangeRow
 	NextSeq, Position int64
 	Replay            []string
+	StoreID           string
 }
 
 // AckRequest is one acknowledgement of the cursor (View, Consumer, Scope).
@@ -77,8 +80,11 @@ type AckRequest struct {
 }
 
 // AckResult is the answer of an Ack: the cursor's stored acknowledged sequence
-// number after the acknowledgement.
-type AckResult struct{ AckedSeq int64 }
+// number after the acknowledgement. StoreID is the store's identity.
+type AckResult struct {
+	AckedSeq int64
+	StoreID  string
+}
 
 // handed is what a cursor was given and has not acknowledged: the position it
 // was given them at and the highest sequence number among them.
@@ -136,6 +142,17 @@ func (f *Feed) HandedCursors() int {
 // (and rebinds the cursor to a new Scope), and the creation of a cursor, which
 // starts it at the tail. Calls for one consumer are serialised.
 func (f *Feed) Poll(ctx context.Context, req PollRequest) (PollResult, error) {
+	res, err := f.poll(ctx, req)
+	if err != nil {
+		return PollResult{}, err
+	}
+	if res.StoreID, err = f.cfg.Store.Identity(ctx); err != nil {
+		return PollResult{}, err
+	}
+	return res, nil
+}
+
+func (f *Feed) poll(ctx context.Context, req PollRequest) (PollResult, error) {
 	view, err := f.validate(req.View, req.Consumer, req.Scope)
 	if err != nil {
 		return PollResult{}, err
@@ -371,6 +388,17 @@ func (f *Feed) forget(consumer string) {
 // a NextSeq above the head of the log with ErrAckBeyondHead. The result is the
 // cursor's stored position after the acknowledgement.
 func (f *Feed) Ack(ctx context.Context, req AckRequest) (AckResult, error) {
+	res, err := f.ack(ctx, req)
+	if err != nil {
+		return AckResult{}, err
+	}
+	if res.StoreID, err = f.cfg.Store.Identity(ctx); err != nil {
+		return AckResult{}, err
+	}
+	return res, nil
+}
+
+func (f *Feed) ack(ctx context.Context, req AckRequest) (AckResult, error) {
 	view, err := f.validate(req.View, req.Consumer, req.Scope)
 	if err != nil {
 		return AckResult{}, err

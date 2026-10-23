@@ -57,7 +57,12 @@ package schema
 // ops and their wire shapes CIChangeEntity, CIChange and CIChangesResult (see
 // changes.go). The CIRun shape itself is unchanged; the bump follows the same
 // rule that ANY change to the capability's wire shapes bumps the version.
-const CISchemaVersion = 7
+//
+// Bumped 7 -> 8 by the connector-daemon hoist (packet H10b), which added
+// store_identity to the ci changes answer and to ChangesAckResult. Additive; the
+// bump follows the same rule that ANY change to the capability's wire shapes
+// bumps the version.
+const CISchemaVersion = 8
 
 // CIRun is the ci capability's shared JSON wire shape, returned by the ci
 // capability's "list_runs" op and carried by

@@ -196,9 +196,12 @@ restated.
 - **`INV-GH-CHG-6`** <!-- uuid: d5bf79c4-044c-4542-ac08-d6c6e4fff06f --> — Delivery MUST be **at least once** with **explicit
   acknowledgement**: rows are not acknowledged by being returned. A consumer that crashes before its
   caller has the rows MUST receive them again. A poll that returns no rows MUST still be able to
-  acknowledge its `next_seq`, so a quiet query's position keeps moving. The cursor key MUST be
-  (consumer, kind, query), because two queries share one consumer name, and calls for one key MUST be
-  serialized.
+  acknowledge its `next_seq`, so a quiet query's position keeps moving. A consumer MUST hold
+  exactly **one position**: the first poll of a consumer fixes the view (`pr` or `ci`) and the
+  optional query filter that position is bound to, and a later call that names another view or
+  another query MUST be refused (a `--reset` MAY rebind the query), so one consumer name never
+  keeps two independent positions. Calls for one consumer MUST be serialized. Every answer MUST
+  carry the daemon store's `store_identity`, which differs for a replaced store.
 - **`INV-GH-CHG-7`** <!-- uuid: 248c0b20-cf19-41b8-a0b6-77bcc82e0942 --> — The **first poll** of a new key MUST start at the
   tail of the log, taken after the query's baseline exists (`INV-GH-CHG-2`), so neither a new key nor
   a cold store pushes every open PR to its consumer at once. `--reset` MUST replay the query's

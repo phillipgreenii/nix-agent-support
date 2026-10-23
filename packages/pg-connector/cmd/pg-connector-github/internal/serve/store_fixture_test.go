@@ -25,7 +25,8 @@ import (
 //
 // The expected answer, testdata/changes_v3_expected.json, was generated ONCE
 // against the version 3 ladder, before any later rung existed, and is never
-// regenerated to make a rung pass. To write it again (a deliberate change of the
+// regenerated to make a rung pass (packet H10b added the store_identity key by
+// hand, with the token, once the answer carried it). To write it again (a deliberate change of the
 // scenario only) run
 //
 //	PG_CONNECTOR_SERVE_UPDATE_EXPECTATIONS=1 go test ./cmd/pg-connector-github/internal/serve -run TestStoreFixtureV3
@@ -53,12 +54,14 @@ func normaliseAnswer(t *testing.T, raw json.RawMessage) map[string]any {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("decode the changes answer: %v", err)
 	}
-	if v, ok := doc[storeIdentityKey]; ok {
-		if s, isString := v.(string); !isString || s == "" {
-			t.Fatalf("%s = %#v, want a non-empty string", storeIdentityKey, v)
-		}
-		doc[storeIdentityKey] = identityToken
+	v, ok := doc[storeIdentityKey]
+	if !ok {
+		t.Fatalf("the changes answer carries no %s: %s", storeIdentityKey, raw)
 	}
+	if s, isString := v.(string); !isString || s == "" {
+		t.Fatalf("%s = %#v, want a non-empty string", storeIdentityKey, v)
+	}
+	doc[storeIdentityKey] = identityToken
 	for k := range doc {
 		if k == "schema_version" || k == "store_schema_version" {
 			delete(doc, k)

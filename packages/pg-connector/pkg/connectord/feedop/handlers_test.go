@@ -155,8 +155,8 @@ func TestResultArraysAreEmptyArraysNeverNull(t *testing.T) {
 	if !strings.Contains(string(raw), `"changes":[]`) || strings.Contains(string(raw), "null") {
 		t.Fatalf("answer = %s", raw)
 	}
-	if strings.Contains(string(raw), "store_identity") {
-		t.Fatalf("the answer carries a store identity before the packet that adds it: %s", raw)
+	if !strings.Contains(string(raw), `"store_identity":"`) || strings.Contains(string(raw), `"store_identity":""`) {
+		t.Fatalf("the answer carries no store identity: %s", raw)
 	}
 }
 
