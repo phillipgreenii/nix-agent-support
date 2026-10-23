@@ -137,3 +137,19 @@ func TestLifecycleRequestBytesUnchangedForARoleWithoutHandler(t *testing.T) {
 		})
 	}
 }
+
+// SentRole is the role object as sent: nothing for a role without handler, and
+// {"name","config"} (config {} when none) for one with it.
+func TestSentRole(t *testing.T) {
+	if got, ok := SentRole(roles.Role{Name: "old"}); ok || got != nil {
+		t.Errorf("SentRole(old) = %s, %v; want nothing", got, ok)
+	}
+	got, ok := SentRole(roles.Role{Name: "n", Handler: "/h"})
+	if !ok || string(got) != `{"name":"n","config":{}}` {
+		t.Errorf("SentRole(no config) = %s, %v", got, ok)
+	}
+	got, ok = SentRole(roles.Role{Name: "n", Handler: "/h", Config: map[string]any{"a": map[string]any{"b": "c"}}})
+	if !ok || string(got) != `{"name":"n","config":{"a":{"b":"c"}}}` {
+		t.Errorf("SentRole(config) = %s, %v", got, ok)
+	}
+}

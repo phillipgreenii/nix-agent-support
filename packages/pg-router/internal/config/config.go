@@ -690,22 +690,74 @@ func (c Config) absentBackingCommands() []error {
 	return errs
 }
 
-// handlerCommandFindings is the startup check that the handler command is
-// invocable (docket pg2-12gr4.8, design section 5; register row INV-WORKFLOW-1).
-// It runs only when PG_ROUTER_HANDLER_COMMAND is set: an unset handler command is
-// legal today (it gives a per-dispatch error, see HandlerCommand), so a config
-// without it must not start failing Load. "Invocable" means the command resolves
-// through the same locator absentBackingCommands uses to an executable file; the
-// core does NOT run the handler to check it (that is the optional validate
-// subcommand's job, asked at startup by cmd/pg-router).
-func (c Config) handlerCommandFindings() []error {
+// RoleConfigPath is the per-role JSON file under HandlerCommandDir that
+// RoleCommand hands a shared (old-path) handler as `--role-config`.
+func RoleConfigPath(dir, roleName string) string {
+	return filepath.Join(dir, roleName+".json")
+}
+
+// RoleCommand is the ONE resolver of a role's adapter argv (docket
+// pg2-12gr4.10, the handler split): the daemon's wire client, run-role, doctor,
+// startup validate, config --show and config check all call it, so what an
+// operator reads is what core runs. subcommand is placed as argv[1] (the
+// adapter's own CLI parses its first argument as the subcommand).
+//
+//   - A role that sets handler is on the NEW path: [role.Handler, subcommand],
+//     never the global command and never --role-config (its [role.config] rides
+//     on stdin as the request's role object). That branch comes first so a
+//     deployment that has migrated every role needs no PG_ROUTER_HANDLER_COMMAND.
+//   - A role without handler is on today's path: [HandlerCommand, subcommand]
+//     plus, when HandlerCommandDir is set, `--role-config <dir>/<role>.json`.
+//     With no HandlerCommand it is an error naming the role.
+func (c Config) RoleCommand(role roles.Role, subcommand string) ([]string, error) {
+	if role.NewPath() {
+		return []string{role.Handler, subcommand}, nil
+	}
 	if c.HandlerCommand == "" {
-		return nil
+		return nil, fmt.Errorf("no handler command configured for role %q (set PG_ROUTER_HANDLER_COMMAND)", role.Name)
 	}
-	if err := c.locator().Locate(c.HandlerCommand); err != nil {
-		return []error{fmt.Errorf("handler command %q (PG_ROUTER_HANDLER_COMMAND) cannot be invoked: %w (absent backing command)", c.HandlerCommand, err)}
+	if c.HandlerCommandDir != "" {
+		return []string{c.HandlerCommand, subcommand, "--role-config", RoleConfigPath(c.HandlerCommandDir, role.Name)}, nil
 	}
-	return nil
+	return []string{c.HandlerCommand, subcommand}, nil
+}
+
+// handlerCommandFindings is the startup check that every handler command is
+// invocable (docket pg2-12gr4.8, design section 5; register row INV-WORKFLOW-1,
+// and docket pg2-12gr4.10 for the per-role handler). Two checks, both through
+// the resolver:
+//   - the shared command, only when PG_ROUTER_HANDLER_COMMAND is set: an unset
+//     one is legal today (it gives a per-dispatch error, see HandlerCommand), so
+//     a config without it must not start failing Load;
+//   - each ENABLED role that sets handler: its handler path must resolve too, so
+//     a missing handler shows in the same config check run as a missing query
+//     command (a disabled role is not started, so it is not checked).
+//
+// "Invocable" means the command resolves through the same locator
+// absentBackingCommands uses to an executable file; the core does NOT run the
+// handler to check it (that is the optional validate subcommand's job, asked at
+// startup by cmd/pg-router).
+func (c Config) handlerCommandFindings() []error {
+	var errs []error
+	if c.HandlerCommand != "" {
+		if err := c.locator().Locate(c.HandlerCommand); err != nil {
+			errs = append(errs, fmt.Errorf("handler command %q (PG_ROUTER_HANDLER_COMMAND) cannot be invoked: %w (absent backing command)", c.HandlerCommand, err))
+		}
+	}
+	for _, role := range c.Roles {
+		if !role.Enabled || !role.NewPath() {
+			continue
+		}
+		argv, err := c.RoleCommand(role, "dispatch")
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if err := c.locator().Locate(argv[0]); err != nil {
+			errs = append(errs, fmt.Errorf("role %q handler %q cannot be invoked: %w (absent backing command)", role.Name, argv[0], err))
+		}
+	}
+	return errs
 }
 
 // roleConfigFindings is the startup check that each enabled role's --role-config
@@ -727,7 +779,7 @@ func (c Config) roleConfigFindings() []error {
 		if !role.Enabled || role.NewPath() {
 			continue
 		}
-		path := filepath.Join(c.HandlerCommandDir, role.Name+".json")
+		path := RoleConfigPath(c.HandlerCommandDir, role.Name)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("role %q role-config file %q cannot be read: %w (PG_ROUTER_HANDLER_COMMAND_DIR)", role.Name, path, err))

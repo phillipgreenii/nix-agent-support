@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/roles"
@@ -15,7 +14,7 @@ import (
 // handlerRoleConfigPath is the per-role file under cfg.HandlerCommandDir that
 // handlerCommandFor hands a handler as `--role-config`.
 func handlerRoleConfigPath(dir, roleName string) string {
-	return filepath.Join(dir, roleName+".json")
+	return config.RoleConfigPath(dir, roleName)
 }
 
 // roleSurvivalFlag is the ONE key of a role's rendered config file this binary

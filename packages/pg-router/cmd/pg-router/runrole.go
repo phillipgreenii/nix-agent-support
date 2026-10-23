@@ -127,10 +127,13 @@ func runRunRole(roleName, eventJSON string, asJSON bool) int {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
 		return exitUsage
 	}
+	// replyRecorder keeps the handler's dispatch reply so the outcome it gave
+	// (or its deferral) is printed, not just swallowed into the event log.
+	rec := &replyRecorder{HandlerClient: wireclient.New(handlerCommandFor(cfg))}
 	o := &orchestrator.Orchestrator{
 		Reg:     cfg.Roles,
 		Cfg:     cfg,
-		Handler: wireclient.New(handlerCommandFor(cfg)),
+		Handler: rec,
 	}
 	if err := o.RunOne(ctx, role, evt); err != nil {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
@@ -151,7 +154,11 @@ func runRunRole(roleName, eventJSON string, asJSON bool) int {
 		}
 	}
 	if asJSON {
-		renderRunRoleJSON(os.Stdout, role.Name, d.Item.ID)
+		renderRunRoleReplyJSON(os.Stdout, role.Name, d.Item.ID, rec.reply)
+	} else if rec.reply.Deferred {
+		// A deferred reply carries no outcome for the "# dispatch" line (the
+		// orchestrator prints actions from outcome), so say what the handler did.
+		fmt.Printf("# dispatch %s %s: the handler accepted it and will report later (deferred)\n", role.Name, d.Item.ID)
 	}
 	return exitOK
 }
@@ -170,11 +177,36 @@ type runRoleReport struct {
 	Role     string `json:"role"`
 	Item     string `json:"item"`
 	Accepted bool   `json:"accepted"`
+	// Deferred and Outcome are the handler's own dispatch reply, relayed as
+	// received (additive keys): deferred means it accepted the event and will
+	// report later; outcome is whatever string it reported, uninterpreted.
+	Deferred bool   `json:"deferred,omitempty"`
+	Outcome  string `json:"outcome,omitempty"`
 }
 
-// renderRunRoleJSON writes run-role's --json success report.
+// renderRunRoleJSON writes run-role's --json success report without a handler
+// reply (the identity-only form).
 func renderRunRoleJSON(w io.Writer, role, item string) {
-	writeJSON(w, runRoleReport{Role: role, Item: item, Accepted: true})
+	renderRunRoleReplyJSON(w, role, item, wireclient.Reply{})
+}
+
+// renderRunRoleReplyJSON writes run-role's --json success report carrying the
+// handler's own dispatch reply.
+func renderRunRoleReplyJSON(w io.Writer, role, item string, reply wireclient.Reply) {
+	writeJSON(w, runRoleReport{Role: role, Item: item, Accepted: true, Deferred: reply.Deferred, Outcome: reply.Outcome})
+}
+
+// replyRecorder wraps a handler client and remembers the last dispatch reply,
+// so run-role can print the handler's outcome. Only Dispatch is intercepted.
+type replyRecorder struct {
+	wireclient.HandlerClient
+	reply wireclient.Reply
+}
+
+func (r *replyRecorder) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.Event) (wireclient.Reply, error) {
+	reply, err := r.HandlerClient.Dispatch(ctx, role, evt)
+	r.reply = reply
+	return reply, err
 }
 
 // runRunQuery is `run-query`'s entry point: it smokes exactly ONE named

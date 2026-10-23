@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/query"
+	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
 // runConfig implements `pg-router config --print-defaults | --show [--json] | check`.
@@ -85,6 +88,16 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 	_, _ = fmt.Fprintf(w, "roles (%d):\n", len(cfg.Roles))
 	for _, r := range cfg.Roles {
 		_, _ = fmt.Fprintf(w, "  - %-12s enabled=%t binds=%v\n", r.Name, r.Enabled, r.Binds)
+		show := roleShowFor(cfg, r)
+		if show.Command != "" {
+			_, _ = fmt.Fprintf(w, "      command: %s\n", show.Command)
+		} else {
+			_, _ = fmt.Fprintf(w, "      command: (none: %s)\n", show.CommandError)
+		}
+		_, _ = fmt.Fprintf(w, "      survives_shutdown: %t\n", show.SurvivesShutdown)
+		if show.Role != nil {
+			_, _ = fmt.Fprintf(w, "      role: %s\n", show.Role)
+		}
 	}
 	// Queries are the producers (event model): show each one's emits, flagging any
 	// stub query type (not yet implemented; it errors when run).
@@ -100,7 +113,7 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 		}
 		_, _ = fmt.Fprintf(w, "  - %-14s emits=%v%s\n", s.Name, emits, stub)
 		// A command query shows its command and its strict switch. A role's
-		// command is not printed here.
+		// command is shown with the role, in the roles block above.
 		if s.Query != nil {
 			if cmdline, strict, ok := queryCommand(s.Query); ok {
 				_, _ = fmt.Fprintf(w, "      command: %s\n", cmdline)
@@ -190,7 +203,11 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 		},
 	}
 	for _, r := range cfg.Roles {
-		out.Roles = append(out.Roles, configShowRole{Name: r.Name, Enabled: r.Enabled, Binds: r.Binds, NonBlockingGates: r.NonBlockingGates, MaxDispatchRetries: r.MaxDispatchRetries})
+		show := roleShowFor(cfg, r)
+		out.Roles = append(out.Roles, configShowRole{
+			Name: r.Name, Enabled: r.Enabled, Binds: r.Binds, NonBlockingGates: r.NonBlockingGates, MaxDispatchRetries: r.MaxDispatchRetries,
+			Command: show.Command, CommandError: show.CommandError, SurvivesShutdown: show.SurvivesShutdown, Role: show.Role,
+		})
 	}
 	for _, s := range cfg.Queries {
 		var emits []string
@@ -231,6 +248,46 @@ type configShowRole struct {
 	// MaxDispatchRetries is the role's opt-in bounded re-run count for a
 	// transiently failed dispatch (bead pg2-yu5y2); omitted when 0 (off).
 	MaxDispatchRetries int `json:"maxDispatchRetries,omitempty"`
+	// Command is what core runs for the role's dispatch, resolved by the ONE
+	// role-adapter resolver (config.Config.RoleCommand): [handler, dispatch] for
+	// a role with handler, today's shared command (plus --role-config when a
+	// directory is set) otherwise. Empty with CommandError set when a role
+	// without handler has no shared command configured.
+	Command      string `json:"command,omitempty"`
+	CommandError string `json:"commandError,omitempty"`
+	// SurvivesShutdown is the value core acts on at shutdown: the TOML
+	// survives_shutdown key for a role with handler, the per-role JSON flag
+	// otherwise.
+	SurvivesShutdown bool `json:"survivesShutdown"`
+	// Role is the role object core sends in every handler request for a role
+	// with handler ({"name", "config"}, including sessionEnv when the config has
+	// one), byte for byte what wireclient puts on stdin. Omitted for a role
+	// without handler, whose requests carry no role object.
+	Role json.RawMessage `json:"role,omitempty"`
+}
+
+// roleShow is what config --show prints about one role's adapter: the resolved
+// command, the survives-shutdown value and the role object as sent.
+type roleShow struct {
+	Command          string
+	CommandError     string
+	SurvivesShutdown bool
+	Role             json.RawMessage
+}
+
+// roleShowFor resolves a role's adapter surfaces through the same resolver,
+// survival decision and role-object builder the daemon uses, so --show cannot
+// drift from what core runs and sends.
+func roleShowFor(cfg config.Config, r roles.Role) roleShow {
+	var out roleShow
+	if argv, err := cfg.RoleCommand(r, "dispatch"); err != nil {
+		out.CommandError = err.Error()
+	} else {
+		out.Command = displayArgv(argv)
+	}
+	out.SurvivesShutdown = roleSurvives(cfg, r)
+	out.Role, _ = wireclient.SentRole(r)
+	return out
 }
 
 // configShowQuery echoes one configured producer's emits, flagging a stub query

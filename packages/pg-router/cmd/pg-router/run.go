@@ -200,18 +200,9 @@ func drainThenCancelDispatch(q *eventqueue.Queue, cancelDispatch context.CancelF
 // so a deployment that has migrated every role needs no PG_ROUTER_HANDLER_COMMAND
 // at all; every role without handler resolves exactly as before.
 func handlerCommandFor(cfg config.Config) wireclient.CommandFor {
-	return func(role roles.Role, subcommand string) ([]string, error) {
-		if role.Handler != "" {
-			return []string{role.Handler, subcommand}, nil
-		}
-		if cfg.HandlerCommand == "" {
-			return nil, fmt.Errorf("no handler command configured for role %q (set PG_ROUTER_HANDLER_COMMAND)", role.Name)
-		}
-		if cfg.HandlerCommandDir != "" {
-			return []string{cfg.HandlerCommand, subcommand, "--role-config", handlerRoleConfigPath(cfg.HandlerCommandDir, role.Name)}, nil
-		}
-		return []string{cfg.HandlerCommand, subcommand}, nil
-	}
+	// ONE resolver (config.Config.RoleCommand) serves this seam, config --show,
+	// config check, run-role, doctor and startup validate.
+	return cfg.RoleCommand
 }
 
 // warnHandlerCommandAmbiguity logs a boot-time WARN (this bead, pg2-ymb3v)

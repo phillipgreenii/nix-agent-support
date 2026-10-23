@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -108,6 +109,51 @@ binds = ["a.ready"]
 	for _, want := range []string{`handler command "absent-handler"`, "not well-formed JSON", `source "s" backing command "absent-lister"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Load error %q does not contain %q (the checks aggregate)", err, want)
+		}
+	}
+}
+
+// A role that sets handler has its handler path checked in the same run as the
+// other findings (the new path's counterpart of the shared-command check), but
+// only while the role is enabled; a role on today's path is untouched.
+func TestValidate_roleHandlerPathIsChecked(t *testing.T) {
+	c := handlerWiring()
+	c.Roles = roles.RoleSet{{Name: "r", Enabled: true, Binds: []string{"a.ready"}, Handler: "/abs/absent-adapter"}}
+	errs, _ := c.diagnose()
+	if !findingsContain(errs, `role "r" handler "/abs/absent-adapter"`) || !findingsContain(errs, "absent backing command") {
+		t.Fatalf("a missing role handler must be named; got %v", errs)
+	}
+	c.Locator = stubLocator{present: map[string]bool{"/abs/absent-adapter": true, "present-tool": true}}
+	if errs, _ := c.diagnose(); len(errs) != 0 {
+		t.Fatalf("an invocable role handler is valid; got %v", errs)
+	}
+	c.Locator = stubLocator{present: map[string]bool{}}
+	c.Roles[0].Enabled = false
+	if errs, _ := c.diagnose(); findingsContain(errs, "absent-adapter") {
+		t.Fatalf("a disabled role is not started, so its handler is not checked; got %v", errs)
+	}
+}
+
+// RoleCommand is the one resolver: handler first and alone on the new path,
+// today's argv (with --role-config only when the directory is set) otherwise.
+func TestRoleCommand_choosesThePathPerRole(t *testing.T) {
+	cases := []struct {
+		name string
+		c    Config
+		r    roles.Role
+		want []string
+		err  bool
+	}{
+		{"new path needs no shared command", Config{}, roles.Role{Name: "n", Handler: "/h"}, []string{"/h", "dispatch"}, false},
+		{"new path ignores the shared command and dir", Config{HandlerCommand: "s", HandlerCommandDir: "/d"}, roles.Role{Name: "n", Handler: "/h"}, []string{"/h", "dispatch"}, false},
+		{"old path with dir", Config{HandlerCommand: "s", HandlerCommandDir: "/d"}, roles.Role{Name: "o"}, []string{"s", "dispatch", "--role-config", "/d/o.json"}, false},
+		{"old path without dir", Config{HandlerCommand: "s"}, roles.Role{Name: "o"}, []string{"s", "dispatch"}, false},
+		{"old path without a shared command", Config{}, roles.Role{Name: "o"}, nil, true},
+	}
+	for _, tc := range cases {
+		got, err := tc.c.RoleCommand(tc.r, "dispatch")
+		if (err != nil) != tc.err || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: RoleCommand = %v, %v; want %v (err %v)", tc.name, got, err, tc.want, tc.err)
 		}
 	}
 }

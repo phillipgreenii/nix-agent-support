@@ -1,9 +1,12 @@
 package config
 
 import (
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/pg-router/internal/roles"
 )
 
 // TestExampleTOML_roundTrips guarantees the generated example config actually
@@ -80,5 +83,43 @@ func TestExampleTOML_noPlaceholderBracketsInValues(t *testing.T) {
 		if strings.Contains(trimmed, "<") {
 			t.Errorf("uncommented TOML key=value line contains a placeholder bracket: %q", line)
 		}
+	}
+}
+
+// --print-defaults documents the per-role adapter keys (handler,
+// survives_shutdown, [role.config]) and prints no per-kind block.
+func TestExampleTOML_documentsThePerRoleHandlerKeys(t *testing.T) {
+	out := ExampleTOML()
+	for _, want := range []string{"handler = \"/abs/path/to/adapter\"", "survives_shutdown = true", "[role.config]", "role object", "--show"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("ExampleTOML() does not document %q:\n%s", want, out)
+		}
+	}
+	for _, gone := range []string{"[role.ccpool]", "[role.command]"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("ExampleTOML() prints the per-kind block %q", gone)
+		}
+	}
+}
+
+// emitRole writes the new keys for a role on the handler path, and what it
+// writes loads back: the same handler, survival flag and nested config.
+func TestEmitRole_handlerKeysRoundTrip(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("[[query]]\nname = \"s\"\nemits = [\"e\"]\ntype = \"command\"\n[query.command]\nargv = [\"x\"]\nformat = \"jsonl\"\n\n")
+	emitRole(&b, roles.Role{
+		Name: "r", Enabled: true, Binds: []string{"e"}, Handler: "/opt/adapter", SurvivesShutdown: true,
+		Config: map[string]any{"actor": "a", "sessionEnv": map[string]any{"K": "v"}},
+	})
+	absentGlobalConfig(t)
+	writeCfg(t, b.String())
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("emitted role must load: %v\n%s", err, b.String())
+	}
+	r := c.Roles[0]
+	want := map[string]any{"actor": "a", "sessionEnv": map[string]any{"K": "v"}}
+	if r.Handler != "/opt/adapter" || !r.SurvivesShutdown || !reflect.DeepEqual(r.Config, want) {
+		t.Errorf("round trip = %+v, want handler, survives and config %v", r, want)
 	}
 }

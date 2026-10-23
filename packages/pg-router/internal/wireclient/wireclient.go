@@ -249,6 +249,24 @@ type roleObject struct {
 // roleFor builds the request's role object for a role on the new handler path,
 // and nil for a role without handler (whose request bodies stay byte-identical
 // to the pre-split ones).
+// SentRole is the role object core puts in every handler request for role, in
+// the JSON shape it is sent in ({"name": ..., "config": {...}}), and false for a
+// role without handler (whose requests carry no role object). `pg-router config
+// --show` prints this value, so what an operator reads is exactly what is sent.
+func SentRole(role roles.Role) (json.RawMessage, bool) {
+	ro := roleFor(role)
+	if ro == nil {
+		return nil, false
+	}
+	b, err := json.Marshal(ro)
+	if err != nil {
+		// Config came from a TOML decode, so it always marshals; keep the
+		// signature total anyway.
+		return nil, false
+	}
+	return b, true
+}
+
 func roleFor(role roles.Role) *roleObject {
 	if role.Handler == "" {
 		return nil
