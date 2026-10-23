@@ -454,6 +454,62 @@ let
   };
   backendBinDirsFailures = builtins.attrNames (lib.filterAttrs (_: ok: !ok) backendBinDirsCases);
 
+  # The pinned backend set (bead pg2-vn8kd). The comparison above cannot see a
+  # backend REMOVED from `backendPackages`: the helper and home.packages both
+  # derive from that one list, so they shrink together and still agree, and
+  # the backend then silently vanishes from every pg-wrap PATH. This list is
+  # the independent second source. Adding or removing a pg-connector-* backend
+  # in `backendPackages` (home/programs/pg-connector/default.nix) MUST be
+  # mirrored here, in the SAME change; the failure message names the backend
+  # and the file to edit. `pg-connector-github` is not listed: it is the
+  # optional daemon, pinned separately below.
+  expectedBackendNames = [
+    "pg-connector-pr-github"
+    "pg-connector-ci-github-actions"
+    "pg-connector-issue-beads"
+    "pg-connector-issue-jira"
+    "pg-connector-scm-git"
+    "pg-connector-activity-git"
+    "pg-connector-thread-slack"
+    "pg-connector-calendar-osx-bridge"
+    "pg-connector-calendar-task-focus"
+    "pg-connector-agentsession-pa-monitor"
+    "pg-connector-alert-grafana"
+    "pg-connector-mail-osx-bridge"
+  ];
+  # The PATH entries the pinned names stand for, with a hint per entry.
+  backendSetProblems =
+    e: daemon:
+    let
+      expected =
+        map (n: {
+          name = n;
+          dir = binDirOf pkgs.${n};
+        }) expectedBackendNames
+        ++ daemon;
+      actual = helperOf e { };
+      missing = builtins.filter (x: !(builtins.elem x.dir actual)) expected;
+      unexpected = builtins.filter (d: !(builtins.elem d (map (x: x.dir) expected))) actual;
+    in
+    map (
+      x:
+      "backend ${x.name} is pinned in expectedBackendNames (tests/pg-connector-home-render.nix) but missing from backendPackages (home/programs/pg-connector/default.nix): re-add it there, or remove it from the pinned list if it was removed on purpose"
+    ) missing
+    ++ map (
+      d:
+      "${d} is in backendPackages (home/programs/pg-connector/default.nix) but not pinned in expectedBackendNames (tests/pg-connector-home-render.nix): add its name to the pinned list, or remove it from backendPackages"
+    ) unexpected;
+  # Default scope (daemon off) and the daemon-enabled scope, which adds the
+  # configured github daemon package.
+  backendSetFailures =
+    backendSetProblems plain [ ]
+    ++ backendSetProblems ghEnabled [
+      {
+        name = "pg-connector-github (github.enable)";
+        dir = binDirOf (ghOpts ghEnabled).package;
+      }
+    ];
+
   # A malformed instance (missing command, or an empty one) must FAIL
   # evaluation, never render a half-entry the registry would reject later.
   renders = cfg: (builtins.tryEval (builtins.deepSeq (render cfg).drvPath true)).success;
@@ -474,7 +530,7 @@ in
   # The pg-connector-github cases: name -> bool, and the failing names.
   inherit githubCases;
   githubFailures = builtins.attrNames (lib.filterAttrs (_: ok: !ok) githubCases);
-  inherit backendBinDirsFailures;
+  inherit backendBinDirsFailures backendSetFailures;
   # Rendered daemon configs (store paths) and the values the shell side of the
   # check compares them against.
   github = {

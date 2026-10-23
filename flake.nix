@@ -13991,6 +13991,16 @@
                       echo "pg-connector lib.backendBinDirs cases failed: ${lib.concatStringsSep ", " rendered.backendBinDirsFailures}" >&2
                       exit 1
                     ''}
+                    # the pinned backend set (bead pg2-vn8kd): backendPackages equals
+                    # expectedBackendNames, so a backend dropped from (or added to)
+                    # that one list is detected; each message names the backend and
+                    # the file to edit
+                    ${lib.optionalString (rendered.backendSetFailures != [ ]) ''
+                      cat >&2 <<'EOF_BACKEND_SET'
+                      ${lib.concatStringsSep "\n" rendered.backendSetFailures}
+                      EOF_BACKEND_SET
+                      exit 1
+                    ''}
                     # the rendered daemon config: absolute state paths, the host,
                     # the gh path, the label, the cap, the OTel endpoint read from
                     # the system scope, the queries from the backends block, and

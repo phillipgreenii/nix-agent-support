@@ -27,7 +27,10 @@ let
   # both home.packages and `lib.backendBinDirs` read, so the PATH entries a
   # pg-wrap spec needs cannot drift from what the module installs. A package
   # added to home.packages directly, bypassing this list, is caught by
-  # checks.test-pg-connector-home-rendering (backendBinDirsCases).
+  # checks.test-pg-connector-home-rendering (backendBinDirsCases). A backend
+  # added to or removed from THIS list MUST be mirrored in that test's pinned
+  # `expectedBackendNames` (tests/pg-connector-home-render.nix), which is the
+  # only thing that notices a backend dropped from here.
   backendPackages = [
     pkgs.pg-connector-pr-github
     pkgs.pg-connector-ci-github-actions

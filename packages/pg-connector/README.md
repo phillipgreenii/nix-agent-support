@@ -475,7 +475,10 @@ umbrella's own `package` first. The helper reads the same `backendPackages` list
 `home.packages`, so a new backend added to that list reaches every spec with no edit. The helper names
 no consumer tool (`bd`, `pjira`, `claude` stay with the consumer). `test-pg-connector-home-rendering`
 (`tests/pg-connector-home-render.nix`, `backendBinDirsCases`) fails when a package reaches
-`home.packages` without being in the helper.
+`home.packages` without being in the helper, and when `backendPackages` differs from the pinned
+`expectedBackendNames` list in the same test file (so a backend dropped from `backendPackages` is
+caught too). Adding or removing a backend therefore means editing both lists in one change; the
+failure message names the backend and the file to edit.
 
 ## Versioning
 
