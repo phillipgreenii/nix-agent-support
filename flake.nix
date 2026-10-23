@@ -4200,9 +4200,22 @@
                   fi
 
                   ff="$surface/claude-marketplace/integrate-branch/skills/ff-merge-to-main/SKILL.md"
-                  for want in 'integrate-branch-support --prek-branch-diff' 'pg-hooks run pre-land' 'pg-hooks not installed on this machine; ask the operator to run pn workspace apply' 'integrate-branch-support --bundle-refresh' 'stopped:precommit-branch-diff-failed' 'overrides any older rule'; do
+                  for want in 'integrate-branch-support --prek-branch-diff' 'pg-hooks run pre-land' 'pg-hooks not installed on this machine; ask the operator to run pn workspace apply' 'integrate-branch-support --bundle-refresh' 'stopped:precommit-branch-diff-failed' 'overrides any older rule' '## FF-1c' 'stopped:eval-failed' 'pre-land-eval "$WT" "$FB"' 'bgwait "pre-land-eval-' 'AGENT-FIXABLE' 'pre-land-eval not installed on this machine; ask the operator to run pn workspace apply' 'pgii-integrate-branch.preLandEval' 'pre-land eval: not enabled for <repo>'; do
                     if ! grep -qF -- "$want" "$ff"; then
                       echo "FAIL: ff-merge-to-main SKILL.md lost the FF-1b/FF-4 pg-hooks text: $want" >&2
+                      exit 1
+                    fi
+                  done
+                  # Operator ruling 2026-10-23 (bead pg2-quj42): FF-1c (the eval-only
+                  # pre-land-eval step) is pinned in the skill, in its status table and
+                  # mermaid flow, in the lander reference and in the agent how-to.
+                  if ! grep -qF -- '| `eval-failed`' "$ff" || ! grep -qF -- 'F1C -->' "$ff"; then
+                    echo "FAIL: ff-merge-to-main SKILL.md lost the FF-1c status-table row or decision-flow edge" >&2
+                    exit 1
+                  fi
+                  for enum in "$surface/claude-marketplace/pb/skills/drain-one/references/land.md" "$surface/home/programs/agent-rules/nix-how-to.md"; do
+                    if ! grep -qF -- 'stopped:eval-failed' "$enum"; then
+                      echo "FAIL: $enum no longer names stopped:eval-failed alongside the FF-1b status" >&2
                       exit 1
                     fi
                   done

@@ -110,6 +110,18 @@ Read in full when step 6 of `SKILL.md` applies. Moved verbatim from /drain-beads
      or an explicit `$?` test, never a bare `;` chain. FF-1b can take several
      minutes on a loaded host, so a lost ff race is expected; the handler's own
      retry bound above applies (do not widen it);
+   - the FF-1c eval-only check (`pre-land-eval`, enablement-gated per clone, operator
+     ruling 2026-10-23) is a SECOND hard gate on `ff-merge-to-main`, run through
+     `bgrun`/`bgwait` (about one to three minutes): the lander MUST NOT run
+     `merge --ff-only` after an exit 10 (`eval-failed`) or any other non-zero exit
+     except 11 (`eval-inconclusive`, continue with a warning line) and 127
+     (`pre-land-eval` not installed: record the handler's notice and continue, like
+     FF-1b's 127). Report `stopped:eval-failed` with the failing output and the
+     reproduce command and land NOTHING. Unlike FF-1b, that stop is AGENT-FIXABLE
+     (a deterministic failure of the code this bead just changed): the lander does
+     not fix it, and the orchestrator treats it as a failed gate to repair (re-delegate
+     the fix to the implementation subagent, then re-land) rather than as an
+     operator decision; only a failure that cannot be repaired goes to STUCK;
    - MUST NOT merge any PR, MUST NOT push any primary branch, MUST NOT use
      `run_in_background` for git operations, and MUST report fully in ONE turn;
    - the lander is itself a dispatched (non-top-level) subagent, so if any step

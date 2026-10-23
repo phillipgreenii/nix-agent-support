@@ -57,7 +57,8 @@ A-3: a brief that lists relative paths without a root causes exactly this defect
 - Full `nix flake check` ruling (operator, Phillip, 2026-10-01): not a per-change or land-time gate;
   it overrides any older rule telling an agent to run a full flake check at land or before
   committing. The gates are the commit's own hook run and, at land, `ff-merge-to-main`'s FF-1b
-  `pg-hooks run pre-land` over the branch diff.
+  `pg-hooks run pre-land` over the branch diff, plus FF-1c's eval-only `pre-land-eval` in a clone that
+  opted in (operator ruling, Phillip, 2026-10-23: a separate gate, not a full flake check).
 - Per-repo CI posture: repos with cloud CI (`phillipgreenii-nix-support-apps`,
   `phillipgreenii-nix-personal`) keep CI as the whole-repo gate. Accepted interim risk:
   `phillipgreenii-nix-agent-support` and `phillipg-nix-ziprecruiter` have no CI, so their only

@@ -116,6 +116,15 @@ committing. The gates are:
    hook failure (exit `10`) or any other non-zero exit halts the land as
    `stopped:precommit-branch-diff-failed`.
 
+3. **At land, `ff-merge-to-main`'s FF-1c** — the eval-only `pre-land-eval` check (it evaluates a
+   flake's `checks`, `packages` and `devShells` derivation paths at the commit being landed and
+   builds none of them; it is NOT a full `nix flake check`; operator ruling, Phillip, 2026-10-23).
+   It runs only in a clone that opted in (`git config pgii-integrate-branch.preLandEval true`), takes
+   about one to three minutes and is run through `bgrun`/`bgwait`. `eval-failed` (exit `10`) halts
+   the land as `stopped:eval-failed`, which is agent-fixable: fix the evaluation error, commit and
+   re-invoke (unlike FF-1b, which is operator-decided). `not-enabled` and `eval-inconclusive` continue;
+   exit `127` (not installed until `pn workspace apply`) is recorded like FF-1b's `127`.
+
 Beyond those, an agent MAY — and SHOULD when it touched shared infrastructure (a builder, a flake
 module, a shared library) — build the targeted checks relevant to its change, in the background
 (`nix build .#checks.<system>.<name> -L`, with an explicit long timeout or `run_in_background`).
@@ -126,7 +135,7 @@ ran, and several concurrent sessions each running one saturated the machine.
 Repos with cloud CI (`phillipgreenii-nix-support-apps`, `phillipgreenii-nix-personal`) keep CI as
 the whole-repo gate. Accepted interim risk: `phillipgreenii-nix-agent-support` and
 `phillipg-nix-ziprecruiter` have no CI, so their only automatic test runners are the commit-time
-`run-unit-tests` hook plus FF-1b's `pg-hooks run pre-land` over the branch diff — the whole-repo `checks.*`
+`run-unit-tests` hook plus FF-1b's `pg-hooks run pre-land` over the branch diff (and FF-1c's eval-only check where a clone opted in) — the whole-repo `checks.*`
 derivations (`checks.pre-commit`, every `*-go-tests`, golangci lint, spec-drift) run only when an
 agent builds them. If that lets problems through, that is the signal to bring CI back.
 
