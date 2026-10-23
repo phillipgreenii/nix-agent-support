@@ -6,24 +6,25 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/enginetest/vocab"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 )
 
 // The kinds below are invented: the shared engine takes its kind order and its
 // roles as data, so a registration of made-up names exercises every path.
-const (
-	kindAlpha   = "alpha"
-	kindBeta    = "beta"
-	kindGamma   = "gamma"
-	kindDelta   = "delta"
-	kindEnter   = "enter_set"
-	kindLeave   = "leave_set"
-	kindRemoved = "gone"
+var (
+	kindAlpha   = vocab.W("alpha")
+	kindBeta    = vocab.W("beta")
+	kindGamma   = vocab.W("gamma")
+	kindDelta   = vocab.W("delta")
+	kindEnter   = vocab.W("enter_set")
+	kindLeave   = vocab.W("leave_set")
+	kindRemoved = vocab.W("gone")
 )
 
 var order = []string{kindAlpha, kindBeta, kindGamma, kindDelta, kindRemoved, kindEnter, kindLeave}
 
-var roles = registry.Roles{Added: "first", Removed: kindRemoved, EnteredQuery: kindEnter, LeftQuery: kindLeave}
+var roles = registry.Roles{Added: vocab.W("first"), Removed: kindRemoved, EnteredQuery: kindEnter, LeftQuery: kindLeave}
 
 func raw(s string) json.RawMessage { return json.RawMessage(s) }
 

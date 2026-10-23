@@ -209,7 +209,7 @@ func TestAStampedGroupCountsOnlyForTheStampsOfThePendingRow(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("rows = %d, want 1", len(rows))
 	}
-	for _, n := range []string{"alpha", "beta"} {
+	for _, n := range []string{groupAlpha, groupBeta} {
 		if !slices.Contains(rowFields(rows[0]), n) {
 			t.Errorf("fields = %v, missing %s", rowFields(rows[0]), n)
 		}
@@ -562,7 +562,7 @@ func TestAMembershipRowMergesIntoAPendingRowAndLeavesItPending(t *testing.T) {
 	if len(rows) != 1 || r.version(idOne) != 6 {
 		t.Fatalf("rows = %d, version = %d; want one row at version 6", len(rows), r.version(idOne))
 	}
-	if !slices.Equal(rowFields(rows[0]), []string{"gamma", "open", "query:mine"}) {
+	if !slices.Equal(rowFields(rows[0]), []string{groupGamma, "open", "query:mine"}) {
 		t.Errorf("fields = %v", rowFields(rows[0]))
 	}
 }

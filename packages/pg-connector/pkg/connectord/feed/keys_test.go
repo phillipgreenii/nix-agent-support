@@ -169,10 +169,10 @@ func TestOneConsumerCannotHoldTheCursorsOfTwoViewsOfOneScope(t *testing.T) {
 	ctx := context.Background()
 	r.poll(viewAll, "c", "mine")
 	_, err := r.f.Poll(ctx, PollRequest{View: viewFlagged, Consumer: "c", Scope: "mine"})
-	wantConflict(t, err, "(c, all, mine)")
+	wantConflict(t, err, "(c, "+viewAll+", mine)")
 	_, err = r.f.Poll(ctx, PollRequest{View: viewFlagged, Consumer: "c", Scope: "mine", Reset: true})
-	wantConflict(t, err, "(c, all, mine)")
-	wantConflict(t, ackErr(r.f, ctx, viewFlagged, "c", "mine", 0), "(c, all, mine)")
+	wantConflict(t, err, "(c, "+viewAll+", mine)")
+	wantConflict(t, ackErr(r.f, ctx, viewFlagged, "c", "mine", 0), "(c, "+viewAll+", mine)")
 	if _, ok := r.pos(viewFlagged, "c", "mine"); ok {
 		t.Fatal("a refused creation left a key")
 	}
@@ -180,7 +180,7 @@ func TestOneConsumerCannotHoldTheCursorsOfTwoViewsOfOneScope(t *testing.T) {
 	// The reverse, a different consumer and a different query are allowed.
 	r.poll(viewFlagged, "d", "mine")
 	_, err = r.f.Poll(ctx, PollRequest{View: viewAll, Consumer: "d", Scope: "mine"})
-	wantConflict(t, err, "(d, flagged, mine)")
+	wantConflict(t, err, "(d, "+viewFlagged+", mine)")
 	r.poll(viewAll, "e", "mine")
 	r.poll(viewFlagged, "e", "team")
 	r.poll(viewFlagged, "c2", "mine")

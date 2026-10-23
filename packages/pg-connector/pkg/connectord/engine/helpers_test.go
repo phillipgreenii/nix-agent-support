@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/enginetest/vocab"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
@@ -16,20 +17,23 @@ import (
 
 // The invented registration every test of this package runs on: one entity kind,
 // a primary group and three others, and change kinds no real connector uses.
-const (
-	kindWidget = "widget"
+//
+// Each name goes through vocab.W, so the whole test set also runs over a second
+// registration of different invented names (see second_registration_test.go).
+var (
+	kindWidget = vocab.W("widget")
 
-	groupAlpha = "alpha"
-	groupBeta  = "beta" // stamped: a fetch counts only for the stamps of the pending row
-	groupGamma = "gamma"
+	groupAlpha = vocab.W("alpha")
+	groupBeta  = vocab.W("beta") // stamped: a fetch counts only for the stamps of the pending row
+	groupGamma = vocab.W("gamma")
 
-	changeRetitled = "retitled"
-	changeToggled  = "toggled"
-	changeTweaked  = "tweaked"
-	changeGone     = "gone"
-	changeJoined   = "joined"
-	changeLeft     = "left"
-	changeAdded    = "added"
+	changeRetitled = vocab.W("retitled")
+	changeToggled  = vocab.W("toggled")
+	changeTweaked  = vocab.W("tweaked")
+	changeGone     = vocab.W("gone")
+	changeJoined   = vocab.W("joined")
+	changeLeft     = vocab.W("left")
+	changeAdded    = vocab.W("added")
 )
 
 var t0 = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)

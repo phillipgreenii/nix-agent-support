@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/enginetest/vocab"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/scheduler"
@@ -21,11 +22,6 @@ import (
 // The invented registration every test of this package runs on: one entity kind
 // and change kinds no real connector uses.
 const (
-	kindWidget     = "widget"
-	changeAdded    = "added"
-	changeGone     = "gone"
-	changeJoined   = "joined"
-	changeLeft     = "left"
 	statePrefix    = "state_of:"
 	bucketInvent   = governor.BucketRESTCore
 	ttlMine        = 60 * time.Second
@@ -36,6 +32,16 @@ const (
 	exprMineOpen   = "mine-open"
 	exprTeamOpen   = "team-open"
 	exprTeamSecond = "team-second"
+)
+
+// The names of the invented registration go through vocab.W, so the whole test
+// set also runs over a second registration (see second_registration_test.go).
+var (
+	kindWidget   = vocab.W("widget")
+	changeAdded  = vocab.W("added")
+	changeGone   = vocab.W("gone")
+	changeJoined = vocab.W("joined")
+	changeLeft   = vocab.W("left")
 )
 
 var t0 = time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/enginetest/vocab"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
@@ -26,18 +27,20 @@ const (
 
 // The invented vocabulary of the test registration: one entity kind, two views
 // (all rows, and only the rows that carry the flag kind) and the four roles.
-const (
-	entityKind   = "example_entity"
-	viewAll      = "all"
-	viewFlagged  = "flagged"
-	kindAdded    = "added"
-	kindRemoved  = "removed"
-	kindEntered  = "entered_scope"
-	kindLeft     = "left_scope"
-	kindContent  = "content_changed"
-	kindFlag     = "flag_changed"
-	kindOther    = "other_changed"
-	groupPrimary = "main"
+// Each name goes through vocab.W, so the whole test set also runs over a second
+// registration (see second_registration_test.go).
+var (
+	entityKind   = vocab.W("example_entity")
+	viewAll      = vocab.W("all")
+	viewFlagged  = vocab.W("flagged")
+	kindAdded    = vocab.W("added")
+	kindRemoved  = vocab.W("removed")
+	kindEntered  = vocab.W("entered_scope")
+	kindLeft     = vocab.W("left_scope")
+	kindContent  = vocab.W("content_changed")
+	kindFlag     = vocab.W("flag_changed")
+	kindOther    = vocab.W("other_changed")
+	groupPrimary = vocab.W("main")
 )
 
 // foldRef folds the part of a reference before the number sign to lower case and

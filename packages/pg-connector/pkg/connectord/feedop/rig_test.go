@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/enginetest/vocab"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/feed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
@@ -20,20 +21,27 @@ import (
 
 var t0 = time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
 
+// The invented vocabulary of the test registration. Each name goes through
+// vocab.W, so the whole test set also runs over a second registration (see
+// second_registration_test.go).
+var (
+	entityKind  = vocab.W("example_entity")
+	viewAll     = vocab.W("all")
+	viewFlagged = vocab.W("flagged")
+	kindAdded   = vocab.W("added")
+	kindRemoved = vocab.W("removed")
+	kindEntered = vocab.W("entered_scope")
+	kindLeft    = vocab.W("left_scope")
+	kindContent = vocab.W("content_changed")
+	kindFlag    = vocab.W("flag_changed")
+	groupMain   = vocab.W("main")
+)
+
 const (
-	day         = 24 * time.Hour
-	refA        = "example-org/widget#1"
-	refB        = "example-org/widget#2"
-	entityKind  = "example_entity"
-	viewAll     = "all"
-	viewFlagged = "flagged"
-	kindAdded   = "added"
-	kindRemoved = "removed"
-	kindEntered = "entered_scope"
-	kindLeft    = "left_scope"
-	kindContent = "content_changed"
-	kindFlag    = "flag_changed"
-	sourceName  = "example-source"
+	day        = 24 * time.Hour
+	refA       = "example-org/widget#1"
+	refB       = "example-org/widget#2"
+	sourceName = "example-source"
 )
 
 func foldRef(ref string) string {
@@ -46,8 +54,8 @@ func foldRef(ref string) string {
 func testSpec() registry.Spec {
 	return registry.Spec{
 		EntityKind:   entityKind,
-		PrimaryGroup: "main",
-		Groups:       []string{"main"},
+		PrimaryGroup: groupMain,
+		Groups:       []string{groupMain},
 		Changes:      []string{kindAdded, kindRemoved, kindEntered, kindLeft, kindContent, kindFlag},
 		Roles:        registry.Roles{Added: kindAdded, Removed: kindRemoved, EnteredQuery: kindEntered, LeftQuery: kindLeft},
 		Views:        []registry.View{{Name: viewAll}, {Name: viewFlagged, AnyOf: []string{kindFlag}}},
