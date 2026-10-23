@@ -1,0 +1,20 @@
+{
+  "name": "19-legacy-version-0-row",
+  "description": "My open PR with one unaddressed review comment whose store row is the legacy shape the cutover leaves (version 0, never hydrated): the decider refuses it until a refresh hydrates it, then plans the same as a freshly hydrated row.",
+  "entities": ["acme/api#119"],
+  "legacy_seeded": ["acme/api#119"],
+  "prs": [
+    {
+      "number": 119,
+      "title": "Add retry to client",
+      "author": "phillipgreenii",
+      "comments": [
+        {
+          "id": "c1",
+          "author": "teammate",
+          "body": "Please handle the timeout case."
+        }
+      ]
+    }
+  ]
+}

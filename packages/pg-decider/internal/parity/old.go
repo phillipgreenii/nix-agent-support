@@ -14,7 +14,8 @@ type PlannedRow struct{ Kind, ContentHash string }
 type OldResult struct{ Rows map[string][]PlannedRow } // entity id -> rows
 
 // RunOld loads the scenario through the OLD code path and reads back what sync
-// planned. In a hermetic sandbox (fresh state directory, config, PATH with only
+// planned. It is used only by Freeze, to record the golden once; the gate does
+// not call it. In a hermetic sandbox (fresh state directory, config, PATH with only
 // the fake pg-connector) it runs, per entity,
 //
 //	pg-desk run pr <id> --change added      gather, interpret, store, sync

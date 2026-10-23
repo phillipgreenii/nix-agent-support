@@ -17,7 +17,11 @@ import (
 // new plan carries no equivalent hash, and the two sides write different field
 // shapes (a dedup_key the old bead never had, for one). Counts are kept, so two
 // entries with the same key are two writes.
-type Entry struct{ Entity, Kind, Op string }
+type Entry struct {
+	Entity string `json:"entity"`
+	Kind   string `json:"kind"`
+	Op     string `json:"op"`
+}
 
 // Op classes. Create and annotate are written for a thing that does not exist
 // yet; the rest act on an existing work item.

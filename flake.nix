@@ -5383,21 +5383,29 @@
                 ];
               };
 
-              # pg-decider old-vs-new parity gate (bead pg2-v3cti, follow-up of
-              # pg2-pyh1i). TestParityGate runs every synthetic scenario through
-              # the old sync (pg-desk, sync.mode = plan) and the new decider and
-              # diffs the plans against testdata/expected-diff.json. It needs the
-              # three BUILT binaries and used to skip silently without them (which
-              # is how the gate stayed broken at HEAD until pg2-pyh1i). This check
-              # builds them (the same pkgs.pg-desk / pkgs.pg-connector /
-              # pkgs.pg-decider the system ships), exports them as
-              # PG_DECIDER_PARITY_*_BIN, and sets PG_DECIDER_PARITY_REQUIRE_BINARIES
-              # so an unset binary FAILS the run instead of skipping it. It runs
-              # ONLY TestParityGate in internal/parity (the rest of the module is
-              # pg-decider-go-tests' job), and the buildPhase asserts that test
-              # really reported PASS, so a renamed or filtered-out test cannot make
-              # the check pass vacuously. The module's vendor env comes from
-              # mkGoTest; only the buildPhase is replaced.
+              # pg-decider parity gate (bead pg2-v3cti, follow-up of pg2-pyh1i;
+              # frozen by pg2-6mo45.3.3, design 6.7). TestParityGate loads every
+              # synthetic scenario into a schema-2 store (pg-desk migrate --cutover,
+              # then pg-desk pr refresh), runs the decider, and compares its plan
+              # with the scenario's FROZEN golden, internal/parity/testdata/<scenario>/
+              # expected-plan.json (the old sync stage's plans, recorded once from a
+              # pinned pre-removal pg-desk, plus the explained differences and the
+              # hand-pinned unobservable entries). One scenario is seeded the legacy
+              # way by a store helper that drives sqlite3 (a version-0, never-hydrated
+              # row), hence PG_DECIDER_PARITY_SQLITE3_BIN. The test needs the three
+              # BUILT binaries and used to skip silently without them (which is how
+              # the gate stayed broken at HEAD until pg2-pyh1i). This check builds
+              # them (the same pkgs.pg-desk / pkgs.pg-connector / pkgs.pg-decider the
+              # system ships), exports them as PG_DECIDER_PARITY_*_BIN, and sets
+              # PG_DECIDER_PARITY_REQUIRE_BINARIES so an unset binary FAILS the run
+              # instead of skipping it. It runs ONLY TestParityGate and
+              # TestParityGateNegativeCases in internal/parity (the rest of the module
+              # is pg-decider-go-tests' job), and the buildPhase asserts a PASS line
+              # for EVERY scenario directory (each is a TestParityGate subtest), no
+              # SKIP line, and at least minScenarios scenarios, so a renamed or
+              # filtered-out test, a skipped scenario, or a gate that found no
+              # scenarios cannot pass vacuously ("0 equals 0"). The module's vendor
+              # env comes from mkGoTest; only the buildPhase is replaced.
               pg-decider-parity-gate =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-decider-parity-gate";
@@ -5408,21 +5416,46 @@
                     PG_DECIDER_PARITY_PG_DESK_BIN = "${pkgs.pg-desk}/bin/pg-desk";
                     PG_DECIDER_PARITY_PG_CONNECTOR_BIN = "${pkgs.pg-connector}/bin/pg-connector";
                     PG_DECIDER_PARITY_PG_DECIDER_BIN = "${pkgs.pg-decider}/bin/pg-decider";
+                    PG_DECIDER_PARITY_SQLITE3_BIN = "${lib.getBin pkgs.sqlite}/bin/sqlite3";
                     PG_DECIDER_PARITY_REQUIRE_BINARIES = "1";
+                    # Keep equal to MinScenarios in internal/parity/golden.go.
+                    minScenarios = "19";
                     buildPhase = ''
                       runHook preBuild
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
                       export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      if ! go test -count=1 -v -run '^TestParityGate$' ./internal/parity/ > "$TMPDIR/parity-gate.log" 2>&1; then
-                        cat "$TMPDIR/parity-gate.log"
-                        echo "pg-decider-parity-gate: TestParityGate FAILED" >&2
+                      log="$TMPDIR/parity-gate.log"
+                      if ! go test -count=1 -v -run '^(TestParityGate|TestParityGateNegativeCases)$' ./internal/parity/ > "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-decider-parity-gate: the parity gate FAILED" >&2
                         exit 1
                       fi
-                      cat "$TMPDIR/parity-gate.log"
-                      if ! grep -q -- '^--- PASS: TestParityGate ' "$TMPDIR/parity-gate.log"; then
-                        echo "pg-decider-parity-gate: TestParityGate did not report PASS (skipped or not run)" >&2
+                      cat "$log"
+                      for t in TestParityGate TestParityGateNegativeCases; do
+                        if ! grep -q -- "^--- PASS: $t " "$log"; then
+                          echo "pg-decider-parity-gate: $t did not report PASS (skipped or not run)" >&2
+                          exit 1
+                        fi
+                      done
+                      if grep -q -- '--- SKIP' "$log"; then
+                        echo "pg-decider-parity-gate: a test or scenario was SKIPPED" >&2
+                        grep -- '--- SKIP' "$log" >&2
                         exit 1
                       fi
+                      found=0
+                      for f in internal/parity/testdata/*/scenario.json; do
+                        scenario=$(basename "$(dirname "$f")")
+                        if ! grep -q -- "^    --- PASS: TestParityGate/$scenario " "$log"; then
+                          echo "pg-decider-parity-gate: scenario $scenario has no PASS line" >&2
+                          exit 1
+                        fi
+                        found=$((found + 1))
+                      done
+                      if [ "$found" -lt "$minScenarios" ]; then
+                        echo "pg-decider-parity-gate: only $found scenarios found, at least $minScenarios are required" >&2
+                        exit 1
+                      fi
+                      echo "pg-decider-parity-gate: $found scenarios, each with a PASS line, none skipped"
                       runHook postBuild
                     '';
                   });

@@ -7,7 +7,7 @@ import (
 )
 
 // TestExpectedDiffNamesRealScenariosAndCoversTheDocumentedExceptions needs no
-// binaries: it guards the expected-diff file itself.
+// binaries: it guards the explained differences recorded in the goldens.
 func TestExpectedDiffNamesRealScenariosAndCoversTheDocumentedExceptions(t *testing.T) {
 	exp, err := LoadExpected()
 	if err != nil {
@@ -37,51 +37,40 @@ func TestExpectedDiffNamesRealScenariosAndCoversTheDocumentedExceptions(t *testi
 	}
 }
 
-// TestParityGate runs every scenario through both runners and fails on any
-// unexplained difference, or on a listed exception that did not occur.
+// TestParityGate runs every scenario through the decider as its own subtest and
+// fails on any difference from the scenario's frozen golden: an entry the
+// decider plans that the golden does not list, or a stale golden entry the
+// decider no longer plans. The subtest names are what the nix check asserts a
+// PASS line for.
 func TestParityGate(t *testing.T) {
 	env := realEnv(t)
-	outs, err := RunGate(context.Background(), env)
-	if err != nil {
-		t.Fatalf("RunGate: %v", err)
-	}
-	scs, _ := Scenarios()
-	if len(outs) != len(scs) {
-		t.Fatalf("gate covered %d scenarios, want all %d", len(outs), len(scs))
-	}
-	var b strings.Builder
-	if !Render(&b, outs) {
-		t.Errorf("parity gate is not clean:\n%s", b.String())
-	}
-}
-
-// TestTeamPRFeedbackCycleExceptionIsExercised pins S16 on the real binaries:
-// for a team PR with unaddressed comments the old side plans a feedback-cycle
-// row and the new side plans no process-feedback action.
-func TestTeamPRFeedbackCycleExceptionIsExercised(t *testing.T) {
-	env := realEnv(t)
-	sc := scenarioByPrefix(t, "03-")
-	old, err := RunOld(context.Background(), env, sc)
+	scs, err := Scenarios()
 	if err != nil {
 		t.Fatal(err)
 	}
-	nw, err := RunNew(context.Background(), env, sc)
+	if len(scs) < MinScenarios {
+		t.Fatalf("the gate covers %d scenarios, it requires at least %d", len(scs), MinScenarios)
+	}
+	gs, err := LoadGoldens()
 	if err != nil {
 		t.Fatal(err)
 	}
-	id := sc.Entities[0]
-	sawCycle := false
-	for _, r := range old.Rows[id] {
-		if r.Kind == "feedback-cycle" {
-			sawCycle = true
-		}
-	}
-	if !sawCycle {
-		t.Errorf("old side planned no feedback-cycle row for the team PR: %v", old.Rows[id])
-	}
-	for _, a := range nw.Plans[id].Actions {
-		if a.Kind == "process-feedback" {
-			t.Errorf("new side planned a process-feedback action for a team PR: %+v", a)
-		}
+	for _, sc := range scs {
+		t.Run(sc.Name, func(t *testing.T) {
+			o := RunScenario(context.Background(), env, sc, gs[sc.Name])
+			var b strings.Builder
+			if !Render(&b, []Outcome{o}) {
+				t.Errorf("parity gate is not clean:\n%s", b.String())
+			}
+			fx, err := LoadFixture(sc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range fx.LegacySeeded {
+				if o.Refused[id] == "" {
+					t.Errorf("the legacy-seeded %s was not shown to be declined before its refresh", id)
+				}
+			}
+		})
 	}
 }

@@ -2,7 +2,6 @@ package parity
 
 import (
 	"bytes"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,9 +108,6 @@ func Diff(scenario string, old, new []Entry, expected []Expected) Report {
 	return r
 }
 
-//go:embed testdata/expected-diff.json
-var expectedDiffJSON []byte
-
 // knownIDs are the exception ids the expected diff may use: the design's
 // decision ids (S13..S26), UNOBS, and "pg2-nbkps", the operator ruling (Phillip,
 // 2026-10-05) that scenario 13's title-prefix adoption is out of scope. That id
@@ -123,11 +119,8 @@ var knownIDs = map[string]bool{
 	"UNOBS": true, "pg2-nbkps": true, "D-F13": true,
 }
 
-// LoadExpected reads the embedded testdata/expected-diff.json, keyed by
-// scenario name.
-func LoadExpected() (map[string][]Expected, error) { return ParseExpected(expectedDiffJSON) }
-
-// ParseExpected decodes and validates an expected-diff document. Unknown
+// ParseExpected decodes and validates an expected-diff document (the input of
+// Freeze, and the shape the goldens' explained lists are validated with). Unknown
 // members, unknown ids or sides and empty entity, kind, op or reason are
 // errors, so the list cannot hold a vague or misspelled allowance.
 func ParseExpected(data []byte) (map[string][]Expected, error) {

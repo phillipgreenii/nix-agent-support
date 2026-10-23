@@ -7,32 +7,73 @@ behavior lives in `docs/behavior/pg-decider/`; this page covers building and tes
 
 - Whole module: `nix build .#checks.<system>.pg-decider-go-tests` (or `go test ./...` in this
   directory).
-- Old-versus-new parity gate: `nix build .#checks.<system>.pg-decider-parity-gate -L`.
+- Parity gate (the decider against its frozen golden): `nix build .#checks.<system>.pg-decider-parity-gate -L`.
 
 ## Parity gate
 
-`internal/parity` runs every synthetic scenario under `internal/parity/testdata/` through the old
-sync (`pg-desk`, `sync.mode = plan`) and the new decider (`pg-decider plan`), normalizes both plans
-into one vocabulary and diffs them. `testdata/expected-diff.json` lists the differences that are
-intended (exception ids such as `S26`); any other difference, and any listed exception that does
-NOT occur, fails the gate. It makes no live contact: all state is temporary and the connector is a
-generated fake.
+`internal/parity` loads every synthetic scenario under `internal/parity/testdata/` into a schema-2
+store (`pg-desk migrate --cutover`, then `pg-desk pr refresh` per entity), runs the decider
+(`pg-decider plan`), normalizes its plan into one vocabulary and compares it with the scenario's
+FROZEN golden, `testdata/<scenario>/expected-plan.json`. It makes no live contact: all state is
+temporary and the connector is a generated fake.
 
-The gate needs three BUILT binaries, named by environment variables holding absolute paths:
+The gate is a regression snapshot, not an oracle. The old sync stage observed only creates for
+three kinds, and the golden compares plans, never applies. The real oracle is the end-to-end test
+against a real tracker.
+
+### The golden
+
+Each `expected-plan.json` was recorded once, before the sync stage was removed, by running the old
+sync stage (`pg-desk run pr`, `sync.mode = plan`) and the decider side by side
+(`pg-decider-parity freeze`). It holds:
+
+- `frozen_from`: the agent-support `main` commit and the pg-desk build the old plans came from. Every
+  file carries the same pin (a test refuses a set frozen twice).
+- `old_plan`: what the old sync stage planned, normalized. Frozen; never recomputed.
+- `explained`: every difference between `old_plan` and the decider, each with its exception id (`S13`
+  and so on) and reason, including the hand-pinned `UNOBS` entries (the old side exposes no write
+  against an existing bead, so the decider's close, reopen and update entries are pinned instead of
+  observed).
+- `expected_plan`: the full normalized set the decider MUST plan: `old_plan` with the old-only
+  differences removed and the new-only ones added. The gate compares this, exactly and counted,
+  with the decider's plan.
+
+An entry the golden lists that the decider no longer plans is a STALE expected entry and fails the
+gate; an entry the decider plans that the golden does not list fails it too. An intended behavior
+change is recorded by editing `expected_plan` AND adding its `explained` entry in the same change;
+`ParseGolden` refuses a file whose `expected_plan` is not `old_plan` with the explained differences
+applied. The golden is edited by hand after the freeze and is never re-recorded (`freeze` refuses to
+overwrite one).
+
+Scenario `19-legacy-version-0-row` is seeded the legacy way: a store helper (`legacy_store.go`,
+driving `sqlite3`) writes the entity row an old-schema store held, into a schema-1 store before the
+cutover, so the cutover leaves it at version 0, never hydrated. The runner shows the decider declines
+to plan it before the refresh (a non-zero exit, or an empty plan: today the decider plans no action
+from a never-hydrated row; the fail-closed exit is the composed command's job) and that it plans
+exactly what scenario 01 plans after `pg-desk pr refresh`.
+
+`Diff` and the comparison have plain negative cases (`TestParityGateNegativeCases`, no binaries
+needed): an input with one kind or one operation changed, a stale entry and an unplanned extra entry
+each make the gate fail, and an unchanged input passes.
+
+The gate needs three BUILT binaries, named by environment variables holding absolute paths, and
+`sqlite3` for the legacy helper:
 
 | Variable                             | Binary         | Nix package                     |
 | ------------------------------------ | -------------- | ------------------------------- |
 | `PG_DECIDER_PARITY_PG_DESK_BIN`      | `pg-desk`      | `.#packages.<sys>.pg-desk`      |
 | `PG_DECIDER_PARITY_PG_CONNECTOR_BIN` | `pg-connector` | `.#packages.<sys>.pg-connector` |
 | `PG_DECIDER_PARITY_PG_DECIDER_BIN`   | `pg-decider`   | `.#packages.<sys>.pg-decider`   |
+| `PG_DECIDER_PARITY_SQLITE3_BIN`      | `sqlite3`      | `pkgs.sqlite` (PATH when unset) |
 
 ### In nix (the gate)
 
-`checks.<system>.pg-decider-parity-gate` builds the three packages, exports the variables, and runs
-`TestParityGate`. It fails when the gate fails, and it also sets
-`PG_DECIDER_PARITY_REQUIRE_BINARIES=1`, so a missing or empty binary variable FAILS the run instead
-of skipping it. The check additionally requires `TestParityGate` to report `PASS`, so a renamed or
-filtered-out test cannot pass vacuously.
+`checks.<system>.pg-decider-parity-gate` builds the packages, exports the variables, and runs
+`TestParityGate` (one subtest per scenario) and `TestParityGateNegativeCases`. It fails when either
+fails, and it also sets `PG_DECIDER_PARITY_REQUIRE_BINARIES=1`, so a missing or empty binary
+variable FAILS the run instead of skipping it. The check additionally requires a `PASS` line for
+both tests and for EVERY scenario directory, no `SKIP` line, and at least 19 scenarios, so a renamed
+or filtered-out test, a skipped scenario, or a gate that found nothing cannot pass vacuously.
 
 ### By hand
 
@@ -42,18 +83,18 @@ export PG_DECIDER_PARITY_PG_CONNECTOR_BIN="$(nix build .#pg-connector --no-link 
 export PG_DECIDER_PARITY_PG_DECIDER_BIN="$(nix build .#pg-decider --no-link --print-out-paths)/bin/pg-decider"
 
 go test ./internal/parity/...      # includes TestParityGate
-go run ./cmd/pg-decider-parity     # prints every unexplained difference; exit 0 when clean
+go run ./cmd/pg-decider-parity     # prints every difference from the golden; exit 0 when clean
 ```
 
 Without the variables a plain `go test` SKIPS the tests that run the real binaries (so the module
 stays green for developers who have not built them). Set `PG_DECIDER_PARITY_REQUIRE_BINARIES=1` to
 make that skip a failure.
 
-### Keeping the exceptions honest
+### Keeping the golden honest
 
-Removing an entry from `testdata/expected-diff.json` (for example `S26`) makes the gate, and so the
-check, fail naming the unexplained difference. Adding an entry for a difference that does not occur
-fails it too.
+Removing an entry from a scenario's `expected_plan` (together with its `explained` entry) makes the
+gate, and so the check, fail naming the unplanned entry. Adding an entry for something the decider
+does not plan fails it too.
 
 ## Running the focus contract test
 

@@ -34,6 +34,8 @@ var newWantActions = map[string][]rule{
 	"16-": {{"create", "focus-item", "focus.item"}},
 	"17-": {{"update", "focus-item", "focus.item"}},
 	"18-": {{"update", "focus-item", "focus.item"}},
+	// After the refresh the legacy row plans exactly what scenario 01 does.
+	"19-": {{"create", "anchor", "anchor.lazy"}, {"create", "review-pr", "review.head-advanced"}, {"create", "process-feedback", "feedback.digest-changed"}},
 }
 
 var newWantAbsent = map[string][]rule{

@@ -12,7 +12,7 @@ func TestRunWithoutEnvironmentExitsTwoWithAUsageMessage(t *testing.T) {
 		t.Setenv(v, "")
 	}
 	var out, errOut bytes.Buffer
-	if code := run(context.Background(), &out, &errOut); code != 2 {
+	if code := run(context.Background(), nil, &out, &errOut); code != 2 {
 		t.Fatalf("exit = %d, want 2", code)
 	}
 	if !strings.Contains(errOut.String(), "PG_DECIDER_PARITY_PG_DESK_BIN") {

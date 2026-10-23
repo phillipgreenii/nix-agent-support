@@ -1,0 +1,25 @@
+{
+  "scenario": "17-focus-strike-holds-an-open-bead",
+  "frozen_from": {
+    "agent_support_commit": "a5ee265c4f0861d2f180e090e4e7bc419840a695",
+    "pg_desk": "/nix/store/34xjrfnx6ja1fwz3983iadga3b9xcb9c-pg-desk-0.0.0-ba7d1ff7"
+  },
+  "old_plan": [],
+  "explained": [
+    {
+      "id": "D-F13",
+      "entity": "acme/api#117",
+      "kind": "focus-item",
+      "op": "update",
+      "side": "new-only",
+      "reason": "focus.item hold (D-F13): a source whose selection was struck gets its open, unclaimed focus bead held with one update (status deferred, marker struck); the old sync has no focus bead. The write is against an existing bead, so the old side could not show it either way."
+    }
+  ],
+  "expected_plan": [
+    {
+      "entity": "acme/api#117",
+      "kind": "focus-item",
+      "op": "update"
+    }
+  ]
+}

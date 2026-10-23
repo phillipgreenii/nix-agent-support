@@ -18,6 +18,10 @@ const (
 	envPgConnectorBin = "PG_DECIDER_PARITY_PG_CONNECTOR_BIN"
 	envPgDeciderBin   = "PG_DECIDER_PARITY_PG_DECIDER_BIN"
 
+	// envSqlite3Bin optionally names the sqlite3 program the legacy store helper
+	// drives; the nix check sets it, a by-hand run falls back to the PATH.
+	envSqlite3Bin = "PG_DECIDER_PARITY_SQLITE3_BIN"
+
 	// envRequireBinaries, when set to anything but "" or "0", makes the tests
 	// that need the built binaries FAIL instead of skip when the three variables
 	// above are not all set. The nix check pg-decider-parity-gate sets it so a
@@ -38,6 +42,7 @@ func RequireBinaries() bool {
 type Env struct {
 	PgDeskBin, PgConnectorBin, PgDeciderBin string // absolute paths to the built binaries
 	TempDir                                 string // fresh per run; all state lives under it
+	Sqlite3Bin                              string // optional: the sqlite3 program of the legacy store helper (PATH lookup when empty)
 }
 
 // EnvFromProcess reads the three binary paths from the process environment
@@ -55,6 +60,7 @@ func EnvFromProcess() (Env, bool) {
 		PgDeskBin:      os.Getenv(envPgDeskBin),
 		PgConnectorBin: os.Getenv(envPgConnectorBin),
 		PgDeciderBin:   os.Getenv(envPgDeciderBin),
+		Sqlite3Bin:     os.Getenv(envSqlite3Bin),
 	}
 	if e.PgDeskBin == "" || e.PgConnectorBin == "" || e.PgDeciderBin == "" {
 		return Env{}, false

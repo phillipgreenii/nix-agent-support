@@ -1,20 +1,21 @@
-// Package parity holds the first half of the old-versus-new parity tool: the
-// synthetic scenario fixtures and the two runners that load them into a real
-// pg-desk store and report what each side planned.
+// Package parity is the parity gate: the synthetic scenario fixtures, the runner
+// that loads one into a real schema-2 pg-desk store and reads back what the
+// decider plans, and the comparison of that plan with the scenario's frozen
+// golden (golden.go).
 //
 // internal/sync is an internal package of another Go module, so this package
 // cannot import it. Instead it EXECS the built binaries:
 //
-//   - RunOld loads a fixture through the pre-cutover code path (pg-desk run
-//     with sync.mode = plan) and reads back the writes sync planned.
-//   - RunNew loads the SAME fixture, migrates the store with pg-desk migrate
-//     --cutover, hydrates the entities and runs pg-decider plan.
+//   - RunNew loads a fixture into a fresh store (pg-desk migrate --cutover, then
+//     pg-desk pr refresh) and runs pg-decider plan. The gate uses only this side.
+//   - RunOld loads the same fixture through the pre-cutover code path (pg-desk
+//     run with sync.mode = plan) and reads back the writes sync planned. It ran
+//     once, to record the golden (Freeze); the gate no longer calls it, and it
+//     is deleted with the sync stage.
 //
-// Both sides are hermetic: a fresh state directory, config, HOME and PATH, with
-// a fixture-driven fake pg-connector first (and only) on PATH. The package
-// maps nothing and diffs nothing; that is the sibling packet's job. It imports
-// neither packages/pg-desk nor any internal/sync, so the tool
-// is deleted with internal/sync as one directory.
+// Both are hermetic: a fresh state directory, config, HOME and PATH, with a
+// fixture-driven fake pg-connector first (and only) on PATH. The package imports
+// neither packages/pg-desk nor any internal/sync.
 package parity
 
 import (
@@ -101,6 +102,13 @@ type Fixture struct {
 	// entry has the annotation unset (null), which reads as "not selected". The
 	// old side has no such notion and ignores it.
 	FocusSelected map[string]string `json:"focus_selected,omitempty"`
+	// LegacySeeded lists evaluated entities whose store row is written the
+	// legacy way by the store helper (SeedLegacyRow): the row an old-schema
+	// store held when the cutover ran, which the cutover leaves at version 0
+	// and never hydrated. The new side checks the decider REFUSES such an
+	// entity before the refresh and plans it correctly after it. The old side
+	// ignores the field (`run pr` builds its own rows).
+	LegacySeeded []string `json:"legacy_seeded,omitempty"`
 }
 
 // PRFixture is one synthetic pull request; unset fields take realistic
@@ -245,6 +253,11 @@ func (fx *Fixture) validate() error {
 	for _, h := range fx.Hidden {
 		if !contains(fx.Entities, h) {
 			return fmt.Errorf("fixture %s: hidden %q is not an evaluated entity", fx.Name, h)
+		}
+	}
+	for _, e := range fx.LegacySeeded {
+		if !contains(fx.Entities, e) {
+			return fmt.Errorf("fixture %s: legacy_seeded names %q, which is not an evaluated entity", fx.Name, e)
 		}
 	}
 	for e, period := range fx.FocusSelected {

@@ -1,83 +1,26 @@
 package parity
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
 )
 
-// Outcome is one scenario's result: its Report, or the error that kept it from
-// being compared (wrapping ErrUnsupported when the real binaries cannot load it).
+// Outcome is one scenario's result: its Report (the decider's plan against the
+// frozen golden), or the error that kept it from being compared (wrapping
+// ErrUnsupported when the real binaries cannot load it).
 type Outcome struct {
 	Scenario Scenario
 	Report   Report
 	Err      error
+	// Refused is how the decider declined each legacy-seeded entity before its
+	// refresh (RunNew); empty for a scenario with none.
+	Refused map[string]string
 }
 
 // Clean is true when the scenario ran and its report is clean.
 func (o Outcome) Clean() bool { return o.Err == nil && o.Report.Clean() }
-
-// RunGate runs every scenario through both runners, normalizes and diffs them
-// against the expected differences. A scenario a runner cannot load is
-// reported (Err wraps ErrUnsupported), never dropped. An expected-diff entry
-// naming a scenario that does not exist is an error: the list must not rot.
-func RunGate(ctx context.Context, env Env) ([]Outcome, error) {
-	scs, err := Scenarios()
-	if err != nil {
-		return nil, err
-	}
-	expected, err := LoadExpected()
-	if err != nil {
-		return nil, err
-	}
-	known := map[string]bool{}
-	for _, sc := range scs {
-		known[sc.Name] = true
-	}
-	for name := range expected {
-		if !known[name] {
-			return nil, fmt.Errorf("parity: expected-diff names scenario %q, which does not exist", name)
-		}
-	}
-	var outs []Outcome
-	for _, sc := range scs {
-		outs = append(outs, runScenario(ctx, env, sc, expected[sc.Name]))
-	}
-	return outs, nil
-}
-
-func runScenario(ctx context.Context, env Env, sc Scenario, expected []Expected) Outcome {
-	out := Outcome{Scenario: sc}
-	fx, err := LoadFixture(sc)
-	if err != nil {
-		out.Err = err
-		return out
-	}
-	old, err := RunOld(ctx, env, sc)
-	if err != nil {
-		out.Err = fmt.Errorf("old side: %w", err)
-		return out
-	}
-	nw, err := RunNew(ctx, env, sc)
-	if err != nil {
-		out.Err = fmt.Errorf("new side: %w", err)
-		return out
-	}
-	oe, err := NormalizeOld(fx, old)
-	if err != nil {
-		out.Err = err
-		return out
-	}
-	ne, err := NormalizeNew(nw)
-	if err != nil {
-		out.Err = err
-		return out
-	}
-	out.Report = Diff(sc.Name, oe, ne, expected)
-	return out
-}
 
 // Render prints a table of every scenario with its matches, expected
 // differences and failures, then each failure in full. It reports whether the
@@ -123,6 +66,10 @@ func Render(w io.Writer, outs []Outcome) bool {
 		for _, x := range o.Report.Missing {
 			fmt.Fprintf(w, "  MISSING     %-5s %s %s %s (%s): listed but did not occur\n", x.ID, x.Entity, x.Kind, x.Op, x.Side)
 		}
+	}
+	if !clean {
+		fmt.Fprintln(w, "\nUNEXPLAINED (old-only) = a stale expected entry: the golden lists it, the decider does not plan it.")
+		fmt.Fprintln(w, "UNEXPLAINED (new-only) = the decider plans it, the golden does not list it.")
 	}
 	return clean
 }

@@ -1,0 +1,38 @@
+{
+  "scenario": "04-team-draft",
+  "frozen_from": {
+    "agent_support_commit": "a5ee265c4f0861d2f180e090e4e7bc419840a695",
+    "pg_desk": "/nix/store/34xjrfnx6ja1fwz3983iadga3b9xcb9c-pg-desk-0.0.0-ba7d1ff7"
+  },
+  "old_plan": [
+    {
+      "entity": "acme/api#104",
+      "kind": "anchor",
+      "op": "create"
+    },
+    {
+      "entity": "acme/api#104",
+      "kind": "process-feedback",
+      "op": "create"
+    }
+  ],
+  "explained": [
+    {
+      "id": "S16",
+      "entity": "acme/api#104",
+      "kind": "process-feedback",
+      "op": "create",
+      "side": "old-only",
+      "reason": "Team PRs get only an operator-pending review; process-feedback cycles are gated to mine/co-owned PRs (S16, spec 7.3 feedback.digest-changed). Today's needsCycle has no ownership gate."
+    },
+    {
+      "id": "S16",
+      "entity": "acme/api#104",
+      "kind": "anchor",
+      "op": "create",
+      "side": "old-only",
+      "reason": "The old anchor existed only to parent the feedback cycle (anchors are created lazily, D8); with no cycle for a team PR and no review request (draft) nothing needs it (S16)."
+    }
+  ],
+  "expected_plan": []
+}

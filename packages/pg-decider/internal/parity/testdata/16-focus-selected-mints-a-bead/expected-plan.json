@@ -1,0 +1,25 @@
+{
+  "scenario": "16-focus-selected-mints-a-bead",
+  "frozen_from": {
+    "agent_support_commit": "a5ee265c4f0861d2f180e090e4e7bc419840a695",
+    "pg_desk": "/nix/store/34xjrfnx6ja1fwz3983iadga3b9xcb9c-pg-desk-0.0.0-ba7d1ff7"
+  },
+  "old_plan": [],
+  "explained": [
+    {
+      "id": "D-F13",
+      "entity": "acme/api#116",
+      "kind": "focus-item",
+      "op": "create",
+      "side": "new-only",
+      "reason": "New rule focus.item (D-F13): a PR the daily focus selects, with no focus bead yet, gets one focus bead minted (one create); the old sync has no focus bead."
+    }
+  ],
+  "expected_plan": [
+    {
+      "entity": "acme/api#116",
+      "kind": "focus-item",
+      "op": "create"
+    }
+  ]
+}

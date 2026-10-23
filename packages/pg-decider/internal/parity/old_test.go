@@ -38,6 +38,9 @@ var oldWantKinds = map[string][]string{
 	"16-": nil,
 	"17-": nil,
 	"18-": nil,
+	// The legacy-seeded scenario: the old side builds its own rows with run pr,
+	// so it plans what scenario 01 does.
+	"19-": {"anchor", "feedback-cycle", "review-request"},
 }
 
 func wantFor[T any](t *testing.T, table map[string]T, name string) T {
