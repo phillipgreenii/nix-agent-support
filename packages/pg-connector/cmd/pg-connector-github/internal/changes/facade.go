@@ -114,13 +114,43 @@ type Membership struct {
 	Query, Node, Ref string
 	// Extra is appended to the row's fields.
 	Extra []classify.Field
+	// Watch and Via are the watch of an arrival into a watched query (see
+	// engine.Membership).
+	Watch WatchMode
+	Via   string
 }
+
+type (
+	// WatchMode says when a watch is applied relative to the entity's baseline.
+	WatchMode = engine.WatchMode
+	// WatchRequest asks for one entity to be watched.
+	WatchRequest = engine.WatchRequest
+	// WatchResult reports what a watch did.
+	WatchResult = engine.WatchResult
+)
+
+// The two watch modes of the shared engine.
+const (
+	WatchBaseline = engine.WatchBaseline
+	WatchLate     = engine.WatchLate
+)
 
 // AppendMembership records a membership change (see engine.Engine.AppendMembership).
 func (e *Engine) AppendMembership(ctx context.Context, tx *store.Tx, m Membership) error {
 	return e.Engine.AppendMembership(ctx, tx, engine.Membership{
 		Kind: m.Kind, Query: m.Query, ID: m.Node, Ref: m.Ref, Extra: m.Extra,
+		Watch: m.Watch, Via: m.Via,
 	})
+}
+
+// Watch sets the entity's watched flag inside tx (see engine.Engine.Watch).
+func (e *Engine) Watch(ctx context.Context, tx *store.Tx, w WatchRequest) (WatchResult, error) {
+	return e.Engine.Watch(ctx, tx, w)
+}
+
+// WatchOne is Watch in a transaction of its own (see engine.Engine.WatchOne).
+func (e *Engine) WatchOne(ctx context.Context, st *store.Store, w WatchRequest) (WatchResult, error) {
+	return e.Engine.WatchOne(ctx, st, w)
 }
 
 // Lifecycle is the settle lifecycle of an Engine (see engine.Lifecycle): it ends

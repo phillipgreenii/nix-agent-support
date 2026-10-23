@@ -480,6 +480,10 @@ func (f *failingChanges) AppendMembership(ctx context.Context, tx *store.Tx, m e
 	return f.inner.AppendMembership(ctx, tx, m)
 }
 
+func (f *failingChanges) Watch(ctx context.Context, tx *store.Tx, w engine.WatchRequest) (engine.WatchResult, error) {
+	return f.inner.Watch(ctx, tx, w)
+}
+
 func TestMembership_TheStoredRowAndTheAppendedRowsAreVisibleTogetherOrNotAtAll(t *testing.T) {
 	var fc *failingChanges
 	r := newRigWith(t, func(c *Config) {

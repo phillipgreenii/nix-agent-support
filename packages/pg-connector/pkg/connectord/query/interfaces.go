@@ -80,11 +80,12 @@ type Confirmation struct {
 }
 
 // Changes is the part of the change engine the runner uses to record a membership
-// change; *engine.Engine satisfies it. The call runs inside the transaction that
-// stores the run's result, so the row and the result are visible together or not
-// at all.
+// change and to mark the members of a watched query; *engine.Engine satisfies
+// it. Both calls run inside the transaction that stores the run's result, so the
+// row, the flags and the result are visible together or not at all.
 type Changes interface {
 	AppendMembership(ctx context.Context, tx *store.Tx, m engine.Membership) error
+	Watch(ctx context.Context, tx *store.Tx, w engine.WatchRequest) (engine.WatchResult, error)
 }
 
 var _ Changes = (*engine.Engine)(nil)

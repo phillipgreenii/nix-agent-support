@@ -48,6 +48,16 @@
 // recomputed by the next one, never dropped. An ad-hoc key has no baseline and no
 // rows.
 //
+// # Watched queries
+//
+// A run of a configured query the settings mark watched marks every member
+// watched inside that same transaction: an arrival through AppendMembership with
+// Watch set, every other member through Changes.Watch. The mode is
+// engine.WatchBaseline when the row had no baseline before the run and
+// engine.WatchLate otherwise; the runner never appends a row itself, the engine
+// does under its emission rule. Fetch with FetchOptions{Watch} does the same for
+// an ad-hoc run, always late, when the registration allows it (Config.AdHocWatch).
+//
 // # Failure
 //
 // A failed run keeps the previous ids and times and records last_error (a
@@ -66,6 +76,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/scheduler"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 const (
@@ -76,6 +87,25 @@ const (
 	// never collide with an entity's own id.
 	entityPrefix = "query:"
 )
+
+// taskMode distinguishes the scheduler entity of a run that marks its members
+// watched (the ad-hoc watch option) from the plain run of the same key, so the
+// watch run never joins a run in flight that would not mark them.
+type taskMode int
+
+// taskModeWatch is the mode of a run carrying the watch option.
+const taskModeWatch taskMode = 1
+
+// watchPayload is the payload of a task of taskModeWatch.
+type watchPayload struct{ Key Key }
+
+// FetchOptions are the options of one Fetch.
+type FetchOptions struct {
+	// Watch marks every member of this run watched (an ad-hoc query run with the
+	// watch option). It is refused (invalid_argument) unless Spec.AdHocQueryWatch
+	// is true.
+	Watch bool
+}
 
 // ErrPending is returned by Fetch when ctx ended while the run was still going:
 // the run is not cancelled, it completes in the background and is stored.
@@ -116,8 +146,12 @@ type Config struct {
 	Auth Auth
 	// Clock is the time source; nil means the system clock.
 	Clock governor.Clock
-	// Changes records membership changes; nil means none are recorded (the
-	// baseline still is) and Confirmer is never called.
+	// AdHocWatch is the registration's AdHocQueryWatch: whether Fetch accepts
+	// FetchOptions{Watch}.
+	AdHocWatch bool
+	// Changes records membership changes and marks the members of a watched
+	// query; nil means none are recorded or marked (the baseline still is) and
+	// Confirmer is never called.
 	Changes Changes
 	// Confirmer makes the read that confirms a departure; it is used only when
 	// Changes is set. With Changes set and Confirmer nil a departure cannot be
@@ -199,17 +233,39 @@ func (r *Runner) log(event string, kv ...any) {
 
 func entityOf(k Key) string { return entityPrefix + k.String() }
 
+// modeEntityOf is the scheduler entity of the task of key k in mode: the key's
+// own entity followed by the mode.
+func modeEntityOf(k Key, mode taskMode) string { return fmt.Sprintf("%s@%d", entityOf(k), int(mode)) }
+
 func taskOf(k Key, class governor.Class, due time.Time) scheduler.Task {
 	return scheduler.Task{Kind: Kind, Entity: entityOf(k), Group: Group, Class: class, Due: due, Payload: k}
+}
+
+// watchTaskOf is the interactive task of a run that marks its members watched:
+// its own entity, so it is never merged into or joined to the plain run of k.
+func watchTaskOf(k Key) scheduler.Task {
+	return scheduler.Task{
+		Kind: Kind, Entity: modeEntityOf(k, taskModeWatch), Group: Group,
+		Class: governor.ClassInteractive, Payload: watchPayload{Key: k},
+	}
 }
 
 // keyOf is the Key a query task runs: its payload, else the configured name its
 // entity carries.
 func keyOf(t scheduler.Task) Key {
-	if k, ok := t.Payload.(Key); ok {
-		return k
+	switch p := t.Payload.(type) {
+	case Key:
+		return p
+	case watchPayload:
+		return p.Key
 	}
 	return Key{Name: strings.TrimPrefix(t.Entity, entityPrefix)}
+}
+
+// watchOf reports whether the task is one that marks its members watched.
+func watchOf(t scheduler.Task) bool {
+	_, ok := t.Payload.(watchPayload)
+	return ok
 }
 
 // Schedule queues the first run of every configured query, due when its stored
@@ -271,11 +327,27 @@ func (r *Runner) Expire(ctx context.Context, expiry time.Duration) (int, error) 
 // when the run has finished (the stored row, or the run's error: a
 // *governor.Refusal when the budget declined it) or ctx is done (ErrPending; the
 // run is not cancelled and is stored when it completes).
-func (r *Runner) Fetch(ctx context.Context, key Key) (store.QueryRow, error) {
+//
+// FetchOptions{Watch} (the first of opts is used) marks every member of the run
+// watched, late; it is refused with scriptout.ErrInvalidArgument unless the
+// registration allows it (Config.AdHocWatch). A watch run is its own task: it
+// does not join a run of the same key already in flight without the option.
+func (r *Runner) Fetch(ctx context.Context, key Key, opts ...FetchOptions) (store.QueryRow, error) {
+	var opt FetchOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	if opt.Watch && !r.cfg.AdHocWatch {
+		return store.QueryRow{}, scriptout.WrapError(scriptout.ErrInvalidArgument, "the watch option is not allowed on a query run")
+	}
 	if _, ok := r.Expr(key.Name); !ok {
 		return store.QueryRow{}, fmt.Errorf("query: %q is not a configured query", key.Name)
 	}
-	f, err := r.cfg.Scheduler.SubmitInteractive(taskOf(key, governor.ClassInteractive, time.Time{}))
+	task := taskOf(key, governor.ClassInteractive, time.Time{})
+	if opt.Watch {
+		task = watchTaskOf(key)
+	}
+	f, err := r.cfg.Scheduler.SubmitInteractive(task)
 	if err != nil {
 		return store.QueryRow{}, err
 	}
@@ -319,6 +391,12 @@ func (r *Runner) QueueRun(key Key, class governor.Class) error {
 
 // run lists key's members from the origin and stores the result.
 func (r *Runner) run(ctx context.Context, key Key, class governor.Class) (store.QueryRow, error) {
+	return r.runWith(ctx, key, class, false)
+}
+
+// runWith is run with the watch option: option marks every member watched even
+// when the settings do not mark the query watched.
+func (r *Runner) runWith(ctx context.Context, key Key, class governor.Class, option bool) (store.QueryRow, error) {
 	expr, ok := r.Expr(key.Name)
 	if !ok {
 		return store.QueryRow{}, fmt.Errorf("query: %q is not a configured query", key.Name)
@@ -366,8 +444,9 @@ func (r *Runner) run(ctx context.Context, key Key, class governor.Class) (store.
 	if !key.Adhoc() {
 		row.BaselineAt = baselineFor(prev, l.Complete, now)
 	}
-	rows := r.membershipRows(key, plan.arrivals, left)
-	if len(rows) == 0 {
+	w := r.watchPlanFor(key, prev, option)
+	rows := r.membershipRows(key, plan.arrivals, left, w)
+	if len(rows) == 0 && !w.on() {
 		if err := r.cfg.Store.PutQuery(ctx, row); err != nil {
 			return store.QueryRow{}, err
 		}
@@ -381,6 +460,9 @@ func (r *Runner) run(ctx context.Context, key Key, class governor.Class) (store.
 			if err := r.cfg.Changes.AppendMembership(ctx, tx, m); err != nil {
 				return err
 			}
+		}
+		if w.on() {
+			return r.markOthers(ctx, tx, l.Members, rows, w)
 		}
 		return nil
 	})
@@ -457,7 +539,7 @@ func (r *Runner) execute(ctx context.Context, it scheduler.Item) scheduler.Resul
 	if class == governor.ClassFill {
 		class = governor.ClassKeepAlive
 	}
-	row, err := r.run(ctx, key, class)
+	row, err := r.runWith(ctx, key, class, watchOf(it.Task))
 	if err != nil {
 		r.recordError(ctx, key, err)
 		return scheduler.Result{Err: err}

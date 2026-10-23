@@ -15,6 +15,7 @@ import (
 // visible together or not at all.
 type Changes interface {
 	AppendMembership(ctx context.Context, tx *store.Tx, m changes.Membership) error
+	Watch(ctx context.Context, tx *store.Tx, w changes.WatchRequest) (changes.WatchResult, error)
 }
 
 var _ Changes = (*changes.Engine)(nil)
@@ -27,7 +28,12 @@ var _ shared.Changes = changesAdapter{}
 func (a changesAdapter) AppendMembership(ctx context.Context, tx *store.Tx, m engine.Membership) error {
 	return a.c.AppendMembership(ctx, tx, changes.Membership{
 		Kind: m.Kind, Query: m.Query, Node: m.ID, Ref: m.Ref, Extra: m.Extra,
+		Watch: m.Watch, Via: m.Via,
 	})
+}
+
+func (a changesAdapter) Watch(ctx context.Context, tx *store.Tx, w engine.WatchRequest) (engine.WatchResult, error) {
+	return a.c.Watch(ctx, tx, w)
 }
 
 // StateFieldPrefix starts the name of the extra field a left_query row carries:

@@ -19,8 +19,10 @@ func (s configSettings) Expr(name string) ([]string, bool) {
 	return def.Expr, ok
 }
 
-// Watched is false until the watch packet wires it.
-func (configSettings) Watched(string) bool { return false }
+// Watched reports the configured query's watched flag: a property of the
+// configuration, not of the store. A name the configuration does not define is
+// not watched.
+func (s configSettings) Watched(name string) bool { return s.cfg.PR.Queries[name].Watched }
 
 func (s configSettings) Names() []string {
 	names := make([]string, 0, len(s.cfg.PR.Queries))

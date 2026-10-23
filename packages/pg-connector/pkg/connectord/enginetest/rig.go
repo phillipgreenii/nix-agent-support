@@ -104,6 +104,7 @@ func NewRig(t *testing.T, opts ...RigOption) *Rig {
 		Spec: reg.Spec, StateFieldPrefix: "state_of:", Bucket: bucket,
 		Settings: r.Settings, Store: st, Aliases: r.Aliases, Tracker: r.Tracker, Lister: r.Lister,
 		Scheduler: r.Scheduler, Auth: r.Auth, Clock: clk, Changes: r.Engine, Confirmer: r.Confirmer,
+		AdHocWatch: reg.Spec.AdHocQueryWatch,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -284,6 +285,15 @@ func (r *Rig) RunQuery(name string) store.QueryRow {
 	row, err := r.Runner.Fetch(ctx, query.Key{Name: name})
 	r.must(err)
 	return row
+}
+
+// RunQueryWith is RunQuery with the options of the runner's Fetch; it returns
+// the stored row and the run's error.
+func (r *Rig) RunQueryWith(key query.Key, opts query.FetchOptions) (store.QueryRow, error) {
+	r.T.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return r.Runner.Fetch(ctx, key, opts)
 }
 
 // Rows returns every change row in the log in ascending Seq.

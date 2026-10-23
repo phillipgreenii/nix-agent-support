@@ -33,6 +33,7 @@
 package query
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -44,6 +45,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	shared "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/scheduler"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 )
 
@@ -121,8 +123,9 @@ func New(cfg Config) (*Runner, error) {
 		cfg.GH == nil, cfg.Governor == nil, cfg.Feed == nil, cfg.Scheduler == nil:
 		return nil, errors.New("query: runner needs settings, a store, identity, tracker, gh, governor, feed and scheduler")
 	}
+	spec := changes.Spec()
 	sc := shared.Config{
-		Spec:             changes.Spec(),
+		Spec:             spec,
 		StateFieldPrefix: StateFieldPrefix,
 		UnauthError:      UnauthenticatedError,
 		Bucket:           governor.BucketGraphQL,
@@ -132,6 +135,7 @@ func New(cfg Config) (*Runner, error) {
 		Tracker:          cfg.Tracker,
 		Lister:           &lister{gh: cfg.GH, governor: cfg.Governor, feed: cfg.Feed, auth: cfg.Auth},
 		Scheduler:        cfg.Scheduler,
+		AdHocWatch:       spec.AdHocQueryWatch,
 		Clock:            cfg.Clock,
 		Confirmer:        cfg.Confirm,
 		Log:              cfg.Log,
@@ -147,6 +151,20 @@ func New(cfg Config) (*Runner, error) {
 		return nil, err
 	}
 	return &Runner{Runner: r}, nil
+}
+
+// Fetch re-runs key now for a caller that is waiting (see the shared runner). It
+// keeps the two-argument shape the feed, the list operation and their fakes
+// declare; FetchWith is the form that takes the watch option.
+func (r *Runner) Fetch(ctx context.Context, key Key) (store.QueryRow, error) {
+	return r.Runner.Fetch(ctx, key)
+}
+
+// FetchWith is Fetch with the shared runner's options: FetchOptions{Watch} marks
+// every member of the run watched, and is refused (invalid_argument) when the
+// registration does not allow it.
+func (r *Runner) FetchWith(ctx context.Context, key Key, opts shared.FetchOptions) (store.QueryRow, error) {
+	return r.Runner.Fetch(ctx, key, opts)
 }
 
 // Expr returns the configured expressions of a query name, and false when the

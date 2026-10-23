@@ -74,26 +74,39 @@ func isString(raw json.RawMessage, want string) bool {
 
 // Deliver reports whether a log row reaches a consumer bound to (view, scope),
 // and the wire word. member says whether the row's entity is a member of scope
-// now (false when scope is empty).
+// now (false when scope is empty). Spec.Delivery selects the rule.
 //
-// The rows of a member are delivered. The rows of a non-member are delivered only
-// when a membership kind names the scope (an entered, a left or a removed row),
-// so a consumer sees a departure and the arrival that preceded a departure it has
-// not yet been told of. A view with AnyOf delivers a member's row only when its
-// kinds include one of them. Membership kinds that name ANOTHER scope are not
-// this cursor's added or removed.
+// DeliverByMembership (the legacy rule): the rows of a member are delivered. The
+// rows of a non-member are delivered only when a membership kind names the scope
+// (an entered, a left or a removed row), so a consumer sees a departure and the
+// arrival that preceded a departure it has not yet been told of. A view with
+// AnyOf delivers a member's row only when its kinds include one of them.
+// Membership kinds that name ANOTHER scope are not this cursor's added or
+// removed.
+//
+// DeliverByWatched: a row whose watched snapshot is not set is dropped. With a
+// scope, a row whose entity is not a member and whose kinds do not name the scope
+// through a membership kind is dropped. A view with AnyOf drops a row whose kinds
+// miss AnyOf unless it carries the Removed role or names the scope. Everything
+// else is delivered, member or not: an unscoped consumer receives the closed row
+// of an entity that already left its query, while a scoped consumer asked for a
+// membership filter and gets it.
 //
 // The word, with a scope: an entered kind that names the scope is added, a left
 // or removed kind that names it is removed, the added role counts as added for a
 // row whose entity is a member, anything else is changed. Without a scope no row
 // names one, so the word follows the kinds: entered or added is added, left or
 // removed is removed, anything else is changed.
-//
-// Only this legacy rule exists for every Spec.Delivery value.
 func Deliver(spec registry.Spec, view registry.View, row store.ChangeRow, scope string, member bool) (ok bool, word string) {
 	var n naming
 	if scope != "" {
 		n = namesScope(spec, row, scope)
+	}
+	if spec.Delivery == registry.DeliverByWatched {
+		if !deliverByWatched(spec, view, row, scope, n, member) {
+			return false, ""
+		}
+		return true, wireWord(spec, row, scope, n, member)
 	}
 	word = wireWord(spec, row, scope, n, member)
 	if n.any() {
@@ -106,6 +119,20 @@ func Deliver(spec registry.Spec, view registry.View, row store.ChangeRow, scope 
 		return false, ""
 	}
 	return true, word
+}
+
+// deliverByWatched is the selection rule of DeliverByWatched; n says which
+// membership kinds of the row name scope (none without a scope).
+func deliverByWatched(spec registry.Spec, view registry.View, row store.ChangeRow, scope string, n naming, member bool) bool {
+	switch {
+	case !row.Watched:
+		return false
+	case scope != "" && !member && !n.any():
+		return false
+	case len(view.AnyOf) > 0 && !hasAny(row, view.AnyOf) && !hasKind(row, spec.Roles.Removed) && !n.any():
+		return false
+	}
+	return true
 }
 
 func hasAny(row store.ChangeRow, kinds []string) bool {
