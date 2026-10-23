@@ -1,0 +1,25 @@
+[
+  {
+    "call": "changes_ack {\"consumer\":\"example-ci-consumer\",\"next_seq\":13,\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 7,
+      "result": {
+        "consumer": "example-ci-consumer",
+        "query": "mine",
+        "acked_seq": 13
+      }
+    }
+  },
+  {
+    "call": "changes_ack {\"consumer\":\"example-ci-consumer\",\"next_seq\":63,\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 7,
+      "error": {
+        "code": "invalid_argument",
+        "message": "scriptout: invalid argument: ack beyond the head of the change log: next_seq 63, head 13"
+      }
+    }
+  }
+]

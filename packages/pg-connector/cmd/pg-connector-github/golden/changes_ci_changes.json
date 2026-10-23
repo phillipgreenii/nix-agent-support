@@ -1,0 +1,433 @@
+[
+  {
+    "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 7,
+      "error": {
+        "code": "invalid_argument",
+        "message": "invalid_argument: cannot create the ci key (example-consumer, ci, mine) while the pr key (example-consumer, pr, mine) exists: one consumer acting on both feeds would act twice on one CI event"
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 7,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-ci-github-actions",
+            "status": "succeeded",
+            "version": 7,
+            "truncated": false,
+            "next_seq": 7
+          }
+        ],
+        "changes": [],
+        "sources_freshness": [
+          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
+          { "query": "team", "last_error": "example error" }
+        ]
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 7,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-ci-github-actions",
+            "status": "succeeded",
+            "version": 7,
+            "truncated": false,
+            "next_seq": 13
+          }
+        ],
+        "changes": [
+          {
+            "change": "changed",
+            "source": "pg-connector-ci-github-actions",
+            "entity": {
+              "pr_id": "example-org/example-repo#1",
+              "rollup": "failure",
+              "runs": [
+                {
+                  "id": "22",
+                  "name": "build",
+                  "status": "completed",
+                  "conclusion": "failure",
+                  "url": "https://example.invalid/runs/22",
+                  "provider": "github-actions",
+                  "head_sha": "example-head-9",
+                  "repo": "",
+                  "pr_id": "example-org/example-repo#1",
+                  "as_of": "2026-10-12T09:01:00Z",
+                  "stale": false
+                },
+                {
+                  "id": "21",
+                  "name": "build",
+                  "status": "completed",
+                  "conclusion": "success",
+                  "url": "https://example.invalid/runs/21",
+                  "provider": "github-actions",
+                  "head_sha": "example-head-8",
+                  "repo": "",
+                  "pr_id": "example-org/example-repo#1",
+                  "as_of": "2026-10-12T09:01:00Z",
+                  "stale": false
+                }
+              ],
+              "version": 12,
+              "head_sha": "example-ci-2"
+            },
+            "seq": 9,
+            "kinds": ["ci_changed"],
+            "fields": [
+              { "name": "checks", "before": "pending", "after": "failure" }
+            ]
+          },
+          {
+            "change": "added",
+            "source": "pg-connector-ci-github-actions",
+            "entity": {
+              "pr_id": "example-org/example-repo#2",
+              "rollup": "none",
+              "runs": [],
+              "version": 3,
+              "head_sha": "example-ci-b"
+            },
+            "seq": 10,
+            "kinds": ["entered_query"],
+            "fields": [
+              { "name": "query:mine", "before": null, "after": "mine" }
+            ]
+          },
+          {
+            "change": "removed",
+            "source": "pg-connector-ci-github-actions",
+            "entity": {
+              "pr_id": "example-org/example-repo#1",
+              "rollup": "failure",
+              "runs": [
+                {
+                  "id": "22",
+                  "name": "build",
+                  "status": "completed",
+                  "conclusion": "failure",
+                  "url": "https://example.invalid/runs/22",
+                  "provider": "github-actions",
+                  "head_sha": "example-head-9",
+                  "repo": "",
+                  "pr_id": "example-org/example-repo#1",
+                  "as_of": "2026-10-12T09:01:00Z",
+                  "stale": false
+                },
+                {
+                  "id": "21",
+                  "name": "build",
+                  "status": "completed",
+                  "conclusion": "success",
+                  "url": "https://example.invalid/runs/21",
+                  "provider": "github-actions",
+                  "head_sha": "example-head-8",
+                  "repo": "",
+                  "pr_id": "example-org/example-repo#1",
+                  "as_of": "2026-10-12T09:01:00Z",
+                  "stale": false
+                }
+              ],
+              "version": 13,
+              "head_sha": "example-ci-3"
+            },
+            "seq": 11,
+            "kinds": ["left_query"],
+            "fields": [
+              { "name": "query:mine", "before": "mine", "after": null }
+            ]
+          },
+          {
+            "change": "removed",
+            "source": "pg-connector-ci-github-actions",
+            "entity": {
+              "pr_id": "example-org/example-repo#3",
+              "rollup": "none",
+              "runs": [],
+              "version": 8,
+              "head_sha": "example-ci-4"
+            },
+            "seq": 12,
+            "kinds": ["removed"],
+            "fields": [
+              { "name": "query:mine", "before": "mine", "after": null }
+            ]
+          }
+        ],
+        "sources_freshness": [
+          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
+          { "query": "team", "last_error": "example error" }
+        ]
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 7,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-ci-github-actions",
+            "status": "succeeded",
+            "version": 7,
+            "truncated": false,
+            "next_seq": 13
+          }
+        ],
+        "changes": [
+          {
+            "change": "changed",
+            "source": "pg-connector-ci-github-actions",
+            "entity": {
+              "pr_id": "example-org/example-repo#1",
+              "rollup": "failure",
+              "runs": [
+                {
+                  "id": "22",
+                  "name": "build",
+                  "status": "completed",
+                  "conclusion": "failure",
+                  "url": "https://example.invalid/runs/22",
+                  "provider": "github-actions",
+                  "head_sha": "example-head-9",
+                  "repo": "",
+                  "pr_id": "example-org/example-repo#1",
+                  "as_of": "2026-10-12T09:01:00Z",
+                  "stale": false
+                },
+                {
+                  "id": "21",
+                  "name": "build",
+                  "status": "completed",
+                  "conclusion": "success",
+                  "url": "https://example.invalid/runs/21",
+                  "provider": "github-actions",
+                  "head_sha": "example-head-8",
+                  "repo": "",
+                  "pr_id": "example-org/example-repo#1",
+                  "as_of": "2026-10-12T09:01:00Z",
+                  "stale": false
+                }
+              ],
+              "version": 12,
+              "head_sha": "example-ci-2"
+            },
+            "seq": 9,
+            "kinds": ["ci_changed"],
+            "fields": [
+              { "name": "checks", "before": "pending", "after": "failure" }
+            ]
+          },
+          {
+            "change": "added",
+            "source": "pg-connector-ci-github-actions",
+            "entity": {
+              "pr_id": "example-org/example-repo#2",
+              "rollup": "none",
+              "runs": [],
+              "version": 3,
+              "head_sha": "example-ci-b"
+            },
+            "seq": 10,
+            "kinds": ["entered_query"],
+            "fields": [
+              { "name": "query:mine", "before": null, "after": "mine" }
+            ]
+          },
+          {
+            "change": "removed",
+            "source": "pg-connector-ci-github-actions",
+            "entity": {
+              "pr_id": "example-org/example-repo#1",
+              "rollup": "failure",
+              "runs": [
+                {
+                  "id": "22",
+                  "name": "build",
+                  "status": "completed",
+                  "conclusion": "failure",
+                  "url": "https://example.invalid/runs/22",
+                  "provider": "github-actions",
+                  "head_sha": "example-head-9",
+                  "repo": "",
+                  "pr_id": "example-org/example-repo#1",
+                  "as_of": "2026-10-12T09:01:00Z",
+                  "stale": false
+                },
+                {
+                  "id": "21",
+                  "name": "build",
+                  "status": "completed",
+                  "conclusion": "success",
+                  "url": "https://example.invalid/runs/21",
+                  "provider": "github-actions",
+                  "head_sha": "example-head-8",
+                  "repo": "",
+                  "pr_id": "example-org/example-repo#1",
+                  "as_of": "2026-10-12T09:01:00Z",
+                  "stale": false
+                }
+              ],
+              "version": 13,
+              "head_sha": "example-ci-3"
+            },
+            "seq": 11,
+            "kinds": ["left_query"],
+            "fields": [
+              { "name": "query:mine", "before": "mine", "after": null }
+            ]
+          },
+          {
+            "change": "removed",
+            "source": "pg-connector-ci-github-actions",
+            "entity": {
+              "pr_id": "example-org/example-repo#3",
+              "rollup": "none",
+              "runs": [],
+              "version": 8,
+              "head_sha": "example-ci-4"
+            },
+            "seq": 12,
+            "kinds": ["removed"],
+            "fields": [
+              { "name": "query:mine", "before": "mine", "after": null }
+            ]
+          }
+        ],
+        "sources_freshness": [
+          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
+          { "query": "team", "last_error": "example error" }
+        ]
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"team\",\"reset\":true}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 7,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-ci-github-actions",
+            "status": "succeeded",
+            "version": 13,
+            "truncated": false,
+            "next_seq": 13
+          }
+        ],
+        "changes": [
+          {
+            "change": "added",
+            "source": "pg-connector-ci-github-actions",
+            "entity": {
+              "pr_id": "example-org/example-repo#1",
+              "rollup": "failure",
+              "runs": [
+                {
+                  "id": "22",
+                  "name": "build",
+                  "status": "completed",
+                  "conclusion": "failure",
+                  "url": "https://example.invalid/runs/22",
+                  "provider": "github-actions",
+                  "head_sha": "example-head-9",
+                  "repo": "",
+                  "pr_id": "example-org/example-repo#1",
+                  "as_of": "2026-10-12T09:01:00Z",
+                  "stale": false
+                },
+                {
+                  "id": "21",
+                  "name": "build",
+                  "status": "completed",
+                  "conclusion": "success",
+                  "url": "https://example.invalid/runs/21",
+                  "provider": "github-actions",
+                  "head_sha": "example-head-8",
+                  "repo": "",
+                  "pr_id": "example-org/example-repo#1",
+                  "as_of": "2026-10-12T09:01:00Z",
+                  "stale": false
+                }
+              ],
+              "version": 9,
+              "head_sha": "example-head-9"
+            },
+            "seq": 0,
+            "kinds": [],
+            "fields": []
+          },
+          {
+            "change": "added",
+            "source": "pg-connector-ci-github-actions",
+            "entity": {
+              "pr_id": "example-org/example-repo#2",
+              "rollup": "none",
+              "runs": [],
+              "version": 0,
+              "head_sha": ""
+            },
+            "seq": 0,
+            "kinds": [],
+            "fields": []
+          }
+        ],
+        "sources_freshness": [
+          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
+          { "query": "team", "last_error": "example error" }
+        ]
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 7,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-ci-github-actions",
+            "status": "succeeded",
+            "version": 13,
+            "truncated": false,
+            "next_seq": 13
+          }
+        ],
+        "changes": [],
+        "sources_freshness": [
+          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
+          { "query": "team", "last_error": "example error" }
+        ]
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"example-unknown\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 7,
+      "error": {
+        "code": "query_not_recognized",
+        "message": "scriptout: query not recognized: \"example-unknown\" is not a configured query"
+      }
+    }
+  }
+]

@@ -1,0 +1,33 @@
+[
+  {
+    "call": "changes_ack {\"consumer\":\"example-consumer\",\"next_seq\":7,\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 13,
+      "result": {
+        "consumer": "example-consumer",
+        "query": "mine",
+        "acked_seq": 7
+      }
+    }
+  },
+  {
+    "call": "changes_ack {\"consumer\":\"example-fresh\",\"next_seq\":2,\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 13,
+      "result": { "consumer": "example-fresh", "query": "mine", "acked_seq": 2 }
+    }
+  },
+  {
+    "call": "changes_ack {\"consumer\":\"example-consumer\",\"next_seq\":57,\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 13,
+      "error": {
+        "code": "invalid_argument",
+        "message": "scriptout: invalid argument: ack beyond the head of the change log: next_seq 57, head 7"
+      }
+    }
+  }
+]

@@ -1,0 +1,623 @@
+[
+  {
+    "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 13,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-pr-github",
+            "status": "succeeded",
+            "version": 1,
+            "truncated": false,
+            "next_seq": 1
+          }
+        ],
+        "changes": [],
+        "sources_freshness": [
+          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
+          { "query": "team", "last_error": "example error" }
+        ]
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 13,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-pr-github",
+            "status": "succeeded",
+            "version": 1,
+            "truncated": false,
+            "next_seq": 7
+          }
+        ],
+        "changes": [
+          {
+            "change": "changed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#1",
+              "repo": "example-org/example-repo",
+              "number": 1,
+              "title": "Add the example widget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#1",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-4",
+              "version": 4,
+              "checks_rollup": "failure",
+              "node_id": "PR_example_1"
+            },
+            "seq": 2,
+            "kinds": ["feedback_changed"],
+            "fields": [
+              {
+                "name": "title",
+                "before": "Old title",
+                "after": "Add the example widget"
+              }
+            ]
+          },
+          {
+            "change": "changed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#1",
+              "repo": "example-org/example-repo",
+              "number": 1,
+              "title": "Add the example widget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#1",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-5",
+              "version": 5,
+              "checks_rollup": "failure",
+              "node_id": "PR_example_1"
+            },
+            "seq": 3,
+            "kinds": ["head_changed"],
+            "fields": []
+          },
+          {
+            "change": "added",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#2",
+              "repo": "",
+              "number": 0,
+              "title": "",
+              "state": "",
+              "branch": "",
+              "base": "",
+              "author": "",
+              "url": "",
+              "draft": false,
+              "merged": false,
+              "as_of": "",
+              "stale": false,
+              "head_sha": "example-head-b",
+              "version": 2
+            },
+            "seq": 4,
+            "kinds": ["entered_query"],
+            "fields": [
+              { "name": "query:mine", "before": null, "after": "mine" }
+            ]
+          },
+          {
+            "change": "removed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#1",
+              "repo": "example-org/example-repo",
+              "number": 1,
+              "title": "Add the example widget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#1",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-6",
+              "version": 6,
+              "checks_rollup": "failure",
+              "node_id": "PR_example_1"
+            },
+            "seq": 5,
+            "kinds": ["left_query"],
+            "fields": [
+              { "name": "query:mine", "before": "mine", "after": null }
+            ]
+          },
+          {
+            "change": "removed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#3",
+              "repo": "example-org/example-repo",
+              "number": 3,
+              "title": "Fix the example gadget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#3",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-7",
+              "version": 7,
+              "checks_rollup": "none",
+              "node_id": "PR_example_3"
+            },
+            "seq": 6,
+            "kinds": ["removed"],
+            "fields": [
+              { "name": "query:mine", "before": "mine", "after": null }
+            ]
+          }
+        ],
+        "sources_freshness": [
+          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
+          { "query": "team", "last_error": "example error" }
+        ]
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 13,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-pr-github",
+            "status": "succeeded",
+            "version": 1,
+            "truncated": false,
+            "next_seq": 7
+          }
+        ],
+        "changes": [
+          {
+            "change": "changed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#1",
+              "repo": "example-org/example-repo",
+              "number": 1,
+              "title": "Add the example widget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#1",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-4",
+              "version": 4,
+              "checks_rollup": "failure",
+              "node_id": "PR_example_1"
+            },
+            "seq": 2,
+            "kinds": ["feedback_changed"],
+            "fields": [
+              {
+                "name": "title",
+                "before": "Old title",
+                "after": "Add the example widget"
+              }
+            ]
+          },
+          {
+            "change": "changed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#1",
+              "repo": "example-org/example-repo",
+              "number": 1,
+              "title": "Add the example widget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#1",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-5",
+              "version": 5,
+              "checks_rollup": "failure",
+              "node_id": "PR_example_1"
+            },
+            "seq": 3,
+            "kinds": ["head_changed"],
+            "fields": []
+          },
+          {
+            "change": "added",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#2",
+              "repo": "",
+              "number": 0,
+              "title": "",
+              "state": "",
+              "branch": "",
+              "base": "",
+              "author": "",
+              "url": "",
+              "draft": false,
+              "merged": false,
+              "as_of": "",
+              "stale": false,
+              "head_sha": "example-head-b",
+              "version": 2
+            },
+            "seq": 4,
+            "kinds": ["entered_query"],
+            "fields": [
+              { "name": "query:mine", "before": null, "after": "mine" }
+            ]
+          },
+          {
+            "change": "removed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#1",
+              "repo": "example-org/example-repo",
+              "number": 1,
+              "title": "Add the example widget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#1",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-6",
+              "version": 6,
+              "checks_rollup": "failure",
+              "node_id": "PR_example_1"
+            },
+            "seq": 5,
+            "kinds": ["left_query"],
+            "fields": [
+              { "name": "query:mine", "before": "mine", "after": null }
+            ]
+          },
+          {
+            "change": "removed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#3",
+              "repo": "example-org/example-repo",
+              "number": 3,
+              "title": "Fix the example gadget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#3",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-7",
+              "version": 7,
+              "checks_rollup": "none",
+              "node_id": "PR_example_3"
+            },
+            "seq": 6,
+            "kinds": ["removed"],
+            "fields": [
+              { "name": "query:mine", "before": "mine", "after": null }
+            ]
+          }
+        ],
+        "sources_freshness": [
+          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
+          { "query": "team", "last_error": "example error" }
+        ]
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\",\"cached\":true}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 13,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-pr-github",
+            "status": "succeeded",
+            "version": 1,
+            "truncated": false,
+            "next_seq": 7
+          }
+        ],
+        "changes": [
+          {
+            "change": "changed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#1",
+              "repo": "example-org/example-repo",
+              "number": 1,
+              "title": "Add the example widget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#1",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-4",
+              "version": 4,
+              "checks_rollup": "failure",
+              "node_id": "PR_example_1"
+            },
+            "seq": 2,
+            "kinds": ["feedback_changed"],
+            "fields": [
+              {
+                "name": "title",
+                "before": "Old title",
+                "after": "Add the example widget"
+              }
+            ]
+          },
+          {
+            "change": "changed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#1",
+              "repo": "example-org/example-repo",
+              "number": 1,
+              "title": "Add the example widget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#1",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-5",
+              "version": 5,
+              "checks_rollup": "failure",
+              "node_id": "PR_example_1"
+            },
+            "seq": 3,
+            "kinds": ["head_changed"],
+            "fields": []
+          },
+          {
+            "change": "added",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#2",
+              "repo": "",
+              "number": 0,
+              "title": "",
+              "state": "",
+              "branch": "",
+              "base": "",
+              "author": "",
+              "url": "",
+              "draft": false,
+              "merged": false,
+              "as_of": "",
+              "stale": false,
+              "head_sha": "example-head-b",
+              "version": 2
+            },
+            "seq": 4,
+            "kinds": ["entered_query"],
+            "fields": [
+              { "name": "query:mine", "before": null, "after": "mine" }
+            ]
+          },
+          {
+            "change": "removed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#1",
+              "repo": "example-org/example-repo",
+              "number": 1,
+              "title": "Add the example widget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#1",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-6",
+              "version": 6,
+              "checks_rollup": "failure",
+              "node_id": "PR_example_1"
+            },
+            "seq": 5,
+            "kinds": ["left_query"],
+            "fields": [
+              { "name": "query:mine", "before": "mine", "after": null }
+            ]
+          },
+          {
+            "change": "removed",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#3",
+              "repo": "example-org/example-repo",
+              "number": 3,
+              "title": "Fix the example gadget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#3",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-7",
+              "version": 7,
+              "checks_rollup": "none",
+              "node_id": "PR_example_3"
+            },
+            "seq": 6,
+            "kinds": ["removed"],
+            "fields": [
+              { "name": "query:mine", "before": "mine", "after": null }
+            ]
+          }
+        ],
+        "sources_freshness": [
+          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
+          { "query": "team", "last_error": "example error" }
+        ]
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"team\",\"reset\":true}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 13,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-pr-github",
+            "status": "succeeded",
+            "version": 7,
+            "truncated": false,
+            "next_seq": 7
+          }
+        ],
+        "changes": [
+          {
+            "change": "added",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#1",
+              "repo": "example-org/example-repo",
+              "number": 1,
+              "title": "Add the example widget",
+              "state": "open",
+              "branch": "",
+              "base": "",
+              "author": "example-author",
+              "url": "https://example.invalid/example-org/example-repo#1",
+              "draft": false,
+              "merged": false,
+              "as_of": "2026-10-12T09:00:00Z",
+              "stale": false,
+              "head_sha": "example-head-9",
+              "version": 9,
+              "checks_rollup": "failure",
+              "node_id": "PR_example_1"
+            },
+            "seq": 0,
+            "kinds": [],
+            "fields": []
+          },
+          {
+            "change": "added",
+            "source": "pg-connector-pr-github",
+            "entity": {
+              "id": "example-org/example-repo#2",
+              "repo": "",
+              "number": 0,
+              "title": "",
+              "state": "",
+              "branch": "",
+              "base": "",
+              "author": "",
+              "url": "",
+              "draft": false,
+              "merged": false,
+              "as_of": "",
+              "stale": false
+            },
+            "seq": 0,
+            "kinds": [],
+            "fields": []
+          }
+        ],
+        "sources_freshness": [
+          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
+          { "query": "team", "last_error": "example error" }
+        ]
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"mine\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 13,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-pr-github",
+            "status": "succeeded",
+            "version": 7,
+            "truncated": false,
+            "next_seq": 7
+          }
+        ],
+        "changes": [],
+        "sources_freshness": [
+          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
+          { "query": "team", "last_error": "example error" }
+        ]
+      }
+    }
+  },
+  {
+    "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"example-unknown\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 13,
+      "error": {
+        "code": "query_not_recognized",
+        "message": "scriptout: query not recognized: \"example-unknown\" is not a configured query"
+      }
+    }
+  }
+]

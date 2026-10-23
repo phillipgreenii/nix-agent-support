@@ -10,6 +10,13 @@
 // this library MUST scope its daemon to one upstream rate-limit domain, not to
 // one connector type.
 //
+// The genericity guard keeps the library generic mechanically:
+// genericity_guard_test.go in this package scans every Go file under
+// pkg/connectord for the known words of one upstream, for string-literal
+// comparisons in the generic packages and for imports of a cmd or internal
+// tree, against the committed baseline testdata/genericity_allowlist.json. The
+// guard's header comment says how to regenerate the baseline counts.
+//
 // This package and its subpackages are part of the module's shared-surface
 // allowlist (cmd/pg-connector/layout_convention_test.go): any binary may
 // import them, so they MUST NOT import a binary's internal/ tree or package

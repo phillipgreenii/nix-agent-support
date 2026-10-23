@@ -1,0 +1,656 @@
+{
+  "version": 1,
+  "baseline": [
+    {
+      "file": "genericity_guard_test.go",
+      "token": "bd",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "bead",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "beads",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "ci",
+      "max": 5,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "draft",
+      "max": 1,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "epic",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "gh",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "github",
+      "max": 6,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "graphql",
+      "max": 5,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "issue",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "issues",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "jira",
+      "max": 4,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "jql",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "mergeable",
+      "max": 4,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "owner",
+      "max": 6,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "pjira",
+      "max": 6,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "pr",
+      "max": 7,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "prs",
+      "max": 7,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "pull request",
+      "max": 3,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "pull_request",
+      "max": 3,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "pullrequest",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "repo",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "repos",
+      "max": 1,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "review",
+      "max": 1,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "reviews",
+      "max": 1,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "rollup",
+      "max": 1,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "sha",
+      "max": 22,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "sprint",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "genericity_guard_test.go",
+      "token": "workflow",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "governor/governor.go",
+      "token": "gh",
+      "max": 3,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "governor/governor.go",
+      "token": "github",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "governor/governor.go",
+      "token": "graphql",
+      "max": 5,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "governor/governor_test.go",
+      "token": "graphql",
+      "max": 61,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "governor/persist_test.go",
+      "token": "graphql",
+      "max": 23,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "governor/types.go",
+      "token": "gh",
+      "max": 3,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "governor/types.go",
+      "token": "graphql",
+      "max": 12,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "proc/supervisor_linux.go",
+      "token": "github",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "proc/supervisor_linux_test.go",
+      "token": "github",
+      "max": 1,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "router/dispatch_test.go",
+      "token": "ci",
+      "max": 3,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "router/dispatch_test.go",
+      "token": "pr",
+      "max": 19,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "router/router.go",
+      "token": "ci",
+      "max": 2,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "router/router.go",
+      "token": "github",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "router/router.go",
+      "token": "pr",
+      "max": 2,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "router/router_test.go",
+      "token": "ci",
+      "max": 8,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "router/router_test.go",
+      "token": "gh",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "router/router_test.go",
+      "token": "pr",
+      "max": 39,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "scheduler/batcher_test.go",
+      "token": "graphql",
+      "max": 19,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "scheduler/batcher_test.go",
+      "token": "sprint",
+      "max": 11,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "scheduler/queue_test.go",
+      "token": "sprint",
+      "max": 6,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "scheduler/scheduler_test.go",
+      "token": "graphql",
+      "max": 7,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "scheduler/scheduler_test.go",
+      "token": "sprint",
+      "max": 4,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "socket/client.go",
+      "token": "github",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "socket/client_test.go",
+      "token": "ci",
+      "max": 3,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "socket/client_test.go",
+      "token": "pr",
+      "max": 10,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "socket/frame.go",
+      "token": "ci",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "socket/frame.go",
+      "token": "pr",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "socket/frame_test.go",
+      "token": "pr",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "socket/server_test.go",
+      "token": "ci",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "socket/server_test.go",
+      "token": "pr",
+      "max": 16,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/changes.go",
+      "token": "ci",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "store/changes.go",
+      "token": "github",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "store/changes.go",
+      "token": "pr",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "store/changes.go",
+      "token": "sha",
+      "max": 17,
+      "class": "opaque-column",
+      "why": "shipped column or Go field name (head_sha, base_sha, last_known_mergeable); permanent until a later rename rung"
+    },
+    {
+      "file": "store/changes_test.go",
+      "token": "ci",
+      "max": 5,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/changes_test.go",
+      "token": "pr",
+      "max": 45,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/changes_test.go",
+      "token": "repo",
+      "max": 19,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/changes_test.go",
+      "token": "sha",
+      "max": 8,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/groupcas.go",
+      "token": "pr",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "store/groupcas_test.go",
+      "token": "pr",
+      "max": 25,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/jobs.go",
+      "token": "ci",
+      "max": 5,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "store/jobs_test.go",
+      "token": "repo",
+      "max": 1,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/schema.go",
+      "token": "ci",
+      "max": 3,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "store/schema.go",
+      "token": "mergeable",
+      "max": 1,
+      "class": "opaque-column",
+      "why": "shipped column or Go field name (head_sha, base_sha, last_known_mergeable); permanent until a later rename rung"
+    },
+    {
+      "file": "store/schema.go",
+      "token": "pr",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "store/schema.go",
+      "token": "sha",
+      "max": 3,
+      "class": "opaque-column",
+      "why": "shipped column or Go field name (head_sha, base_sha, last_known_mergeable); permanent until a later rename rung"
+    },
+    {
+      "file": "store/store_test.go",
+      "token": "mergeable",
+      "max": 1,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/store_test.go",
+      "token": "repo",
+      "max": 6,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/store_test.go",
+      "token": "sha",
+      "max": 3,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/store_test.go",
+      "token": "sprint",
+      "max": 2,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/tables.go",
+      "token": "github",
+      "max": 1,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "store/tables.go",
+      "token": "mergeable",
+      "max": 9,
+      "class": "opaque-column",
+      "why": "shipped column or Go field name (head_sha, base_sha, last_known_mergeable); permanent until a later rename rung"
+    },
+    {
+      "file": "store/tables.go",
+      "token": "owner",
+      "max": 3,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "store/tables.go",
+      "token": "repo",
+      "max": 2,
+      "class": "legacy",
+      "why": "pre-existing code that the hoist does not neutralise"
+    },
+    {
+      "file": "store/tables_test.go",
+      "token": "ci",
+      "max": 4,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/tables_test.go",
+      "token": "graphql",
+      "max": 8,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/tables_test.go",
+      "token": "mergeable",
+      "max": 9,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/tables_test.go",
+      "token": "pr",
+      "max": 45,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/tables_test.go",
+      "token": "prs",
+      "max": 5,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/tables_test.go",
+      "token": "repo",
+      "max": 30,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/tables_test.go",
+      "token": "sha",
+      "max": 16,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/tx_test.go",
+      "token": "mergeable",
+      "max": 6,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/tx_test.go",
+      "token": "pr",
+      "max": 71,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    },
+    {
+      "file": "store/tx_test.go",
+      "token": "repo",
+      "max": 3,
+      "class": "legacy",
+      "why": "fixture or word list of an existing test file"
+    }
+  ]
+}
