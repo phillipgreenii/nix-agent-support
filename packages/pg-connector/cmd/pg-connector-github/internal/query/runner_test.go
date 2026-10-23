@@ -191,9 +191,9 @@ func newRigWith(t *testing.T, opts ...func(*Config)) *rig {
 	t.Cleanup(func() { _ = st.Close() })
 	clk := governor.NewManualClock(t0)
 	cfg := config.Defaults()
-	cfg.PR.Queries = map[string]schema.QueryExpr{
-		"mine": {"author:phillipgreenii is:open"},
-		"team": {"org:acme-org is:open", "org:acme-org is:draft"},
+	cfg.PR.Queries = map[string]schema.QueryDef{
+		"mine": {Expr: schema.QueryExpr{"author:phillipgreenii is:open"}},
+		"team": {Expr: schema.QueryExpr{"org:acme-org is:open", "org:acme-org is:draft"}},
 	}
 	gov, err := governor.New(ratefeed.GovernorConfig(cfg.Settings), governor.Options{Clock: clk})
 	if err != nil {

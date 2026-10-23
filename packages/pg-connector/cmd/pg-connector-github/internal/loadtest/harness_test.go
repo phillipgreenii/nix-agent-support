@@ -519,10 +519,10 @@ func newHarness(t *testing.T, o scenarioOpts) *harness {
 	// the GraphQL cap, the reserve, the background share and the REST search cap
 	// are the defaults.
 	h.cfg.RESTRequestsPerHour = 1500
-	h.cfg.PR.Queries = map[string]schema.QueryExpr{}
+	h.cfg.PR.Queries = map[string]schema.QueryDef{}
 	for n := 0; n < 11; n++ {
 		h.queryNames = append(h.queryNames, queryName(n))
-		h.cfg.PR.Queries[queryName(n)] = schema.QueryExpr{"loadtest:" + queryName(n)}
+		h.cfg.PR.Queries[queryName(n)] = schema.QueryDef{Expr: schema.QueryExpr{"loadtest:" + queryName(n)}}
 		if n >= 2 {
 			// mine and team keep their defaults (60 s and 120 s); the other nine
 			// are re-run every five minutes, so that the queries are not most of

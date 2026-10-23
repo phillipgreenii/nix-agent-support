@@ -15,8 +15,8 @@ type configSettings struct{ cfg *config.Config }
 var _ shared.Settings = configSettings{}
 
 func (s configSettings) Expr(name string) ([]string, bool) {
-	e, ok := s.cfg.PR.Queries[name]
-	return e, ok
+	def, ok := s.cfg.PR.Queries[name]
+	return def.Expr, ok
 }
 
 // Watched is false until the watch packet wires it.

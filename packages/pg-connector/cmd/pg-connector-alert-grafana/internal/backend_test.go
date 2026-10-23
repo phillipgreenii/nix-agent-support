@@ -444,3 +444,17 @@ func TestToAttentionItem_AcknowledgedLowering(t *testing.T) {
 		})
 	}
 }
+
+func TestListAttention_ObjectFormWatchedQueryIsParsedAndIgnored(t *testing.T) {
+	st := &stubTransport{}
+	cfg := baseCfg()
+	cfg["attention_query"] = "attention"
+	cfg["queries"] = map[string]any{"attention": map[string]any{"expr": []string{`{severity="critical"}`}, "watched": true}}
+	if _, err := New(st).ListAttention(cfgCtx(t, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{`severity="critical"`}}
+	if !reflect.DeepEqual(st.calls, want) {
+		t.Fatalf("calls = %#v, want %#v", st.calls, want)
+	}
+}

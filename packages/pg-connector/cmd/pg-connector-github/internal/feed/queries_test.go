@@ -130,7 +130,7 @@ func TestNewQueriesOverTheRealRunner(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
 	cfg := config.Defaults()
-	cfg.PR.Queries = map[string]schema.QueryExpr{"mine": {"author:phillipgreenii is:open"}}
+	cfg.PR.Queries = map[string]schema.QueryDef{"mine": {Expr: schema.QueryExpr{"author:phillipgreenii is:open"}}}
 	gov, err := governor.New(ratefeed.GovernorConfig(cfg.Settings), governor.Options{Clock: r.clk})
 	if err != nil {
 		t.Fatal(err)

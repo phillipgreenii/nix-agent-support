@@ -155,7 +155,7 @@ type PRSection struct {
 	// expression (a string or a list of strings, schema.QueryExpr). The ci
 	// instance resolves a query name against these too, because CI runs have
 	// no queries of their own.
-	Queries map[string]schema.QueryExpr `json:"queries,omitempty"`
+	Queries map[string]schema.QueryDef `json:"queries,omitempty"`
 
 	// PostedStateDir is the posted-review sidecar's STATE HOME, the parent of
 	// its posted/ and locks/ directories. It is optional and, when set, an

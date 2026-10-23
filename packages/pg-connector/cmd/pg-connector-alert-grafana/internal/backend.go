@@ -77,9 +77,9 @@ var (
 // backendConfig is the per-backend config block decoded from
 // scriptout.ConfigFromContext on every call.
 type backendConfig struct {
-	BaseURL        string                      `json:"base_url"`
-	AttentionQuery string                      `json:"attention_query"`
-	Queries        map[string]schema.QueryExpr `json:"queries"`
+	BaseURL        string                     `json:"base_url"`
+	AttentionQuery string                     `json:"attention_query"`
+	Queries        map[string]schema.QueryDef `json:"queries"`
 }
 
 func decodeConfig(ctx context.Context) (backendConfig, error) {
@@ -213,7 +213,7 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 			return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
 				fmt.Sprintf("alert-grafana: attention_query %q is not defined in config.queries", cfg.AttentionQuery))
 		}
-		query = expr
+		query = expr.Expr
 	}
 	alerts, err := b.firingSet(ctx, cfg, query)
 	if err != nil {

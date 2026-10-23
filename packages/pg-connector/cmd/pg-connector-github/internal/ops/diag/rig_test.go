@@ -62,7 +62,7 @@ func newEnv(t *testing.T) *env {
 	}
 	e.queries = &fakeQueries{st: rig.Store}
 	e.cfg = config.Defaults()
-	e.cfg.PR.Queries = map[string]schema.QueryExpr{"mine": {"is:open author:@me"}}
+	e.cfg.PR.Queries = map[string]schema.QueryDef{"mine": {Expr: schema.QueryExpr{"is:open author:@me"}}}
 	deps := Deps{
 		Engine: rig.Svc, Summaries: rig.Summary, Queries: e.queries, Config: e.cfg,
 		Store: rig.Store, Aliases: rig.Aliases,

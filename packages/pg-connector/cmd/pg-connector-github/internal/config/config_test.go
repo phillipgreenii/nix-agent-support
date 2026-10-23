@@ -126,7 +126,7 @@ func TestGoldenExampleLoadsAtDefaults(t *testing.T) {
 	if string(a) != string(b) {
 		t.Fatalf("golden settings differ from defaults:\n%s\n%s", a, b)
 	}
-	if len(cfg.PR.Queries["team"]) != 2 || cfg.PR.Queries["mine"][0] != "is:pr is:open author:@me" {
+	if len(cfg.PR.Queries["team"].Expr) != 2 || cfg.PR.Queries["mine"].Expr[0] != "is:pr is:open author:@me" {
 		t.Errorf("queries = %#v", cfg.PR.Queries)
 	}
 	if cfg.HashStamped() || cfg.Hash == "" {
