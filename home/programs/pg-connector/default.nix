@@ -22,6 +22,30 @@ let
   isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
   wantsLaunchd = gh.enable && gh.supervisor == "launchd";
 
+  # The Tier-2 backends the umbrella execs by BARE name (see the comment at
+  # home.packages below), plus the GitHub daemon when it is enabled: the ONE list
+  # both home.packages and `lib.backendBinDirs` read, so the PATH entries a
+  # pg-wrap spec needs cannot drift from what the module installs. A package
+  # added to home.packages directly, bypassing this list, is caught by
+  # checks.test-pg-connector-home-rendering (backendBinDirsCases).
+  backendPackages = [
+    pkgs.pg-connector-pr-github
+    pkgs.pg-connector-ci-github-actions
+    pkgs.pg-connector-issue-beads
+    pkgs.pg-connector-issue-jira
+    pkgs.pg-connector-scm-git
+    pkgs.pg-connector-activity-git
+    pkgs.pg-connector-thread-slack
+    pkgs.pg-connector-calendar-osx-bridge
+    pkgs.pg-connector-calendar-task-focus
+    pkgs.pg-connector-agentsession-pa-monitor
+    pkgs.pg-connector-alert-grafana
+    pkgs.pg-connector-mail-osx-bridge
+  ]
+  ++ lib.optional gh.enable gh.package;
+
+  binDirOf = p: "${lib.getBin p}/bin";
+
   # ---- pg-connector-github (docket pg2-z5fax, Phase 2) ----------------------
   # The two OLD GitHub instance names. Option A of the design's Registration
   # rule keeps them: every `--backend` pin, `sources[]` row, ledger key and
@@ -758,6 +782,26 @@ in
       };
     };
 
+    # Read-only helper for pg-wrap spec authors (bead pg2-p8xtx): set
+    # unconditionally, like pg-router-ccpool-handler's `lib.renderWrapSpec`, so a
+    # consumer can read it without enabling the module's own machinery.
+    lib.backendBinDirs = lib.mkOption {
+      type = lib.types.raw;
+      readOnly = true;
+      description = ''
+        Read-only function `{ includeSelf ? false } -> [ "<store>/bin" ... ]`: the
+        `bin` directory of every backend this module installs (the Tier-2
+        `pg-connector-*` backends, and `pg-connector-github` when `github.enable`
+        is set), in a stable order, as a list of PATH entries for the `keep`/`wrap`
+        PATH of a pg-wrap spec. pg-connector execs its backends by bare name, so a
+        spec that runs it under a strict base environment needs these on PATH.
+        With `includeSelf = true` the umbrella's own `package` bin directory comes
+        first. The list is derived from the same list `home.packages` installs, so
+        it follows the module; a check fails when they diverge. Example:
+        `PATH = lib.concatStringsSep ":" (cfg.lib.backendBinDirs { includeSelf = true; } ++ [ "/usr/bin" "/bin" ])`.
+      '';
+    };
+
     renderedConfig = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
       readOnly = true;
@@ -783,6 +827,11 @@ in
     {
       phillipgreenii.programs.pg-connector = {
         inherit renderedConfig;
+        lib.backendBinDirs =
+          {
+            includeSelf ? false,
+          }:
+          lib.optional includeSelf (binDirOf cfg.package) ++ map binDirOf backendPackages;
         github = {
           configFile = githubConfigFile;
           configHash = githubConfigHash;
@@ -824,22 +873,9 @@ in
       # pg-connector-calendar-task-focus joins (bead pg2-t7me1.4): also
       # always-installed, independent of whether connector.calendar or
       # attention.sources name it -- it answers the attention capability too.
-      home.packages = [
-        cfg.package
-        pkgs.pg-connector-pr-github
-        pkgs.pg-connector-ci-github-actions
-        pkgs.pg-connector-issue-beads
-        pkgs.pg-connector-issue-jira
-        pkgs.pg-connector-scm-git
-        pkgs.pg-connector-activity-git
-        pkgs.pg-connector-thread-slack
-        pkgs.pg-connector-calendar-osx-bridge
-        pkgs.pg-connector-calendar-task-focus
-        pkgs.pg-connector-agentsession-pa-monitor
-        pkgs.pg-connector-alert-grafana
-        pkgs.pg-connector-mail-osx-bridge
-      ]
-      ++ lib.optional gh.enable gh.package;
+      # The backends live in `backendPackages` (top of this file), which
+      # `lib.backendBinDirs` also reads; add a new backend THERE, not here.
+      home.packages = [ cfg.package ] ++ backendPackages;
 
       # With github.enable but no supervisor and no allowUnsupervised the binary
       # and config are installed but the registry is left alone; say why, so a

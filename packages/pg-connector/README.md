@@ -454,6 +454,29 @@ The runbook `docs/go-daemon-profiling-runbook.md` in `phillipg-nix-repo-base` is
 home of how to capture and read a profile. The listener accepts only an absolute socket path or a
 loopback `host:port`; any other value is refused with a line on stderr and the daemon keeps running.
 
+## Backend PATH for pg-wrap specs (HM module)
+
+The umbrella execs every Tier-2 backend by BARE name, so whoever runs `pg-connector` under a strict
+base environment (`PATH=/usr/bin:/bin:/usr/sbin:/sbin`, as a pg-wrap spec gives) must put the backend
+bin directories on `PATH` itself. The home-manager module exposes them as a read-only function,
+`phillipgreenii.programs.pg-connector.lib.backendBinDirs`:
+
+```nix
+# { includeSelf ? false } -> [ "<store>/bin" ... ]
+let
+  connector = config.phillipgreenii.programs.pg-connector;
+in
+lib.concatStringsSep ":" (connector.lib.backendBinDirs { includeSelf = true; } ++ [ "/usr/bin" "/bin" ])
+```
+
+It lists the `bin` directory of every backend the module installs (the `pg-connector-*` Tier-2
+backends, plus `pg-connector-github` when `github.enable` is set); `includeSelf = true` puts the
+umbrella's own `package` first. The helper reads the same `backendPackages` list that feeds
+`home.packages`, so a new backend added to that list reaches every spec with no edit. The helper names
+no consumer tool (`bd`, `pjira`, `claude` stay with the consumer). `test-pg-connector-home-rendering`
+(`tests/pg-connector-home-render.nix`, `backendBinDirsCases`) fails when a package reaches
+`home.packages` without being in the helper.
+
 ## Versioning
 
 Per-source content digest (this repo's own "Versioning of Custom Packages" convention):

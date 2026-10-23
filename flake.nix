@@ -13945,6 +13945,14 @@
                       echo "pg-connector-github render cases failed: ${lib.concatStringsSep ", " rendered.githubFailures}" >&2
                       exit 1
                     ''}
+                    # lib.backendBinDirs (bead pg2-p8xtx): the helper equals the
+                    # installed backend set, and a package added to home.packages
+                    # but missing from the helper is detected; a failure names
+                    # every failing case
+                    ${lib.optionalString (rendered.backendBinDirsFailures != [ ]) ''
+                      echo "pg-connector lib.backendBinDirs cases failed: ${lib.concatStringsSep ", " rendered.backendBinDirsFailures}" >&2
+                      exit 1
+                    ''}
                     # the rendered daemon config: absolute state paths, the host,
                     # the gh path, the label, the cap, the OTel endpoint read from
                     # the system scope, the queries from the backends block, and

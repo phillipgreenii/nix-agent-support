@@ -418,6 +418,42 @@ let
       (ghOpts ghEnabled).configFile == (ghOpts ghUnsupervisedAllowed).configFile;
   };
 
+  # lib.backendBinDirs (bead pg2-p8xtx): the helper a pg-wrap spec author calls
+  # to get the backend PATH entries. It MUST equal the backend set the module
+  # installs, so a package added to home.packages but missing from the helper
+  # fails here (the `bypassing` scenario below is that mutation, kept as a
+  # permanent negative control so the check cannot go vacuous).
+  binDirOf = p: "${lib.getBin p}/bin";
+  helperOf = e: e.config.phillipgreenii.programs.pg-connector.lib.backendBinDirs;
+  umbrellaOf = e: e.config.phillipgreenii.programs.pg-connector.package;
+  # Every installed package except the umbrella itself, as PATH entries.
+  installedBackendDirs =
+    e: map binDirOf (builtins.filter (p: toString p != toString (umbrellaOf e)) e.config.home.packages);
+  helperMatchesInstalled =
+    e: lib.sort lib.lessThan (helperOf e { }) == lib.sort lib.lessThan (installedBackendDirs e);
+  plain = evaluate { } null;
+  # A package installed WITHOUT going through the module's backend list.
+  bypassing = plain.extendModules { modules = [ { home.packages = [ pkgs.hello ]; } ]; };
+  # Neither the helper nor the module may name a ZR tool (they stay in
+  # nix-ziprecruiter); every entry is a pg-connector package.
+  zrFree = lib.all (d: lib.hasInfix "-pg-connector" d) (helperOf plain { includeSelf = true; });
+  backendBinDirsCases = {
+    matchesInstalledByDefault = helperMatchesInstalled plain;
+    matchesInstalledWithGithubDaemon = helperMatchesInstalled ghEnabled;
+    daemonListedOnlyWhenEnabled =
+      builtins.elem (binDirOf (ghOpts ghEnabled).package) (helperOf ghEnabled { })
+      && !(builtins.elem (binDirOf pkgs.pg-connector-github) (helperOf plain { }));
+    includeSelfPrependsUmbrella =
+      helperOf plain { includeSelf = true; } == [ (binDirOf (umbrellaOf plain)) ] ++ helperOf plain { }
+      && !(builtins.elem (binDirOf (umbrellaOf plain)) (helperOf plain { }));
+    noDuplicates = lib.length (helperOf plain { }) == lib.length (lib.unique (helperOf plain { }));
+    namesNoZrTool = zrFree;
+    # The mutation: a backend added to home.packages but absent from the helper
+    # MUST be detected, so the comparison above is not vacuously true.
+    bypassingIsDetected = !(helperMatchesInstalled bypassing);
+  };
+  backendBinDirsFailures = builtins.attrNames (lib.filterAttrs (_: ok: !ok) backendBinDirsCases);
+
   # A malformed instance (missing command, or an empty one) must FAIL
   # evaluation, never render a half-entry the registry would reject later.
   renders = cfg: (builtins.tryEval (builtins.deepSeq (render cfg).drvPath true)).success;
@@ -438,6 +474,7 @@ in
   # The pg-connector-github cases: name -> bool, and the failing names.
   inherit githubCases;
   githubFailures = builtins.attrNames (lib.filterAttrs (_: ok: !ok) githubCases);
+  inherit backendBinDirsFailures;
   # Rendered daemon configs (store paths) and the values the shell side of the
   # check compares them against.
   github = {
