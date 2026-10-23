@@ -131,6 +131,11 @@ type Config struct {
 	// phase's own code).
 	Sync SyncConfig `yaml:"sync,omitempty" json:"sync,omitempty"`
 
+	// PRLane holds the PR lane's keys. Mode is the one source of the lane
+	// mode that pg-desk can read (the router's per-role JSON is not readable
+	// by pg-desk); read it through PRLaneMode().
+	PRLane PRLaneConfig `yaml:"pr_lane,omitempty" json:"pr_lane,omitempty"`
+
 	HeartbeatPeriod string `yaml:"heartbeat_period,omitempty" json:"heartbeat_period,omitempty"`
 	StaleAfter      string `yaml:"stale_after,omitempty" json:"stale_after,omitempty"`
 
@@ -823,6 +828,37 @@ type SyncConfig struct {
 	// time.ParseDuration string; default DefaultReviewSettleWindow, "0"
 	// disables the window). See ReviewSettleWindowResolve.
 	ReviewSettleWindow string `yaml:"review_settle_window,omitempty" json:"review_settle_window,omitempty"`
+}
+
+// PR lane modes (config.yaml's pr_lane.mode).
+const (
+	PRLaneModeOff   = "off"
+	PRLaneModePlan  = "plan"
+	PRLaneModeApply = "apply"
+)
+
+// PRLaneConfig is config.yaml's pr_lane block.
+type PRLaneConfig struct {
+	// Mode is one of "off", "plan" or "apply": the mode the deployment gave
+	// the PR lane's roles, rendered beside the role's own mode so pg-desk can
+	// report it (status, doctor, the pg_desk_pr_lane_mode gauge). A missing
+	// or unrecognised value reads as "off": see Config.PRLaneMode.
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+}
+
+// PRLaneMode returns the configured pr_lane.mode: "off", "plan" or "apply".
+// A missing block, an empty value and any value that is not one of the three
+// read as "off", so a typo can never report the lane as running.
+func (c *Config) PRLaneMode() string {
+	if c == nil {
+		return PRLaneModeOff
+	}
+	switch c.PRLane.Mode {
+	case PRLaneModePlan, PRLaneModeApply:
+		return c.PRLane.Mode
+	default:
+		return PRLaneModeOff
+	}
 }
 
 // DefaultReviewSettleWindow is the default sync.review_settle_window (bead

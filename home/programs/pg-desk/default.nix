@@ -162,6 +162,14 @@ let
       review_settle_window = cfg.sync.reviewSettleWindow;
     };
   }
+  // {
+    # pr_lane.mode (PR lane refactor, P0b): like sync.mode a mandatory enum with
+    # its own default ("off", which is also what pg-desk reads for an absent or
+    # invalid value), so it is rendered unconditionally.
+    pr_lane = {
+      inherit (cfg.prLane) mode;
+    };
+  }
   // lib.optionalAttrs (cfg.heartbeatPeriod != null) { heartbeat_period = cfg.heartbeatPeriod; }
   // lib.optionalAttrs (cfg.staleAfter != null) { stale_after = cfg.staleAfter; }
   // lib.optionalAttrs (renderedServe != { }) { serve = renderedServe; }
@@ -418,6 +426,27 @@ in
       type = lib.types.nullOr lib.types.str;
       default = null;
       description = "config.yaml's actor — the identity pg-desk attributes its own writes to.";
+    };
+
+    # pr_lane.mode (PR lane refactor, P0b): the lane mode the deployment gave the
+    # PR lane's roles. It is the one source of the lane mode that pg-desk can
+    # read (the router's per-role JSON is not readable by pg-desk): pg-desk
+    # exports it as the pg_desk_pr_lane_mode gauge and prints it in the pr lane
+    # line of status and doctor. The deployment sets it beside the role's own
+    # mode; nothing here changes what any role does.
+    prLane.mode = lib.mkOption {
+      type = lib.types.enum [
+        "off"
+        "plan"
+        "apply"
+      ];
+      default = "off";
+      description = ''
+        config.yaml's pr_lane.mode: the PR lane's mode (`off`, `plan` or
+        `apply`), rendered as pr_lane.mode. It only REPORTS the mode (status,
+        doctor and the pg_desk_pr_lane_mode gauge); it does not switch the
+        lane. A missing or invalid value reads as `off` in pg-desk itself.
+      '';
     };
 
     sync = {

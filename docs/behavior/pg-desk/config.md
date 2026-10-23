@@ -45,6 +45,18 @@ field is not read.
 computable for issues; it is specified in [`changes.md`](changes.md), "Issue-dependency
 hydration". A non-boolean value is a load error naming the key.
 
+## The PR lane mode: `pr_lane.mode`
+
+| Key            | Home-module option | Type                     | Default | Meaning                                                                                                                                                                                                                                               |
+| -------------- | ------------------ | ------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pr_lane.mode` | `prLane.mode`      | `off`, `plan` or `apply` | `off`   | The mode the deployment gave the PR lane's roles, rendered beside the role's own mode. It only REPORTS the mode (the `pr lane` line of `status` and `doctor`, and the `pg_desk_pr_lane_mode` gauge, see [`serve.md`](serve.md)); it switches nothing. |
+
+`pr_lane.mode` is the one source of the lane mode that `pg-desk` can read: the router's per-role JSON
+is not readable by `pg-desk`, which is why the key exists. A missing key, an empty value and any value
+other than the three MUST read as `off`, never fail the load, so a typo can never report the lane as
+running. The home module always renders the key (its option has the default `off`), unlike the focus
+keys above, which it omits when null.
+
 ## Issue change-flow keys: watched queries and the orphan cap
 
 The `issue` change flow is watched-only (see [`changes.md`](changes.md)): an issue produces change
@@ -105,6 +117,10 @@ that wants it MUST declare that query watched.
 - **INV-CONFIG-9.** <!-- uuid: 193683c6-4588-4dac-9c6d-676cad254617 --> At most `hydration.orphan_max_per_poll` orphans MUST be read per poll, read first out of the
   `hydration.max_per_poll` budget; its default is a recommendation, and a non-positive value MUST fail the
   load with an error naming the key.
+
+- **INV-CONFIG-10.** <!-- uuid: 804188fa-33bf-4700-adcf-fea704aa9448 --> `pr_lane.mode` MUST read as `off` when the key is missing, empty or not one of `off`, `plan` and `apply`,
+  MUST NOT fail the load, and the home module MUST render it unconditionally from an enum option that
+  defaults to `off`.
 
 ## Telemetry and logs
 

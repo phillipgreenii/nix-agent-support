@@ -768,3 +768,71 @@ groups:
                 - evaluator:
                     type: gt
                     params: [500]
+
+      # PR never hydrated (PR lane refactor, P0b tripwire; P8a-1 finalizes its
+      # threshold and adds the promtool harness). pg_desk_pr_unhydrated is the
+      # number of PRs the store lists as open that no hydration has ever written
+      # (open, not hidden, not marked inactive, version 0), computed from the
+      # store at scrape time; pg_desk_pr_unhydrated_oldest_age_seconds is the
+      # age of the oldest. It is the signal that would have fired on 2026-10-19,
+      # when every one of 495 rows was unhydrated and nothing said so.
+      #
+      # The rule fires in two cases, both in the one expression:
+      #   1. the gauge is above 0 for the `for` duration (the PRs are listed
+      #      and nothing hydrates them); or
+      #   2. the gauge has no series at all while pg_desk_liveness is up: the
+      #      store cannot answer (not migrated, or the read failed), which is
+      #      never "healthy". The absence test lives in the expression, not in
+      #      noDataState: `pg_desk_liveness == 1 unless on() pg_desk_pr_unhydrated`
+      #      yields the liveness series only when no unhydrated series exists.
+      # Both are dropped by the SYSTEM_PAUSE guard copied from
+      # pg-desk-sync-stale (`unless on() (pg_router_gates_active{type=
+      # "SYSTEM_PAUSE"} == 1)`, whose reasoning is documented there): a pause
+      # deliberately stops the hydrating dispatches. With pg-desk itself down
+      # both branches are empty and pg-desk-liveness-down is the alert that
+      # speaks, so noDataState is OK: an empty result here means "nothing to
+      # report", never "healthy".
+      #
+      # Not registered with the probe in this change: from the first apply of
+      # P0b until the backfill the rule is red for a known reason (the 495
+      # unhydrated PRs), and registration is deferred to the start of P6 so a
+      # rule that is red for a known reason files no bead.
+      - uid: pg-desk-pr-never-hydrated
+        title: pg-desk has PRs that were never hydrated
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-desk lists PRs that no hydration has ever written, or cannot count them"
+          description: 'pg_desk_pr_unhydrated (open, not hidden, not inactive, version 0) has been above 0 for over 30 minutes, or has no series while pg-desk is up (the store cannot answer: not migrated to schema 2, or the read failed). The PR lane is not running or not hydrating: see the pr lane line of pg-desk status and doctor, and pg_desk_pr_unhydrated_oldest_age_seconds for how long the oldest has waited. This rule is suppressed while a pg-router SYSTEM_PAUSE gate is active (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1).'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '((pg_desk_pr_unhydrated > 0) or (pg_desk_liveness == 1 unless on() pg_desk_pr_unhydrated)) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

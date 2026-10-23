@@ -5767,6 +5767,33 @@
                     touch "$out"
                   '';
 
+              # pg-desk PR lane tripwire rule (pg-desk-pr-never-hydrated, PR lane refactor P0b):
+              # structure rules T1-T5 over packages/pg-desk/grafana/alerting/alerts.yaml (uid,
+              # noDataState OK, the SYSTEM_PAUSE guard copied from pg-desk-sync-stale, the absence
+              # branch, the rule shape), then the script's plain negative cases: a rule file whose
+              # guard has been removed, one whose noDataState differs and one whose absence branch
+              # has been removed each MUST fail with exactly their own rule. The behaviour of the
+              # rule's expression is modelled by internal/alertrules (in pg-desk-go-tests).
+              test-pg-desk-alert-structure =
+                pkgs.runCommand "test-pg-desk-alert-structure"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.yq-go
+                      pkgs.jq
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    script=${./packages/pg-desk/grafana/check-alert-structure.sh}
+                    alerts=${./packages/pg-desk/grafana/alerting/alerts.yaml}
+                    bash "$script" "$alerts"
+                    bash "$script" --self-test "$alerts"
+                    touch "$out"
+                  '';
+
               # pg-connector-github dashboard: rules D1-D7 over the dashboard JSON and the metric
               # catalog (uid and title, catalogued names, counters inside rate/increase, the eight
               # topics, descriptions, Prometheus datasource, every expr parses under promtool),
@@ -9866,6 +9893,27 @@
                     repos = [ { remote = "phillipgreenii/example-repo"; } ];
                     focus.operatorIdentities = [ ];
                   };
+                  # prLane.mode (PR lane refactor, P0b): rendered as pr_lane.mode.
+                  hmPRLanePlan = evalHM {
+                    enable = true;
+                    selfLogin = "phillipgreenii";
+                    repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                    prLane.mode = "plan";
+                  };
+                  # An enum option: a value outside off|plan|apply must not
+                  # evaluate (a throw cannot be grepped for in the rendered file).
+                  prLaneModeRejected =
+                    mode:
+                    !(builtins.tryEval (
+                      builtins.seq
+                        (evalHM {
+                          enable = true;
+                          selfLogin = "phillipgreenii";
+                          repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                          prLane.mode = mode;
+                        }).xdg.configFile."pg-desk/config.yaml".source.drvPath
+                        true
+                    )).success;
                   # The loader rejects an explicit 0 for max_per_poll, so the
                   # options must not admit one: evaluating the rendered file's
                   # derivation must throw.
@@ -10010,6 +10058,7 @@
                 # (a throw cannot be grepped for in the rendered file).
                 assert maxPerPollZeroRejected { sweep.maxPerPoll = 0; };
                 assert maxPerPollZeroRejected { hydration.maxPerPoll = 0; };
+                assert prLaneModeRejected "aplly";
                 pkgs.runCommand "test-pg-desk-module-ok" { } ''
                   # area_labels absent by default, rendered when set (field defaults to title).
                   ! grep -q area_labels ${hmEnabled.xdg.configFile."pg-desk/config.yaml".source}
@@ -10070,6 +10119,14 @@
                   ! grep -qE '^  (pr|thread):' "$p"
                   ! grep -qE '^(sweep|hydration|change_log_retention|consumer_stale_after):' "$p"
                   ! grep -q 'active_window' "$p"
+
+                  # pr_lane.mode (PR lane refactor, P0b): rendered unconditionally,
+                  # "off" by default, and under the loader's key names when set.
+                  sed -n '/^pr_lane:/,/^[a-z]/p' "$d" | grep -q '^  mode: off$'
+                  sed -n '/^pr_lane:/,/^[a-z]/p' ${
+                    hmPRLanePlan.xdg.configFile."pg-desk/config.yaml".source
+                  } | grep -q '^  mode: plan$'
+                  [ "$(grep -c '^pr_lane:' ${hmPRLanePlan.xdg.configFile."pg-desk/config.yaml".source})" = 1 ]
 
                   # Focus keys: none rendered by default (all options null).
                   ! grep -qE '^(focus|bead_id_pattern):' "$d"

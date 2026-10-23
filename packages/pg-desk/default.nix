@@ -87,6 +87,15 @@ mkGoApp {
     mkdir -p $out/share/tldr/pages.common
     cp ${./share/tldr/pages.common/pg-desk-focus.md} $out/share/tldr/pages.common/pg-desk-focus.md
 
+    # The safe-verb list (PR lane refactor, P0b): the verbs that run on a store
+    # migrated to schema 2, one verb path per line. The deployment check reads
+    # it from this fixed path and carries no copy of its own; the verb
+    # exhaustiveness test (cmd/pg-desk/verbs_schema2_test.go, in
+    # checks.<system>.pg-desk-go-tests) fails when this file and the command
+    # tree disagree.
+    mkdir -p $out/share/pg-desk
+    cp ${./share/pg-desk/safe-verbs.txt} $out/share/pg-desk/safe-verbs.txt
+
     mkdir -p $out/share/bash-completion/completions
     mkdir -p $out/share/zsh/site-functions
     mkdir -p $out/share/fish/vendor_completions.d

@@ -146,6 +146,36 @@ its bound is checked and alerting. An absent series (no verdict) is Normal, not 
 On a store that has not been cut over to the new schema these families MUST be absent from the
 scrape; `serve` keeps answering with the dashboard families and MUST NOT refuse or fail the scrape.
 
+### PR lane metrics
+
+`/metrics` also exposes the PR lane's first signals (PR lane refactor, P0b), each emitted with a value
+when it is healthy, so that "no series" never reads as "healthy":
+
+- `pg_desk_pr_lane_mode{mode}` — the configured lane mode (`pr_lane.mode`, see [`config.md`](config.md)):
+  one series per mode (`off`, `plan`, `apply`), `1` on the configured mode and `0` on the other two. A
+  missing or invalid key reads as `off`.
+- `pg_desk_pr_unhydrated` — the number of PRs the store lists as open that no hydration has ever
+  written: `pr` entities that are active (not marked inactive), at version `0`, not hidden, and not
+  known from their stored facts to be closed or merged. It is the signal that would have fired when
+  every row of a migrated store was unhydrated and nothing said so.
+- `pg_desk_pr_unhydrated_oldest_age_seconds` — the age in seconds of the oldest member of that set
+  (from when `pg-desk` first saw it), `0` when the set is empty.
+
+Both unhydrated gauges are computed from the store at scrape time. A scrape whose store read fails
+exports NO series for them, never `0`, and a store that has not been cut over has none either; the
+mode gauge and every other family are unaffected.
+
+The Grafana rule `pg-desk-pr-never-hydrated` (`packages/pg-desk/grafana/alerting/alerts.yaml`; warning,
+`for: 30m`, `noDataState: OK`) fires when `pg_desk_pr_unhydrated` is above `0`, OR when that gauge has
+no series while `pg_desk_liveness` is `1` (the store cannot answer). The absence test is in the
+expression, not in `noDataState`. It is suppressed while a pg-router `SYSTEM_PAUSE` gate is active,
+with the same guard as `pg-desk-sync-stale`. Its uid is NOT registered with the alert probe yet: it is
+red for a known reason until the backfill has hydrated the migrated PRs, and registering it earlier
+would file a bead for that. The threshold is the first version, and a later change finalizes it.
+`internal/alertrules` models the expression and pins it to the YAML, and a structure check over the
+rule file carries plain negative cases (a rule file whose `SYSTEM_PAUSE` guard was removed, one whose
+`noDataState` differs, and one whose absence branch was removed each fail).
+
 ### Focus metrics
 
 `/metrics` also exposes the daily-focus families, computed from the store by the one function
@@ -252,6 +282,13 @@ The lag threshold of `pg-desk-focus-consumer-lag` is provisional: the design doe
 the operator checkpoint sets the final budget from the decider cost it measures. Decider failures
 are not covered by a rule here: they reach `pg_router_failures_total{role="<focus role>"}`, which the
 existing `pg-router-failure-rate` rule already watches.
+
+## Invariants
+
+- **INV-SERVE-1.** <!-- uuid: 49037238-ded6-4367-a15a-d4e2308dffda --> `pg_desk_pr_lane_mode` MUST be emitted with a value on every scrape (`1` on the configured mode, `0` on
+  the other two), and `pg_desk_pr_unhydrated` with its oldest-age companion MUST be emitted with a value
+  whenever the store read succeeds on a store at schema 2 (`0` for an empty set), and MUST have no series,
+  never `0`, when the store read fails or the store is not at schema 2.
 
 ## Out of scope (Phase 9, narrowed by Phase 10)
 

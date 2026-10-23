@@ -1,0 +1,8 @@
+sync off, lane off => pr lane: legacy sync off, lane off
+sync plan, lane off => pr lane: legacy sync plan, lane off
+sync apply, lane off => pr lane: legacy sync apply, lane off
+sync off, lane plan => pr lane: legacy sync off, lane plan
+sync off, lane apply => pr lane: legacy sync off, lane apply
+nothing set => pr lane: legacy sync off, lane off
+invalid lane mode => pr lane: legacy sync off, lane off
+no configuration => pr lane: legacy sync unknown, lane unknown (configuration unavailable)

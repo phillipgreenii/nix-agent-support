@@ -25,6 +25,14 @@ and non-transient — see [`sync.md`](sync.md)'s "Automatic retry"), the age of 
 `plan` — planned sync rows by kind (anchor / feedback-cycle / review-request; see
 [`sync.md`](sync.md)). It also prints `pg-connector ledger show` for the configured consumer.
 
+It prints one static `pr lane` line, `pr lane: legacy sync <mode>, lane <mode>`, naming the legacy
+sync's mode (`sync.mode`, `off` when unset) and the PR lane's mode (`pr_lane.mode`, see
+[`config.md`](config.md), `off` when missing or invalid). The line reports what the configuration
+says and nothing the lane did, so it carries no verdict and no count; a configuration that cannot be
+loaded prints `unknown` for both modes. It exists so that a store on which the legacy sync is off
+and the lane is off is not mistaken for a healthy one: `sync_errors: 0` alone cannot tell "nothing
+failed" from "nothing ran". The live lane line replaces it when the lane ships.
+
 It prints a `change_flow` section, human-readable, per entity type and per consumer, matching the
 change-flow families `serve` exposes on `/metrics` (see [`serve.md`](serve.md)). Per type it
 reports the active entity count, the due backlog, the change-log records by kind and origin, the
@@ -260,6 +268,8 @@ such row fails `doctor`, and each is listed with its error and its retry indicat
 retrying, with retries used out of the bound and the next retry time; exhausted; or
 non-transient — see [`sync.md`](sync.md)'s "Automatic retry"); and the stranded-cycle report
 formerly produced by `pr-pool reconcile`.
+`doctor` also prints the same static `pr lane` line as `status` right after the `config` check. It is
+information, never a check: it adds no failure.
 `serve` reachability fails `doctor` only when `serve` is unreachable (a refused connection, or none made before the deadline); a `serve` that accepted the connection but answered slowly, or not before the generous probe deadline, is reported as `slow` and never fails `doctor`, since a loaded host can take several seconds to answer one scrape (`pg2-903lz`). The ledger-based `work-beads reach` line (`pg2-6w396`) was removed with the ledger, which the cutover drops: it guarded sync's adoption and closure cascade, which are removed too, and on a version-2 store it could only be skipped. `pg-connector config validate`'s own
 query-name-coverage check (a config-authoring signal comparing a backend's declared query names
 against its peers of the same type, bead `pg2-2j5ac.28.1`) is informational-only as of
@@ -422,6 +432,27 @@ The contract, the invariants and the configuration are in [`freshness.md`](fresh
 
 Exit codes: `0` whenever the store is readable; `1` when it is not.
 
+## Verbs on a schema-2 store: the safe-verb list
+
+The cutover to store schema 2 drops the ledger and replaces the old per-column annotation table, so
+a verb written against schema 1 can fail on a migrated store, and a deployed role that runs it fails
+with it. Every leaf verb of the command tree is therefore classified, in a hand-written table beside
+the verb tree's test, as `safe` (it runs on a migrated store) or `unsafe` with the reason. The table
+and the tree MUST agree: a verb added without a classification fails the test, and so does a
+classification naming a verb that does not exist. Every safe verb is run, in its own process, against
+a real store migrated to schema 2 under a deployment-style configuration; it passes when it runs
+without a schema or ledger error (it MAY still exit non-zero for another reason, such as a missing
+entity or no reachable connector). The unsafe verbs today are the legacy top-level `show`, `hide`,
+`unhide`, `wip` and `feedback` (replaced by the typed `pr` forms), `reconcile` and `ledger` (both read
+the dropped ledger), `import-pg-pr-annotations` and `migrate` (one-shot cutover verbs), and the `open`
+verbs (they exec the configured browser opener). `run` and `sweep` are safe only while `sync.mode` is
+`off`: the sync stage reads the ledger.
+
+The list of safe verbs is written into the package output as `share/pg-desk/safe-verbs.txt`, one verb
+path per line (for example `pr refresh`), blank lines and `#` comments allowed. The same test verifies
+the file against the verb tree, so a deployment check that reads the file never carries a copy that
+can drift.
+
 ## Invariants
 
 - **INV-OPERATOR-1.** <!-- uuid: 2e9cf9b1-9424-4957-9ed5-fa2326b9e413 --> `pg-desk issue refresh <id> --watch` MUST mark exactly that one issue watched, for a beads issue
@@ -444,6 +475,13 @@ Exit codes: `0` whenever the store is readable; `1` when it is not.
 - **INV-OPERATOR-7.** <!-- uuid: 83ea533e-e2c1-4e45-ba8a-0a113c0aceea --> For `issue` the due backlog MUST count only pending hydrations (a changed or watched entity not yet
   hydrated, and the failed-ingest entries), and neither the local nor the remote sweep bound MUST be
   evaluated or reported.
+- **INV-OPERATOR-8.** <!-- uuid: de87cc87-33cc-4461-9630-95a83e86430f --> Every leaf verb of the command tree MUST be classified safe or unsafe on a store at schema 2,
+  every safe verb MUST run on a store migrated to schema 2 without a schema or ledger error, and the
+  list of safe verbs installed as `share/pg-desk/safe-verbs.txt` MUST equal the set of verbs the
+  classification marks safe.
+- **INV-OPERATOR-9.** <!-- uuid: 661b5e25-4dc3-4e01-9e78-fbe86e036042 --> `status` and `doctor` MUST each print the static `pr lane` line, read from `sync.mode` and `pr_lane.mode`, and
+  the line MUST report an absent or invalid `pr_lane.mode` as `off`; `doctor` MUST NOT count the line as a
+  failure.
 
 ## Telemetry and logs
 

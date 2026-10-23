@@ -136,6 +136,11 @@ func runStatus(cmd *cobra.Command) error {
 	fmt.Fprintf(w, "last_run: %s\n", orDash(lastRun))
 	fmt.Fprintf(w, "last_sweep: %s\n", orDash(lastSweep))
 
+	// The static pr lane line (design: status truthfulness in the interim). A
+	// config-load failure degrades to "unknown", like the sections below.
+	laneCfg, _ := deskConfigLoad(cmd.Context())
+	fmt.Fprintln(w, prLaneLine(laneCfg))
+
 	// Planned sync rows by kind (design section 7.5/7.7): a config-load
 	// failure here degrades to skipping this section rather than failing
 	// status entirely — status's own exit-code contract is "1 when the

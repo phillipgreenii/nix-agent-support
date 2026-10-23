@@ -58,6 +58,8 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		"watch", "sweep", "hydration", "change_log_retention", "consumer_stale_after",
 		// Focus keys (daily-focus design, section 12 (m)).
 		"focus", "bead_id_pattern",
+		// pr_lane (PR lane refactor, P0b): the lane mode the deployment renders.
+		"pr_lane",
 	}
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
@@ -75,6 +77,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		want []string
 	}{
 		{"RepoConfig", reflect.TypeOf(RepoConfig{}), []string{"remote", "beads_dir"}},
+		{"PRLaneConfig", reflect.TypeOf(PRLaneConfig{}), []string{"mode"}},
 		{"AgentConfig", reflect.TypeOf(AgentConfig{}), []string{"login", "approval_regex", "policy"}},
 		{"JiraConfig", reflect.TypeOf(JiraConfig{}), []string{"high_priority_values", "incident_labels", "incident_issue_types", "in_progress_statuses", "done_statuses"}},
 		{"UrgencyConfig", reflect.TypeOf(UrgencyConfig{}), []string{"labels", "keywords", "thresholds"}},
@@ -1154,5 +1157,36 @@ func TestFocusPriorityMap_EmptyMeansDefault(t *testing.T) {
 	}
 	if got := cfg.FocusPriorityMap()["High"]; got != "P1" {
 		t.Errorf("High = %q, want P1 from the default", got)
+	}
+}
+
+// TestPRLaneMode: pr_lane.mode reads as written for the three valid values and
+// as "off" for a missing block, an empty value, a typo and a nil Config, so a
+// mistake can never report the lane as running.
+func TestPRLaneMode(t *testing.T) {
+	for _, tc := range []struct {
+		name, yaml, want string
+	}{
+		{"missing block", "", PRLaneModeOff},
+		{"empty mode", "pr_lane:\n  mode: ''\n", PRLaneModeOff},
+		{"off", "pr_lane:\n  mode: off\n", PRLaneModeOff},
+		{"plan", "pr_lane:\n  mode: plan\n", PRLaneModePlan},
+		{"apply", "pr_lane:\n  mode: apply\n", PRLaneModeApply},
+		{"typo", "pr_lane:\n  mode: aplly\n", PRLaneModeOff},
+		{"wrong case", "pr_lane:\n  mode: Apply\n", PRLaneModeOff},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := LoadFile(writeYAML(t, t.TempDir(), focusBase+tc.yaml))
+			if err != nil {
+				t.Fatalf("LoadFile: %v", err)
+			}
+			if got := cfg.PRLaneMode(); got != tc.want {
+				t.Errorf("PRLaneMode = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	var nilCfg *Config
+	if got := nilCfg.PRLaneMode(); got != PRLaneModeOff {
+		t.Errorf("nil Config PRLaneMode = %q, want off", got)
 	}
 }

@@ -307,6 +307,8 @@ func runDoctor(cmd *cobra.Command) error {
 	} else {
 		fmt.Fprintln(w, "config: ok")
 	}
+	// The static pr lane line: information, not a check (it never adds a failure).
+	fmt.Fprintln(w, prLaneLine(cfg))
 
 	if path, err := doctorLookPath("pg-connector"); err != nil {
 		fmt.Fprintf(w, "pg-connector on PATH: FAIL (%v)\n", err)

@@ -133,6 +133,28 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 		return nil, fmt.Errorf("httpapi: register focus metrics: %w", err)
 	}
 
+	// The PR lane families (PR lane refactor, P0b): the configured lane mode
+	// and the never-hydrated set, both read at scrape time. The set needs the
+	// schema-2 columns, so a store that is not migrated has NO series for it
+	// (not 0), and a failed read has none either.
+	unhydratedFn := func() (metrics.PRUnhydratedSnapshot, bool, error) {
+		v, err := st.SchemaVersion()
+		if err != nil {
+			return metrics.PRUnhydratedSnapshot{}, false, err
+		}
+		if v < store.NewSchemaVersion {
+			return metrics.PRUnhydratedSnapshot{}, false, nil
+		}
+		u, err := st.CountPRUnhydrated(nowUTC())
+		if err != nil {
+			return metrics.PRUnhydratedSnapshot{}, false, err
+		}
+		return metrics.PRUnhydratedSnapshot{Count: u.Count, OldestAgeSeconds: u.OldestAgeSeconds}, true, nil
+	}
+	if err := metrics.RegisterPRLane(mp, cfg.PRLaneMode, unhydratedFn); err != nil {
+		return nil, fmt.Errorf("httpapi: register pr lane metrics: %w", err)
+	}
+
 	return scrapeHandler(registry, scrapeTimeout), nil
 }
 

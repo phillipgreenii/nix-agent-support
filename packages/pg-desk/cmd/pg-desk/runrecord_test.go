@@ -21,6 +21,7 @@ import (
 // test provokes on purpose, appends a record) out of the real state directory
 // (bead pg2-dpml1).
 func TestMain(m *testing.M) {
+	runVerbChildIfRequested() // a re-executed verb process (verbs_schema2_test.go) never returns
 	dir, err := os.MkdirTemp("", "pg-desk-run-record-")
 	if err != nil {
 		panic(err)

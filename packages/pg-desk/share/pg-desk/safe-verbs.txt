@@ -1,0 +1,68 @@
+# Verbs of pg-desk that run on a store migrated to schema 2 (one verb path per line).
+# Generated from the classification table in cmd/pg-desk/verbs_schema2_test.go:
+# regenerate with PG_DESK_UPDATE_SAFE_VERBS=1 nice -n 10 go test ./cmd/pg-desk -run TestVerbExhaustiveness
+# run and sweep are safe only under sync.mode off: the sync stage reads the ledger that schema 2 drops.
+attention explain
+attention list
+doctor
+focus close
+focus explain
+focus pull
+focus replan
+focus select
+focus show
+freshness
+heartbeat
+heartbeat-item
+issue annotate
+issue changes
+issue consumer forget
+issue consumer list
+issue hide
+issue history
+issue link add
+issue link remove
+issue refresh
+issue show
+issue suppress
+issue unhide
+issue unsuppress
+issue wip
+links
+pr annotate
+pr changes
+pr consumer forget
+pr consumer list
+pr feedback list
+pr feedback set
+pr force-review
+pr head-check
+pr hide
+pr history
+pr link add
+pr link remove
+pr refresh
+pr show
+pr suppress
+pr unhide
+pr unsuppress
+pr wip
+run
+serve
+status
+sweep
+thread annotate
+thread changes
+thread consumer forget
+thread consumer list
+thread hide
+thread history
+thread link add
+thread link remove
+thread refresh
+thread show
+thread suppress
+thread unhide
+thread unsuppress
+thread wip
+version
