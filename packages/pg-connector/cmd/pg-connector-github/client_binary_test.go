@@ -249,7 +249,7 @@ const listRequest = `{"op":"list","args":{"query":"mine"}}`
 func TestClientBinaryDaemonAbsent(t *testing.T) {
 	bin := fastClient(t)
 	cfg, stateDir, sock := clientSetup(t)
-	hint := proc.RestartHint(config.DefaultSupervisorLabel, cfg)
+	hint := proc.RestartHint(config.DefaultSupervisorLabel, cfg, config.DaemonName)
 
 	for i, req := range []string{listRequest, `{"op":"show","args":{"id":"x"}}`, `{"op":"changes"}`, `{"op":"auth_status"}`} {
 		res := runClientBinary(t, bin, cfg, "pr", req)

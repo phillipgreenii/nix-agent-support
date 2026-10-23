@@ -173,7 +173,7 @@ func TestEveryOtherOpIsForwardedAndAnsweredUnavailableWhenTheDaemonIsDown(t *tes
 		if e.Code != "unavailable" || res.code != scriptout.ExitCodeForCode("unavailable") {
 			t.Errorf("%s: code %q exit %d", op, e.Code, res.code)
 		}
-		hint := proc.RestartHint("com.example.daemon", "/etc/pcg/config.json")
+		hint := proc.RestartHint("com.example.daemon", "/etc/pcg/config.json", "pg-connector-github")
 		for _, want := range []string{missing, hint} {
 			if !strings.Contains(e.Message, want) {
 				t.Errorf("%s: message %q must contain %q (the socket path and the platform's restart hint)", op, e.Message, want)

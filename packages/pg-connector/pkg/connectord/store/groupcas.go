@@ -15,11 +15,12 @@ import (
 // writer or an invalidation bumps it (BumpGroup), and a store whose expected
 // generation no longer matches writes nothing.
 
-// summaryGroupName is the one group a bump never creates: a summary row exists
+// SummaryGroupName is the one group a bump never creates: a summary row exists
 // only because a summary was fetched, and an "empty" one would read as a
-// fetched-but-empty PR. It mirrors the summary package's GroupName, which this
-// generic package cannot import.
-const summaryGroupName = "summary"
+// fetched-but-empty entity. A connector's primary group MUST carry this name
+// (the engine checks it at start-up); this generic package cannot import the
+// connector package that also names it.
+const SummaryGroupName = "summary"
 
 // PutGroupIf stores g only when the stored row's generation equals
 // expectGeneration, or when no row exists and expectGeneration is 0. It stores
@@ -98,7 +99,7 @@ func (s *Store) BumpGroup(ctx context.Context, kind, id, group string, freshUnti
 	defer func() { _ = tx.Rollback() }()
 
 	var row interface{ Scan(...any) error }
-	if group == summaryGroupName {
+	if group == SummaryGroupName {
 		row = tx.QueryRowContext(ctx, `
 UPDATE entity_group SET generation = generation + 1, fresh_until = ?
 WHERE kind = ? AND id = ? AND group_name = ?
@@ -112,7 +113,7 @@ ON CONFLICT (kind, id, group_name) DO UPDATE SET
 RETURNING generation`, kind, id, group, []byte{}, msOrNull(freshUntil))
 	}
 	if err := row.Scan(&generation); err != nil {
-		if group == summaryGroupName && errors.Is(err, sql.ErrNoRows) {
+		if group == SummaryGroupName && errors.Is(err, sql.ErrNoRows) {
 			return 0, nil
 		}
 		return 0, fmt.Errorf("store: bump group %s/%s/%s: %w", kind, id, group, err)

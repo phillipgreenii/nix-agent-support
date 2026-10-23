@@ -14,7 +14,7 @@ func TestLinuxSupervisorProbeReportsNone(t *testing.T) {
 }
 
 func TestLinuxRestartHintIsABackgroundedNohupCommand(t *testing.T) {
-	got := RestartHint("example", "/etc/example/config.json")
+	got := RestartHint("example", "/etc/example/config.json", "pg-connector-github")
 	want := "nohup pg-connector-github --config /etc/example/config.json serve >/dev/null 2>&1 &"
 	if !strings.Contains(got, want) {
 		t.Errorf("RestartHint = %q, want it to contain %q", got, want)
@@ -22,7 +22,7 @@ func TestLinuxRestartHintIsABackgroundedNohupCommand(t *testing.T) {
 	if !strings.HasSuffix(got, "&") {
 		t.Errorf("the hint must end in & so it never blocks a shell: %q", got)
 	}
-	if q := RestartHint("example", "/has space/c.json"); !strings.Contains(q, "'/has space/c.json'") {
+	if q := RestartHint("example", "/has space/c.json", "pg-connector-github"); !strings.Contains(q, "'/has space/c.json'") {
 		t.Errorf("a config path with a space must be quoted: %q", q)
 	}
 }

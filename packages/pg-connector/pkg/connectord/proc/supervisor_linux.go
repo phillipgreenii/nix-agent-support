@@ -10,7 +10,7 @@ func SupervisorProbe(label string) SupervisorState { return SupervisorNone }
 // the daemon back. The command MUST run in the background (nohup ... &): an
 // agent that ran a bare foreground serve from an unavailable answer would
 // block its shell.
-func RestartHint(label, configPath string) string {
+func RestartHint(label, configPath, binary string) string {
 	return "no supervisor on this host (pg2-opk5g); start it in the background: " +
-		"nohup pg-connector-github --config " + shellQuote(configPath) + " serve >/dev/null 2>&1 &"
+		"nohup " + binary + " --config " + shellQuote(configPath) + " serve >/dev/null 2>&1 &"
 }

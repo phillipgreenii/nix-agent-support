@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/proc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/socket"
@@ -54,8 +55,9 @@ func (c Collector) Collect(ctx context.Context) Report {
 	}
 	sock := &socket.Client{
 		SocketPath:  c.Static.SocketPath,
+		DaemonName:  config.DaemonName,
 		Build:       c.Static.BuildID,
-		RestartHint: proc.RestartHint(c.Static.SupervisorLabel, c.Static.ConfigPath),
+		RestartHint: proc.RestartHint(c.Static.SupervisorLabel, c.Static.ConfigPath, config.DaemonName),
 		Logger:      c.Logger,
 	}
 	reply, err := sock.Call(ctx, inst, scriptout.Request{Op: OpName}, budget, max(budget-time.Second, 0))

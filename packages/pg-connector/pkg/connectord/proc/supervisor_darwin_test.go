@@ -68,7 +68,7 @@ func TestDarwinSupervisorProbeRealLaunchctlForUnknownLabel(t *testing.T) {
 }
 
 func TestDarwinRestartHintIsLaunchctlKickstart(t *testing.T) {
-	got := RestartHint("com.example.daemon", "/etc/example/config.json")
+	got := RestartHint("com.example.daemon", "/etc/example/config.json", "example-daemon")
 	want := fmt.Sprintf("launchctl kickstart -k gui/%d/com.example.daemon", os.Getuid())
 	if !strings.Contains(got, want) {
 		t.Errorf("RestartHint = %q, want it to contain %q", got, want)

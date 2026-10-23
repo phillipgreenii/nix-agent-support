@@ -64,6 +64,13 @@ type ChangeRow struct {
 	At              time.Time
 }
 
+// SetStamp records the row's stamp (the head commit the row was recorded
+// with, in the shipped head_sha column).
+func (c *ChangeRow) SetStamp(s string) { c.HeadSHA = s }
+
+// Stamp returns the row's stamp.
+func (c ChangeRow) Stamp() string { return c.HeadSHA }
+
 const changeCols = `seq, kind, id, version, head_sha, kinds, fields, origin, origin_updated_at, at`
 
 func scanChange(sc interface{ Scan(...any) error }) (ChangeRow, error) {
@@ -202,6 +209,13 @@ type PendingChange struct {
 	DetectedAt      time.Time
 	Deadline        time.Time
 }
+
+// SetStamps records the two stamps of a pending row (the shipped head_sha and
+// base_sha columns): the first is the primary stamp, the second the secondary.
+func (p *PendingChange) SetStamps(a, b string) { p.HeadSHA, p.BaseSHA = a, b }
+
+// Stamps returns the two stamps of a pending row.
+func (p PendingChange) Stamps() (string, string) { return p.HeadSHA, p.BaseSHA }
 
 const pendingCols = `kind, id, kinds, fields, awaited, head_sha, base_sha, origin, origin_updated_at, detected_at, deadline`
 

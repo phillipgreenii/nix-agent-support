@@ -72,6 +72,9 @@ const (
 	// DefaultSupervisorLabel is the launchd label of the daemon's supervisor
 	// entry (design "One binary, two modes").
 	DefaultSupervisorLabel = "com.phillipg.pg-connector-github-daemon"
+	// DaemonName is the daemon binary name, printed in a daemon-down message and
+	// in the restart hint of a platform with no supervisor.
+	DaemonName = "pg-connector-github"
 )
 
 // Names of the files the daemon, the client and the later packets share.

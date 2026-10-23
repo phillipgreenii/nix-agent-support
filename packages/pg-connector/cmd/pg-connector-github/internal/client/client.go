@@ -26,6 +26,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/logs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/proc"
@@ -93,9 +94,10 @@ func Run(ctx context.Context, o Options, stdin io.Reader, stdout io.Writer) int 
 
 	sock := &socket.Client{
 		SocketPath:  o.SocketPath,
+		DaemonName:  config.DaemonName,
 		Build:       o.Build,
 		Protocol:    o.Protocol,
-		RestartHint: proc.RestartHint(o.SupervisorLabel, o.ConfigPath),
+		RestartHint: proc.RestartHint(o.SupervisorLabel, o.ConfigPath, config.DaemonName),
 		Logger:      o.Logger,
 	}
 	budget := o.Budget

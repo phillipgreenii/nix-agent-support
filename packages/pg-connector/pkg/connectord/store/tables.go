@@ -441,6 +441,13 @@ type GroupRow struct {
 	FetchedForBase string
 }
 
+// SetStamps records the two stamps the content was fetched for (the shipped
+// fetched_for_head and fetched_for_base columns).
+func (g *GroupRow) SetStamps(a, b string) { g.FetchedForHead, g.FetchedForBase = a, b }
+
+// Stamps returns the two stamps the content was fetched for.
+func (g GroupRow) Stamps() (string, string) { return g.FetchedForHead, g.FetchedForBase }
+
 // PutGroup inserts or replaces the row for (g.Kind, g.ID, g.Group).
 func (s *Store) PutGroup(ctx context.Context, g GroupRow) error {
 	return putGroup(ctx, s.db, g)

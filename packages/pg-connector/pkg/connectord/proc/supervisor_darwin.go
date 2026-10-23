@@ -61,7 +61,7 @@ func SupervisorProbe(label string) SupervisorState {
 // RestartHint is the text an unavailable answer carries so a caller can bring
 // the daemon back: launchctl kickstart -k gui/<uid>/<label> (-k restarts a
 // running job; the config path is not needed because launchd already holds the
-// command line).
-func RestartHint(label, configPath string) string {
+// command line; binary is not needed either).
+func RestartHint(label, configPath, binary string) string {
 	return "restart it with: launchctl kickstart -k " + domainTarget(label)
 }

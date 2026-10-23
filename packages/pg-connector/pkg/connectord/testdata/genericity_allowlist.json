@@ -254,16 +254,9 @@
       "why": "pre-existing code that the hoist does not neutralise"
     },
     {
-      "file": "proc/supervisor_linux.go",
-      "token": "github",
-      "max": 1,
-      "class": "legacy",
-      "why": "pre-existing code that the hoist does not neutralise"
-    },
-    {
       "file": "proc/supervisor_linux_test.go",
       "token": "github",
-      "max": 1,
+      "max": 3,
       "class": "legacy",
       "why": "fixture or word list of an existing test file"
     },
@@ -280,27 +273,6 @@
       "max": 19,
       "class": "legacy",
       "why": "fixture or word list of an existing test file"
-    },
-    {
-      "file": "router/router.go",
-      "token": "ci",
-      "max": 2,
-      "class": "legacy",
-      "why": "pre-existing code that the hoist does not neutralise"
-    },
-    {
-      "file": "router/router.go",
-      "token": "github",
-      "max": 1,
-      "class": "legacy",
-      "why": "pre-existing code that the hoist does not neutralise"
-    },
-    {
-      "file": "router/router.go",
-      "token": "pr",
-      "max": 2,
-      "class": "legacy",
-      "why": "pre-existing code that the hoist does not neutralise"
     },
     {
       "file": "router/router_test.go",
@@ -359,13 +331,6 @@
       "why": "fixture or word list of an existing test file"
     },
     {
-      "file": "socket/client.go",
-      "token": "github",
-      "max": 1,
-      "class": "legacy",
-      "why": "pre-existing code that the hoist does not neutralise"
-    },
-    {
       "file": "socket/client_test.go",
       "token": "ci",
       "max": 3,
@@ -378,20 +343,6 @@
       "max": 10,
       "class": "legacy",
       "why": "fixture or word list of an existing test file"
-    },
-    {
-      "file": "socket/frame.go",
-      "token": "ci",
-      "max": 1,
-      "class": "legacy",
-      "why": "pre-existing code that the hoist does not neutralise"
-    },
-    {
-      "file": "socket/frame.go",
-      "token": "pr",
-      "max": 1,
-      "class": "legacy",
-      "why": "pre-existing code that the hoist does not neutralise"
     },
     {
       "file": "socket/frame_test.go",
@@ -438,7 +389,7 @@
     {
       "file": "store/changes.go",
       "token": "sha",
-      "max": 17,
+      "max": 23,
       "class": "opaque-column",
       "why": "shipped column or Go field name (head_sha, base_sha, last_known_mergeable); permanent until a later rename rung"
     },
@@ -469,13 +420,6 @@
       "max": 8,
       "class": "legacy",
       "why": "fixture or word list of an existing test file"
-    },
-    {
-      "file": "store/groupcas.go",
-      "token": "pr",
-      "max": 1,
-      "class": "legacy",
-      "why": "pre-existing code that the hoist does not neutralise"
     },
     {
       "file": "store/groupcas_test.go",

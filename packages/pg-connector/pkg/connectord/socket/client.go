@@ -33,6 +33,9 @@ const maxReplyBytes = 256 << 20
 // platform limit, or the connection failed. Its message names the socket path
 // and carries the platform's restart hint; the caller answers unavailable.
 type DaemonDownError struct {
+	// Daemon is the daemon's name as the message prints it (the client's
+	// DaemonName).
+	Daemon     string
 	SocketPath string
 	// Hint is the platform's restart hint, possibly empty.
 	Hint string
@@ -43,7 +46,7 @@ type DaemonDownError struct {
 }
 
 func (e *DaemonDownError) Error() string {
-	msg := fmt.Sprintf("the pg-connector-github daemon is not reachable on socket %s: %v", e.SocketPath, e.Cause)
+	msg := fmt.Sprintf("the %s daemon is not reachable on socket %s: %v", e.Daemon, e.SocketPath, e.Cause)
 	if e.Waited > 0 {
 		msg += fmt.Sprintf(" (retried for %s)", e.Waited.Round(time.Millisecond))
 	}
@@ -74,6 +77,9 @@ func (e *VersionMismatchError) Error() string {
 type Client struct {
 	// SocketPath is the daemon's absolute socket path (REQUIRED).
 	SocketPath string
+	// DaemonName is the daemon's name, printed in a DaemonDownError message
+	// (REQUIRED so that no message names an empty daemon).
+	DaemonName string
 	// Build is this client's build id, sent as client_build.
 	Build string
 	// Protocol is the client's socket protocol; zero uses ProtocolVersion.
@@ -142,7 +148,7 @@ func (c *Client) Call(ctx context.Context, instance string, req scriptout.Reques
 		backoff = DefaultBackoff
 	}
 	down := func(cause error, waited time.Duration) error {
-		return &DaemonDownError{SocketPath: c.SocketPath, Hint: c.RestartHint, Cause: cause, Waited: waited}
+		return &DaemonDownError{Daemon: c.DaemonName, SocketPath: c.SocketPath, Hint: c.RestartHint, Cause: cause, Waited: waited}
 	}
 
 	limit := c.MaxSocketPathBytes
@@ -151,7 +157,7 @@ func (c *Client) Call(ctx context.Context, instance string, req scriptout.Reques
 	}
 	if err := proc.CheckSocketPath(c.SocketPath, limit); err != nil {
 		log.Log("socket_path_too_long", "socket_path", c.SocketPath, "bytes", len(c.SocketPath), "limit", limit)
-		return nil, &DaemonDownError{SocketPath: c.SocketPath, Cause: err}
+		return nil, &DaemonDownError{Daemon: c.DaemonName, SocketPath: c.SocketPath, Cause: err}
 	}
 
 	// start and the retry window use the injectable clock; the context and the

@@ -60,7 +60,7 @@ const MigratingPrefix = "migrating:"
 
 // Call is one decoded request.
 type Call struct {
-	// Instance is "pr" or "ci" (any registered name routes).
+	// Instance is the registered instance name (any registered name routes).
 	Instance string
 	// Request is the unmodified scriptout Request.
 	Request scriptout.Request
@@ -88,7 +88,7 @@ type Options struct {
 	// conformance probes send none.
 	CheckConfig func(block json.RawMessage) error
 	// Instances declares the instance names that exist even while nothing is
-	// registered under them ("pr" and "ci" for pg-connector-github), so an
+	// registered under them (the registered instance names), so an
 	// op not yet delivered answers unknown_op rather than an unknown
 	// instance. Registering under a name also makes it known.
 	Instances []string

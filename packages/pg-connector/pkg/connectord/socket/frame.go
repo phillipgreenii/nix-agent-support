@@ -59,7 +59,7 @@ var ErrFrameTooLarge = errors.New("frame exceeds the size cap")
 type RequestFrame struct {
 	SocketProtocol int    `json:"socket_protocol"`
 	ClientBuild    string `json:"client_build"`
-	// Instance is "pr" or "ci".
+	// Instance is the registered instance name.
 	Instance string `json:"instance"`
 	// DeadlineMS is the call's remaining budget in milliseconds when the client
 	// sent the frame; zero means the client states none and the daemon assumes
