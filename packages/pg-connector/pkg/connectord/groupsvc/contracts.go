@@ -49,6 +49,7 @@ const (
 	sentinelNoFetcher
 	sentinelUnknownGroup
 	sentinelNoReference
+	sentinelNotRefreshed
 )
 
 func (e sentinel) Error() string {
@@ -61,6 +62,8 @@ func (e sentinel) Error() string {
 		return "groupsvc: unknown group"
 	case sentinelNoReference:
 		return "the stored primary content names no entity reference"
+	case sentinelNotRefreshed:
+		return "groupsvc: the refresh finished without storing a fresh row"
 	default:
 		return "groupsvc: unknown error"
 	}

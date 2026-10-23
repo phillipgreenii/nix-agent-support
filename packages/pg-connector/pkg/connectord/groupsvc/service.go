@@ -30,6 +30,7 @@ type Service struct {
 
 	mu       sync.Mutex
 	fetchers map[string]Fetcher
+	observer Observer
 	hints    OriginHints
 	// commits counts the refreshes stored per (entity, group) since start; an
 	// Ensure compares it before and after its fetch to say whether the origin was
@@ -91,6 +92,12 @@ func (s *Service) registered() []string {
 		}
 	}
 	return out
+}
+
+func (s *Service) obs() Observer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.observer
 }
 
 func (s *Service) originHints() OriginHints {

@@ -32,6 +32,7 @@ type scriptFetcher struct {
 	seq     int
 
 	gate    chan struct{}
+	ctxErr  error // the fetch context's error once a blocked call resumed
 	err     error
 	gone    map[string]bool
 	lastErr string
@@ -49,7 +50,7 @@ func (f *scriptFetcher) Spend(class governor.Class, _ int) governor.Request {
 	return governor.Request{Class: class, Cost: 1}
 }
 
-func (f *scriptFetcher) Fetch(_ context.Context, call CallMeta, targets []Target) []Outcome {
+func (f *scriptFetcher) Fetch(ctx context.Context, call CallMeta, targets []Target) []Outcome {
 	f.mu.Lock()
 	f.calls = append(f.calls, scriptCall{Call: call, Targets: slices.Clone(targets)})
 	f.started++
@@ -59,6 +60,9 @@ func (f *scriptFetcher) Fetch(_ context.Context, call CallMeta, targets []Target
 
 	if gate != nil {
 		<-gate
+		f.mu.Lock()
+		f.ctxErr = ctx.Err()
+		f.mu.Unlock()
 	}
 	out := make([]Outcome, len(targets))
 	if ferr != nil {
@@ -218,4 +222,11 @@ func (m *authMarker) counts() (marks, clears int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.marks, m.clears
+}
+
+// contextErr is the error of the context a blocked Fetch saw when it resumed.
+func (f *scriptFetcher) contextErr() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ctxErr
 }
