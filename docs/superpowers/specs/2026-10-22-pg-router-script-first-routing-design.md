@@ -4,9 +4,11 @@ Status: approved for decomposition (operator rulings: Phillip 2026-10-02 pg-resc
 2026-10-22 push ruling, session 72907203-1867-4415-af2a-bcf11aa27cac, and the 2026-10-22 push-scope
 ruling recorded in D5)
 Date: 2026-10-22
-Revision: 2 (reconcile of docket pg2-q6a96 after an independent critique; the packets for items 1 to
-11 of the work breakdown had already landed when it was amended, so the corrections ride on the
-follow-up items 12 to 16 and the open item 11)
+Revision: 3 (formatting amendment of revision 2, no change of meaning: the work breakdown is split
+into four lists so that every item keeps one number under the repo formatter, which renumbers an
+ordered list sequentially; revision 2 was the reconcile of docket pg2-q6a96 after an independent
+critique, and the packets for items 1 to 11 of the work breakdown had already landed when it was
+amended, so the corrections ride on the follow-up items 12 to 16 and the open item 11)
 Bead: `pg2-q6a96` (docket)
 Sources: `docs/superpowers/specs/2026-10-02-pg-rescue-design.md` sections 12, 13 and 15 (follow-ups 6
 and 7); `docs/superpowers/specs/2026-09-29-entity-change-flow-design.md` S13, S25, S26, "Where new
@@ -406,7 +408,10 @@ the fetch on this remote, and its first live use is outside this design.
 
 ## Work breakdown
 
-Agent-support repo (`phillipgreenii-nix-agent-support`):
+The items are numbered once, 1 to 16, across the four lists below (one list per repo and revision), so
+a number names the same item everywhere it is cited.
+
+Revision 1, agent-support repo (`phillipgreenii-nix-agent-support`), items 1 to 7:
 
 1. `pg-rescue-bead --annotate-from-env` (D3).
 2. `pg-router-source-pg-connector list --exclude-title-prefix` (D1).
@@ -416,25 +421,31 @@ Agent-support repo (`phillipgreenii-nix-agent-support`):
 5. The `pg-rescue-push-branch` helper: the force-with-lease push (D5).
 6. `pg-rescue-fix-ci` shim (D6).
 7. Commit this design to `docs/superpowers/specs/`.
-8. Revision 2 corrections to the pg-rescue module and to the committed design copy: the `give-up`
-   default reads `PG_ROUTER_ITEM_ID`, the `conflict-fix-small` and `conflict-fix-large` instances,
-   the `give-up` chain, and the committed spec brought to revision 2 (D3, D5).
-9. Revision 2 corrections to `pg-rescue-push-branch`: full-ref lease, no `--remote`, `--worktree-root`
-   containment, ancestry and rebase checks, environment hygiene (D5).
-10. Revision 2 corrections to `pg-rescue-resolve-conflict`: stale-head check, run-id worktree name,
-    sweep, traps, closed-item claim, failure cap, `PUSH_AGENT_RESOLVED`, push-disabled agent
-    environment, helper call, `PG_ROUTER_ITEM_ID`, stale close on a rejected lease, run log (D4, D5, D9).
-11. Revision 2 corrections to `pg-rescue-fix-ci`: comma-set encoding, record before rerun, sweep,
-    traps, closed-item claim, failure cap, `PG_ROUTER_ITEM_ID`, run log (D6, D9).
 
-Deployment repo (`phillipg-nix-ziprecruiter`):
+Revision 1, deployment repo (`phillipg-nix-ziprecruiter`), items 8 to 11:
 
 8. `give-up` handler override with `--backend` and `--tracker-dir` (D3, D7).
 9. `resolve-conflict` path: queries, producer, role, `worker-source` exclusion, `worker-fallback-source` (D1, D7).
 10. `fix-ci` path: query, producer, role, extended exclusion (D1, D6, D7).
 11. Post-apply verification (D8). It stays gated on the apply of the deployment correction (16), not
     only of item 10, and is picked up only after item 16 has attached its `pn:applied` gate.
-12. Revision 2 corrections to the deployment: the `give-up` override reads `PG_ROUTER_ITEM_ID`,
+
+Revision 2 corrections, agent-support repo, items 12 to 15:
+
+12. Revision 2 corrections to the pg-rescue module and to the committed design copy: the `give-up`
+    default reads `PG_ROUTER_ITEM_ID`, the `conflict-fix-small` and `conflict-fix-large` instances,
+    the `give-up` chain, and the committed spec brought to revision 2 (D3, D5).
+13. Revision 2 corrections to `pg-rescue-push-branch`: full-ref lease, no `--remote`, `--worktree-root`
+    containment, ancestry and rebase checks, environment hygiene (D5).
+14. Revision 2 corrections to `pg-rescue-resolve-conflict`: stale-head check, run-id worktree name,
+    sweep, traps, closed-item claim, failure cap, `PUSH_AGENT_RESOLVED`, push-disabled agent
+    environment, helper call, `PG_ROUTER_ITEM_ID`, stale close on a rejected lease, run log (D4, D5, D9).
+15. Revision 2 corrections to `pg-rescue-fix-ci`: comma-set encoding, record before rerun, sweep,
+    traps, closed-item claim, failure cap, `PG_ROUTER_ITEM_ID`, run log (D6, D9).
+
+Revision 2 correction, deployment repo (`phillipg-nix-ziprecruiter`), item 16:
+
+16. Revision 2 corrections to the deployment: the `give-up` override reads `PG_ROUTER_ITEM_ID`,
     explicit `max_dispatch_retries = 0` on both script roles, assertions for both; after its commit it
     gates item 11 on that commit with the `pb:pb-gate-lifecycle` skill (D3, D7, D8).
 
