@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no cgo)
@@ -179,6 +180,12 @@ type Store struct {
 // handle is nil and Result.Outcome is OutcomeRefusedNewer. See the package
 // comment for the outcomes.
 func Open(path string, opts Options) (*Store, Result, error) {
+	// An empty path would make SQLite open an anonymous temporary database
+	// (and, were the URI prefix ever lost, a file named after the query
+	// string in the working directory), so it is refused up front.
+	if path == "" {
+		return nil, Result{}, errors.New("store: empty path")
+	}
 	ladder := opts.ladder()
 	if err := validateLadder(ladder); err != nil {
 		return nil, Result{}, err
@@ -258,12 +265,22 @@ func reopenAfterMoveAside(path string, opts Options, res Result, cause error) (*
 	return s, res, nil
 }
 
+// uriPath escapes the characters that end or alter the path part of a SQLite
+// URI ('%' introduces an escape, '?' starts the query and '#' the fragment),
+// so a path that contains one is still opened as a file name and never
+// misread as a query string.
+func uriPath(path string) string {
+	return uriPathEscaper.Replace(path)
+}
+
+var uriPathEscaper = strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23")
+
 // openAndMigrate opens the database with the connection pragmas, checks it
 // is a database and brings it to the ladder's top. It returns the schema
 // version the file had before migrating.
 func openAndMigrate(path string, opts Options, ladder []Migration) (*Store, int, error) {
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)",
-		path, busyTimeoutMillis)
+		uriPath(path), busyTimeoutMillis)
 	if opts.Synchronous != "" {
 		dsn += "&_pragma=synchronous(" + opts.Synchronous + ")"
 	}
