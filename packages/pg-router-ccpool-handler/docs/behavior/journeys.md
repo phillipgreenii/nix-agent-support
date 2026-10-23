@@ -86,7 +86,8 @@ Extensions:
   `skipped-bead-not-groomed`, `skipped-bead-deferred`, `skipped-bead-blocked`); a bead that the
   role's own actor already holds `in_progress` is never declined here, because it is the live
   session of an earlier dispatch, which 2k absorbs while its turn is in progress. It reads only, and
-  any failure to read launches as normal.
+  any failure to read launches as normal, except that a REVIEW check whose connector answers
+  `unavailable` declines `busy` with reason `connector-unavailable`, which the router re-offers.
 - 2m. Preparing the per-bead isolation fails because the filesystem has run out of room
   (`INV-CCH-8`): the ccpool-backed handler executor does not count this as a launch failure of
   this bead, because a full disk is a transient, system-wide condition that would hit whichever

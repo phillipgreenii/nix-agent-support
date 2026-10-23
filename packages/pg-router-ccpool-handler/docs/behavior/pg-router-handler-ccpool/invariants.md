@@ -70,11 +70,11 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   after a good launch; a stamp an earlier handler left is ignored (`INV-CCH-34`). The adapter maps
   its own reasons to kinds:
 
-  | kind      | reasons                                                              |
-  | --------- | -------------------------------------------------------------------- |
-  | `busy`    | `at-capacity` (a usage-limit refusal maps here), `session-in-flight` |
-  | `fault`   | `capacity-unknown`, `pool-unreadable`, `low-disk`, `launch-failed`   |
-  | `neutral` | `origin-unavailable` and every `skipped-*` reason                    |
+  | kind      | reasons                                                                                                                                                 |
+  | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `busy`    | `at-capacity` (a usage-limit refusal maps here), `session-in-flight`, `connector-unavailable` (the `review` precheck's retryable decline, `INV-CCH-22`) |
+  | `fault`   | `capacity-unknown`, `pool-unreadable`, `low-disk`, `launch-failed`                                                                                      |
+  | `neutral` | `origin-unavailable` and every `skipped-*` reason                                                                                                       |
 
   The core counts a role's progress by kind alone and never reads a reason (`INV-OBS-3`,
   `INV-CCH-37`).

@@ -3,8 +3,10 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -157,6 +159,64 @@ func TestPrecheckReview_FailsOpen(t *testing.T) {
 	}
 }
 
+// TestPrecheckReview_UnavailableDeclinesRetryably: a connector answer of class
+// unavailable, on either PR read, declines the dispatch with the retryable
+// reason (the router re-offers it), and the decline stops further reads.
+func TestPrecheckReview_UnavailableDeclinesRetryably(t *testing.T) {
+	unavailable := fmt.Errorf("pg-connector pr show o/r#120058: %w: down", ErrConnectorUnavailable)
+	tests := []struct {
+		name      string
+		pr        *fakePR
+		wantCalls []string
+	}{
+		{"merged read unavailable", &fakePR{mergedErr: unavailable}, []string{"merged o/r#120058"}},
+		{"pending read unavailable", &fakePR{pendingErr: unavailable}, []string{"merged o/r#120058", "pending o/r#120058"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := fastCfg()
+			role := pinnedHeadReviewRole(cfg)
+			got, skipped := PrecheckReview(context.Background(), DispatchContext{Role: role, Item: reviewItem()}, Deps{Cfg: cfg, PR: tc.pr}, openBead())
+			if !skipped {
+				t.Fatal("an unavailable connector must decline the dispatch")
+			}
+			if got.Reason != ReasonConnectorUnavailable || !got.Retryable {
+				t.Fatalf("skip = %+v, want reason %q and Retryable", got, ReasonConnectorUnavailable)
+			}
+			if strings.HasPrefix(got.Reason, "skipped-") {
+				t.Fatalf("reason %q must not carry the routine skipped- prefix", got.Reason)
+			}
+			if !reflect.DeepEqual(tc.pr.calls, tc.wantCalls) {
+				t.Fatalf("PR reads = %v, want %v", tc.pr.calls, tc.wantCalls)
+			}
+		})
+	}
+}
+
+// TestPrecheckReview_OtherErrorsStillFailOpen: any connector error that is not
+// the unavailable class (including a call that outlived its bound) launches, and
+// no skip is Retryable.
+func TestPrecheckReview_OtherErrorsStillFailOpen(t *testing.T) {
+	for name, err := range map[string]error{
+		"generic":      errors.New("connector down"),
+		"not found":    fmt.Errorf("connector error %q: gone", "not_found"),
+		"unauthed":     fmt.Errorf("connector error %q: no token", "unauthenticated"),
+		"call timeout": fmt.Errorf("pg-connector pr show: %w", context.DeadlineExceeded),
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := fastCfg()
+			role := pinnedHeadReviewRole(cfg)
+			pr := &fakePR{mergedErr: err, pendingErr: err}
+			if got, skipped := PrecheckReview(context.Background(), DispatchContext{Role: role, Item: reviewItem()}, Deps{Cfg: cfg, PR: pr}, openBead()); skipped {
+				t.Fatalf("a non-unavailable error must fail open, got skip %+v", got)
+			}
+			if len(pr.calls) != 2 {
+				t.Fatalf("PR reads = %v, want both reads to run", pr.calls)
+			}
+		})
+	}
+}
+
 // TestPrecheckReview_OnlyTheReviewRole: another role never runs the precheck,
 // even for a closed bead (its dispatch path is unchanged).
 func TestPrecheckReview_OnlyTheReviewRole(t *testing.T) {
@@ -218,6 +278,14 @@ func (c *scriptedCmd) Run(_ context.Context, argv []string) ([]byte, error) {
 		return nil, errors.New("scriptedCmd: unscripted call: " + key)
 	}
 	return []byte(out), nil
+}
+
+// envelopeOnFailCmd answers every call with stdout out AND a failed process, as
+// pg-connector does for an error answer (exit 1, envelope on stdout).
+type envelopeOnFailCmd struct{ out string }
+
+func (c *envelopeOnFailCmd) Run(context.Context, []string) ([]byte, error) {
+	return []byte(c.out), errors.New("exit status 1")
 }
 
 // TestConnectorReader pins the exact read-only argv and the wire parsing.
@@ -283,6 +351,43 @@ func TestConnectorReader(t *testing.T) {
 		r := ConnectorReader{Cmd: &scriptedCmd{err: errors.New("exit status 4")}}
 		if _, err := r.PRMerged(ctx, "o/r#7"); err == nil {
 			t.Fatal("want an error")
+		}
+	})
+	// The connector exits non-zero for an error answer and still writes the
+	// envelope to stdout; only the unavailable class is told apart.
+	t.Run("unavailable envelope on a failed process is classed unavailable", func(t *testing.T) {
+		r := ConnectorReader{Cmd: &envelopeOnFailCmd{out: `{"error":{"code":"unavailable","message":"daemon down"}}`}}
+		if _, err := r.PRMerged(ctx, "o/r#7"); !errors.Is(err, ErrConnectorUnavailable) {
+			t.Fatalf("PRMerged err = %v, want ErrConnectorUnavailable", err)
+		}
+		if _, err := r.PendingReview(ctx, "o/r#7"); !errors.Is(err, ErrConnectorUnavailable) {
+			t.Fatalf("PendingReview err = %v, want ErrConnectorUnavailable", err)
+		}
+	})
+	t.Run("unavailable envelope on a clean exit is classed unavailable", func(t *testing.T) {
+		r := ConnectorReader{Cmd: &scriptedCmd{out: map[string]string{show: `{"error":{"code":"unavailable","message":"x"}}`}}}
+		if _, err := r.PRMerged(ctx, "o/r#7"); !errors.Is(err, ErrConnectorUnavailable) {
+			t.Fatalf("err = %v, want ErrConnectorUnavailable", err)
+		}
+	})
+	t.Run("other error classes and bare failures are not unavailable", func(t *testing.T) {
+		for _, out := range []string{
+			`{"error":{"code":"not_found","message":"x"}}`,
+			`{"error":{"code":"unauthenticated","message":"x"}}`,
+			`{"error":{"code":"invalid_argument","message":"x"}}`,
+			`not json`,
+			``,
+		} {
+			r := ConnectorReader{Cmd: &envelopeOnFailCmd{out: out}}
+			_, err := r.PRMerged(ctx, "o/r#7")
+			if err == nil || errors.Is(err, ErrConnectorUnavailable) {
+				t.Fatalf("output %q: err = %v, want a non-unavailable error", out, err)
+			}
+		}
+		// A call that outlives its bound is a deadline error with no envelope.
+		r := ConnectorReader{Cmd: &scriptedCmd{err: context.DeadlineExceeded}}
+		if _, err := r.PRMerged(ctx, "o/r#7"); err == nil || errors.Is(err, ErrConnectorUnavailable) {
+			t.Fatalf("deadline err = %v, want a non-unavailable error", err)
 		}
 	})
 	t.Run("configured binary is used", func(t *testing.T) {

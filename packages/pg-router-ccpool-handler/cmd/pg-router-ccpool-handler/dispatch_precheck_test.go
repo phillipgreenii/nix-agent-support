@@ -112,6 +112,57 @@ func TestRunDispatch_reviewPrecheck(t *testing.T) {
 	}
 }
 
+// setConnectorScript replaces the fake pg-connector in the PATH dir precheckEnv
+// built with body (shell), so a test can script a failing connector.
+func setConnectorScript(t *testing.T, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(os.Getenv("PATH"), "pg-connector"), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRunDispatch_reviewPrecheckConnectorErrors drives the REAL process path: a
+// fake pg-connector that, like the real one, writes an error envelope to stdout
+// and exits 1. An unavailable answer declines retryably (kind busy, reason
+// connector-unavailable, exit busy); every other error class and a bare
+// failure keep failing open to the unchanged launch path.
+func TestRunDispatch_reviewPrecheckConnectorErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		script     string
+		wantReason string
+		wantKind   string
+	}{
+		{"unavailable declines retryably", `printf '%s' '{"error":{"code":"unavailable","message":"daemon down"}}'; exit 1`, "connector-unavailable", "busy"},
+		{"not_found fails open", `printf '%s' '{"error":{"code":"not_found","message":"gone"}}'; exit 4`, busyReasonPoolUnreadable, "fault"},
+		{"unauthenticated fails open", `printf '%s' '{"error":{"code":"unauthenticated","message":"no token"}}'; exit 1`, busyReasonPoolUnreadable, "fault"},
+		{"bare failure fails open", `echo boom >&2; exit 1`, busyReasonPoolUnreadable, "fault"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rolePath, _ := precheckEnv(t, "open", prOpen, noPending)
+			setConnectorScript(t, tc.script)
+			restoreIn := redirectStdin(t, `{"schemaVersion":"1","id":"d-1","event":{"id":"e-1","type":"dispatch","payload":{"id":"zr-r","type":"review-pr","metadata":{"repo":"o/r","pr_number":120058,"head_sha":"abc"}}}}`)
+			defer restoreIn()
+			var code int
+			got := captureStdout(t, func() { code = runDispatch([]string{"--role-config", rolePath}) })
+			var reply struct {
+				Reason string `json:"reason"`
+				Kind   string `json:"kind"`
+			}
+			if err := json.Unmarshal([]byte(got), &reply); err != nil {
+				t.Fatalf("stdout = %q, not valid JSON: %v", got, err)
+			}
+			if code != conformance.ExitBusy {
+				t.Fatalf("exit = %d, want ExitBusy (%d)", code, conformance.ExitBusy)
+			}
+			if reply.Reason != tc.wantReason || reply.Kind != tc.wantKind {
+				t.Fatalf("reply = %+v, want reason %q kind %q", reply, tc.wantReason, tc.wantKind)
+			}
+		})
+	}
+}
+
 // TestRunDispatch_reviewPrecheckFailsOpenWithoutConnector: with no pg-connector
 // on PATH the precheck cannot read the PR, logs it, and launches as before.
 func TestRunDispatch_reviewPrecheckFailsOpenWithoutConnector(t *testing.T) {

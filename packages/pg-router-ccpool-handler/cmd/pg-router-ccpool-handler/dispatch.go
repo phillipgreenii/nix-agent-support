@@ -272,12 +272,19 @@ func runDispatch(args []string) int {
 	// whose bead is no longer open, unclaimed, groomed, undeferred and unblocked,
 	// and a "triage" role's dispatch whose bead no longer matches its discovery
 	// query (open, escalated, not human, undeferred, unblocked), launch no
-	// session. Read-only; fails open.
+	// session. Read-only; fails open, except that a connector answer of class
+	// unavailable declines retryably (busy, reason connector-unavailable).
 	// After the reconciles above so their housekeeping still runs on a decline;
 	// the decline is the same pre-accept busy reply as every other, carrying the
 	// skip's own reason so pg-router core's declined metric counts it per reason.
 	if skip, skipped := executor.Precheck(ctx, dctx, deps, bead); skipped {
-		declineAndReply(os.Stdout, declineLog, role, dctx.Item.ID, neutralDecline(skip.Reason, skip.Detail))
+		decline := neutralDecline(skip.Reason, skip.Detail)
+		if skip.Retryable {
+			// A retryable skip (the review precheck's connector-unavailable) proves
+			// nothing moot: it is routine backpressure the router re-offers.
+			decline.Kind = declineKindBusy
+		}
+		declineAndReply(os.Stdout, declineLog, role, dctx.Item.ID, decline)
 		return conformance.ExitBusy
 	}
 	result, err := executor.For(role.Type).Dispatch(ctx, dctx, deps)

@@ -29,6 +29,23 @@ const (
 	SkipPendingReview = "skipped-pending-review"
 )
 
+// ReasonConnectorUnavailable is the review precheck's retryable decline reason:
+// the connector answered a PR read with error class "unavailable" (its daemon is
+// briefly down or its budget is reserved), so the dispatch is declined and the
+// router re-offers the event. Unlike the "skipped-" reasons it does NOT prove the
+// dispatch moot, so it deliberately does not carry that prefix: the failure-rate
+// alert, which excludes "skipped-.+" as routine, still sees a sustained outage.
+const ReasonConnectorUnavailable = "connector-unavailable"
+
+// connectorErrorUnavailable is the wire error code of the connector's retryable
+// "unavailable" class (pg-connector's closed error taxonomy).
+const connectorErrorUnavailable = "unavailable"
+
+// ErrConnectorUnavailable marks a connector read that was answered with error
+// class "unavailable". The review precheck declines retryably on it; every other
+// connector error fails open.
+var ErrConnectorUnavailable = errors.New("connector answered unavailable")
+
 // The "ready" precheck's skip reasons (INV-CCH-22, bead pg2-nk6th.3). They share
 // the "skipped-" prefix with the review reasons so the failure-rate alert, which
 // excludes only `skipped-.+`, treats every one as a routine decline.
@@ -59,7 +76,8 @@ var readyExcludedLabels = []string{beads.LabelHuman, "human-focus-required", bea
 const precheckEventKind = "precheck_skip"
 
 // connectorCallTimeout bounds one read-only pg-connector call made by the
-// precheck. A call that outlives it is an error, which fails open.
+// precheck. A call that outlives it is an error, which fails open (only an
+// answer of class "unavailable" declines retryably).
 const connectorCallTimeout = 20 * time.Second
 
 // defaultConnectorBinary is the pg-connector executable resolved on PATH when
@@ -76,6 +94,10 @@ type Skip struct {
 	Reason string
 	// Detail is a short human-readable account for the log line.
 	Detail string
+	// Retryable is true for a decline that does not prove the dispatch moot: the
+	// router re-offers the event, so the caller replies with a busy decline
+	// rather than a neutral one.
+	Retryable bool
 }
 
 // PendingReview is the part of pg-connector's review_pending record the
@@ -119,10 +141,8 @@ func (c ConnectorReader) binary() string {
 func (c ConnectorReader) run(ctx context.Context, args ...string) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, connectorCallTimeout)
 	defer cancel()
-	out, err := c.Cmd.Run(ctx, append([]string{c.binary()}, args...))
-	if err != nil {
-		return nil, fmt.Errorf("%s %s: %w", c.binary(), strings.Join(args, " "), err)
-	}
+	out, runErr := c.Cmd.Run(ctx, append([]string{c.binary()}, args...))
+	what := c.binary() + " " + strings.Join(args, " ")
 	var env struct {
 		Result json.RawMessage `json:"result"`
 		Error  *struct {
@@ -130,14 +150,28 @@ func (c ConnectorReader) run(ctx context.Context, args ...string) (json.RawMessa
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(out, &env); err != nil {
-		return nil, fmt.Errorf("%s %s: decode output: %w", c.binary(), strings.Join(args, " "), err)
+	decodeErr := json.Unmarshal(out, &env)
+	if runErr != nil {
+		// The connector exits non-zero for an error answer and still writes the
+		// envelope to stdout, so an "unavailable" class is read from the output
+		// even when the process failed. Any other failure (missing binary, a call
+		// that outlived its bound, another error class) is a plain error.
+		if decodeErr == nil && env.Error != nil && env.Error.Code == connectorErrorUnavailable {
+			return nil, fmt.Errorf("%s: %w: %s", what, ErrConnectorUnavailable, env.Error.Message)
+		}
+		return nil, fmt.Errorf("%s: %w", what, runErr)
+	}
+	if decodeErr != nil {
+		return nil, fmt.Errorf("%s: decode output: %w", what, decodeErr)
 	}
 	if env.Error != nil {
-		return nil, fmt.Errorf("%s %s: connector error %q: %s", c.binary(), strings.Join(args, " "), env.Error.Code, env.Error.Message)
+		if env.Error.Code == connectorErrorUnavailable {
+			return nil, fmt.Errorf("%s: %w: %s", what, ErrConnectorUnavailable, env.Error.Message)
+		}
+		return nil, fmt.Errorf("%s: connector error %q: %s", what, env.Error.Code, env.Error.Message)
 	}
 	if len(env.Result) == 0 {
-		return nil, fmt.Errorf("%s %s: output carries no result", c.binary(), strings.Join(args, " "))
+		return nil, fmt.Errorf("%s: output carries no result", what)
 	}
 	return env.Result, nil
 }
@@ -374,7 +408,10 @@ func PrecheckTriage(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool)
 //
 // It fails OPEN: an unreadable bead, a PR id the item does not carry, or any
 // connector failure (missing binary, timeout, error envelope) logs a warning
-// and launches exactly as before. A decline logs a message distinct per reason,
+// and launches exactly as before, with one exception: a connector answer of
+// error class "unavailable" (ErrConnectorUnavailable) declines the dispatch with
+// the retryable reason ReasonConnectorUnavailable, so the router re-offers it
+// once the connector is back. A decline logs a message distinct per reason,
 // writes a precheck_skip event-log record, and (via the busy-decline reason the
 // caller replies with) lands in pg-router core's declined metric by reason.
 func PrecheckReview(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
@@ -401,6 +438,8 @@ func precheckReview(ctx context.Context, d DispatchContext, deps Deps, iss *bead
 	pr := deps.prReader()
 	merged, err := pr.PRMerged(ctx, prID)
 	switch {
+	case errors.Is(err, ErrConnectorUnavailable):
+		return deps.skip(d, unavailableSkip(err), prID), true
 	case err != nil:
 		slog.Warn("dispatch precheck: could not read PR merged state; launching anyway", "role", d.Role.Name, "bead", d.Item.ID, "pr", prID, "err", err)
 	case merged:
@@ -408,12 +447,20 @@ func precheckReview(ctx context.Context, d DispatchContext, deps Deps, iss *bead
 	}
 	pending, err := pr.PendingReview(ctx, prID)
 	switch {
+	case errors.Is(err, ErrConnectorUnavailable):
+		return deps.skip(d, unavailableSkip(err), prID), true
 	case err != nil:
 		slog.Warn("dispatch precheck: could not read pending-review state; launching anyway", "role", d.Role.Name, "bead", d.Item.ID, "pr", prID, "err", err)
 	case pending.Pending && !pending.Stale:
 		return deps.skip(d, Skip{Reason: SkipPendingReview, Detail: "a pending review already holds content for the PR's live head"}, prID), true
 	}
 	return Skip{}, false
+}
+
+// unavailableSkip is the retryable decline for a connector read answered with
+// class "unavailable".
+func unavailableSkip(err error) Skip {
+	return Skip{Reason: ReasonConnectorUnavailable, Detail: err.Error(), Retryable: true}
 }
 
 // skip logs a precheck decline with a message distinct per reason and records
@@ -441,6 +488,8 @@ func (d Deps) skip(dc DispatchContext, s Skip, pr string) Skip {
 		msg = "dispatch declined: bead is blocked"
 	case SkipBeadNotEscalated:
 		msg = "dispatch declined: bead is no longer escalated"
+	case ReasonConnectorUnavailable:
+		msg = "dispatch declined: connector unavailable, retry later"
 	default:
 		msg = "dispatch declined: precheck"
 	}

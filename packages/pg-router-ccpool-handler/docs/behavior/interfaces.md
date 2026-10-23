@@ -57,7 +57,7 @@ and to the deployment. Each is fully defined by the invariant cited; none is dec
   strictly.
 - **The decline reasons and kinds** — the fixed, bounded reasons of the pre-accept busy declines
   (`at-capacity`, `capacity-unknown`, `pool-unreadable`, `low-disk`, `session-in-flight`,
-  `command-busy`, `origin-unavailable`, `launch-failed` and the `skipped-*` reasons), each mapped to
+  `command-busy`, `connector-unavailable`, `origin-unavailable`, `launch-failed` and the `skipped-*` reasons), each mapped to
   a kind (`INV-CCH-37`).
 - **The `dispatch_start`, outcome and `dispatch_decline` event-log records** — what an accepted
   dispatch ran, written when its payload starts (`role`, `item_id`, `item_type`, then `argv`,

@@ -485,7 +485,8 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   written to the event log as a `precheck_skip` record carrying role, bead, PR (review only) and
   reason. Every check MUST fail OPEN: an unreadable bead, an item that names no well-formed PR, or
   any connector failure (binary missing, timeout, error answer, malformed answer) is logged and the
-  dispatch proceeds exactly as without this invariant.
+  dispatch proceeds exactly as without this invariant, with ONE exception: a connector answer of
+  error class `unavailable` (the `review` check only, below) declines the dispatch retryably.
   - **`review`.** Decline when ANY of these holds, in this order: (a) the review bead is already
     closed (its status as just re-read at dispatch, no further bead call); (b) the pull request the
     item names (`<repo>#<number>` from the item's metadata) is merged; (c) the acting identity
@@ -501,9 +502,17 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     "open" only means the dispatch proceeds. Where the connector's backend keeps its own store
     and daemon (ADR 0090), the pending-review read (c) is unchanged in kind and is served from
     that backend's pending group, which has a two-minute freshness window. An `unavailable`
-    answer, which the connector classes as retryable, is one more connector failure of the kind
-    the fail-open rule above covers: the check declines nothing and the dispatch proceeds exactly
-    as without this invariant.
+    answer, which the connector classes as retryable (a daemon that is briefly down, a reserved
+    rate budget), is the one connector failure that does NOT fail open: the check declines the
+    dispatch with the pre-accept busy decline of `INV-CCH-6`, reason `connector-unavailable`, kind
+    `busy`, so the router re-offers the event once the connector is back, and it stops reading
+    (a launch against a connector that cannot answer would act on an unchecked dispatch). The
+    reason deliberately does NOT start `skipped-`: the dispatch is not proven moot, and a
+    sustained outage stays visible to the failure-rate alert. The class is read from the
+    connector's error envelope even when its process exits non-zero, which is how the connector
+    reports an error answer. Every OTHER connector failure (a missing binary, a call that
+    outlives its bound, another error class such as `not_found` or `unauthenticated`, a
+    malformed answer) still fails open and launches.
   - **`ready`** (a role that works a bead it claims itself, such as a drain worker). The check
     reads only the bead as just re-read at dispatch (its status, assignee, labels, deferral date
     and dependencies; no further bead call) and declines when ANY of these holds, in this order:
@@ -1080,11 +1089,11 @@ changes a core gate or `INV-LIFE-2`.
     the role's progress by kind alone (`INV-OBS-3`); it never reads the reason (`GOAL-MIN-1`).
   - **The mapping.**
 
-    | kind      | reasons                                                                                                                                   |
-    | --------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-    | `busy`    | `at-capacity` (a usage-limit refusal maps here, so a usage window never pages), `session-in-flight`, `command-busy`                       |
-    | `fault`   | `capacity-unknown`, `pool-unreadable`, `low-disk`, `launch-failed`                                                                        |
-    | `neutral` | `origin-unavailable` (the origin gate has its own rule, `INV-CCH-10`) and every `skipped-*` reason (a dispatch proven moot, `INV-CCH-22`) |
+    | kind      | reasons                                                                                                                                                                            |
+    | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | `busy`    | `at-capacity` (a usage-limit refusal maps here, so a usage window never pages), `session-in-flight`, `command-busy`, `connector-unavailable` (the `review` precheck, `INV-CCH-22`) |
+    | `fault`   | `capacity-unknown`, `pool-unreadable`, `low-disk`, `launch-failed`                                                                                                                 |
+    | `neutral` | `origin-unavailable` (the origin gate has its own rule, `INV-CCH-10`) and every `skipped-*` reason (a dispatch proven moot, `INV-CCH-22`)                                          |
 
   - **The detail.** `detail` says why, for a reader. It is bounded, and redacted with the masking of
     `INV-CCH-9`, and the core never parses it. It MUST NOT carry an item's content, a prompt or the
