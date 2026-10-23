@@ -7057,6 +7057,67 @@
                   };
                   firedAssertion = lib.findFirst (a: a.assertion == false) null bothEnabled.assertions;
 
+                  # roles.<name> (pg2-12gr4.10.9): a role with a handler, a
+                  # [role.config] table, survivesShutdown and an extra pass-through
+                  # key; a handler-less role (skipped); both beside baseConfigText.
+                  rolesDeclared = evalHM {
+                    enable = true;
+                    periodicDrain = {
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                    };
+                    daemon = {
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                    };
+                    roles = {
+                      scratch-command = {
+                        binds = [ "scratch.event" ];
+                        handler = "/nix/store/fake-handler/bin/pg-router-handler-command";
+                        config.command.argv = [ "/usr/bin/true" ];
+                        survivesShutdown = true;
+                        extra.non_blocking_gates = [ "cicd-down" ];
+                      };
+                      minimal = {
+                        binds = [ "min.event" ];
+                        enabled = false;
+                        handler = "/nix/store/fake-handler/bin/h";
+                      };
+                      undecided = {
+                        binds = [ "later.event" ];
+                      };
+                    };
+                    existingRoleNames = [ "worker" ];
+                  };
+                  renderedByName = lib.listToAttrs (
+                    map (r: lib.nameValuePair r.name r) rolesDeclared.phillipgreenii.programs.pg-router.renderedRoles
+                  );
+                  rolesRelative = evalHM {
+                    enable = true;
+                    roles.bad.handler = "relative/handler";
+                    periodicDrain = {
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                    };
+                    daemon = {
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                    };
+                  };
+                  rolesDuplicate = evalHM {
+                    enable = true;
+                    roles.worker.handler = "/nix/store/fake-handler/bin/h";
+                    existingRoleNames = [ "worker" ];
+                    periodicDrain = {
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                    };
+                    daemon = {
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                    };
+                  };
+
                   darwinWithDaemon = evalDarwin true true;
                   darwinWithoutDaemon = evalDarwin false true;
                   # pprof.enable = false: daemon on, profiling endpoint opted out.
@@ -7190,7 +7251,80 @@
                   darwinWithDaemon.phillipgreenii.observability.alertRuleFiles;
                 assert lib.elem ./packages/pg-router/grafana/alerting/alerts.yaml
                   darwinWithoutDaemon.phillipgreenii.observability.alertRuleFiles;
-                pkgs.runCommand "test-pg-router-module-ok" { } "touch $out";
+                # roles.<name> (pg2-12gr4.10.9): a consumer that sets no roles
+                # renders nothing (empty list) and its unit environment is the
+                # same one as before the option existed; the old options are
+                # untouched.
+                assert drainOnly.phillipgreenii.programs.pg-router.renderedRoles == [ ];
+                assert
+                  drainService.Environment == [
+                    "PG_ROUTER_REPO_ROOT=/repo"
+                    "PG_ROUTER_CONFIG=${pkgs.writeText "pg-router-drain-config.toml" baseConfigText}"
+                  ];
+                # A role with a handler renders name/enabled/binds plus handler,
+                # config, survives_shutdown and the extra keys; a handler-less role
+                # is skipped; a role setting only handler+binds+enabled renders
+                # exactly those keys (defaults omitted).
+                assert
+                  lib.attrNames renderedByName == [
+                    "minimal"
+                    "scratch-command"
+                  ];
+                assert
+                  renderedByName.scratch-command == {
+                    name = "scratch-command";
+                    enabled = true;
+                    binds = [ "scratch.event" ];
+                    handler = "/nix/store/fake-handler/bin/pg-router-handler-command";
+                    config.command.argv = [ "/usr/bin/true" ];
+                    survives_shutdown = true;
+                    non_blocking_gates = [ "cicd-down" ];
+                  };
+                assert
+                  renderedByName.minimal == {
+                    name = "minimal";
+                    enabled = false;
+                    binds = [ "min.event" ];
+                    handler = "/nix/store/fake-handler/bin/h";
+                  };
+                # No assertion fires for a well-formed declaration.
+                # (Only the roles assertions are forced: the ccpool-enable one
+                # reads an option this stub eval does not declare.)
+                assert lib.all (a: a.assertion) (
+                  lib.filter (
+                    a: lib.hasInfix "pg-router.roles." a.message || lib.hasInfix "declared both" a.message
+                  ) rolesDeclared.assertions
+                );
+                # A relative handler and a duplicate name each fire an assertion
+                # (the relative one names the role).
+                assert
+                  let
+                    fired = lib.findFirst (a: a.assertion == false) null rolesRelative.assertions;
+                  in
+                  fired != null && lib.hasInfix "roles.bad.handler" fired.message;
+                assert
+                  let
+                    fired = lib.findFirst (a: a.assertion == false) null rolesDuplicate.assertions;
+                  in
+                  fired != null && lib.hasInfix "worker" fired.message;
+                pkgs.runCommand "test-pg-router-module-ok"
+                  {
+                    rolesFile = rolesDeclared.phillipgreenii.programs.pg-router.rolesFile;
+                  }
+                  ''
+                    # The rendered file carries the keys under their TOML spelling.
+                    grep -q '^\[\[role\]\]' "$rolesFile"
+                    grep -q '^name = "scratch-command"' "$rolesFile"
+                    grep -q '^handler = "/nix/store/fake-handler/bin/pg-router-handler-command"' "$rolesFile"
+                    grep -q '^survives_shutdown = true' "$rolesFile"
+                    grep -q '^\[role.config.command\]' "$rolesFile"
+                    grep -q '^non_blocking_gates = ' "$rolesFile"
+                    # The handler-less role is not rendered, and survives_shutdown
+                    # appears only for the role that set it.
+                    ! grep -q 'undecided' "$rolesFile"
+                    test "$(grep -c '^survives_shutdown' "$rolesFile")" = 1
+                    touch $out
+                  '';
 
               # test-pg-router-ccpool-handler-module (this bead, pg2-pteab):
               # eval-level coverage for the NEW nix-layer wiring of the

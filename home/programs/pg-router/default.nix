@@ -7,6 +7,81 @@
 let
   cfg = config.phillipgreenii.programs.pg-router;
 
+  tomlFormat = pkgs.formats.toml { };
+
+  # roles.<name> (pg2-12gr4.10.9): one declaration per role, joined by name
+  # through module merging. The submodule's `name` is the attribute name and
+  # becomes the rendered [[role]] table's `name`.
+  roleModule = _: {
+    options = {
+      binds = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = "The event types this role binds (TOML `binds`). Always rendered.";
+      };
+      enabled = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "TOML `enabled`. Always rendered.";
+      };
+      handler = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          The role's own adapter: an ABSOLUTE path to the handler executable
+          (TOML `handler`). `null` means the role is NOT rendered through
+          `roles` (it is skipped from `renderedRoles`), so a consumer can
+          declare binds/enabled before choosing an adapter. A relative path
+          fails evaluation with an assertion naming the role.
+        '';
+      };
+      config = lib.mkOption {
+        inherit (tomlFormat) type;
+        default = { };
+        description = ''
+          The opaque `[role.config]` table handed to the role's handler on
+          stdin (any TOML-expressible attrs, e.g. `{ ccpool.actor = "x"; }`).
+          Omitted from the rendered table when empty.
+        '';
+      };
+      survivesShutdown = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Rendered as the TOML `survives_shutdown` key; emitted only when
+          true (the core defaults it to false).
+        '';
+      };
+      extra = lib.mkOption {
+        inherit (tomlFormat) type;
+        default = { };
+        description = ''
+          Any other `[[role]]` keys, under their TOML spelling (for example
+          `extra.non_blocking_gates`, `extra.retry`, `extra.description`,
+          `extra.max_dispatch_retries`), merged into the rendered table so a
+          consumer never has to hand-write a `[[role]]` table for a role it
+          also declares here.
+        '';
+      };
+    };
+  };
+
+  renderRole =
+    name: r:
+    {
+      inherit name;
+      inherit (r) enabled binds;
+    }
+    // lib.optionalAttrs (r.handler != null) { inherit (r) handler; }
+    // lib.optionalAttrs (r.config != { }) { inherit (r) config; }
+    // lib.optionalAttrs r.survivesShutdown { survives_shutdown = true; }
+    // r.extra;
+
+  # Roles with a handler, in attribute-name order (lib.mapAttrsToList sorts).
+  renderedRoles = lib.concatLists (
+    lib.mapAttrsToList (name: r: lib.optional (r.handler != null) (renderRole name r)) cfg.roles
+  );
+
   # Shared PG_ROUTER_* Environment-list builder for both systemd units below
   # (periodicDrain's oneshot run-until-idle pass, daemon's long-running
   # `run` core): each spawns a pg-router process needing the same
@@ -86,6 +161,62 @@ in
       Runtime-depends on `ccpool` and `bd` being on PATH.
     '';
     package = lib.mkPackageOption pkgs "pg-router" { };
+
+    roles = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule roleModule);
+      default = { };
+      description = ''
+        Role declarations, one entry per role, joined by name through module
+        merging (so another module, for example the handler module, can set
+        `roles.<name>.handler` for a role a consumer declared here). A role
+        with a `handler` renders one `[[role]]` table carrying `name`,
+        `enabled`, `binds` and, only when set, `handler`, `[role.config]`,
+        `survives_shutdown` and the pass-through `extra` keys. A role with
+        `handler = null` is skipped. There is no `wrap`.
+
+        MERGE SURFACE (what a consumer uses): this module does NOT edit
+        `periodicDrain.configText` / `daemon.configText` (the darwin module
+        reads `daemon.configText` itself, and a consumer that sets no `roles`
+        gets exactly the output it got before this option existed). A consumer
+        merges the two read-only outputs into the config it builds:
+        `renderedRoles` (a list of ready `[[role]]` attrs, for example
+        `role = existingRoles ++ config.phillipgreenii.programs.pg-router.renderedRoles`
+        before generating TOML with `pkgs.formats.toml`) and `rolesFile` (a
+        store file holding just those `[[role]]` tables, for inspection and
+        tests). Pass `existingRoleNames` to have a duplicate name between
+        `roles` and the consumer's own `[[role]]` list fail evaluation.
+        The old `handlerCommand` / `handlerCommandDir` options are untouched.
+      '';
+    };
+
+    existingRoleNames = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = ''
+        Names of the `[[role]]` tables the consumer writes itself. When set,
+        an assertion fails if any of them is also declared (with a handler)
+        in `roles`, so one role is never declared twice. When empty no check
+        runs and `pg-router config check` is the backstop.
+      '';
+    };
+
+    renderedRoles = lib.mkOption {
+      type = lib.types.listOf lib.types.attrs;
+      readOnly = true;
+      default = renderedRoles;
+      description = ''
+        Read-only: the `[[role]]` attrs rendered from `roles` (roles with a
+        handler only, sorted by name), under their TOML key spelling, ready to
+        append to a consumer's own `role` list.
+      '';
+    };
+
+    rolesFile = lib.mkOption {
+      type = lib.types.path;
+      readOnly = true;
+      default = tomlFormat.generate "pg-router-roles.toml" { role = renderedRoles; };
+      description = "Read-only: a TOML file holding only the `[[role]]` tables rendered from `roles`.";
+    };
 
     periodicDrain = {
       enable = lib.mkEnableOption ''
@@ -273,48 +404,70 @@ in
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
 
-    assertions = [
-      {
-        assertion = !(cfg.periodicDrain.enable && cfg.daemon.enable);
+    assertions =
+      (lib.mapAttrsToList (name: r: {
+        assertion = r.handler == null || lib.hasPrefix "/" r.handler;
         message = ''
-          phillipgreenii.programs.pg-router: periodicDrain.enable and
-          daemon.enable cannot both be true — they are two independent
-          pg-router cores (`run-until-idle` vs `run`) over the same
-          LogDir/socket/WAL (events.jsonl, the discovery record, the
-          push-ingest socket), and running both would race on that shared
-          state. Enable exactly one.
+          phillipgreenii.programs.pg-router.roles.${name}.handler must be an
+          absolute path (got "${toString r.handler}"); the core resolves it
+          verbatim, so a relative or bare name cannot be invoked reliably.
         '';
-      }
-      {
-        # tc-24qs: pg-router's own enable doc says "Runtime-depends on `ccpool`
-        # ... being on PATH", but that dependency was never enforced, so a
-        # consumer enabling only `programs.pg-router` evaluates cleanly and then
-        # fails at RUNTIME on every single dispatch — not loudly, either: the
-        # tmux session and `claude` process start and stay alive
-        # (`state=starting live=true`), so it presents as a silent 10-minute
-        # hang per attempt ("did not reach ready before timeout"), not an
-        # error. Root cause: `programs.ccpool`'s module is the only thing that
-        # renders `claude.plugin_dir` into ccpool's config.toml; without it
-        # ccpool falls back to its own empty-string default, the
-        # ccpool-plugin's SessionStart hook (`ccpool hook start`) never
-        # registers, and no session can ever reach `ready` (see
-        # packages/ccpool's session.ErrNoPluginDir, which now fails the
-        # underlying `ccpool new`/`reply` call immediately instead of hanging
-        # — this assertion catches the same misconfiguration earlier, at
-        # eval/build time, before any dispatch is even attempted).
-        assertion = config.phillipgreenii.programs.ccpool.enable;
-        message = ''
-          phillipgreenii.programs.pg-router.enable requires
-          phillipgreenii.programs.ccpool.enable = true (or the "claude-fleet"
-          capability, which enables both together) — pg-router dispatches every
-          role via a launched `ccpool` session, and only the ccpool module
-          renders claude.plugin_dir into ccpool's config.toml. Without it,
-          the ccpool-plugin's SessionStart hook never registers and every
-          dispatch would silently hang for the full Wait timeout before
-          failing with "did not reach ready before timeout" (tc-24qs).
-        '';
-      }
-    ];
+      }) cfg.roles)
+      ++ [
+        {
+          assertion = lib.intersectLists cfg.existingRoleNames (map (r: r.name) renderedRoles) == [ ];
+          message = ''
+            phillipgreenii.programs.pg-router: role(s)
+            ${lib.concatStringsSep ", " (
+              lib.intersectLists cfg.existingRoleNames (map (r: r.name) renderedRoles)
+            )}
+            are declared both in `roles` and in the consumer's own [[role]]
+            list (`existingRoleNames`). Declare each role once.
+          '';
+        }
+      ]
+      ++ [
+        {
+          assertion = !(cfg.periodicDrain.enable && cfg.daemon.enable);
+          message = ''
+            phillipgreenii.programs.pg-router: periodicDrain.enable and
+            daemon.enable cannot both be true — they are two independent
+            pg-router cores (`run-until-idle` vs `run`) over the same
+            LogDir/socket/WAL (events.jsonl, the discovery record, the
+            push-ingest socket), and running both would race on that shared
+            state. Enable exactly one.
+          '';
+        }
+        {
+          # tc-24qs: pg-router's own enable doc says "Runtime-depends on `ccpool`
+          # ... being on PATH", but that dependency was never enforced, so a
+          # consumer enabling only `programs.pg-router` evaluates cleanly and then
+          # fails at RUNTIME on every single dispatch — not loudly, either: the
+          # tmux session and `claude` process start and stay alive
+          # (`state=starting live=true`), so it presents as a silent 10-minute
+          # hang per attempt ("did not reach ready before timeout"), not an
+          # error. Root cause: `programs.ccpool`'s module is the only thing that
+          # renders `claude.plugin_dir` into ccpool's config.toml; without it
+          # ccpool falls back to its own empty-string default, the
+          # ccpool-plugin's SessionStart hook (`ccpool hook start`) never
+          # registers, and no session can ever reach `ready` (see
+          # packages/ccpool's session.ErrNoPluginDir, which now fails the
+          # underlying `ccpool new`/`reply` call immediately instead of hanging
+          # — this assertion catches the same misconfiguration earlier, at
+          # eval/build time, before any dispatch is even attempted).
+          assertion = config.phillipgreenii.programs.ccpool.enable;
+          message = ''
+            phillipgreenii.programs.pg-router.enable requires
+            phillipgreenii.programs.ccpool.enable = true (or the "claude-fleet"
+            capability, which enables both together) — pg-router dispatches every
+            role via a launched `ccpool` session, and only the ccpool module
+            renders claude.plugin_dir into ccpool's config.toml. Without it,
+            the ccpool-plugin's SessionStart hook never registers and every
+            dispatch would silently hang for the full Wait timeout before
+            failing with "did not reach ready before timeout" (tc-24qs).
+          '';
+        }
+      ];
 
     systemd = {
       user = {
