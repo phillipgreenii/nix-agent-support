@@ -148,6 +148,19 @@ flowchart LR
   `--exclude-title-prefix` the output is unchanged. Only `list` has this flag (not `changes` or
   `sweep`).
 
+## Entity types
+
+`<type>` is a free-string positional passed straight to pg-connector as the capability name; the
+adapter has no allowlist of types. What a type can do is decided by pg-connector's own verbs:
+
+- **`calendar`** has a `changes` verb, so `changes calendar <query> --consumer <id>` works like
+  `pr`/`issue`/`thread`: one rawItem per change with `type` `calendar`. A calendar entity carries no
+  `head_sha` or `version`, so with `--retry-window` two `changed` reports of one event inside the
+  window share an id (the same content-only trade-off listed above).
+- **`mail`** has NO `changes` verb, and its `list` has no `--query` flag, so `changes`, `sweep` and
+  `list` all fail for `mail` today (exit 1, pg-connector's `unknown flag: --query` on stderr).
+  Polling new mail through this adapter needs a mail delta feed in pg-connector first.
+
 ## Exit codes
 
 This binary's own exit-code scheme is deliberately just two values, never pg-connector's own

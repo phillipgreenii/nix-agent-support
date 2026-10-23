@@ -190,6 +190,15 @@ func helperRun(behavior string, s helperSettings, c cmdrun.Call) reply {
 			Stdout: `{"error":{"code":"invalid_argument","message":"query not recognized"}}`,
 			Stderr: "pg-connector: invalid_argument: query \"bogus\" is not recognized by any registered backend\n",
 		}
+	case "reject_query_flag":
+		// A capability whose pg-connector verb has no --query flag (mail's
+		// list, and a mail "changes" that does not exist at all): cobra
+		// answers "unknown flag: --query" on stderr and exits 1, with
+		// nothing on stdout. Observed against the real pg-connector binary
+		// (packages/pg-connector, `mail changes --query q ...` and
+		// `mail list --query q ...`), so this double reproduces what the
+		// adapter really sees for type "mail" today.
+		return reply{Code: 1, Stderr: "unknown flag: --query\n"}
 	case "backend_not_registered":
 		return reply{Code: 1, Stderr: `dispatch: --backend "not-a-backend" is not registered for connector.issue (registered: [pg-connector-issue-beads])` + "\n"}
 	case "sweep_ids_by_query":
