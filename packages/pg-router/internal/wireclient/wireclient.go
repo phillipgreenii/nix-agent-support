@@ -233,6 +233,31 @@ type dispatchRequest struct {
 	SchemaVersion string        `json:"schemaVersion"`
 	ID            string        `json:"id"`
 	Event         dispatchEvent `json:"event"`
+	// Role is present only for a role on the new handler path (it sets handler),
+	// so the old shared handler never sees the field.
+	Role *roleObject `json:"role,omitempty"`
+}
+
+// roleObject is the request's role property: {"name": ..., "config": {...}}.
+// config is always present, {} when the role has no [role.config]
+// (schemas/handler.*.schema.json "role").
+type roleObject struct {
+	Name   string         `json:"name"`
+	Config map[string]any `json:"config"`
+}
+
+// roleFor builds the request's role object for a role on the new handler path,
+// and nil for a role without handler (whose request bodies stay byte-identical
+// to the pre-split ones).
+func roleFor(role roles.Role) *roleObject {
+	if role.Handler == "" {
+		return nil
+	}
+	cfg := role.Config
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	return &roleObject{Name: role.Name, Config: cfg}
 }
 
 type dispatchEvent struct {
@@ -310,6 +335,7 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 			Type:    evt.Type,
 			Payload: evt.Payload,
 		},
+		Role: roleFor(role),
 	}
 	if !evt.ExpiresAt.IsZero() {
 		req.Event.ExpiresAt = evt.ExpiresAt.Format(rfc3339)
@@ -405,8 +431,9 @@ func (e *ExitError) Error() string {
 // .../handler.preShutdown{,-reply}.schema.json — both hooks share one wire
 // shape (no event, no deferred branch), so one pair of types serves both.
 type lifecycleRequest struct {
-	SchemaVersion string `json:"schemaVersion"`
-	ID            string `json:"id"`
+	SchemaVersion string      `json:"schemaVersion"`
+	ID            string      `json:"id"`
+	Role          *roleObject `json:"role,omitempty"`
 }
 
 type lifecycleReply struct {
@@ -456,7 +483,7 @@ func (c *Client) lifecycleCall(ctx context.Context, subcommand string, role role
 	if err != nil {
 		return Reply{}, fmt.Errorf("wireclient: mint %s id: %w", subcommand, err)
 	}
-	body, err := json.Marshal(lifecycleRequest{SchemaVersion: SchemaVersion, ID: id})
+	body, err := json.Marshal(lifecycleRequest{SchemaVersion: SchemaVersion, ID: id, Role: roleFor(role)})
 	if err != nil {
 		return Reply{}, fmt.Errorf("wireclient: encode %s request: %w", subcommand, err)
 	}
@@ -535,7 +562,7 @@ func (c *Client) Validate(ctx context.Context, role roles.Role) (ValidateResult,
 	if err != nil {
 		return ValidateResult{}, fmt.Errorf("wireclient: mint validate id: %w", err)
 	}
-	body, err := json.Marshal(lifecycleRequest{SchemaVersion: SchemaVersion, ID: id})
+	body, err := json.Marshal(lifecycleRequest{SchemaVersion: SchemaVersion, ID: id, Role: roleFor(role)})
 	if err != nil {
 		return ValidateResult{}, fmt.Errorf("wireclient: encode validate request: %w", err)
 	}

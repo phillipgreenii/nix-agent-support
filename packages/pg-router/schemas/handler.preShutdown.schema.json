@@ -6,6 +6,16 @@
   "required": ["schemaVersion", "id"],
   "properties": {
     "schemaVersion": { "const": "1" },
-    "id": { "type": "string" }
+    "id": { "type": "string" },
+    "role": {
+      "description": "Present only for a role that sets handler (the new path): the role the request is for. config is the role's opaque [role.config] table, {} when the role has none; an adapter MUST also accept a missing config as {}.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "config": { "type": "object" }
+      }
+    }
   }
 }

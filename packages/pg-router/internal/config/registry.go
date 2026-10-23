@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -150,6 +151,19 @@ type roleTOML struct {
 	// bead pg2-yu5y2). Absent or 0: no re-run (the default). Must be within
 	// 0..roles.MaxDispatchRetriesCap.
 	MaxDispatchRetries *int `toml:"max_dispatch_retries"`
+	// Handler is the role's own adapter command (an absolute path; docket
+	// pg2-12gr4.10, the handler split). A role that sets it is on the NEW path.
+	// A pointer so an explicit empty string is rejected rather than read as unset.
+	Handler *string `toml:"handler"`
+	// Config is the opaque [role.config] table handed to the adapter as
+	// role.config on every request; core never interprets it. Decoded as any
+	// and type-checked in applyHandlerKeys: the TOML library silently leaves a
+	// map field nil when the key holds a non-table value, which would hide the
+	// type error.
+	Config any `toml:"config"`
+	// SurvivesShutdown is the generic survives_shutdown key (default false),
+	// read directly from the TOML for a role with Handler.
+	SurvivesShutdown *bool `toml:"survives_shutdown"`
 }
 
 // queryTOML is one top-level [[query]]: a named producer. It carries its config
@@ -536,7 +550,43 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if maxRetries < 0 || maxRetries > roles.MaxDispatchRetriesCap {
 		return roles.Role{}, fmt.Errorf("max_dispatch_retries = %d: must be between 0 and %d (a hard cap so a transient-failure storm cannot amplify load)", maxRetries, roles.MaxDispatchRetriesCap)
 	}
-	return roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, MaxDispatchRetries: maxRetries, Description: rt.Description, NonBlockingGates: rt.NonBlockingGates}, nil
+	role := roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, MaxDispatchRetries: maxRetries, Description: rt.Description, NonBlockingGates: rt.NonBlockingGates}
+	if err := applyHandlerKeys(&role, rt); err != nil {
+		return roles.Role{}, err
+	}
+	return role, nil
+}
+
+// applyHandlerKeys decodes the three NEW per-role keys (handler, [role.config],
+// survives_shutdown) strictly: a wrong type fails the decode (the typed TOML
+// decode already did that), handler must be a non-empty absolute path, and
+// config / survives_shutdown on a role without handler are rejected because the
+// old path never reads them, so accepting them would silently drop the value.
+// Every other unknown [[role]] key is still ignored, exactly as before.
+func applyHandlerKeys(role *roles.Role, rt roleTOML) error {
+	if rt.Handler == nil {
+		if rt.Config != nil {
+			return fmt.Errorf("[role.config] is set but handler is not: config is only handed to the role's own handler")
+		}
+		if rt.SurvivesShutdown != nil {
+			return fmt.Errorf("survives_shutdown is set but handler is not: a role without handler keeps the per-role JSON survivesShutdown flag")
+		}
+		return nil
+	}
+	if !filepath.IsAbs(*rt.Handler) {
+		return fmt.Errorf("handler %q must be an absolute path", *rt.Handler)
+	}
+	role.Handler = *rt.Handler
+	role.Config = map[string]any{}
+	if rt.Config != nil {
+		cfg, ok := rt.Config.(map[string]any)
+		if !ok {
+			return fmt.Errorf("config must be a table ([role.config]), got %T", rt.Config)
+		}
+		role.Config = cfg
+	}
+	role.SurvivesShutdown = rt.SurvivesShutdown != nil && *rt.SurvivesShutdown
+	return nil
 }
 
 // buildQuery decodes one [[query]] into a concrete query.Query, installing its

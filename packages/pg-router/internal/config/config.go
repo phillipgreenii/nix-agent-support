@@ -722,7 +722,9 @@ func (c Config) roleConfigFindings() []error {
 	}
 	var errs []error
 	for _, role := range c.Roles {
-		if !role.Enabled {
+		// A role with its own handler (the new path) carries its config in the
+		// TOML and never reads a --role-config file.
+		if !role.Enabled || role.NewPath() {
 			continue
 		}
 		path := filepath.Join(c.HandlerCommandDir, role.Name+".json")

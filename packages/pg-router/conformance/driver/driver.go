@@ -192,6 +192,26 @@ func negativeMatrixCase(mt string, c negativeCase) Result {
 // golden. handler.dispatch-reply's golden is the deferred ack, so the third
 // branch (the pre-accept decline body, INTF-HANDLER) is covered here.
 var positiveMatrix = map[string][]negativeCase{
+	// The optional role property (docket pg2-12gr4.10): present on a request only
+	// for a role that sets handler. A well-formed role validates, with or without
+	// config (an adapter MUST also accept a missing config as {}).
+	"handler.dispatch": {
+		{"role with a name and config", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":{"sessionEnv":{"K":"v"}}},"event":{"id":"e","type":"t"}}`},
+		{"role with a name and an empty config", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":{}},"event":{"id":"e","type":"t"}}`},
+		{"role with a name and no config", `{"schemaVersion":"1","id":"h","role":{"name":"review"},"event":{"id":"e","type":"t"}}`},
+	},
+	"handler.postStartup": {
+		{"role with a name and config", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":{"a":1}}}`},
+		{"role with a name and no config", `{"schemaVersion":"1","id":"h","role":{"name":"review"}}`},
+	},
+	"handler.preShutdown": {
+		{"role with a name and config", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":{"a":1}}}`},
+		{"role with a name and no config", `{"schemaVersion":"1","id":"h","role":{"name":"review"}}`},
+	},
+	"handler.validate": {
+		{"role with a name and config", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":{"a":1}}}`},
+		{"role with a name and no config", `{"schemaVersion":"1","id":"h","role":{"name":"review"}}`},
+	},
 	"handler.dispatch-reply": {
 		{"decline body with only a reason", `{"schemaVersion":"1","reason":"capacity"}`},
 		{"decline body with a kind and detail", `{"schemaVersion":"1","reason":"launch-failed","kind":"fault","detail":"claude exited 1"}`},
@@ -232,6 +252,12 @@ var negativeMatrix = map[string][]negativeCase{
 		{"deferred wrong const", `{"schemaVersion":"1","id":"q","deferred":false}`},
 	},
 	"handler.dispatch": {
+		{"role without a name", `{"schemaVersion":"1","id":"h","role":{"config":{}},"event":{"id":"e","type":"t"}}`},
+		{"role whose name is not a string", `{"schemaVersion":"1","id":"h","role":{"name":5,"config":{}},"event":{"id":"e","type":"t"}}`},
+		{"role whose config is not an object", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":"x"},"event":{"id":"e","type":"t"}}`},
+		{"role whose config is an array", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":[]},"event":{"id":"e","type":"t"}}`},
+		{"role that is not an object", `{"schemaVersion":"1","id":"h","role":"review","event":{"id":"e","type":"t"}}`},
+		{"role with an extra field", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":{},"extra":1},"event":{"id":"e","type":"t"}}`},
 		{"missing event", `{"schemaVersion":"1","id":"h"}`},
 		{"event missing type", `{"schemaVersion":"1","id":"h","event":{"id":"e"}}`},
 		{"event carries the legacy duration field", `{"schemaVersion":"1","id":"h","event":{"id":"e","type":"t","ttl":"5m"}}`},
@@ -256,6 +282,12 @@ var negativeMatrix = map[string][]negativeCase{
 		{"decline body with the wrong schemaVersion", `{"schemaVersion":"2","reason":"r"}`},
 	},
 	"handler.postStartup": {
+		{"role without a name", `{"schemaVersion":"1","id":"h","role":{"config":{}}}`},
+		{"role whose name is not a string", `{"schemaVersion":"1","id":"h","role":{"name":5,"config":{}}}`},
+		{"role whose config is not an object", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":"x"}}`},
+		{"role whose config is an array", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":[]}}`},
+		{"role that is not an object", `{"schemaVersion":"1","id":"h","role":"review"}`},
+		{"role with an extra field", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":{},"extra":1}}`},
 		{"missing id", `{"schemaVersion":"1"}`},
 		{"wrong-type id", `{"schemaVersion":"1","id":5}`},
 	},
@@ -264,6 +296,12 @@ var negativeMatrix = map[string][]negativeCase{
 		{"wrong-type outcome", `{"schemaVersion":"1","id":"h","outcome":5}`},
 	},
 	"handler.preShutdown": {
+		{"role without a name", `{"schemaVersion":"1","id":"h","role":{"config":{}}}`},
+		{"role whose name is not a string", `{"schemaVersion":"1","id":"h","role":{"name":5,"config":{}}}`},
+		{"role whose config is not an object", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":"x"}}`},
+		{"role whose config is an array", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":[]}}`},
+		{"role that is not an object", `{"schemaVersion":"1","id":"h","role":"review"}`},
+		{"role with an extra field", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":{},"extra":1}}`},
 		{"missing id", `{"schemaVersion":"1"}`},
 		{"wrong-type id", `{"schemaVersion":"1","id":5}`},
 	},
@@ -272,6 +310,12 @@ var negativeMatrix = map[string][]negativeCase{
 		{"wrong-type outcome", `{"schemaVersion":"1","id":"h","outcome":5}`},
 	},
 	"handler.validate": {
+		{"role without a name", `{"schemaVersion":"1","id":"h","role":{"config":{}}}`},
+		{"role whose name is not a string", `{"schemaVersion":"1","id":"h","role":{"name":5,"config":{}}}`},
+		{"role whose config is not an object", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":"x"}}`},
+		{"role whose config is an array", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":[]}}`},
+		{"role that is not an object", `{"schemaVersion":"1","id":"h","role":"review"}`},
+		{"role with an extra field", `{"schemaVersion":"1","id":"h","role":{"name":"review","config":{},"extra":1}}`},
 		{"missing id", `{"schemaVersion":"1"}`},
 		{"wrong-type id", `{"schemaVersion":"1","id":5}`},
 	},

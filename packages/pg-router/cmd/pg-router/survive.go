@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/phillipgreenii/pg-router/internal/config"
+	"github.com/phillipgreenii/pg-router/internal/roles"
 )
 
 // handlerRoleConfigPath is the per-role file under cfg.HandlerCommandDir that
@@ -53,12 +54,22 @@ func roleSurvivesShutdown(cfg config.Config, roleName string) bool {
 	return f.SurvivesShutdown
 }
 
+// roleSurvives is the survival decision for one role. A role with handler (the
+// new path) reads the generic survives_shutdown key core decoded from the TOML;
+// a role without handler keeps reading the per-role JSON flag, as before.
+func roleSurvives(cfg config.Config, r roles.Role) bool {
+	if r.NewPath() {
+		return r.SurvivesShutdown
+	}
+	return roleSurvivesShutdown(cfg, r.Name)
+}
+
 // survivingRoles resolves, once, which ENABLED roles survive a shutdown, as a
 // set keyed by role name (the eventqueue listener id).
 func survivingRoles(cfg config.Config) map[string]bool {
 	out := map[string]bool{}
 	for _, r := range cfg.Roles {
-		if r.Enabled && roleSurvivesShutdown(cfg, r.Name) {
+		if r.Enabled && roleSurvives(cfg, r) {
 			out[r.Name] = true
 		}
 	}

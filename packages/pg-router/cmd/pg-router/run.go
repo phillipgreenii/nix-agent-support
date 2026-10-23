@@ -192,8 +192,18 @@ func drainThenCancelDispatch(q *eventqueue.Queue, cancelDispatch context.CancelF
 // package no longer appends it itself. Falling back to today's
 // [cfg.HandlerCommand, subcommand] when HandlerCommandDir is unset keeps an
 // existing single-role deployment byte-for-byte unchanged.
+//
+// A role that sets handler (docket pg2-12gr4.10, the handler split) is on the
+// NEW path and resolves to [role.Handler, subcommand] on its own: never the
+// global command, never --role-config (its [role.config] rides on stdin as the
+// request's role object instead, internal/wireclient). That branch comes first
+// so a deployment that has migrated every role needs no PG_ROUTER_HANDLER_COMMAND
+// at all; every role without handler resolves exactly as before.
 func handlerCommandFor(cfg config.Config) wireclient.CommandFor {
 	return func(role roles.Role, subcommand string) ([]string, error) {
+		if role.Handler != "" {
+			return []string{role.Handler, subcommand}, nil
+		}
 		if cfg.HandlerCommand == "" {
 			return nil, fmt.Errorf("no handler command configured for role %q (set PG_ROUTER_HANDLER_COMMAND)", role.Name)
 		}
@@ -219,7 +229,15 @@ func warnHandlerCommandAmbiguity(cfg config.Config) {
 	if cfg.HandlerCommand == "" || cfg.HandlerCommandDir != "" {
 		return
 	}
-	if n := countEnabledRoles(cfg.Roles); n > 1 {
+	// Only roles on the old path share the global command; a role with its own
+	// handler never resolves to it.
+	n := 0
+	for _, r := range cfg.Roles {
+		if r.Enabled && !r.NewPath() {
+			n++
+		}
+	}
+	if n > 1 {
 		slog.Warn("multiple roles enabled but only PG_ROUTER_HANDLER_COMMAND is set; every role will dispatch through the identical handler command with no per-role differentiation — set PG_ROUTER_HANDLER_COMMAND_DIR", "enabledRoles", n)
 	}
 }
@@ -551,7 +569,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		// reach, so exec.CommandContext never SIGKILLs its handler. Drain-and-exit
 		// keeps the cancellable ctx: an interactive interrupt still stops handlers.
 		listenerCtx := ctx
-		if runMode == core.RunModeLongRunning && roleSurvivesShutdown(cfg, r.Name) {
+		if runMode == core.RunModeLongRunning && roleSurvives(cfg, r) {
 			listenerCtx = context.WithoutCancel(ctx)
 			slog.Info("role dispatch survives shutdown; it is never cancelled by this daemon", "role", r.Name)
 		}
@@ -614,6 +632,13 @@ func pullSourceIntervals(cfg config.Config) map[string]time.Duration {
 // Orchestrator without going through bootCore at all — an unwired Handler is
 // exactly the same class of problem as a per-call error, so it is logged
 // once per role and skipped, not fatal.
+//
+// Routing on the new handler path (docket pg2-12gr4.10): UNCHANGED, every
+// enabled role gets its own postStartup call whichever path it is on. A role
+// with handler reaches its own adapter (with the role object on stdin), so
+// every adapter named by an enabled role is covered, and the old shared handler
+// receives it per old-path role exactly as before. Unlike preShutdown it is not
+// deduplicated: the ccpool adapter's post-startup reconcile is per role.
 func postStartupAll(ctx context.Context, o *orchestrator.Orchestrator, cfg config.Config) {
 	if o.Handler == nil {
 		slog.Warn("postStartup skipped: no Handler configured (internal/wireclient.HandlerClient)")
@@ -629,9 +654,12 @@ func postStartupAll(ctx context.Context, o *orchestrator.Orchestrator, cfg confi
 	}
 }
 
-// preShutdownAll dispatches handler.preShutdown ONCE per daemon shutdown —
-// to the first ENABLED role's registered handler participant only — at the
-// same point TeardownAll used to fire (pg2-oju6w.15).
+// preShutdownAll dispatches handler.preShutdown ONCE per distinct handler per
+// daemon shutdown — the old shared handler through the first ENABLED role
+// without its own handler, and each adapter a role names with handler through
+// the first enabled role naming it — at the same point TeardownAll used to
+// fire (pg2-oju6w.15). With no role on the new path this is exactly the
+// pg2-asr8z behavior below: one call, to the first enabled role's handler.
 //
 // SUPERSEDES pg2-oju6w.15's original "dispatch once per enabled role"
 // shape (bead pg2-asr8z, 2026-09-22): that shape called this hook once per
@@ -659,18 +687,38 @@ func preShutdownAll(ctx context.Context, o *orchestrator.Orchestrator, cfg confi
 		slog.Warn("preShutdown skipped: no Handler configured (internal/wireclient.HandlerClient)")
 		return
 	}
+	// Routing (docket pg2-12gr4.10, the handler split): every distinct handler
+	// named by an enabled role receives preShutdown exactly ONCE, in config
+	// order, carried by the first enabled role that names it.
+	//   - Old path (no handler): the one shared global handler, once, carried by
+	//     the first enabled old-path role. This is pg2-asr8z's dedup, unchanged,
+	//     and it holds in any order of old and new roles.
+	//   - New path (handler set): once per distinct handler path. An adapter's
+	//     shutdown sweep is global to the adapter (ccpool lists and closes every
+	//     session it owns), so a second call for another role it serves would
+	//     repeat the identical, slow sweep that pg2-asr8z measured eating
+	//     launchd's ExitTimeOut; a different adapter binary still gets its own.
+	// No adapter named by an enabled role is left without its call.
+	oldDone := false
+	seen := map[string]bool{}
 	for _, r := range cfg.Roles {
 		if !r.Enabled {
 			continue
 		}
+		if r.NewPath() {
+			if seen[r.Handler] {
+				continue
+			}
+			seen[r.Handler] = true
+		} else {
+			if oldDone {
+				continue
+			}
+			oldDone = true
+		}
 		if _, err := o.Handler.PreShutdown(ctx, r); err != nil {
 			slog.Warn("preShutdown failed", "role", r.Name, "err", err)
 		}
-		// Dedup (pg2-asr8z): dispatch to exactly one enabled role's handler
-		// participant, never to every one of them — see this function's own
-		// doc above for why calling it more than once is redundant, not
-		// merely harmless.
-		return
 	}
 }
 
