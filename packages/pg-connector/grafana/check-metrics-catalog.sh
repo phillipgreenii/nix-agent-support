@@ -2,8 +2,8 @@
 # Drift check between the pg-connector-github metric catalog and the Metric* constants of
 # the daemon's telemetry package, plus mutant self-tests proving each rule can fail.
 #
-#   check-metrics-catalog.sh <catalog> <telemetry.go>
-#   check-metrics-catalog.sh --self-test <catalog> <telemetry.go>
+#   check-metrics-catalog.sh <catalog> <telemetry.go> [<changemetrics.go>]
+#   check-metrics-catalog.sh --self-test <catalog> <telemetry.go> [<changemetrics.go>]
 #
 # The catalog has one line per metric, <prometheus_name> <type> <labels>: the name as
 # Prometheus sees it (dots replaced by underscores, nothing appended), a type of gauge,
@@ -16,14 +16,19 @@
 #   M2  every line has exactly three fields and a type from the closed set
 #   M3  no name ends in _total, _bucket, _sum or _count
 #   M4  each label key is in the closed set of keys the daemon emits
-#   M5  each line's type matches the instrument constructor registered for that constant
+#   M5  each line's type matches the instrument constructor registered for that constant:
+#       a constructor call in the Go file that takes the constant by name, or, when the
+#       optional third file is given, a constructor call in it whose first argument is a
+#       prefix variable plus a quoted dotted suffix ("change.settle") that the constant's
+#       value ends with, at a dot boundary. The shared change metrics register their
+#       instruments that way, once, under whatever prefix a daemon passes.
 #
 # Exit codes: 0 consistent (self-test: real inputs pass and every mutant fails with exactly
 # its own rule), 1 a rule failed, 2 usage error or unreadable input.
 set -euo pipefail
 
 usage() {
-  echo "usage: check-metrics-catalog.sh [--self-test] <catalog> <telemetry.go>" >&2
+  echo "usage: check-metrics-catalog.sh [--self-test] <catalog> <telemetry.go> [<changemetrics.go>]" >&2
   exit 2
 }
 
@@ -32,10 +37,13 @@ if [ "${1:-}" = "--self-test" ]; then
   selftest=1
   shift
 fi
-[ "$#" -eq 2 ] || usage
+[ "$#" -eq 2 ] || [ "$#" -eq 3 ] || usage
 catalog="$1"
 gofile="$2"
-for f in "$catalog" "$gofile"; do
+shared="${3:-}"
+files=("$catalog" "$gofile")
+[ -z "$shared" ] || files+=("$shared")
+for f in "${files[@]}"; do
   if [ ! -r "$f" ] || [ ! -f "$f" ]; then
     echo "check-metrics-catalog.sh: cannot read $f" >&2
     exit 2
@@ -45,16 +53,32 @@ done
 valid_labels=" bucket purpose group reason class op served_from role result kind origin consumer query "
 valid_types=" gauge counter histogram "
 
-# lint <catalog> <telemetry.go>: prints RULE-Mn lines to stderr, returns 1 when any fired.
+# lint <catalog> <telemetry.go> [<changemetrics.go>]: prints RULE-Mn lines to stderr, returns 1
+# when any fired.
 lint() {
-  local cat="$1" go="$2" status=0
-  local consts ctors want have line name type labels extra n l
+  local cat="$1" go="$2" sh="${3:-}" status=0
+  local consts ctors sctors want have line name type labels extra n l c v s k
 
   # "<ConstName> <prometheus_name>" per Metric* constant.
   consts="$(sed -nE 's/^[[:space:]]*(Metric[A-Za-z0-9]+)[[:space:]]*=[[:space:]]*"([^"]*)".*/\1 \2/p' "$go" |
     while read -r c v; do echo "$c ${v//./_}"; done)"
   # "<ConstName> <Constructor>" per registration site.
   ctors="$(sed -nE 's/.*\.(Int64Counter|Float64Counter|Int64Histogram|Float64Histogram|Int64ObservableGauge|Float64ObservableGauge)\((Metric[A-Za-z0-9]+),.*/\2 \1/p' "$go")"
+  # Registration through the shared change metrics: "<dotted suffix> <Constructor>" per call
+  # shaped <ident>.<Constructor>(<prefix ident>+"<suffix>", ...). A constant whose value ends
+  # with "<suffix>", dots read as underscores, at a word boundary, is registered by that call.
+  if [ -n "$sh" ]; then
+    sctors="$(sed -nE 's/.*\.(Int64Counter|Float64Counter|Int64Histogram|Float64Histogram|Int64ObservableGauge|Float64ObservableGauge)\([A-Za-z0-9_.]+ ?\+ ?"([^"]+)",.*/\2 \1/p' "$sh")"
+    while read -r c v; do
+      [ -n "$c" ] || continue
+      while read -r s k; do
+        [ -n "$s" ] || continue
+        if [[ $v == *"_${s//./_}" ]]; then
+          ctors+=$'\n'"$c $k"
+        fi
+      done <<<"$sctors"
+    done <<<"$consts"
+  fi
 
   # M1
   want="$(printf '%s\n' "$consts" | awk 'NF {print $2}' | sort)"
@@ -120,7 +144,7 @@ lint() {
 }
 
 if [ "$selftest" -eq 0 ]; then
-  lint "$catalog" "$gofile"
+  lint "$catalog" "$gofile" "$shared"
   exit $?
 fi
 
@@ -128,20 +152,25 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 # The real inputs must pass, silently.
-if ! out="$(lint "$catalog" "$gofile" 2>&1)"; then
+if ! out="$(lint "$catalog" "$gofile" "$shared" 2>&1)"; then
   echo "self-test: the real inputs fail:" >&2
   echo "$out" >&2
   exit 1
 fi
 
 fail=0
-# mutant <rule> <description> <sed-script-for-catalog> <sed-script-for-go>
-# An empty script leaves that copy unchanged. The mutant must fail with exactly <rule>.
+# mutant <rule> <description> <sed-script-for-catalog> <sed-script-for-go> [<sed-script-for-shared>]
+# An empty script leaves that copy unchanged. The mutant must fail with exactly <rule>. The
+# shared script applies to the third file and needs that file to be given.
 mutant() {
-  local rule="$1" desc="$2" csed="$3" gsed="$4" dir ids
+  local rule="$1" desc="$2" csed="$3" gsed="$4" ssed="${5:-}" dir ids sarg=""
   dir="$(mktemp -d "$work/m.XXXXXX")"
   cat "$catalog" >"$dir/catalog.txt" # not cp: a store input is read-only and cp keeps the mode
   cat "$gofile" >"$dir/telemetry.go"
+  if [ -n "$shared" ]; then
+    cat "$shared" >"$dir/changemetrics.go"
+    sarg="$dir/changemetrics.go"
+  fi
   if [ -n "$csed" ]; then
     sed -E "$csed" "$catalog" >"$dir/catalog.txt"
     if cmp -s "$catalog" "$dir/catalog.txt"; then
@@ -158,7 +187,20 @@ mutant() {
       return
     fi
   fi
-  if ids="$(lint "$dir/catalog.txt" "$dir/telemetry.go" 2>&1 >/dev/null)"; then
+  if [ -n "$ssed" ]; then
+    if [ -z "$shared" ]; then
+      echo "self-test: mutant $rule ($desc) needs the changemetrics file" >&2
+      fail=1
+      return
+    fi
+    sed -E "$ssed" "$shared" >"$dir/changemetrics.go"
+    if cmp -s "$shared" "$dir/changemetrics.go"; then
+      echo "self-test: mutant $rule ($desc) did not change the changemetrics file" >&2
+      fail=1
+      return
+    fi
+  fi
+  if ids="$(lint "$dir/catalog.txt" "$dir/telemetry.go" "$sarg" 2>&1 >/dev/null)"; then
     echo "self-test: mutant $rule ($desc) passed" >&2
     fail=1
     return
@@ -177,5 +219,13 @@ mutant M3 "a name with a _total suffix (catalog and Go constant renamed together
   's/"pg_connector_github\.budget\.spent"/"pg_connector_github.budget.spent_total"/'
 mutant M4 "a label key the daemon never emits" 's/^(pg_connector_github_queue_depth gauge) class$/\1 colour/' ''
 mutant M5 "a counter cataloged as a gauge" 's/^(pg_connector_github_budget_spent) counter /\1 gauge /' ''
+if [ -n "$shared" ]; then
+  # The constants registered through the shared change metrics carry no constructor call in
+  # the Go file, so M5 must find theirs in the changemetrics file.
+  mutant M5 "a catalogued counter registered as a gauge in the changemetrics file" '' '' \
+    's/(\.)Int64Counter(\([A-Za-z0-9_.]+ ?\+ ?"change\.settle",)/\1Int64ObservableGauge\2/'
+  mutant M5 "a shared registration whose suffix no constant ends with" '' '' \
+    's/(\+ ?")query\.last_success_age_seconds(",)/\1query.last_success_age\2/'
+fi
 
 [ "$fail" -eq 0 ]

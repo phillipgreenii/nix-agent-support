@@ -323,6 +323,7 @@ func (d *daemon) start(ctx context.Context) error {
 		// (it needs the query runner), so its positions are late-bound: until it
 		// exists they report nothing.
 		Pending:   st.CountPending,
+		Watched:   func(ctx context.Context) (int, error) { return st.CountWatched(ctx, changes.Spec().EntityKind) },
 		Queries:   func(ctx context.Context) ([]store.QueryRow, error) { return st.ListQueries(ctx, true) },
 		Started:   time.Now(),
 		Consumers: d.consumerPositions,

@@ -5714,7 +5714,8 @@
                   '';
 
               # pg-connector-github metric catalog vs the Metric* constants of the daemon's
-              # telemetry package: the catalog checks, then the script's own mutant self-tests.
+              # telemetry package (whose change instruments are registered by the shared
+              # changemetrics package): the catalog checks, then the script's own mutant self-tests.
               test-pg-connector-github-metrics-catalog =
                 pkgs.runCommand "test-pg-connector-github-metrics-catalog"
                   {
@@ -5731,8 +5732,9 @@
                     script=${./packages/pg-connector/grafana/check-metrics-catalog.sh}
                     catalog=${./packages/pg-connector/grafana/pg-connector-github-metrics.txt}
                     gofile=${./packages/pg-connector/cmd/pg-connector-github/internal/telemetry/telemetry.go}
-                    bash "$script" "$catalog" "$gofile"
-                    bash "$script" --self-test "$catalog" "$gofile"
+                    shared=${./packages/pg-connector/pkg/connectord/changemetrics/changemetrics.go}
+                    bash "$script" "$catalog" "$gofile" "$shared"
+                    bash "$script" --self-test "$catalog" "$gofile" "$shared"
                     touch "$out"
                   '';
 

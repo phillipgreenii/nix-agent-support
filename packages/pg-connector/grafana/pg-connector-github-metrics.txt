@@ -17,3 +17,4 @@ pg_connector_github_consumer_lag_rows gauge consumer,query
 pg_connector_github_consumer_oldest_unacked_age_seconds gauge consumer,query
 pg_connector_github_consumer_redeliveries counter consumer,query
 pg_connector_github_query_last_success_age_seconds gauge query
+pg_connector_github_watched_entities gauge -
