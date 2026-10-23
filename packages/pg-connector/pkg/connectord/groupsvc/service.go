@@ -2,6 +2,7 @@ package groupsvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -41,6 +42,78 @@ type Service struct {
 }
 
 type pairKey struct{ id, group string }
+
+// New returns the service. It validates what the service uses and no more: the
+// Spec fields it reads (a non-empty EntityKind, a PrimaryGroup that is one of
+// Groups, no duplicate group) and the Config members its methods call; a Spec
+// without Views or Roles is accepted, so the full registry validation is not
+// repeated here. Expiry has no default in shared code and MUST be positive.
+func New(cfg Config) (*Service, error) {
+	switch {
+	case cfg.Store == nil, cfg.Scheduler == nil, cfg.Describer == nil, cfg.Aliases == nil,
+		cfg.KeepAlive == nil, cfg.Errors == nil, cfg.ParseID == nil,
+		cfg.NoSuchEntity == nil, cfg.BadRef == nil, cfg.UnknownEntity == nil:
+		return nil, errors.New("groupsvc: service needs a store, scheduler, describer, alias table, keep-alive rule, error policy, id parser and the three entity sentinels")
+	case len(cfg.Rules.Groups) == 0:
+		return nil, errors.New("groupsvc: service needs a rules table")
+	case cfg.Expiry <= 0:
+		return nil, errors.New("groupsvc: expiry must be positive")
+	case cfg.Spec.EntityKind == "":
+		return nil, errors.New("groupsvc: spec has no entity kind")
+	case !slices.Contains(cfg.Spec.Groups, cfg.Spec.PrimaryGroup):
+		return nil, fmt.Errorf("groupsvc: primary group %q is not one of the spec's groups", cfg.Spec.PrimaryGroup)
+	}
+	seen := map[string]bool{}
+	for _, g := range cfg.Spec.Groups {
+		if seen[g] {
+			return nil, fmt.Errorf("groupsvc: group %q is listed twice in the spec", g)
+		}
+		seen[g] = true
+	}
+	s := &Service{cfg: cfg, clock: cfg.Clock, fetchers: map[string]Fetcher{}, commits: map[pairKey]uint64{}}
+	if s.clock == nil {
+		s.clock = governor.SystemClock{}
+	}
+	s.writes.init()
+	return s, nil
+}
+
+// Register installs the executor of the fetcher's group under the scheduler kind
+// f.Group(). Registering a group again replaces the fetcher. It panics for the
+// primary group (the connector's own executor owns it) and for a name outside
+// Spec.Groups: both are wiring mistakes.
+func (s *Service) Register(f Fetcher) {
+	g := f.Group()
+	if g == s.cfg.Spec.PrimaryGroup || !s.isGroup(g) {
+		panic(fmt.Sprintf("groupsvc: cannot register a fetcher for group %q", g))
+	}
+	s.mu.Lock()
+	s.fetchers[g] = f
+	s.mu.Unlock()
+	s.cfg.Scheduler.Register(g, &executor{s: s, f: f})
+}
+
+// SetObserver installs the observer; nil means none.
+func (s *Service) SetObserver(o Observer) {
+	s.mu.Lock()
+	s.observer = o
+	s.mu.Unlock()
+}
+
+// SetOriginHints installs the receiver of the origin hints InvalidateAndQueueAs
+// records; nil means none.
+func (s *Service) SetOriginHints(h OriginHints) {
+	s.mu.Lock()
+	s.hints = h
+	s.mu.Unlock()
+}
+
+// Revalidated forwards one revalidation result to the observer.
+func (s *Service) Revalidated(group, result string) {
+	if o := s.obs(); o != nil {
+		o.Revalidated(group, result)
+	}
+}
 
 func (s *Service) commitCount(id, group string) uint64 {
 	s.mu.Lock()
