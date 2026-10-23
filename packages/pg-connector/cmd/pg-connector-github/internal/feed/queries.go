@@ -5,11 +5,13 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/query"
+	shared "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/feed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 )
 
-// Queries is what the feed needs of the query runner.
+// Queries is what the feed needs of the query runner, in the three methods the
+// GitHub daemon implements; sharedQueries adapts it to the shared interface.
 type Queries interface {
 	// Known reports whether name is a query the daemon is configured with.
 	Known(name string) bool
@@ -23,10 +25,18 @@ type Queries interface {
 // Members is the stored membership of a query. Refs are the wire references
 // owner/repo#n in the stored row's order; Baseline is true once the query's
 // membership baseline exists.
-type Members struct {
-	Refs     []string
-	Baseline bool
-}
+type Members = shared.Members
+
+// sharedQueries supplies what the shared interface asks beyond the three
+// methods: no names, never watched and no watched references, which is right
+// while the GitHub registration delivers by membership.
+type sharedQueries struct{ Queries }
+
+func (sharedQueries) Names() []string                               { return nil }
+func (sharedQueries) Watched(string) bool                           { return false }
+func (sharedQueries) WatchedRefs(context.Context) ([]string, error) { return nil, nil }
+
+var _ shared.Queries = sharedQueries{}
 
 // runner is the part of *query.Runner the feed uses.
 type runner interface {

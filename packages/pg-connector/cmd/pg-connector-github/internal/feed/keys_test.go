@@ -217,14 +217,3 @@ func TestTheCIKeyDeliversOnlyCIChangesAndTheMembershipRowsNamingItsQuery(t *test
 		t.Fatal("an ack of the ci key created a pr key")
 	}
 }
-
-func TestKeyLocksDoNotGrow(t *testing.T) {
-	var l keyLocks
-	for i := range 100 {
-		unlock := l.lock(keyID{"c", "pr", string(rune('a' + i%26))})
-		unlock()
-	}
-	if n := l.size(); n != 0 {
-		t.Fatalf("%d locks retained", n)
-	}
-}

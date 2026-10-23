@@ -46,14 +46,14 @@ func TestPruneForgetsTheRedeliveryBookkeepingOfDroppedKeys(t *testing.T) {
 	r.poll(KindPR, "c", "mine")
 	r.plain(refA)
 	r.poll(KindPR, "c", "mine")
-	if len(r.f.handed) != 1 {
-		t.Fatalf("handed = %v", r.f.handed)
+	if r.f.Shared().HandedCursors() != 1 {
+		t.Fatalf("handed = %d", r.f.Shared().HandedCursors())
 	}
 	r.clk.Advance(8 * day)
 	if _, keys, err := r.f.Prune(context.Background()); err != nil || keys != 1 {
 		t.Fatalf("prune = %d, %v", keys, err)
 	}
-	if len(r.f.handed) != 0 {
-		t.Fatalf("handed = %v", r.f.handed)
+	if r.f.Shared().HandedCursors() != 0 {
+		t.Fatalf("handed = %d", r.f.Shared().HandedCursors())
 	}
 }

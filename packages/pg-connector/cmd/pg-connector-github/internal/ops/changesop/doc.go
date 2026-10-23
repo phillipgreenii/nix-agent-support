@@ -1,4 +1,9 @@
-// Package changesop serves the change feed on the daemon's wire: the changes op
+// Package changesop is the GitHub daemon's adapter over the shared wire handlers
+// (pkg/connectord/feedop): it supplies the two renderers (the PR entity and the
+// CI entity) and the unauthenticated sentinel, and the two instances' schema
+// versions; the ops themselves are the shared ones.
+//
+// It serves the change feed on the daemon's wire: the changes op
 // (a consumer polls the rows after its acknowledged position for a query) and
 // the changes_ack op (the consumer acknowledges the position it was given, after
 // it has flushed its output).

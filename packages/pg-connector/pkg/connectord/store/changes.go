@@ -494,3 +494,8 @@ func (t *Tx) GetMeta(ctx context.Context, key string) (value string, ok bool, er
 func (t *Tx) PutMeta(ctx context.Context, key, value string) error {
 	return putMeta(ctx, t.tx, key, value)
 }
+
+// MovedAsideKey is the store_meta key under which the feed records that the
+// daemon started on a fresh store because the previous one was moved aside: an
+// RFC 3339 time.
+const MovedAsideKey = "moved_aside_at"

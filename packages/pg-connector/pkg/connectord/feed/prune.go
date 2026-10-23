@@ -3,8 +3,8 @@ package feed
 import "context"
 
 // Prune applies change_log_retention to the log and consumer_stale_after to the
-// consumer table: it deletes the rows older than Retention and the keys unseen
-// for ConsumerStaleAfter, and returns how many of each. A key whose position
+// consumer table: it deletes the rows older than Retention and the cursors unseen
+// for ConsumerStaleAfter, and returns how many of each. A cursor whose position
 // fell out of retention is NOT deleted here: it stays until it is polled and
 // answered cursor_expired:.
 func (f *Feed) Prune(ctx context.Context) (rows, keys int64, err error) {
@@ -23,7 +23,7 @@ func (f *Feed) Prune(ctx context.Context) (rows, keys int64, err error) {
 	return rows, keys, nil
 }
 
-// dropStaleHanded forgets the redelivery bookkeeping of keys that no longer
+// dropStaleHanded forgets the redelivery bookkeeping of cursors that no longer
 // exist.
 func (f *Feed) dropStaleHanded(ctx context.Context) error {
 	stored, err := f.cfg.Store.ListConsumers(ctx)

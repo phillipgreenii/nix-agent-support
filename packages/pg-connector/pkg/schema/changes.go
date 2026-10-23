@@ -27,6 +27,10 @@ type ChangeSource struct {
 	NextSeq int64 `json:"next_seq"`
 }
 
+// ChangeSourceSucceeded is the ChangeSource.Status of every answer of the daemons'
+// changes ops.
+const ChangeSourceSucceeded = "succeeded"
+
 // PRChange is one changes[] entry. Change is "added", "removed" or "changed"
 // for the polling key; Entity is the summary-level PR with its Version and
 // HeadSHA set to the ROW'S OWN recorded values (the current ones are not used),
@@ -101,4 +105,25 @@ type ChangesAckResult struct {
 	Consumer string `json:"consumer"`
 	Query    string `json:"query"`
 	AckedSeq int64  `json:"acked_seq"`
+}
+
+// ChangesResult is the answer every connector's changes op returns: the shape of
+// PRChangesResult and CIChangesResult with the entity of each change as the
+// connector's own JSON, which the shared handlers never decode. The marshalled
+// bytes of a connector's answer equal those of its typed result.
+type ChangesResult struct {
+	Sources          []ChangeSource    `json:"sources"`
+	Changes          []Change          `json:"changes"`
+	SourcesFreshness []SourceFreshness `json:"sources_freshness"`
+}
+
+// Change is one changes[] entry of a ChangesResult; Entity is the connector's
+// own JSON. The other fields mean what they mean in PRChange.
+type Change struct {
+	Change string          `json:"change"`
+	Source string          `json:"source"`
+	Entity json.RawMessage `json:"entity"`
+	Seq    int64           `json:"seq"`
+	Kinds  []string        `json:"kinds"`
+	Fields json.RawMessage `json:"fields"`
 }

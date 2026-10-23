@@ -20,42 +20,17 @@ type Position struct {
 // the rows a poll of the key would deliver after its position, filtered by the
 // query's stored members; Head is 0 for an empty log.
 func (f *Feed) Positions(ctx context.Context) ([]Position, error) {
-	keys, err := f.cfg.Store.ListConsumers(ctx)
+	ps, err := f.sh.Positions(ctx)
 	if err != nil {
 		return nil, err
 	}
-	head, err := f.cfg.Store.ChangeHead(ctx)
-	if err != nil {
-		return nil, err
-	}
-	sets := map[string]memberSet{}
-	out := make([]Position, 0, len(keys))
-	for _, c := range keys {
-		p := Position{Consumer: c.Consumer, Kind: c.Kind, Query: c.Query, AckedSeq: c.AckedSeq, Head: head, SeenAt: c.SeenAt}
-		if c.AckedSeq < head {
-			set, ok := sets[c.Query]
-			if !ok {
-				if f.cfg.Queries.Known(c.Query) {
-					m, err := f.cfg.Queries.Members(ctx, c.Query)
-					if err != nil {
-						return nil, err
-					}
-					set = newMemberSet(m.Refs)
-				}
-				sets[c.Query] = set
-			}
-			rows, _, err := f.scan(ctx, c.Kind, c.Query, c.AckedSeq, head, 0, set)
-			if err != nil {
-				return nil, err
-			}
-			p.LagRows = len(rows)
-			for _, r := range rows {
-				if p.OldestUnacked.IsZero() || r.At.Before(p.OldestUnacked) {
-					p.OldestUnacked = r.At
-				}
-			}
-		}
-		out = append(out, p)
+	out := make([]Position, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, Position{
+			Consumer: p.Consumer, Kind: p.View, Query: p.Scope,
+			AckedSeq: p.AckedSeq, Head: p.Head, LagRows: p.LagRows,
+			OldestUnacked: p.OldestUnacked, SeenAt: p.SeenAt,
+		})
 	}
 	return out, nil
 }

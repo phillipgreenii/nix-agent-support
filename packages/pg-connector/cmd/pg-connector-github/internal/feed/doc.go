@@ -1,4 +1,10 @@
-// Package feed is the core of the change feed: what a consumer polling
+// Package feed is the GitHub daemon's adapter over the shared change feed
+// (pkg/connectord/feed): it binds the GitHub registration (the views pr and ci)
+// and keeps the daemon's own spelling of the cursor key, (consumer, kind, query),
+// the three-method Queries and the Position fields. The rules below are the
+// shared feed's.
+//
+// The feed is the core of the change feed: what a consumer polling
 // `changes` receives and how its position moves, independent of any wire
 // format. The ops that put it on the wire are built on it.
 //

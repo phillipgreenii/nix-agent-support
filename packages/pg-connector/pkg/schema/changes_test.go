@@ -105,3 +105,39 @@ func TestCIChangesResult_JSONNames(t *testing.T) {
 		t.Errorf("result = %s, want %s", raw, want)
 	}
 }
+
+func TestChangesResult_MarshalsLikeTheTypedAnswers(t *testing.T) {
+	src := []ChangeSource{{Backend: "b", Status: ChangeSourceSucceeded, Version: 3, NextSeq: 9}}
+	fresh := []SourceFreshness{{Query: "mine", LastSuccessAt: "2026-10-12T09:00:00Z"}}
+	pr := PR{ID: "o/r#1", Version: 4, HeadSHA: "h<&>"}
+	typed, err := json.Marshal(PRChangesResult{
+		Sources: src, SourcesFreshness: fresh,
+		Changes: []PRChange{
+			{Change: "added", Source: "s", Entity: pr, Seq: 7, Kinds: []string{"head_changed"}, Fields: json.RawMessage(`[{"name":"x"}]`)},
+			{Change: "changed", Source: "s", Entity: pr, Kinds: []string{}, Fields: json.RawMessage(`[]`)},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entity, err := json.Marshal(pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generic, err := json.Marshal(ChangesResult{
+		Sources: src, SourcesFreshness: fresh,
+		Changes: []Change{
+			{Change: "added", Source: "s", Entity: entity, Seq: 7, Kinds: []string{"head_changed"}, Fields: json.RawMessage(`[{"name":"x"}]`)},
+			{Change: "changed", Source: "s", Entity: entity, Kinds: []string{}, Fields: json.RawMessage(`[]`)},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(typed) != string(generic) {
+		t.Fatalf("generic answer differs from the typed answer:\n got %s\nwant %s", generic, typed)
+	}
+	if strings.Contains(string(generic), "store_identity") {
+		t.Errorf("the answer carries a store_identity before the packet that adds it: %s", generic)
+	}
+}

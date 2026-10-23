@@ -372,7 +372,7 @@ func TestCallsForOneKeyAreSerialisedAndDifferentKeysRunInParallel(t *testing.T) 
 
 	close(release)
 	wg.Wait()
-	if n := r.f.locks.size(); n != 0 {
+	if n := r.f.Shared().KeyLocksHeld(); n != 0 {
 		t.Fatalf("%d key locks left behind", n)
 	}
 }
@@ -411,7 +411,7 @@ func TestConcurrentPollsAndAcksKeepThePositionMonotonic(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if n := r.f.locks.size(); n != 0 {
+	if n := r.f.Shared().KeyLocksHeld(); n != 0 {
 		t.Fatalf("%d key locks left behind", n)
 	}
 	for _, c := range []string{"w0", "w1"} {

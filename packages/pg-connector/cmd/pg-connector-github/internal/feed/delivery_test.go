@@ -77,11 +77,12 @@ func TestDeliveryForCIKey(t *testing.T) {
 }
 
 func TestRefFoldIgnoresTheCaseOfOwnerAndRepoOnly(t *testing.T) {
-	m := newMemberSet([]string{"Acme-Org/Widget#3"})
-	if !m.has("acme-org/widget#3") {
+	fold := registration.FoldRef
+	m := fold("Acme-Org/Widget#3")
+	if fold("acme-org/widget#3") != m {
 		t.Error("owner/repo case must not matter")
 	}
-	if m.has("acme-org/widget#4") || m.has("acme-org/widget") {
+	if fold("acme-org/widget#4") == m || fold("acme-org/widget") == m {
 		t.Error("the number is exact")
 	}
 }
