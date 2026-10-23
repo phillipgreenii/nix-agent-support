@@ -392,10 +392,10 @@ an agent to run a full flake check at land (the deployed copies of these
 rules keep saying so until the operator next runs `pn workspace apply`).
 
 FF-1c is a different, narrower thing and does not reopen that ruling: it is the
-eval-only `pre-land-eval` check (it evaluates `checks`, `packages` and
-`devShells` derivation paths and builds none of them, and it runs no hooks), it
-is a separate gate, and it runs only in a clone that opted in (operator ruling,
-Phillip, 2026-10-23).
+eval-only `pre-land-eval` check, a caller of `pn workspace flake-check --no-build`
+(it evaluates `checks`, `packages` and `devShells` derivation paths and builds
+none of them, and it runs no hooks), it is a separate gate, and it runs only in a
+clone that opted in (operator ruling, Phillip, 2026-10-23).
 
 Interim risk, accepted by the operator: a workspace repo with no CI has, as its
 only automatic test runners, the commit-time `run-unit-tests` hook
@@ -412,19 +412,33 @@ judgment, not a step of this handler.
 FF-1b runs hooks; it never evaluates the flake. An evaluation error (a missing
 option, a `throw`, a bad import) therefore passes FF-1b and lands. This step
 closes that gap with `pre-land-eval`, a standalone command (it is NOT a
-`pg-hooks` subcommand and its exit codes are unrelated to `pg-hooks`'s). It
+`pg-hooks` subcommand and its exit codes are unrelated to `pg-hooks`'s). It adds
+the per-clone opt-in key and a one-word verdict to
+`pn workspace flake-check --no-build --caller ff-1c --rev <FB> <WT>`, which
 evaluates, without building, the derivation paths of the repo's flake `checks`,
-`packages` and `devShells` at one commit, using the locked inputs only. It is
-**not** a `nix flake check`: it builds nothing the repo ships and runs no
-hooks. Operator ruling (Phillip, 2026-10-23, recorded on `pg2-pla9d.26`): the
-eval-only pre-land check is built now; it supersedes the deferral banner in design
-`pg2-3i12x` section 9. Tool and contract: `pre-land-eval` in `nix-repo-base`
-(`docs/hooks.md`, section "The eval-only pre-land check").
+`packages` and `devShells` at one commit, **against the LOCAL workspace
+siblings** (pn's `--override-input <alias> git+file://<clone>` set, read from the
+siblings' working trees), so a repo whose locked siblings lag the local clones
+gets a true answer with no push, no relock and no `flake.lock` write. It is
+**not** a `nix flake check` and it is **not** nix's own `--no-build` either: it
+builds nothing the repo ships, runs no hooks, and its verdict does not depend on
+the store. Operator rulings (Phillip, 2026-10-23, recorded on `pg2-pla9d.26` and
+`pg2-8uc2d`): the eval-only pre-land check is built now (it supersedes the
+deferral banner in design `pg2-3i12x` section 9), and using it for landing is an
+EXPERIMENT whose runs pn logs to
+`${XDG_STATE_HOME:-$HOME/.local/state}/pn/flake-check-no-build.jsonl`. Tool and
+contract: `pre-land-eval` and `pn workspace flake-check --no-build` in
+`nix-repo-base` (`docs/hooks.md`, section "The eval-only pre-land check").
+
+**No land step calls `pn workspace update`, `upgrade` or `lock`, or relocks, to
+make FF-1c pass** (operator ruling, 2026-10-23): the check never writes
+`flake.lock`, and a failure is a failure to fix in `<WT>`, not a lock to
+refresh.
 
 Run it only after FF-1b did not halt, against the commit being landed, which is
 `<FB>` as FF-1 just rebased it (`<WT>`'s `HEAD`). It is a store-write operation
 (it writes `.drv` files and source copies, and builds the small
-import-from-derivation derivations) and takes about one to three minutes, so the
+import-from-derivation derivations) and takes about one to four minutes, so the
 handler MUST run it through `bgrun` and wait with `bgwait`, never in the
 foreground, and MUST NOT wait with `sleep`, `date`, `tail` or repeated `bgcheck`:
 
@@ -442,20 +456,29 @@ apart. Never infer success from `bgrun`'s own exit status.
 `git -C <repo> config --get pgii-integrate-branch.preLandEval` prints exactly
 `true`; any other value, and an absent key, makes the command print `not-enabled`
 and exit 0, which is never an error. The handler MUST NOT set the key itself.
+For EVERY clone where the key is `true` the check is
+`pn workspace flake-check --no-build`, through `pre-land-eval`.
+
+**There is no `inconclusive` outcome and no retry** (operator ruling, 2026-10-23):
+an environmental failure (store busy, a fetch failure, a timeout) is reported as
+`eval-failed` exactly like an evaluation error, a sibling's uncommitted
+working-tree edits can fail the check, and a pass proves evaluation only (nothing
+is built or tested, one system, and `darwinConfigurations` is not evaluated). The
+handler MUST NOT re-run the command unchanged to get a different answer.
 
 | Exit (verdict word)           | Meaning                                                                 | This handler                                                                                                                                              |
 | ----------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0 (`ok`)                      | every evaluated set evaluated cleanly                                   | continue to FF-2                                                                                                                                          |
 | 0 (`not-enabled`)             | this clone has not opted in                                             | print one line, `pre-land eval: not enabled for <repo>`, and continue to FF-2                                                                             |
-| 11 (`eval-inconclusive`)      | only import-from-derivation errors under `--no-ifd`, or no system       | continue to FF-2, and add one warning line to the `landed` report (`pre-land eval: inconclusive for <repo>`)                                              |
-| 10 (`eval-failed`)            | nix reported an evaluation error                                        | halt: `stopped:eval-failed`, naming the failing output and printing the reproduce command (below)                                                         |
-| 127                           | `pre-land-eval` is not installed (the shell's own code)                 | exactly like FF-1b's 127 row: record `pre-land-eval not installed on this machine; ask the operator to run pn workspace apply` verbatim, continue to FF-2 |
+| 10 (`eval-failed`)            | `pn workspace flake-check --no-build` reported a failure                | halt: `stopped:eval-failed`, naming the failing output and printing the reproduce command (below)                                                         |
+| 127                           | `pre-land-eval` (or the `pn` it calls) is not installed                 | exactly like FF-1b's 127 row: record `pre-land-eval not installed on this machine; ask the operator to run pn workspace apply` verbatim, continue to FF-2 |
 | other non-zero (2 usage, ...) | the check could not run (a usage error, or a ref that does not resolve) | halt as `stopped:eval-failed`, reporting the exit status and the command's own message verbatim                                                           |
 
 **On `eval-failed`, halt and report** `stopped:eval-failed` with the repo name,
 the failing output copied from the log (the command prints the first 10 lines of
 nix's error, then the last 3 `error:` lines), and the command to reproduce it:
-`pre-land-eval "$WT" "$FB"` (add `--no-ifd` only if the original run used it).
+`pre-land-eval "$WT" "$FB"` (add `--no-ifd` only if the original run used it), or
+the check it wraps: `pn workspace flake-check --no-build --rev "$FB" "$WT"`.
 Unlike an FF-1b hook failure, **this one is agent-fixable**: an evaluation error
 is a deterministic failure of the code the branch itself just changed, so the
 agent that invoked `integrate-branch` fixes it in `<WT>`, commits, and re-invokes
@@ -479,11 +502,11 @@ FF-2's single part keeps its historical label, FF-2b, because other skills
 ### FF-2b — Fast-forward-only merge in the canonical clone
 
 Run this only after FF-1b exited 0 (or 13 / 127 with its notice recorded)
-and FF-1c ended in a continue outcome (`ok`, `not-enabled`, `eval-inconclusive`,
-or exit 127 with its notice recorded). Any other FF-1b exit status, 10 included,
+and FF-1c ended in a continue outcome (`ok`, `not-enabled`, or exit 127 with
+its notice recorded). Any other FF-1b exit status, 10 included,
 means FF-2b MUST NOT run: halt as `stopped:precommit-branch-diff-failed` and
 leave the primary branch untouched. Any other FF-1c outcome (`eval-failed`, or a
-non-zero exit other than 0, 11 and 127) likewise: halt as `stopped:eval-failed`
+non-zero exit other than 0 and 127) likewise: halt as `stopped:eval-failed`
 and leave the primary branch untouched. Rebase, FF-1b, FF-1c and this merge MUST NOT be chained in one unguarded script — check
 each step's exit status before the next (`pg2-1rlme`).
 
@@ -608,8 +631,8 @@ flowchart TD
     C2 -->|No| S1["STOP: stopped:rebase-conflict — abort, keep branch"]
     F1B -->|"exit 10, or any other non-zero"| S12["STOP: stopped:precommit-branch-diff-failed — operator fixes it"]
     F1B -->|"passes, or exit 13 / 127: one notice line recorded"| F1C{"FF-1c: pre-land-eval WT FB (bgrun + bgwait; opt-in per clone)"}
-    F1C -->|"exit 10, or any other non-zero except 11 / 127"| S13["STOP: stopped:eval-failed — the agent fixes the evaluation error and re-invokes"]
-    F1C -->|"ok, not-enabled, inconclusive (11), or 127: one line recorded"| G["FF-2b: git -C CC merge --ff-only FB"]
+    F1C -->|"exit 10, or any other non-zero except 127"| S13["STOP: stopped:eval-failed — the agent fixes the evaluation error and re-invokes"]
+    F1C -->|"ok, not-enabled, or 127: one line recorded"| G["FF-2b: git -C CC merge --ff-only FB"]
     G --> H{"ff-only ok?"}
     H -->|Yes| I["FF-4: bundle refresh (reported, never fails the land), then cd to CC and wtdone FB --cc CC"]
     H -->|"No: attempts++"| J{"attempts < 2?"}
@@ -634,8 +657,7 @@ missing), a `landed` report MUST include the notice line verbatim
 ask the operator to run pn workspace apply`), and it MUST include FF-4a's
 `FF-4: bundle refresh ...` line. Likewise for FF-1c: a `landed` report MUST
 include the one line it printed for a `not-enabled` clone (`pre-land eval: not
-enabled for <repo>`), the `eval-inconclusive` warning line, or the verbatim
-not-installed notice (`pre-land-eval not installed on this machine; ask the
+enabled for <repo>`), or the verbatim not-installed notice (`pre-land-eval not installed on this machine; ask the
 operator to run pn workspace apply`). Its
 `<reason>` values, and the
 disposition each one asks of the operator:
@@ -715,19 +737,26 @@ this machine; ask the operator to run pn workspace apply`), which the outcome
   as `stopped:precommit-branch-diff-failed`, reporting the status and
   `pg-hooks`'s message verbatim: the check could not run, which is not the
   same as having nothing to check.
-- FF-1c MUST run `pre-land-eval "$WT" "$FB"` after FF-1b did not halt and before
-  FF-2, through `bgrun` and `bgwait` (about one to three minutes, a store-write
+- FF-1c MUST run `pre-land-eval "$WT" "$FB"` (a caller of
+  `pn workspace flake-check --no-build`, so the sibling overrides and the
+  experiment log are pn's) after FF-1b did not halt and before
+  FF-2, through `bgrun` and `bgwait` (about one to four minutes, a store-write
   operation, never a foreground call, never polled with `sleep`/`date`/`tail`),
   and MUST branch on `bgwait`'s `DONE exit=<N>` line. Exit 0 with `ok` continues;
   exit 0 with `not-enabled` continues after the one line `pre-land eval: not
-enabled for <repo>`; exit 11 (`eval-inconclusive`) continues and adds one
-  warning line to the `landed` report; exit 10 (`eval-failed`) MUST halt as
+enabled for <repo>`; exit 10 (`eval-failed`) MUST halt as
   `stopped:eval-failed`, naming the failing output and printing the reproduce
   command; any other non-zero exit other than 127 MUST halt as
   `stopped:eval-failed`, reporting the status and the command's own message
   verbatim. The check runs only in a clone that set
   `pgii-integrate-branch.preLandEval` to exactly `true`; the handler MUST NOT set
   that key itself.
+- FF-1c MUST NOT be made to pass by relocking: no land step MAY call
+  `pn workspace update`, `pn workspace upgrade` or `pn workspace lock`, run
+  `nix flake update` or `nix flake lock`, or write `flake.lock` for it (operator
+  ruling, Phillip, 2026-10-23). FF-1c has no `inconclusive` outcome and no retry:
+  an exit 10 is `eval-failed` whatever the cause, and the handler MUST NOT re-run
+  the command unchanged hoping for a different answer.
 - Exit 127 from FF-1c (`pre-land-eval` not installed) MUST behave exactly like
   FF-1b's 127 row: record `pre-land-eval not installed on this machine; ask the
 operator to run pn workspace apply` verbatim, continue the land, and MUST NOT

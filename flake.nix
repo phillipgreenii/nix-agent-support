@@ -4200,9 +4200,24 @@
                   fi
 
                   ff="$surface/claude-marketplace/integrate-branch/skills/ff-merge-to-main/SKILL.md"
-                  for want in 'integrate-branch-support --prek-branch-diff' 'pg-hooks run pre-land' 'pg-hooks not installed on this machine; ask the operator to run pn workspace apply' 'integrate-branch-support --bundle-refresh' 'stopped:precommit-branch-diff-failed' 'overrides any older rule' '## FF-1c' 'stopped:eval-failed' 'pre-land-eval "$WT" "$FB"' 'bgwait "pre-land-eval-' 'AGENT-FIXABLE' 'pre-land-eval not installed on this machine; ask the operator to run pn workspace apply' 'pgii-integrate-branch.preLandEval' 'pre-land eval: not enabled for <repo>'; do
+                  for want in 'integrate-branch-support --prek-branch-diff' 'pg-hooks run pre-land' 'pg-hooks not installed on this machine; ask the operator to run pn workspace apply' 'integrate-branch-support --bundle-refresh' 'stopped:precommit-branch-diff-failed' 'overrides any older rule' '## FF-1c' 'stopped:eval-failed' 'pre-land-eval "$WT" "$FB"' 'bgwait "pre-land-eval-' 'AGENT-FIXABLE' 'pre-land-eval not installed on this machine; ask the operator to run pn workspace apply' 'pgii-integrate-branch.preLandEval' 'pre-land eval: not enabled for <repo>' 'pn workspace flake-check --no-build' 'MUST NOT be made to pass by relocking' 'unchanged hoping for a different answer'; do
                     if ! grep -qF -- "$want" "$ff"; then
                       echo "FAIL: ff-merge-to-main SKILL.md lost the FF-1b/FF-4 pg-hooks text: $want" >&2
+                      exit 1
+                    fi
+                  done
+                  # Operator ruling 2026-10-23 (bead pg2-8uc2d): FF-1c has no inconclusive
+                  # outcome (an environmental failure is eval-failed, no retry), and no land
+                  # step relocks to make it pass.
+                  for gone in 'eval-inconclusive' 'inconclusive (11)'; do
+                    if grep -qF -- "$gone" "$ff"; then
+                      echo "FAIL: ff-merge-to-main SKILL.md still documents an FF-1c inconclusive outcome: $gone" >&2
+                      exit 1
+                    fi
+                  done
+                  for relock in 'no land step MAY call' '`pn workspace update`, `pn workspace upgrade` or `pn workspace lock`'; do
+                    if ! grep -qF -- "$relock" "$ff"; then
+                      echo "FAIL: ff-merge-to-main SKILL.md no longer forbids FF-1c relocking: $relock" >&2
                       exit 1
                     fi
                   done

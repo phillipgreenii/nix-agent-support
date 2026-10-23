@@ -116,13 +116,15 @@ committing. The gates are:
    hook failure (exit `10`) or any other non-zero exit halts the land as
    `stopped:precommit-branch-diff-failed`.
 
-3. **At land, `ff-merge-to-main`'s FF-1c** — the eval-only `pre-land-eval` check (it evaluates a
-   flake's `checks`, `packages` and `devShells` derivation paths at the commit being landed and
-   builds none of them; it is NOT a full `nix flake check`; operator ruling, Phillip, 2026-10-23).
+3. **At land, `ff-merge-to-main`'s FF-1c** — the eval-only `pre-land-eval` check, a caller of
+   `pn workspace flake-check --no-build` (it evaluates a flake's `checks`, `packages` and `devShells`
+   derivation paths at the commit being landed, against the local workspace siblings, and builds none
+   of them; it is NOT a full `nix flake check` and NOT nix's own `--no-build`; no land step relocks to
+   make it pass; operator ruling, Phillip, 2026-10-23).
    It runs only in a clone that opted in (`git config pgii-integrate-branch.preLandEval true`), takes
    about one to three minutes and is run through `bgrun`/`bgwait`. `eval-failed` (exit `10`) halts
    the land as `stopped:eval-failed`, which is agent-fixable: fix the evaluation error, commit and
-   re-invoke (unlike FF-1b, which is operator-decided). `not-enabled` and `eval-inconclusive` continue;
+   re-invoke (unlike FF-1b, which is operator-decided). `not-enabled` continues (there is no inconclusive outcome and no retry);
    exit `127` (not installed until `pn workspace apply`) is recorded like FF-1b's `127`.
 
 Beyond those, an agent MAY — and SHOULD when it touched shared infrastructure (a builder, a flake
