@@ -156,7 +156,7 @@ func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
 		"alias": {"node_id", "ref", "seen_at"},
 		"entity": {
 			"kind", "id", "version", "last_access", "keep_alive", "last_known_mergeable",
-			"tombstoned_at",
+			"tombstoned_at", "watched_at", "watched_via",
 		},
 		"entity_group": {
 			"kind", "id", "group_name", "content", "fingerprint", "fetched_at", "fresh_until",
@@ -166,6 +166,7 @@ func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
 		"job":    {"run_id", "attempt", "jobs", "fetched_at"},
 		"change_log": {
 			"seq", "kind", "id", "version", "head_sha", "kinds", "fields", "origin", "origin_updated_at", "at",
+			"watched",
 		},
 		"pending_change": {
 			"kind", "id", "kinds", "fields", "awaited", "head_sha", "base_sha", "origin", "origin_updated_at",

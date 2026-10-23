@@ -62,6 +62,9 @@ type ChangeRow struct {
 	Origin          string
 	OriginUpdatedAt time.Time
 	At              time.Time
+	// Watched is whether the entity's watched flag was set when the row was
+	// appended (the log row's snapshot); a row written before rung 5 reads false.
+	Watched bool
 }
 
 // SetStamp records the row's stamp (the head commit the row was recorded
@@ -71,7 +74,7 @@ func (c *ChangeRow) SetStamp(s string) { c.HeadSHA = s }
 // Stamp returns the row's stamp.
 func (c ChangeRow) Stamp() string { return c.HeadSHA }
 
-const changeCols = `seq, kind, id, version, head_sha, kinds, fields, origin, origin_updated_at, at`
+const changeCols = `seq, kind, id, version, head_sha, kinds, fields, origin, origin_updated_at, at, watched`
 
 func scanChange(sc interface{ Scan(...any) error }) (ChangeRow, error) {
 	var (
@@ -79,8 +82,9 @@ func scanChange(sc interface{ Scan(...any) error }) (ChangeRow, error) {
 		kinds, flds  string
 		originUpdate sql.NullInt64
 		at           int64
+		watched      int
 	)
-	if err := sc.Scan(&c.Seq, &c.Kind, &c.ID, &c.Version, &c.HeadSHA, &kinds, &flds, &c.Origin, &originUpdate, &at); err != nil {
+	if err := sc.Scan(&c.Seq, &c.Kind, &c.ID, &c.Version, &c.HeadSHA, &kinds, &flds, &c.Origin, &originUpdate, &at, &watched); err != nil {
 		return ChangeRow{}, err
 	}
 	var err error
@@ -90,6 +94,7 @@ func scanChange(sc interface{ Scan(...any) error }) (ChangeRow, error) {
 	c.Fields = jsonOf(flds)
 	c.OriginUpdatedAt = timeOf(originUpdate)
 	c.At = time.UnixMilli(at).UTC()
+	c.Watched = watched != 0
 	return c, nil
 }
 
@@ -103,10 +108,10 @@ func (t *Tx) AppendChange(ctx context.Context, c ChangeRow) (seq int64, err erro
 		return 0, fmt.Errorf("store: encode kinds of change %s/%s: %w", c.Kind, c.ID, err)
 	}
 	res, err := t.tx.ExecContext(ctx, `
-INSERT INTO change_log (kind, id, version, head_sha, kinds, fields, origin, origin_updated_at, at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO change_log (kind, id, version, head_sha, kinds, fields, origin, origin_updated_at, at, watched)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.Kind, c.ID, c.Version, c.HeadSHA, kinds, rawJSON(c.Fields), c.Origin,
-		msOrNull(c.OriginUpdatedAt), c.At.UnixMilli())
+		msOrNull(c.OriginUpdatedAt), c.At.UnixMilli(), boolInt(c.Watched))
 	if err != nil {
 		return 0, fmt.Errorf("store: append change %s/%s: %w", c.Kind, c.ID, err)
 	}

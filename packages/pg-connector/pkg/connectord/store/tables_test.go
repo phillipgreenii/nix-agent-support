@@ -46,7 +46,10 @@ func TestGenerateFixture(t *testing.T) {
 		`INSERT INTO query (key, configured, ids, complete, fetched_at, fresh_until, last_success_at, last_error, baseline_at)
 		 VALUES ('open-prs:org/repo', 1, '["PR_1","PR_2"]', 1, 1760000000000, 1760000060000, 1760000000000, '', 1760000000000)`,
 		`INSERT INTO alias VALUES ('PR_1', 'org/repo#1', 1760000000000)`,
-		`INSERT INTO entity VALUES ('pr', 'PR_1', 3, 1760000000000, 1, 'MERGEABLE', NULL)`,
+		// Named columns: the table has grown (watched_at and watched_via, version 5).
+		`INSERT INTO entity (kind, id, version, last_access, keep_alive, last_known_mergeable, tombstoned_at,
+		   watched_at, watched_via)
+		 VALUES ('pr', 'PR_1', 3, 1760000000000, 1, 'MERGEABLE', NULL, 1760000006000, 'direct')`,
 		`INSERT INTO entity_group (kind, id, group_name, content, fingerprint, fetched_at, fresh_until, max_age_at,
 		   last_error, generation, fetched_for_head, fetched_for_base)
 		 VALUES ('pr', 'PR_1', 'summary', x'7b227469746c65223a2253616d706c65227d', 'fp-1', 1760000000000, 1760000060000,
@@ -72,6 +75,14 @@ func TestGenerateFixture(t *testing.T) {
 		`INSERT INTO store_meta (key, value) VALUES ('moved_aside_at', '1760000005000')`,
 	} {
 		if _, err := s.DB().Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, k := range fixtureWatchedConsumers() {
+		if _, err := s.DB().Exec(
+			`INSERT INTO consumer (consumer, kind, query, acked_seq, seen_at) VALUES (?, ?, ?, ?, ?)`,
+			k.Consumer, k.Kind, k.Query, k.AckedSeq, 1760000004100+int64(i)*100,
+		); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -126,6 +137,21 @@ func assertFixtureJobs(t *testing.T, ctx context.Context, s *Store, fixtureVersi
 		t.Errorf("a version %d fixture has no job rows, but the migrated store returned %+v", fixtureVersion, got)
 	case fixtureVersion >= jobTableVersion && (!ok || !sameJobRow(got, want)):
 		t.Errorf("job row = %+v ok=%v, want %+v", got, ok, want)
+	}
+}
+
+// watchedVersion is the schema version that added the watched flag.
+const watchedVersion = 5
+
+// fixtureWatchedConsumers are the cursors the version 5 fixture carries besides
+// the sample one: a consumer with one row, one with several rows and one on the
+// second feed, in the order ListConsumers returns them.
+func fixtureWatchedConsumers() []ConsumerRow {
+	return []ConsumerRow{
+		{Consumer: "example-ci", Kind: "ci", Query: "", AckedSeq: 7},
+		{Consumer: "example-multi", Kind: "pr", Query: "q1", AckedSeq: 9},
+		{Consumer: "example-multi", Kind: "pr", Query: "q2", AckedSeq: 4},
+		{Consumer: "example-one", Kind: "pr", Query: "q1", AckedSeq: 5},
 	}
 }
 
@@ -204,12 +230,25 @@ func assertFixtureChanges(t *testing.T, ctx context.Context, s *Store, fixtureVe
 		p.DetectedAt.UnixMilli() != 1760000003000 || p.Deadline.UnixMilli() != 1760000033000 {
 		t.Errorf("pending row = %+v", p)
 	}
-	if len(consumers) != 1 {
-		t.Fatalf("consumers = %+v, want one row", consumers)
+	wantConsumers := 1
+	if fixtureVersion >= watchedVersion {
+		wantConsumers = 5 // the sample cursor and the version 5 fixture's own four
 	}
-	if k := consumers[0]; k.Consumer != "sample-consumer" || k.Kind != "pr" || k.Query != "open-prs" ||
+	if len(consumers) != wantConsumers {
+		t.Fatalf("consumers = %+v, want %d rows", consumers, wantConsumers)
+	}
+	// Ordered by consumer, kind, query: the version 5 rows sort before the sample.
+	if k := consumers[len(consumers)-1]; k.Consumer != "sample-consumer" || k.Kind != "pr" || k.Query != "open-prs" ||
 		k.AckedSeq != 1 || k.SeenAt.UnixMilli() != 1760000004000 {
 		t.Errorf("consumer row = %+v", k)
+	}
+	if fixtureVersion >= watchedVersion {
+		for i, want := range fixtureWatchedConsumers() {
+			if k := consumers[i]; k.Consumer != want.Consumer || k.Kind != want.Kind || k.Query != want.Query ||
+				k.AckedSeq != want.AckedSeq {
+				t.Errorf("consumer %d = %+v, want %+v", i, k, want)
+			}
+		}
 	}
 	if !metaOK || meta != "1760000005000" {
 		t.Errorf("meta = %q ok=%v", meta, metaOK)

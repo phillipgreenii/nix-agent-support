@@ -47,6 +47,19 @@ func userVersionOf(t *testing.T, s *Store) int {
 	return v
 }
 
+// climbedCopy copies the store file at from and opens the copy with the current
+// ladder (no backup), so the typed accessors can read the data an older store
+// holds. The original is left as it is.
+func climbedCopy(t *testing.T, from string) *Store {
+	t.Helper()
+	to := dbPath(t)
+	copyFile(t, from, to)
+	opts := fastOpts()
+	opts.BackupBeforeMigrate = falsePtr()
+	s, _ := mustOpen(t, to, opts)
+	return s
+}
+
 func falsePtr() *bool { f := false; return &f }
 
 func TestBackupOpeningAPopulatedV3StoreWritesABackupThatAV3BinaryOpens(t *testing.T) {
@@ -75,8 +88,11 @@ func TestBackupOpeningAPopulatedV3StoreWritesABackupThatAV3BinaryOpens(t *testin
 	if bres.Outcome != OutcomeOpened || bres.FromVersion != 3 || userVersionOf(t, b) != 3 {
 		t.Fatalf("backup open result = %+v user_version=%d, want opened at 3", bres, userVersionOf(t, b))
 	}
-	assertFixtureData(t, ctx, b)
-	assertFixtureChanges(t, ctx, b, 3)
+	// The accessors read the current columns, which a version 3 store lacks: the
+	// data check runs on a copy of the backup climbed to the current version.
+	c := climbedCopy(t, b.Path())
+	assertFixtureData(t, ctx, c)
+	assertFixtureChanges(t, ctx, c, 3)
 	if _, err := b.Identity(ctx); !errors.Is(err, ErrNoIdentity) {
 		t.Errorf("the backup has an identity: %v", err)
 	}
@@ -182,8 +198,11 @@ func TestBackupFailingRungMovesTheStoreAsideAndTheBackupIsIntact(t *testing.T) {
 	if bres.Outcome != OutcomeOpened || bres.FromVersion != 3 {
 		t.Fatalf("backup open result = %+v, want opened at 3", bres)
 	}
-	assertFixtureData(t, ctx, b)
-	assertFixtureChanges(t, ctx, b, 3)
+	// The accessors read the current columns, which a version 3 store lacks: the
+	// data check runs on a copy of the backup climbed to the current version.
+	c := climbedCopy(t, b.Path())
+	assertFixtureData(t, ctx, c)
+	assertFixtureChanges(t, ctx, c, 3)
 }
 
 func TestBackupThatCannotBeMadeFailsOpenAndLeavesTheStoreUntouched(t *testing.T) {

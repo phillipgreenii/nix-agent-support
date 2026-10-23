@@ -9,7 +9,7 @@ import (
 
 // SchemaVersion is the newest schema version this binary knows. A store
 // above it is refused (ErrSchemaNewer); a store below it is migrated up.
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 // builtinMigrations is the ladder; len(builtinMigrations) == SchemaVersion
 // (asserted by a test). A migration, once shipped, MUST NOT change: add a
@@ -19,6 +19,7 @@ var builtinMigrations = []Migration{
 	{Version: 2, Name: "job", Apply: migrateV2},
 	{Version: 3, Name: "pending_change, change_log, consumer", Apply: migrateV3},
 	{Version: 4, Name: "store identity", Apply: migrateV4},
+	{Version: 5, Name: "watched flag and log snapshot", Apply: migrateV5},
 }
 
 // BuiltinMigrations returns a copy of the built-in ladder. A caller that wants
@@ -223,6 +224,28 @@ func migrateV4(tx *sql.Tx, report func(string)) error {
 	}
 	if _, err := tx.Exec(schemaV4, hex.EncodeToString(b)); err != nil {
 		return fmt.Errorf("create version 4 store identity: %w", err)
+	}
+	return nil
+}
+
+// schemaV5 adds the per-entity watched flag and the log row's snapshot of it.
+//
+//   - entity.watched_at: Unix milliseconds the flag was first set; NULL means
+//     not watched. entity.watched_via records the cause (empty while unwatched).
+//   - change_log.watched: whether the entity's flag was set when the row was
+//     appended, 0 for every row written before this rung.
+//   - entity_watched: the partial index the watched listing and count read.
+const schemaV5 = `
+ALTER TABLE entity ADD COLUMN watched_at INTEGER;
+ALTER TABLE entity ADD COLUMN watched_via TEXT NOT NULL DEFAULT '';
+ALTER TABLE change_log ADD COLUMN watched INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX entity_watched ON entity (kind, watched_at) WHERE watched_at IS NOT NULL;
+`
+
+func migrateV5(tx *sql.Tx, report func(string)) error {
+	report("adding the watched flag and the log snapshot")
+	if _, err := tx.Exec(schemaV5); err != nil {
+		return fmt.Errorf("create version 5 schema: %w", err)
 	}
 	return nil
 }

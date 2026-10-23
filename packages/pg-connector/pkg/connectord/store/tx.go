@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Tx is one open store transaction, handed to the callback of InTx or
@@ -130,6 +131,44 @@ func (t *Tx) ListQueries(ctx context.Context, configuredOnly bool) ([]QueryRow, 
 // tombstone) when it is absent and changes nothing when it exists.
 func (t *Tx) EnsureEntity(ctx context.Context, kind, id string) error {
 	return ensureEntity(ctx, t.tx, kind, id)
+}
+
+// SetWatched sets the entity's watched flag, first cause wins: it creates the
+// entity row when it is absent (EnsureEntity), then sets watched_at and
+// watched_via only where watched_at is still NULL. newly reports whether this
+// call set the flag; a later call, whatever its cause, changes nothing and
+// reports false. There is no operation that clears the flag: a watched entity
+// stays watched until its row is deleted.
+func (t *Tx) SetWatched(ctx context.Context, kind, id, via string, at time.Time) (newly bool, err error) {
+	if err := ensureEntity(ctx, t.tx, kind, id); err != nil {
+		return false, err
+	}
+	res, err := t.tx.ExecContext(ctx,
+		`UPDATE entity SET watched_at = ?, watched_via = ? WHERE kind = ? AND id = ? AND watched_at IS NULL`,
+		at.UnixMilli(), via, kind, id)
+	if err != nil {
+		return false, fmt.Errorf("store: set watched %s/%s: %w", kind, id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: set watched %s/%s: %w", kind, id, err)
+	}
+	return n > 0, nil
+}
+
+// IsWatched reports whether the entity's watched flag is set; a missing entity
+// row is not watched.
+func (t *Tx) IsWatched(ctx context.Context, kind, id string) (bool, error) {
+	var watched int
+	err := t.tx.QueryRowContext(ctx,
+		`SELECT watched_at IS NOT NULL FROM entity WHERE kind = ? AND id = ?`, kind, id).Scan(&watched)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: is watched %s/%s: %w", kind, id, err)
+	}
+	return watched != 0, nil
 }
 
 // BumpEntityVersion increments entity.version by one in place, touching no other

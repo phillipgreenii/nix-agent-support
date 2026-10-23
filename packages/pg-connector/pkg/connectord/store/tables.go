@@ -298,9 +298,17 @@ type EntityRow struct {
 	KeepAlive          bool
 	LastKnownMergeable string
 	TombstonedAt       time.Time
+	// WatchedAt and WatchedVia are the per-entity watched flag (rung 5): when it
+	// was first set (the zero time while unwatched) and the cause. They are read
+	// only: PutEntity never writes them; Tx.SetWatched is the only writer.
+	WatchedAt  time.Time
+	WatchedVia string
 }
 
-// PutEntity inserts or replaces the row for (e.Kind, e.ID).
+// PutEntity inserts or replaces the row for (e.Kind, e.ID). It never writes
+// watched_at or watched_via: the update list names neither, so a read-modify-write
+// of an old copy of the row cannot clear the watched flag (an insert leaves them
+// at their defaults).
 func (s *Store) PutEntity(ctx context.Context, e EntityRow) error {
 	return putEntity(ctx, s.db, e)
 }
@@ -354,18 +362,19 @@ ON CONFLICT (kind, id) DO NOTHING`, kind, id)
 	return nil
 }
 
-const entityCols = `kind, id, version, last_access, keep_alive, last_known_mergeable, tombstoned_at`
+const entityCols = `kind, id, version, last_access, keep_alive, last_known_mergeable, tombstoned_at, watched_at, watched_via`
 
 func scanEntity(sc interface{ Scan(...any) error }) (EntityRow, error) {
 	var (
-		e            EntityRow
-		access, tomb sql.NullInt64
-		keep         int
+		e                  EntityRow
+		access, tomb, wtch sql.NullInt64
+		keep               int
 	)
-	if err := sc.Scan(&e.Kind, &e.ID, &e.Version, &access, &keep, &e.LastKnownMergeable, &tomb); err != nil {
+	if err := sc.Scan(&e.Kind, &e.ID, &e.Version, &access, &keep, &e.LastKnownMergeable, &tomb, &wtch, &e.WatchedVia); err != nil {
 		return EntityRow{}, err
 	}
 	e.LastAccess, e.KeepAlive, e.TombstonedAt = timeOf(access), keep != 0, timeOf(tomb)
+	e.WatchedAt = timeOf(wtch)
 	return e, nil
 }
 
@@ -403,6 +412,39 @@ func (s *Store) ListEntities(ctx context.Context, kind string) ([]EntityRow, err
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ListWatched returns the entity rows of one kind whose watched flag is set,
+// ordered by watched_at then id.
+func (s *Store) ListWatched(ctx context.Context, kind string) ([]EntityRow, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+entityCols+` FROM entity WHERE kind = ? AND watched_at IS NOT NULL ORDER BY watched_at, id`, kind)
+	if err != nil {
+		return nil, fmt.Errorf("store: list watched %s: %w", kind, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []EntityRow
+	for rows.Next() {
+		e, err := scanEntity(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: list watched %s: %w", kind, err)
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list watched %s: %w", kind, err)
+	}
+	return out, nil
+}
+
+// CountWatched counts the watched entity rows of one kind.
+func (s *Store) CountWatched(ctx context.Context, kind string) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM entity WHERE kind = ? AND watched_at IS NOT NULL`, kind).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: count watched %s: %w", kind, err)
+	}
+	return n, nil
 }
 
 // DeleteEntity removes the entity row AND its groups, in one transaction.
