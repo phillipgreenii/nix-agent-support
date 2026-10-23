@@ -150,6 +150,11 @@ func TestAMissingUnparsableOrFutureMarkerCountsAsAbsent(t *testing.T) {
 	}
 }
 
+// bound is the binding a conflict names: "consumer X is bound to view V, scope S".
+func bound(consumer, view, scope string) string {
+	return "consumer " + consumer + " is bound to view " + view + ", scope " + scope
+}
+
 func wantConflict(t *testing.T, err error, existing string) {
 	t.Helper()
 	var ke *KeyConflictError
@@ -169,10 +174,10 @@ func TestOneConsumerCannotHoldTheCursorsOfTwoViewsOfOneScope(t *testing.T) {
 	ctx := context.Background()
 	r.poll(viewAll, "c", "mine")
 	_, err := r.f.Poll(ctx, PollRequest{View: viewFlagged, Consumer: "c", Scope: "mine"})
-	wantConflict(t, err, "(c, "+viewAll+", mine)")
+	wantConflict(t, err, bound("c", viewAll, "mine"))
 	_, err = r.f.Poll(ctx, PollRequest{View: viewFlagged, Consumer: "c", Scope: "mine", Reset: true})
-	wantConflict(t, err, "(c, "+viewAll+", mine)")
-	wantConflict(t, ackErr(r.f, ctx, viewFlagged, "c", "mine", 0), "(c, "+viewAll+", mine)")
+	wantConflict(t, err, bound("c", viewAll, "mine"))
+	wantConflict(t, ackErr(r.f, ctx, viewFlagged, "c", "mine", 0), bound("c", viewAll, "mine"))
 	if _, ok := r.pos(viewFlagged, "c", "mine"); ok {
 		t.Fatal("a refused creation left a key")
 	}
@@ -180,12 +185,12 @@ func TestOneConsumerCannotHoldTheCursorsOfTwoViewsOfOneScope(t *testing.T) {
 	// The reverse, a different consumer and a different query are allowed.
 	r.poll(viewFlagged, "d", "mine")
 	_, err = r.f.Poll(ctx, PollRequest{View: viewAll, Consumer: "d", Scope: "mine"})
-	wantConflict(t, err, "(d, "+viewFlagged+", mine)")
+	wantConflict(t, err, bound("d", viewFlagged, "mine"))
 	r.poll(viewAll, "e", "mine")
-	r.poll(viewFlagged, "e", "team")
+	r.poll(viewFlagged, "e2", "team")
 	r.poll(viewFlagged, "c2", "mine")
 
-	// An existing key keeps working: the rule is on creation.
+	// An existing key keeps working: the rule is on the call that names another view.
 	r.plain(refA)
 	if res := r.poll(viewAll, "c", "mine"); len(res.Rows) != 1 {
 		t.Fatalf("existing key = %+v", res)
@@ -220,7 +225,7 @@ func TestTheFlaggedViewDeliversOnlyFlaggedChangesAndTheMembershipRowsNamingItsSc
 func TestKeyLocksDoNotGrow(t *testing.T) {
 	var l keyLocks
 	for i := range 100 {
-		unlock := l.lock(keyID{"c", viewAll, string(rune('a' + i%26))})
+		unlock := l.lock(string(rune('a' + i%26)))
 		unlock()
 	}
 	if n := l.size(); n != 0 {

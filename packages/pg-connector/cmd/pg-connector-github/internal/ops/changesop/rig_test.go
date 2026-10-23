@@ -3,7 +3,9 @@ package changesop
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -44,6 +46,16 @@ func (q *fakeQueries) Known(name string) bool {
 	_, ok := q.members[name]
 	return ok
 }
+
+func (q *fakeQueries) Names() []string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return slices.Sorted(maps.Keys(q.members))
+}
+
+func (q *fakeQueries) Watched(string) bool { return false }
+
+func (q *fakeQueries) WatchedRefs(context.Context) ([]string, error) { return nil, nil }
 
 func (q *fakeQueries) Members(_ context.Context, name string) (feed.Members, error) {
 	q.mu.Lock()
@@ -184,11 +196,14 @@ func (r *rig) head() int64 {
 
 func (r *rig) pos(consumer, query string) (int64, bool) {
 	r.t.Helper()
-	c, ok, err := r.st.GetConsumer(context.Background(), consumer, "pr", query)
+	c, ok, err := r.st.GetConsumer(context.Background(), consumer)
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	return c.AckedSeq, ok
+	if !ok || c.View != "pr" || c.Scope != query {
+		return 0, false
+	}
+	return c.AckedSeq, true
 }
 
 // call dispatches one op of the pr instance through the router.
@@ -265,5 +280,5 @@ func wantError(t *testing.T, resp scriptout.Response, code, want string) {
 }
 
 func feedPoll(kind, consumer, query string) feed.PollRequest {
-	return feed.PollRequest{Kind: kind, Consumer: consumer, Query: query}
+	return feed.PollRequest{View: kind, Consumer: consumer, Scope: query}
 }

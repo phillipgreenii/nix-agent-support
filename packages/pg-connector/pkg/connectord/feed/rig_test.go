@@ -3,7 +3,9 @@ package feed
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -76,17 +78,34 @@ func ackErr(f *Feed, ctx context.Context, view, consumer, scope string, seq int6
 	return err
 }
 
-// fakeQueries is a Queries whose membership the test sets.
+// fakeQueries is a Queries whose membership, watched flags and watched
+// references the test sets.
 type fakeQueries struct {
-	mu      sync.Mutex
-	members map[string]Members
-	runs    map[string]int
-	runErr  error
-	onRun   func(name string)
+	mu          sync.Mutex
+	members     map[string]Members
+	watched     map[string]bool
+	watchedRefs []string
+	runs        map[string]int
+	runErr      error
+	onRun       func(name string)
 }
 
 func newFakeQueries() *fakeQueries {
-	return &fakeQueries{members: map[string]Members{}, runs: map[string]int{}}
+	return &fakeQueries{members: map[string]Members{}, watched: map[string]bool{}, runs: map[string]int{}}
+}
+
+// setWatched marks the configured query name watched.
+func (q *fakeQueries) setWatched(name string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.watched[name] = true
+}
+
+// setWatchedRefs sets every watched entity's reference, in order.
+func (q *fakeQueries) setWatchedRefs(refs ...string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.watchedRefs = refs
 }
 
 func (q *fakeQueries) set(name string, baseline bool, refs ...string) {
@@ -102,11 +121,23 @@ func (q *fakeQueries) Known(name string) bool {
 	return ok
 }
 
-func (q *fakeQueries) Names() []string { return nil }
+func (q *fakeQueries) Names() []string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return slices.Sorted(maps.Keys(q.members))
+}
 
-func (q *fakeQueries) Watched(string) bool { return false }
+func (q *fakeQueries) Watched(name string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.watched[name]
+}
 
-func (q *fakeQueries) WatchedRefs(context.Context) ([]string, error) { return nil, nil }
+func (q *fakeQueries) WatchedRefs(context.Context) ([]string, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return slices.Clone(q.watchedRefs), nil
+}
 
 func (q *fakeQueries) Members(_ context.Context, name string) (Members, error) {
 	q.mu.Lock()
@@ -235,14 +266,19 @@ func (r *rig) ack(view, consumer, scope string, seq int64) {
 	}
 }
 
-// pos returns the stored position of a cursor; ok is false when there is none.
+// pos returns the stored position of the consumer's cursor when it is bound to
+// (view, scope); ok is false when the consumer has no cursor or its cursor is
+// bound to another view or scope.
 func (r *rig) pos(view, consumer, scope string) (int64, bool) {
 	r.t.Helper()
-	c, ok, err := r.st.GetConsumer(context.Background(), consumer, view, scope)
+	c, ok, err := r.st.GetConsumer(context.Background(), consumer)
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	return c.AckedSeq, ok
+	if !ok || c.View != view || c.Scope != scope {
+		return 0, false
+	}
+	return c.AckedSeq, true
 }
 
 func seqs(rows []store.ChangeRow) []int64 {

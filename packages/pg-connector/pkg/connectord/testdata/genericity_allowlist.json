@@ -410,7 +410,7 @@
     {
       "file": "store/changes_test.go",
       "token": "pr",
-      "max": 45,
+      "max": 39,
       "class": "legacy",
       "why": "fixture or word list of an existing test file"
     },
@@ -536,7 +536,7 @@
     {
       "file": "store/tables_test.go",
       "token": "ci",
-      "max": 6,
+      "max": 7,
       "class": "legacy",
       "why": "fixture or word list of an existing test file"
     },

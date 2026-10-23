@@ -162,7 +162,7 @@ func (s *StatusSource) SettleStats(ctx context.Context) (status.SettleStats, err
 	return status.SettleStats{Timeouts: st.Timeouts, Failures: st.Failures}, nil
 }
 
-// Consumers are the feed's positions, one per stored cursor key.
+// Consumers are the feed's positions, one per stored cursor.
 func (s *StatusSource) Consumers(ctx context.Context) ([]status.Consumer, error) {
 	ps, err := s.cfg.Positions.Positions(ctx)
 	if err != nil {
@@ -172,7 +172,7 @@ func (s *StatusSource) Consumers(ctx context.Context) ([]status.Consumer, error)
 	var out []status.Consumer
 	for _, p := range ps {
 		c := status.Consumer{
-			Consumer: p.Consumer, Kind: p.Kind, Query: p.Query,
+			Consumer: p.Consumer, Kind: p.View, Query: p.Scope,
 			AckedSeq: p.AckedSeq, LagRows: p.LagRows, SeenAt: utc(p.SeenAt),
 		}
 		if !p.OldestUnacked.IsZero() {

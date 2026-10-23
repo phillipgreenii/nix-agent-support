@@ -244,7 +244,7 @@ func TestChangesWire_OneConsumerHoldingBothKeysOfAQueryIsRefused(t *testing.T) {
 		t.Errorf("the ci ack of a consumer holding the pr key = %+v, want invalid_argument", ack.Error)
 	}
 	var n int
-	if err := d.OpenStore(t).QueryRow(`SELECT COUNT(*) FROM consumer WHERE consumer = 'both-keys' AND kind = 'ci'`).Scan(&n); err != nil || n != 0 {
+	if err := d.OpenStore(t).QueryRow(`SELECT COUNT(*) FROM consumer WHERE consumer = 'both-keys' AND feed_view = 'ci'`).Scan(&n); err != nil || n != 0 {
 		t.Errorf("ci keys of the refused consumer = %d (%v), want none", n, err)
 	}
 }

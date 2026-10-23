@@ -90,7 +90,7 @@ type Feed struct {
 	locks keyLocks
 
 	mu     sync.Mutex
-	handed map[keyID]handed
+	handed map[string]handed // by consumer
 }
 
 // New returns a Feed.
@@ -112,7 +112,7 @@ func New(cfg Config) (*Feed, error) {
 	if cfg.ConflictReason == "" {
 		cfg.ConflictReason = defaultConflictReason()
 	}
-	return &Feed{cfg: cfg, handed: map[keyID]handed{}}, nil
+	return &Feed{cfg: cfg, handed: map[string]handed{}}, nil
 }
 
 // Spec returns the registration the feed was built with.
@@ -130,10 +130,11 @@ func (f *Feed) HandedCursors() int {
 	return len(f.handed)
 }
 
-// Poll returns what the cursor (Consumer, View, Scope) has not yet acknowledged.
-// It never moves the position (Ack does), except Reset, which moves it to the
-// head, and the creation of a cursor, which starts it at the tail. Calls for one
-// cursor are serialised.
+// Poll returns what the consumer's cursor has not yet acknowledged. A consumer
+// holds ONE cursor, bound to the View and Scope of the call that created it. Poll
+// never moves the position (Ack does), except Reset, which moves it to the head
+// (and rebinds the cursor to a new Scope), and the creation of a cursor, which
+// starts it at the tail. Calls for one consumer are serialised.
 func (f *Feed) Poll(ctx context.Context, req PollRequest) (PollResult, error) {
 	view, err := f.validate(req.View, req.Consumer, req.Scope)
 	if err != nil {
@@ -147,15 +148,15 @@ func (f *Feed) Poll(ctx context.Context, req PollRequest) (PollResult, error) {
 		limit = DefaultLimit
 	}
 	k := keyID{req.Consumer, view.Name, req.Scope}
-	defer f.locks.lock(k)()
+	defer f.locks.lock(k.consumer)()
 
 	now := f.cfg.Clock.Now()
-	row, exists, err := f.cfg.Store.GetConsumer(ctx, k.consumer, k.view, k.scope)
+	row, exists, err := f.cfg.Store.GetConsumer(ctx, k.consumer)
 	if err != nil {
 		return PollResult{}, err
 	}
-	if !exists {
-		if err := f.checkConflict(ctx, k); err != nil {
+	if exists {
+		if err := f.checkBinding(row, k, req.Reset); err != nil {
 			return PollResult{}, err
 		}
 	}
@@ -163,36 +164,43 @@ func (f *Feed) Poll(ctx context.Context, req PollRequest) (PollResult, error) {
 		return PollResult{}, err
 	}
 	if !req.Cached {
-		if err := f.cfg.Queries.Run(ctx, k.scope); err != nil {
+		if err := f.runQueries(ctx, k.scope); err != nil {
 			return PollResult{}, err
 		}
 	}
-	members, err := f.cfg.Queries.Members(ctx, k.scope)
-	if err != nil {
-		return PollResult{}, err
+	var members Members
+	if k.scope != "" {
+		if members, err = f.cfg.Queries.Members(ctx, k.scope); err != nil {
+			return PollResult{}, err
+		}
 	}
 	head, err := f.cfg.Store.ChangeHead(ctx)
 	if err != nil {
 		return PollResult{}, err
 	}
 
-	switch {
-	case req.Reset:
-		if err := f.cfg.Store.PutConsumer(ctx, store.ConsumerRow{Consumer: k.consumer, Kind: k.view, Query: k.scope, AckedSeq: head, SeenAt: now}); err != nil {
+	if req.Reset {
+		replay, err := f.replay(ctx, k.scope, members)
+		if err != nil {
 			return PollResult{}, err
 		}
-		f.forget(k)
-		replay := slices.Clone(members.Refs)
-		if replay == nil {
-			replay = []string{}
+		if err := f.cfg.Store.PutConsumer(ctx, store.ConsumerRow{Consumer: k.consumer, View: k.view, Scope: k.scope, AckedSeq: head, SeenAt: now}); err != nil {
+			return PollResult{}, err
 		}
+		f.forget(k.consumer)
 		return PollResult{NextSeq: head, Position: head, Replay: replay}, nil
-	case !exists && !members.Baseline:
-		// The tail is taken after the baseline exists; until then the cursor is
-		// not created, and the consumer's Ack of NextSeq creates it.
-		return PollResult{NextSeq: head}, nil
-	case !exists:
-		if err := f.cfg.Store.PutConsumer(ctx, store.ConsumerRow{Consumer: k.consumer, Kind: k.view, Query: k.scope, AckedSeq: head, SeenAt: now}); err != nil {
+	}
+	if !exists {
+		ready, err := f.baselined(ctx, k.scope, members)
+		if err != nil {
+			return PollResult{}, err
+		}
+		if !ready {
+			// The tail is taken after the baseline exists; until then the cursor is
+			// not created, and the consumer's Ack of NextSeq creates it.
+			return PollResult{NextSeq: head}, nil
+		}
+		if err := f.cfg.Store.PutConsumer(ctx, store.ConsumerRow{Consumer: k.consumer, View: k.view, Scope: k.scope, AckedSeq: head, SeenAt: now}); err != nil {
 			return PollResult{}, err
 		}
 		return PollResult{NextSeq: head, Position: head}, nil
@@ -215,6 +223,77 @@ func (f *Feed) Poll(ctx context.Context, req PollRequest) (PollResult, error) {
 	}
 	f.noteHanded(k, row.AckedSeq, rows)
 	return PollResult{Rows: rows, NextSeq: next, Position: row.AckedSeq}, nil
+}
+
+// runQueries makes the stored results a poll reads fresh: a scoped poll runs its
+// one query, an unscoped poll runs every configured watched query. Each run
+// honours its own freshness, so a fresh stored result is a no-op.
+func (f *Feed) runQueries(ctx context.Context, scope string) error {
+	if scope != "" {
+		return f.cfg.Queries.Run(ctx, scope)
+	}
+	for _, name := range f.cfg.Queries.Names() {
+		if !f.cfg.Queries.Watched(name) {
+			continue
+		}
+		if err := f.cfg.Queries.Run(ctx, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// baselined reports whether a new cursor of scope may start at the tail: a scoped
+// cursor needs its query's membership baseline, an unscoped one needs the
+// baseline of every configured watched query (members is the scope's stored
+// result, unused when the scope is empty).
+func (f *Feed) baselined(ctx context.Context, scope string, members Members) (bool, error) {
+	if scope != "" {
+		return members.Baseline, nil
+	}
+	for _, name := range f.cfg.Queries.Names() {
+		if !f.cfg.Queries.Watched(name) {
+			continue
+		}
+		m, err := f.cfg.Queries.Members(ctx, name)
+		if err != nil {
+			return false, err
+		}
+		if !m.Baseline {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// replay is the reference list a Reset hands back to be replayed as added. With
+// DeliverByMembership it is the scope's members. With DeliverByWatched it is the
+// watched members of the scope, or every watched reference for an unscoped
+// consumer.
+func (f *Feed) replay(ctx context.Context, scope string, members Members) ([]string, error) {
+	refs := members.Refs
+	if f.cfg.Spec.Delivery == registry.DeliverByWatched {
+		watched, err := f.cfg.Queries.WatchedRefs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if scope == "" {
+			refs = watched
+		} else {
+			set := newMemberSet(watched, f.cfg.Spec.FoldRef)
+			refs = nil
+			for _, r := range members.Refs {
+				if set.has(r) {
+					refs = append(refs, r)
+				}
+			}
+		}
+	}
+	replay := slices.Clone(refs)
+	if replay == nil {
+		replay = []string{}
+	}
+	return replay, nil
 }
 
 // scan reads the log after pos up to head and returns the rows the cursor
@@ -255,7 +334,7 @@ func (f *Feed) scan(ctx context.Context, view registry.View, scope string, pos, 
 // the cursor was already handed at the same position and has not acknowledged.
 func (f *Feed) noteHanded(k keyID, pos int64, rows []store.ChangeRow) {
 	f.mu.Lock()
-	h, had := f.handed[k]
+	h, had := f.handed[k.consumer]
 	redelivered := 0
 	if had && h.pos == pos {
 		for _, r := range rows {
@@ -270,7 +349,7 @@ func (f *Feed) noteHanded(k keyID, pos int64, rows []store.ChangeRow) {
 		h.max = max(h.max, r.Seq)
 	}
 	if len(rows) > 0 || had && h.pos == pos {
-		f.handed[k] = h
+		f.handed[k.consumer] = h
 	}
 	f.mu.Unlock()
 	if redelivered > 0 && f.cfg.Observer != nil {
@@ -278,16 +357,17 @@ func (f *Feed) noteHanded(k keyID, pos int64, rows []store.ChangeRow) {
 	}
 }
 
-func (f *Feed) forget(k keyID) {
+func (f *Feed) forget(consumer string) {
 	f.mu.Lock()
-	delete(f.handed, k)
+	delete(f.handed, consumer)
 	f.mu.Unlock()
 }
 
 // Ack records that the consumer has received everything up to NextSeq (the
 // NextSeq of a poll, after the rows were flushed). It only moves the position
 // forward: a NextSeq at or below the position is a no-op. It creates a cursor
-// that does not exist (checking the conflict and moved-aside rules), and refuses
+// that does not exist (checking the moved-aside rule), refuses a view or scope
+// other than the cursor's own, and refuses
 // a NextSeq above the head of the log with ErrAckBeyondHead. The result is the
 // cursor's stored position after the acknowledgement.
 func (f *Feed) Ack(ctx context.Context, req AckRequest) (AckResult, error) {
@@ -302,7 +382,7 @@ func (f *Feed) Ack(ctx context.Context, req AckRequest) (AckResult, error) {
 		return AckResult{}, err
 	}
 	k := keyID{req.Consumer, view.Name, req.Scope}
-	defer f.locks.lock(k)()
+	defer f.locks.lock(k.consumer)()
 
 	head, err := f.cfg.Store.ChangeHead(ctx)
 	if err != nil {
@@ -312,18 +392,20 @@ func (f *Feed) Ack(ctx context.Context, req AckRequest) (AckResult, error) {
 		return AckResult{}, fmt.Errorf("%w: next_seq %d, head %d", ErrAckBeyondHead, req.NextSeq, head)
 	}
 	now := f.cfg.Clock.Now()
-	row, exists, err := f.cfg.Store.GetConsumer(ctx, k.consumer, k.view, k.scope)
+	row, exists, err := f.cfg.Store.GetConsumer(ctx, k.consumer)
 	if err != nil {
 		return AckResult{}, err
 	}
-	if !exists {
-		if err := f.checkConflict(ctx, k); err != nil {
+	if exists {
+		if err := f.checkBinding(row, k, false); err != nil {
 			return AckResult{}, err
 		}
+	}
+	if !exists {
 		if err := f.checkMovedAside(ctx, k, now, false, time.Time{}, false); err != nil {
 			return AckResult{}, err
 		}
-		err := f.cfg.Store.PutConsumer(ctx, store.ConsumerRow{Consumer: k.consumer, Kind: k.view, Query: k.scope, AckedSeq: req.NextSeq, SeenAt: now})
+		err := f.cfg.Store.PutConsumer(ctx, store.ConsumerRow{Consumer: k.consumer, View: k.view, Scope: k.scope, AckedSeq: req.NextSeq, SeenAt: now})
 		if err != nil {
 			return AckResult{}, err
 		}
@@ -336,6 +418,6 @@ func (f *Feed) Ack(ctx context.Context, req AckRequest) (AckResult, error) {
 	if err := f.cfg.Store.PutConsumer(ctx, row); err != nil {
 		return AckResult{}, err
 	}
-	f.forget(k)
+	f.forget(k.consumer)
 	return AckResult{AckedSeq: row.AckedSeq}, nil
 }

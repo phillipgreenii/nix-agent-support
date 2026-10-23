@@ -32,22 +32,22 @@ func (f *Feed) Positions(ctx context.Context) ([]Position, error) {
 	sets := map[string]memberSet{}
 	out := make([]Position, 0, len(cursors))
 	for _, c := range cursors {
-		p := Position{Consumer: c.Consumer, View: c.Kind, Scope: c.Query, AckedSeq: c.AckedSeq, Head: head, SeenAt: c.SeenAt}
-		view, verr := f.resolveView(c.Kind)
+		p := Position{Consumer: c.Consumer, View: c.View, Scope: c.Scope, AckedSeq: c.AckedSeq, Head: head, SeenAt: c.SeenAt}
+		view, verr := f.resolveView(c.View)
 		if c.AckedSeq < head && verr == nil {
-			set, ok := sets[c.Query]
+			set, ok := sets[c.Scope]
 			if !ok {
 				set = newMemberSet(nil, f.cfg.Spec.FoldRef)
-				if f.cfg.Queries.Known(c.Query) {
-					m, err := f.cfg.Queries.Members(ctx, c.Query)
+				if f.cfg.Queries.Known(c.Scope) {
+					m, err := f.cfg.Queries.Members(ctx, c.Scope)
 					if err != nil {
 						return nil, err
 					}
 					set = newMemberSet(m.Refs, f.cfg.Spec.FoldRef)
 				}
-				sets[c.Query] = set
+				sets[c.Scope] = set
 			}
-			rows, _, err := f.scan(ctx, view, c.Query, c.AckedSeq, head, 0, set)
+			rows, _, err := f.scan(ctx, view, c.Scope, c.AckedSeq, head, 0, set)
 			if err != nil {
 				return nil, err
 			}

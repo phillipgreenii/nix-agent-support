@@ -6,7 +6,7 @@
       "schemaVersion": 7,
       "error": {
         "code": "invalid_argument",
-        "message": "invalid_argument: cannot create the ci key (example-consumer, ci, mine) while the pr key (example-consumer, pr, mine) exists: one consumer acting on both feeds would act twice on one CI event"
+        "message": "invalid_argument: consumer example-consumer is bound to view pr, scope mine, so it cannot use view ci: one consumer acting on both feeds would act twice on one CI event"
       }
     }
   },
@@ -27,8 +27,14 @@
         ],
         "changes": [],
         "sources_freshness": [
-          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
-          { "query": "team", "last_error": "example error" }
+          {
+            "query": "mine",
+            "last_success_at": "2026-10-12T10:00:00Z"
+          },
+          {
+            "query": "team",
+            "last_error": "example error"
+          }
         ]
       }
     }
@@ -89,7 +95,11 @@
             "seq": 9,
             "kinds": ["ci_changed"],
             "fields": [
-              { "name": "checks", "before": "pending", "after": "failure" }
+              {
+                "name": "checks",
+                "before": "pending",
+                "after": "failure"
+              }
             ]
           },
           {
@@ -105,7 +115,11 @@
             "seq": 10,
             "kinds": ["entered_query"],
             "fields": [
-              { "name": "query:mine", "before": null, "after": "mine" }
+              {
+                "name": "query:mine",
+                "before": null,
+                "after": "mine"
+              }
             ]
           },
           {
@@ -148,7 +162,11 @@
             "seq": 11,
             "kinds": ["left_query"],
             "fields": [
-              { "name": "query:mine", "before": "mine", "after": null }
+              {
+                "name": "query:mine",
+                "before": "mine",
+                "after": null
+              }
             ]
           },
           {
@@ -164,13 +182,23 @@
             "seq": 12,
             "kinds": ["removed"],
             "fields": [
-              { "name": "query:mine", "before": "mine", "after": null }
+              {
+                "name": "query:mine",
+                "before": "mine",
+                "after": null
+              }
             ]
           }
         ],
         "sources_freshness": [
-          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
-          { "query": "team", "last_error": "example error" }
+          {
+            "query": "mine",
+            "last_success_at": "2026-10-12T10:00:00Z"
+          },
+          {
+            "query": "team",
+            "last_error": "example error"
+          }
         ]
       }
     }
@@ -231,7 +259,11 @@
             "seq": 9,
             "kinds": ["ci_changed"],
             "fields": [
-              { "name": "checks", "before": "pending", "after": "failure" }
+              {
+                "name": "checks",
+                "before": "pending",
+                "after": "failure"
+              }
             ]
           },
           {
@@ -247,7 +279,11 @@
             "seq": 10,
             "kinds": ["entered_query"],
             "fields": [
-              { "name": "query:mine", "before": null, "after": "mine" }
+              {
+                "name": "query:mine",
+                "before": null,
+                "after": "mine"
+              }
             ]
           },
           {
@@ -290,7 +326,11 @@
             "seq": 11,
             "kinds": ["left_query"],
             "fields": [
-              { "name": "query:mine", "before": "mine", "after": null }
+              {
+                "name": "query:mine",
+                "before": "mine",
+                "after": null
+              }
             ]
           },
           {
@@ -306,19 +346,29 @@
             "seq": 12,
             "kinds": ["removed"],
             "fields": [
-              { "name": "query:mine", "before": "mine", "after": null }
+              {
+                "name": "query:mine",
+                "before": "mine",
+                "after": null
+              }
             ]
           }
         ],
         "sources_freshness": [
-          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
-          { "query": "team", "last_error": "example error" }
+          {
+            "query": "mine",
+            "last_success_at": "2026-10-12T10:00:00Z"
+          },
+          {
+            "query": "team",
+            "last_error": "example error"
+          }
         ]
       }
     }
   },
   {
-    "call": "changes {\"consumer\":\"example-ci-consumer\",\"query\":\"team\",\"reset\":true}",
+    "call": "changes {\"consumer\":\"example-ci-reset-consumer\",\"query\":\"team\",\"reset\":true}",
     "answer": {
       "protocolVersion": 1,
       "schemaVersion": 7,
@@ -390,8 +440,14 @@
           }
         ],
         "sources_freshness": [
-          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
-          { "query": "team", "last_error": "example error" }
+          {
+            "query": "mine",
+            "last_success_at": "2026-10-12T10:00:00Z"
+          },
+          {
+            "query": "team",
+            "last_error": "example error"
+          }
         ]
       }
     }
@@ -413,8 +469,14 @@
         ],
         "changes": [],
         "sources_freshness": [
-          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
-          { "query": "team", "last_error": "example error" }
+          {
+            "query": "mine",
+            "last_success_at": "2026-10-12T10:00:00Z"
+          },
+          {
+            "query": "team",
+            "last_error": "example error"
+          }
         ]
       }
     }

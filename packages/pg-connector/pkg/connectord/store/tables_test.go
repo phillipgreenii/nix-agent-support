@@ -70,7 +70,7 @@ func TestGenerateFixture(t *testing.T) {
 		 VALUES ('pr', 'org/repo#2', '["ci_changed"]', '[{"name":"ci","before":"pending","after":"success"}]',
 		   '[{"group":"runs","since":1760000002000}]', 'head-sha-2', 'base-sha-2', 'query',
 		   1760000002500, 1760000003000, 1760000033000)`,
-		`INSERT INTO consumer (consumer, kind, query, acked_seq, seen_at)
+		`INSERT INTO consumer (consumer, feed_view, scope, acked_seq, seen_at)
 		 VALUES ('sample-consumer', 'pr', 'open-prs', 1, 1760000004000)`,
 		`INSERT INTO store_meta (key, value) VALUES ('moved_aside_at', '1760000005000')`,
 	} {
@@ -78,13 +78,20 @@ func TestGenerateFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for i, k := range fixtureWatchedConsumers() {
+	for _, k := range fixtureWatchedConsumers() {
 		if _, err := s.DB().Exec(
-			`INSERT INTO consumer (consumer, kind, query, acked_seq, seen_at) VALUES (?, ?, ?, ?, ?)`,
-			k.Consumer, k.Kind, k.Query, k.AckedSeq, 1760000004100+int64(i)*100,
+			`INSERT INTO consumer (consumer, feed_view, scope, acked_seq, seen_at) VALUES (?, ?, ?, ?, ?)`,
+			k.Consumer, k.View, k.Scope, k.AckedSeq, k.SeenAt.UnixMilli(),
 		); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// The record rung 6 leaves for a consumer that held several rows: the
+	// post-collapse state the version 5 fixture reaches (see
+	// fixtureCollapsedRecord).
+	if _, err := s.DB().Exec(`INSERT INTO store_meta (key, value) VALUES (?, ?)`,
+		ConsumerCollapsedPrefix+"example-multi", fixtureCollapsedRecord); err != nil {
+		t.Fatal(err)
 	}
 	if err := s.Checkpoint(); err != nil {
 		t.Fatal(err)
@@ -143,17 +150,27 @@ func assertFixtureJobs(t *testing.T, ctx context.Context, s *Store, fixtureVersi
 // watchedVersion is the schema version that added the watched flag.
 const watchedVersion = 5
 
-// fixtureWatchedConsumers are the cursors the version 5 fixture carries besides
-// the sample one: a consumer with one row, one with several rows and one on the
-// second feed, in the order ListConsumers returns them.
+// consumerCursorVersion is the schema version that gave a consumer one cursor.
+const consumerCursorVersion = 6
+
+// fixtureWatchedConsumers are the cursors a fixture of version watchedVersion or
+// above carries besides the sample one, as a store at the current version holds
+// them, in the order ListConsumers returns them. The version 5 fixture holds
+// four rows for them: a consumer with one row (example-one, q1), one with two
+// rows (example-multi, q1 at 9 and q2 at 4, seen at 1760000004200 and
+// 1760000004300) and one on the second feed (example-ci). Rung 6 keeps the lowest
+// acked_seq of example-multi (q2, 4) and the greatest seen_at (1760000004300).
 func fixtureWatchedConsumers() []ConsumerRow {
 	return []ConsumerRow{
-		{Consumer: "example-ci", Kind: "ci", Query: "", AckedSeq: 7},
-		{Consumer: "example-multi", Kind: "pr", Query: "q1", AckedSeq: 9},
-		{Consumer: "example-multi", Kind: "pr", Query: "q2", AckedSeq: 4},
-		{Consumer: "example-one", Kind: "pr", Query: "q1", AckedSeq: 5},
+		{Consumer: "example-ci", View: "ci", Scope: "", AckedSeq: 7, SeenAt: time.UnixMilli(1760000004400).UTC()},
+		{Consumer: "example-multi", View: "pr", Scope: "q2", AckedSeq: 4, SeenAt: time.UnixMilli(1760000004300).UTC()},
+		{Consumer: "example-one", View: "pr", Scope: "q1", AckedSeq: 5, SeenAt: time.UnixMilli(1760000004100).UTC()},
 	}
 }
+
+// fixtureCollapsedRecord is the consumer_collapsed.example-multi record rung 6
+// writes for the version 5 fixture: the dropped row of that consumer.
+const fixtureCollapsedRecord = `[{"view":"pr","scope":"q1","acked_seq":9}]`
 
 // changeTablesVersion is the schema version that added the change engine's
 // tables and query.baseline_at.
@@ -232,20 +249,20 @@ func assertFixtureChanges(t *testing.T, ctx context.Context, s *Store, fixtureVe
 	}
 	wantConsumers := 1
 	if fixtureVersion >= watchedVersion {
-		wantConsumers = 5 // the sample cursor and the version 5 fixture's own four
+		wantConsumers = 4 // the sample cursor and the three the fixtures carry (rung 6 collapses example-multi)
 	}
 	if len(consumers) != wantConsumers {
 		t.Fatalf("consumers = %+v, want %d rows", consumers, wantConsumers)
 	}
-	// Ordered by consumer, kind, query: the version 5 rows sort before the sample.
-	if k := consumers[len(consumers)-1]; k.Consumer != "sample-consumer" || k.Kind != "pr" || k.Query != "open-prs" ||
+	// Ordered by consumer: the fixture's own rows sort before the sample.
+	if k := consumers[len(consumers)-1]; k.Consumer != "sample-consumer" || k.View != "pr" || k.Scope != "open-prs" ||
 		k.AckedSeq != 1 || k.SeenAt.UnixMilli() != 1760000004000 {
 		t.Errorf("consumer row = %+v", k)
 	}
 	if fixtureVersion >= watchedVersion {
 		for i, want := range fixtureWatchedConsumers() {
-			if k := consumers[i]; k.Consumer != want.Consumer || k.Kind != want.Kind || k.Query != want.Query ||
-				k.AckedSeq != want.AckedSeq {
+			if k := consumers[i]; k.Consumer != want.Consumer || k.View != want.View || k.Scope != want.Scope ||
+				k.AckedSeq != want.AckedSeq || !k.SeenAt.Equal(want.SeenAt) {
 				t.Errorf("consumer %d = %+v, want %+v", i, k, want)
 			}
 		}

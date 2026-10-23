@@ -172,7 +172,7 @@ func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
 			"kind", "id", "kinds", "fields", "awaited", "head_sha", "base_sha", "origin", "origin_updated_at",
 			"detected_at", "deadline",
 		},
-		"consumer":   {"consumer", "kind", "query", "acked_seq", "seen_at"},
+		"consumer":   {"consumer", "feed_view", "scope", "acked_seq", "seen_at"},
 		"store_meta": {"key", "value"},
 	}
 	for table, cols := range wantCols {

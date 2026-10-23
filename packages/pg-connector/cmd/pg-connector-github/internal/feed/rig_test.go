@@ -3,7 +3,9 @@ package feed
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -47,6 +49,16 @@ func (q *fakeQueries) Known(name string) bool {
 	_, ok := q.members[name]
 	return ok
 }
+
+func (q *fakeQueries) Names() []string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return slices.Sorted(maps.Keys(q.members))
+}
+
+func (q *fakeQueries) Watched(string) bool { return false }
+
+func (q *fakeQueries) WatchedRefs(context.Context) ([]string, error) { return nil, nil }
 
 func (q *fakeQueries) Members(_ context.Context, name string) (Members, error) {
 	q.mu.Lock()
@@ -161,7 +173,7 @@ func (r *rig) head() int64 {
 
 func (r *rig) poll(kind, consumer, query string) PollResult {
 	r.t.Helper()
-	res, err := r.f.Poll(context.Background(), PollRequest{Kind: kind, Consumer: consumer, Query: query})
+	res, err := r.f.Poll(context.Background(), PollRequest{View: kind, Consumer: consumer, Scope: query})
 	if err != nil {
 		r.t.Fatalf("poll %s/%s/%s: %v", consumer, kind, query, err)
 	}
@@ -170,19 +182,24 @@ func (r *rig) poll(kind, consumer, query string) PollResult {
 
 func (r *rig) ack(kind, consumer, query string, seq int64) {
 	r.t.Helper()
-	if err := r.f.Ack(context.Background(), kind, consumer, query, seq); err != nil {
+	if err := r.f.Ack(context.Background(), AckRequest{View: kind, Consumer: consumer, Scope: query, NextSeq: seq}); err != nil {
 		r.t.Fatalf("ack: %v", err)
 	}
 }
 
-// pos returns the stored position of a key; ok is false when there is none.
+// pos returns the stored position of the consumer's cursor when it is bound to
+// (kind, query); ok is false when the consumer has no cursor or its cursor is
+// bound to another view or scope.
 func (r *rig) pos(kind, consumer, query string) (int64, bool) {
 	r.t.Helper()
-	c, ok, err := r.st.GetConsumer(context.Background(), consumer, kind, query)
+	c, ok, err := r.st.GetConsumer(context.Background(), consumer)
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	return c.AckedSeq, ok
+	if !ok || c.View != kind || c.Scope != query {
+		return 0, false
+	}
+	return c.AckedSeq, true
 }
 
 func seqs(rows []store.ChangeRow) []int64 {

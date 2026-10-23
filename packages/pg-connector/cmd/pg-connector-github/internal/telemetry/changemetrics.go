@@ -186,14 +186,14 @@ type consumerSeries struct {
 	oldest time.Time
 }
 
-// observeConsumers reports lag and age per (consumer, query) label pair. Keys
-// that differ only in kind, and every unconfigured query, share a pair, so
+// observeConsumers reports lag and age per (consumer, query) label pair. Cursors
+// of one consumer, and every unconfigured query, share a pair, so
 // their lag adds up and their age is the oldest one.
 func (t *Telemetry) observeConsumers(o metric.Observer, ps []feed.Position) {
 	type pair struct{ consumer, query string }
 	series := map[pair]*consumerSeries{}
 	for _, p := range ps {
-		k := pair{consumer: p.Consumer, query: t.queryLabel(p.Query)}
+		k := pair{consumer: p.Consumer, query: t.queryLabel(p.Scope)}
 		s := series[k]
 		if s == nil {
 			s = &consumerSeries{}

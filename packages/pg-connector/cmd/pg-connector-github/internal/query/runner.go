@@ -113,7 +113,10 @@ type Config struct {
 // Runner runs queries: the shared runner, whose public methods (TTL, Row,
 // Schedule, Expire, Fetch, QueueRun) it exposes, with Expr in the shape the
 // daemon's callers read.
-type Runner struct{ *shared.Runner }
+type Runner struct {
+	*shared.Runner
+	settings configSettings
+}
 
 // New returns a Runner over the shared runner built from cfg, and registers its
 // executor with the scheduler under Kind.
@@ -150,7 +153,7 @@ func New(cfg Config) (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Runner{Runner: r}, nil
+	return &Runner{Runner: r, settings: configSettings{cfg.Settings}}, nil
 }
 
 // Fetch re-runs key now for a caller that is waiting (see the shared runner). It
@@ -176,6 +179,13 @@ func (r *Runner) Expr(name string) (schema.QueryExpr, bool) {
 	}
 	return schema.QueryExpr(e), true
 }
+
+// Names lists the configured query names, sorted.
+func (r *Runner) Names() []string { return r.settings.Names() }
+
+// Watched reports whether the configured query name is marked watched in the
+// daemon's config; a name it does not define is not.
+func (r *Runner) Watched(name string) bool { return r.settings.Watched(name) }
 
 // UnauthenticatedError is the error a fetch answers while the daemon is
 // unauthenticated; it wraps vcs.ErrAuthInvalid.

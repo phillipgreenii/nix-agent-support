@@ -363,8 +363,8 @@ func TestAKeyConflictIsInvalidArgumentNamingTheExistingKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp := r.call(OpChanges, pollArgs("c", "mine"))
-	wantError(t, resp, "invalid_argument", "(c, ci, mine)")
-	wantError(t, r.call(OpChangesAck, ackArgs("c", "mine", 0)), "invalid_argument", "(c, ci, mine)")
+	wantError(t, resp, "invalid_argument", "consumer c is bound to view ci, scope mine")
+	wantError(t, r.call(OpChangesAck, ackArgs("c", "mine", 0)), "invalid_argument", "consumer c is bound to view ci, scope mine")
 	// Another consumer is not in conflict.
 	r.changes(pollArgs("other-consumer", "mine"))
 }

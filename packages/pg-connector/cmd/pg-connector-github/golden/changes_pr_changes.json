@@ -16,8 +16,14 @@
         ],
         "changes": [],
         "sources_freshness": [
-          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
-          { "query": "team", "last_error": "example error" }
+          {
+            "query": "mine",
+            "last_success_at": "2026-10-12T10:00:00Z"
+          },
+          {
+            "query": "team",
+            "last_error": "example error"
+          }
         ]
       }
     }
@@ -119,7 +125,11 @@
             "seq": 4,
             "kinds": ["entered_query"],
             "fields": [
-              { "name": "query:mine", "before": null, "after": "mine" }
+              {
+                "name": "query:mine",
+                "before": null,
+                "after": "mine"
+              }
             ]
           },
           {
@@ -147,7 +157,11 @@
             "seq": 5,
             "kinds": ["left_query"],
             "fields": [
-              { "name": "query:mine", "before": "mine", "after": null }
+              {
+                "name": "query:mine",
+                "before": "mine",
+                "after": null
+              }
             ]
           },
           {
@@ -175,13 +189,23 @@
             "seq": 6,
             "kinds": ["removed"],
             "fields": [
-              { "name": "query:mine", "before": "mine", "after": null }
+              {
+                "name": "query:mine",
+                "before": "mine",
+                "after": null
+              }
             ]
           }
         ],
         "sources_freshness": [
-          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
-          { "query": "team", "last_error": "example error" }
+          {
+            "query": "mine",
+            "last_success_at": "2026-10-12T10:00:00Z"
+          },
+          {
+            "query": "team",
+            "last_error": "example error"
+          }
         ]
       }
     }
@@ -283,7 +307,11 @@
             "seq": 4,
             "kinds": ["entered_query"],
             "fields": [
-              { "name": "query:mine", "before": null, "after": "mine" }
+              {
+                "name": "query:mine",
+                "before": null,
+                "after": "mine"
+              }
             ]
           },
           {
@@ -311,7 +339,11 @@
             "seq": 5,
             "kinds": ["left_query"],
             "fields": [
-              { "name": "query:mine", "before": "mine", "after": null }
+              {
+                "name": "query:mine",
+                "before": "mine",
+                "after": null
+              }
             ]
           },
           {
@@ -339,13 +371,23 @@
             "seq": 6,
             "kinds": ["removed"],
             "fields": [
-              { "name": "query:mine", "before": "mine", "after": null }
+              {
+                "name": "query:mine",
+                "before": "mine",
+                "after": null
+              }
             ]
           }
         ],
         "sources_freshness": [
-          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
-          { "query": "team", "last_error": "example error" }
+          {
+            "query": "mine",
+            "last_success_at": "2026-10-12T10:00:00Z"
+          },
+          {
+            "query": "team",
+            "last_error": "example error"
+          }
         ]
       }
     }
@@ -447,7 +489,11 @@
             "seq": 4,
             "kinds": ["entered_query"],
             "fields": [
-              { "name": "query:mine", "before": null, "after": "mine" }
+              {
+                "name": "query:mine",
+                "before": null,
+                "after": "mine"
+              }
             ]
           },
           {
@@ -475,7 +521,11 @@
             "seq": 5,
             "kinds": ["left_query"],
             "fields": [
-              { "name": "query:mine", "before": "mine", "after": null }
+              {
+                "name": "query:mine",
+                "before": "mine",
+                "after": null
+              }
             ]
           },
           {
@@ -503,19 +553,29 @@
             "seq": 6,
             "kinds": ["removed"],
             "fields": [
-              { "name": "query:mine", "before": "mine", "after": null }
+              {
+                "name": "query:mine",
+                "before": "mine",
+                "after": null
+              }
             ]
           }
         ],
         "sources_freshness": [
-          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
-          { "query": "team", "last_error": "example error" }
+          {
+            "query": "mine",
+            "last_success_at": "2026-10-12T10:00:00Z"
+          },
+          {
+            "query": "team",
+            "last_error": "example error"
+          }
         ]
       }
     }
   },
   {
-    "call": "changes {\"consumer\":\"example-consumer\",\"query\":\"team\",\"reset\":true}",
+    "call": "changes {\"consumer\":\"example-reset-consumer\",\"query\":\"team\",\"reset\":true}",
     "answer": {
       "protocolVersion": 1,
       "schemaVersion": 13,
@@ -580,8 +640,14 @@
           }
         ],
         "sources_freshness": [
-          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
-          { "query": "team", "last_error": "example error" }
+          {
+            "query": "mine",
+            "last_success_at": "2026-10-12T10:00:00Z"
+          },
+          {
+            "query": "team",
+            "last_error": "example error"
+          }
         ]
       }
     }
@@ -603,8 +669,14 @@
         ],
         "changes": [],
         "sources_freshness": [
-          { "query": "mine", "last_success_at": "2026-10-12T10:00:00Z" },
-          { "query": "team", "last_error": "example error" }
+          {
+            "query": "mine",
+            "last_success_at": "2026-10-12T10:00:00Z"
+          },
+          {
+            "query": "team",
+            "last_error": "example error"
+          }
         ]
       }
     }

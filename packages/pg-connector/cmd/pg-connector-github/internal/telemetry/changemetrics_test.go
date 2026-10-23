@@ -198,10 +198,10 @@ func TestConsumerGaugesReportEachStoredKeyAndFoldUnconfiguredQueries(t *testing.
 	f.build(func(o *Options) {
 		o.ConfiguredQueries = func() []string { return []string{"mine"} }
 		o.Consumers = fixedPositions(
-			feed.Position{Consumer: "desk", Kind: feed.KindPR, Query: "mine", LagRows: 4, OldestUnacked: changeT0.Add(-90 * time.Second)},
-			feed.Position{Consumer: "desk", Kind: feed.KindCI, Query: "mine", LagRows: 1, OldestUnacked: changeT0.Add(-30 * time.Second)},
-			feed.Position{Consumer: "router", Kind: feed.KindPR, Query: "example-owner/example-repo#41"},
-			feed.Position{Consumer: "router", Kind: feed.KindCI, Query: "adhoc?assignee=someone", LagRows: 2, OldestUnacked: changeT0.Add(-10 * time.Second)},
+			feed.Position{Consumer: "desk", View: feed.KindPR, Scope: "mine", LagRows: 4, OldestUnacked: changeT0.Add(-90 * time.Second)},
+			feed.Position{Consumer: "desk", View: feed.KindCI, Scope: "mine", LagRows: 1, OldestUnacked: changeT0.Add(-30 * time.Second)},
+			feed.Position{Consumer: "router", View: feed.KindPR, Scope: "example-owner/example-repo#41"},
+			feed.Position{Consumer: "router", View: feed.KindCI, Scope: "adhoc?assignee=someone", LagRows: 2, OldestUnacked: changeT0.Add(-10 * time.Second)},
 		)
 	})
 	lag := f.metric(MetricConsumerLagRows)
@@ -237,8 +237,8 @@ func TestOldestUnackedIsZeroWithNothingUnacknowledgedAndGrowsWithTheClock(t *tes
 	f.build(func(o *Options) {
 		o.ConfiguredQueries = func() []string { return []string{"mine"} }
 		o.Consumers = fixedPositions(
-			feed.Position{Consumer: "idle", Kind: feed.KindPR, Query: "mine"},
-			feed.Position{Consumer: "behind", Kind: feed.KindPR, Query: "mine", LagRows: 1, OldestUnacked: changeT0},
+			feed.Position{Consumer: "idle", View: feed.KindPR, Scope: "mine"},
+			feed.Position{Consumer: "behind", View: feed.KindPR, Scope: "mine", LagRows: 1, OldestUnacked: changeT0},
 		)
 	})
 	m := f.metric(MetricConsumerOldestUnacked)
@@ -255,7 +255,7 @@ func TestRedeliveredAddsRowsOnlyUnderStoredConsumersAndConfiguredQueries(t *test
 	f := newChangeFixture(t)
 	tel := f.build(func(o *Options) {
 		o.ConfiguredQueries = func() []string { return []string{"mine"} }
-		o.Consumers = fixedPositions(feed.Position{Consumer: "desk", Kind: feed.KindPR, Query: "mine"})
+		o.Consumers = fixedPositions(feed.Position{Consumer: "desk", View: feed.KindPR, Scope: "mine"})
 	})
 	o := NewFeedObserver(tel)
 
@@ -380,7 +380,7 @@ func TestObserversAreSafeUnderConcurrentUse(t *testing.T) {
 	f := newChangeFixture(t)
 	tel := f.build(func(o *Options) {
 		o.ConfiguredQueries = func() []string { return []string{"mine"} }
-		o.Consumers = fixedPositions(feed.Position{Consumer: "desk", Kind: feed.KindPR, Query: "mine", LagRows: 1})
+		o.Consumers = fixedPositions(feed.Position{Consumer: "desk", View: feed.KindPR, Scope: "mine", LagRows: 1})
 		o.Pending = func(context.Context) (int, error) { return 1, nil }
 	})
 	co, fo := NewChangeObserver(tel), NewFeedObserver(tel)

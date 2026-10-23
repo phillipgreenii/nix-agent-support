@@ -321,35 +321,36 @@ func (s *Store) CountPending(ctx context.Context) (int, error) {
 
 // ---- consumer -----------------------------------------------------------
 
-// ConsumerRow is one feed cursor, keyed (Consumer, Kind, Query).
+// ConsumerRow is one feed cursor. A consumer holds ONE row: View and Scope are
+// fixed when the row is created (Scope is "" for an unscoped consumer).
 type ConsumerRow struct {
-	Consumer, Kind, Query string
+	Consumer, View, Scope string
 	AckedSeq              int64
 	SeenAt                time.Time
 }
 
-const consumerCols = `consumer, kind, query, acked_seq, seen_at`
+const consumerCols = `consumer, feed_view, scope, acked_seq, seen_at`
 
 func scanConsumer(sc interface{ Scan(...any) error }) (ConsumerRow, error) {
 	var (
 		c    ConsumerRow
 		seen int64
 	)
-	if err := sc.Scan(&c.Consumer, &c.Kind, &c.Query, &c.AckedSeq, &seen); err != nil {
+	if err := sc.Scan(&c.Consumer, &c.View, &c.Scope, &c.AckedSeq, &seen); err != nil {
 		return ConsumerRow{}, err
 	}
 	c.SeenAt = time.UnixMilli(seen).UTC()
 	return c, nil
 }
 
-func getConsumer(ctx context.Context, db dbtx, consumer, kind, query string) (c ConsumerRow, ok bool, err error) {
+func getConsumer(ctx context.Context, db dbtx, consumer string) (c ConsumerRow, ok bool, err error) {
 	c, err = scanConsumer(db.QueryRowContext(ctx,
-		`SELECT `+consumerCols+` FROM consumer WHERE consumer = ? AND kind = ? AND query = ?`, consumer, kind, query))
+		`SELECT `+consumerCols+` FROM consumer WHERE consumer = ?`, consumer))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ConsumerRow{}, false, nil
 	}
 	if err != nil {
-		return ConsumerRow{}, false, fmt.Errorf("store: get consumer %q/%s/%q: %w", consumer, kind, query, err)
+		return ConsumerRow{}, false, fmt.Errorf("store: get consumer %q: %w", consumer, err)
 	}
 	return c, true, nil
 }
@@ -357,25 +358,26 @@ func getConsumer(ctx context.Context, db dbtx, consumer, kind, query string) (c 
 func putConsumer(ctx context.Context, db dbtx, c ConsumerRow) error {
 	_, err := db.ExecContext(ctx, `
 INSERT INTO consumer (`+consumerCols+`) VALUES (?, ?, ?, ?, ?)
-ON CONFLICT (consumer, kind, query) DO UPDATE SET
+ON CONFLICT (consumer) DO UPDATE SET
+  feed_view = excluded.feed_view, scope = excluded.scope,
   acked_seq = excluded.acked_seq, seen_at = excluded.seen_at`,
-		c.Consumer, c.Kind, c.Query, c.AckedSeq, c.SeenAt.UnixMilli())
+		c.Consumer, c.View, c.Scope, c.AckedSeq, c.SeenAt.UnixMilli())
 	if err != nil {
-		return fmt.Errorf("store: put consumer %q/%s/%q: %w", c.Consumer, c.Kind, c.Query, err)
+		return fmt.Errorf("store: put consumer %q: %w", c.Consumer, err)
 	}
 	return nil
 }
 
-func deleteConsumer(ctx context.Context, db dbtx, consumer, kind, query string) error {
+func deleteConsumer(ctx context.Context, db dbtx, consumer string) error {
 	if _, err := db.ExecContext(ctx,
-		`DELETE FROM consumer WHERE consumer = ? AND kind = ? AND query = ?`, consumer, kind, query); err != nil {
-		return fmt.Errorf("store: delete consumer %q/%s/%q: %w", consumer, kind, query, err)
+		`DELETE FROM consumer WHERE consumer = ?`, consumer); err != nil {
+		return fmt.Errorf("store: delete consumer %q: %w", consumer, err)
 	}
 	return nil
 }
 
 func listConsumers(ctx context.Context, db dbtx) ([]ConsumerRow, error) {
-	rows, err := db.QueryContext(ctx, `SELECT `+consumerCols+` FROM consumer ORDER BY consumer, kind, query`)
+	rows, err := db.QueryContext(ctx, `SELECT `+consumerCols+` FROM consumer ORDER BY consumer`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list consumers: %w", err)
 	}
@@ -406,23 +408,22 @@ func deleteConsumersSeenBefore(ctx context.Context, db dbtx, t time.Time) (int64
 	return n, nil
 }
 
-// GetConsumer returns the cursor of (consumer, kind, query); ok is false when
-// there is none.
-func (s *Store) GetConsumer(ctx context.Context, consumer, kind, query string) (ConsumerRow, bool, error) {
-	return getConsumer(ctx, s.db, consumer, kind, query)
+// GetConsumer returns the cursor of consumer; ok is false when there is none.
+func (s *Store) GetConsumer(ctx context.Context, consumer string) (ConsumerRow, bool, error) {
+	return getConsumer(ctx, s.db, consumer)
 }
 
-// PutConsumer inserts or replaces the cursor of (c.Consumer, c.Kind, c.Query).
+// PutConsumer inserts or replaces the cursor of c.Consumer.
 func (s *Store) PutConsumer(ctx context.Context, c ConsumerRow) error {
 	return putConsumer(ctx, s.db, c)
 }
 
 // DeleteConsumer removes one cursor (no error when absent).
-func (s *Store) DeleteConsumer(ctx context.Context, consumer, kind, query string) error {
-	return deleteConsumer(ctx, s.db, consumer, kind, query)
+func (s *Store) DeleteConsumer(ctx context.Context, consumer string) error {
+	return deleteConsumer(ctx, s.db, consumer)
 }
 
-// ListConsumers returns every cursor ordered by consumer, kind, query.
+// ListConsumers returns every cursor ordered by consumer.
 func (s *Store) ListConsumers(ctx context.Context) ([]ConsumerRow, error) {
 	return listConsumers(ctx, s.db)
 }
@@ -434,16 +435,16 @@ func (s *Store) DeleteConsumersSeenBefore(ctx context.Context, t time.Time) (int
 }
 
 // GetConsumer is Store.GetConsumer inside the transaction.
-func (t *Tx) GetConsumer(ctx context.Context, consumer, kind, query string) (ConsumerRow, bool, error) {
-	return getConsumer(ctx, t.tx, consumer, kind, query)
+func (t *Tx) GetConsumer(ctx context.Context, consumer string) (ConsumerRow, bool, error) {
+	return getConsumer(ctx, t.tx, consumer)
 }
 
 // PutConsumer is Store.PutConsumer inside the transaction.
 func (t *Tx) PutConsumer(ctx context.Context, c ConsumerRow) error { return putConsumer(ctx, t.tx, c) }
 
 // DeleteConsumer is Store.DeleteConsumer inside the transaction.
-func (t *Tx) DeleteConsumer(ctx context.Context, consumer, kind, query string) error {
-	return deleteConsumer(ctx, t.tx, consumer, kind, query)
+func (t *Tx) DeleteConsumer(ctx context.Context, consumer string) error {
+	return deleteConsumer(ctx, t.tx, consumer)
 }
 
 // ListConsumers is Store.ListConsumers inside the transaction.

@@ -335,6 +335,11 @@ func (q allQueries) Members(context.Context, string) (feed.Members, error) {
 	return feed.Members{Refs: q.refs, Baseline: true}, nil
 }
 func (q allQueries) Run(context.Context, string) error { return nil }
+func (q allQueries) Names() []string                   { return []string{consumerQuery} }
+func (q allQueries) Watched(string) bool               { return false }
+func (q allQueries) WatchedRefs(context.Context) ([]string, error) {
+	return nil, nil
+}
 
 const (
 	consumerName  = "load-consumer"
@@ -980,7 +985,7 @@ func (c *consumer) step() {
 }
 
 func (c *consumer) doPoll() {
-	res, err := c.h.fd.Poll(c.h.ctx, feed.PollRequest{Kind: feed.KindPR, Consumer: consumerName, Query: consumerQuery})
+	res, err := c.h.fd.Poll(c.h.ctx, feed.PollRequest{View: feed.KindPR, Consumer: consumerName, Scope: consumerQuery})
 	if err != nil {
 		c.h.t.Fatalf("poll: %v", err)
 	}
@@ -1004,7 +1009,7 @@ func (c *consumer) ack() {
 		}
 		n = head
 	}
-	if err := c.h.fd.Ack(c.h.ctx, feed.KindPR, consumerName, consumerQuery, n); err != nil {
+	if err := c.h.fd.Ack(c.h.ctx, feed.AckRequest{View: feed.KindPR, Consumer: consumerName, Scope: consumerQuery, NextSeq: n}); err != nil {
 		c.h.t.Fatalf("ack %d: %v", n, err)
 	}
 	c.acked = max(c.acked, n)

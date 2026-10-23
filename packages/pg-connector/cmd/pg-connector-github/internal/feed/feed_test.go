@@ -78,7 +78,7 @@ func TestCachedWithoutBaselineAnswersEmptyAtHeadAndCreatesNoKey(t *testing.T) {
 	r := newRig(t)
 	r.q.set("fresh", false)
 	head := r.plain(refA)
-	res, err := r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "c", Query: "fresh", Cached: true})
+	res, err := r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "c", Scope: "fresh", Cached: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,14 +151,14 @@ func TestAckOnlyMovesForwardAndRefusesBeyondTheHead(t *testing.T) {
 	if p, _ := r.pos(KindPR, "c", "mine"); p != s2 {
 		t.Fatalf("position = %d after a stale ack, want %d", p, s2)
 	}
-	err := r.f.Ack(context.Background(), KindPR, "c", "mine", s2+1)
+	err := r.f.Ack(context.Background(), AckRequest{View: KindPR, Consumer: "c", Scope: "mine", NextSeq: s2 + 1})
 	if !errors.Is(err, ErrAckBeyondHead) || !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("ack beyond the head = %v", err)
 	}
 	if p, _ := r.pos(KindPR, "c", "mine"); p != s2 {
 		t.Fatalf("position = %d after a refused ack", p)
 	}
-	if err := r.f.Ack(context.Background(), KindPR, "c", "mine", -1); !errors.Is(err, scriptout.ErrInvalidArgument) {
+	if err := r.f.Ack(context.Background(), AckRequest{View: KindPR, Consumer: "c", Scope: "mine", NextSeq: -1}); !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("negative ack = %v", err)
 	}
 }
@@ -170,7 +170,7 @@ func TestResetReplaysTheMembersAndMovesTheKeyToTheHead(t *testing.T) {
 	r.plain(refB)
 	head := r.plain(refA)
 
-	res, err := r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "c", Query: "team", Reset: true})
+	res, err := r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "c", Scope: "team", Reset: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestResetReplaysTheMembersAndMovesTheKeyToTheHead(t *testing.T) {
 	}
 
 	// A reset of a key that does not exist creates it, and a normal poll has no Replay.
-	if _, err := r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "new", Query: "team", Reset: true}); err != nil {
+	if _, err := r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "new", Scope: "team", Reset: true}); err != nil {
 		t.Fatal(err)
 	}
 	if p, ok := r.pos(KindPR, "new", "team"); !ok || p != head {
@@ -206,14 +206,14 @@ func TestCachedNeverRunsTheQueryAndItsAbsenceRunsItOnce(t *testing.T) {
 		t.Fatalf("runs = %d after one poll, want 1", n)
 	}
 	for range 3 {
-		if _, err := r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "c", Query: "mine", Cached: true}); err != nil {
+		if _, err := r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "c", Scope: "mine", Cached: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if n := r.q.runCount("mine"); n != 1 {
 		t.Fatalf("runs = %d after cached polls, want 1", n)
 	}
-	if _, err := r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "c", Query: "mine", Cached: true, Reset: true}); err != nil {
+	if _, err := r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "c", Scope: "mine", Cached: true, Reset: true}); err != nil {
 		t.Fatal(err)
 	}
 	if n := r.q.runCount("mine"); n != 1 {
@@ -227,10 +227,10 @@ func TestAFailedRunIsReturnedAsItIsAndServesNoRows(t *testing.T) {
 	r.plain(refA)
 	boom := errors.New("origin failure")
 	r.q.runErr = boom
-	if _, err := r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "c", Query: "mine"}); !errors.Is(err, boom) {
+	if _, err := r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "c", Scope: "mine"}); !errors.Is(err, boom) {
 		t.Fatalf("poll = %v, want the run's error", err)
 	}
-	res, err := r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "c", Query: "mine", Cached: true})
+	res, err := r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "c", Scope: "mine", Cached: true})
 	if err != nil || len(res.Rows) != 1 {
 		t.Fatalf("cached poll after a failed run = %+v, %v", res, err)
 	}
@@ -239,19 +239,19 @@ func TestAFailedRunIsReturnedAsItIsAndServesNoRows(t *testing.T) {
 func TestAnUnknownQueryAndABadRequestAreRefused(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
-	if _, err := r.f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: "c", Query: "nope"}); !errors.Is(err, ErrQueryNotRecognized) {
+	if _, err := r.f.Poll(ctx, PollRequest{View: KindPR, Consumer: "c", Scope: "nope"}); !errors.Is(err, ErrQueryNotRecognized) {
 		t.Fatalf("poll of an unknown query = %v", err)
 	}
-	if err := r.f.Ack(ctx, KindPR, "c", "nope", 0); !errors.Is(err, ErrQueryNotRecognized) {
+	if err := r.f.Ack(ctx, AckRequest{View: KindPR, Consumer: "c", Scope: "nope", NextSeq: 0}); !errors.Is(err, ErrQueryNotRecognized) {
 		t.Fatalf("ack of an unknown query = %v", err)
 	}
 	if n := r.q.runCount("nope"); n != 0 {
 		t.Fatalf("an unknown query was run %d times", n)
 	}
 	for name, req := range map[string]PollRequest{
-		"kind":     {Kind: "issue", Consumer: "c", Query: "mine"},
-		"consumer": {Kind: KindPR, Query: "mine"},
-		"query":    {Kind: KindPR, Consumer: "c"},
+		"kind":     {View: "issue", Consumer: "c", Scope: "mine"},
+		"consumer": {View: KindPR, Scope: "mine"},
+		"query":    {View: KindPR, Consumer: "c"},
 	} {
 		if _, err := r.f.Poll(ctx, req); !errors.Is(err, scriptout.ErrInvalidArgument) {
 			t.Errorf("poll with a bad %s = %v", name, err)
@@ -290,7 +290,7 @@ func TestLimitStopsTheScanAndNextSeqFollowsTheLastRow(t *testing.T) {
 	}
 	var got []int64
 	for range 6 {
-		res, err := r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "c", Query: "mine", Limit: 2})
+		res, err := r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "c", Scope: "mine", Limit: 2})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -351,15 +351,15 @@ func TestCallsForOneKeyAreSerialisedAndDifferentKeysRunInParallel(t *testing.T) 
 	var wg sync.WaitGroup
 	poll := func(consumer, query string) {
 		defer wg.Done()
-		if _, err := r.f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: consumer, Query: query}); err != nil {
+		if _, err := r.f.Poll(ctx, PollRequest{View: KindPR, Consumer: consumer, Scope: query}); err != nil {
 			t.Errorf("poll: %v", err)
 		}
 	}
 	wg.Add(2)
 	go poll("c", "mine")
-	waitFor(t, inRun) // the first poll of key c/mine is inside Run, holding its lock
+	waitFor(t, inRun) // the first poll of consumer c is inside Run, holding its lock
 
-	go poll("c", "mine") // the same key: must wait for the lock, never reaching Run
+	go poll("c", "mine") // the same consumer: must wait for the lock, never reaching Run
 	select {
 	case <-inRun:
 		t.Fatal("a second call for the same key entered Run while the first held the key")
@@ -367,7 +367,7 @@ func TestCallsForOneKeyAreSerialisedAndDifferentKeysRunInParallel(t *testing.T) 
 	}
 
 	wg.Add(1)
-	go poll("c", "team") // a different key runs at once
+	go poll("d", "team") // a different consumer runs at once
 	waitFor(t, inRun)
 
 	close(release)
@@ -398,12 +398,12 @@ func TestConcurrentPollsAndAcksKeepThePositionMonotonic(t *testing.T) {
 			consumer := fmt.Sprintf("w%d", w%2)
 			for range 25 {
 				r.plain(refA)
-				res, err := r.f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: consumer, Query: "mine"})
+				res, err := r.f.Poll(ctx, PollRequest{View: KindPR, Consumer: consumer, Scope: "mine"})
 				if err != nil {
 					t.Errorf("poll: %v", err)
 					return
 				}
-				if err := r.f.Ack(ctx, KindPR, consumer, "mine", res.NextSeq); err != nil {
+				if err := r.f.Ack(ctx, AckRequest{View: KindPR, Consumer: consumer, Scope: "mine", NextSeq: res.NextSeq}); err != nil {
 					t.Errorf("ack: %v", err)
 					return
 				}

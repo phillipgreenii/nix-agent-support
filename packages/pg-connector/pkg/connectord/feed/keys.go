@@ -37,10 +37,9 @@ func (e *CursorExpiredError) Error() string { return e.Message }
 // Is makes errors.Is(err, scriptout.ErrInvalidArgument) hold.
 func (e *CursorExpiredError) Is(target error) bool { return target == scriptout.ErrInvalidArgument }
 
-// KeyConflictError refuses the creation of a cursor while the same consumer
-// holds the cursor of another view for the same scope; it is an
-// invalid_argument. Existing names the cursor that exists, as "(consumer, view,
-// scope)".
+// KeyConflictError refuses a call that names another view than the one the
+// consumer's single cursor is bound to; it is an invalid_argument. Existing
+// names the binding, as "consumer X is bound to view V, scope S".
 type KeyConflictError struct{ Existing, Message string }
 
 func (e *KeyConflictError) Error() string { return e.Message }
@@ -48,16 +47,28 @@ func (e *KeyConflictError) Error() string { return e.Message }
 // Is makes errors.Is(err, scriptout.ErrInvalidArgument) hold.
 func (e *KeyConflictError) Is(target error) bool { return target == scriptout.ErrInvalidArgument }
 
-// keyID is a cursor key.
+// ScopeConflictError refuses a call that names another scope than the one the
+// consumer's single cursor is bound to, unless the call is a Reset (which
+// rebinds the cursor); it is an invalid_argument. Existing names the binding, as
+// "consumer X is bound to view V, scope S".
+type ScopeConflictError struct{ Existing, Message string }
+
+func (e *ScopeConflictError) Error() string { return e.Message }
+
+// Is makes errors.Is(err, scriptout.ErrInvalidArgument) hold.
+func (e *ScopeConflictError) Is(target error) bool { return target == scriptout.ErrInvalidArgument }
+
+// keyID names a cursor's consumer, view and scope in the messages of an answer.
 type keyID struct{ consumer, view, scope string }
 
 func (k keyID) String() string { return "(" + k.consumer + ", " + k.view + ", " + k.scope + ")" }
 
-// keyLocks serialises the calls of one cursor without growing: an entry exists
-// only while a call holds or waits for it.
+// keyLocks serialises the calls of one consumer without growing: an entry exists
+// only while a call holds or waits for it. A consumer holds one cursor, so the
+// lock keys on the consumer.
 type keyLocks struct {
 	mu sync.Mutex
-	m  map[keyID]*keyLock
+	m  map[string]*keyLock
 }
 
 type keyLock struct {
@@ -65,11 +76,11 @@ type keyLock struct {
 	refs int
 }
 
-// lock takes the key's lock and returns its release.
-func (l *keyLocks) lock(k keyID) func() {
+// lock takes the consumer's lock and returns its release.
+func (l *keyLocks) lock(k string) func() {
 	l.mu.Lock()
 	if l.m == nil {
-		l.m = map[keyID]*keyLock{}
+		l.m = map[string]*keyLock{}
 	}
 	e := l.m[k]
 	if e == nil {
@@ -110,7 +121,9 @@ func (f *Feed) resolveView(name string) (registry.View, error) {
 	return registry.View{}, scriptout.WrapError(scriptout.ErrInvalidArgument, fmt.Sprintf("feed view %q is not one of the registered views", name))
 }
 
-// validate checks the request fields every call shares and returns the view.
+// validate checks the request fields every call shares and returns the view. A
+// scope is required exactly when the registration delivers by membership;
+// otherwise it is optional.
 func (f *Feed) validate(view, consumer, scope string) (registry.View, error) {
 	v, err := f.resolveView(view)
 	switch {
@@ -118,38 +131,43 @@ func (f *Feed) validate(view, consumer, scope string) (registry.View, error) {
 		return registry.View{}, err
 	case consumer == "":
 		return registry.View{}, scriptout.WrapError(scriptout.ErrInvalidArgument, "a consumer name is required")
-	case scope == "":
+	case scope == "" && f.cfg.Spec.Delivery == registry.DeliverByMembership:
 		return registry.View{}, scriptout.WrapError(scriptout.ErrInvalidArgument, "a query name is required")
 	}
 	return v, nil
 }
 
-// checkKnown refuses a scope the daemon does not know.
+// checkKnown refuses a scope the daemon does not know; no scope is always fine.
 func (f *Feed) checkKnown(scope string) error {
-	if !f.cfg.Queries.Known(scope) {
+	if scope != "" && !f.cfg.Queries.Known(scope) {
 		return fmt.Errorf("%w: %q is not a configured query", ErrQueryNotRecognized, scope)
 	}
 	return nil
 }
 
-// checkConflict refuses the creation of k while the same consumer holds the
-// cursor of any OTHER registered view for the same scope.
-func (f *Feed) checkConflict(ctx context.Context, k keyID) error {
-	for _, v := range f.cfg.Spec.Views {
-		if v.Name == k.view {
-			continue
+// binding says what an existing consumer's cursor is bound to.
+func binding(row store.ConsumerRow) string {
+	scope := row.Scope
+	if scope == "" {
+		scope = "(unscoped)"
+	}
+	return fmt.Sprintf("consumer %s is bound to view %s, scope %s", row.Consumer, row.View, scope)
+}
+
+// checkBinding refuses a call whose view or scope differs from the one the
+// consumer's cursor was created with. A different scope is accepted when the
+// call is a Reset, which rebinds the cursor.
+func (f *Feed) checkBinding(row store.ConsumerRow, k keyID, reset bool) error {
+	switch {
+	case row.View != k.view:
+		return &KeyConflictError{
+			Existing: binding(row),
+			Message:  fmt.Sprintf("invalid_argument: %s, so it cannot use view %s: %s", binding(row), k.view, f.cfg.ConflictReason),
 		}
-		o := keyID{k.consumer, v.Name, k.scope}
-		_, ok, err := f.cfg.Store.GetConsumer(ctx, o.consumer, o.view, o.scope)
-		if err != nil {
-			return err
-		}
-		if ok {
-			return &KeyConflictError{
-				Existing: o.String(),
-				Message: fmt.Sprintf("invalid_argument: cannot create the %s key %s while the %s key %s exists: %s",
-					k.view, k, o.view, o, f.cfg.ConflictReason),
-			}
+	case row.Scope != k.scope && !reset:
+		return &ScopeConflictError{
+			Existing: binding(row),
+			Message:  fmt.Sprintf("invalid_argument: %s, so it cannot use scope %q; re-run with --reset to rebind it", binding(row), k.scope),
 		}
 	}
 	return nil

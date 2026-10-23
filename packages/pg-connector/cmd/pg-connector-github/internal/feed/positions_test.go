@@ -34,10 +34,10 @@ func TestPositionsReportsLagAndTheOldestUnackedRow(t *testing.T) {
 	}
 	byKind := map[string]Position{}
 	for _, p := range ps {
-		byKind[p.Kind] = p
+		byKind[p.View] = p
 	}
 	pr, ci := byKind[KindPR], byKind[KindCI]
-	if pr.Consumer != "a" || pr.Query != "mine" || pr.Head != 3 || pr.AckedSeq != 0 || pr.LagRows != 2 || !pr.OldestUnacked.Equal(first) {
+	if pr.Consumer != "a" || pr.Scope != "mine" || pr.Head != 3 || pr.AckedSeq != 0 || pr.LagRows != 2 || !pr.OldestUnacked.Equal(first) {
 		t.Fatalf("pr key = %+v", pr)
 	}
 	if ci.Consumer != "b" || ci.LagRows != 1 || ci.OldestUnacked.Equal(first) {
@@ -50,7 +50,7 @@ func TestPositionsReportsLagAndTheOldestUnackedRow(t *testing.T) {
 	r.ack(KindPR, "a", "mine", 3)
 	ps, _ = r.f.Positions(ctx)
 	for _, p := range ps {
-		if p.Kind == KindPR && (p.LagRows != 0 || !p.OldestUnacked.IsZero()) {
+		if p.View == KindPR && (p.LagRows != 0 || !p.OldestUnacked.IsZero()) {
 			t.Fatalf("acked key still lags: %+v", p)
 		}
 	}

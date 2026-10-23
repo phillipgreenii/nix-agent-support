@@ -363,15 +363,15 @@ func TestConformanceChangesFailuresOverTheRealClient(t *testing.T) {
 	invoke(t, pr, confChangesReq("holds-pr-first", servetest.QueryMine, nil)).wantResult(t, "pr poll", schema.PRSchemaVersion)
 	r := invoke(t, ci, confChangesReq("holds-pr-first", servetest.QueryMine, nil))
 	r.wantError(t, "ci poll of a consumer holding the pr key", "invalid_argument")
-	if r.resp.Error != nil && !strings.Contains(r.resp.Error.Message, "(holds-pr-first, pr, mine)") {
-		t.Errorf("the refusal must name the existing key (holds-pr-first, pr, mine): %q", r.resp.Error.Message)
+	if r.resp.Error != nil && !strings.Contains(r.resp.Error.Message, "consumer holds-pr-first is bound to view pr, scope mine") {
+		t.Errorf("the refusal must name the existing binding (consumer holds-pr-first is bound to view pr, scope mine): %q", r.resp.Error.Message)
 	}
 
 	invoke(t, ci, confChangesReq("holds-ci-first", servetest.QueryMine, nil)).wantResult(t, "ci poll", schema.CISchemaVersion)
 	r = invoke(t, pr, confChangesReq("holds-ci-first", servetest.QueryMine, nil))
 	r.wantError(t, "pr poll of a consumer holding the ci key", "invalid_argument")
-	if r.resp.Error != nil && !strings.Contains(r.resp.Error.Message, "(holds-ci-first, ci, mine)") {
-		t.Errorf("the refusal must name the existing key (holds-ci-first, ci, mine): %q", r.resp.Error.Message)
+	if r.resp.Error != nil && !strings.Contains(r.resp.Error.Message, "consumer holds-ci-first is bound to view ci, scope mine") {
+		t.Errorf("the refusal must name the existing binding (consumer holds-ci-first is bound to view ci, scope mine): %q", r.resp.Error.Message)
 	}
 }
 

@@ -145,11 +145,13 @@ func goldenScenario(t *testing.T) map[string][]goldenStep {
 	r.add(goldenRefThree, 7, "example-head-7", []string{classify.KindRemoved}, leftField("mine"))
 	r.add(goldenRefOther, 1, "example-head-o", []string{classify.KindHeadChanged}) // not a member
 
-	// pr: the five rows, then the same rows again (no ack), then the replay.
+	// pr: the five rows, then the same rows again (no ack), then the replay. The
+	// replay is the reset of a consumer of its own: a reset to another query
+	// rebinds a consumer's one cursor, so it would end the polling of the first.
 	first := g.call(t, "pr", OpChanges, pollArgsMine)
 	g.call(t, "pr", OpChanges, pollArgsMine)
 	g.call(t, "pr", OpChanges, `{"consumer":"example-consumer","query":"mine","cached":true}`)
-	g.call(t, "pr", OpChanges, `{"consumer":"example-consumer","query":"team","reset":true}`)
+	g.call(t, "pr", OpChanges, `{"consumer":"example-reset-consumer","query":"team","reset":true}`)
 	var firstRes schema.PRChangesResult
 	if err := json.Unmarshal(first.Result, &firstRes); err != nil || len(firstRes.Sources) != 1 {
 		t.Fatalf("first pr answer = %s (%v)", first.Result, err)
@@ -177,7 +179,7 @@ func goldenScenario(t *testing.T) map[string][]goldenStep {
 
 	ciFirst := g.call(t, "ci", OpChanges, pollArgsCI)
 	g.call(t, "ci", OpChanges, pollArgsCI)
-	g.call(t, "ci", OpChanges, `{"consumer":"example-ci-consumer","query":"team","reset":true}`)
+	g.call(t, "ci", OpChanges, `{"consumer":"example-ci-reset-consumer","query":"team","reset":true}`)
 	var ciRes schema.CIChangesResult
 	if err := json.Unmarshal(ciFirst.Result, &ciRes); err != nil || len(ciRes.Sources) != 1 {
 		t.Fatalf("first ci answer = %s %+v (%v)", ciFirst.Result, ciFirst.Error, err)

@@ -52,11 +52,14 @@ func (r *rig) ackCI(consumer, query string, seq int64) schema.ChangesAckResult {
 
 func (r *rig) posKind(kind, consumer, query string) (int64, bool) {
 	r.t.Helper()
-	c, ok, err := r.st.GetConsumer(context.Background(), consumer, kind, query)
+	c, ok, err := r.st.GetConsumer(context.Background(), consumer)
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	return c.AckedSeq, ok
+	if !ok || c.View != kind || c.Scope != query {
+		return 0, false
+	}
+	return c.AckedSeq, true
 }
 
 // putChecks sets the checks state of the stored summary of a PR put by putPR.
@@ -351,19 +354,19 @@ func TestCIAckMovesTheCIKeyOnlyAndLeavesAnotherConsumersPRKeyUntouched(t *testin
 func TestCIKeyConflictsWithThePRKeyBothWaysNamingTheExistingKey(t *testing.T) {
 	r := newRig(t)
 	r.changes(pollArgs("c", "mine"))
-	wantError(t, r.callCI(OpChanges, pollArgs("c", "mine")), "invalid_argument", "(c, pr, mine)")
-	wantError(t, r.callCI(OpChangesAck, ackArgs("c", "mine", 0)), "invalid_argument", "(c, pr, mine)")
+	wantError(t, r.callCI(OpChanges, pollArgs("c", "mine")), "invalid_argument", "consumer c is bound to view pr, scope mine")
+	wantError(t, r.callCI(OpChangesAck, ackArgs("c", "mine", 0)), "invalid_argument", "consumer c is bound to view pr, scope mine")
 	if _, ok := r.posKind("ci", "c", "mine"); ok {
 		t.Fatal("a refused ci request created the ci key")
 	}
 
-	r.changesCI(pollArgs("c", "team"))
-	wantError(t, r.call(OpChanges, pollArgs("c", "team")), "invalid_argument", "(c, ci, team)")
-	wantError(t, r.call(OpChangesAck, ackArgs("c", "team", 0)), "invalid_argument", "(c, ci, team)")
-	if _, ok := r.posKind("pr", "c", "team"); ok {
+	r.changesCI(pollArgs("c2", "team"))
+	wantError(t, r.call(OpChanges, pollArgs("c2", "team")), "invalid_argument", "consumer c2 is bound to view ci, scope team")
+	wantError(t, r.call(OpChangesAck, ackArgs("c2", "team", 0)), "invalid_argument", "consumer c2 is bound to view ci, scope team")
+	if _, ok := r.posKind("pr", "c2", "team"); ok {
 		t.Fatal("a refused pr request created the pr key")
 	}
-	// Another consumer, and another query of the same consumer, are not in conflict.
+	// Another consumer is not in conflict.
 	r.changesCI(pollArgs("other-consumer", "mine"))
 }
 

@@ -206,7 +206,7 @@ func TestACursorOfAnotherViewConflictsNamingTheExistingCursor(t *testing.T) {
 	r := newRig(t, viewAll, nil)
 	r.changes(`{"consumer":"c","query":"mine"}`)
 	_, err := r.forView(viewFlagged).call("changes", `{"consumer":"c","query":"mine"}`)
-	if !errors.Is(err, scriptout.ErrInvalidArgument) || !strings.Contains(err.Error(), "(c, "+viewAll+", mine)") {
+	if !errors.Is(err, scriptout.ErrInvalidArgument) || !strings.Contains(err.Error(), "consumer c is bound to view "+viewAll+", scope mine") {
 		t.Fatalf("conflict = %v", err)
 	}
 }

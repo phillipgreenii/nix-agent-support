@@ -360,9 +360,9 @@ func TestCallsForOneKeyAreSerialisedAndDifferentKeysRunInParallel(t *testing.T) 
 	}
 	wg.Add(2)
 	go poll("c", "mine")
-	waitFor(t, inRun) // the first poll of key c/mine is inside Run, holding its lock
+	waitFor(t, inRun) // the first poll of consumer c is inside Run, holding its lock
 
-	go poll("c", "mine") // the same key: must wait for the lock, never reaching Run
+	go poll("c", "mine") // the same consumer: must wait for the lock, never reaching Run
 	select {
 	case <-inRun:
 		t.Fatal("a second call for the same key entered Run while the first held the key")
@@ -370,7 +370,7 @@ func TestCallsForOneKeyAreSerialisedAndDifferentKeysRunInParallel(t *testing.T) 
 	}
 
 	wg.Add(1)
-	go poll("c", "team") // a different key runs at once
+	go poll("d", "team") // a different consumer runs at once
 	waitFor(t, inRun)
 
 	close(release)

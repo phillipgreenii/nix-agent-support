@@ -10,37 +10,22 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 )
 
-// Queries is what the feed needs of the query runner, in the three methods the
-// GitHub daemon implements; sharedQueries adapts it to the shared interface.
-type Queries interface {
-	// Known reports whether name is a query the daemon is configured with.
-	Known(name string) bool
-	// Members returns the stored result of the configured query name.
-	Members(ctx context.Context, name string) (Members, error)
-	// Run makes the query's stored result fresh, re-running it only when it is
-	// stale, and returns the error of a failed run.
-	Run(ctx context.Context, name string) error
-}
+// Queries is what the feed needs of the query runner: the six methods of the
+// shared interface (Known, Names, Watched, Members, Run, WatchedRefs).
+type Queries = shared.Queries
 
 // Members is the stored membership of a query. Refs are the wire references
 // owner/repo#n in the stored row's order; Baseline is true once the query's
 // membership baseline exists.
 type Members = shared.Members
 
-// sharedQueries supplies what the shared interface asks beyond the three
-// methods: no names, never watched and no watched references, which is right
-// while the GitHub registration delivers by membership.
-type sharedQueries struct{ Queries }
-
-func (sharedQueries) Names() []string                               { return nil }
-func (sharedQueries) Watched(string) bool                           { return false }
-func (sharedQueries) WatchedRefs(context.Context) ([]string, error) { return nil, nil }
-
-var _ shared.Queries = sharedQueries{}
-
 // runner is the part of *query.Runner the feed uses.
 type runner interface {
 	Expr(name string) (schema.QueryExpr, bool)
+	// Names lists the configured query names; Watched reports a configured
+	// query's watched flag (both are the daemon's config, query.Settings).
+	Names() []string
+	Watched(name string) bool
 	Row(ctx context.Context, key query.Key) (store.QueryRow, bool, error)
 	Fetch(ctx context.Context, key query.Key) (store.QueryRow, error)
 }
@@ -64,6 +49,17 @@ func (q *queries) Known(name string) bool {
 	_, ok := q.r.Expr(name)
 	return ok
 }
+
+// Names lists the configured query names.
+func (q *queries) Names() []string { return q.r.Names() }
+
+// Watched reports whether the configured query name is a watched one.
+func (q *queries) Watched(name string) bool { return q.r.Watched(name) }
+
+// WatchedRefs is a documented empty stub: the GitHub registration delivers by
+// membership, so no reset replays watched references. The watched-entity
+// listing replaces it when the registration delivers by watched.
+func (q *queries) WatchedRefs(context.Context) ([]string, error) { return nil, nil }
 
 func (q *queries) Members(ctx context.Context, name string) (Members, error) {
 	row, ok, err := q.st.GetQuery(ctx, query.Key{Name: name}.String())

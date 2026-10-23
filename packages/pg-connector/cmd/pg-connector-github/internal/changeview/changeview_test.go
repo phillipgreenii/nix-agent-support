@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,16 @@ func (q queries) Members(_ context.Context, name string) (feed.Members, error) {
 	return feed.Members{Refs: q[name], Baseline: true}, nil
 }
 func (q queries) Run(context.Context, string) error { return nil }
+func (q queries) Names() []string {
+	names := make([]string, 0, len(q))
+	for name := range q {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+func (q queries) Watched(string) bool                           { return false }
+func (q queries) WatchedRefs(context.Context) ([]string, error) { return nil, nil }
 
 type rig struct {
 	t   *testing.T
@@ -130,7 +141,7 @@ func TestStatusSourceReadsTheStoreTheLifecycleAndTheFeed(t *testing.T) {
 	}
 
 	// A consumer key (first poll, at the tail), then rows it has not acknowledged.
-	if _, err := r.f.Poll(ctx, feed.PollRequest{Kind: feed.KindPR, Consumer: "consumer-a", Query: "mine"}); err != nil {
+	if _, err := r.f.Poll(ctx, feed.PollRequest{View: feed.KindPR, Consumer: "consumer-a", Scope: "mine"}); err != nil {
 		t.Fatal(err)
 	}
 	r.clk.Advance(time.Minute)
@@ -184,7 +195,7 @@ func TestStatusSourceReadsTheStoreTheLifecycleAndTheFeed(t *testing.T) {
 	}
 
 	// Acknowledged: no lag and no age.
-	if err := r.f.Ack(ctx, feed.KindPR, "consumer-a", "mine", 2); err != nil {
+	if err := r.f.Ack(ctx, feed.AckRequest{View: feed.KindPR, Consumer: "consumer-a", Scope: "mine", NextSeq: 2}); err != nil {
 		t.Fatal(err)
 	}
 	cs, _ = src.Consumers(ctx)
@@ -197,7 +208,7 @@ func TestStatusSourceAgesFollowTheAdaptersClockNotTheWallClock(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
 	src, _ := NewStatusSource(r.cfg)
-	if _, err := r.f.Poll(ctx, feed.PollRequest{Kind: feed.KindPR, Consumer: "c", Query: "mine"}); err != nil {
+	if _, err := r.f.Poll(ctx, feed.PollRequest{View: feed.KindPR, Consumer: "c", Scope: "mine"}); err != nil {
 		t.Fatal(err)
 	}
 	r.appendChange(refA, []string{"head_changed"}, "refresh")

@@ -1,15 +1,18 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"sort"
 )
 
 // SchemaVersion is the newest schema version this binary knows. A store
 // above it is refused (ErrSchemaNewer); a store below it is migrated up.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // builtinMigrations is the ladder; len(builtinMigrations) == SchemaVersion
 // (asserted by a test). A migration, once shipped, MUST NOT change: add a
@@ -20,6 +23,7 @@ var builtinMigrations = []Migration{
 	{Version: 3, Name: "pending_change, change_log, consumer", Apply: migrateV3},
 	{Version: 4, Name: "store identity", Apply: migrateV4},
 	{Version: 5, Name: "watched flag and log snapshot", Apply: migrateV5},
+	{Version: 6, Name: "consumer cursor per consumer", Apply: migrateV6},
 }
 
 // BuiltinMigrations returns a copy of the built-in ladder. A caller that wants
@@ -246,6 +250,126 @@ func migrateV5(tx *sql.Tx, report func(string)) error {
 	report("adding the watched flag and the log snapshot")
 	if _, err := tx.Exec(schemaV5); err != nil {
 		return fmt.Errorf("create version 5 schema: %w", err)
+	}
+	return nil
+}
+
+// schemaV6 rebuilds consumer so a consumer holds ONE cursor: the primary key
+// becomes (consumer) and the old kind and query columns become feed_view and
+// scope. feed_view is the registered view name; scope is the query filter fixed
+// when the cursor was created (” for an unscoped consumer).
+//
+// The rebuild runs in Go (migrateV6) because a consumer that held several rows
+// is collapsed to one: the row with the lowest acked_seq is kept so no consumer
+// moves past a row it has not acknowledged.
+const schemaV6Table = `
+CREATE TABLE consumer_v6 (
+    consumer  TEXT    NOT NULL PRIMARY KEY,
+    feed_view TEXT    NOT NULL,
+    scope     TEXT    NOT NULL DEFAULT '',
+    acked_seq INTEGER NOT NULL DEFAULT 0,
+    seen_at   INTEGER NOT NULL
+)`
+
+// ConsumerCollapsedPrefix is the store_meta key prefix under which rung v6
+// records the rows it dropped from a multi-row consumer; the key is the prefix
+// followed by the consumer name and the value a JSON list of
+// {"view", "scope", "acked_seq"}.
+const ConsumerCollapsedPrefix = "consumer_collapsed."
+
+// CollapsedRow is one dropped cursor in a consumer_collapsed.<consumer> record.
+type CollapsedRow struct {
+	View     string `json:"view"`
+	Scope    string `json:"scope"`
+	AckedSeq int64  `json:"acked_seq"`
+}
+
+type v5ConsumerRow struct {
+	kind, query string
+	ackedSeq    int64
+	seenAt      int64
+}
+
+func migrateV6(tx *sql.Tx, report func(string)) error {
+	report("rebuilding the consumer table with one cursor per consumer")
+	rows, err := tx.Query(`SELECT consumer, kind, query, acked_seq, seen_at FROM consumer ORDER BY consumer, kind, query`)
+	if err != nil {
+		return fmt.Errorf("create version 6 schema: read consumers: %w", err)
+	}
+	byConsumer := map[string][]v5ConsumerRow{}
+	var names []string
+	for rows.Next() {
+		var (
+			name string
+			r    v5ConsumerRow
+		)
+		if err := rows.Scan(&name, &r.kind, &r.query, &r.ackedSeq, &r.seenAt); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("create version 6 schema: read consumers: %w", err)
+		}
+		if _, seen := byConsumer[name]; !seen {
+			names = append(names, name)
+		}
+		byConsumer[name] = append(byConsumer[name], r)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("create version 6 schema: read consumers: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("create version 6 schema: read consumers: %w", err)
+	}
+
+	if _, err := tx.Exec(schemaV6Table); err != nil {
+		return fmt.Errorf("create version 6 schema: %w", err)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		group := byConsumer[name]
+		// The kept row has the lowest acked_seq; ties go to the lowest kind,
+		// then the lowest query (the rows arrive ordered by kind, query).
+		keep := 0
+		maxSeen := group[0].seenAt
+		for i, r := range group {
+			if r.ackedSeq < group[keep].ackedSeq {
+				keep = i
+			}
+			if r.seenAt > maxSeen {
+				maxSeen = r.seenAt
+			}
+		}
+		kept := group[keep]
+		if _, err := tx.Exec(
+			`INSERT INTO consumer_v6 (consumer, feed_view, scope, acked_seq, seen_at) VALUES (?, ?, ?, ?, ?)`,
+			name, kept.kind, kept.query, kept.ackedSeq, maxSeen,
+		); err != nil {
+			return fmt.Errorf("create version 6 schema: copy consumer %q: %w", name, err)
+		}
+		if len(group) < 2 {
+			continue
+		}
+		dropped := make([]CollapsedRow, 0, len(group)-1)
+		for i, r := range group {
+			if i != keep {
+				dropped = append(dropped, CollapsedRow{View: r.kind, Scope: r.query, AckedSeq: r.ackedSeq})
+			}
+		}
+		b, err := json.Marshal(dropped)
+		if err != nil {
+			return fmt.Errorf("create version 6 schema: record collapse of %q: %w", name, err)
+		}
+		if err := putMeta(context.Background(), tx, ConsumerCollapsedPrefix+name, string(b)); err != nil {
+			return fmt.Errorf("create version 6 schema: %w", err)
+		}
+	}
+	for _, stmt := range []string{
+		`DROP TABLE consumer`,
+		`ALTER TABLE consumer_v6 RENAME TO consumer`,
+		`CREATE INDEX consumer_seen_at ON consumer (seen_at)`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("create version 6 schema: %w", err)
+		}
 	}
 	return nil
 }

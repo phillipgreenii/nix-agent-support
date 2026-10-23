@@ -30,9 +30,9 @@ func (f *Feed) dropStaleHanded(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	live := make(map[keyID]bool, len(stored))
+	live := make(map[string]bool, len(stored))
 	for _, c := range stored {
-		live[keyID{c.Consumer, c.Kind, c.Query}] = true
+		live[c.Consumer] = true
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()

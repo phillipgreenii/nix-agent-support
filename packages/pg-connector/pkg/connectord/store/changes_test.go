@@ -379,21 +379,21 @@ func TestConsumerRowsRoundTripAndAreOrdered(t *testing.T) {
 	ctx := context.Background()
 	s, _ := mustOpen(t, dbPath(t), fastOpts())
 	rows := []ConsumerRow{
-		{Consumer: "zeta", Kind: "pr", Query: "", AckedSeq: 3, SeenAt: ms(100)},
-		{Consumer: "alpha", Kind: "pr", Query: "q2", AckedSeq: 1, SeenAt: ms(200)},
-		{Consumer: "alpha", Kind: "ci", Query: "", AckedSeq: 2, SeenAt: ms(300)},
-		{Consumer: "alpha", Kind: "pr", Query: "q1", AckedSeq: 5, SeenAt: ms(400)},
+		{Consumer: "zeta", View: "pr", Scope: "", AckedSeq: 3, SeenAt: ms(100)},
+		{Consumer: "alpha", View: "pr", Scope: "q2", AckedSeq: 1, SeenAt: ms(200)},
+		{Consumer: "beta", View: "ci", Scope: "", AckedSeq: 2, SeenAt: ms(300)},
+		{Consumer: "gamma", View: "pr", Scope: "q1", AckedSeq: 5, SeenAt: ms(400)},
 	}
 	for _, r := range rows {
 		if err := s.PutConsumer(ctx, r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got, ok, err := s.GetConsumer(ctx, "alpha", "pr", "q1")
-	if err != nil || !ok || got.AckedSeq != 5 || !got.SeenAt.Equal(ms(400)) {
+	got, ok, err := s.GetConsumer(ctx, "gamma")
+	if err != nil || !ok || got.View != "pr" || got.Scope != "q1" || got.AckedSeq != 5 || !got.SeenAt.Equal(ms(400)) {
 		t.Errorf("get = %+v ok=%v err=%v", got, ok, err)
 	}
-	if _, ok, err := s.GetConsumer(ctx, "alpha", "pr", "nope"); err != nil || ok {
+	if _, ok, err := s.GetConsumer(ctx, "nope"); err != nil || ok {
 		t.Errorf("missing consumer: ok=%v err=%v", ok, err)
 	}
 
@@ -403,24 +403,28 @@ func TestConsumerRowsRoundTripAndAreOrdered(t *testing.T) {
 	}
 	var order []string
 	for _, r := range list {
-		order = append(order, r.Consumer+"/"+r.Kind+"/"+r.Query)
+		order = append(order, r.Consumer+"/"+r.View+"/"+r.Scope)
 	}
-	want := []string{"alpha/ci/", "alpha/pr/q1", "alpha/pr/q2", "zeta/pr/"}
+	want := []string{"alpha/pr/q2", "beta/ci/", "gamma/pr/q1", "zeta/pr/"}
 	if !slices.Equal(order, want) {
-		t.Errorf("order = %v, want consumer, kind, query: %v", order, want)
+		t.Errorf("order = %v, want by consumer: %v", order, want)
 	}
 
-	// Put replaces; delete removes one key and is a no-op for an absent one.
-	if err := s.PutConsumer(ctx, ConsumerRow{Consumer: "alpha", Kind: "pr", Query: "q1", AckedSeq: 9, SeenAt: ms(500)}); err != nil {
+	// Put replaces the one row of a consumer (a Reset rebinds its scope); delete
+	// removes it and is a no-op for an absent one.
+	if err := s.PutConsumer(ctx, ConsumerRow{Consumer: "gamma", View: "pr", Scope: "q9", AckedSeq: 9, SeenAt: ms(500)}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _, _ := s.GetConsumer(ctx, "alpha", "pr", "q1"); got.AckedSeq != 9 || !got.SeenAt.Equal(ms(500)) {
+	if got, _, _ := s.GetConsumer(ctx, "gamma"); got.Scope != "q9" || got.AckedSeq != 9 || !got.SeenAt.Equal(ms(500)) {
 		t.Errorf("after replace = %+v", got)
 	}
-	if err := s.DeleteConsumer(ctx, "alpha", "pr", "q1"); err != nil {
+	if list, _ := s.ListConsumers(ctx); len(list) != 4 {
+		t.Errorf("after replace: %d rows, want 4 (one row per consumer)", len(list))
+	}
+	if err := s.DeleteConsumer(ctx, "gamma"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteConsumer(ctx, "alpha", "pr", "q1"); err != nil {
+	if err := s.DeleteConsumer(ctx, "gamma"); err != nil {
 		t.Errorf("second delete: %v", err)
 	}
 	if list, _ := s.ListConsumers(ctx); len(list) != 3 {
@@ -432,7 +436,7 @@ func TestDeleteConsumersSeenBeforeRemovesOnlyOlderOnesAndCountsThem(t *testing.T
 	ctx := context.Background()
 	s, _ := mustOpen(t, dbPath(t), fastOpts())
 	for i, at := range []int64{100, 200, 300, 400} {
-		if err := s.PutConsumer(ctx, ConsumerRow{Consumer: fmt.Sprintf("c%d", i), Kind: "pr", SeenAt: ms(at)}); err != nil {
+		if err := s.PutConsumer(ctx, ConsumerRow{Consumer: fmt.Sprintf("c%d", i), View: "pr", SeenAt: ms(at)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -454,14 +458,14 @@ func TestConsumerTxFormsMatchTheStoreForms(t *testing.T) {
 	s, _ := mustOpen(t, dbPath(t), fastOpts())
 	if err := s.InTx(ctx, func(tx *Tx) error {
 		for i, at := range []int64{100, 200, 300} {
-			if err := tx.PutConsumer(ctx, ConsumerRow{Consumer: fmt.Sprintf("c%d", i), Kind: "pr", Query: "q", SeenAt: ms(at)}); err != nil {
+			if err := tx.PutConsumer(ctx, ConsumerRow{Consumer: fmt.Sprintf("c%d", i), View: "pr", Scope: "q", SeenAt: ms(at)}); err != nil {
 				return err
 			}
 		}
-		if c, ok, err := tx.GetConsumer(ctx, "c1", "pr", "q"); err != nil || !ok || !c.SeenAt.Equal(ms(200)) {
+		if c, ok, err := tx.GetConsumer(ctx, "c1"); err != nil || !ok || !c.SeenAt.Equal(ms(200)) {
 			t.Errorf("tx get = %+v ok=%v err=%v", c, ok, err)
 		}
-		if err := tx.DeleteConsumer(ctx, "c0", "pr", "q"); err != nil {
+		if err := tx.DeleteConsumer(ctx, "c0"); err != nil {
 			return err
 		}
 		if n, err := tx.DeleteConsumersSeenBefore(ctx, ms(250)); err != nil || n != 1 {

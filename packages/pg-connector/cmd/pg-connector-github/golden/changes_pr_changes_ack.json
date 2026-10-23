@@ -16,7 +16,11 @@
     "answer": {
       "protocolVersion": 1,
       "schemaVersion": 13,
-      "result": { "consumer": "example-fresh", "query": "mine", "acked_seq": 2 }
+      "result": {
+        "consumer": "example-fresh",
+        "query": "mine",
+        "acked_seq": 2
+      }
     }
   },
   {

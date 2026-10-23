@@ -42,10 +42,10 @@ func TestAKeyPastRetentionAnswersCursorExpiredUntilReset(t *testing.T) {
 		t.Fatalf("prune = %d, %v", rows, err)
 	}
 
-	_, err = r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "stale", Query: "mine"})
+	_, err = r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "stale", Scope: "mine"})
 	wantExpired(t, err)
 	// It stays expired, and an ack does not hide it.
-	_, err = r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "stale", Query: "mine"})
+	_, err = r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "stale", Scope: "mine"})
 	wantExpired(t, err)
 
 	// A key acknowledged at the last pruned row (the oldest retained minus one) is served.
@@ -53,7 +53,7 @@ func TestAKeyPastRetentionAnswersCursorExpiredUntilReset(t *testing.T) {
 		t.Fatalf("current key = %+v", res)
 	}
 
-	res, err := r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "stale", Query: "mine", Reset: true})
+	res, err := r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "stale", Scope: "mine", Reset: true})
 	if err != nil || res.Position != r.head() {
 		t.Fatalf("reset = %+v, %v", res, err)
 	}
@@ -71,7 +71,7 @@ func TestAKeyBelowTheHeadOfAnEmptyLogExpiresAndOneAtTheHeadNever(t *testing.T) {
 	if rows, _, err := r.f.Prune(context.Background()); err != nil || rows != 1 {
 		t.Fatalf("prune = %d, %v", rows, err)
 	}
-	_, err := r.f.Poll(context.Background(), PollRequest{Kind: KindPR, Consumer: "behind", Query: "mine"})
+	_, err := r.f.Poll(context.Background(), PollRequest{View: KindPR, Consumer: "behind", Scope: "mine"})
 	wantExpired(t, err)
 	if res := r.poll(KindPR, "caught-up", "mine"); len(res.Rows) != 0 {
 		t.Fatalf("caught-up key = %+v", res)
@@ -91,11 +91,11 @@ func TestAfterMovedAsideTheFirstPollOfEveryKeyIsCursorExpiredUntilReset(t *testi
 	r.clk.Advance(time.Second)
 	ctx := context.Background()
 
-	_, err := r.f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: "old", Query: "mine"})
+	_, err := r.f.Poll(ctx, PollRequest{View: KindPR, Consumer: "old", Scope: "mine"})
 	wantExpired(t, err)
-	_, err = r.f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: "brand-new", Query: "mine"})
+	_, err = r.f.Poll(ctx, PollRequest{View: KindPR, Consumer: "brand-new", Scope: "mine"})
 	wantExpired(t, err)
-	wantExpired(t, r.f.Ack(ctx, KindPR, "brand-new", "mine", 0))
+	wantExpired(t, r.f.Ack(ctx, AckRequest{View: KindPR, Consumer: "brand-new", Scope: "mine", NextSeq: 0}))
 	if _, ok := r.pos(KindPR, "brand-new", "mine"); ok {
 		t.Fatal("an expired poll or ack created a key")
 	}
@@ -104,7 +104,7 @@ func TestAfterMovedAsideTheFirstPollOfEveryKeyIsCursorExpiredUntilReset(t *testi
 	}
 
 	for _, c := range []string{"old", "brand-new"} {
-		if _, err := r.f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: c, Query: "mine", Reset: true}); err != nil {
+		if _, err := r.f.Poll(ctx, PollRequest{View: KindPR, Consumer: c, Scope: "mine", Reset: true}); err != nil {
 			t.Fatalf("reset of %s: %v", c, err)
 		}
 		r.plain(refA)
@@ -121,7 +121,7 @@ func TestTheMovedAsideMarkerLapsesAfterConsumerStaleAfter(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.plain(refA)
-	_, err := r.f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: "c", Query: "mine"})
+	_, err := r.f.Poll(ctx, PollRequest{View: KindPR, Consumer: "c", Scope: "mine"})
 	wantExpired(t, err)
 
 	r.clk.Advance(7 * day) // consumer_stale_after
@@ -142,11 +142,11 @@ func TestAMissingUnparsableOrFutureMarkerCountsAsAbsent(t *testing.T) {
 		if err := r.st.PutMeta(ctx, MovedAsideKey, v); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := r.f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: name, Query: "mine"}); err != nil {
+		if _, err := r.f.Poll(ctx, PollRequest{View: KindPR, Consumer: name, Scope: "mine"}); err != nil {
 			t.Errorf("%s marker: %v", name, err)
 		}
 	}
-	if _, err := r.f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: "none", Query: "mine"}); err != nil {
+	if _, err := r.f.Poll(ctx, PollRequest{View: KindPR, Consumer: "none", Scope: "mine"}); err != nil {
 		t.Errorf("no marker: %v", err)
 	}
 }
@@ -169,24 +169,24 @@ func TestOneConsumerCannotHoldBothTheCIAndThePRKeyOfOneQuery(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
 	r.poll(KindPR, "c", "mine")
-	_, err := r.f.Poll(ctx, PollRequest{Kind: KindCI, Consumer: "c", Query: "mine"})
-	wantConflict(t, err, "(c, pr, mine)")
-	_, err = r.f.Poll(ctx, PollRequest{Kind: KindCI, Consumer: "c", Query: "mine", Reset: true})
-	wantConflict(t, err, "(c, pr, mine)")
-	wantConflict(t, r.f.Ack(ctx, KindCI, "c", "mine", 0), "(c, pr, mine)")
+	_, err := r.f.Poll(ctx, PollRequest{View: KindCI, Consumer: "c", Scope: "mine"})
+	wantConflict(t, err, "consumer c is bound to view pr, scope mine")
+	_, err = r.f.Poll(ctx, PollRequest{View: KindCI, Consumer: "c", Scope: "mine", Reset: true})
+	wantConflict(t, err, "consumer c is bound to view pr, scope mine")
+	wantConflict(t, r.f.Ack(ctx, AckRequest{View: KindCI, Consumer: "c", Scope: "mine", NextSeq: 0}), "consumer c is bound to view pr, scope mine")
 	if _, ok := r.pos(KindCI, "c", "mine"); ok {
 		t.Fatal("a refused creation left a key")
 	}
 
 	// The reverse, a different consumer and a different query are allowed.
 	r.poll(KindCI, "d", "mine")
-	_, err = r.f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: "d", Query: "mine"})
-	wantConflict(t, err, "(d, ci, mine)")
+	_, err = r.f.Poll(ctx, PollRequest{View: KindPR, Consumer: "d", Scope: "mine"})
+	wantConflict(t, err, "consumer d is bound to view ci, scope mine")
 	r.poll(KindPR, "e", "mine")
-	r.poll(KindCI, "e", "team")
+	r.poll(KindCI, "e2", "team")
 	r.poll(KindCI, "c2", "mine")
 
-	// An existing key keeps working: the rule is on creation.
+	// An existing key keeps working: the rule is on the call that names another view.
 	r.plain(refA)
 	if res := r.poll(KindPR, "c", "mine"); len(res.Rows) != 1 {
 		t.Fatalf("existing key = %+v", res)

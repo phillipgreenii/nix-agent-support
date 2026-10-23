@@ -3,6 +3,8 @@ package feed
 import (
 	"context"
 	"errors"
+	"slices"
+	"sort"
 	"testing"
 	"time"
 
@@ -25,6 +27,17 @@ type fakeRunner struct {
 }
 
 func (f *fakeRunner) Expr(name string) (schema.QueryExpr, bool) { return nil, f.known[name] }
+
+func (f *fakeRunner) Names() []string {
+	var names []string
+	for name := range f.known {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (f *fakeRunner) Watched(string) bool { return false }
 
 func (f *fakeRunner) Row(ctx context.Context, key query.Key) (store.QueryRow, bool, error) {
 	return f.st.GetQuery(ctx, key.String())
@@ -100,14 +113,14 @@ func TestTheFeedRunsThroughQueriesBuiltOverARunner(t *testing.T) {
 	}
 	ctx := context.Background()
 	// The first poll runs the query (which establishes the baseline) and starts at the tail.
-	res, err := f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: "c", Query: "mine"})
+	res, err := f.Poll(ctx, PollRequest{View: KindPR, Consumer: "c", Scope: "mine"})
 	if err != nil || fr.fetches != 1 {
 		t.Fatalf("poll = %+v, %v (fetches %d)", res, err, fr.fetches)
 	}
 	if _, ok := r.pos(KindPR, "c", "mine"); !ok {
 		t.Fatal("no key after a poll with a baseline")
 	}
-	if _, err := f.Poll(ctx, PollRequest{Kind: KindPR, Consumer: "c", Query: "nope"}); !errors.Is(err, ErrQueryNotRecognized) {
+	if _, err := f.Poll(ctx, PollRequest{View: KindPR, Consumer: "c", Scope: "nope"}); !errors.Is(err, ErrQueryNotRecognized) {
 		t.Fatalf("unknown query = %v", err)
 	}
 }
@@ -164,5 +177,40 @@ func TestNewQueriesOverTheRealRunner(t *testing.T) {
 	}
 	if err := q.Run(ctx, "mine"); err != nil {
 		t.Fatalf("run of a fresh query = %v", err)
+	}
+}
+
+// TestNewQueriesTakesNamesAndWatchedFromTheDaemonConfigAndStubsWatchedRefs pins
+// the three methods the shared interface adds to the legacy three: the names and
+// the watched flag come from query.Settings, and WatchedRefs is an empty stub
+// while the registration delivers by membership.
+func TestNewQueriesTakesNamesAndWatchedFromTheDaemonConfigAndStubsWatchedRefs(t *testing.T) {
+	r := newRig(t)
+	cfg := config.Defaults()
+	cfg.PR.Queries = map[string]schema.QueryDef{
+		"zeta":  {Expr: schema.QueryExpr{"is:open"}},
+		"alpha": {Expr: schema.QueryExpr{"is:open author:example-author"}, Watched: true},
+	}
+	gov, err := governor.New(ratefeed.GovernorConfig(cfg.Settings), governor.Options{Clock: r.clk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := query.New(query.Config{
+		Settings: cfg, Store: r.st, Identity: entity.NewIdentity(r.st, r.clk), Tracker: noTracker{}, GH: noGH{},
+		Governor: gov, Feed: ratefeed.New(gov, noGH{}, r.clk),
+		Scheduler: scheduler.New(scheduler.Options{Clock: r.clk, Gate: gov, Workers: 1}), Clock: r.clk,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := NewQueries(runner, r.st)
+	if got := q.Names(); !slices.Equal(got, []string{"alpha", "zeta"}) {
+		t.Fatalf("Names = %v, want the configured names sorted", got)
+	}
+	if !q.Watched("alpha") || q.Watched("zeta") || q.Watched("nope") {
+		t.Fatalf("Watched = alpha %v, zeta %v, nope %v", q.Watched("alpha"), q.Watched("zeta"), q.Watched("nope"))
+	}
+	if refs, err := q.WatchedRefs(context.Background()); err != nil || len(refs) != 0 {
+		t.Fatalf("WatchedRefs = %v, %v, want the empty stub", refs, err)
 	}
 }

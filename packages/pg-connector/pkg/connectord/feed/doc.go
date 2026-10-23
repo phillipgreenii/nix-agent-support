@@ -4,32 +4,36 @@
 // a registry.Spec (its views, its roles, its reference fold) and its queries
 // through the Queries interface; this package knows no kind of its own.
 //
-//   - A cursor is (consumer, view, scope): the view is one of Spec.Views, the
-//     scope is the name of a configured query. The cursor is stored in the
-//     consumer table (view in its kind column, scope in its query column). Calls
-//     for one cursor are serialised; different cursors run in parallel.
+//   - A consumer holds ONE cursor, stored in the consumer table keyed by the
+//     consumer name. The first poll or ack that creates it fixes its view (one of
+//     Spec.Views) and its scope (the name of a configured query, or none). A
+//     different view is a *KeyConflictError; a different scope is a
+//     *ScopeConflictError unless the call is a Reset, which rebinds the cursor to
+//     the new scope and moves it to the head. Calls for one consumer are
+//     serialised; different consumers run in parallel.
+//   - A scope is required exactly when the registration delivers by membership;
+//     otherwise it is optional, and when given it must be a configured query.
 //   - A new cursor's first poll starts at the TAIL of the log, taken after the
-//     scope's membership baseline exists. Before the baseline no cursor is
-//     created: the poll answers an empty result whose NextSeq is the head, and
+//     scope's membership baseline exists (for an unscoped cursor, after the
+//     baseline of every configured watched query). Before the baseline no cursor
+//     is created: the poll answers an empty result whose NextSeq is the head, and
 //     the consumer's Ack of that NextSeq creates it.
 //   - Delivery is at-least-once. Poll never moves a position; only Ack does, and
 //     only forward. A poll that hands out rows the cursor was already given and
 //     did not acknowledge reports the redelivery to the Observer.
-//   - Reset replays the scope's current members as added and moves the cursor to
-//     the head.
-//   - Cached answers from the store without running the query.
+//   - Reset moves the cursor to the head and answers the references to replay as
+//     added: the scope's members by membership, the watched members of the scope
+//     (or every watched reference, for an unscoped cursor) by watched. It never
+//     appends a row.
+//   - Cached answers from the store without running a query; an uncached scoped
+//     poll runs its one query and an uncached unscoped poll runs every configured
+//     watched query, each honouring its own freshness.
 //   - A cursor whose position fell outside retention is answered
 //     *CursorExpiredError ("cursor_expired:"); after NoteMovedAside the first
 //     poll of every cursor is answered the same way, until Reset.
-//   - One consumer may not hold the cursors of two views for one scope
-//     (*KeyConflictError).
 //
 // Rows are filtered per cursor by Deliver, which also names the wire word
 // (added, removed or changed). A change row is appended elsewhere, in the
 // transaction of the content change that caused it; this package only reads the
 // log and keeps the consumer table.
-//
-// Only the legacy delivery rule exists in this package: a scope is required, a
-// member's rows are delivered, and a non-member's row only when a membership
-// kind names the scope.
 package feed
