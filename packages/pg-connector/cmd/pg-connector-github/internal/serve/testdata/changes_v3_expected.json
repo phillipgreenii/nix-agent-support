@@ -1,0 +1,22 @@
+{
+  "changes": [],
+  "sources": [
+    {
+      "backend": "pg-connector-pr-github",
+      "next_seq": 1,
+      "status": "succeeded",
+      "truncated": false,
+      "version": 1
+    }
+  ],
+  "sources_freshness": [
+    {
+      "last_success_at": "(time)",
+      "query": "mine"
+    },
+    {
+      "last_success_at": "(time)",
+      "query": "team"
+    }
+  ]
+}
