@@ -33,6 +33,10 @@ flowchart LR
 A decider's write produces a change record that routes back to it. Because a decider is idempotent
 (re-running on an unchanged view writes nothing), the next run produces no actions and the loop ends.
 
+For a PR the role does not call the decider directly: it runs the composed command `pg-pr-change`, which
+hydrates the PR with `pg-desk pr refresh` and then decides it, under a per-PR lock (see
+[`pr-change.md`](pr-change.md)).
+
 ## Actors
 
 | Actor       | Interest                                                                              |
@@ -51,6 +55,7 @@ A decider's write produces a change record that routes back to it. Because a dec
 | [`work-items.md`](work-items.md)         | The work-item contract: the six kinds, the bead shapes, the dedup key and the same-context rule              |
 | [`plan-and-apply.md`](plan-and-apply.md) | `pg-decider plan` and `apply`, exit codes, precedence, skip reasons, audit, failure escalation, run counters |
 | [`config.md`](config.md)                 | The decider configuration file: location, format and keys                                                    |
+| [`pr-change.md`](pr-change.md)           | `pg-pr-change`, the composed command: per-PR lock, hydrate then decide, exit codes, not-found escalation     |
 
 ## The rules
 
@@ -81,6 +86,7 @@ The invariants of this set are numbered `INV-DECIDER-<n>` across the docs, in RF
 - `INV-DECIDER-1` to `INV-DECIDER-6` are in [`work-items.md`](work-items.md).
 - `INV-DECIDER-7` to `INV-DECIDER-20` and `INV-DECIDER-25` are in [`plan-and-apply.md`](plan-and-apply.md).
 - `INV-DECIDER-21` to `INV-DECIDER-24` are in [`config.md`](config.md).
+- `INV-PRCHANGE-1` to `INV-PRCHANGE-8` are in [`pr-change.md`](pr-change.md).
 
 ## Scope
 

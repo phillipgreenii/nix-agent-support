@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+// FakeConnectorScript is fakeConnectorScript for another package's real-tool
+// tests (internal/prchange): the fixture-driven fake pg-connector, logging each
+// call to callLog. It adds nothing to the parity gate itself.
+func FakeConnectorScript(fx *Fixture, callLog string) string { return fakeConnectorScript(fx, callLog) }
+
 // fakeConnectorScript renders the fixture-driven fake pg-connector: a POSIX
 // shell script that answers, from the fixture, exactly the calls the two
 // pg-desk sides make while loading it. Every call (answered or not) is appended

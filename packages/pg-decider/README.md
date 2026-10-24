@@ -8,6 +8,19 @@ behavior lives in `docs/behavior/pg-decider/`; this page covers building and tes
 - Whole module: `nix build .#checks.<system>.pg-decider-go-tests` (or `go test ./...` in this
   directory).
 - Parity gate (the decider against its frozen golden): `nix build .#checks.<system>.pg-decider-parity-gate -L`.
+- `pg-pr-change` real-tool gate (the real `pg-desk`, `pg-decider` and `pg-pr-change` against a
+  fixture-driven connector): `nix build .#checks.<system>.pg-pr-change-real-tools -L`. The tests that
+  need a real `bd` (the not-found escalation's lookup across closed beads) carry the `contract` build
+  tag and run from the `pg-pr-change-contract-test` hook, or by hand with
+  `go test -tags contract -run RealBD ./internal/prchange/`.
+
+## `pg-pr-change`
+
+`cmd/pg-pr-change` and `internal/prchange` are the composed command a `pr-change` role runs for one
+PR id: a per-PR lock, `pg-desk pr refresh`, a fail-closed view check, then `pg-decider plan|apply`.
+It ships in this package's output beside `pg-decider`, with `pg-desk`, `pg-connector` and the sibling
+`pg-decider` on its `PATH`. Exit codes, failure classes and the not-found escalation are in
+`docs/behavior/pg-decider/pr-change.md`.
 
 ## Parity gate
 

@@ -1,0 +1,1 @@
+^(packages/(pg-decider/(cmd/pg-pr-change/|internal/(prchange|parity|config|view|workitem)/|go\.(mod|sum)$)|pg-desk/(cmd/pg-desk/|internal/|go\.(mod|sum)$)|pg-connector/(cmd/pg-connector/|cmd/pg-connector-issue-beads/|pkg/|go\.(mod|sum)$))|scripts/run-pg-pr-change-contract\.sh$)

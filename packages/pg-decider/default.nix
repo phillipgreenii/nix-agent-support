@@ -22,7 +22,14 @@ mkGoApp {
 
   gomod2nixToml = ./gomod2nix.toml;
 
-  subPackages = [ "cmd/pg-decider" ];
+  # pg-decider is the decider; pg-pr-change is the composed command a
+  # `pr-change` role runs for one PR id (hydrate with `pg-desk pr refresh`, then
+  # decide), kept in this module because it shares the decider's view, work-item
+  # index and configuration packages. Both declare `var Version = "dev"`.
+  subPackages = [
+    "cmd/pg-decider"
+    "cmd/pg-pr-change"
+  ];
 
   nativeBuildInputs = [ makeWrapper ];
 
@@ -38,11 +45,19 @@ mkGoApp {
         pg-connector
       ]
     }
+    # pg-pr-change execs pg-desk, pg-decider (its sibling in this output) and
+    # pg-connector by bare name. The unwrapped binary is `.pg-pr-change-wrapped`.
+    wrapProgram $out/bin/pg-pr-change --prefix PATH : "${
+      lib.makeBinPath [
+        pg-desk
+        pg-connector
+      ]
+    }:$out/bin"
     install -Dm644 ${./share/work-item-keys.json} $out/share/pg-decider/work-item-keys.json
   '';
 
   meta = {
-    description = "Decider that plans and applies work-item changes from the pg-desk composite view";
+    description = "Decider that plans and applies work-item changes from the pg-desk composite view, and pg-pr-change, the command that hydrates a PR and then decides it";
     mainProgram = "pg-decider";
   };
 }

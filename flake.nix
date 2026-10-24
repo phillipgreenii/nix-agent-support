@@ -1064,6 +1064,51 @@
           require_serial = true;
         };
 
+        # docket pg2-6mo45.3, packet P3b1b: pg-pr-change's not-found escalation
+        # looks for an earlier escalation in EVERY status, closed included, with
+        # `pg-connector search` against the beads tracker. Whether that lookup
+        # finds a CLOSED bead is a property of a REAL tool (bd's search), so its
+        # regression guard runs against a real bd in a throwaway embedded store
+        # (global rule V-3): the `contract`-tagged `TestPRChangeRealBD_*` tests in
+        # packages/pg-decider/internal/prchange, which build the real pg-desk,
+        # pg-decider, pg-pr-change, pg-connector and pg-connector-issue-beads from
+        # source. Like `pg-desk-closure-contract-test` above: the nix sandbox has no
+        # bd, so `checks.<system>.pg-pr-change-real-tools` covers everything else
+        # (the real pg-desk, pg-decider and pg-pr-change against a fixture-driven
+        # connector) and this path-scoped hook is what puts the real-tracker half
+        # under the commit-time and `pg-hooks run pre-land` runs. The logic lives in
+        # scripts/run-pg-pr-change-contract.sh; its path regex lives in
+        # scripts/pg-pr-change-contract-files.regex, which this hook and
+        # tests/pg-pr-change-contract-hook.bats both read (the bats case feeds the
+        # regex one path of every input and runs the script against PATH shims, so a
+        # missing tool is shown to fail loudly). A missing `bd` or `go` is a LOUD
+        # failure, never a skip.
+        pg-pr-change-contract-test = {
+          enable = true;
+          name = "pg-pr-change-contract-test";
+          description = "pg-pr-change: run the contract-tagged real-bd escalation dedup tests (docket pg2-6mo45.3, P3b1b)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "pg-pr-change-contract-test-hook";
+              runtimeInputs = [ pkgs.git ];
+              text = ''
+                # No bd in the nix build sandbox (and no network/module cache):
+                # this runs on the operator's machine via pg-hooks only.
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "pg-pr-change-contract-test: inside the nix build sandbox; skipping (needs a real bd)" >&2
+                  exit 0
+                fi
+
+                exec bash ${./scripts/run-pg-pr-change-contract.sh} "$@"
+              '';
+            }
+          }/bin/pg-pr-change-contract-test-hook";
+          language = "system";
+          files = pkgs.lib.removeSuffix "\n" (builtins.readFile ./scripts/pg-pr-change-contract-files.regex);
+          pass_filenames = false;
+          require_serial = true;
+        };
+
         # pg2-sx246: the pg-router-ccpool-handler budget hard stop MUST NOT
         # reopen a bead that is already closed. Whether the release
         # (`bd update --status=open --assignee=`) reopens a closed bead is a
@@ -5484,6 +5529,66 @@
                         exit 1
                       fi
                       echo "pg-decider-parity-gate: $found scenarios, each with a PASS line, none skipped"
+                      runHook postBuild
+                    '';
+                  });
+
+              # pg-pr-change real-tool gate (docket pg2-6mo45.3, packet P3b1b; design 6.1
+              # "Hydrate then decide"). TestPRChangeRealTools runs the BUILT pg-desk,
+              # pg-decider and pg-pr-change (the same pkgs.pg-desk / pkgs.pg-decider the
+              # system ships) in a hermetic sandbox against a fixture-driven fake
+              # pg-connector whose failures and tracker answers come from control files
+              # (a 502, a null node, a degraded read, a search answer, a `block`): the
+              # exit-code table, the failure classes, the per-PR lock and the
+              # not-found marking and escalation. The nix sandbox has no bd, so the
+              # throwaway-real-bd tests (TestPRChangeRealBD_*, `contract` tag) run from
+              # the `pg-pr-change-contract-test` hook instead. The tests need the three
+              # BUILT binaries and used to skip silently without them; this check
+              # exports them as PG_PR_CHANGE_*_BIN and sets PG_PR_CHANGE_REQUIRE_BINARIES
+              # so an unset binary FAILS the run. It runs ONLY TestPRChangeRealTools, and
+              # the buildPhase asserts the test's own PASS line, NO SKIP line and at least
+              # minScenarios scenario PASS lines (keep equal to minScenarios in
+              # internal/prchange/realtools_test.go), so a renamed or filtered-out test,
+              # a skipped scenario or a gate that ran nothing cannot pass vacuously.
+              pg-pr-change-real-tools =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-pr-change-real-tools";
+                  src = lib.cleanSource ./packages/pg-decider; # matches default.nix
+                  gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    PG_PR_CHANGE_PG_DESK_BIN = "${pkgs.pg-desk}/bin/pg-desk";
+                    PG_PR_CHANGE_PG_DECIDER_BIN = "${pkgs.pg-decider}/bin/pg-decider";
+                    PG_PR_CHANGE_BIN = "${pkgs.pg-decider}/bin/pg-pr-change";
+                    PG_PR_CHANGE_SQLITE3_BIN = "${lib.getBin pkgs.sqlite}/bin/sqlite3";
+                    PG_PR_CHANGE_REQUIRE_BINARIES = "1";
+                    minScenarios = "16";
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/pg-pr-change-real-tools.log"
+                      if ! go test -count=1 -v -run '^TestPRChangeRealTools$' ./internal/prchange/ > "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-pr-change-real-tools: the real-tool test FAILED" >&2
+                        exit 1
+                      fi
+                      cat "$log"
+                      if ! grep -q -- '^--- PASS: TestPRChangeRealTools ' "$log"; then
+                        echo "pg-pr-change-real-tools: TestPRChangeRealTools did not report PASS (skipped or not run)" >&2
+                        exit 1
+                      fi
+                      if grep -q -- '--- SKIP' "$log"; then
+                        echo "pg-pr-change-real-tools: a test or scenario was SKIPPED" >&2
+                        grep -- '--- SKIP' "$log" >&2
+                        exit 1
+                      fi
+                      found=$(grep -c -- '^    --- PASS: TestPRChangeRealTools/' "$log" || true)
+                      if [ "$found" -lt "$minScenarios" ]; then
+                        echo "pg-pr-change-real-tools: only $found scenarios passed, at least $minScenarios are required" >&2
+                        exit 1
+                      fi
+                      echo "pg-pr-change-real-tools: $found scenarios, each with a PASS line, none skipped"
                       runHook postBuild
                     '';
                   });
