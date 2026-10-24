@@ -180,3 +180,90 @@ func TestTypedFeedbackOnNewSchemaWritesDispositionAnnotations(t *testing.T) {
 		t.Errorf("annotations = %+v, want exactly the two disposition rows", got)
 	}
 }
+
+// The PR annotation verbs only write annotations: each of pr hide and pr unhide
+// prints the composed command to run, in the configured lane mode, and hide
+// also says that beads already open stay open and claimable. wip is view-only
+// and prints nothing. The text is pinned verbatim: it is the operator-facing
+// contract.
+func TestPRHideUnhidePrintTheComposedCommand(t *testing.T) {
+	for _, tc := range []struct {
+		laneMode string
+		next     string
+	}{
+		{"plan", "next: run pg-pr-change plan o/r#5 to have the lane act on it"},
+		{"apply", "next: run pg-pr-change apply o/r#5 to have the lane act on it"},
+		{"off", "next: the pr lane is off (pr_lane.mode), so nothing acts on it yet; when it runs: pg-pr-change plan o/r#5"},
+		{"", "next: the pr lane is off (pr_lane.mode), so nothing acts on it yet; when it runs: pg-pr-change plan o/r#5"},
+	} {
+		t.Run("lane "+tc.laneMode, func(t *testing.T) {
+			open, _ := seedLinkStore(t, [2]string{"pr", "o/r#5"})
+			cfg := linkTestConfig()
+			cfg.PRLane.Mode = tc.laneMode
+			withOpenSeams(t, cfg, open)
+
+			out, err := runGroupCmd(t, typedHide, "pr", "5", "noisy PR")
+			if err != nil {
+				t.Fatalf("pr hide: %v", err)
+			}
+			wantHide := "beads already open for a hidden PR stay open and claimable\n" + tc.next + "\n"
+			if out != wantHide {
+				t.Errorf("pr hide output:\n%q\nwant:\n%q", out, wantHide)
+			}
+			out, err = runGroupCmd(t, typedUnhide, "pr", "5")
+			if err != nil {
+				t.Fatalf("pr unhide: %v", err)
+			}
+			if want := tc.next + "\n"; out != want {
+				t.Errorf("pr unhide output:\n%q\nwant:\n%q", out, want)
+			}
+			out, err = runGroupCmd(t, typedWIP, "pr", "on", "5")
+			if err != nil {
+				t.Fatalf("pr wip on: %v", err)
+			}
+			if out != "" {
+				t.Errorf("pr wip printed %q, want nothing (view-only)", out)
+			}
+		})
+	}
+}
+
+// Only PRs have a lane: issue and thread hide/unhide print no command.
+func TestIssueHideUnhidePrintNoComposedCommand(t *testing.T) {
+	open, _ := seedLinkStore(t, [2]string{"issue", "K-1"})
+	cfg := linkTestConfig()
+	cfg.PRLane.Mode = "apply"
+	withOpenSeams(t, cfg, open)
+	for _, build := range []func(string) *cobra.Command{typedHide, typedUnhide} {
+		if out, err := runGroupCmd(t, build, "issue", "K-1"); err != nil || out != "" {
+			t.Errorf("issue verb: out=%q err=%v, want no output", out, err)
+		}
+	}
+}
+
+// The pr hide and unhide forms (the top-level verbs share the code) print the same, on
+// an old-schema store too (the composed command exists whatever the schema).
+func TestPRHideUnhidePrintTheComposedCommandOnAnOldSchemaStore(t *testing.T) {
+	st, openFresh := openTestStore(t)
+	cfg := linkTestConfig()
+	cfg.PRLane.Mode = "plan"
+	withOpenSeams(t, cfg, openFresh)
+	seedBareEntity(t, st, "o/r", "o/r#42")
+
+	for _, tc := range []struct {
+		build func(string) *cobra.Command
+		args  []string
+		want  string
+	}{
+		{typedHide, []string{"42", "x"}, "beads already open for a hidden PR stay open and claimable\nnext: run pg-pr-change plan o/r#42 to have the lane act on it\n"},
+		{typedUnhide, []string{"42"}, "next: run pg-pr-change plan o/r#42 to have the lane act on it\n"},
+	} {
+		out, err := runGroupCmd(t, tc.build, "pr", tc.args...)
+		if err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		if out != tc.want {
+			t.Errorf("output %q, want %q", out, tc.want)
+		}
+	}
+}

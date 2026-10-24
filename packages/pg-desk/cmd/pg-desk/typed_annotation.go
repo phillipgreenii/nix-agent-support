@@ -82,7 +82,29 @@ func newTypedUnhideCmd(entityType string) *cobra.Command {
 	}
 }
 
+// hiddenBeadsNote is printed by a PR hide: hiding a PR stops the lane from
+// opening new work for it, but never touches a bead that is already open.
+const hiddenBeadsNote = "beads already open for a hidden PR stay open and claimable"
+
 func runTypedHidden(cmd *cobra.Command, cmdName, entityType, ref string, hidden bool, reason string) error {
+	if err := runTypedHiddenWrite(cmd, cmdName, entityType, ref, hidden, reason); err != nil {
+		return err
+	}
+	// The annotation is written; tell the operator what makes the lane act on
+	// it (the composed command; the verb never calls the decider). Only PRs
+	// have a lane, so issue and thread print nothing extra.
+	cfg, err := deskConfigLoad(cmd.Context())
+	if err != nil {
+		return fmt.Errorf("%s: load config: %w", cmdName, err)
+	}
+	preface := ""
+	if hidden && entityType == entityTypePR {
+		preface = hiddenBeadsNote
+	}
+	return printComposedCommand(cmd.OutOrStdout(), cfg, entityType, ref, preface)
+}
+
+func runTypedHiddenWrite(cmd *cobra.Command, cmdName, entityType, ref string, hidden bool, reason string) error {
 	return runSchemaDual(
 		oldPathFor(entityType, func() error { return setHiddenAnnotation(cmd, cmdName, ref, hidden, reason) }),
 		func(st *store.Store) error {

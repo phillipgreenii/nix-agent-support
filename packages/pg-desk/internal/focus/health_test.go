@@ -335,6 +335,11 @@ func TestPendingReasonsAndTheirAges(t *testing.T) {
 	if got := h.OldestPendingAge[PendingUnwatched]; got != 10*time.Minute {
 		t.Errorf("oldest unwatched age = %v, want 10m", got)
 	}
+	// Doctor tags only the PR share of the unminted count "expected until P6",
+	// so the split by selected type must add up to the count.
+	if got := h.UnmintedByType["pr"]; got != 2 || len(h.UnmintedByType) != 1 {
+		t.Errorf("UnmintedByType = %v, want {pr: 2} (the two unminted rows are PRs)", h.UnmintedByType)
+	}
 	if h.UnwatchedSelected != 1 {
 		t.Errorf("UnwatchedSelected = %d, want 1", h.UnwatchedSelected)
 	}

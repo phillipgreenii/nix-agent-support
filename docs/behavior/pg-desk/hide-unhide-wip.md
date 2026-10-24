@@ -34,6 +34,22 @@ verbs depend on the store's schema:
   stored entity exits `1`. The top-level verbs MUST NOT read or write the old per-column annotation
   on a migrated store.
 
+## What the verbs print
+
+`hide`, `unhide` and `wip` only write annotations; none of them calls the decider. For a PR, `hide` and
+`unhide` therefore end by printing the composed command to run so the lane acts on the annotation,
+`next: run pg-pr-change <mode> <id> to have the lane act on it`, where `<mode>` is the configured
+`pr_lane.mode` when it is `plan` or `apply` and `<id>` is the PR's canonical `OWNER/REPO#N`. With the
+lane off the line says so and names the plan form to try once it runs: `next: the pr lane is off
+(pr_lane.mode), so nothing acts on it yet; when it runs: pg-pr-change plan <id>`. `hide` first prints
+`beads already open for a hidden PR stay open and claimable`: hiding stops new work for the PR and
+touches no bead that is already open. `wip` is view-only and prints nothing. The `issue` and `thread`
+forms print nothing, since only PRs have a lane. The printing happens on both schemas and only after
+the annotation is written, so an error exits before it.
+
+- **INV-HIDE-1.** <!-- uuid: 47e481e7-9833-43fd-b576-4863caf55600 --> `pr hide` and `pr unhide` MUST print the composed command to run after writing the annotation, `pr hide` MUST
+  also say that beads already open for the PR stay open and claimable, and `wip` MUST print nothing.
+
 ## Exit codes, telemetry, and logs
 
 `0` on success (the annotation is written, or already in the requested state); `1` when `<pr>`

@@ -170,6 +170,16 @@ links: bd-1 (work, open)  C1/1.5 (references)
 The second line is `relationship  state` followed, for a PR, by `ready|draft`, `head=` and `ci=`,
 then `as_of=` with `(fresh)` or `(stale)`. Each link reads `id (relation[, state])`.
 
+A row at version 0 (a migrated entity no hydration has written yet) shows an empty snapshot and zero
+links, which would read as a PR with nothing to say, so its human output ends with one more line:
+
+```text
+unhydrated: run pg-desk pr refresh acme/api#123
+```
+
+The line names the entity's own type (`pg-desk <type> refresh <id>`), appears once, and only in the
+human output: `--json` carries the `version` itself and no hint.
+
 The `review:` line appears for a PR only. It reads as follows for each state of the PR:
 
 ```text
@@ -221,6 +231,9 @@ If the entity's own hydration fails or degrades, the stored view is still printe
 - **INV-SHOW-7.** <!-- uuid: aa1213f6-10f1-4b59-a9cc-d8facc20ac7a --> `links[].title`, `links[].priority`, `annotations.ready_to_land` and `annotations.focus_selected` MUST be read-only stored data:
   they are copied from the linked entity's stored snapshot and the stored annotation, building them
   MUST NOT call the network or write to the store, and they MUST NOT carry a computed value.
+
+- **INV-SHOW-8.** <!-- uuid: ed0c56d6-0fc9-4aab-a915-4d7a970fcc1a --> The human output of `show` for a row at version 0 MUST end with the line `unhydrated: run pg-desk <type> refresh <id>`,
+  and the `--json` output MUST NOT carry it.
 
 ## Telemetry and logs
 

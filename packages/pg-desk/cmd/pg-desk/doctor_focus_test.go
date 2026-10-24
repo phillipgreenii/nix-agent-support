@@ -579,3 +579,76 @@ func TestDoctorAndFocusShowAgreeOnAWatchedQueryListingStatus(t *testing.T) {
 	}
 	step("listing recorded", "coverage: complete", `pr "mine": ok`+"\n", 0)
 }
+
+// TestUnmintedPRSelectionsCarryTheExpectedUntilP6Tag: until the lane flips to
+// apply the composed command mints no bead for a PR, so the unminted line is
+// red for a known reason; it carries the tag, and still FAILS (the tag
+// explains, it does not suppress). Once the lane is apply the tag is gone.
+func TestUnmintedPRSelectionsCarryTheExpectedUntilP6Tag(t *testing.T) {
+	for _, tc := range []struct {
+		laneMode string
+		wantTag  bool
+	}{
+		{"off", true},
+		{"plan", true},
+		{"apply", false},
+	} {
+		t.Run(tc.laneMode, func(t *testing.T) {
+			w := newDoctorFocusWorld(t)
+			w.cfg.PRLane.Mode = tc.laneMode
+			live := w.openPR(t, 4)
+			w.selected(t, live)
+
+			stdout, err := runDoctorCmd(t)
+			if err == nil || !strings.Contains(err.Error(), focusGateUnminted) {
+				t.Fatalf("doctor err = %v, want the unminted gate (the tag must not suppress it)\n%s", err, stdout)
+			}
+			var line string
+			for _, l := range strings.Split(focusBlockOf(t, stdout), "\n") {
+				if strings.Contains(l, "[gate] unminted selections") {
+					line = l
+				}
+			}
+			if !strings.Contains(line, "unminted selections: 1") || !strings.Contains(line, " FAIL") {
+				t.Fatalf("unminted line = %q, want a tripped count of 1", line)
+			}
+			if got := strings.Contains(line, "[expected until P6: the pr lane is "+tc.laneMode+", so no bead is minted for a PR selection]"); got != tc.wantTag {
+				t.Errorf("tag present = %v, want %v in %q", got, tc.wantTag, line)
+			}
+			// status prints the same block, so it carries the same tag.
+			statusOut, serr := runStatusCmd(t)
+			if serr != nil {
+				t.Fatalf("status: %v", serr)
+			}
+			if got := strings.Contains(statusOut, "expected until P6"); got != tc.wantTag {
+				t.Errorf("status tag present = %v, want %v:\n%s", got, tc.wantTag, statusOut)
+			}
+		})
+	}
+}
+
+// TestUnmintedExpectedTagCoversOnlyThePRShare: a count with a non-PR share says
+// so, and a zero or non-PR-only count carries no tag, so a real finding is not
+// hidden by the tag.
+func TestUnmintedExpectedTagCoversOnlyThePRShare(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.PRLane.Mode = "plan"
+	for _, tc := range []struct {
+		name         string
+		unminted, pr int
+		want         string
+	}{
+		{"none", 0, 0, ""},
+		{"no PR among them", 2, 0, ""},
+		{"all PRs", 2, 2, "expected until P6: the pr lane is plan, so no bead is minted for a PR selection"},
+		{"mixed", 3, 1, "1 of 3 are PR selections, expected until P6: the pr lane is plan; the other 2 are not expected"},
+	} {
+		if got := unmintedExpected(cfg, tc.unminted, tc.pr); got != tc.want {
+			t.Errorf("%s: tag = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	cfg.PRLane.Mode = "apply"
+	if got := unmintedExpected(cfg, 2, 2); got != "" {
+		t.Errorf("apply mode: tag = %q, want none", got)
+	}
+}

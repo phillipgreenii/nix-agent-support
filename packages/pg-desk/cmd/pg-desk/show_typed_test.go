@@ -719,3 +719,51 @@ func TestTypedShowFocusSelectedIsStringOrNull(t *testing.T) {
 		})
 	}
 }
+
+// A migrated row no hydration has written is at version 0: its view succeeds
+// with an empty snapshot and zero links, so the human output says it is
+// unhydrated and names the command; a hydrated row prints no such line, and
+// --json (the pg-desk.view/v1 contract, which carries the version itself) is
+// untouched.
+func TestTypedShowPrintsTheUnhydratedHintForAVersionZeroRow(t *testing.T) {
+	open, seed := seedLinkStore(t) // the cut-over seed holds pr o/r#1 at version 0
+	withOpenSeams(t, linkTestConfig(), open)
+	if e, found, err := seed.GetEntity("o/r", "pr", "o/r#1"); err != nil || !found || e.Version != 0 {
+		t.Fatalf("seed entity o/r#1: found=%v version=%d err=%v, want a version-0 row", found, e.Version, err)
+	}
+
+	out, _, err := runTypedShowCmd(t, "pr", "o/r#1")
+	if err != nil {
+		t.Fatalf("pr show: %v", err)
+	}
+	if !strings.HasSuffix(out, "unhydrated: run pg-desk pr refresh o/r#1\n") {
+		t.Errorf("version-0 output lacks the unhydrated line:\n%s", out)
+	}
+	if n := strings.Count(out, "unhydrated:"); n != 1 {
+		t.Errorf("unhydrated line printed %d times, want once:\n%s", n, out)
+	}
+
+	jsonOut, _, err := runTypedShowCmd(t, "pr", "o/r#1", "--json")
+	if err != nil {
+		t.Fatalf("pr show --json: %v", err)
+	}
+	if strings.Contains(jsonOut, "unhydrated") {
+		t.Errorf("--json output carries the hint:\n%s", jsonOut)
+	}
+	var v struct {
+		Version int64 `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &v); err != nil || v.Version != 0 {
+		t.Errorf("--json version = %d, err %v, want 0", v.Version, err)
+	}
+
+	// A hydrated row (version >= 1) prints no hint.
+	newViewFixture(t)
+	hydrated, _, err := runTypedShowCmd(t, "pr", "o/r#5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(hydrated, "unhydrated") {
+		t.Errorf("hydrated row prints the hint:\n%s", hydrated)
+	}
+}

@@ -25,13 +25,37 @@ and non-transient — see [`sync.md`](sync.md)'s "Automatic retry"), the age of 
 `plan` — planned sync rows by kind (anchor / feedback-cycle / review-request; see
 [`sync.md`](sync.md)). It also prints `pg-connector ledger show` for the configured consumer.
 
-It prints one static `pr lane` line, `pr lane: legacy sync <mode>, lane <mode>`, naming the legacy
-sync's mode (`sync.mode`, `off` when unset) and the PR lane's mode (`pr_lane.mode`, see
-[`config.md`](config.md), `off` when missing or invalid). The line reports what the configuration
-says and nothing the lane did, so it carries no verdict and no count; a configuration that cannot be
-loaded prints `unknown` for both modes. It exists so that a store on which the legacy sync is off
-and the lane is off is not mistaken for a healthy one: `sync_errors: 0` alone cannot tell "nothing
-failed" from "nothing ran". The live lane line replaces it when the lane ships.
+It prints one live `pr lane` line (the static line of the guards phase, replaced once the composed
+command exists). Its first part names the legacy sync's mode (`sync.mode`, `off` when unset) and the
+PR lane's mode (`pr_lane.mode`, see [`config.md`](config.md), `off` when missing or invalid, the one
+source of the mode); a configuration that cannot be loaded prints `unknown` for both modes and
+nothing more. The rest is read from the persisted store state (the lane keys in `meta`, see
+[`store-schema.md`](store-schema.md), and the never-hydrated set), never from the run-record file:
+
+```text
+pr lane: legacy sync off, lane apply, flipped 2026-10-02T09:00:00Z, never-hydrated 1 (oldest 394h0m0s), residual 1 (oldest 1h0m0s), last run 2026-10-02T09:00:00Z
+```
+
+- `flipped <time>` is the persisted flip time, the time of the first recorded run in `apply` that
+  found the recorded lane mode not yet `apply`; `not yet` before it. It is a display value and is
+  unchanged by a by-hand `plan` run after the flip.
+- `never-hydrated <n> (oldest <age>)` is the count of open PRs no hydration has ever written (the
+  set behind `pg_desk_pr_unhydrated`) and the age of the oldest.
+- `residual <n> (oldest <age>)` is the number of PRs a read-only plan still lists actions for after
+  an `apply` run, with the oldest age. It is printed only when the configured mode is `apply` and an
+  `apply` run has been recorded; otherwise `residual n/a (lane not in apply)` or `residual n/a (no
+apply run recorded yet)`, because a `plan` run's action list is not a backlog.
+- `last run <time|never>` is the time of the last recorded run, in any mode.
+- `recorded lane mode <m>` appears, before the residual, only when the recorded lane mode differs
+  from the configured one (the lane was reconfigured and has not run in the new mode yet).
+- A store that is missing, below schema 2 or unreadable keeps the configured part and appends
+  `lane state unavailable (<why>)`; the state is never printed as zeros, which would read as a
+  healthy lane.
+
+The line MUST NOT carry a "time since the last decider apply": that is legitimately large in a quiet
+window and pg-desk has no source for it. It exists so that a store on which the lane is off or has
+not run is not mistaken for a healthy one: `sync_errors: 0` alone cannot tell "nothing failed" from
+"nothing ran".
 
 It prints a `change_flow` section, human-readable, per entity type and per consumer, matching the
 change-flow families `serve` exposes on `/metrics` (see [`serve.md`](serve.md)). Per type it
@@ -293,8 +317,15 @@ such row fails `doctor`, and each is listed with its error and its retry indicat
 retrying, with retries used out of the bound and the next retry time; exhausted; or
 non-transient — see [`sync.md`](sync.md)'s "Automatic retry"); and the stranded-cycle report
 formerly produced by `pr-pool reconcile`.
-`doctor` also prints the same static `pr lane` line as `status` right after the `config` check. It is
-information, never a check: it adds no failure.
+`doctor` also prints the same live `pr lane` line as `status` right after the `config` check, read
+through a raw store handle of its own. It is information, never a check: it adds no failure.
+
+The retry indicator of a `sync_error` row names a remedy that fits the phase. On a store below
+schema 2 the remedy is `fix the cause, then pg-desk reconcile --retry-all`. On a schema-2 store the
+ledger that command reads is dropped, so the indicator says so instead of naming a command that
+fails: with the lane in `plan` or `apply` it names the lane's composed command for the row's PR
+(`fix the cause, then run pg-pr-change <mode> <id>`), and with the lane off it says nothing retries
+the row until the lane runs.
 `serve` reachability fails `doctor` only when `serve` is unreachable (a refused connection, or none made before the deadline); a `serve` that accepted the connection but answered slowly, or not before the generous probe deadline, is reported as `slow` and never fails `doctor`, since a loaded host can take several seconds to answer one scrape (`pg2-903lz`). The ledger-based `work-beads reach` line (`pg2-6w396`) was removed with the ledger, which the cutover drops: it guarded sync's adoption and closure cascade, which are removed too, and on a version-2 store it could only be skipped. `pg-connector config validate`'s own
 query-name-coverage check (a config-authoring signal comparing a backend's declared query names
 against its peers of the same type, bead `pg2-2j5ac.28.1`) is informational-only as of
@@ -381,6 +412,13 @@ The four gates, in print order:
   catches the missing-role and plan-mode case: `doctor` cannot read a role's plan-versus-apply mode
   from the router config (which carries only `name`, `enabled` and `binds`), so the age is the signal.
   Remedy: bind the focus decider role to `issue.changed` and `pr.changed` and set it to apply.
+  Until the PR lane flips to `apply` the composed command mints no bead for a PR, so a PR selection is
+  unminted by design and the line is red for a known reason: while `pr_lane.mode` is not `apply` the
+  line carries `[expected until P6: the pr lane is <mode>, so no bead is minted for a PR selection]`
+  after `FAIL`. The tag covers only the PR share of the count (when other selections are unminted it
+  reads `N of M are PR selections, expected until P6: ...; the other K are not expected`), and it
+  explains the line without suppressing it: the gate still trips and `doctor` still exits non-zero.
+  `status` prints the same tag.
 - **`row_without_annotation` divergence.** A plan row whose `focus_selected` annotation is missing,
   `none` or names another period. Remedy: `pg-desk focus select --repair`.
 - **`selected_bead_held` divergence.** A selected item whose bead is held although its source is not
@@ -505,12 +543,19 @@ can drift.
   every safe verb MUST run on a store migrated to schema 2 without a schema or ledger error, and the
   list of safe verbs installed as `share/pg-desk/safe-verbs.txt` MUST equal the set of verbs the
   classification marks safe.
-- **INV-OPERATOR-9.** <!-- uuid: 661b5e25-4dc3-4e01-9e78-fbe86e036042 --> `status` and `doctor` MUST each print the static `pr lane` line, read from `sync.mode` and `pr_lane.mode`, and
-  the line MUST report an absent or invalid `pr_lane.mode` as `off`; `doctor` MUST NOT count the line as a
-  failure.
+- **INV-OPERATOR-9.** <!-- uuid: 661b5e25-4dc3-4e01-9e78-fbe86e036042 --> `status` and `doctor` MUST each print the live `pr lane` line: the configured lane mode from `pr_lane.mode`
+  (an absent or invalid value reported as `off`), the flip time, the never-hydrated count and its oldest
+  age, the residual (only in `apply` mode), and the time of the last recorded run, all read from the
+  persisted store state and never from the run-record file; the line MUST NOT report a time since the
+  last decider apply and MUST NOT report an unreadable store as zeros; `doctor` MUST NOT count the line as
+  a failure.
 - **INV-OPERATOR-10.** <!-- uuid: aef55489-c70e-4057-a04d-0cad4fd53595 --> `pr lane-record` MUST reject a document with an unknown member or a value outside a closed
   vocabulary without writing anything, and `pr mark-inactive` MUST work from a run in either lane mode and
   count a PR once.
+
+- **INV-OPERATOR-11.** <!-- uuid: b0994b23-e3bf-4c10-a9fd-1194d541b6b7 --> `doctor`'s remedy for a `sync_error` row MUST NOT name `pg-desk reconcile --retry-all` on a store at
+  schema 2, and a line of the `focus:` block that is red for a known reason until the lane flips to `apply`
+  (unminted PR selections) MUST carry an `expected until P6` tag without ceasing to be a gate.
 
 ## Telemetry and logs
 

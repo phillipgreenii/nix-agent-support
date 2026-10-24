@@ -114,6 +114,10 @@ type Health struct {
 	// OldestPendingAge is the oldest now-minus-selected_at per pending reason;
 	// a reason with no row has no entry.
 	OldestPendingAge map[string]time.Duration
+	// UnmintedByType splits Pending[unminted] by the type of the selected
+	// entity; a type with no unminted row has no entry. Doctor reads it to tag
+	// the unminted PR selections that are red for a known reason.
+	UnmintedByType map[string]int
 	// Divergence counts the seven divergence kinds; every kind has an entry.
 	Divergence map[string]int
 	// UnwatchedSelected counts selected rows whose entity is in no
@@ -209,6 +213,7 @@ func ComputeHealth(st *store.Store, cfg *config.Config, now time.Time) (Health, 
 		OldestBeadAge:    map[string]time.Duration{},
 		Pending:          zeroCounts(HealthPendingReasons),
 		OldestPendingAge: map[string]time.Duration{},
+		UnmintedByType:   map[string]int{},
 		Divergence:       zeroCounts(HealthDivergenceKinds),
 		Runs:             map[[2]string]int{},
 		Candidates:       map[string]int{"pr": set.Counts.PR, "jira": set.Counts.Jira, "bead": set.Counts.Bead},
@@ -373,6 +378,9 @@ func ComputeHealth(st *store.Store, cfg *config.Config, now time.Time) (Health, 
 			continue
 		}
 		h.Pending[reason]++
+		if reason == PendingUnminted {
+			h.UnmintedByType[k.Type]++
+		}
 		var age time.Duration
 		if t, ok := selectedAt[k]; ok {
 			age = nonNegative(now.Sub(t))

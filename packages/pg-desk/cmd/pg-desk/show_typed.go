@@ -542,6 +542,16 @@ func renderTypedShow(w io.Writer, vd viewData) error {
 	if len(linkTexts) > 0 {
 		linksLine = "links: " + strings.Join(linkTexts, "  ")
 	}
-	_, err := fmt.Fprintf(w, "%s\n%s\n%s\n%s%s\n", line1, strings.Join(parts, "  "), anns, reviewLine, linksLine)
-	return err
+	if _, err := fmt.Fprintf(w, "%s\n%s\n%s\n%s%s\n", line1, strings.Join(parts, "  "), anns, reviewLine, linksLine); err != nil {
+		return err
+	}
+	// A version-0 row is a migrated entity no hydration has written yet: its
+	// view succeeds with an empty snapshot and zero links, which reads as a PR
+	// with nothing to say. Say it is unhydrated and which command fixes it. The
+	// JSON contract carries the version itself and is left untouched.
+	if v.Version == 0 {
+		_, err := fmt.Fprintf(w, "unhydrated: run pg-desk %s refresh %s\n", v.Type, v.ID)
+		return err
+	}
+	return nil
 }

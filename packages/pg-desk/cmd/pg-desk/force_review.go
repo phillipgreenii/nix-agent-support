@@ -91,6 +91,10 @@ func runForceReview(cmd *cobra.Command, ref, actorFlag, origin string, clear boo
 	if err := w.set(st); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "force-review requested on pr %s at %s\n", w.id, e.HeadSHA)
-	return err
+	if _, err = fmt.Fprintf(cmd.OutOrStdout(), "force-review requested on pr %s at %s\n", w.id, e.HeadSHA); err != nil {
+		return err
+	}
+	// Only the request needs the lane to act; --clear is how a decider consumes
+	// the flag, so it prints no command.
+	return printComposedCommand(cmd.OutOrStdout(), cfg, entityTypePR, w.id, "")
 }

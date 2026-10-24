@@ -36,6 +36,12 @@ flowchart LR
   record; when it was not set it prints that there was nothing to do, appends no record and exits
   `0`. It is the only verb that consumes the flag. Whether and when to clear is the decider's
   choice; this verb is the mechanism.
+
+Setting the flag (and only setting it) also prints the composed command to run so the lane acts on it,
+`next: run pg-pr-change <mode> <id> to have the lane act on it` (the lane-off wording and the mode rule
+are those of `pr hide`, see [`hide-unhide-wip.md`](hide-unhide-wip.md), "What the verbs print"); the
+verb never calls the decider. `--clear` prints no command: a decider uses it to consume the flag.
+
 - `<id>` is resolved as for the other typed verbs: a PR by number, `OWNER/REPO#N` or URL; an
   issue or thread id verbatim. An id with no stored entity fails and writes nothing.
 - `set_by` is `--actor`, defaulting to the configured actor; these verbs fail when neither is

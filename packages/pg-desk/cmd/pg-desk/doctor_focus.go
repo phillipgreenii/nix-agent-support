@@ -55,6 +55,11 @@ type focusLine struct {
 	Detail string
 	// Remedy is the one-line remedy.
 	Remedy string
+	// Expected, when set, says the line is red or non-zero for a known reason
+	// that a later phase clears; it is rendered as "[expected until <phase>:
+	// ...]" so a permanently red doctor does not become learned noise. It never
+	// changes whether a gate trips.
+	Expected string
 	// Tripped is true only for a gate whose condition holds.
 	Tripped bool
 	// GateName is the failure name doctor records for a tripped gate.
@@ -75,6 +80,9 @@ func (l focusLine) String() string {
 	}
 	if l.Tripped {
 		b.WriteString(" FAIL")
+	}
+	if l.Expected != "" {
+		fmt.Fprintf(&b, " [%s]", l.Expected)
 	}
 	if l.Remedy != "" {
 		fmt.Fprintf(&b, "; remedy: %s", l.Remedy)
@@ -207,6 +215,23 @@ func focusLagLine(rc *routerConfig, flow changes.Flow) focusLine {
 	return line
 }
 
+// unmintedExpected is the "expected until P6" tag of the unminted-selections
+// line. Until the lane flips to apply (P6) the composed command mints no focus
+// bead for a PR (in plan mode it writes nothing), so PR selections stay
+// unminted by design: the line is red for a known reason. The tag covers only
+// the PR share of the count: an unminted selection of any other type is a real
+// finding and the tag says so when the two differ. Once the configured lane
+// mode is apply the tag is gone and the line means what it says.
+func unmintedExpected(cfg *config.Config, unminted, unmintedPR int) string {
+	if unminted == 0 || unmintedPR == 0 || cfg.PRLaneMode() == config.PRLaneModeApply {
+		return ""
+	}
+	if unmintedPR == unminted {
+		return fmt.Sprintf("expected until P6: the pr lane is %s, so no bead is minted for a PR selection", cfg.PRLaneMode())
+	}
+	return fmt.Sprintf("%d of %d are PR selections, expected until P6: the pr lane is %s; the other %d are not expected", unmintedPR, unminted, cfg.PRLaneMode(), unminted-unmintedPR)
+}
+
 // focusLines computes the lines of the block from the shared health model.
 // Gates come first, then reports. h MUST be migrated (the caller prints
 // `focus: unmigrated` otherwise).
@@ -227,6 +252,7 @@ func focusLines(h focus.Health, cfg *config.Config, now time.Time, contract focu
 	} else {
 		un.Detail = fmt.Sprintf("gate at %s", gateAge)
 	}
+	un.Expected = unmintedExpected(cfg, unminted, h.UnmintedByType[entityTypePR])
 	lines = append(lines, un)
 
 	rwa := h.Divergence[focus.DivergenceRowWithoutAnnotation]

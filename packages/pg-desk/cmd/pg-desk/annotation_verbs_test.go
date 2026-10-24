@@ -466,3 +466,29 @@ func TestAnnotateRemoveConflictsWithValueAndNeedsOneOfThem(t *testing.T) {
 		t.Errorf("history = %v, want %v (a rejected call writes nothing)", got, before)
 	}
 }
+
+// force-review prints the composed command after setting the flag; --clear (how
+// a decider consumes the flag) prints none.
+func TestForceReviewPrintsTheComposedCommandOnSetOnly(t *testing.T) {
+	open, seed := newStoreAt(t, "new")
+	seedForceReviewEntity(t, seed, "deadbeef")
+	cfg := linkTestConfig()
+	cfg.PRLane.Mode = "apply"
+	withOpenSeams(t, cfg, open)
+
+	out, err := runGroupCmd(t, forceReviewCmd, "pr", "1")
+	if err != nil {
+		t.Fatalf("force-review: %v", err)
+	}
+	want := "force-review requested on pr o/r#1 at deadbeef\nnext: run pg-pr-change apply o/r#1 to have the lane act on it\n"
+	if out != want {
+		t.Errorf("set output:\n%q\nwant:\n%q", out, want)
+	}
+	out, err = runGroupCmd(t, forceReviewCmd, "pr", "1", "--clear")
+	if err != nil {
+		t.Fatalf("force-review --clear: %v", err)
+	}
+	if out != "force-review cleared on pr o/r#1\n" {
+		t.Errorf("clear output %q, want only the cleared line", out)
+	}
+}

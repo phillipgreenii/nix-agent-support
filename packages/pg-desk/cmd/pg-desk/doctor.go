@@ -228,10 +228,22 @@ func doctorStrandedCycles(ctx context.Context, cfg *config.Config, st *store.Sto
 	return stranded, nil
 }
 
+// doctorPRLaneLine renders the live pr lane line with a raw store handle that
+// it closes before returning (doctor opens the store raw so it works on a store
+// in any schema state).
+func doctorPRLaneLine(cfg *config.Config) string {
+	st, err := deskStoreOpenRaw()
+	if err != nil {
+		return prLaneLine(cfg, nil, changesNow())
+	}
+	defer func() { _ = st.Close() }()
+	return prLaneLine(cfg, st, changesNow())
+}
+
 // doctorSyncErrors lists every interpretation row with a non-empty
 // sync_error as "entity: error [retry indicator]" (pg2-kftf9.5; the
 // indicator is bead pg2-xb6fs's, see describeSyncRetry).
-func doctorSyncErrors(st *store.Store) ([]string, error) {
+func doctorSyncErrors(st *store.Store, version int, laneMode string) ([]string, error) {
 	interps, err := st.ListInterpretations()
 	if err != nil {
 		return nil, err
@@ -245,23 +257,42 @@ func doctorSyncErrors(st *store.Store) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, fmt.Sprintf("%s: %s [%s]", i.EntityID, i.SyncError, describeSyncRetry(r, found)))
+		out = append(out, fmt.Sprintf("%s: %s [%s]", i.EntityID, i.SyncError, describeSyncRetry(r, found, syncErrorRemedy(version, laneMode, i.EntityID))))
 	}
 	return out, nil
 }
 
+// syncErrorRemedy is the repair step doctor names for a sync_error row, aware
+// of the phase the deployment is in (PR lane refactor, P3b3): `pg-desk
+// reconcile --retry-all` reads the ledger, which the schema-2 cutover drops, so
+// it only works on a store below schema 2. On a schema-2 store the row is a
+// legacy leftover that no command of the lane retries (the lane's composed
+// command is run per PR, and the row's PR is named in the line), and with the
+// lane off nothing runs it at all; the remedy says which of those holds rather
+// than naming a command that fails.
+func syncErrorRemedy(version int, laneMode, entityID string) string {
+	switch {
+	case version < store.NewSchemaVersion:
+		return "fix the cause, then pg-desk reconcile --retry-all"
+	case laneMode == config.PRLaneModePlan || laneMode == config.PRLaneModeApply:
+		return fmt.Sprintf("the ledger is dropped, so pg-desk reconcile --retry-all no longer works; the pr lane replaces it: fix the cause, then run %s %s %s", composedCommandName, laneMode, entityID)
+	default:
+		return fmt.Sprintf("the ledger is dropped, so pg-desk reconcile --retry-all no longer works, and the pr lane is off (pr_lane.mode): nothing retries this row until the lane runs %s plan %s", composedCommandName, entityID)
+	}
+}
+
 // describeSyncRetry renders a sync_error row's retry indicator so an
 // operator can tell a row that is still being retried from one that no
-// longer will be (bead pg2-xb6fs).
-func describeSyncRetry(r store.SyncRetry, found bool) string {
+// longer will be (bead pg2-xb6fs). remedy is the phase-aware repair step.
+func describeSyncRetry(r store.SyncRetry, found bool, remedy string) string {
 	if !found {
 		return "retrying: awaiting its first automatic retry"
 	}
 	switch r.EffectiveState() {
 	case store.SyncRetryExhausted:
-		return fmt.Sprintf("exhausted: %d/%d retries failed, no further automatic retry; fix the cause, then pg-desk reconcile --retry-all", r.Retries(), r.MaxRetries)
+		return fmt.Sprintf("exhausted: %d/%d retries failed, no further automatic retry; %s", r.Retries(), r.MaxRetries, remedy)
 	case store.SyncRetryNonTransient:
-		return "non-transient: not retried automatically; fix the cause, then pg-desk reconcile --retry-all"
+		return "non-transient: not retried automatically; " + remedy
 	default:
 		next := r.NextRetryAt
 		if next == "" {
@@ -307,8 +338,10 @@ func runDoctor(cmd *cobra.Command) error {
 	} else {
 		fmt.Fprintln(w, "config: ok")
 	}
-	// The static pr lane line: information, not a check (it never adds a failure).
-	fmt.Fprintln(w, prLaneLine(cfg))
+	// The live pr lane line: information, not a check (it never adds a
+	// failure). It reads the persisted lane state from a raw store handle of
+	// its own; a store that cannot be opened prints the configured part only.
+	fmt.Fprintln(w, doctorPRLaneLine(cfg))
 
 	if path, err := doctorLookPath("pg-connector"); err != nil {
 		fmt.Fprintf(w, "pg-connector on PATH: FAIL (%v)\n", err)
@@ -369,7 +402,7 @@ func runDoctor(cmd *cobra.Command) error {
 		// is a PR whose bead sync failed and may have leaked open beads;
 		// unlike stranded cycles this IS a gate (exit 1) so an alert can
 		// hang off the doctor exit code.
-		syncErrs, syncErrCheck := doctorSyncErrors(st)
+		syncErrs, syncErrCheck := doctorSyncErrors(st, version, cfg.PRLaneMode())
 		_ = st.Close()
 		if syncErrCheck != nil {
 			fmt.Fprintf(w, "sync_error rows: FAIL (%v)\n", syncErrCheck)

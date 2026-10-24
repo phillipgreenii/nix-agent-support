@@ -786,3 +786,34 @@ func TestDoctorStatusCategoryLineIsZeroWithoutTicketPatterns(t *testing.T) {
 		t.Errorf("stdout lacks the zero count:\n%s", stdout)
 	}
 }
+
+// TestSyncErrorRemedyIsPhaseAware: the remedy named for a sync_error row never
+// points at pg-desk reconcile --retry-all on a store that dropped the ledger
+// (schema 2), where that command fails; it names the pr lane's composed command
+// in the lane's mode, or says the lane is off. On a store below schema 2 the
+// legacy command stays the remedy.
+func TestSyncErrorRemedyIsPhaseAware(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		version  int
+		laneMode string
+		want     string
+	}{
+		{"schema 1, lane off", 1, "off", "fix the cause, then pg-desk reconcile --retry-all"},
+		{"schema 1, lane apply", 1, "apply", "fix the cause, then pg-desk reconcile --retry-all"},
+		{"schema 2, lane plan", store.NewSchemaVersion, "plan", "the ledger is dropped, so pg-desk reconcile --retry-all no longer works; the pr lane replaces it: fix the cause, then run pg-pr-change plan o/r#2"},
+		{"schema 2, lane apply", store.NewSchemaVersion, "apply", "the ledger is dropped, so pg-desk reconcile --retry-all no longer works; the pr lane replaces it: fix the cause, then run pg-pr-change apply o/r#2"},
+		{"schema 2, lane off", store.NewSchemaVersion, "off", "the ledger is dropped, so pg-desk reconcile --retry-all no longer works, and the pr lane is off (pr_lane.mode): nothing retries this row until the lane runs pg-pr-change plan o/r#2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := syncErrorRemedy(tc.version, tc.laneMode, "o/r#2"); got != tc.want {
+				t.Errorf("remedy:\n got: %s\nwant: %s", got, tc.want)
+			}
+		})
+	}
+	r := store.SyncRetry{Attempts: 11, MaxRetries: 10, State: store.SyncRetryExhausted}
+	got := describeSyncRetry(r, true, syncErrorRemedy(store.NewSchemaVersion, "plan", "o/r#2"))
+	if strings.Contains(got, "; fix the cause, then pg-desk reconcile") {
+		t.Errorf("the schema-2 indicator still names the failing command: %s", got)
+	}
+}
