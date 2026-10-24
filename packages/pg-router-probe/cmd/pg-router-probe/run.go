@@ -8,7 +8,8 @@
 //
 //	0 clean       -- every ATTEMPTED sub-check ran cleanly; nothing new to
 //	                 report, or every new finding was successfully
-//	                 filed/updated. A sub-check this invocation was never
+//	                 filed/updated (every bd create, metadata update and
+//	                 comment it needed succeeded). A sub-check this invocation was never
 //	                 CONFIGURED to run (see below) does not by itself
 //	                 block a clean exit.
 //	2 usage error -- a cobra-level flag/arg problem (see main.go's run()).
@@ -19,7 +20,8 @@
 //	4 partial     -- at least one CONFIGURED sub-check was attempted and
 //	                 actually degraded (its dependency was unreachable for
 //	                 --degraded-threshold CONSECUTIVE runs, or the
-//	                 snapshot/dedup query failed), while at least one
+//	                 snapshot/dedup query failed, or a bd create/update/
+//	                 comment write for a finding failed), while at least one
 //	                 other sub-check produced a
 //	                 result; this run proceeds with whatever succeeded,
 //	                 and any bead it files/updates carries a note about
@@ -33,6 +35,14 @@
 // degrades the exit code. The snapshot-persist and dedup-query failures stay
 // immediate: the first disables every later comparison, and the second drops
 // findings that a later run could no longer re-derive.
+//
+// A failed bd write for a finding (create, metadata update or comment) is
+// immediate too (pg2-a7pz9): pg-router discards a role's stderr on exit 0,
+// so a stderr warning alone loses the escalation this probe exists to file.
+// The run ends through partialErrorf (exit 4). For the edge-triggered
+// binary-hash finding the persisted baseline additionally stays at the
+// PREVIOUS hash/path when a write for it failed, so the next run derives the
+// finding again instead of comparing the new hash with itself.
 //
 // Which sub-checks are "configured" at all (Grafana URL set,
 // --queue-depth and/or --backlog/--backlog-from-status set, --binary-path set) is entirely a
@@ -561,6 +571,20 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 			alertStates[fp] = st
 		}
 		alertsChanged := false
+		// holdBinaryBaseline is set when a write for the edge-triggered
+		// binary-hash finding failed: the snapshot must keep the previous
+		// baseline so the next run re-derives the finding.
+		holdBinaryBaseline := false
+		// writeFailed records a failed bd write for f: warn, degrade the
+		// run (exit 4), and hold the binary-hash baseline if f is that
+		// finding.
+		writeFailed := func(f finding, msg string, err error) {
+			warn(fmt.Sprintf("%s: %v", msg, err))
+			degraded = append(degraded, fmt.Sprintf("%s: %v", msg, err))
+			if f.Kind == kindBinaryHashMismatch {
+				holdBinaryBaseline = true
+			}
+		}
 		// noted records a successful note about a grafana fingerprint.
 		noted := func(f finding) {
 			alertStates[f.Fingerprint] = recordEpisode(alertStates[f.Fingerprint], f.StartsAt, now)
@@ -581,7 +605,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 				_, err := deps.createIssue(createCtx, escalationTitle(f), escalationLabels(f), trackedMetadata(f), body, warn)
 				cancel()
 				if err != nil {
-					warn(fmt.Sprintf("failed to create bd issue for %s: %v", f.Fingerprint, err))
+					writeFailed(f, fmt.Sprintf("failed to create bd issue for %s", f.Fingerprint), err)
 				} else if f.Kind == kindGrafanaAlert {
 					noted(f)
 				}
@@ -591,13 +615,13 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 				err := deps.updateMetadata(updateCtx, match.ID, trackedMetadata(f), warn)
 				cancel()
 				if err != nil {
-					warn(fmt.Sprintf("failed to update bd issue %s for %s: %v", match.ID, f.Fingerprint, err))
+					writeFailed(f, fmt.Sprintf("failed to update bd issue %s for %s", match.ID, f.Fingerprint), err)
 				}
 				commentCtx, cancel2 := withPgTimeout()
 				err = deps.comment(commentCtx, match.ID, body, warn)
 				cancel2()
 				if err != nil {
-					warn(fmt.Sprintf("failed to comment on bd issue %s for %s: %v", match.ID, f.Fingerprint, err))
+					writeFailed(f, fmt.Sprintf("failed to comment on bd issue %s for %s", match.ID, f.Fingerprint), err)
 				}
 			case actionSeed:
 				// First tick with no state for an already-open bead
@@ -613,7 +637,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 				cancel()
 				if err != nil {
 					// State stays put, so the next tick retries the note.
-					warn(fmt.Sprintf("failed to comment on bd issue %s for %s: %v", match.ID, f.Fingerprint, err))
+					writeFailed(f, fmt.Sprintf("failed to comment on bd issue %s for %s", match.ID, f.Fingerprint), err)
 					continue
 				}
 				noted(f)
@@ -622,7 +646,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 					err := deps.updateMetadata(updateCtx, match.ID, recurrenceMetadata(f, match), warn)
 					cancel2()
 					if err != nil {
-						warn(fmt.Sprintf("failed to update bd issue %s for %s: %v", match.ID, f.Fingerprint, err))
+						writeFailed(f, fmt.Sprintf("failed to update bd issue %s for %s", match.ID, f.Fingerprint), err)
 					}
 				}
 			case actionSkip:
@@ -633,8 +657,14 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 
 		// Persist the alert state AFTER the writes it describes, so a
 		// failed comment is retried rather than recorded as noted.
-		if alertsChanged && !persistFailed {
-			next.Alerts = pruneAlertStates(alertStates, now)
+		if holdBinaryBaseline {
+			next.BinaryHash = prevSnap.BinaryHash
+			next.BinaryPath = prevSnap.BinaryPath
+		}
+		if (alertsChanged || holdBinaryBaseline) && !persistFailed {
+			if alertsChanged {
+				next.Alerts = pruneAlertStates(alertStates, now)
+			}
 			if err := saveSnapshot(opts.snapshotPath, next); err != nil {
 				warn(fmt.Sprintf("failed to persist snapshot: %v", err))
 				degraded = append(degraded, fmt.Sprintf("snapshot-persist: %v", err))

@@ -232,8 +232,9 @@ func TestFailedRecurrenceCommentIsRetried(t *testing.T) {
 	later := started.Add(time.Hour)
 	spy := episodeSpy(later, "B=5", []connectorIssue{openBead("zr-1")}, nil)
 	spy.commentErr = errUnreachable
-	if err := tick(t, opts, spy, t0); err != nil {
-		t.Fatal(err)
+	// A failed write is a partial run (exit 4), not a silent exit 0 (pg2-a7pz9).
+	if err := tick(t, opts, spy, t0); exitCodeOf(t, err) != 4 {
+		t.Fatalf("failed recurrence comment: err = %v, want exit 4", err)
 	}
 	if len(spy.updated) != 0 {
 		t.Fatalf("metadata must not be bumped when the comment failed: %+v", spy.updated)
