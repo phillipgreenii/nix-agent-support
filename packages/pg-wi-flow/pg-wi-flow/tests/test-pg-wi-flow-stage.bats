@@ -136,7 +136,7 @@ write_workflow_config() {
   run pgwf_cmd_annotate tc-1 --premise "https://example" --acceptance "it works" --design "approach A"
   [ "$status" -eq 0 ]
   line="$(grep '^update tc-1' "$MOCK_BD_LOG")"
-  [[ "$line" == *"--set-metadata wi_premise=https://example"* ]]
+  [[ "$line" == *"--set-metadata premise=https://example"* ]]
   [[ "$line" == *"--acceptance it works"* ]]
   [[ "$line" == *"--design approach A"* ]]
 }

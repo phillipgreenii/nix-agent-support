@@ -592,7 +592,7 @@ pgwf_cmd_annotate() {
     update_args+=(--add-label "${component_prefix}${component}")
   fi
 
-  [[ $have_premise -eq 1 ]] && update_args+=(--set-metadata "wi_premise=${premise}")
+  [[ $have_premise -eq 1 ]] && update_args+=(--set-metadata "premise=${premise}")
   [[ $have_acceptance -eq 1 ]] && update_args+=(--acceptance "$acceptance")
   [[ $have_design -eq 1 ]] && update_args+=(--design "$design")
   [[ $have_append_notes -eq 1 ]] && update_args+=(--append-notes "$append_notes")
