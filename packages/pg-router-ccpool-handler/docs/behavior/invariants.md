@@ -725,6 +725,19 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     contain the stable substring `session ended on a usage limit or API outage`
     (`packages/pg-router/docs/behavior/interfaces.md`, "Usage-limit sentinel"), so the router can count it under its own reason
     instead of as an unexplained handler failure.
+  - **Limit and outage death of any role.** The same class is exempt from the role's `on_failure`
+    when the session dies on the death path of `INV-CCH-7` (the bead was claimed, or the role is a
+    triager that works a bead it never claims) instead of ending unclaimed (operator ruling,
+    Phillip, 2026-10-14, `pg2-e0imq`, applied to this path by `pg2-jzttp` after a triager session
+    that hit a spend limit left its bead `human`). A death whose failure signature (`INV-CCH-9`) is
+    `api-rate-limit` or `api-transient` MUST be handled as `on_failure = unclaim` whatever the role
+    declares: the dead session's claim is released with the same guarded update, and the bead MUST
+    NOT get `human`, MUST NOT get a park note, and the result MUST NOT report an `escalated` verb.
+    The decision keys on the signature alone, never on the capacity usage-limit reading of
+    `INV-CCH-26`. The dispatch is still a failure: it writes its `dispatch_result` with the
+    signature, and the error it returns contains the same stable substring, so the router counts it
+    as `usage-limit` (below `triager-failure` for a triage role, which keeps its own bulkhead
+    reason). Every other signature keeps the role's `on_failure` exactly.
   - **Absorption.** A dispatch under this mode that ends with its bead still open leaves a settled
     session like any other, and a settled session is never absorbed (`INV-CCH-17`, `INV-CCH-30`):
     a same-event re-request after a hand-back runs in a fresh session.

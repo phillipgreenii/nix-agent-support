@@ -29,7 +29,8 @@ copies drifting; this module is bound by the upstream text as written. That incl
 substrings a handler error carries for the core to classify (the "Budget-stop sentinel",
 "Upstream-killed sentinel" and "Usage-limit sentinel" of that `INTF-HANDLER` section): this module
 emits the usage-limit one, `session ended on a usage limit or API outage`, in the error of an
-unclaimed end that died on a usage or spend limit or an API outage (`INV-CCH-28`); the wording is
+unclaimed end, or of a dead session of any role, that died on a usage or spend limit or an API
+outage (`INV-CCH-28`); the wording is
 the core's and is never reworded here.
 
 Its pre-accept declines carry the optional `kind` and `detail` that `DEC-WIRE-1` adds to the decline

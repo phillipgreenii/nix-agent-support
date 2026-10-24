@@ -590,7 +590,7 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 			return report.Result{}
 		}
 		res := failureAction(report.Unclaimed, beadID)
-		if cc.OnFailure == roles.AddHuman {
+		if cc.OnFailure == roles.AddHuman && !(sd != nil && sd.exempt) {
 			res.Actions = append([]report.Action{{Verb: report.Escalated, Refs: res.Actions[0].Refs}}, res.Actions...)
 		}
 		return res
@@ -1624,16 +1624,31 @@ func (r *ccpoolRun) fail(ctx context.Context, d DispatchContext, reason string) 
 // An add-human death writes the park note (bead pg2-78mxs, parknote.go) before
 // the label-and-release update: the bead is parked as human with nothing for a
 // person to decide, and the note says so and names the drain worktree.
+//
+// A death whose failure signature is api-rate-limit or api-transient (a usage
+// or spend limit, a 429, an API outage) is the one exception (INV-CCH-28, the
+// pg2-e0imq ruling widened to every role by pg2-jzttp): nothing about the bead
+// failed, so the death is handled as on_failure=unclaim whatever the role
+// declares, with no human label and no park note, and the error carries
+// UsageLimitEndSentinel so the router counts it under its own reason. The
+// signature is the one shared classification (INV-CCH-9, captured before the
+// session was closed); the capacity usage-limit reading is never consulted.
 func (r *ccpoolRun) failDead(ctx context.Context, d DispatchContext, name, reason string) error {
+	sig := r.captureSignature()
+	exempt := unclaimedEndExempt(sig.Signature)
+	action := d.Role.CCPool.OnFailure
+	if exempt {
+		action = roles.Unclaim
+	}
 	note := ""
-	if d.Role.CCPool.OnFailure == roles.AddHuman {
+	if action == roles.AddHuman {
 		note = r.parkNote(ctx, d, name, "session died before completing ("+reason+")", r.deathDetail())
 	}
-	derr := complete.OnDeath(ctx, r.deps.BD, d.Role.CCPool.OnFailure, d.Item.ID, note)
+	derr := complete.OnDeath(ctx, r.deps.BD, action, d.Item.ID, note)
 	if derr != nil {
 		r.deathReleaseFailed(d, name, derr)
 	}
-	return &sessionDied{beadID: d.Item.ID, reason: reason, releaseErr: derr}
+	return &sessionDied{beadID: d.Item.ID, reason: reason, releaseErr: derr, exempt: exempt, signature: sig.Signature}
 }
 
 // deathReleaseKind is the eventlog kind of a dead session's claim release that
@@ -1675,9 +1690,19 @@ type sessionDied struct {
 	// released. waitFailureResult reports no verb for a release that did not
 	// land (pg2-qyc3h).
 	releaseErr error
+	// exempt is true when the death was caused by a usage or spend limit or an
+	// API outage (failDead): no human label was added whatever the role's
+	// on_failure, and the error text carries UsageLimitEndSentinel.
+	exempt    bool
+	signature failsig.Signature
 }
 
-func (e *sessionDied) Error() string { return fmt.Sprintf("%s: %s", e.beadID, e.reason) }
+func (e *sessionDied) Error() string {
+	if e.exempt {
+		return fmt.Sprintf("%s: %s before completing (%s; claim released, no human added)", e.beadID, UsageLimitEndSentinel, e.signature)
+	}
+	return fmt.Sprintf("%s: %s", e.beadID, e.reason)
+}
 
 func (e *sessionDied) Is(target error) bool { return target == ErrSessionDied }
 

@@ -97,7 +97,9 @@ Extensions:
   is not a decline: the dispatch is accepted and fails (exit `1`) with no label on the bead
   (`INV-CCH-8`).
 - 2i. A session dies unexplained before its bead completes (`INV-CCH-7`): this module also logs
-  the pool's usage-limit reading once (`INV-CCH-26`), as evidence only; the failure is unchanged.
+  the pool's usage-limit reading once (`INV-CCH-26`), as evidence only; the failure is unchanged,
+  except that a death on a usage or spend limit or an API outage never adds `human` to the bead,
+  whatever the role's `on_failure` (`INV-CCH-28`, "Limit and outage death of any role").
 - 2j. A drain session (completion `close-or-release`) raises a permission dialog nobody can answer
   and sits in `needs_input` (`INV-CCH-29`). After 15 minutes without a write to its transcript, its
   own dispatch sends Escape; if it is still silent one quiet window later, the dispatch closes it

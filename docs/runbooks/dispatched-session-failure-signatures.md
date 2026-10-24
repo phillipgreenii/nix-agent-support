@@ -79,6 +79,18 @@ Fixture output for the first recipe is `2026-09-23T14:01:00.000000000Z` / `worke
          | "\(.time) \(.role) \(.bead) \(.failure_signature)"' "$LOG"
   ```
 
+- A session that DIES (the `dispatch_result` path, not an unclaimed end) with signature
+  `api-rate-limit` or `api-transient` is exempt from the role's `add-human` policy too, for every
+  role including the escalation triager: the claim is released, the bead gets no `human` and no park
+  note, and the handler's error carries the same `session ended on a usage limit or API outage`
+  text. The `dispatch_result` is still written. To list them:
+
+  ```bash
+  jq -r 'select(.kind=="dispatch_result" and (.failure_signature=="api-rate-limit"
+         or .failure_signature=="api-transient"))
+         | "\(.time) \(.role) \(.bead) \(.failure_signature)"' "$LOG"
+  ```
+
 - `session-errored`, `session-idle`, and `session-gone` mean no transcript text explained the
   exit, so the ccpool session facts last observed named it: state `errored` (a StopFailure with
   no recognizable error text), state `idle` (the turn ended and the bead is not complete), or a

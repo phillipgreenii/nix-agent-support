@@ -451,9 +451,9 @@ sustained-only alert rule built on it (`DEC-OBS-3`). Other slow-GitHub failures 
 both substrings (for example `error connecting to api.github.com`) are **not** covered and keep
 counting under the residual failure-rate series.
 
-**Usage-limit sentinel.** When a handler's session ended without claiming its bead because it died
-on an account usage or spend limit or an API outage (the handler's `api-rate-limit` and
-`api-transient` failure signatures), the error text it reports **MUST contain the stable substring
+**Usage-limit sentinel.** When a handler's session ended without claiming its bead, or died while
+running under any role, because it hit an account usage or spend limit or an API outage (the handler's
+`api-rate-limit` and `api-transient` failure signatures), the error text it reports **MUST contain the stable substring
 `session ended on a usage limit or API outage`** (for example `zr-1: session ended on a usage limit
 or API outage before claiming its bead (api-rate-limit; no strike counted)`). The handler exempts
 such an end from its own strike policy
