@@ -16,7 +16,8 @@ import (
 
 type ruleFile struct {
 	Groups []struct {
-		Rules []rule `yaml:"rules"`
+		Interval string `yaml:"interval"`
+		Rules    []rule `yaml:"rules"`
 	} `yaml:"groups"`
 }
 
@@ -183,5 +184,158 @@ func TestUnreconciledAnchorAgeAboveRetryHorizon(t *testing.T) {
 	}
 	if got <= tickBound {
 		t.Errorf("age rule threshold %s must exceed the reconcile-tick-bound retry horizon %s", got, tickBound)
+	}
+}
+
+// sample is one evaluation's reduced input: ok false is NoData (no series).
+type sample struct {
+	v  float64
+	ok bool
+}
+
+// alertState is the Grafana state of a rule after an evaluation.
+type alertState string
+
+const (
+	stateNormal   alertState = "Normal"
+	statePending  alertState = "Pending"
+	stateAlerting alertState = "Alerting"
+)
+
+// evaluate models Grafana unified alerting for one of these rules: each
+// interval it reduces its query to the last sample, applies `gt threshold`
+// (NoData is Normal under noDataState: OK), stays Pending from the first
+// breach until the breach has lasted `for`, then Alerts; the first
+// non-breaching evaluation resolves it to Normal. It returns the state after
+// each evaluation.
+func evaluate(forDur, interval time.Duration, thr float64, samples []sample) []alertState {
+	var states []alertState
+	var breachSince time.Duration
+	breaching := false
+	for i, s := range samples {
+		at := time.Duration(i) * interval
+		if !s.ok || s.v <= thr {
+			breaching = false
+			states = append(states, stateNormal)
+			continue
+		}
+		if !breaching {
+			breaching, breachSince = true, at
+		}
+		if at-breachSince >= forDur {
+			states = append(states, stateAlerting)
+		} else {
+			states = append(states, statePending)
+		}
+	}
+	return states
+}
+
+func repeatSample(s sample, n int) []sample {
+	out := make([]sample, n)
+	for i := range out {
+		out[i] = s
+	}
+	return out
+}
+
+// TestSyncErrorRulesFireAfterForAndResolve is the modelled end of bead
+// pg2-pyewq's proof that a recorded sync_error pages and clears: for each
+// sync_error-driven rule, taken from alerts.yaml (its `for`, its gt threshold
+// and the group's evaluation interval), a value just above the threshold
+// becomes Pending, is still Pending one interval short of `for`, Alerts at
+// `for`, and resolves on the first evaluation back at 0 or with no data. A
+// value AT the threshold never alerts. It proves the MODELED rule only (no
+// PromQL or Grafana engine is a dependency of this module); the real firing
+// stays a post-apply smoke check (pg2-zlc7h).
+//
+// Delete with the sync_error alerts (pg2-6mo45.3.34).
+func TestSyncErrorRulesFireAfterForAndResolve(t *testing.T) {
+	b, err := os.ReadFile("../../grafana/alerting/alerts.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f ruleFile
+	if err := yaml.Unmarshal(b, &f); err != nil {
+		t.Fatal(err)
+	}
+	interval := time.Duration(0)
+	for _, g := range f.Groups {
+		for _, r := range g.Rules {
+			if r.UID == "pg-desk-sync-error-rows" {
+				interval, err = time.ParseDuration(g.Interval)
+				if err != nil {
+					t.Fatalf("group interval %q: %v", g.Interval, err)
+				}
+			}
+		}
+	}
+	if interval != time.Minute {
+		t.Fatalf("evaluation interval = %s, want 1m", interval)
+	}
+
+	rules := loadRules(t)
+	for _, want := range []struct {
+		uid       string
+		forDur    time.Duration
+		threshold float64
+	}{
+		{"pg-desk-sync-error-rows", 5 * time.Minute, 0},
+		{"pg-desk-sync-error-retrying", 30 * time.Minute, 0},
+		{"pg-desk-unreconciled-anchor-age", 5 * time.Minute, 6 * 3600},
+	} {
+		uid := want.uid
+		t.Run(uid, func(t *testing.T) {
+			r, ok := rules[uid]
+			if !ok {
+				t.Fatalf("rule %s missing", uid)
+			}
+			forDur, err := time.ParseDuration(r.For)
+			if err != nil {
+				t.Fatalf("for %q: %v", r.For, err)
+			}
+			thr := threshold(t, r)
+			if forDur != want.forDur || thr != want.threshold {
+				t.Fatalf("rule %s for/threshold = %s/%v, want %s/%v: the simulation below is only meaningful for the pinned values", uid, forDur, thr, want.forDur, want.threshold)
+			}
+			above := sample{v: thr + 1, ok: true}
+			clear := sample{v: 0, ok: true}
+			holdEvals := int(forDur / interval) // evaluations strictly before `for` has elapsed
+
+			// Breach, hold, then recover.
+			samples := append(append(repeatSample(above, holdEvals+3), repeatSample(clear, 2)...), repeatSample(sample{}, 1)...)
+			got := evaluate(forDur, interval, thr, samples)
+			if got[0] != statePending {
+				t.Errorf("first breaching evaluation = %s, want Pending", got[0])
+			}
+			if got[holdEvals-1] != statePending {
+				t.Errorf("one interval short of for (%s) = %s, want Pending", r.For, got[holdEvals-1])
+			}
+			if got[holdEvals] != stateAlerting {
+				t.Errorf("evaluation at for (%s) = %s, want Alerting", r.For, got[holdEvals])
+			}
+			if got[holdEvals+2] != stateAlerting {
+				t.Errorf("still breaching after for = %s, want Alerting", got[holdEvals+2])
+			}
+			if got[holdEvals+3] != stateNormal {
+				t.Errorf("first evaluation back at 0 = %s, want Normal (resolved)", got[holdEvals+3])
+			}
+
+			// NoData is OK, not an alert and not a held breach.
+			if rules[uid].NoData != "OK" {
+				t.Fatalf("noDataState = %q, want OK", rules[uid].NoData)
+			}
+			gotNoData := evaluate(forDur, interval, thr, append(append(repeatSample(above, holdEvals+1), sample{}), above))
+			if gotNoData[holdEvals] != stateAlerting || gotNoData[holdEvals+1] != stateNormal || gotNoData[holdEvals+2] != statePending {
+				t.Errorf("no-data handling = %v, want Alerting then Normal (resolved) then a fresh Pending", gotNoData[holdEvals:])
+			}
+
+			// A value AT the threshold is not a breach (gt, not gte).
+			for i, st := range evaluate(forDur, interval, thr, repeatSample(sample{v: thr, ok: true}, holdEvals+2)) {
+				if st != stateNormal {
+					t.Errorf("evaluation %d at the threshold = %s, want Normal", i, st)
+				}
+			}
+		})
 	}
 }

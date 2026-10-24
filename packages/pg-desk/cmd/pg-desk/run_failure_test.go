@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -193,5 +194,86 @@ func TestRunFailureLine_NotEmittedOnSuccess(t *testing.T) {
 	}
 	if lines := runFailureLines(t, stderr); len(lines) != 0 {
 		t.Fatalf("a successful run must not emit run_failed, got %+v", lines)
+	}
+}
+
+// TestRunCmd_SyncStageFailureExitsOneAndRecordsSyncError is the CLI-layer
+// proof of pg2-kftf9.1 (bead pg2-pyewq): a sync-stage failure of `pg-desk run
+// pr`, driven through a stub pg-connector on PATH, makes the cobra RunE return
+// a non-nil error (main() turns that into os.Exit(exitCodeFor(err)), which is
+// 1 for a plain error), writes a stage-tagged run_failed line, persists the
+// sync_error on the interpretation row, and a later successful run clears it.
+// internal/pipeline's own tests prove Run returns the error; this proves the
+// CLI hands it on unchanged, which is what pg-router's exit-1 handling sees.
+//
+// Delete with the sync stage and `run pr` (pg2-6mo45.3.37) together with the
+// sync_error column and alerts (pg2-6mo45.3.34).
+func TestRunCmd_SyncStageFailureExitsOneAndRecordsSyncError(t *testing.T) {
+	stubRunSeams(t)
+	cfg := issueTestCfg()
+	cfg.Sync.Mode = "apply"
+	runConfigLoad = func(ctx context.Context) (*config.Config, error) { return cfg, nil }
+	// run closes the store it is handed, so every run opens the same on-disk
+	// file afresh and the assertions below read it through their own handle.
+	store.SetSynchronousForTests("OFF")
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	runStoreOpen = func() (*store.Store, error) { return store.Open(dbPath) }
+	syncError := func() string {
+		t.Helper()
+		st, err := store.Open(dbPath)
+		if err != nil {
+			t.Fatalf("reopen store: %v", err)
+		}
+		defer func() { _ = st.Close() }()
+		interp, found, err := st.GetInterpretation("acme/widgets", "pr", "acme/widgets#9")
+		if err != nil || !found {
+			t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
+		}
+		return interp.SyncError
+	}
+
+	// The stub serves a minimal open PR of mine to gather, an empty answer to
+	// every other read, and fails only the sync stage's `issue create`, so the
+	// failure can only come from sync. The marker file flips it to success for
+	// the recovery run.
+	okMarker := filepath.Join(t.TempDir(), "sync-ok")
+	installFakePGConnector(t, `case "$1 $2" in
+"pr show")
+  echo '{"protocolVersion":1,"schemaVersion":4,"result":{"repo":"acme/widgets","number":9,"title":"fix: x","state":"open","head_sha":"abc123","author":"me"}}' ;;
+"issue create")
+  if [ -e `+okMarker+` ]; then
+    echo '{"protocolVersion":1,"result":{"id":"bd-anchor-1"}}'
+  else
+    echo '{"protocolVersion":1,"error":{"code":"unavailable","message":"sync stub failure"}}'
+    exit 1
+  fi ;;
+*)
+  echo '{"protocolVersion":1,"result":{"entities":[]}}' ;;
+esac`)
+
+	stderr, runErr := runWithStderr(t, "pr", "acme/widgets#9")
+	if runErr == nil {
+		t.Fatalf("expected a sync-stage failure to make run return an error (stderr: %s)", stderr)
+	}
+	if code := exitCodeFor(runErr); code != 1 {
+		t.Fatalf("exitCodeFor(%v) = %d, want 1", runErr, code)
+	}
+	lines := runFailureLines(t, stderr)
+	if len(lines) != 1 || lines[0].Stage != "sync" {
+		t.Fatalf("run_failed lines = %+v, want exactly one with stage sync (stderr: %s)", lines, stderr)
+	}
+	if got := syncError(); !strings.Contains(got, "sync stub failure") {
+		t.Fatalf("interpretation.SyncError = %q, want the stub failure recorded", got)
+	}
+
+	// Recovery: the same run, now succeeding, exits clean and clears sync_error.
+	if err := os.WriteFile(okMarker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if stderr, runErr = runWithStderr(t, "pr", "acme/widgets#9"); runErr != nil {
+		t.Fatalf("retry run: %v (stderr: %s)", runErr, stderr)
+	}
+	if got := syncError(); got != "" {
+		t.Fatalf("interpretation.SyncError = %q after a successful retry, want cleared", got)
 	}
 }
