@@ -366,6 +366,37 @@ write_workflow_config() {
   [ "$status" -ne 0 ]
 }
 
+@test "close: refuses a plain close of a kind:pointer item with bullets, naming them and pointing at --trace" {
+  show_fixture tc-1 '{"id":"tc-1","labels":["kind:pointer"],"metadata":{},"description":"Resume:\n- first thing\n- second thing"}'
+  run --separate-stderr pgwf_cmd_close tc-1 --reason "handled"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"--trace"* ]]
+  [[ "$stderr" == *"first thing"* ]]
+  [[ "$stderr" == *"second thing"* ]]
+  ! grep -q '^close tc-1' "$MOCK_BD_LOG"
+}
+
+@test "close: still closes a kind:pointer item that has no bullets" {
+  show_fixture tc-1 '{"id":"tc-1","labels":["kind:pointer"],"metadata":{},"description":"Resume: nothing further to follow up."}'
+  run pgwf_cmd_close tc-1 --reason "handled"
+  [ "$status" -eq 0 ]
+  grep -q -- "^close tc-1 --reason handled" "$MOCK_BD_LOG"
+}
+
+@test "close: still closes a non-pointer item whose description has bullets" {
+  show_fixture tc-1 '{"id":"tc-1","labels":["kind:bug"],"metadata":{},"description":"Repro:\n- step one\n- step two"}'
+  run pgwf_cmd_close tc-1 --reason "fixed"
+  [ "$status" -eq 0 ]
+  grep -q -- "^close tc-1 --reason fixed" "$MOCK_BD_LOG"
+}
+
+@test "close --trace: a kind:pointer item with every bullet dispositioned still closes" {
+  show_fixture tc-1 '{"id":"tc-1","labels":["kind:pointer"],"metadata":{},"description":"Resume:\n- first thing\n- second thing"}'
+  run pgwf_cmd_close tc-1 --reason "handled" --trace "first thing=no longer needed" --trace "second thing=also not needed"
+  [ "$status" -eq 0 ]
+  grep -q -- "^close tc-1 --reason handled" "$MOCK_BD_LOG"
+}
+
 @test "close --trace: refuses an incomplete pointer (a bullet with no disposition)" {
   show_fixture tc-1 '{"id":"tc-1","labels":[],"metadata":{},"description":"Resume:\n- first thing\n- second thing"}'
   run pgwf_cmd_close tc-1 --reason "handled" --trace "first thing=tc-2"

@@ -989,6 +989,15 @@ pgwf_cmd_merge() {
   pgwf_tracker_note "$survivor" "$note_text" "$actor" >/dev/null
 }
 
+# pgwf_pointer_bullets ITEM_JSON -- the bullets parsed from ITEM_JSON's
+# description, one per line (leading marker and trailing space stripped).
+pgwf_pointer_bullets() {
+  local item_json="$1"
+  jq -r '.description // ""' <<<"$item_json" |
+    { grep -E '^[[:space:]]*[-*][[:space:]]+' || true; } |
+    sed -E 's/^[[:space:]]*[-*][[:space:]]+//; s/[[:space:]]+$//'
+}
+
 # pgwf_close_trace CONFIG_JSON ID ACTOR ENTRY... -- close --trace's
 # mechanics [design: ## The flow -> "Pointer path", quoted verbatim in this
 # packet's Contract]: parses every "<bullet>=<disposition>" ENTRY, refuses
@@ -1003,15 +1012,13 @@ pgwf_close_trace() {
   shift 3
   local -a entries=("$@")
 
-  local item_json description
+  local item_json
   item_json="$(pgwf_tracker_show_json "$id")" || return 1
-  description="$(jq -r '.description // ""' <<<"$item_json")"
 
   local -a bullets=()
   while IFS= read -r line; do
     [[ -n $line ]] && bullets+=("$line")
-  done < <(grep -E '^[[:space:]]*[-*][[:space:]]+' <<<"$description" |
-    sed -E 's/^[[:space:]]*[-*][[:space:]]+//; s/[[:space:]]+$//')
+  done < <(pgwf_pointer_bullets "$item_json")
 
   if [[ ${#bullets[@]} -eq 0 ]]; then
     echo "pg-wi-flow: close --trace: $id has no parsed bullets to trace" >&2
@@ -1068,7 +1075,8 @@ pgwf_close_trace() {
 
 # pgwf_cmd_close ID --reason TEXT [--trace "bullet=disposition"]... --
 # closes; with --trace, refuses unless every parsed bullet of a pointer
-# item has a disposition, links traced ids, files filed: items at the
+# item has a disposition (a plain close of a kind:pointer item with bullets
+# is refused, pointing at --trace), links traced ids, files filed: items at the
 # workflow's entry stage with the pointer's priority [design: ## Components
 # table, close row; ## The flow -> "Pointer path"].
 pgwf_cmd_close() {
@@ -1109,6 +1117,20 @@ pgwf_cmd_close() {
 
   if [[ ${#trace_entries[@]} -gt 0 ]]; then
     pgwf_close_trace "$config_json" "$id" "$actor" "${trace_entries[@]}" || return 1
+  else
+    # A kind:pointer item with bullets needs a disposition per bullet, so a
+    # plain close is refused (the pointer checklist's contract); a pointer
+    # with no bullets, and every other kind, closes as before.
+    local kind_prefix item_json bullets
+    kind_prefix="$(pgwf_config_label "$config_json" kind_prefix 'kind:')"
+    item_json="$(pgwf_tracker_show_json "$id")" || return 1
+    if jq -e --arg l "${kind_prefix}pointer" '(.labels // []) | index($l)' <<<"$item_json" >/dev/null; then
+      bullets="$(pgwf_pointer_bullets "$item_json")"
+      if [[ -n $bullets ]]; then
+        echo "pg-wi-flow: close: $id is a pointer; every bullet needs a disposition, pass --trace \"<bullet>=<id|label|filed:<title>>\" for: ${bullets//$'\n'/; }" >&2
+        return 1
+      fi
+    fi
   fi
 
   pgwf_tracker_close "$id" "$reason" "$actor" >/dev/null

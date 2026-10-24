@@ -63,7 +63,8 @@ inside Claude Code; an explicit `--actor` override only outside it).
   related links; `SURVIVOR` gets a note listing the merged symptoms.
 - **`close ID --reason TEXT [--trace "BULLET=DISPOSITION"]...`** -- closes `ID`. With `--trace`,
   refuses unless every bullet parsed from `ID`'s description has a disposition (an existing id, a
-  plain label, or `filed:TITLE` to file a new entry-stage item).
+  plain label, or `filed:TITLE` to file a new entry-stage item). A plain close (no `--trace`) of a
+  `kind:pointer` item that has bullets is refused, naming the bullets and pointing at `--trace`.
 - **`close-duplicate ID --of OF`** -- refuses unless `ID` is newer than `OF` and `OF` is open on a
   fresh read; adds a related link.
 
