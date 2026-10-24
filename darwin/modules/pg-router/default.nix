@@ -223,14 +223,17 @@ in
           # pg2-dtigc (ADR 0085): this key is now LOAD-BEARING for the
           # restart requirement ("restarts MUST NOT kill existing
           # sessions"), not just a drain bugfix. The daemon no longer
-          # cancels a ccpool-backed role's dispatch at shutdown
-          # (survivesShutdown, rendered by
-          # home/programs/pg-router-ccpool-handler), so those handlers are
-          # EXPECTED to outlive the daemon and must not be group-killed. They
+          # cancels a session-backed role's dispatch at shutdown (the role's
+          # survives-shutdown setting: the `survives_shutdown` key of its
+          # [[role]] table, or `survivesShutdown` in a per-role JSON file on
+          # the old path; both rendered by
+          # home/programs/pg-router-ccpool-handler), so such a role's adapter
+          # and its sessions are EXPECTED to outlive the daemon and must not
+          # be group-killed, whichever adapter binary the role names. They
           # are no longer untracked orphans: the new daemon replays the
           # un-accepted offer, re-offers it, and the redelivered dispatch
-          # absorbs the live session. Command-type roles are unchanged
-          # (drain, then cancel).
+          # absorbs the live session. A role without the setting (a command
+          # role) is unchanged (drain, then cancel).
           AbandonProcessGroup = true;
         };
       };

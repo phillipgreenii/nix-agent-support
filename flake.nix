@@ -7517,6 +7517,7 @@
                 let
                   inherit (import ./tests/pg-router-ccpool-handler-eval-hm.nix { inherit lib pkgs llm-agents; })
                     evalHM
+                    evalHMWith
                     claudeBin
                     ;
 
@@ -8397,6 +8398,248 @@
                     fired: role: dir:
                     fired != null && lib.hasInfix role fired.message && lib.hasInfix dir fired.message;
 
+                  # The NEW path (bead pg2-12gr4.10.10): a role that sets `handler`
+                  # (an adapter binary) instead of `type` joins the pg-router
+                  # module's `roles.<name>` by name. Each new-path role has an
+                  # OLD-path twin (same settings, `type` instead of `handler`) so a
+                  # build-time check can prove the [role.config] table equals the
+                  # per-role JSON field for field (a field the shared renderer
+                  # dropped would differ).
+                  npPkg = (evalHM { }).phillipgreenii.programs.pg-router-ccpool-handler.package;
+                  npCcpoolAdapter = "${npPkg}/bin/pg-router-handler-ccpool";
+                  npCommandAdapter = "${npPkg}/bin/pg-router-handler-command";
+                  npCcpoolSettings = wrapRoleBase // {
+                    precheck = "ready";
+                    beadsDir = "/tmp/pg2-12gr4-10-beads";
+                    worktreeQuietWindow = "90s";
+                    effort = "high";
+                    toolSets = [ "go" ];
+                    extraAllowedTools = [ "Skill" ];
+                    isolation.prefetch = {
+                      enable = true;
+                      refspec = "pull/1/head";
+                      rev = "abc";
+                      diffBase = "origin/main";
+                      timeout = "3m";
+                    };
+                    pool = {
+                      enable = true;
+                      dir = "/tmp/pg2-12gr4-10-pool";
+                      settings.pool.max_sessions = 2;
+                    };
+                  };
+                  npCcpoolSpec = {
+                    exec = [ "${pkgs.coreutils}/bin/true" ];
+                    wrap = [
+                      [
+                        wrapFakePrefix
+                        "NP_VAR=1"
+                      ]
+                    ];
+                  };
+                  npCommandSettings = {
+                    argv = [
+                      "np-cmd-bin"
+                      "--flag"
+                    ];
+                    spec.wrap = [
+                      [
+                        wrapFakePrefix
+                        "NP_CMD=1"
+                      ]
+                    ];
+                  };
+                  npRoles = {
+                    np-ccpool = {
+                      handler = npCcpoolAdapter;
+                      ccpool = npCcpoolSettings;
+                      spec = npCcpoolSpec;
+                      sessionEnv.NP_EXTRA = "extra";
+                    };
+                    np-cmd = {
+                      handler = npCommandAdapter;
+                      command = npCommandSettings;
+                      strictBaseEnv = true;
+                    };
+                    # The old-path twins.
+                    old-ccpool = {
+                      type = "ccpool";
+                      ccpool = npCcpoolSettings;
+                      spec = npCcpoolSpec;
+                      sessionEnv.NP_EXTRA = "extra";
+                    };
+                    old-cmd = {
+                      type = "command";
+                      command = npCommandSettings;
+                      strictBaseEnv = true;
+                    };
+                  };
+                  npBinds = {
+                    np-ccpool.binds = [ "np.ccpool" ];
+                    np-cmd.binds = [ "np.cmd" ];
+                  };
+                  npEval = evalHMWith {
+                    handler = {
+                      enable = true;
+                      roles = npRoles;
+                    };
+                    pgRouter.roles = npBinds;
+                  };
+                  npMod = npEval.phillipgreenii.programs.pg-router-ccpool-handler;
+                  npRolesFile = npEval.phillipgreenii.programs.pg-router.rolesFile;
+                  # The survives-shutdown assertion: a consumer override to false fires it.
+                  npNoSurviveFired = wrapFired (evalHMWith {
+                    handler = {
+                      enable = true;
+                      roles.np-ccpool = npRoles.np-ccpool;
+                    };
+                    pgRouter.roles = {
+                      np-ccpool = {
+                        binds = [ "np.ccpool" ];
+                        survivesShutdown = lib.mkForce false;
+                      };
+                    };
+                  });
+                  # A handler role with no pg-router counterpart (no binds).
+                  npNoCounterpartFired = wrapFired (evalHMWith {
+                    handler = {
+                      enable = true;
+                      roles.np-cmd = npRoles.np-cmd;
+                    };
+                  });
+                  # Both type and handler; neither.
+                  npBothFired = wrapFired (evalHMWith {
+                    handler = {
+                      enable = true;
+                      roles.np-both = npRoles.np-cmd // {
+                        type = "command";
+                      };
+                    };
+                    pgRouter.roles.np-both.binds = [ "np.both" ];
+                  });
+                  npNeitherFired = wrapFired (evalHM {
+                    enable = true;
+                    roles.np-neither.command.argv = [ "x" ];
+                  });
+                  # A handler that is not one of the adapters.
+                  npBadHandlerFired = wrapFired (evalHMWith {
+                    handler = {
+                      enable = true;
+                      roles.np-bad = {
+                        handler = "/bin/true";
+                        command.argv = [ "x" ];
+                      };
+                    };
+                    pgRouter.roles.np-bad.binds = [ "np.bad" ];
+                  });
+                  # Pool setup keys on the adapter: a spec role naming the ccpool
+                  # adapter on ccpool's unmanaged default pool fails, like a typed one.
+                  npDefaultPoolFired = wrapFired (evalHMWith {
+                    handler = {
+                      enable = true;
+                      roles.np-stray = {
+                        handler = npCcpoolAdapter;
+                        ccpool = wrapRoleBase;
+                        spec.exec = [ "/nix/store/fake/bin/claude" ];
+                      };
+                    };
+                    pgRouter.roles.np-stray.binds = [ "np.stray" ];
+                  });
+                  # A no-spec new-path role on the handler-wide pg-wrap-exec pool fails.
+                  npSharedPoolFired = wrapFired (evalHMWith {
+                    handler = {
+                      enable = true;
+                      pool = {
+                        enable = true;
+                        dir = "/tmp/pg2-12gr4-10-shared";
+                      };
+                      roles = {
+                        np-with-spec = {
+                          handler = npCcpoolAdapter;
+                          ccpool = wrapRoleBase;
+                          spec.exec = [ "/nix/store/fake/bin/claude" ];
+                        };
+                        np-without-spec = {
+                          handler = npCcpoolAdapter;
+                          ccpool = wrapRoleBase;
+                        };
+                      };
+                    };
+                    pgRouter.roles = {
+                      np-with-spec.binds = [ "np.a" ];
+                      np-without-spec.binds = [ "np.b" ];
+                    };
+                  });
+                  npFired = wrapFired npEval;
+                  npNoJsonDir = npMod.handlerCommandDir;
+                  npValidateCcpool = npMod.roleValidation.ccpool;
+                  npValidateCommand = npMod.roleValidation.command;
+                  # The validate derivations carry pg-wrap check over the spec files.
+                  npValidateSpecArgs =
+                    lib.hasInfix (builtins.unsafeDiscardStringContext "--spec ${npMod.specFiles.np-ccpool}") npValidateCcpool.buildCommand
+                    && lib.hasInfix (builtins.unsafeDiscardStringContext "--spec ${npMod.commandSpecFiles.np-cmd}") npValidateCommand.buildCommand;
+                  # The build-time validation, expected to FAIL on a rendered config
+                  # carrying a key the adapter's decoder rejects (the field-drop
+                  # negative: the adapter's validate is the ONE entry point), and to
+                  # pass a clean one. Expected-failure idiom as
+                  # test-pg-router-ccpool-handler-check-rendered above.
+                  checkAdapterRolesScript = npMod.lib.checkAdapterRolesScript;
+                  checkAdapterRolesCheck =
+                    pkgs.runCommand "test-pg-router-ccpool-handler-check-adapter-roles"
+                      {
+                        inherit checkAdapterRolesScript npCcpoolAdapter npCommandAdapter;
+                      }
+                      ''
+                        set -euo pipefail
+                        mkdir fx
+                        clean_cmd='{"schemaVersion":"1","id":"build","role":{"name":"clean","config":{"command":{"argv":["/bin/true"]}}}}'
+                        bogus_cmd='{"schemaVersion":"1","id":"build","role":{"name":"bogus","config":{"command":{"argv":["/bin/true"]},"bogusKey":1}}}'
+                        cc='"ccpool":{"actor":"a","promptBody":"p","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim"}'
+                        clean_cc="{\"schemaVersion\":\"1\",\"id\":\"build\",\"role\":{\"name\":\"clean\",\"config\":{$cc}}}"
+                        bogus_cc="{\"schemaVersion\":\"1\",\"id\":\"build\",\"role\":{\"name\":\"bogus\",\"config\":{$cc,\"bogusKey\":1}}}"
+                        printf '%s' "$clean_cmd" > fx/clean-cmd.request.json
+                        printf '%s' "$bogus_cmd" > fx/bogus-cmd.request.json
+                        printf '%s' "$clean_cc" > fx/clean-cc.request.json
+                        printf '%s' "$bogus_cc" > fx/bogus-cc.request.json
+
+                        # Clean configs pass and keep the validate reply as evidence.
+                        "$checkAdapterRolesScript" "$npCommandAdapter" --request fx/clean-cmd.request.json --out fx/replies
+                        "$checkAdapterRolesScript" "$npCcpoolAdapter" --adapter-arg --skip-pool-dirs --request fx/clean-cc.request.json --out fx/replies
+                        [ "$(${pkgs.jq}/bin/jq -c .problems fx/replies/clean-cmd.request.json.reply.json)" = '[]' ]
+                        [ "$(${pkgs.jq}/bin/jq -c .problems fx/replies/clean-cc.request.json.reply.json)" = '[]' ]
+
+                        # A key the adapter rejects fails the check, naming the file and the key.
+                        if "$checkAdapterRolesScript" "$npCommandAdapter" --request fx/bogus-cmd.request.json 2>neg-cmd.log; then
+                          echo "FAIL: a command role config with an unknown key passed validate" >&2
+                          exit 1
+                        fi
+                        grep -q "fx/bogus-cmd.request.json" neg-cmd.log
+                        grep -q "bogusKey" neg-cmd.log
+                        if "$checkAdapterRolesScript" "$npCcpoolAdapter" --adapter-arg --skip-pool-dirs --request fx/bogus-cc.request.json 2>neg-cc.log; then
+                          echo "FAIL: a ccpool role config with an unknown key passed validate" >&2
+                          exit 1
+                        fi
+                        grep -q "fx/bogus-cc.request.json" neg-cc.log
+                        grep -q "bogusKey" neg-cc.log
+                        # A request the adapter cannot use fails too (never a silent pass).
+                        echo '{}' > fx/empty.request.json
+                        if "$checkAdapterRolesScript" "$npCommandAdapter" --request fx/empty.request.json 2>/dev/null; then
+                          echo "FAIL: a request without a role passed" >&2
+                          exit 1
+                        fi
+                        # A spec that fails pg-wrap check fails it.
+                        printf 'schema_version = 1\nwrap = ["relative/env K=1"]\nexec = ["/bin/true"]\n' > fx/relative.toml
+                        if "$checkAdapterRolesScript" "$npCommandAdapter" --spec fx/relative.toml 2>neg-spec.log; then
+                          echo "FAIL: a spec with a relative first word passed" >&2
+                          exit 1
+                        fi
+                        grep -q "fx/relative.toml" neg-spec.log
+                        rc=0
+                        "$checkAdapterRolesScript" "$npCommandAdapter" --bogus x 2>/dev/null || rc=$?
+                        [ "$rc" -eq 2 ]
+                        touch $out
+                      '';
+
                   # File-content verification is done at BUILD time via a
                   # runCommand + jq (code-file-standards' "Structured Data
                   # Files MUST use jq" rule), not via builtins.readFile at
@@ -8426,6 +8669,13 @@
                           k31SpecFile
                           k31SpecCheck
                           checkRenderedCheck
+                          checkAdapterRolesCheck
+                          npRolesFile
+                          npNoJsonDir
+                          npValidateCcpool
+                          npValidateCommand
+                          npCcpoolAdapter
+                          npCommandAdapter
                           k31WrapJson
                           handlerCommandDir
                           emptyHandlerCommandDir
@@ -8660,6 +8910,55 @@
                         [ "$(toml2json "$wrapHandlerPoolConfig" | jq -r .claude.bin)" = "$pgWrapExecPath" ]
                         toml2json "$wrapPlainPoolConfig" | jq -e '(.claude // {}) | has("bin") | not' >/dev/null
 
+                        # The NEW path (bead pg2-12gr4.10.10). No per-role JSON for a
+                        # role that sets `handler`; the old-path twins still render.
+                        test -f "$npNoJsonDir/old-ccpool.json"
+                        test -f "$npNoJsonDir/old-cmd.json"
+                        test ! -e "$npNoJsonDir/np-ccpool.json"
+                        test ! -e "$npNoJsonDir/np-cmd.json"
+                        [ "$(ls -1 "$npNoJsonDir" | wc -l)" -eq 2 ]
+                        # Keys reach the TOML: handler, binds (the consumer's own),
+                        # survives_shutdown only for the ccpool adapter's role.
+                        np_json="$(toml2json "$npRolesFile")"
+                        [ "$(jq -r '.role | length' <<<"$np_json")" = 2 ]
+                        [ "$(jq -r '.role[] | select(.name=="np-ccpool") | .handler' <<<"$np_json")" = "$npCcpoolAdapter" ]
+                        [ "$(jq -r '.role[] | select(.name=="np-cmd") | .handler' <<<"$np_json")" = "$npCommandAdapter" ]
+                        [ "$(jq -c '.role[] | select(.name=="np-ccpool") | .binds' <<<"$np_json")" = '["np.ccpool"]' ]
+                        [ "$(jq -r '.role[] | select(.name=="np-ccpool") | .survives_shutdown' <<<"$np_json")" = true ]
+                        jq -e '.role[] | select(.name=="np-cmd") | has("survives_shutdown") | not' <<<"$np_json" >/dev/null
+                        # [role.config] equals the old per-role JSON minus name, type and
+                        # survivesShutdown: the two renderers share one field list, so a
+                        # dropped field would show here.
+                        for pair in np-ccpool:old-ccpool np-cmd:old-cmd; do
+                          newr="''${pair%%:*}"
+                          oldr="''${pair##*:}"
+                          want="$(jq -S 'del(.name, .type, .survivesShutdown)' "$npNoJsonDir/$oldr.json")"
+                          got="$(jq -S --arg n "$newr" '.role[] | select(.name==$n) | .config' <<<"$np_json")"
+                          if [ "$want" != "$got" ]; then
+                            echo "FAIL: $newr [role.config] differs from $oldr.json" >&2
+                            diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") >&2 || true
+                            exit 1
+                          fi
+                        done
+                        # The ccpool role's config carries the fields the renderer lists
+                        # (a spot check that the comparison above is not vacuous).
+                        jq -e '.role[] | select(.name=="np-ccpool") | .config
+                          | .ccpool.precheck == "ready" and .ccpool.effort == "high"
+                            and .ccpool.beadsDir == "/tmp/pg2-12gr4-10-beads"
+                            and .ccpool.poolDir == "/tmp/pg2-12gr4-10-pool"
+                            and .ccpool.isolation.Prefetch.DiffBase == "origin/main"
+                            and (.ccpool.extraAllowedTools | index("Skill") != null and index("Bash(go test:*)") != null)
+                            and (.sessionEnv.PG_WRAP_SPEC | endswith("pg-wrap-spec.toml"))' <<<"$np_json" >/dev/null
+                        # Each adapter's validate RAN over its roles (the replies are the
+                        # evidence), with no problems, and never over an old-path role.
+                        jq -e '.problems == []' "$npValidateCcpool"/replies/*-np-ccpool.request.json.reply.json >/dev/null
+                        jq -e '.problems == []' "$npValidateCommand"/replies/*-np-cmd.request.json.reply.json >/dev/null
+                        [ "$(ls -1 "$npValidateCcpool/replies" | wc -l)" -eq 1 ]
+                        [ "$(ls -1 "$npValidateCommand/replies" | wc -l)" -eq 1 ]
+                        # The negative cases (an unknown key fails validate, naming the
+                        # file) ran as the build of checkAdapterRolesCheck.
+                        test -f "$checkAdapterRolesCheck"
+
                         # claudeBaseline (bead pg2-12gr4.8.31): the spec built from it
                         # passes `pg-wrap check` (k31SpecCheck is built as an input);
                         # every wrap entry starts with an absolute store path and none
@@ -8808,6 +9107,37 @@
                 assert wrapMessageNames wrapCommandSpecFired "cmd-spec" "command role";
                 assert wrapMessageNames wrapCcpoolCommandSpecFired "ccpool-cmd-spec" "command.spec";
                 assert wrapMessageNames wrapEnvClashFired "clash" "PG_WRAP_SPEC";
+                # The new path (bead pg2-12gr4.10.10): the join evaluates clean;
+                # pool setup (own pool, bootstrap entry, spec files, wrap-pool
+                # assertions) keys on the adapter a role names; each selection and
+                # join assertion fires on its misconfiguration.
+                assert npFired == null;
+                assert
+                  lib.attrNames npMod.poolConfigFiles == [
+                    "np-ccpool"
+                    "old-ccpool"
+                  ];
+                assert npEval.home.activation ? "pgRouterCcpoolHandlerPool_np-ccpool";
+                assert
+                  lib.attrNames npMod.specFiles == [
+                    "np-ccpool"
+                    "old-ccpool"
+                  ];
+                assert
+                  lib.attrNames npMod.commandSpecFiles == [
+                    "np-cmd"
+                    "old-cmd"
+                  ];
+                assert npEval.phillipgreenii.programs.pg-router.roles.np-ccpool.survivesShutdown;
+                assert !npEval.phillipgreenii.programs.pg-router.roles.np-cmd.survivesShutdown;
+                assert npValidateSpecArgs;
+                assert wrapMessageNames npNoSurviveFired "np-ccpool" "survivesShutdown";
+                assert wrapMessageNames npNoCounterpartFired "np-cmd" "binds no event";
+                assert wrapMessageNames npBothFired "np-both" "exactly one";
+                assert wrapMessageNames npNeitherFired "np-neither" "exactly one";
+                assert wrapMessageNames npBadHandlerFired "np-bad" "absolute path";
+                assert wrapMessageNames npDefaultPoolFired "np-stray" "default pool";
+                assert wrapMessageNames npSharedPoolFired "np-without-spec" "/tmp/pg2-12gr4-10-shared";
                 # pg2-4roho decision item 4: exactly one registry entry,
                 # scoped to this handler's own configured worktreeDir, with
                 # exactly one variant.

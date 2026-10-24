@@ -27,8 +27,9 @@ system, so the same class of bug is caught while it's still cheap to fix.
 They prove the config **evaluates** and the binary **compiles**. They do not invoke the wired
 command with real arguments, do not launch a real ccpool session, and do not check that a role's
 _actual_ invocation matches what you intended — see this repo's own `CLAUDE.md` "pg-router config
-testing trap" and the two bullets after it (the config.toml-vs-`handlerCommandDir` split, and why
-build-clean does not mean live-working). A broken wiring of this kind fails **silently** — no
+testing trap" and the two bullets after it (where a role's real invocation lives: the `[role.config]`
+table in `config.toml` for a role on the new path, the per-role JSON under `handlerCommandDir` for a
+role still on the old one; and why build-clean does not mean live-working). A broken wiring of this kind fails **silently** — no
 crash, no alert, nothing to grep for — so the only way to know it works is to actually run it.
 
 ## Procedure
@@ -122,6 +123,9 @@ way, watch it to a real outcome, and clean up immediately:
 
 - The live daemon's resolved config: `pg-router status` (shows `configPath=`) or
   `pg-router config --show` from the repo root it operates on.
-- A role's REAL command/ccpool invocation (never visible in `config.toml`): find the running
+- A role's REAL command/ccpool invocation depends on its path. New path (the `[[role]]` table has a
+  `handler`): it is the role's `[role.config]` table in `config.toml`, so
+  `pg-router config --show --json` shows it, and `pg-router doctor` runs the adapter's real
+  `validate` over it. Old path (no `handler`; never visible in `config.toml`): find the running
   `pg-router-ccpool-handler dispatch --role-config <dir>/<role>.json` process
   (`ps aux | grep pg-router-ccpool-handler`) and `cat` that JSON file directly.

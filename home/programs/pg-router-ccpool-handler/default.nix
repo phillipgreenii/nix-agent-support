@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  options,
   # Set by the nix-darwin / NixOS home-manager integration; null for a
   # standalone home-manager activation (no system scope to read from).
   osConfig ? null,
@@ -200,6 +201,48 @@ let
       keep = lib.unique (wrapSpecOwnedKeep ++ keep);
     };
 
+  # The two paths a role can be on (pg2-12gr4.10.10, design S5 compat window).
+  #
+  #   * OLD path: `type` is set. The role renders into a per-role JSON file under
+  #     `handlerCommandDir` and the old `pg-router-ccpool-handler` binary reads it
+  #     through `--role-config`.
+  #   * NEW path: `handler` is set, an absolute path to one of the two adapter
+  #     binaries. The role joins, by name, the pg-router module's
+  #     `roles.<name>`: this module fills in that role's `handler`, `config`
+  #     (the `[role.config]` table, the same field list the JSON renderer uses)
+  #     and `survivesShutdown`; the consumer sets only `binds` and `enabled`
+  #     there. No per-role JSON is rendered for a new-path role.
+  #
+  # Exactly one of `type` and `handler` is set per role (an assertion). Every
+  # helper below that used to key on `type` keys on `kindOf`, so pool setup, the
+  # wrap-pool checks and spec rendering work for both paths.
+  ccpoolAdapterName = "pg-router-handler-ccpool";
+  commandAdapterName = "pg-router-handler-command";
+  ccpoolAdapterBin = "${cfg.package}/bin/${ccpoolAdapterName}";
+  commandAdapterBin = "${cfg.package}/bin/${commandAdapterName}";
+  isNewPath = roleCfg: roleCfg.handler != null;
+  usesCcpoolAdapter = roleCfg: isNewPath roleCfg && baseNameOf roleCfg.handler == ccpoolAdapterName;
+  usesCommandAdapter = roleCfg: isNewPath roleCfg && baseNameOf roleCfg.handler == commandAdapterName;
+  # The role kind: `type` on the old path, the adapter the role names on the new.
+  kindOf =
+    roleCfg:
+    if isNewPath roleCfg then
+      if usesCcpoolAdapter roleCfg then
+        "ccpool"
+      else if usesCommandAdapter roleCfg then
+        "command"
+      else
+        null
+    else
+      roleCfg.type;
+  newPathRoles = lib.filterAttrs (_name: isNewPath) cfg.roles;
+  oldPathRoles = lib.filterAttrs (_name: roleCfg: !isNewPath roleCfg) cfg.roles;
+  # The pg-router module's roles.<name> option exists only when that module is
+  # imported (home/default.nix imports both). Gated on the option's DECLARATION,
+  # not on config, so a harness that loads only this module still evaluates.
+  hasPgRouterRoles = options.phillipgreenii.programs ? pg-router;
+  pgRouterRoles = config.phillipgreenii.programs.pg-router.roles;
+
   specRoles = lib.filterAttrs (_name: roleCfg: roleCfg.spec != null) cfg.roles;
   # A role's rendered spec. Choice (the design is silent): every `sessionEnv`
   # key other than PG_WRAP_SPEC (which pg-wrap-exec strips itself) joins the
@@ -220,7 +263,8 @@ let
   # `[ pg-wrap run --spec <spec> -- <argv...> ]` (design section 4, "Per-item
   # values for a wrapper"). `handlerCommandDir` runs `pg-wrap check` over each one.
   commandSpecRoles = lib.filterAttrs (
-    _name: roleCfg: roleCfg.type == "command" && roleCfg.command != null && roleCfg.command.spec != null
+    _name: roleCfg:
+    kindOf roleCfg == "command" && roleCfg.command != null && roleCfg.command.spec != null
   ) cfg.roles;
   commandSpecFiles = lib.mapAttrs (
     _name: roleCfg:
@@ -242,7 +286,7 @@ let
     ]
     ++ roleCfg.command.argv;
 
-  ccpoolRoles = lib.filterAttrs (_name: roleCfg: roleCfg.type == "ccpool") cfg.roles;
+  ccpoolRoles = lib.filterAttrs (_name: roleCfg: kindOf roleCfg == "ccpool") cfg.roles;
   # The ccpool roles that share the handler-wide pool (only meaningful while
   # `pool.enable`; otherwise they run on ccpool's unmanaged default pool).
   handlerPoolRoles = lib.optionalAttrs cfg.pool.enable (
@@ -331,7 +375,7 @@ let
     '';
   }) ccpoolRoles;
   wrapSpecAssertions = lib.mapAttrsToList (name: roleCfg: {
-    assertion = roleCfg.type == "ccpool";
+    assertion = kindOf roleCfg == "ccpool";
     message = ''
       phillipgreenii.programs.pg-router-ccpool-handler.roles.${name}: `spec` is valid
       only on a ccpool role; a command role is wrapped through its argv.
@@ -340,7 +384,7 @@ let
   commandSpecAssertions =
     lib.mapAttrsToList
       (name: roleCfg: {
-        assertion = roleCfg.type == "command";
+        assertion = kindOf roleCfg == "command";
         message = ''
           phillipgreenii.programs.pg-router-ccpool-handler.roles.${name}: `command.spec` is
           valid only on a command role; a ccpool role's pg-wrap spec is `spec`.
@@ -356,6 +400,97 @@ let
     '';
   }) specRoles;
 
+  # rolePathAssertions (pg2-12gr4.10.10): every role picks exactly one path, a
+  # new-path role names a known adapter by absolute path, and a role's settings
+  # block matches its kind.
+  rolePathAssertions = lib.concatLists (
+    lib.mapAttrsToList (
+      name: roleCfg:
+      let
+        where = "phillipgreenii.programs.pg-router-ccpool-handler.roles.${name}";
+      in
+      [
+        {
+          assertion = (roleCfg.type != null) != (roleCfg.handler != null);
+          message = ''
+            ${where}: set exactly one of `type` (the old path: a per-role JSON file) and
+            `handler` (the new path: an adapter binary joined to the pg-router role of
+            the same name); got ${if roleCfg.type != null then "both" else "neither"}.
+          '';
+        }
+        {
+          assertion =
+            roleCfg.handler == null
+            || (lib.hasPrefix "/" roleCfg.handler && (usesCcpoolAdapter roleCfg || usesCommandAdapter roleCfg));
+          message = ''
+            ${where}.handler must be an absolute path to one of the adapter binaries
+            (`.../bin/${ccpoolAdapterName}` or `.../bin/${commandAdapterName}`); got
+            "${toString roleCfg.handler}".
+          '';
+        }
+        {
+          assertion = kindOf roleCfg != "ccpool" || roleCfg.ccpool != null;
+          message = ''
+            ${where}: a ccpool role needs its `ccpool` settings.
+          '';
+        }
+        {
+          assertion = kindOf roleCfg != "command" || roleCfg.command != null;
+          message = ''
+            ${where}: a command role needs its `command` settings.
+          '';
+        }
+      ]
+    ) cfg.roles
+  );
+
+  # roleJoinAssertions (pg2-12gr4.10.10): each new-path role joins the pg-router
+  # module's role of the same name. The join creates that role's entry by
+  # merging, so a missing counterpart shows as a role that binds no event type
+  # (the core rejects such a role as a disconnected handler anyway). Every role on
+  # the ccpool adapter must carry the survives-shutdown key, so a daemon restart
+  # cannot cancel a live session's dispatch (ADR 0085): the join sets it, and this
+  # fails evaluation when a consumer overrode it.
+  roleJoinAssertions = lib.optionals (newPathRoles != { }) (
+    [
+      {
+        assertion = hasPgRouterRoles;
+        message = ''
+          phillipgreenii.programs.pg-router-ccpool-handler: roles ${lib.concatStringsSep ", " (lib.attrNames newPathRoles)}
+          set `handler`, which joins the pg-router module's `roles.<name>`, but that
+          module is not imported (no `phillipgreenii.programs.pg-router` options).
+        '';
+      }
+    ]
+    ++ lib.optionals hasPgRouterRoles (
+      lib.concatLists (
+        lib.mapAttrsToList (
+          name: roleCfg:
+          [
+            {
+              assertion = (pgRouterRoles.${name}.binds or [ ]) != [ ];
+              message = ''
+                phillipgreenii.programs.pg-router-ccpool-handler.roles.${name} sets `handler`, so it joins
+                phillipgreenii.programs.pg-router.roles.${name}, but that role binds no event
+                type: declare it there (`binds`, and `enabled`). Without a counterpart the role
+                is a disconnected handler.
+              '';
+            }
+          ]
+          ++ lib.optional (usesCcpoolAdapter roleCfg) {
+            assertion = pgRouterRoles.${name}.survivesShutdown or false;
+            message = ''
+              phillipgreenii.programs.pg-router.roles.${name}: the role uses the ccpool adapter
+              (${ccpoolAdapterName}), so `survivesShutdown` MUST be true: the adapter supervises its
+              session independently of the daemon, and a daemon shutdown must not cancel its
+              dispatch (ADR 0085). The pg-router-ccpool-handler module sets it; do not override it.
+            '';
+          }
+        ) newPathRoles
+      )
+    )
+  );
+
   poolConfigFile = tomlFormat.generate "pg-router-ccpool-handler-pool-config.toml" handlerPoolSettings;
 
   # ccpoolRolesWithOwnPool / poolConfigFileFor / roleBootstrapEntries (bead
@@ -369,7 +504,7 @@ let
   # verbatim from the whole-process version below, just parameterized by
   # role name/dir/settings instead of reading `cfg.pool.*` directly.
   ccpoolRolesWithOwnPool = lib.filterAttrs (
-    _name: roleCfg: roleCfg.type == "ccpool" && roleCfg.ccpool.pool.enable
+    _name: roleCfg: kindOf roleCfg == "ccpool" && roleCfg.ccpool.pool.enable
   ) cfg.roles;
   poolConfigFileFor =
     name: roleCfg:
@@ -795,7 +930,7 @@ let
   # capitalized because `roles.IsolationConfig` (packages/pg-router-ccpool-
   # handler/internal/roles/roles.go) carries no json tags at all -- Go's
   # encoding/json then falls back to the literal exported field name. Only
-  # the block matching `roleCfg.type` is emitted (mirroring `roleFile.CCPool`/
+  # the block matching the role's kind is emitted (mirroring `roleFile.CCPool`/
   # `.Command`'s own `omitempty` pointers), so a "command" role's JSON never
   # carries a stray `ccpool` key and vice versa.
   roleFileFor =
@@ -814,100 +949,114 @@ let
           # re-offers the event and absorbs the live session). Derived from
           # `type`, not a user option: a command-type role stays cancellable
           # (short, and killing a stuck one is the point). pg-router reads
-          # only this one key of the file; the Go `roleFile` ignores it.
+          # only this one key of the file; the Go `roleFile` ignores it. On the
+          # new path the same value is the pg-router role's `survivesShutdown`
+          # (the TOML `survives_shutdown` key), set by the join below.
           survivesShutdown = true;
-          # sessionEnv (design ruling 30): the role's own entries plus, for a
-          # role with a spec, the module-owned PG_WRAP_SPEC (right operand
-          # wins; a role-set PG_WRAP_SPEC also fails an assertion).
-          sessionEnv =
-            roleCfg.sessionEnv
-            // lib.optionalAttrs (roleCfg.spec != null) { PG_WRAP_SPEC = "${specFiles.${name}}"; };
-          ccpool = {
-            inherit (roleCfg.ccpool)
-              actor
-              skillMD
-              completion
-              onFailure
-              onDispatchFail
-              authorshipGuard
-              promptBody
-              ;
-            budget = {
-              inherit (roleCfg.ccpool.budget) tokens cost time;
-            };
-            budgetStopEscalateAfter = roleCfg.ccpool.budgetStopEscalateAfter;
-            isolation = {
-              Type = roleCfg.ccpool.isolation.type;
-              Path = roleCfg.ccpool.isolation.path;
-            }
-            // lib.optionalAttrs roleCfg.ccpool.isolation.prefetch.enable {
-              # prefetch (bead pg2-hh32y): omitted unless enabled, so a role that
-              # never opts in decodes `Prefetch == nil` (unchanged behavior).
-              # Field names are Go's own (roles.PrefetchConfig has no json tags).
-              Prefetch = {
-                Remote = roleCfg.ccpool.isolation.prefetch.remote;
-                Refspec = roleCfg.ccpool.isolation.prefetch.refspec;
-                Rev = roleCfg.ccpool.isolation.prefetch.rev;
-                DiffBase = roleCfg.ccpool.isolation.prefetch.diffBase;
-                Timeout = roleCfg.ccpool.isolation.prefetch.timeout;
-              };
-            };
-          }
-          // lib.optionalAttrs (roleCfg.ccpool.worktreeQuietWindow != null) {
-            # worktreeQuietWindow (bead pg2-uyahp, INV-CCH-23): omitted when null, so
-            # a role that never sets it decodes to "no override" (the handler-wide
-            # 2m default applies, unchanged behavior).
-            inherit (roleCfg.ccpool) worktreeQuietWindow;
-          }
-          // lib.optionalAttrs (roleCfg.ccpool.effort != null) {
-            # effort (bead pg2-svkob, INV-CCH-31): omitted when null, so a role that
-            # never sets it decodes to "no override" (the launch-config effort
-            # applies, unchanged behavior).
-            inherit (roleCfg.ccpool) effort;
-          }
-          // lib.optionalAttrs (roleCfg.ccpool.precheck != null) {
-            # precheck (bead pg2-nk6th.3): omitted when null, so a role that never
-            # opts in decodes to "" (the historical behavior). The role file is
-            # rendered from an EXPLICIT field list above plus these optionalAttrs,
-            # not the whole option set: an option that is not added here is
-            # silently dropped.
-            inherit (roleCfg.ccpool) precheck;
-          }
-          // lib.optionalAttrs (roleExtraAllowedTools roleCfg.ccpool != [ ]) {
-            # extraAllowedTools (bead pg2-nk6th.5): omitted when empty, so a role
-            # that never sets it decodes to "no extra grants" (the handler-wide
-            # allowedTools applies unchanged). Carries the role's own
-            # `extraAllowedTools` followed by the grants of every named tool set
-            # the role declares in `toolSets` (bead pg2-cwn44), de-duplicated;
-            # the handler merges them onto the handler-wide list for THIS role
-            # only, so a role that declares no set never gains its grants.
-            extraAllowedTools = roleExtraAllowedTools roleCfg.ccpool;
-          }
-          // lib.optionalAttrs (roleCfg.ccpool.beadsDir != "") {
-            # beadsDir (bead pg2-2grpj): omitted when unset, like poolDir.
-            inherit (roleCfg.ccpool) beadsDir;
-          }
-          // lib.optionalAttrs roleCfg.ccpool.pool.enable {
-            # poolDir (bead pg2-mr0sl): only rendered when this role opted
-            # into its own dedicated pool -- omitted (not merely "") when
-            # disabled, so `internal/rolefile/rolefile.go`'s `LoadRole` sees an absent JSON
-            # key and decodes the zero-value "" exactly like every field
-            # this schema already omits when unset, keeping a
-            # non-opted-in role's dispatch pointed at whatever CCPOOL_POOL
-            # this process already inherits (unchanged behavior).
-            poolDir = roleCfg.ccpool.pool.dir;
-          };
         }
-        // lib.optionalAttrs (roleCfg.type == "command") {
-          command = {
-            argv = commandArgvFor name roleCfg;
-          };
-          # strictBaseEnv (design ruling 30): command roles only; a ccpool
-          # role's minimal env comes from its spec's `strict_env`.
-          inherit (roleCfg) strictBaseEnv;
-        }
+        // roleBodyFor name roleCfg
       )
     );
+
+  # roleBodyFor (pg2-12gr4.10.10): the fields shared by the old per-role JSON
+  # (`roleFileFor` adds `name`, `type` and `survivesShutdown`) and the new
+  # path's `[role.config]` table, which the adapters decode with exactly these
+  # names. ONE field list for both renderers, so a field added here cannot reach
+  # one and be silently dropped by the other. Keyed on `kindOf`, so a role on
+  # the new path renders the block of the adapter it names.
+  roleBodyFor =
+    name: roleCfg:
+    (lib.optionalAttrs (kindOf roleCfg == "ccpool") {
+      # sessionEnv (design ruling 30): the role's own entries plus, for a
+      # role with a spec, the module-owned PG_WRAP_SPEC (right operand
+      # wins; a role-set PG_WRAP_SPEC also fails an assertion).
+      sessionEnv =
+        roleCfg.sessionEnv
+        // lib.optionalAttrs (roleCfg.spec != null) { PG_WRAP_SPEC = "${specFiles.${name}}"; };
+      ccpool = {
+        inherit (roleCfg.ccpool)
+          actor
+          skillMD
+          completion
+          onFailure
+          onDispatchFail
+          authorshipGuard
+          promptBody
+          ;
+        budget = {
+          inherit (roleCfg.ccpool.budget) tokens cost time;
+        };
+        budgetStopEscalateAfter = roleCfg.ccpool.budgetStopEscalateAfter;
+        isolation = {
+          Type = roleCfg.ccpool.isolation.type;
+          Path = roleCfg.ccpool.isolation.path;
+        }
+        // lib.optionalAttrs roleCfg.ccpool.isolation.prefetch.enable {
+          # prefetch (bead pg2-hh32y): omitted unless enabled, so a role that
+          # never opts in decodes `Prefetch == nil` (unchanged behavior).
+          # Field names are Go's own (roles.PrefetchConfig has no json tags).
+          Prefetch = {
+            Remote = roleCfg.ccpool.isolation.prefetch.remote;
+            Refspec = roleCfg.ccpool.isolation.prefetch.refspec;
+            Rev = roleCfg.ccpool.isolation.prefetch.rev;
+            DiffBase = roleCfg.ccpool.isolation.prefetch.diffBase;
+            Timeout = roleCfg.ccpool.isolation.prefetch.timeout;
+          };
+        };
+      }
+      // lib.optionalAttrs (roleCfg.ccpool.worktreeQuietWindow != null) {
+        # worktreeQuietWindow (bead pg2-uyahp, INV-CCH-23): omitted when null, so
+        # a role that never sets it decodes to "no override" (the handler-wide
+        # 2m default applies, unchanged behavior).
+        inherit (roleCfg.ccpool) worktreeQuietWindow;
+      }
+      // lib.optionalAttrs (roleCfg.ccpool.effort != null) {
+        # effort (bead pg2-svkob, INV-CCH-31): omitted when null, so a role that
+        # never sets it decodes to "no override" (the launch-config effort
+        # applies, unchanged behavior).
+        inherit (roleCfg.ccpool) effort;
+      }
+      // lib.optionalAttrs (roleCfg.ccpool.precheck != null) {
+        # precheck (bead pg2-nk6th.3): omitted when null, so a role that never
+        # opts in decodes to "" (the historical behavior). The role file is
+        # rendered from an EXPLICIT field list above plus these optionalAttrs,
+        # not the whole option set: an option that is not added here is
+        # silently dropped.
+        inherit (roleCfg.ccpool) precheck;
+      }
+      // lib.optionalAttrs (roleExtraAllowedTools roleCfg.ccpool != [ ]) {
+        # extraAllowedTools (bead pg2-nk6th.5): omitted when empty, so a role
+        # that never sets it decodes to "no extra grants" (the handler-wide
+        # allowedTools applies unchanged). Carries the role's own
+        # `extraAllowedTools` followed by the grants of every named tool set
+        # the role declares in `toolSets` (bead pg2-cwn44), de-duplicated;
+        # the handler merges them onto the handler-wide list for THIS role
+        # only, so a role that declares no set never gains its grants.
+        extraAllowedTools = roleExtraAllowedTools roleCfg.ccpool;
+      }
+      // lib.optionalAttrs (roleCfg.ccpool.beadsDir != "") {
+        # beadsDir (bead pg2-2grpj): omitted when unset, like poolDir.
+        inherit (roleCfg.ccpool) beadsDir;
+      }
+      // lib.optionalAttrs roleCfg.ccpool.pool.enable {
+        # poolDir (bead pg2-mr0sl): only rendered when this role opted
+        # into its own dedicated pool -- omitted (not merely "") when
+        # disabled, so `internal/rolefile/rolefile.go`'s `LoadRole` sees an absent JSON
+        # key and decodes the zero-value "" exactly like every field
+        # this schema already omits when unset, keeping a
+        # non-opted-in role's dispatch pointed at whatever CCPOOL_POOL
+        # this process already inherits (unchanged behavior).
+        poolDir = roleCfg.ccpool.pool.dir;
+      };
+    })
+    // lib.optionalAttrs (kindOf roleCfg == "command") {
+      command = {
+        argv = commandArgvFor name roleCfg;
+      };
+      # strictBaseEnv (design ruling 30): command roles only; a ccpool
+      # role's minimal env comes from its spec's `strict_env`.
+      inherit (roleCfg) strictBaseEnv;
+    };
 
   # handlerCommandDir joins every `roles` entry's rendered JSON file into one
   # directory (`pkgs.linkFarm`), the shape `PG_ROUTER_HANDLER_COMMAND_DIR`
@@ -931,7 +1080,7 @@ let
         lib.concatStringsSep " " (
           (lib.mapAttrsToList (_name: file: "--spec ${file}") specFiles)
           ++ (lib.mapAttrsToList (_name: file: "--spec ${file}") commandSpecFiles)
-          ++ (lib.mapAttrsToList (name: roleCfg: "--role ${roleFileFor name roleCfg}") cfg.roles)
+          ++ (lib.mapAttrsToList (name: roleCfg: "--role ${roleFileFor name roleCfg}") oldPathRoles)
         )
       }
       mkdir -p "$out"
@@ -939,9 +1088,159 @@ let
     + lib.concatStringsSep "\n" (
       lib.mapAttrsToList (
         name: roleCfg: "ln -s ${roleFileFor name roleCfg} $out/${lib.escapeShellArg "${name}.json"}"
-      ) cfg.roles
+      ) oldPathRoles
     )
   );
+
+  # checkAdapterRolesScript (pg2-12gr4.10.10): `check-adapter-roles <adapter>
+  # [--adapter-arg <arg>]... [--spec <file>]... [--request <file>]... [--out
+  # <dir>]`, the build-time check of what the NEW path renders. Each `--spec`
+  # runs `pg-wrap check --spec <file>`; each `--request` file (the JSON request
+  # `{"schemaVersion":"1","id":"build","role":{"name":..,"config":..}}`) is
+  # piped to `<adapter> validate <adapter-arg>...`. A run fails when validate
+  # exits non-zero, or its reply is unparsable or carries a non-empty `problems`
+  # (a valid reply is `problems: []`); warnings are printed and never fail.
+  # With `--out`, each reply is kept as `<dir>/<request file name>.reply.json`,
+  # so a test can read the evidence that validate ran. Every failing file is
+  # printed with its messages; exit 1 if any failed, 2 for a usage error.
+  checkAdapterRolesScript = pkgs.writeShellScript "check-adapter-roles" ''
+    PATH=${lib.makeBinPath [ pkgs.coreutils ]}
+    jq=${pkgs.jq}/bin/jq
+    pgwrap=${pkgs.pg-wrap}/bin/pg-wrap
+    if [ $# -lt 1 ]; then
+      echo "check-adapter-roles: the adapter binary is the first argument" >&2
+      exit 2
+    fi
+    adapter="$1"
+    shift
+    adapter_args=()
+    specs=()
+    requests=()
+    out=""
+    failed=0
+    while [ $# -gt 0 ]; do
+      kind="$1"
+      case "$kind" in
+        --spec | --request | --adapter-arg | --out) ;;
+        *)
+          echo "check-adapter-roles: unknown argument: $kind" >&2
+          exit 2
+          ;;
+      esac
+      if [ $# -lt 2 ]; then
+        echo "check-adapter-roles: $kind needs a value" >&2
+        exit 2
+      fi
+      file="$2"
+      shift 2
+      case "$kind" in
+        --adapter-arg) adapter_args+=("$file") ;;
+        --out)
+          out="$file"
+          mkdir -p "$out"
+          ;;
+        --spec) specs+=("$file") ;;
+        --request) requests+=("$file") ;;
+      esac
+    done
+    for file in "''${specs[@]}"; do
+      if ! msgs="$("$pgwrap" check --spec "$file" 2>&1)"; then
+        echo "check-adapter-roles: FAIL spec $file:" >&2
+        echo "$msgs" >&2
+        failed=1
+      fi
+    done
+    for file in "''${requests[@]}"; do
+      rc=0
+      errf="$(mktemp)"
+      reply="$("$adapter" validate "''${adapter_args[@]}" <"$file" 2>"$errf")" || rc=$?
+      msgs=""
+      if [ "$rc" -ne 0 ]; then
+        msgs="validate exited $rc: $reply $(cat "$errf")"
+      elif ! msgs="$(printf '%s' "$reply" | "$jq" -r '
+          if (.problems | type) == "array" then .problems[] | "problem: " + .
+          else error("reply has no problems array") end' 2>&1)"; then
+        msgs="unparsable validate reply: $reply $msgs"
+      fi
+      rm -f "$errf"
+      if [ -n "$out" ]; then
+        printf '%s\n' "$reply" >"$out/$(basename "$file").reply.json"
+      fi
+      if [ -n "$msgs" ]; then
+        echo "check-adapter-roles: FAIL role request $file:" >&2
+        echo "$msgs" >&2
+        failed=1
+      fi
+      warns="$(printf '%s' "$reply" | "$jq" -r '(.warnings // [])[] | "warning: " + .' 2>/dev/null || true)"
+      if [ -n "$warns" ]; then
+        echo "check-adapter-roles: role request $file:" >&2
+        echo "$warns" >&2
+      fi
+    done
+    exit "$failed"
+  '';
+
+  # roleRequestFor: the validate request for one new-path role, built from the
+  # SAME `roleBodyFor` attrs the join hands to the pg-router role's
+  # `config`, so validate sees exactly the rendered table.
+  roleRequestFor =
+    name: roleCfg:
+    pkgs.writeText "${name}.request.json" (
+      builtins.toJSON {
+        schemaVersion = "1";
+        id = "build";
+        role = {
+          inherit name;
+          config = roleBodyFor name roleCfg;
+        };
+      }
+    );
+
+  # mkAdapterValidation: one build-time derivation per adapter, running that
+  # adapter's `validate` over every new-path role naming it, and `pg-wrap check`
+  # over those roles' spec files (so the spec check survives the removal of
+  # `handlerCommandDir`). The ccpool adapter runs with --skip-pool-dirs because
+  # the build sandbox has no pools (never for doctor or startup). It builds
+  # trivially when no role names the adapter. Its `$out/replies` holds each
+  # role's validate reply.
+  mkAdapterValidation =
+    {
+      adapterName,
+      adapterBin,
+      adapterArgs ? [ ],
+      roles,
+      specFilesOf,
+    }:
+    pkgs.runCommand "pg-router-${adapterName}-validate" { } ''
+      ${checkAdapterRolesScript} ${adapterBin} ${
+        lib.concatStringsSep " " (
+          (map (a: "--adapter-arg ${lib.escapeShellArg a}") adapterArgs)
+          ++ (lib.mapAttrsToList (_name: file: "--spec ${file}") specFilesOf)
+          ++ (lib.mapAttrsToList (name: roleCfg: "--request ${roleRequestFor name roleCfg}") roles)
+          ++ [ "--out $out/replies" ]
+        )
+      }
+      mkdir -p $out/replies
+    '';
+  roleValidation = {
+    ccpool = mkAdapterValidation {
+      adapterName = ccpoolAdapterName;
+      adapterBin = ccpoolAdapterBin;
+      adapterArgs = [ "--skip-pool-dirs" ];
+      roles = lib.filterAttrs (_n: usesCcpoolAdapter) cfg.roles;
+      specFilesOf = lib.filterAttrs (n: _: isNewPath cfg.roles.${n}) specFiles;
+    };
+    command = mkAdapterValidation {
+      adapterName = commandAdapterName;
+      adapterBin = commandAdapterBin;
+      roles = lib.filterAttrs (_n: usesCommandAdapter) cfg.roles;
+      specFilesOf = lib.filterAttrs (n: _: isNewPath cfg.roles.${n}) commandSpecFiles;
+    };
+  };
+  # The adapters that have at least one new-path role, for `home.extraDependencies`.
+  activeRoleValidations =
+    lib.optional (lib.any usesCcpoolAdapter (lib.attrValues cfg.roles)) roleValidation.ccpool
+    ++ lib.optional (lib.any usesCommandAdapter (lib.attrValues cfg.roles)) roleValidation.command;
 
   # defaultAllowedTools (this bead, pg2-qsred): mirrors
   # internal/config.baseAllowedTools's own literal value exactly.
@@ -1040,14 +1339,48 @@ let
   roleSubmodule = lib.types.submodule {
     options = {
       type = lib.mkOption {
-        type = lib.types.enum [
-          "ccpool"
-          "command"
-        ];
+        type = lib.types.nullOr (
+          lib.types.enum [
+            "ccpool"
+            "command"
+          ]
+        );
+        default = null;
         description = ''
-          This role's kind (`roleFile.Type`) -- "ccpool" dispatches a
-          ccpool/claude session (`ccpool` below is required), "command" runs
-          a bare command (`command` below is required).
+          OLD PATH selector. This role's kind (`roleFile.Type`) -- "ccpool"
+          dispatches a ccpool/claude session (`ccpool` below is required),
+          "command" runs a bare command (`command` below is required). A role
+          with `type` renders a per-role JSON file under `handlerCommandDir`,
+          read by the old `pg-router-ccpool-handler` binary. Exactly one of
+          `type` and `handler` is set per role (an assertion fires otherwise).
+          Removed, with the old path, by the final compat-window cleanup.
+        '';
+      };
+      handler = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = lib.literalExpression ''"''${config.phillipgreenii.programs.pg-router-ccpool-handler.package}/bin/pg-router-handler-command"'';
+        description = ''
+          NEW PATH selector (pg2-12gr4.10.10). An ABSOLUTE path to one of the two
+          adapter binaries, `<package>/bin/pg-router-handler-ccpool` (a ccpool
+          role) or `<package>/bin/pg-router-handler-command` (a command role);
+          `null` means the role is on the old path through `type`. The adapter is
+          read from the path's base name, so the role's kind follows the adapter
+          it names (`ccpool` or `command` below is then the settings spelling of
+          the role: it feeds the `[role.config]` table and pool setup, as before).
+
+          A role with `handler` set is joined BY NAME with the pg-router
+          module's own `phillipgreenii.programs.pg-router.roles.<name>`: this
+          module sets that role's `handler`, `config` (the `[role.config]` table,
+          the same field list the per-role JSON used, without `name`, `type` and
+          `survivesShutdown`) and, for the ccpool adapter, `survivesShutdown =
+          true`. The consumer sets ONLY `binds` and `enabled` on the pg-router
+          side; a handler-module role whose pg-router counterpart binds no event
+          type fails evaluation. No per-role JSON is rendered for the role, and it
+          is not passed to the old binary's `validate --role-config`. Each
+          adapter's `validate` instead runs over the role's rendered config during
+          the build (`roleValidation`), and every role on the ccpool adapter must
+          have `survivesShutdown` set (an assertion).
         '';
       };
       ccpool = lib.mkOption {
@@ -1454,7 +1787,8 @@ let
         default = null;
         description = ''
           This role's ccpool launch/behavior config -- required (non-null)
-          iff `type` == "ccpool" (`roleFile.CCPool`).
+          iff the role's kind is ccpool: `type` == "ccpool", or `handler` names
+          the ccpool adapter (`roleFile.CCPool`).
         '';
       };
       command = lib.mkOption {
@@ -1511,8 +1845,9 @@ let
         );
         default = null;
         description = ''
-          This role's bare-command argv -- required (non-null) iff `type` ==
-          "command" (`roleFile.Command`).
+          This role's bare-command argv -- required (non-null) iff the role's
+          kind is command: `type` == "command", or `handler` names the command
+          adapter (`roleFile.Command`).
         '';
       };
       strictBaseEnv = lib.mkOption {
@@ -1738,32 +2073,6 @@ in
     # pg2-12gr4.8.12): read-only outputs, set unconditionally like
     # `handlerCommandDir`, so a consumer or a check can read them without this
     # module's own machinery enabled.
-    lib.renderWrapSpec = lib.mkOption {
-      type = lib.types.raw;
-      readOnly = true;
-      description = ''
-        Read-only function `{ wrap, keep, strictEnv, exec } -> <spec file
-        derivation>`: renders a pg-wrap spec (`schema_version = 1` plus the four
-        keys) as TOML. The ten module-owned `keep` names are always added and the
-        result is de-duplicated. Command-role specs reuse it.
-      '';
-    };
-
-    lib.checkRenderedScript = lib.mkOption {
-      type = lib.types.package;
-      readOnly = true;
-      description = ''
-        Read-only executable script `check-rendered [--spec <file>]... [--role
-        <file>]...`. Each `--spec` runs `pg-wrap check --spec <file>`; each
-        `--role` runs the handler's `validate --skip-pool-dirs --role-config
-        <file>` (the request on stdin). It prints every failing file with its
-        messages, then exits 1 if any check failed and 0 otherwise. A `validate`
-        run fails when it exits non-zero or its reply is unparsable or has a
-        non-empty `problems`; warnings are printed and never fail.
-        `handlerCommandDir` runs it over every role file and every `specFiles`
-        entry, so a failing file fails the build.
-      '';
-    };
 
     commandSpecFiles = lib.mkOption {
       type = lib.types.attrsOf lib.types.package;
@@ -1781,6 +2090,64 @@ in
       description = ''
         Read-only output: role name -> that role's rendered pg-wrap spec file, for
         every role with a `spec`.
+      '';
+    };
+
+    lib = {
+      renderWrapSpec = lib.mkOption {
+        type = lib.types.raw;
+        readOnly = true;
+        description = ''
+          Read-only function `{ wrap, keep, strictEnv, exec } -> <spec file
+          derivation>`: renders a pg-wrap spec (`schema_version = 1` plus the four
+          keys) as TOML. The ten module-owned `keep` names are always added and the
+          result is de-duplicated. Command-role specs reuse it.
+        '';
+      };
+
+      checkRenderedScript = lib.mkOption {
+        type = lib.types.package;
+        readOnly = true;
+        description = ''
+          Read-only executable script `check-rendered [--spec <file>]... [--role
+          <file>]...`. Each `--spec` runs `pg-wrap check --spec <file>`; each
+          `--role` runs the handler's `validate --skip-pool-dirs --role-config
+          <file>` (the request on stdin). It prints every failing file with its
+          messages, then exits 1 if any check failed and 0 otherwise. A `validate`
+          run fails when it exits non-zero or its reply is unparsable or has a
+          non-empty `problems`; warnings are printed and never fail.
+          `handlerCommandDir` runs it over every role file and every `specFiles`
+          entry, so a failing file fails the build.
+        '';
+      };
+
+      checkAdapterRolesScript = lib.mkOption {
+        type = lib.types.package;
+        readOnly = true;
+        description = ''
+          Read-only executable script `check-adapter-roles <adapter> [--adapter-arg
+          <arg>]... [--spec <file>]... [--request <file>]... [--out <dir>]`: the
+          check `roleValidation` runs. Each `--request` is a validate request JSON
+          piped to `<adapter> validate`; it fails on a non-zero exit, an unparsable
+          reply or a non-empty `problems` array.
+        '';
+      };
+    };
+
+    roleValidation = lib.mkOption {
+      type = lib.types.attrsOf lib.types.package;
+      readOnly = true;
+      description = ''
+        Read-only output (pg2-12gr4.10.10): `{ ccpool; command; }`, one build-time
+        derivation per adapter. Each runs the adapter's `validate` (the ccpool
+        adapter with `--skip-pool-dirs`, because the build sandbox has no pools)
+        over the rendered `[role.config]` of every NEW-path role naming that
+        adapter, and `pg-wrap check` over those roles' spec files; it fails the
+        build when `validate` reports a problem. `$out/replies/<role>.request.json
+        .reply.json` keeps each validate reply. A derivation for an adapter no
+        role names builds trivially. Both are also added to `home.extraDependencies`
+        (when that option exists) while some role names them, so a home-manager
+        generation cannot build without them.
       '';
     };
 
@@ -2314,8 +2681,10 @@ in
         ];
         # handlerCommandDir: this bead, pg2-pteab.
         inherit handlerCommandDir specFiles commandSpecFiles;
-        lib.renderWrapSpec = renderWrapSpec;
-        lib.checkRenderedScript = checkRenderedScript;
+        lib = {
+          inherit renderWrapSpec checkRenderedScript checkAdapterRolesScript;
+        };
+        inherit roleValidation;
         inherit claudeBaseline;
         poolConfigFiles =
           lib.optionalAttrs cfg.pool.enable { handler = poolConfigFile; }
@@ -2448,7 +2817,11 @@ in
       ++ unmanagedPoolAssertions
       ++ wrapSpecAssertions
       ++ commandSpecAssertions
-      ++ wrapSessionEnvAssertions;
+      ++ wrapSessionEnvAssertions
+      # old/new path selection and the join with the pg-router module's roles
+      # (pg2-12gr4.10.10).
+      ++ rolePathAssertions
+      ++ roleJoinAssertions;
 
       systemd.user = {
         services = {
@@ -2513,5 +2886,30 @@ in
         };
       };
     })
+
+    # The join (pg2-12gr4.10.10): each new-path role fills in the pg-router
+    # module's role of the same name. Keyed on the OPTION's declaration (the pg-router
+    # module is imported by home/default.nix next to this one), so a harness that
+    # loads only this module still evaluates; a new-path role without that module
+    # fails `roleJoinAssertions`. `binds` and `enabled` stay the consumer's. The
+    # ccpool adapter's role gets `survivesShutdown = true` (ADR 0085): a ccpool-backed
+    # role's session outlives the daemon, so the daemon must not cancel its dispatch.
+    (lib.mkIf cfg.enable (
+      lib.optionalAttrs hasPgRouterRoles {
+        phillipgreenii.programs.pg-router.roles = lib.mapAttrs (
+          name: roleCfg:
+          {
+            inherit (roleCfg) handler;
+            config = roleBodyFor name roleCfg;
+          }
+          // lib.optionalAttrs (usesCcpoolAdapter roleCfg) { survivesShutdown = true; }
+        ) newPathRoles;
+      }
+      # Build the per-adapter validation with every home-manager generation (the
+      # check that fails the build on a field the renderer dropped).
+      // lib.optionalAttrs (options ? home && options.home ? extraDependencies) {
+        home.extraDependencies = activeRoleValidations;
+      }
+    ))
   ];
 }

@@ -64,8 +64,11 @@ let
   # field along the way -- an unstubbed option here would
   # throw "attribute missing" the first time that happens,
   # not merely stay unforced.
-  evalHM =
-    ccpoolHandler:
+  evalHMWith =
+    {
+      handler ? { },
+      pgRouter ? { },
+    }:
     (lib.evalModules {
       specialArgs = {
         pkgs = hmPkgs;
@@ -76,6 +79,9 @@ let
       };
       modules = [
         ../home/programs/pg-router-ccpool-handler/default.nix
+        # The pg-router module's `roles.<name>` is what a new-path handler role
+        # joins (bead pg2-12gr4.10.10); its own options need only the stubs below.
+        ../home/programs/pg-router/default.nix
         (
           { lib, ... }:
           {
@@ -92,6 +98,12 @@ let
                 activation = lib.mkOption {
                   type = lib.types.attrsOf lib.types.anything;
                   default = { };
+                };
+                # home-manager's `home.extraDependencies` (bead pg2-12gr4.10.10):
+                # the per-adapter role validation rides in it.
+                extraDependencies = lib.mkOption {
+                  type = lib.types.listOf lib.types.package;
+                  default = [ ];
                 };
               };
               systemd.user.services = lib.mkOption {
@@ -173,12 +185,16 @@ let
             };
           }
         )
-        { phillipgreenii.programs.pg-router-ccpool-handler = ccpoolHandler; }
+        {
+          phillipgreenii.programs.pg-router-ccpool-handler = handler;
+          phillipgreenii.programs.pg-router = pgRouter;
+        }
       ];
     }).config;
+  evalHM = handler: evalHMWith { inherit handler; };
 in
 {
-  inherit evalHM;
+  inherit evalHM evalHMWith;
   # What a spec's default `exec` resolves to.
   claudeBin = "${hmPkgs.llm-agentsPkgs.claude-code}/bin/claude";
 }
