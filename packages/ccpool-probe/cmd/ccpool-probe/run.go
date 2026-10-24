@@ -8,7 +8,8 @@
 // paragraph]:
 //
 //	0 clean       -- every sub-check ran cleanly; nothing new to report,
-//	                 or every new finding was successfully filed/updated.
+//	                 or every new finding was successfully filed/updated
+//	                 (every bd write it needed succeeded).
 //	2 usage error -- a cobra-level flag/arg problem (see main.go's run()).
 //	3 total failure -- every sub-check's own ccpool dependency was
 //	                 unreachable (neither produced a result); this run
@@ -17,7 +18,8 @@
 //	4 partial     -- at least one sub-check was attempted and actually
 //	                 degraded (its ccpool dependency was unreachable for
 //	                 --degraded-threshold CONSECUTIVE runs, the
-//	                 pg-connector dedup query itself failed, or the
+//	                 pg-connector dedup query itself failed, a bd write
+//	                 for a finding failed, or the
 //	                 last-run snapshot could not be persisted), while at
 //	                 least one other sub-check (or the dedup query, when
 //	                 reached) produced a result; this run proceeds with
@@ -28,7 +30,15 @@
 //	                 every later run would see "no baseline" and the
 //	                 drift/never-prompted checks would stay silently inert
 //	                 (pg2-d845f), and the handler discards stderr on
-//	                 exit 0, so only a non-zero exit surfaces it.
+//	                 exit 0, so only a non-zero exit surfaces it. A failed bd
+//	                 write for a finding (create, metadata update or comment
+//	                 through pg-connector) is degraded for the same reason:
+//	                 the finding was not filed, so the run must not exit 0.
+//	                 The zombie-drift finding is edge-triggered against the
+//	                 saved baseline, so when its filing fails (or the dedup
+//	                 query fails before any filing) the snapshot's zombie
+//	                 baseline is rolled back to the previous run's, and the
+//	                 next run derives the finding again.
 //
 // A single ccpool failure is NOT enough for exit 4 (pg2-zzf54): a killed call
 // is retried once, and a sub-check that still fails is logged to stderr and
@@ -327,13 +337,16 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		nextDegraded = nil
 	}
 
-	if err := saveSnapshot(opts.snapshotPath, snapshot{
+	snap := snapshot{
 		ZombieCount:             zombieCount,
 		ZombieConsecutiveGrowth: consecutiveGrowth,
 		CheckedAt:               deps.now().UTC().Format(time.RFC3339),
 		ReadySeen:               readySeen,
 		Degraded:                nextDegraded,
-	}); err != nil {
+	}
+	snapSaved := true
+	if err := saveSnapshot(opts.snapshotPath, snap); err != nil {
+		snapSaved = false
 		// A snapshot that cannot be persisted silently disables the drift
 		// and never-prompted checks (every later run sees "no baseline";
 		// pg2-d845f), so it is a degraded sub-check: exit 4 after the
@@ -361,6 +374,33 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		return context.WithTimeout(ctx, opts.pgConnectorTimeout)
 	}
 
+	// rollbackZombieBaseline re-saves the snapshot with the PREVIOUS zombie
+	// baseline (count and growth streak) when a zombie-drift finding could not
+	// be filed. The drift band is edge-triggered against that baseline, so
+	// leaving the new count in place would make the next run compare the
+	// count with itself and never derive the finding again; with the old
+	// baseline restored, the next run derives it again and retries the write.
+	// The other snapshot-derived check, never-prompted, needs no rollback: its
+	// ready keys stay saved, so the next run still sees the session in both
+	// observations and re-derives the finding.
+	rollbackZombieBaseline := func() {
+		if !snapSaved {
+			return // nothing new was persisted, so the old baseline is intact
+		}
+		snap.ZombieCount = prevSnap.ZombieCount
+		snap.ZombieConsecutiveGrowth = prevSnap.ZombieConsecutiveGrowth
+		if err := saveSnapshot(opts.snapshotPath, snap); err != nil {
+			warn(fmt.Sprintf("failed to restore zombie baseline in snapshot %s: %v", opts.snapshotPath, err))
+			degraded = append(degraded, fmt.Sprintf("snapshot: restore zombie baseline %s: %v", opts.snapshotPath, err))
+		}
+	}
+	hasZombieFinding := false
+	for _, f := range findings {
+		if f.Kind == kindZombieDrift {
+			hasZombieFinding = true
+		}
+	}
+
 	if len(findings) > 0 {
 		listCtx, cancel := withPgTimeout()
 		existing, err := deps.listEscalated(listCtx, opts.dedupQuery, warn)
@@ -370,10 +410,24 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 			// returning immediately, no bead is filed/updated on this
 			// path.
 			degraded = append(degraded, fmt.Sprintf("dedup query: %v", err))
+			if hasZombieFinding {
+				rollbackZombieBaseline()
+			}
 			return partialErrorf("run: partial (%s)", exitReasons())
 		}
+		zombieFilingFailed := false
 		for _, f := range findings {
 			action, match := decideAction(f, existing)
+			// fail records one failed bd write: it degrades the exit (a
+			// finding that was not filed must not exit 0) and, for the
+			// edge-triggered zombie finding, marks the baseline for rollback.
+			fail := func(what string, err error) {
+				warn(fmt.Sprintf("failed to %s: %v", what, err))
+				degraded = append(degraded, fmt.Sprintf("%s: %v", what, err))
+				if f.Kind == kindZombieDrift {
+					zombieFilingFailed = true
+				}
+			}
 			body := renderBody(f, deps.now(), skippedNote)
 			switch action {
 			case actionCreate:
@@ -381,25 +435,28 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 				_, err := deps.createIssue(createCtx, escalationTitle(f), []string{"escalated"}, trackedMetadata(f), body, warn)
 				cancel()
 				if err != nil {
-					warn(fmt.Sprintf("failed to create bd issue for %s: %v", f.Fingerprint, err))
+					fail("create bd issue for "+f.Fingerprint, err)
 				}
 			case actionUpdate:
 				updateCtx, cancel := withPgTimeout()
 				err := deps.updateMetadata(updateCtx, match.ID, trackedMetadata(f), warn)
 				cancel()
 				if err != nil {
-					warn(fmt.Sprintf("failed to update bd issue %s for %s: %v", match.ID, f.Fingerprint, err))
+					fail(fmt.Sprintf("update bd issue %s for %s", match.ID, f.Fingerprint), err)
 				}
 				commentCtx, cancel2 := withPgTimeout()
 				err = deps.comment(commentCtx, match.ID, body, warn)
 				cancel2()
 				if err != nil {
-					warn(fmt.Sprintf("failed to comment on bd issue %s for %s: %v", match.ID, f.Fingerprint, err))
+					fail(fmt.Sprintf("comment on bd issue %s for %s", match.ID, f.Fingerprint), err)
 				}
 			case actionSkip:
 				// Nothing new -- no write [Binding decisions: "'Nothing
 				// new' rule"].
 			}
+		}
+		if zombieFilingFailed {
+			rollbackZombieBaseline()
 		}
 	}
 
