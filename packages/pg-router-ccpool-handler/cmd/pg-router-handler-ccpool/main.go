@@ -11,10 +11,10 @@
 // Subcommands: dispatch, postStartup, preShutdown and validate (INTF-HANDLER,
 // DEC-WIRE-1: JSON on stdin, JSON on stdout, a coarse exit code), the outbound
 // manager-contract subcommands register and self-status (the launchd agent runs
-// register; they speak to the core's socket), the operator tool origin, version
-// and help. The remaining ccpool-specific subcommands (pool-capacity, split,
-// query) are not part of this binary yet: they are the next packet of the same
-// split (pg2-12gr4.10.7), and an unknown subcommand is a usage error.
+// register; they speak to the core's socket), the ccpool-specific subcommands
+// origin, pool-capacity, split and query (query is the beads-shaped INTF-SOURCE
+// participant, bead pg2-12gr4.10.7), version and help. An unknown subcommand is
+// a usage error.
 //
 // Sessions outlive daemon restarts (ADR 0085), so besides dispatch this adapter
 // carries the lifecycle: postStartup runs the post-startup reconcile and orphan
@@ -73,6 +73,12 @@ func run(args []string) int {
 		return runValidate(args[1:])
 	case "origin":
 		return runOrigin(args[1:])
+	case "pool-capacity":
+		return runPoolCapacity(args[1:])
+	case "split":
+		return runSplit(args[1:])
+	case "query":
+		return runQuery(args[1:])
 	default:
 		cliutil.PrintUsageErr(fmt.Sprintf("pg-router-handler-ccpool: unknown subcommand %q", args[0]), usageLine)
 		return conformance.ExitUsage

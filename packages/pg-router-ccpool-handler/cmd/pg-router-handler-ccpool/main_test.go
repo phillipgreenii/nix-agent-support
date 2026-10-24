@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/corecall"
@@ -18,6 +20,7 @@ import (
 var ambientEnvInputs = []string{
 	rolefile.EnvConfig,
 	rolefile.EnvRoleConfig,
+	envQueryConfig,
 	corecall.EnvSocket,
 	corecall.EnvToken,
 	"CCPOOL_POOL",
@@ -86,12 +89,26 @@ func TestRun_SubcommandSet(t *testing.T) {
 			t.Errorf("%s: exit %d, want 0", ok, got)
 		}
 	}
-	// The remaining ccpool subcommands belong to the next packet of the split;
-	// until then they are usage errors, never a stub.
-	for _, notYet := range []string{"pool-capacity", "split", "query", "bogus"} {
-		if got := run([]string{notYet}); got != conformance.ExitUsage {
-			t.Errorf("%s: exit %d, want %d (not a subcommand yet)", notYet, got, conformance.ExitUsage)
+	// An unknown subcommand is a usage error, never a stub.
+	if got := run([]string{"bogus"}); got != conformance.ExitUsage {
+		t.Errorf("bogus: exit %d, want %d", got, conformance.ExitUsage)
+	}
+	// The ccpool-specific subcommands are real: with no arguments, split and
+	// pool-capacity are usage errors from their own parsers (not "unknown
+	// subcommand"), and pool-capacity -h prints help with exit 0.
+	for _, sub := range []string{"pool-capacity", "split"} {
+		if got := run([]string{sub}); got != conformance.ExitUsage {
+			t.Errorf("%s with no arguments: exit %d, want %d", sub, got, conformance.ExitUsage)
 		}
+	}
+	if got := run([]string{"pool-capacity", "-h"}); got != conformance.ExitOK {
+		t.Errorf("pool-capacity -h: exit %d, want 0", got)
+	}
+	if got := run([]string{"split", "--help"}); got != conformance.ExitOK {
+		t.Errorf("split --help: exit %d, want 0", got)
+	}
+	if got := run([]string{"query", "stray"}); got != conformance.ExitUsage {
+		t.Errorf("query with an argument: exit %d, want %d", got, conformance.ExitUsage)
 	}
 	// Requests are JSON on stdin, never arguments.
 	for _, sub := range []string{"dispatch", "postStartup", "preShutdown", "validate"} {
@@ -102,5 +119,31 @@ func TestRun_SubcommandSet(t *testing.T) {
 	// origin keeps its old subcommands: the verb is required.
 	if got := run([]string{"origin"}); got != conformance.ExitUsage {
 		t.Errorf("origin without a verb: exit %d, want %d", got, conformance.ExitUsage)
+	}
+}
+
+// TestHelp_ListsExactlyItsOwnSubcommands pins the help and usage line to the
+// twelve subcommands this binary dispatches, and none of the old binary's
+// retired spellings.
+func TestHelp_ListsExactlyItsOwnSubcommands(t *testing.T) {
+	want := []string{"dispatch", "validate", "origin", "postStartup", "preShutdown", "register", "self-status", "pool-capacity", "split", "query", "version", "help"}
+	for _, sub := range want {
+		if !strings.Contains(usageLine, sub) {
+			t.Errorf("usageLine lacks %q", sub)
+		}
+		if !strings.Contains(helpText, "\n  "+sub+" ") {
+			t.Errorf("helpText has no entry for %q", sub)
+		}
+	}
+	// Every two-space-indented entry in the help is one of the twelve.
+	entry := regexp.MustCompile(`(?m)^  ([A-Za-z-]+) {2,}\S`)
+	known := map[string]bool{}
+	for _, w := range want {
+		known[w] = true
+	}
+	for _, m := range entry.FindAllStringSubmatch(helpText, -1) {
+		if !known[m[1]] {
+			t.Errorf("helpText lists %q, which is not a subcommand of this binary", m[1])
+		}
 	}
 }

@@ -1,6 +1,6 @@
 package main
 
-const usageLine = "usage: pg-router-handler-ccpool <dispatch|postStartup|preShutdown|validate|register|self-status|origin|version|help> [flags]"
+const usageLine = "usage: pg-router-handler-ccpool <dispatch|postStartup|preShutdown|validate|register|self-status|origin|pool-capacity|split|query|version|help> [flags]"
 
 const helpText = `pg-router-handler-ccpool — the ccpool adapter for pg-router.
 
@@ -66,6 +66,22 @@ Subcommands:
                  per-origin availability probe (INV-CCH-10): origin status,
                  origin ignore <key>, origin unignore <key>. Configured by the
                  launch config's originProbe block.
+  pool-capacity NOT part of the wire contract (never spawned by core): an
+                 operational/observability tool run directly (e.g. by a
+                 periodic timer) that makes ccpool emit each named pool's
+                 capacity as the ccpool_pool_capacity OTLP gauge (--pool
+                 <name>=<dir>, repeatable; OTEL_* env from the caller; failures
+                 on stderr).
+  split         NOT part of the wire contract: the split-triage role's write
+                 path: split apply <bead-id> (JSON plan on stdin) / split
+                 unsplittable <bead-id> (reason on stdin). See: split --help
+  query         INTF-SOURCE: answer a pull query (reads the source.query
+                 request on stdin, writes source.query-reply JSON to stdout):
+                 zero events when unconfigured, or the real "bd ready" results
+                 when --query-config (or PG_ROUTER_CCPOOL_HANDLER_QUERY) names
+                 its beads-backed label/title-prefix/item-type filters;
+                 --config/PG_ROUTER_CCPOOL_HANDLER_CONFIG supplies
+                 RepoRoot/BeadsPrefix.
   version       print the version.
   help          print this text.
 
