@@ -214,7 +214,9 @@ at: 2026-10-05T12:00:00Z
 
 - `rule` is the rule id and `op` is the action's operation.
 - `facts` is the compact JSON object of the facts the rule keyed on, keys sorted.
-- `seq` is the routed item's sequence number, or `none` for a run without `--from-item`.
+- `seq` is the routed item's sequence number, or `none` for a run without `--from-item`. For a PR the
+  composed command builds that item itself, and the number it writes is the delivery key (the change
+  sequence, else the value of the id suffix; see [`pr-change.md`](pr-change.md)), not a change sequence.
 - `at` is the time of the run in UTC, RFC 3339.
 
 The `focus.item` rule covers four transitions under one rule id, so its comment is told apart by

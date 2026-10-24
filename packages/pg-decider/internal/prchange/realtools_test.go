@@ -1,6 +1,12 @@
 package prchange
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -48,7 +54,7 @@ const (
 // minScenarios is the number of subtests TestPRChangeRealTools has; the nix
 // check requires at least this many PASS lines, so a filtered-out or renamed
 // scenario cannot pass vacuously. Keep it equal to the number of t.Run calls.
-const minScenarios = 16
+const minScenarios = 20
 
 func contains(t *testing.T, what, got string, want ...string) {
 	t.Helper()
@@ -392,7 +398,196 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
+	run("a-failing-change-delivered-twice-counts-once-with-or-without-a-sequence-and-changes-that-differ-count-each", func(t *testing.T) {
+		// Every delivery fails (the tracker refuses the anchor create), so the
+		// decider's failure counter is the observable: it rises once per
+		// DELIVERY, not once per run.
+		const key = "failures.anchor.lazy"
+		cases := []struct {
+			name       string
+			deliveries [][]string // the argv after `apply`
+			counts     []string   // the failure count after each delivery
+			fromItem   []bool     // whether the decider was handed --from-item
+			seqRecord  string     // metadata.seq the decider recorded for the last delivery
+		}{
+			{"a change sequence", [][]string{{id11, "5"}, {id11, "5"}, {id11, "6"}}, []string{"1", "1", "2"}, []bool{true, true, true}, "6"},
+			{
+				"the id suffix of the old adapter (no sequence at all)",
+				[][]string{{oldAdapterID(id11, "head-a", "feedback")}, {oldAdapterID(id11, "head-a", "feedback")}, {oldAdapterID(id11, "head-b", "feedback")}, {oldAdapterID(id11, "head-b", "push")}},
+				[]string{"1", "1", "2", "3"},
+				[]bool{true, true, true, true},
+				strconv.FormatInt(suffixValue(oldAdapterID(id11, "head-b", "push")), 10),
+			},
+			{"a missing template key (<no value>) falls to the id suffix", [][]string{{oldAdapterID(id11, "h", "k"), "<no value>"}, {oldAdapterID(id11, "h", "k"), "<no value>"}}, []string{"1", "1"}, []bool{true, true}, strconv.FormatInt(suffixValue(oldAdapterID(id11, "h", "k")), 10)},
+			{"a sequence in exponent form (10^7)", [][]string{{id11, "1e+07"}, {id11, "1e+07"}}, []string{"1", "1"}, []bool{true, true}, "10000000"},
+			{"a bare id counts every run (no retry window, no router retry)", [][]string{{id11}, {id11}}, []string{"1", "2"}, []bool{false, false}, ""},
+			{"a sequence of 0 is never passed", [][]string{{id11, "0"}, {id11, "0"}}, []string{"1", "2"}, []bool{false, false}, ""},
+		}
+		for _, c := range cases {
+			r := newRig(t, fxMine, true)
+			r.ctlWrite("fail.create", "unavailable")
+			for i, d := range c.deliveries {
+				res := r.change(append([]string{"apply"}, d...)...)
+				if res.code != ExitDecidePartial {
+					t.Fatalf("%s, delivery %d: exit %d, want %d:\n%s", c.name, i+1, res.code, ExitDecidePartial, res.stderr)
+				}
+				if got := r.annotation(id11, key); got != c.counts[i] {
+					t.Fatalf("%s: after delivery %d the failure count is %q, want %q", c.name, i+1, got, c.counts[i])
+				}
+				runs := r.deciderRuns()
+				if got := strings.Contains(runs[len(runs)-1], "--from-item -"); got != c.fromItem[i] {
+					t.Fatalf("%s, delivery %d: decider argv %q, --from-item = %v, want %v", c.name, i+1, runs[len(runs)-1], got, c.fromItem[i])
+				}
+			}
+			if got := r.annotation(id11, "failure_seq.anchor.lazy"); got != c.seqRecord {
+				t.Errorf("%s: the decider recorded seq %q, want %q", c.name, got, c.seqRecord)
+			}
+		}
+	})
+
+	run("the-audit-comment-names-the-delivery-key-from-the-sequence-or-the-old-adapters-id-suffix", func(t *testing.T) {
+		old := oldAdapterID(id11, "head0011", "changed")
+		for _, c := range []struct {
+			name string
+			args []string
+			want string
+		}{
+			{"a change sequence", []string{id11, "42"}, "seq: 42\n"},
+			{"an exponent-form sequence", []string{id11, "1.234567e+06"}, "seq: 1234567\n"},
+			{"the old adapter's item (no sequence, an @<12 hex> id)", []string{old}, fmt.Sprintf("seq: %d\n", suffixValue(old))},
+			{"a bare id passes no key", []string{id11}, "seq: none\n"},
+		} {
+			r := newRig(t, fxMine, true)
+			r.change(append([]string{"apply"}, c.args...)...)
+			if got := r.ctlRead("calls.log"); !strings.Contains(got, c.want) {
+				t.Errorf("%s: no audit comment carries %q:\n%s", c.name, c.want, got)
+			}
+		}
+	})
+
+	run("each-run-is-recorded-and-a-by-hand-plan-run-after-an-apply-run-changes-neither-the-lane-mode-nor-the-flip-time", func(t *testing.T) {
+		r := newRigWith(t, fxMine, rigOpts{cutover: true, laneMode: "apply"})
+		res := r.change("apply", id11, "3")
+		if res.code != ExitDecidePartial {
+			t.Fatalf("apply: exit %d:\n%s", res.code, res.stderr)
+		}
+		// The residual is the actions a read-only plan still lists after the
+		// apply, read here the same way.
+		after := r.exec(context.Background(), r.binDir+"/pg-decider", "plan", "pr", id11, "--json")
+		var plan struct{ Actions []json.RawMessage }
+		must(t, json.Unmarshal([]byte(after.stdout), &plan))
+		if len(plan.Actions) == 0 {
+			t.Fatal("setup: the plan after the apply lists nothing, so the residual would not be told from a missing one")
+		}
+
+		first := r.lane()
+		if first["pr_lane.state.mode"] != "apply" || first["pr_lane.state.flip_at"] == "" || first["pr_lane.state.last_run_at"] == "" {
+			t.Fatalf("lane-level state after an apply run: %v", first)
+		}
+		var pr struct {
+			Mode        string `json:"mode"`
+			LastOutcome string `json:"last_outcome"`
+			Residual    int    `json:"residual"`
+		}
+		must(t, json.Unmarshal([]byte(first["pr_lane.pr."+id11]), &pr))
+		if pr.Mode != "apply" || pr.Residual != len(plan.Actions) || pr.LastOutcome != "decide.decide_partial" {
+			t.Fatalf("per-PR state = %+v (residual want %d): %v", pr, len(plan.Actions), first)
+		}
+		if first["pr_lane.runs.decide.decide_partial"] != "1" {
+			t.Fatalf("the lane-run counter after one failed apply: %v", first)
+		}
+		for k := range first {
+			if strings.HasPrefix(k, "pr_lane.decisions.") && strings.Contains(k, "|planned|") {
+				t.Fatalf("the residual plan after the apply was recorded as a run (%s): %v", k, first)
+			}
+		}
+
+		// A by-hand plan run after the apply run.
+		if res := r.change("plan", id11); res.code != ExitOK {
+			t.Fatalf("plan: exit %d:\n%s", res.code, res.stderr)
+		}
+		second := r.lane()
+		for _, k := range []string{"pr_lane.state.mode", "pr_lane.state.flip_at", "pr_lane.pr." + id11} {
+			if second[k] != first[k] {
+				t.Errorf("a by-hand plan run changed %s: %q -> %q", k, first[k], second[k])
+			}
+		}
+		planned := false
+		for k := range second {
+			planned = planned || (strings.HasPrefix(k, "pr_lane.decisions.") && strings.Contains(k, "|planned|"))
+		}
+		if !planned {
+			t.Errorf("the plan run's decisions were not counted: %v", second)
+		}
+
+		recs := r.runRecords()
+		if len(recs) != 2 {
+			t.Fatalf("%d run records, want 2", len(recs))
+		}
+		a, p := recs[0], recs[1]
+		if a.Mode != "apply" || a.Entity != id11 || a.Seq != 3 || a.SeqSource != KeySourceSequence || a.ExitCode != ExitDecidePartial || a.ErrorClass != ClassDecidePartial ||
+			a.Hydrate.Result != hydrateOK || a.Decide == nil || a.Decide.ExitCode != 2 || len(a.Decide.Actions) == 0 || a.Residual == nil || *a.Residual != len(plan.Actions) || a.Lane.Result != laneRecorded {
+			t.Errorf("apply record = %+v / %+v", a, a.Decide)
+		}
+		if p.Mode != "plan" || p.ExitCode != 0 || p.Decide == nil || p.Decide.ExitCode != 0 || len(p.Decide.Rules) == 0 || p.Adoption == nil {
+			t.Errorf("plan record = %+v / %+v", p, p.Decide)
+		}
+		if a.RunID == p.RunID || a.RunID == "" {
+			t.Errorf("run ids %q and %q", a.RunID, p.RunID)
+		}
+	})
+
+	run("a-run-that-stops-at-hydrate-appends-a-record-with-its-class-and-no-decide-fields-and-counts-one-lane-run-in-each-mode", func(t *testing.T) {
+		r := newRigWith(t, fxLegacy, rigOpts{cutover: true, legacy: []string{id9}, laneMode: "plan"})
+		r.ctlWrite("fail.pr-show", "not_found")
+		for i, mode := range []string{"plan", "apply"} {
+			res := r.change(mode, id9)
+			if res.code != ExitHydrateNotFound {
+				t.Fatalf("%s: exit %d:\n%s", mode, res.code, res.stderr)
+			}
+			if got := r.lane()["pr_lane.runs.hydrate.not_found"]; got != strconv.Itoa(i+1) {
+				t.Fatalf("after the %s run the lane-run counter is %q, want %d", mode, got, i+1)
+			}
+			recs := r.runRecords()
+			if len(recs) != i+1 {
+				t.Fatalf("%d records after the %s run", len(recs), mode)
+			}
+			rec := recs[i]
+			if rec.Mode != mode || rec.ErrorClass != ClassNotFound || rec.FailingStage != StageHydrate || rec.Decide != nil || rec.Adoption != nil || rec.Residual != nil ||
+				rec.Hydrate.Result != hydrateFailed || rec.Lane.Result != laneRecorded {
+				t.Fatalf("%s record = %+v", mode, rec)
+			}
+		}
+		raw := r.ctlRead("decider.log")
+		if raw != "" {
+			t.Errorf("the decider ran: %q", raw)
+		}
+		if !strings.Contains(r.lane()["pr_lane.marked_inactive"], "1") {
+			t.Errorf("the not-found PR was not counted as marked inactive: %v", r.lane())
+		}
+	})
+
 	if scenarios != minScenarios {
 		t.Errorf("the test declares %d scenarios, but minScenarios is %d (and the nix check's minScenarios must equal it)", scenarios, minScenarios)
 	}
+}
+
+// oldAdapterID is the item id the old source adapter gives a change under a
+// retry window: the entity id and `@` and 12 hexadecimal digits, a stable
+// digest of the change kind, the entity and its head (the adapter's rows carry
+// no sequence, kinds or fields). One change gives one id, a change that differs
+// in head or in kind another.
+func oldAdapterID(entity, head, kind string) string {
+	sum := sha256.Sum256([]byte(kind + "|" + entity + "|" + head))
+	return entity + "@" + hex.EncodeToString(sum[:])[:12]
+}
+
+// suffixValue is the integer value of an item id's 12 hexadecimal digits.
+func suffixValue(id string) int64 {
+	_, hexDigits, _ := strings.Cut(id, "@")
+	n, err := strconv.ParseInt(hexDigits, 16, 64)
+	if err != nil {
+		panic(err)
+	}
+	return n
 }

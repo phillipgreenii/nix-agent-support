@@ -10,8 +10,11 @@ of this repo, not a shell snippet in a deployment's configuration, so its exit-c
 testable.
 
 ```text
-pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] <plan|apply> <id>
+pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] [--run-record FILE] <plan|apply> <id> [<seq>]
 ```
+
+`<seq>` is the item's change sequence as the router renders it into the role's argv; the next
+sections say what it is for. An operator running the command by hand leaves it out.
 
 ```mermaid
 flowchart TD
@@ -59,9 +62,99 @@ directory is `--lock-dir`, else the environment variable `PG_PR_CHANGE_LOCK_DIR`
    decider, when the view's version is `0` or the view is marked stale, so an unhydrated view can
    never mint an anchor. A legacy row has version `0`, so the version is a sufficient test.
 3. **Decide.** `pg-decider plan pr <id>` for mode `plan`, `pg-decider apply pr <id>` for mode
-   `apply`. The plan the decider prints is passed through on standard output.
+   `apply` (with `--from-item -` when the run has a delivery key, see below). The plan the decider
+   prints is passed through on standard output.
+4. **Record.** The run is recorded in the lane state and in the run record (see "The run record" and
+   "Lane state"). A failure to record never changes the exit code: the decider has already acted.
 
 The command never sleeps and retries inside one run: pg-router owns every clock.
+
+Besides the decider's own run, the command makes read-only `pg-decider plan pr <id> --json` reads: one
+after a `plan` run, and one before and one after an `apply` run. They write nothing. They are where the
+run record's planned actions, per-rule outcomes and skip reasons, and the lane state's residual and
+decisions come from.
+
+## The delivery key
+
+The decider's `escalate_after` counter counts a failing change once per DELIVERY, not once per run,
+but only when the run says which delivery it is: a run without `--from-item` always counts, so a
+router retry of one delivery would raise a premature human task. The router's command executor gives
+the command no standard input and no item file, only the three environment entries
+`PG_ROUTER_ROLE`, `PG_ROUTER_ITEM_ID` and `PG_ROUTER_ITEM_TYPE`, so the deployment templates the
+item's id and its change sequence into the command's arguments (`<id>` and `<seq>`), and in `apply`
+mode the command builds the minimal routed item itself (`id`, `type`, `title` and `metadata` with
+`entity_type`, `entity_id`, `kind` and `seq`) and hands it to the decider's `--from-item -` on
+standard input. `plan` has no such flag and is never given one.
+
+The delivery key the command writes into `metadata.seq` is, in order:
+
+1. the change sequence `<seq>`, when the item carries one (the daemon feed does);
+2. otherwise the integer value of the 12 hexadecimal digits after the `@` in the item id (the
+   retry-window id the old source adapter gives every item: a stable digest of the change kind,
+   source, entity id, head and version, so a router retry of one delivery carries the same suffix;
+   the digest omits content, so two changes of one kind on one head share one key and one id, which
+   the core deduplicates on purpose, and count once);
+3. otherwise none: no `--from-item` is passed (no retry window means no router retry, so counting
+   every run is correct).
+
+A key of `0` is never passed, because the decider treats an item as carrying a sequence whatever its
+value, and a pair of equal keys makes it skip the count. A sequence of `0` is therefore no sequence,
+and so is a suffix of twelve zeros. `<seq>` that is empty or reads `<no value>`, `<nil>` or `null`
+(what a template renders for a missing key) is absent. The router renders a JSON number it decoded
+into an untyped value, so a sequence of 1,000,000 or more arrives in exponent form (for example
+`1.234567e+06`); the command parses it. Text that is no whole, non-negative number is a usage error
+(exit `64`), never read as "no sequence".
+
+The decider's audit comment names the delivery key, NOT a change sequence: its `seq:` line holds the
+sequence when the item carried one and otherwise the value of the id suffix, and `none` for a run with
+no key.
+
+## The run record
+
+Every run that gets past argument checking appends one JSON line to the run record file, in one write
+under a lock on the file, so concurrent runs (a manual run, the paced backfill, live dispatches)
+cannot interleave lines. The file is `--run-record FILE`, else the environment variable
+`PG_PR_CHANGE_RUN_RECORD`, else `$XDG_STATE_HOME/pg-pr-change/pr-change-runs.jsonl`. Its name differs on
+purpose from pg-desk's `run-record.log` (the legacy per-run record of `pg-desk run`, which rotates at 8 MiB and
+goes away with the legacy path). The record is for people and for the plan summary; no alert reads it,
+so a dead log pipeline cannot silence an alert (the outcome alerts read the store). The file is not
+rotated away before the plan summary has been consumed: it is kept until the operator declares the
+lane stable.
+
+A line carries `contract` (`pg-pr-change.run-record/v1`), `run_id`, `at` and `finished_at`, `entity`
+(the normalized PR id), `event_id` (the item id as the router gave it), `seq` and `seq_source`
+(`sequence`, `id-suffix` or `none`: the delivery key), `mode`, `hydrate` (`result` ok, failed or
+not_run, the refresh `exit_code`, `class` and the refresh `line`), `exit_code`, `error_class` and
+`failing_stage` (`lock`, `hydrate` or `decide`; both absent for a run that succeeded), `lane_record`
+(whether the lane write path took the run), and, when the decider ran, `decide` (its `exit_code`, the
+per-rule outcome and skip reason in `rules`, the planned `actions` as kind and operation, `by_kind`,
+the count per kind, and `plan_error` when the plan could not be read), `adoption` (the adoption
+`outcome` and the `candidates`, the anchors the view links with their state and whether each is
+already keyed) and, for `apply`, `residual` (the number of actions a read-only plan still lists after
+the apply). A run that stops at the lock or at hydrate carries no `decide`, `adoption` or `residual`.
+New members MAY be added to `v1`; none is removed or changes meaning.
+
+## Lane state
+
+After each run the command calls pg-desk's lane write path (`pg-desk pr lane-record`, see
+`operator-commands.md` of the set `phillipgreenii-nix-agent-support · docs/behavior/pg-desk`) once, with
+the mode the run ran in, so the PR's mode, residual, first-seen time of a non-empty residual and last
+outcome, the lane-run counter (one event for a failed run: its stage and class), the decisions counter
+(per rule, action, outcome and skip reason) and the last-run time are stored. The write path alone applies
+the lane-level rule: the lane-level mode and the flip time follow the configured `pr_lane.mode` and
+change only for a recorded run whose mode equals it, so a by-hand `plan` run after the flip changes
+neither, and leaves the PR's persisted apply-mode residual alone. The residual plan the command makes
+after an `apply` is passed as the residual OF that run, never as a run of its own; in `plan` mode the
+residual is the number of actions the plan lists, which is non-zero by definition when there is work.
+A run that ends at the lock is in the run record only: it holds no lock to write the PR's own state
+under. When the decider reports its work-item lookup item count and ceiling they are forwarded too
+(the decider starts to in a later packet).
+
+The decisions counter's `action` comes from the plan read just before an `apply` (the operation of
+each action) and its `outcome` from the decider's apply counters, assigned to a rule's actions in plan
+order, so a rule that mixes operations in one run is attributed in that order. If pg-desk refuses the
+document because of a decision (a rule or reason outside its closed lists), the command records the
+run again without the decisions and says so in the run record (`dropped_decisions`).
 
 ## Exit codes and failure classes
 
@@ -153,6 +246,10 @@ rows of the search answer, never from the merged hits:
 A failure to read the open-anchor probe, to mark the PR inactive or to create the escalation is
 likewise `transient`.
 
+A run that stops here is recorded like any other: one run record line with `error_class` `not_found`
+and no `decide` members, and one `hydrate` / `not_found` event in the lane-run counter, in `plan` and
+in `apply` mode.
+
 ## Invariants
 
 - **INV-PRCHANGE-1.** <!-- uuid: 32cdf748-c087-4a1a-af34-5a282c6d9e23 --> The command MUST run `pg-desk pr refresh <id>` and then `pg-decider` (`plan` or `apply`,
@@ -178,3 +275,19 @@ likewise `transient`.
 - **INV-PRCHANGE-8.** <!-- uuid: 4cd36cf0-c939-478f-a29f-fedcfd096665 --> An escalation lookup that cannot be trusted (a degraded or disabled beads row, a row at the
   cap, an unreadable answer, no beads row, or a failed open-anchor probe) MUST exit as the transient
   class and MUST NOT be read as "no match".
+- **INV-PRCHANGE-9.** <!-- uuid: 8e14b894-f308-4e78-b568-59dc4153a6a8 --> In `apply` mode a run with a delivery key MUST pass the decider `--from-item -` with a minimal
+  routed item on its standard input whose `metadata.seq` is the key, so a router retry of one delivery
+  counts once in the decider's failure counter; a run with no key MUST pass no `--from-item`, and the
+  key MUST NEVER be `0`.
+- **INV-PRCHANGE-10.** <!-- uuid: fbeeaf6e-e2c7-4377-9448-a93da13d8b77 --> The delivery key MUST be the change sequence when the item carries one, else the integer
+  value of the 12 hexadecimal digits after the `@` of the item id, else none; a sequence in exponent
+  form MUST be parsed, `<no value>` MUST read as no sequence, and text that is no whole, non-negative
+  number MUST be a usage error.
+- **INV-PRCHANGE-11.** <!-- uuid: e1d04ad0-353b-41e7-892f-0adcf4f3c7e9 --> Every run that passes argument checking MUST append exactly one JSON line to the run record, in one
+  write, whose file name differs from pg-desk's `run-record.log`; a run that stops before the decider
+  MUST still be recorded, with its `error_class` and no `decide` members.
+- **INV-PRCHANGE-12.** <!-- uuid: 5feaffc9-ac3e-462a-ba54-74f174871ee0 --> A run that holds the per-PR lock MUST record itself once through the lane write path with the
+  mode it ran in, MUST pass the residual plan an `apply` makes afterwards as that run's residual and
+  not as a run, and MUST NOT change its exit code because the lane write path failed.
+- **INV-PRCHANGE-13.** <!-- uuid: fb5e3dd5-6ec3-4f8b-8504-654d9061d887 --> The audit comment of an applied action names the delivery key, not a change sequence; a
+  failure note MUST NOT carry any of the router's retry words after a failure that is not retryable.

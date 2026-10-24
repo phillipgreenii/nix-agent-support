@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
@@ -32,6 +33,18 @@ type Options struct {
 	// Config is the decider's configuration (the tracker backend and beads
 	// directory the not-found escalation writes through); nil means defaults.
 	Config *config.Config
+	// Seq is the change sequence argument as the router rendered it into the
+	// role's argv: a number (possibly in exponent form), or empty or `<no value>`
+	// when the item carries none. See ResolveKey.
+	Seq string
+	// RunRecordPath is the file one JSON record per run is appended to; empty
+	// means no record is written (only a test of the composition logic leaves it
+	// empty).
+	RunRecordPath string
+	// Clock stamps the record; nil means time.Now. NewRunID makes the run id; nil
+	// means a random one.
+	Clock    func() time.Time
+	NewRunID func() string
 	// Runner runs the subprocesses; nil means ExecRunner.
 	Runner Runner
 	// Stdout receives pg-desk's refresh line and the decider's plan output;
@@ -53,6 +66,12 @@ func Run(ctx context.Context, o Options) int {
 	if r.o.LockWait <= 0 {
 		r.o.LockWait = DefaultLockWait
 	}
+	if r.o.Clock == nil {
+		r.o.Clock = time.Now
+	}
+	if r.o.NewRunID == nil {
+		r.o.NewRunID = newRunID
+	}
 	return r.execute()
 }
 
@@ -60,6 +79,23 @@ type run struct {
 	o   Options
 	ctx context.Context
 	id  string
+
+	// key is the delivery key of the run (see ResolveKey).
+	key DeliveryKey
+	// view is the stored view the decider decides on, read after a successful
+	// refresh.
+	view *view.View
+	// rec is the run record under construction; failStage and failClass are set
+	// by fail.
+	rec                  RunRecord
+	failStage, failClass string
+	// residual is the number of actions a read-only plan still lists after the
+	// run (apply) or that the plan lists (plan); nil when not learned.
+	residual  *int
+	decisions []decision
+	// lookupItems and lookupCeiling are the decider's work-item lookup figures,
+	// when it reported them (see lookupFromDecider).
+	lookupItems, lookupCeiling *int64
 }
 
 func (r *run) execute() int {
@@ -73,18 +109,37 @@ func (r *run) execute() int {
 		return ExitUsage
 	}
 	r.id = id
+	key, err := ResolveKey(r.o.Seq, r.o.RawID)
+	if err != nil {
+		fmt.Fprintf(r.o.Stderr, "pg-pr-change: usage: %v: run pg-pr-change --help\n", err)
+		return ExitUsage
+	}
+	r.key = key
+	r.startRecord()
 
 	lock, err := AcquireLock(r.ctx, r.o.LockDir, id, r.o.LockWait)
 	if err != nil {
 		again := fmt.Sprintf("pg-pr-change %s %s", r.o.Mode, id)
+		var code int
 		if errors.Is(err, ErrLockTimeout) {
-			return r.fail(StageLock, ClassTransient, "lock wait ran out",
+			code = r.fail(StageLock, ClassTransient, "lock wait ran out",
 				fmt.Sprintf("another run holds the per-PR lock for %s", id), again)
+		} else {
+			code = r.fail(StageLock, ClassHydrateError, "lock failed", err.Error(), again)
 		}
-		return r.fail(StageLock, ClassHydrateError, "lock failed", err.Error(), again)
+		r.finish(code)
+		return code
 	}
 	defer lock.Release()
 
+	code := r.hydrateAndDecide()
+	// The run is recorded while the lock is still held: the PR's own lane state is
+	// written only by the run that holds its lock.
+	r.finish(code)
+	return code
+}
+
+func (r *run) hydrateAndDecide() int {
 	if code, stop := r.hydrate(); stop {
 		return code
 	}
@@ -94,6 +149,7 @@ func (r *run) execute() int {
 // fail prints one failure line and returns the exit code of (stage, class).
 func (r *run) fail(stage, class, what, detail, next string) int {
 	spec := specFor(stage, class)
+	r.failStage, r.failClass = stage, class
 	fmt.Fprintln(r.o.Stderr, failureLine(spec, what, detail, next))
 	return spec.Code
 }
@@ -118,6 +174,12 @@ func (r *run) planCmd() string    { return "pg-decider plan pr " + r.id }
 // with the exit code when the run must end here.
 func (r *run) hydrate() (int, bool) {
 	res := r.call(Call{Name: "pg-desk", Args: []string{"pr", "refresh", r.id}})
+	r.rec.Hydrate.Result = hydrateFailed
+	if res.StartErr == nil && !res.Signaled {
+		code := res.Code
+		r.rec.Hydrate.ExitCode = &code
+		r.rec.Hydrate.Line = oneLine(res.Stdout, 200)
+	}
 	switch {
 	case res.StartErr != nil:
 		return r.fail(StageHydrate, ClassHydrateError, "refresh could not start", res.StartErr.Error(), r.refreshCmd()), true
@@ -136,7 +198,11 @@ func (r *run) hydrate() (int, bool) {
 			fmt.Sprintf("pg-desk pr refresh exited %d: %s", res.Code, firstLine(res.Stderr)), r.refreshCmd()), true
 	}
 
-	return r.checkView()
+	code, stop := r.checkView()
+	if !stop {
+		r.rec.Hydrate.Result = hydrateOK
+	}
+	return code, stop
 }
 
 // refreshClass reads the one `class=<class>` line pg-desk prints on exit 2 and
@@ -223,19 +289,102 @@ func (r *run) checkView() (int, bool) {
 		}
 		return r.fail(StageHydrate, ClassUnhydrated, "view refused", why+"; the decider was not run", r.refreshCmd()), true
 	}
+	r.view = v
 	return 0, false
 }
 
-// deciderArgs is the decider's argv for the run.
-func (r *run) deciderArgs() []string {
-	return []string{r.o.Mode, "pr", r.id}
+// deciderCall is the decider's call for the run. In apply mode with a delivery
+// key the call carries `--from-item -` and the minimal routed item on its
+// standard input, so the decider's audit comments carry the delivery key and
+// its escalate_after counter counts one delivery once. plan has no such flag,
+// and a run with no key passes none (counting every run is then correct).
+func (r *run) deciderCall() Call {
+	c := Call{Name: "pg-decider", Args: []string{r.o.Mode, "pr", r.id}}
+	if r.o.Mode == ModeApply && r.key.Has() {
+		c.Args = append(c.Args, "--from-item", "-")
+		c.Stdin = RoutedItemJSON(r.o.RawID, r.id, r.key)
+	}
+	return c
 }
 
-// decide runs the decider and maps its exit. Its stderr is re-wrapped: the run
-// counters line passes through unchanged, and every other line becomes part of
-// this command's own failure line (or, on success, a prefixed diagnostic).
+// readPlan runs the decider's read-only `plan pr <id> --json`. It writes
+// nothing, so it is safe before and after an apply. The error text is non-empty
+// when the plan could not be read.
+func (r *run) readPlan() (*action.PlanResult, string) {
+	res := r.call(Call{Name: "pg-decider", Args: []string{"plan", "pr", r.id, "--json"}})
+	switch {
+	case res.StartErr != nil:
+		return nil, res.StartErr.Error()
+	case res.Signaled:
+		return nil, "pg-decider plan --json was ended by a signal"
+	case res.Code != 0:
+		return nil, fmt.Sprintf("pg-decider plan --json exited %d: %s", res.Code, firstLine(res.Stderr))
+	}
+	p, err := parsePlanJSON(res.Stdout)
+	if err != nil {
+		return nil, "the plan is not readable JSON: " + err.Error()
+	}
+	return p, ""
+}
+
+// decide runs the decider and maps its exit, then fills in what the run record
+// and the lane state need: the plan (the actions and skips, read-only), the
+// decider's apply counters, and the residual after the run.
 func (r *run) decide() int {
-	res := r.call(Call{Name: "pg-decider", Args: r.deciderArgs()})
+	rec := &DecideRecord{Rules: []RuleOutcome{}, Actions: []PlannedAction{}, ByKind: map[string]int{}}
+	r.rec.Decide = rec
+
+	// In apply mode the plan is read BEFORE the apply: it says which operation
+	// each action has, which the apply counters (per rule) do not.
+	var pre *action.PlanResult
+	if r.o.Mode == ModeApply {
+		pre, rec.PlanError = r.readPlan()
+	}
+	res := r.call(r.deciderCall())
+	code := r.mapDecide(res)
+	rec.ExitCode = res.Code
+	if res.StartErr != nil || res.Signaled {
+		return code
+	}
+
+	switch {
+	case r.o.Mode == ModePlan && res.Code == 0:
+		// The plan the decider printed is the plan; its JSON form is the record.
+		pre, rec.PlanError = r.readPlan()
+		if pre != nil {
+			n := len(pre.Actions)
+			r.residual = &n
+		}
+	case r.o.Mode == ModeApply && (res.Code == 0 || res.Code == 2):
+		// The residual after an apply: a read-only plan, never a recorded run.
+		if post, msg := r.readPlan(); post != nil {
+			n := len(post.Actions)
+			r.residual = &n
+		} else {
+			r.rec.ResidualError = msg
+		}
+	}
+
+	counters := parseCounters(res.Stderr)
+	rec.Actions, rec.ByKind = plannedActions(pre)
+	rec.Rules = ruleOutcomes(r.o.Mode, pre, counters)
+	r.decisions = decisionsFor(r.o.Mode, pre, counters)
+	r.rec.Adoption = adoptionOutcome(r.o.Mode, r.view, pre, counters)
+	r.lookupItems, r.lookupCeiling = lookupFromDecider(res)
+	return code
+}
+
+// lookupFromDecider extracts the decider's work-item lookup item count and its
+// ceiling from a decider run, when it reports them. The decider does not report
+// them yet (the bounded lookup of the readiness packet adds it), so this
+// returns nil, nil; the lane write path call already accepts and forwards the
+// two values, and a test replaces this function to show it.
+var lookupFromDecider = func(Result) (items, ceiling *int64) { return nil, nil }
+
+// mapDecide maps the decider's exit. Its stderr is re-wrapped: the run counters
+// line passes through unchanged, and every other line becomes part of this
+// command's own failure line (or, on success, a prefixed diagnostic).
+func (r *run) mapDecide(res Result) int {
 	counters, others := splitDeciderStderr(res.Stderr)
 	for _, l := range counters {
 		fmt.Fprintln(r.o.Stderr, l)

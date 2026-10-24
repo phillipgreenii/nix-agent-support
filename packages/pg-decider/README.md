@@ -17,9 +17,11 @@ behavior lives in `docs/behavior/pg-decider/`; this page covers building and tes
 ## `pg-pr-change`
 
 `cmd/pg-pr-change` and `internal/prchange` are the composed command a `pr-change` role runs for one
-PR id: a per-PR lock, `pg-desk pr refresh`, a fail-closed view check, then `pg-decider plan|apply`.
+PR id: a per-PR lock, `pg-desk pr refresh`, a fail-closed view check, then `pg-decider plan|apply`
+(with the delivery key in apply mode), and a record of the run: one JSON line in the run record
+(`$XDG_STATE_HOME/pg-pr-change/pr-change-runs.jsonl`) and the lane state through `pg-desk pr lane-record`.
 It ships in this package's output beside `pg-decider`, with `pg-desk`, `pg-connector` and the sibling
-`pg-decider` on its `PATH`. Exit codes, failure classes and the not-found escalation are in
+`pg-decider` on its `PATH`. Exit codes, failure classes, the delivery key, the run record and the not-found escalation are in
 `docs/behavior/pg-decider/pr-change.md`.
 
 ## Parity gate

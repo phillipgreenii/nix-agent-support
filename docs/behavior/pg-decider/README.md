@@ -55,7 +55,7 @@ hydrates the PR with `pg-desk pr refresh` and then decides it, under a per-PR lo
 | [`work-items.md`](work-items.md)         | The work-item contract: the six kinds, the bead shapes, the dedup key and the same-context rule              |
 | [`plan-and-apply.md`](plan-and-apply.md) | `pg-decider plan` and `apply`, exit codes, precedence, skip reasons, audit, failure escalation, run counters |
 | [`config.md`](config.md)                 | The decider configuration file: location, format and keys                                                    |
-| [`pr-change.md`](pr-change.md)           | `pg-pr-change`, the composed command: per-PR lock, hydrate then decide, exit codes, not-found escalation     |
+| [`pr-change.md`](pr-change.md)           | `pg-pr-change`, the composed command: per-PR lock, hydrate then decide, delivery key, run record, exit codes |
 
 ## The rules
 

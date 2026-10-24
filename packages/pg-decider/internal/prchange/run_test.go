@@ -18,15 +18,28 @@ type script struct {
 	mu    sync.Mutex
 	rules []scriptRule
 	calls []string
+	// inputs[i] is the standard input of calls[i].
+	inputs []string
 }
 
 type scriptRule struct {
 	prefix string
 	res    Result
+	// later, when set, are the answers of the second and later matching calls
+	// (the last one repeats).
+	later []Result
+	n     int
 }
 
 func (s *script) on(prefix string, res Result) *script {
-	s.rules = append(s.rules, scriptRule{prefix, res})
+	s.rules = append(s.rules, scriptRule{prefix: prefix, res: res})
+	return s
+}
+
+// onSeq answers the first matching call with first and the following ones with
+// the later results in order, the last repeating.
+func (s *script) onSeq(prefix string, first Result, later ...Result) *script {
+	s.rules = append(s.rules, scriptRule{prefix: prefix, res: first, later: later})
 	return s
 }
 
@@ -34,9 +47,18 @@ func (s *script) run(_ context.Context, c Call) Result {
 	line := strings.TrimSpace(c.Name + " " + strings.Join(c.Args, " "))
 	s.mu.Lock()
 	s.calls = append(s.calls, line)
+	s.inputs = append(s.inputs, c.Stdin)
 	s.mu.Unlock()
-	for _, r := range s.rules {
+	for i := range s.rules {
+		r := &s.rules[i]
 		if strings.HasPrefix(line, r.prefix) {
+			s.mu.Lock()
+			n := r.n
+			r.n++
+			s.mu.Unlock()
+			if n > 0 && len(r.later) > 0 {
+				return r.later[min(n-1, len(r.later)-1)]
+			}
 			return r.res
 		}
 	}
@@ -70,6 +92,10 @@ func exit(code int, stdout, stderr string) Result {
 
 func opts(t *testing.T, mode string, s *script) (Options, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
+	// Every run is recorded through the lane write path; a test that is not about
+	// it gets a write path that accepts everything (a test that is about it adds
+	// its own rule before calling opts, and the first matching rule wins).
+	s.on("pg-desk pr lane-record", ok("recorded\n"))
 	var out, errb bytes.Buffer
 	return Options{
 		Mode: mode, RawID: testID, LockDir: t.TempDir(), LockWait: 200 * time.Millisecond,
@@ -175,9 +201,16 @@ func TestNoChangeRefreshStillRunsTheDecider(t *testing.T) {
 	if !strings.Contains(out.String(), "no change") {
 		t.Fatalf("stdout %q lost the refresh line", out)
 	}
-	// Order: refresh, then show, then decide.
-	if len(s.calls) != 3 || !strings.HasPrefix(s.calls[0], "pg-desk pr refresh") || !strings.HasPrefix(s.calls[2], "pg-decider") {
+	// Order: refresh, then show, then the decider (its read-only plan for the
+	// record, then the apply), and the lane write path last.
+	if len(s.calls) < 4 || !strings.HasPrefix(s.calls[0], "pg-desk pr refresh") || !strings.HasPrefix(s.calls[1], "pg-desk pr show") ||
+		!strings.HasPrefix(s.calls[2], "pg-decider") || !strings.HasPrefix(s.calls[len(s.calls)-1], "pg-desk pr lane-record") {
 		t.Fatalf("call order = %v", s.calls)
+	}
+	for i, c := range s.calls {
+		if strings.HasPrefix(c, "pg-decider") && i < 2 {
+			t.Fatalf("the decider ran before the view check: %v", s.calls)
+		}
 	}
 }
 

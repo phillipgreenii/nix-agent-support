@@ -3,6 +3,7 @@ package prchange
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -123,7 +124,7 @@ repos:
 actor: pr-change-rig
 sync:
   mode: off
-`
+%s`
 
 // newRig builds the sandbox for fixture JSON fxJSON. The store is created and
 // cut over to schema 2 only when cutover is true; legacy lists entities whose
@@ -144,6 +145,8 @@ type rigOpts struct {
 	real *realTracker
 	// env entries (KEY=value) added to every child process.
 	env []string
+	// laneMode, when set, is the configured pr_lane.mode (off, plan or apply).
+	laneMode string
 }
 
 // realTracker is a real pg-connector (and the real bd behind it) that the
@@ -196,7 +199,7 @@ func newRigWith(t *testing.T, fxJSON string, o rigOpts) *rig {
 		must(t, os.WriteFile(filepath.Join(r.ctl, f), nil, 0o644))
 	}
 	cfg := filepath.Join(dir, "config", "pg-desk.yaml")
-	must(t, os.WriteFile(cfg, []byte(fmt.Sprintf(rigConfigTmpl, parity.FixtureRepo)), 0o644))
+	must(t, os.WriteFile(cfg, []byte(fmt.Sprintf(rigConfigTmpl, parity.FixtureRepo, laneConfig(o.laneMode))), 0o644))
 	r.env = []string{
 		"PATH=" + r.binDir,
 		"HOME=" + filepath.Join(dir, "home"),
@@ -222,6 +225,14 @@ func newRigWith(t *testing.T, fxJSON string, o rigOpts) *rig {
 		r.mustDesk("migrate", "--cutover")
 	}
 	return r
+}
+
+// laneConfig is the pr_lane block of the rig's pg-desk configuration.
+func laneConfig(mode string) string {
+	if mode == "" {
+		return ""
+	}
+	return "pr_lane:\n  mode: " + mode + "\n"
 }
 
 func must(t *testing.T, err error) {
@@ -334,7 +345,30 @@ func (r *rig) created() int {
 	return strings.Count(r.ctlRead("created.log"), "issue create --title")
 }
 
+// deciderRuns is the decider runs that decide (plan or apply). The read-only
+// `plan --json` reads the command makes for its run record are listed apart, by
+// deciderPlanReads.
 func (r *rig) deciderRuns() []string {
+	var out []string
+	for _, l := range r.deciderLog() {
+		if !strings.HasSuffix(l, " --json") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func (r *rig) deciderPlanReads() []string {
+	var out []string
+	for _, l := range r.deciderLog() {
+		if strings.HasSuffix(l, " --json") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func (r *rig) deciderLog() []string {
 	var out []string
 	for _, l := range strings.Split(r.ctlRead("decider.log"), "\n") {
 		if l != "" {
@@ -473,4 +507,45 @@ func (r *rig) startBlocked(args ...string) (kill func()) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	return kill
+}
+
+// annotation reads decider annotation key of the PR's stored view (the
+// decider's own namespace), "" when it is absent.
+func (r *rig) annotation(entity, key string) string {
+	r.t.Helper()
+	res := r.mustDesk("pr", "show", entity, "--json")
+	var v struct {
+		Annotations struct {
+			Decider map[string]map[string]string `json:"decider"`
+		} `json:"annotations"`
+	}
+	must(r.t, json.Unmarshal([]byte(res.stdout), &v))
+	return v.Annotations.Decider["pr-decider"][key]
+}
+
+// lane is every lane key of the store's meta table, as key to value.
+func (r *rig) lane() map[string]string {
+	r.t.Helper()
+	out := map[string]string{}
+	for _, l := range strings.Split(r.sqlite("SELECT key || ' <=> ' || value FROM meta WHERE key LIKE 'pr_lane.%' ORDER BY key;"), "\n") {
+		if k, v, ok := strings.Cut(l, " <=> "); ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// runRecordPath is where the real command writes its run record in the rig
+// (the default path under the rig's XDG_STATE_HOME).
+func (r *rig) runRecordPath() string {
+	return filepath.Join(r.stateHome, "pg-pr-change", RunRecordFileName)
+}
+
+// runRecords reads the run record file; a missing file is no records.
+func (r *rig) runRecords() []RunRecord {
+	r.t.Helper()
+	if _, err := os.Stat(r.runRecordPath()); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return readRecords(r.t, r.runRecordPath())
 }
