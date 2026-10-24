@@ -1655,6 +1655,12 @@ var wrapperPrefixes = []struct {
 // dangerous command behind a name that looks read-only.
 var execPrefixes = map[string]bool{"env": true, "command": true}
 
+// unmodeledEnvExecutable is the Executable given to an `env` leaf carrying an
+// option unwrapExecPrefix refuses to model (pg2-6c2rm). No rule matches it (it
+// is not a real command name), so the leaf Abstains instead of being approved
+// as a bare `env` or as the option's value.
+const unmodeledEnvExecutable = "env:unmodeled-option"
+
 // unwrapExecPrefix strips an env/command prefix's flags and NAME=VALUE
 // assignments and returns the inner executable + its args. Any `env NAME=VALUE`
 // assignments encountered are CAPTURED into envAssigns (not merely stripped) so
@@ -1667,7 +1673,15 @@ var execPrefixes = map[string]bool{"env": true, "command": true}
 // (pg2-d71my) — the flag that makes env discard the WHOLE caller environment
 // before applying envAssigns, rather than merely prefixing it. It is always
 // false for `command`, which has no such flag.
-func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []string, envAssigns []EnvAssignment, hermetic, ok bool) {
+//
+// refused is true when an `env` option was met that this unwrap cannot model
+// (pg2-6c2rm): -P/-S/-L/-U (and --split-string) change where the utility is
+// looked up, what argv it gets, or which environment/login class it runs under,
+// and any option not in envOption's grammar could swallow the utility as its
+// value. inner/ok are then meaningless and the caller MUST NOT fall back to the
+// bare-`env` leaf — safe-commands approves a bare `env` unconditionally, so
+// that fallback would approve `env -S "rm -rf x"`.
+func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []string, envAssigns []EnvAssignment, hermetic, refused, ok bool) {
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -1679,7 +1693,7 @@ func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []str
 		// execute NAME. Do not unwrap: leave the bare `command` for the safe-commands
 		// rule to approve as a read-only lookup. (`command -p` DOES execute → unwrap.)
 		if base == "command" && (a == "-v" || a == "-V") {
-			return "", nil, nil, false, false
+			return "", nil, nil, false, false, false
 		}
 		// env NAME=VALUE assignment (command has none) — capture it so the env-var
 		// guard can inspect it, then continue past it to the inner command.
@@ -1689,15 +1703,16 @@ func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []str
 			continue
 		}
 		if strings.HasPrefix(a, "-") {
-			// env -i / --ignore-environment: the hermetic marker itself.
-			if base == "env" && (a == "-i" || a == "--ignore-environment") {
-				hermetic = true
+			if base == "env" {
+				consumesNext, ignoresEnv, refuse := envOption(a)
+				if refuse {
+					return "", nil, envAssigns, hermetic, true, false
+				}
+				hermetic = hermetic || ignoresEnv
 				i++
-				continue
-			}
-			// env -u NAME and -C DIR take a following argument; consume it too.
-			if base == "env" && (a == "-u" || a == "-C") {
-				i += 2
+				if consumesNext {
+					i++
+				}
 				continue
 			}
 			i++
@@ -1706,9 +1721,51 @@ func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []str
 		break // first bare, non-assignment token is the inner executable
 	}
 	if i >= len(args) {
-		return "", nil, envAssigns, hermetic, false
+		return "", nil, envAssigns, hermetic, false, false
 	}
-	return args[i], args[i+1:], envAssigns, hermetic, true
+	return args[i], args[i+1:], envAssigns, hermetic, false, true
+}
+
+// envOption classifies ONE `env` option token (pg2-6c2rm). consumesNext is true
+// when the option's value is the FOLLOWING token (`-u NAME`, `--chdir DIR`);
+// ignoresEnv is true for `-i`/`--ignore-environment`; refuse is true for an
+// option that is not modeled (see unwrapExecPrefix). Short options may be
+// clustered (`-iu NAME`, macOS getopt) with a value glued to its letter
+// (`-uNAME`).
+//
+// Modeled: -i -0 -v (no value), -u -C -a (one value; GNU also spells them
+// --unset/--chdir/--argv0, separate or `=`-glued), and the valueless GNU
+// long options. Everything else — including -P -S -L -U and --split-string —
+// is refused rather than skipped as if it took no value.
+func envOption(a string) (consumesNext, ignoresEnv, refuse bool) {
+	if a == "-" { // legacy spelling of -i; kept as the pre-existing skip
+		return false, false, false
+	}
+	if strings.HasPrefix(a, "--") {
+		name, _, glued := strings.Cut(a, "=")
+		switch name {
+		case "--ignore-environment":
+			return false, true, false
+		case "--null", "--debug", "--help", "--version", "--list-signal-handling",
+			"--block-signal", "--default-signal", "--ignore-signal":
+			return false, false, false
+		case "--unset", "--chdir", "--argv0":
+			return !glued, false, false
+		}
+		return false, false, true
+	}
+	for j := 1; j < len(a); j++ {
+		switch a[j] {
+		case 'i':
+			ignoresEnv = true
+		case '0', 'v':
+		case 'u', 'C', 'a':
+			return j+1 == len(a), ignoresEnv, false
+		default:
+			return false, false, true
+		}
+	}
+	return false, ignoresEnv, false
 }
 
 // reclassifyEnvAssignsAfterProcSubFabrication closes pg2-813ww's second,
@@ -1966,7 +2023,18 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 		return liftAssignmentArgs(pc)
 	}
 	if execPrefixes[base] {
-		if inner, innerArgs, envAssigns, hermetic, ok := unwrapExecPrefix(base, pc.Args); ok {
+		inner, innerArgs, envAssigns, hermetic, refused, ok := unwrapExecPrefix(base, pc.Args)
+		if refused {
+			// An env option this unwrap cannot model (pg2-6c2rm). Neither lowering to
+			// the next token (the option's VALUE, e.g. `env -P echo /bin/rm`) nor
+			// leaving a bare `env` leaf (alwaysSafe) is acceptable, so rename the leaf
+			// to an executable no rule claims: the verdict is Abstain and Claude's own
+			// prompt decides. Args keeps the whole original tail for that prompt/audit.
+			pc.EnvVars = appendEnvAssignments(pc.EnvVars, reclassifyEnvAssignsAfterProcSubFabrication(envAssigns, pc.ProcessSubstitutions))
+			pc.Executable = unmodeledEnvExecutable
+			return pc
+		}
+		if ok {
 			// COPY-then-override rather than a fresh literal: every field an unwrap does
 			// not deliberately change (Raw, Heredocs, the pipeline coordinates, …) must
 			// survive it, and a literal silently drops any field added later.

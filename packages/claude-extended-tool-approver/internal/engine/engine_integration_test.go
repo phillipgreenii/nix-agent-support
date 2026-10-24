@@ -91,6 +91,16 @@ func TestIntegration_HookBypassRegression(t *testing.T) {
 		{"env wrapper danger", "env rm -rf /etc"},
 		{"env assignment wrapper danger", "env FOO=bar rm -rf /etc"},
 		{"command wrapper danger", "command rm -rf /etc"},
+		// pg2-6c2rm: env options whose VALUE was read as the inner executable
+		// (`env -P echo /bin/rm …` lowered to safe `echo`) or that the unwrap cannot
+		// model at all (-S runs its string as the command line).
+		{"env -P value as utility", "env -P echo /bin/rm -rf ~/important"},
+		{"env -P replaces lookup path", "env -P /tmp/evil echo hi"},
+		{"env -S quoted string", `env -S "rm -rf ~/important"`},
+		{"env -S bare words", "env -S rm -rf ~/important"},
+		{"env -L value as utility", "env -L echo /bin/rm -rf ~/important"},
+		{"env -U value as utility", "env -U echo /bin/rm -rf ~/important"},
+		{"env -a argv0 value as utility", "env -a echo /bin/rm -rf ~/important"},
 		// Fuzz-found leaf-drop: `#` right after `;`/`&` (no space) is a bash comment;
 		// an unterminated quote in it must not swallow the newline and drop the
 		// next-line command (FuzzSplitCompound, fixed in splitCompound).

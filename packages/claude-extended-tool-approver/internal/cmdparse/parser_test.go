@@ -52,6 +52,76 @@ func TestUnwrapCommand_ExecPrefixes(t *testing.T) {
 	}
 }
 
+// TestUnwrapCommand_EnvValueFlags pins pg2-6c2rm: the value of env's
+// -a/--argv0, -u/--unset and -C/--chdir is consumed (separate, `=`-glued, or
+// clustered), so the REAL utility is what downstream rules judge — not the
+// flag's value (`env -a echo /bin/rm -rf x` runs /bin/rm).
+func TestUnwrapCommand_EnvValueFlags(t *testing.T) {
+	tests := []struct {
+		in       string
+		wantExec string
+		wantArgs []string
+	}{
+		{"env -a echo /bin/rm -rf x", "/bin/rm", []string{"-rf", "x"}},
+		{"env --argv0=echo /bin/rm -rf x", "/bin/rm", []string{"-rf", "x"}},
+		{"env --argv0 echo /bin/rm -rf x", "/bin/rm", []string{"-rf", "x"}},
+		{"env -aecho /bin/rm -rf x", "/bin/rm", []string{"-rf", "x"}},
+		{"env --unset=FOO git status", "git", []string{"status"}},
+		{"env --unset FOO git status", "git", []string{"status"}},
+		{"env --chdir=/tmp git status", "git", []string{"status"}},
+		{"env --chdir /tmp git status", "git", []string{"status"}},
+		{"env -C /tmp git status", "git", []string{"status"}},
+		{"env -uFOO git status", "git", []string{"status"}},
+		{"env -iu FOO git status", "git", []string{"status"}},
+		{"env -i -0 -v git status", "git", []string{"status"}},
+	}
+	for _, tt := range tests {
+		got := Parse(tt.in)
+		if len(got) != 1 {
+			t.Fatalf("Parse(%q): got %d cmds, want 1", tt.in, len(got))
+		}
+		if got[0].Executable != tt.wantExec {
+			t.Errorf("Parse(%q).Executable = %q, want %q", tt.in, got[0].Executable, tt.wantExec)
+		}
+		if strings.Join(got[0].Args, " ") != strings.Join(tt.wantArgs, " ") {
+			t.Errorf("Parse(%q).Args = %q, want %q", tt.in, got[0].Args, tt.wantArgs)
+		}
+	}
+}
+
+// TestUnwrapCommand_EnvUnmodeledOptionRefused pins pg2-6c2rm: an env option the
+// unwrap cannot model (-P/-S/-L/-U/--split-string, or anything unrecognised)
+// must NEVER lower to the option's value, to the inner command, or to a bare
+// `env` leaf (alwaysSafe in safe-commands, so `env -S "rm -rf x"` would approve).
+func TestUnwrapCommand_EnvUnmodeledOptionRefused(t *testing.T) {
+	for _, in := range []string{
+		"env -P echo /bin/rm -rf ~/important",
+		"env -P /tmp/evil echo hi",
+		`env -S "rm -rf ~/important"`,
+		"env -S rm -rf ~/important",
+		"env --split-string='rm -rf x'",
+		"env -L echo /bin/rm -rf ~/important",
+		"env -U echo /bin/rm -rf ~/important",
+		"env -iS 'rm -rf x'", // clustered
+		"env -Z rm -rf x",    // unrecognised short option
+		"env --bogus rm -rf x",
+		"nice env -S 'rm -rf x'", // refusal survives a nested unwrap
+		"env -S 'rm -rf x' FOO=bar",
+	} {
+		got := Parse(in)
+		if len(got) != 1 {
+			t.Fatalf("Parse(%q): got %d cmds, want 1", in, len(got))
+		}
+		switch got[0].Executable {
+		case "env", "echo", "rm", "/bin/rm", "/tmp/evil":
+			t.Errorf("Parse(%q).Executable = %q; an unmodeled env option must not lower to env or a guessed utility", in, got[0].Executable)
+		}
+		if got[0].Executable != unmodeledEnvExecutable {
+			t.Errorf("Parse(%q).Executable = %q, want %q", in, got[0].Executable, unmodeledEnvExecutable)
+		}
+	}
+}
+
 // TestUnwrapCommand_EnvCleared pins pg2-d71my's hermetic-invocation marker:
 // `env -i` / `env --ignore-environment` sets ParsedCommand.EnvCleared on the
 // UNWRAPPED leaf (the inner command, not the `env` leaf that no longer
