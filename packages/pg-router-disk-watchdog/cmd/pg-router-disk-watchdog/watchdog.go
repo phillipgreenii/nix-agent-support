@@ -62,7 +62,7 @@ type gateEntry struct {
 
 // check performs ONE watchdog pass:
 //
-//	free <  minFree                -> set the gate (renewing its lease if held)
+//	free <  minFree                -> set the gate (renewing its lease if ours), unless another owner holds it
 //	free >= recoverFree            -> clear the gate if THIS watchdog owns it
 //	minFree <= free < recoverFree  -> hold: renew our gate if we own one, else nothing
 //
@@ -75,6 +75,17 @@ func check(ctx context.Context, cfg config, d deps) int {
 	}
 
 	if free < cfg.minFree {
+		// pg-router's gate set is last-writer-wins, so setting while an operator
+		// holds the gate would take it over (and the recovery branch would later
+		// clear it). Look first. If the owner cannot be determined, fail toward
+		// gating: report the error and set the gate anyway.
+		_, other, err := ownGate(ctx, cfg, d)
+		if err != nil {
+			fmt.Fprintln(d.stderr, "pg-router-disk-watchdog:", err)
+		} else if other {
+			fmt.Fprintf(d.stdout, "pg-router-disk-watchdog: %s free on %s (minimum %s); %s is held by another owner, leaving it\n", formatSize(free), where, formatSize(cfg.minFree), cfg.gateType)
+			return exitOK
+		}
 		desc := fmt.Sprintf("low disk space: %s free on %s (minimum %s)", formatSize(free), where, formatSize(cfg.minFree))
 		if err := setGate(ctx, cfg, d, desc); err != nil {
 			fmt.Fprintln(d.stderr, "pg-router-disk-watchdog:", err)

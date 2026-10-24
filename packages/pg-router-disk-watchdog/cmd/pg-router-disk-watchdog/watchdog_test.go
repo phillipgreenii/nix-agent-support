@@ -72,15 +72,15 @@ func runCheck(t *testing.T, cfg config, f *fakeRouter, disk map[string]uint64) (
 }
 
 func TestCheck_lowSpaceSetsGateWithLeaseOwnerAndDescription(t *testing.T) {
-	f := &fakeRouter{}
+	f := &fakeRouter{listing: `[]`}
 	code, out, _ := runCheck(t, testConfig(), f, map[string]uint64{"/": 12 * gib, "/Volumes/data": 12 * gib})
 	if code != exitOK {
 		t.Fatalf("exit = %d", code)
 	}
-	if len(f.calls) != 1 {
-		t.Fatalf("calls = %v, want exactly one gate set (no list needed while low)", f.calls)
+	if got := strings.Join(f.verbs(), ","); got != "list,set" {
+		t.Fatalf("verbs = %s, want list (who holds the gate) then one gate set", got)
 	}
-	got := strings.Join(f.calls[0], " ")
+	got := strings.Join(f.calls[1], " ")
 	for _, want := range []string{"pg-router gate set LOW_DISK_USAGE", "--owner wd", "--ttl 7m0s", "12.0 GiB free on /", "minimum 20.0 GiB"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("gate set call %q missing %q", got, want)
@@ -92,21 +92,57 @@ func TestCheck_lowSpaceSetsGateWithLeaseOwnerAndDescription(t *testing.T) {
 }
 
 func TestCheck_lowSpaceReSetsEveryPass_leaseRenewal(t *testing.T) {
-	f := &fakeRouter{}
+	f := &fakeRouter{listing: `[{"type":"LOW_DISK_USAGE","owner":"wd"}]`}
 	for i := 0; i < 3; i++ {
 		runCheck(t, testConfig(), f, map[string]uint64{"/": 5 * gib, "/Volumes/data": 5 * gib})
 	}
-	if got := strings.Join(f.verbs(), ","); got != "set,set,set" {
+	if got := strings.Join(f.verbs(), ","); got != "list,set,list,set,list,set" {
 		t.Fatalf("verbs = %s, want a set on every low pass", got)
 	}
 }
 
 func TestCheck_lowestPathWins(t *testing.T) {
-	f := &fakeRouter{}
+	f := &fakeRouter{listing: `[]`}
 	runCheck(t, testConfig(), f, map[string]uint64{"/": 500 * gib, "/Volumes/data": 3 * gib})
-	if len(f.calls) != 1 || !strings.Contains(strings.Join(f.calls[0], " "), "3.0 GiB free on /Volumes/data") {
+	if len(f.calls) != 2 || !strings.Contains(strings.Join(f.calls[1], " "), "3.0 GiB free on /Volumes/data") {
 		t.Fatalf("calls = %v, want a set naming the low volume", f.calls)
 	}
+}
+
+// While space is low, a LOW_DISK_USAGE an operator set by hand (another owner)
+// must be left alone: pg-router's gate set is last-writer-wins, so setting it
+// would take over the gate and the recovery branch would later clear it.
+func TestCheck_lowSpaceLeavesAnotherOwnersGate(t *testing.T) {
+	f := &fakeRouter{listing: `[{"type":"LOW_DISK_USAGE","owner":"operator"}]`}
+	code, out, _ := runCheck(t, testConfig(), f, map[string]uint64{"/": 5 * gib, "/Volumes/data": 5 * gib})
+	if code != exitOK || strings.Join(f.verbs(), ",") != "list" || !strings.Contains(out, "held by another owner") {
+		t.Fatalf("code=%d verbs=%v out=%q, want only a list and a held-by-another-owner note", code, f.verbs(), out)
+	}
+}
+
+// If the owner cannot be determined, fail toward gating: set the gate and
+// report the list error.
+func TestCheck_lowSpaceListFailureStillSetsGate(t *testing.T) {
+	t.Run("list errors", func(t *testing.T) {
+		f := &fakeRouter{failOn: "list"}
+		code, out, errOut := runCheck(t, testConfig(), f, map[string]uint64{"/": 5 * gib, "/Volumes/data": 5 * gib})
+		if code != exitOK || strings.Join(f.verbs(), ",") != "list,set" {
+			t.Fatalf("code=%d verbs=%v, want list then set", code, f.verbs())
+		}
+		if !strings.Contains(errOut, "gate list") || !strings.Contains(errOut, "no running core") {
+			t.Errorf("stderr = %q, want the list error", errOut)
+		}
+		if !strings.Contains(out, "LOW_DISK_USAGE set") {
+			t.Errorf("stdout = %q", out)
+		}
+	})
+	t.Run("unparseable list", func(t *testing.T) {
+		f := &fakeRouter{listing: `not json`}
+		code, _, errOut := runCheck(t, testConfig(), f, map[string]uint64{"/": 5 * gib, "/Volumes/data": 5 * gib})
+		if code != exitOK || strings.Join(f.verbs(), ",") != "list,set" || !strings.Contains(errOut, "parse json") {
+			t.Fatalf("code=%d verbs=%v stderr=%q", code, f.verbs(), errOut)
+		}
+	})
 }
 
 func TestCheck_recoveryClearsOwnGate(t *testing.T) {
