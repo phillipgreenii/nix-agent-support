@@ -9218,7 +9218,9 @@
                 let
                   inherit (import ./tests/pg-router-ccpool-handler-eval-hm.nix { inherit lib pkgs llm-agents; })
                     evalHM
+                    evalHMWith
                     ;
+                  npFixturePkg = (evalHM { }).phillipgreenii.programs.pg-router-ccpool-handler.package;
                   probe = pkgs.writeShellScript "k17-probe" "${pkgs.coreutils}/bin/env | ${pkgs.coreutils}/bin/sort > /tmp/k17-env.txt; exit 0";
                   inherit ((evalHM { }).phillipgreenii.programs.pg-router-ccpool-handler) claudeBaseline;
                   # k20Probe (bead pg2-12gr4.8.15): the `exec` of the k20-a/k20-b roles.
@@ -9324,9 +9326,71 @@
                     };
                   };
                   m = fixture.phillipgreenii.programs.pg-router-ccpool-handler;
+
+                  # new-path/roles.toml (bead pg2-12gr4.10.10): the [[role]] tables the
+                  # pg-router module renders for one NEW-path command role and one
+                  # NEW-path ccpool role (each names its adapter as `handler`), for a
+                  # live `pg-router config check|doctor|run-role` run. The ccpool role
+                  # has no spec and no own pool: it runs on the handler-wide pool, whose
+                  # directory the live run supplies as CCPOOL_POOL.
+                  newPathFixture = evalHMWith {
+                    handler = {
+                      enable = true;
+                      pool = {
+                        enable = true;
+                        dir = "/tmp/np-live-pool";
+                      };
+                      roles = {
+                        np-live-cmd = {
+                          handler = "${npFixturePkg}/bin/pg-router-handler-command";
+                          command.argv = [ "/usr/bin/true" ];
+                        };
+                        # An OLD-path role next to them (type, no handler): it renders
+                        # its per-role JSON under handlerCommandDir, which the live run
+                        # feeds to the old binary through PG_ROUTER_HANDLER_COMMAND_DIR.
+                        np-old-cmd = {
+                          type = "command";
+                          command.argv = [ "/usr/bin/true" ];
+                        };
+                        np-live-cc = {
+                          handler = "${npFixturePkg}/bin/pg-router-handler-ccpool";
+                          ccpool = {
+                            actor = "np-live-actor";
+                            completion = "close-only";
+                            onFailure = "unclaim";
+                            onDispatchFail = "unclaim";
+                            promptBody = "Work bead {{.BeadID}}";
+                            isolation.type = "none";
+                          };
+                        };
+                      };
+                    };
+                    pgRouter.roles = {
+                      np-live-cmd.binds = [ "np.live.cmd" ];
+                      np-live-cc.binds = [ "np.live.cc" ];
+                    };
+                  };
                 in
                 pkgs.linkFarm "pg-router-ccpool-handler-spec-fixtures" (
-                  (lib.mapAttrsToList (name: _: {
+                  [
+                    {
+                      name = "new-path/roles.toml";
+                      path = newPathFixture.phillipgreenii.programs.pg-router.rolesFile;
+                    }
+                    {
+                      name = "new-path/old-roles/np-old-cmd.json";
+                      path = "${newPathFixture.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir}/np-old-cmd.json";
+                    }
+                    {
+                      name = "new-path/validate-ccpool";
+                      path = newPathFixture.phillipgreenii.programs.pg-router-ccpool-handler.roleValidation.ccpool;
+                    }
+                    {
+                      name = "new-path/validate-command";
+                      path = newPathFixture.phillipgreenii.programs.pg-router-ccpool-handler.roleValidation.command;
+                    }
+                  ]
+                  ++ (lib.mapAttrsToList (name: _: {
                     name = "roles/${name}.json";
                     path = "${m.handlerCommandDir}/${name}.json";
                   }) m.roles)
