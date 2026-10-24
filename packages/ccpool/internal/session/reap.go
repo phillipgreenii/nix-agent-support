@@ -140,7 +140,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 			continue
 		}
 		if idleTTL > 0 && now.Sub(time.Unix(r.LastActivityAt, 0)) > idleTTL {
-			toClose[r.ExternalID] = "idle_ttl"
+			toClose[r.ExternalID] = reasonIdleTTL
 		}
 	}
 	// Pass 2: still over cap AFTER the TTL closures → close more sessions, but
@@ -158,7 +158,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 			continue
 		}
 		if _, ok := toClose[r.ExternalID]; !ok {
-			toClose[r.ExternalID] = "cap_eviction"
+			toClose[r.ExternalID] = reasonCapEviction
 			capClosures--
 		}
 	}
@@ -182,21 +182,68 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		if !ok {
 			continue
 		}
-		// Attributes are resolved per session, inside the loop, BEFORE the
-		// close (never once per process: reap touches sessions with different
-		// roles).
-		attrs := s.metricAttrs(r.ExternalID)
-		logArgs := append([]any{"reason", reason}, sessionLogArgs(r.ExternalID)...)
-		if err := s.closeWithReason(ctx, r.ExternalID, reason, false); err != nil {
+		// The reason was chosen from the unlocked snapshot above, so the row is
+		// re-read and re-judged under the per-session lock before it is closed.
+		if err := s.closeRevalidated(ctx, r.ExternalID, reason, now, idleTTL); err != nil {
 			return err
 		}
-		recordReapClosure(reason, attrs)
-		slog.Info("ccpool: reap closed session", logArgs...)
 	}
 	// Last step, after every row decision above: collect orphaned lock files.
 	// Best effort and never fatal (see gcLocks).
 	s.gcLocks(ctx)
 	return nil
+}
+
+// reasonIdleTTL and reasonCapEviction are the close reasons (store.CloseReasons)
+// of Reap's two live-row closure passes.
+const (
+	reasonIdleTTL     = "idle_ttl"
+	reasonCapEviction = "cap_eviction"
+)
+
+// stillQualifiesForReap re-applies, to a row re-read under the lock, the
+// predicate of the pass that chose it: a needs_input row is always spared, an
+// idle_ttl closure needs the row still idle past idleTTL, and a cap_eviction
+// closure needs the row still evictable (its turn ended).
+func stillQualifiesForReap(r store.Session, reason string, now time.Time, idleTTL time.Duration) bool {
+	if preservedForHuman(r) {
+		return false
+	}
+	switch reason {
+	case reasonIdleTTL:
+		return idleTTL > 0 && now.Sub(time.Unix(r.LastActivityAt, 0)) > idleTTL
+	case reasonCapEviction:
+		return evictable(r)
+	}
+	return false
+}
+
+// closeRevalidated closes one row chosen by Pass 1 or Pass 2 from the unlocked
+// List snapshot. Like closeStaleDeadNeedsInput it re-reads the row UNDER the
+// per-external_id lock and closes it only if it still qualifies, so a session
+// that turned working or needs_input since the snapshot (a dispatch, or an
+// operator typing into it) is not closed. A row that no longer qualifies, or is
+// gone, is skipped: no closure metric and no "reap closed session" log line.
+func (s *Service) closeRevalidated(ctx context.Context, externalID, reason string, now time.Time, idleTTL time.Duration) error {
+	return s.withLock(externalID, func() error {
+		cur, ok, err := s.d.Store.GetByExternalID(ctx, externalID)
+		if err != nil || !ok {
+			return err
+		}
+		if !stillQualifiesForReap(cur, reason, now, idleTTL) {
+			return nil
+		}
+		// Attributes are resolved per session, BEFORE the close (never once per
+		// process: reap touches sessions with different roles).
+		attrs := s.metricAttrs(externalID)
+		logArgs := append([]any{"reason", reason}, sessionLogArgs(externalID)...)
+		if err := s.closeLocked(ctx, externalID, reason, false); err != nil {
+			return err
+		}
+		recordReapClosure(reason, attrs)
+		slog.Info("ccpool: reap closed session", logArgs...)
+		return nil
+	})
 }
 
 // recordPreservedForHuman emits ccpool_sessions_preserved_for_human: ONE value

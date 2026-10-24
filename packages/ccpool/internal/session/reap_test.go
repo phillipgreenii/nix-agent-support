@@ -551,3 +551,194 @@ func TestReap_recordsSessionStates(t *testing.T) {
 		}
 	}
 }
+
+// --- Pass 1 / Pass 2 re-validate the row under the per-session lock. ---
+//
+// Reap chooses its idle_ttl and cap_eviction closures from a List snapshot read
+// WITHOUT the lock, then runs Pass 0 (a tmux probe per row) before closing, so a
+// row can change state in between. These tests flip a row from inside that
+// window: flipTmux runs a mutation the first time Pass 0 probes the target
+// session, which is after List and before any closure.
+
+// flipTmux wraps reapTmux and runs onProbe[name] once, on the first HasSession
+// probe of that session.
+type flipTmux struct {
+	*reapTmux
+	onProbe map[string]func()
+}
+
+func (f *flipTmux) HasSession(name string) bool {
+	if fn, ok := f.onProbe[name]; ok {
+		delete(f.onProbe, name)
+		fn()
+	}
+	return f.reapTmux.HasSession(name)
+}
+
+type flipRow struct {
+	id     string
+	state  store.State
+	ageSec int64
+	// flipTo, when non-empty, is the state the row is moved to (a real
+	// store.Transition, which also bumps last_activity_at to now) between List
+	// and the locked re-read.
+	flipTo store.State
+}
+
+// flipFixture builds live rows in a real in-memory store whose clock is `now`,
+// and a Service whose tmux flips the rows that carry flipTo. It returns the
+// closed-session map and the store for assertions.
+func flipFixture(t *testing.T, now time.Time, rows ...flipRow) (*Service, map[string]bool, *store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(":memory:", &mutClock{t: now})
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	live := map[string]bool{}
+	closed := map[string]bool{}
+	tm := &flipTmux{reapTmux: &reapTmux{live: live, closed: closed}, onProbe: map[string]func(){}}
+	for _, r := range rows {
+		if err := st.Insert(ctx, store.Session{
+			ExternalID: r.id, ClaudeSessionID: "csid-" + r.id, State: r.state,
+			TmuxSession: "cc-" + r.id, LastActivityAt: now.Unix() - r.ageSec,
+		}); err != nil {
+			t.Fatalf("Insert %s: %v", r.id, err)
+		}
+		live["cc-"+r.id] = true
+		if r.flipTo != "" {
+			id, to := r.id, r.flipTo
+			tm.onProbe["cc-"+id] = func() {
+				if _, err := st.Transition(ctx, id, to, "", ""); err != nil {
+					t.Errorf("flip %s: %v", id, err)
+				}
+			}
+		}
+	}
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Exister: fakeExister{ok: true}, Now: func() time.Time { return now }})
+	return s, closed, st
+}
+
+// assertNotReaped fails if the row was closed, recorded as a closure, or
+// narrated as reap-closed.
+func assertNotReaped(t *testing.T, st *store.Store, closed map[string]bool, closures []string, logs func() []map[string]any, id string) {
+	t.Helper()
+	got, ok, err := st.GetByExternalID(context.Background(), id)
+	if err != nil || !ok {
+		t.Fatalf("GetByExternalID(%s): ok=%v err=%v", id, ok, err)
+	}
+	if got.CloseReason != "" || got.ClosedAt != 0 {
+		t.Errorf("%s was stamped closed: %+v", id, got)
+	}
+	if closed["cc-"+id] {
+		t.Errorf("%s: tmux session was torn down", id)
+	}
+	if len(closures) != 0 {
+		t.Errorf("recordReapClosure fired for a skipped row: %v", closures)
+	}
+	if reapClosedLines(logs()) != 0 {
+		t.Errorf("a reap-closed log line was written for a skipped row: %v", logs())
+	}
+}
+
+// Pass 1: idle past the TTL at List time, but working again at the locked
+// re-read, so it is not closed.
+func TestReap_idleTTLSkipsRowThatTurnedWorking(t *testing.T) {
+	withReapSpies(t, func(closures *[]string, _ *int, _ *[]int64) {
+		logs := captureSlog(t)
+		now := time.Unix(10_000, 0)
+		s, closed, st := flipFixture(t, now, flipRow{id: "busy", state: store.Idle, ageSec: 7200, flipTo: store.Working})
+		if err := s.Reap(context.Background(), 6, time.Hour); err != nil {
+			t.Fatalf("Reap: %v", err)
+		}
+		assertNotReaped(t, st, closed, *closures, logs, "busy")
+	})
+}
+
+// Pass 1: a row that turned needs_input between List and the locked re-read is
+// preserved for the human (ADR 0037), not closed.
+func TestReap_idleTTLSkipsRowThatTurnedNeedsInput(t *testing.T) {
+	withReapSpies(t, func(closures *[]string, _ *int, _ *[]int64) {
+		logs := captureSlog(t)
+		now := time.Unix(10_000, 0)
+		s, closed, st := flipFixture(t, now, flipRow{id: "asking", state: store.Idle, ageSec: 7200, flipTo: store.NeedsInput})
+		if err := s.Reap(context.Background(), 6, time.Hour); err != nil {
+			t.Fatalf("Reap: %v", err)
+		}
+		assertNotReaped(t, st, closed, *closures, logs, "asking")
+	})
+}
+
+// Pass 2: evictable at List time, no longer evictable (working) at the locked
+// re-read, so it is not cap-evicted. The other idle row, unchanged, still is.
+func TestReap_capEvictionSkipsRowThatTurnedWorking(t *testing.T) {
+	withReapSpies(t, func(closures *[]string, _ *int, _ *[]int64) {
+		logs := captureSlog(t)
+		now := time.Unix(10_000, 0)
+		s, closed, st := flipFixture(t, now,
+			flipRow{id: "oldest", state: store.Idle, ageSec: 1000, flipTo: store.Working},
+			flipRow{id: "fresh", state: store.Idle, ageSec: 10})
+		// idleTTL=0 disables Pass 1; cap=1 over two counted rows closes the oldest.
+		if err := s.Reap(context.Background(), 1, 0); err != nil {
+			t.Fatalf("Reap: %v", err)
+		}
+		assertNotReaped(t, st, closed, *closures, logs, "oldest")
+	})
+}
+
+// Pass 2 needs_input twin of the above.
+func TestReap_capEvictionSkipsRowThatTurnedNeedsInput(t *testing.T) {
+	withReapSpies(t, func(closures *[]string, _ *int, _ *[]int64) {
+		logs := captureSlog(t)
+		now := time.Unix(10_000, 0)
+		s, closed, st := flipFixture(t, now,
+			flipRow{id: "oldest", state: store.Idle, ageSec: 1000, flipTo: store.NeedsInput},
+			flipRow{id: "fresh", state: store.Idle, ageSec: 10})
+		if err := s.Reap(context.Background(), 1, 0); err != nil {
+			t.Fatalf("Reap: %v", err)
+		}
+		assertNotReaped(t, st, closed, *closures, logs, "oldest")
+	})
+}
+
+// A row that still qualifies at the locked re-read is closed, recorded and
+// narrated exactly as before.
+func TestReap_revalidationStillClosesQualifyingRows(t *testing.T) {
+	withReapSpies(t, func(closures *[]string, _ *int, _ *[]int64) {
+		logs := captureSlog(t)
+		now := time.Unix(10_000, 0)
+		s, closed, st := flipFixture(t, now,
+			flipRow{id: "stale", state: store.Idle, ageSec: 7200},
+			flipRow{id: "mid", state: store.Idle, ageSec: 100},
+			flipRow{id: "fresh", state: store.Idle, ageSec: 10})
+		if err := s.Reap(context.Background(), 1, time.Hour); err != nil {
+			t.Fatalf("Reap: %v", err)
+		}
+		if !closed["cc-stale"] || !closed["cc-mid"] || closed["cc-fresh"] {
+			t.Fatalf("closed = %v, want stale and mid closed, fresh kept", closed)
+		}
+		if got := fmt.Sprint(*closures); got != "[idle_ttl cap_eviction]" && got != "[cap_eviction idle_ttl]" {
+			t.Errorf("closures = %v, want one idle_ttl and one cap_eviction", *closures)
+		}
+		if n := reapClosedLines(logs()); n != 2 {
+			t.Errorf("reap-closed log lines = %d, want 2: %v", n, logs())
+		}
+		for id, want := range map[string]string{"stale": "idle_ttl", "mid": "cap_eviction"} {
+			if got, _, _ := st.GetByExternalID(context.Background(), id); got.CloseReason != want {
+				t.Errorf("%s close_reason = %q, want %q", id, got.CloseReason, want)
+			}
+		}
+	})
+}
+
+// reapClosedLines counts the "reap closed session" narration records.
+func reapClosedLines(recs []map[string]any) int {
+	n := 0
+	for _, r := range recs {
+		if r["msg"] == "ccpool: reap closed session" {
+			n++
+		}
+	}
+	return n
+}
