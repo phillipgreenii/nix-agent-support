@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/pg-decider/internal/backfill"
 )
 
 // Real-tracker guard for pg-pr-change's not-found escalation (docket
@@ -372,4 +374,92 @@ func contains2(xs []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// createTyped files a bead of an issue type and returns its id.
+func (f *realBD) createTyped(title, issueType, metadata string) string {
+	f.t.Helper()
+	args := []string{"create", title, "-t", issueType, "--silent"}
+	if metadata != "" {
+		args = append(args, "--metadata", metadata)
+	}
+	lines := strings.Split(strings.TrimSpace(f.run(args...)), "\n")
+	id := strings.TrimSpace(lines[len(lines)-1])
+	if id == "" || strings.Contains(id, " ") {
+		f.t.Fatalf("bd create %q: cannot read the new id from %q", title, lines)
+	}
+	return id
+}
+
+// The backfill driver's `enumerate` against the real tracker (docket pg2-6mo45.3,
+// packet P4b). Whether the named query lists the right beads, and what the real
+// connector's listing looks like to the driver (the entity fields, the sources, the
+// truncation flag), are properties of REAL tools: the real pg-connector over the
+// real pg-connector-issue-beads over a real bd in a throwaway embedded store. Only
+// the `pr list` of the old backend is a double (there is no forge here): a script in
+// front of the real connector answers it and hands everything else on.
+func TestPRChangeRealBD_BackfillEnumerateListsTheRealTrackersOpenAnchors(t *testing.T) {
+	f := newRealBD(t)
+	f.run("config", "set", "types.custom", "merge-request")
+	open := f.createTyped("acme/api#10: Add the export command", "merge-request", `{"state":"open"}`)
+	merged := f.createTyped("acme/api#11: Tidy the readme", "merge-request", `{"state":"merged"}`)
+	f.createTyped("review-pr: acme/api#10", "task", "")
+	weird := f.createTyped("an anchor whose title names no PR", "merge-request", "")
+	closed := f.createTyped("acme/api#12: Closed long ago", "merge-request", "")
+	f.run("close", closed, "--reason", "merged")
+
+	_, connDir := buildBinaries(t)
+	registry := filepath.Join(t.TempDir(), "config.yaml")
+	registryYAML := `connector:
+  issue:
+    - name: beads
+      command: [pg-connector-issue-beads]
+backends:
+  beads:
+    queries:
+      work-beads:
+        - "list --type merge-request --status open,in_progress,blocked"
+        - "list --type task --title-contains review-pr: --status open,in_progress,blocked"
+`
+	must(t, os.WriteFile(registry, []byte(registryYAML), 0o600))
+	shim := filepath.Join(t.TempDir(), "pg-connector")
+	script := "#!/bin/sh\ncase \"$1 $2\" in\n\"pr list\") printf '%s\\n' '{\"entities\":[],\"present_ids\":[\"acme/api#10\",\"acme/api#20\"],\"sources\":[{\"source\":\"pr\",\"status\":\"succeeded\",\"count\":2}],\"truncated\":false}';;\n*) exec " + shq(filepath.Join(connDir, "pg-connector")) + " \"$@\";;\nesac\n"
+	must(t, os.WriteFile(shim, []byte(script), 0o755))
+	queries := filepath.Join(t.TempDir(), "queries")
+	must(t, os.WriteFile(queries, []byte("mine\n"), 0o600))
+
+	set, err := backfill.Enumerate(context.Background(), backfill.EnumerateOptions{
+		QueriesFile: queries, AnchorsQuery: "work-beads", Backend: "beads", BeadsDir: f.dir, Connector: shim,
+		Env: []string{
+			"PATH=" + connDir + string(os.PathListSeparator) + filepath.Dir(f.bd) + string(os.PathListSeparator) + "/usr/bin:/bin",
+			"HOME=" + t.TempDir(), "XDG_STATE_HOME=" + t.TempDir(), "PG_PR_CONFIG=" + registry,
+			"BEADS_DOLT_AUTO_START=0", "BD_JSON_ENVELOPE=1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("enumerate: %v", err)
+	}
+	byPR := map[string]backfill.Entry{}
+	for _, e := range set.Entries {
+		byPR[e.PR] = e
+	}
+	if len(byPR) != 3 {
+		t.Fatalf("entries %v, want #10, #11 and #20", set.IDs())
+	}
+	if e := byPR["acme/api#10"]; !e.Has(backfill.FromAnchor) || !e.Has(backfill.FromQuery) || e.State != backfill.StateOpen || len(e.AnchorIDs) != 1 || e.AnchorIDs[0] != open {
+		t.Errorf("#10: %+v (anchor %s)", e, open)
+	}
+	if e := byPR["acme/api#11"]; !e.Has(backfill.FromAnchor) || e.Has(backfill.FromQuery) || e.State != backfill.StateMerged || e.AnchorIDs[0] != merged {
+		t.Errorf("#11, an anchor whose PR is merged: %+v (anchor %s)", e, merged)
+	}
+	if e := byPR["acme/api#20"]; e.Has(backfill.FromAnchor) || !e.Has(backfill.FromQuery) {
+		t.Errorf("#20: %+v", e)
+	}
+	// The anchor whose title maps to no PR is reported, the closed one and the child are not anchors.
+	if len(set.Unparseable) != 1 || set.Unparseable[0].ID != weird || set.Unparseable[0].From != backfill.FromAnchor {
+		t.Errorf("unparseable %+v", set.Unparseable)
+	}
+	if set.OpenAnchorCount != 3 || set.OpenAnchorPRCount != 2 || set.QueryPRCount != 2 {
+		t.Errorf("open anchors %d, anchor PRs %d, query PRs %d", set.OpenAnchorCount, set.OpenAnchorPRCount, set.QueryPRCount)
+	}
 }

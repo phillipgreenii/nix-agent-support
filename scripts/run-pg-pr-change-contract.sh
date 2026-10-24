@@ -12,6 +12,10 @@
 # sandbox has no bd, so checks.<system>.pg-pr-change-real-tools covers everything
 # else and this gate covers the one thing it cannot.
 #
+# The same run covers the backfill driver (packet P4b): TestPRChangeRealBD_Backfill*
+# runs the driver's `enumerate` over the real connector, beads backend and bd, so the
+# driver's own paths (cmd/pg-pr-backfill, internal/backfill) are in the regex below.
+#
 # The files the hook fires on are in scripts/pg-pr-change-contract-files.regex (the
 # one place the flake and tests/pg-pr-change-contract-hook.bats both read).
 #

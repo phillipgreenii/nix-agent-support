@@ -266,7 +266,8 @@ func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'
 // work-items.out and work-items.code (the answer and exit code of the decider's
 // all-status lookup `issue list --query work-items-all`; the fixture's beads
 // answer it when absent),
-// fail.create (the wire code `issue create` answers with). Every call is
+// fail.create (the wire code `issue create` answers with); with tracker.accepts, a
+// work item the double created (bd-esc-<n>) can be shown and commented on. Every call is
 // appended to calls.log; every `issue create` (its whole argv, a multi-line description included) to created.log.
 func forgeShim(ctl, base string, real *realTracker) string {
 	c := shq(ctl)
@@ -319,6 +320,25 @@ case "$*" in
   printf '%s\n' "$n" > "$CTL/created.n"
   printf '{"result":{"id":"bd-esc-%s"}}\n' "$n"
   exit 0;;
+'issue show bd-esc-'*)
+  # With tracker.accepts: a work item this double created (see issue create above)
+  # can be read back, commented on and has no dependencies, as a real tracker
+  # would let the decider's post-create hooks do. Without it those calls reach the
+  # fixture-driven base, which does not know the item.
+  if [ -f "$CTL/tracker.accepts" ]; then
+    printf '{"protocolVersion":1,"result":{"id":"%s","title":"created through the tracker double","state":"open","url":"https://tracker.example/%s","as_of":"2026-10-01T00:00:00Z","stale":false}}\n' "$3" "$3"
+    exit 0
+  fi;;
+'issue comment bd-esc-'*)
+  if [ -f "$CTL/tracker.accepts" ]; then
+    printf '{"protocolVersion":1,"result":{"id":"%s"}}\n' "$3"
+    exit 0
+  fi;;
+'issue deps bd-esc-'*)
+  if [ -f "$CTL/tracker.accepts" ]; then
+    printf '{"protocolVersion":1,"result":{"ids":[],"entities":[]}}\n'
+    exit 0
+  fi;;
 esac
 exec ` + shq(base) + ` "$@"
 `

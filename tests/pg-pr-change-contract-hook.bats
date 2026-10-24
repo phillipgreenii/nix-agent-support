@@ -39,6 +39,13 @@ shim() { # shim <tool> [body]: an executable PATH shim
     packages/pg-decider/cmd/pg-pr-change/main.go
     packages/pg-decider/internal/prchange/run.go
     packages/pg-decider/internal/prchange/realbd_contract_test.go
+    # pg-pr-backfill, the backfill driver whose `enumerate` the same contract tests
+    # run against a real bd (docket pg2-6mo45.3, packet P4b): its main, its listing,
+    # its run loop and its rate-limit sources
+    packages/pg-decider/cmd/pg-pr-backfill/main.go
+    packages/pg-decider/internal/backfill/set.go
+    packages/pg-decider/internal/backfill/run.go
+    packages/pg-decider/internal/backfill/rate.go
     packages/pg-decider/internal/parity/fakeconnector.go
     packages/pg-decider/internal/config/config.go
     packages/pg-decider/internal/view/view.go
@@ -87,7 +94,8 @@ shim() { # shim <tool> [body]: an executable PATH shim
   # A regex whose literal directories no longer exist would match nothing and
   # never fire. Each directory prefix must be a real directory.
   cd "$BATS_TEST_DIRNAME/.."
-  for d in packages/pg-decider/cmd/pg-pr-change packages/pg-decider/internal/prchange \
+  for d in packages/pg-decider/cmd/pg-pr-change packages/pg-decider/cmd/pg-pr-backfill \
+    packages/pg-decider/internal/prchange packages/pg-decider/internal/backfill \
     packages/pg-decider/internal/parity packages/pg-decider/internal/config \
     packages/pg-decider/internal/view packages/pg-decider/internal/workitem \
     packages/pg-desk/cmd/pg-desk packages/pg-desk/internal \
@@ -126,6 +134,19 @@ shim() { # shim <tool> [body]: an executable PATH shim
   [[ $args == *"-run ^TestPRChangeRealBD_"* ]]
   [[ $args == *"./internal/prchange/"* ]]
   [ "$(cat "$BATS_TEST_TMPDIR/go-pwd")" = "$(cd "$ROOT/packages/pg-decider" && pwd -P)" ]
+}
+
+@test "the backfill driver's real-bd enumerate test is among the tests the hook runs" {
+  # The hook runs -run ^TestPRChangeRealBD_; the driver's test must carry the prefix,
+  # and must sit in the contract-tagged file the hook's package builds.
+  grep -q '^func TestPRChangeRealBD_BackfillEnumerate' "$BATS_TEST_DIRNAME/../packages/pg-decider/internal/prchange/realbd_contract_test.go"
+  head -1 "$BATS_TEST_DIRNAME/../packages/pg-decider/internal/prchange/realbd_contract_test.go" | grep -q '^//go:build contract$'
+}
+
+@test "a path of the driver matches and a path of its docs does not" {
+  regex="$(cat "$REGEX_FILE")"
+  printf '%s\n' packages/pg-decider/internal/backfill/summary.go | grep -Eq -- "$regex"
+  ! printf '%s\n' docs/behavior/pg-decider/backfill.md | grep -Eq -- "$regex"
 }
 
 @test "a failing test run fails the gate with its own exit code" {

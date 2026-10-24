@@ -24,6 +24,22 @@ It ships in this package's output beside `pg-decider`, with `pg-desk`, `pg-conne
 `pg-decider` on its `PATH`. Exit codes, failure classes, the delivery key, the run record and the not-found escalation are in
 `docs/behavior/pg-decider/pr-change.md`.
 
+## `pg-pr-backfill`
+
+`cmd/pg-pr-backfill` and `internal/backfill` are the PR lane's backfill driver: `enumerate` lists the
+backfill set (the tracker's open anchors plus the open PRs of the deployment's queries), `run --mode
+plan|apply` runs `pg-pr-change` over it, paced, under a floor on the GraphQL budget, with resume and
+the operator's create limits, `summary` prints the plan summary or the apply residual check from the
+run record, `flip-marker` writes the flip marker and `writes` lists every write since it. It ships in
+this package's output beside `pg-pr-change`, with `pg-connector` and the sibling `pg-pr-change` on its
+`PATH`. Behavior is in `docs/behavior/pg-decider/backfill.md`; the operator's page is
+`docs/runbooks/pg-pr-backfill.md`.
+
+- Real-tool gate (the driver over the real `pg-pr-change`, `pg-desk` and `pg-decider`, with the fake
+  `remaining` control): `nix build .#checks.<system>.pg-pr-backfill-real-tools -L`. `enumerate` against a
+  real tracker is a `contract`-tagged test (`TestPRChangeRealBD_BackfillEnumerate...`) that runs from the
+  same `pg-pr-change-contract-test` hook.
+
 ## Parity gate
 
 `internal/parity` loads every synthetic scenario under `internal/parity/testdata/` into a schema-2

@@ -132,7 +132,10 @@ the count per kind, and `plan_error` when the plan could not be read), `adoption
 `outcome` and the `candidates`, the anchors the view links with their state and whether each is
 already keyed) and, for `apply`, `residual` (the number of actions a read-only plan still lists after
 the apply). A run that stops at the lock or at hydrate carries no `decide`, `adoption` or `residual`.
-New members MAY be added to `v1`; none is removed or changes meaning.
+New members MAY be added to `v1`; none is removed or changes meaning. The backfill driver
+(see [`backfill.md`](backfill.md)) appends rows of its own kind to the same file (the flip marker and
+the start of a new pass, each with its own `contract` string); every reader of the run records takes
+the latest record of one mode per PR and ignores those rows.
 
 ## Lane state
 

@@ -25,10 +25,13 @@ mkGoApp {
   # pg-decider is the decider; pg-pr-change is the composed command a
   # `pr-change` role runs for one PR id (hydrate with `pg-desk pr refresh`, then
   # decide), kept in this module because it shares the decider's view, work-item
-  # index and configuration packages. Both declare `var Version = "dev"`.
+  # index and configuration packages. pg-pr-backfill is the PR lane's backfill
+  # driver (enumerate, run over the composed command, plan summary, flip marker),
+  # kept here for the same reason. Every one declares `var Version = "dev"`.
   subPackages = [
     "cmd/pg-decider"
     "cmd/pg-pr-change"
+    "cmd/pg-pr-backfill"
   ];
 
   nativeBuildInputs = [ makeWrapper ];
@@ -53,11 +56,19 @@ mkGoApp {
         pg-connector
       ]
     }:$out/bin"
+    # pg-pr-backfill execs pg-connector (the tracker and PR listings, the epic
+    # comment) and pg-pr-change (its sibling in this output) by bare name. The
+    # unwrapped binary is `.pg-pr-backfill-wrapped`.
+    wrapProgram $out/bin/pg-pr-backfill --prefix PATH : "${
+      lib.makeBinPath [
+        pg-connector
+      ]
+    }:$out/bin"
     install -Dm644 ${./share/work-item-keys.json} $out/share/pg-decider/work-item-keys.json
   '';
 
   meta = {
-    description = "Decider that plans and applies work-item changes from the pg-desk composite view, and pg-pr-change, the command that hydrates a PR and then decides it";
+    description = "Decider that plans and applies work-item changes from the pg-desk composite view, pg-pr-change, the command that hydrates a PR and then decides it, and pg-pr-backfill, the driver that runs it over the backfill set";
     mainProgram = "pg-decider";
   };
 }

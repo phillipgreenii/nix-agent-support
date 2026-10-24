@@ -1086,7 +1086,7 @@
         pg-pr-change-contract-test = {
           enable = true;
           name = "pg-pr-change-contract-test";
-          description = "pg-pr-change: run the contract-tagged real-bd escalation dedup tests (docket pg2-6mo45.3, P3b1b)";
+          description = "pg-pr-change and pg-pr-backfill: run the contract-tagged real-bd tests (escalation dedup; backfill enumerate) (docket pg2-6mo45.3, P3b1b and P4b)";
           entry = "${
             pkgs.writeShellApplication {
               name = "pg-pr-change-contract-test-hook";
@@ -5592,6 +5592,68 @@
                         exit 1
                       fi
                       echo "pg-pr-change-real-tools: $found scenarios, each with a PASS line, none skipped"
+                      runHook postBuild
+                    '';
+                  });
+
+              # pg-pr-backfill real-tool gate (docket pg2-6mo45.3, packet P4b; design 6.5
+              # "Adoption, backfill and the first apply" and the test row "Backfill
+              # driver and plan summary"). TestBackfillRealTools runs the BUILT
+              # pg-pr-backfill driver library over the BUILT pg-pr-change, pg-desk and
+              # pg-decider (the same packages the system ships) in the hermetic rig of
+              # pg-pr-change-real-tools: the fake `gh` `remaining` control makes the
+              # driver stop at the floor and report FLOOR, a restart in the same mode
+              # redoes no finished PR and a switch of mode redoes them all, a 5xx and a
+              # rate limit end FAILED naming the PRs, nothing is decided on a PR that
+              # could not be hydrated, the create limits stop the pass after the PR
+              # that exceeded them, a second apply pass after the flip writes nothing,
+              # and the by-timestamp listing since the flip marker lists the real
+              # creates. Like pg-pr-change-real-tools it exports the three BUILT
+              # binaries and sets PG_PR_CHANGE_REQUIRE_BINARIES, runs ONLY its test, and
+              # asserts the test's own PASS line, NO SKIP line and at least minScenarios
+              # scenario PASS lines (keep equal to minBackfillScenarios in
+              # internal/prchange/backfill_realtools_test.go). `enumerate` against a
+              # real bd runs from the `pg-pr-change-contract-test` hook instead (the
+              # nix sandbox has no bd).
+              pg-pr-backfill-real-tools =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-pr-backfill-real-tools";
+                  src = lib.cleanSource ./packages/pg-decider; # matches default.nix
+                  gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    PG_PR_CHANGE_PG_DESK_BIN = "${pkgs.pg-desk}/bin/pg-desk";
+                    PG_PR_CHANGE_PG_DECIDER_BIN = "${pkgs.pg-decider}/bin/pg-decider";
+                    PG_PR_CHANGE_BIN = "${pkgs.pg-decider}/bin/pg-pr-change";
+                    PG_PR_CHANGE_SQLITE3_BIN = "${lib.getBin pkgs.sqlite}/bin/sqlite3";
+                    PG_PR_CHANGE_REQUIRE_BINARIES = "1";
+                    minScenarios = "9";
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/pg-pr-backfill-real-tools.log"
+                      if ! go test -count=1 -v -run '^TestBackfillRealTools$' ./internal/prchange/ > "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-pr-backfill-real-tools: the real-tool test FAILED" >&2
+                        exit 1
+                      fi
+                      cat "$log"
+                      if ! grep -q -- '^--- PASS: TestBackfillRealTools ' "$log"; then
+                        echo "pg-pr-backfill-real-tools: TestBackfillRealTools did not report PASS (skipped or not run)" >&2
+                        exit 1
+                      fi
+                      if grep -q -- '--- SKIP' "$log"; then
+                        echo "pg-pr-backfill-real-tools: a test or scenario was SKIPPED" >&2
+                        grep -- '--- SKIP' "$log" >&2
+                        exit 1
+                      fi
+                      found=$(grep -c -- '^    --- PASS: TestBackfillRealTools/' "$log" || true)
+                      if [ "$found" -lt "$minScenarios" ]; then
+                        echo "pg-pr-backfill-real-tools: only $found scenarios passed, at least $minScenarios are required" >&2
+                        exit 1
+                      fi
+                      echo "pg-pr-backfill-real-tools: $found scenarios, each with a PASS line, none skipped"
                       runHook postBuild
                     '';
                   });
