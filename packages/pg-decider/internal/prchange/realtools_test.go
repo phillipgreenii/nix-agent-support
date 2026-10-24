@@ -69,7 +69,13 @@ func lacksRetryWords(t *testing.T, what, got string) {
 }
 
 func TestPRChangeRealTools(t *testing.T) {
-	t.Run("a-502-is-transient-with-the-routers-retry-wording-and-never-escalated-as-not-found", func(t *testing.T) {
+	scenarios := 0
+	run := func(name string, f func(*testing.T)) {
+		scenarios++
+		t.Run(name, f)
+	}
+
+	run("a-502-is-transient-with-the-routers-retry-wording-and-never-escalated-as-not-found", func(t *testing.T) {
 		r := newRig(t, fxOpenAnchor, true)
 		r.hydrate()
 		r.ctlWrite("fail.pr-show", "unavailable")
@@ -88,7 +94,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	t.Run("a-null-node-is-not-found-and-apply-raises-exactly-one-escalation", func(t *testing.T) {
+	run("a-null-node-is-not-found-and-apply-raises-exactly-one-escalation", func(t *testing.T) {
 		r := newRig(t, fxOpenAnchor, true)
 		r.hydrate()
 		r.ctlWrite("fail.pr-show", "not_found")
@@ -122,7 +128,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	t.Run("not-found-in-plan-mode-records-only-with-no-tracker-write-and-no-escalation", func(t *testing.T) {
+	run("not-found-in-plan-mode-records-only-with-no-tracker-write-and-no-escalation", func(t *testing.T) {
 		r := newRig(t, fxOpenAnchor, true)
 		r.hydrate()
 		r.ctlWrite("fail.pr-show", "not_found")
@@ -141,7 +147,7 @@ func TestPRChangeRealTools(t *testing.T) {
 
 	for _, mode := range []string{"plan", "apply"} {
 		mode := mode
-		t.Run("not-found-with-no-open-anchor-is-marked-inactive-in-"+mode+"-mode-and-drops-out-of-the-unhydrated-count", func(t *testing.T) {
+		run("not-found-with-no-open-anchor-is-marked-inactive-in-"+mode+"-mode-and-drops-out-of-the-unhydrated-count", func(t *testing.T) {
 			r := newRig(t, fxLegacy, true, id9)
 			if got := r.neverHydrated(); got != "1" {
 				t.Fatalf("setup: the never-hydrated count is %s, want 1", got)
@@ -167,7 +173,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		})
 	}
 
-	t.Run("a-degraded-read-exits-hydrate-degraded-and-runs-no-decide", func(t *testing.T) {
+	run("a-degraded-read-exits-hydrate-degraded-and-runs-no-decide", func(t *testing.T) {
 		r := newRig(t, fxMerged, true)
 		r.ctlWrite("fail.detail", "unavailable")
 		res := r.change("apply", id8)
@@ -180,7 +186,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	t.Run("a-refresh-that-reports-no-change-still-runs-the-decider", func(t *testing.T) {
+	run("a-refresh-that-reports-no-change-still-runs-the-decider", func(t *testing.T) {
 		r := newRig(t, fxMerged, true)
 		r.hydrate()
 		res := r.change("apply", id8)
@@ -201,7 +207,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	t.Run("both-id-forms-take-the-same-lock-and-a-wait-that-times-out-exits-transient", func(t *testing.T) {
+	run("both-id-forms-take-the-same-lock-and-a-wait-that-times-out-exits-transient", func(t *testing.T) {
 		r := newRig(t, fxMerged, true)
 		r.hydrate()
 		kill := r.startBlocked("apply", id8)
@@ -215,7 +221,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	t.Run("a-killed-lock-holder-releases-the-lock", func(t *testing.T) {
+	run("a-killed-lock-holder-releases-the-lock", func(t *testing.T) {
 		r := newRig(t, fxMerged, true)
 		r.hydrate()
 		kill := r.startBlocked("apply", id8)
@@ -230,7 +236,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	t.Run("a-refresh-exit-1-is-hydrate_error-is-not-retryable-and-runs-no-decide", func(t *testing.T) {
+	run("a-refresh-exit-1-is-hydrate_error-is-not-retryable-and-runs-no-decide", func(t *testing.T) {
 		// A store that was never cut over to schema 2: refresh refuses with exit 1.
 		r := newRig(t, fxMerged, false)
 		res := r.change("apply", id8)
@@ -244,7 +250,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	t.Run("the-failure-lines-of-every-non-retryable-class-carry-none-of-the-routers-retry-words", func(t *testing.T) {
+	run("the-failure-lines-of-every-non-retryable-class-carry-none-of-the-routers-retry-words", func(t *testing.T) {
 		r := newRig(t, fxOpenAnchor, true)
 		r.hydrate()
 		// Upstream text stuffed with all three router retry words, under each
@@ -269,7 +275,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		lacksRetryWords(t, "not_found line", res.stderr)
 	})
 
-	t.Run("a-partial-decide-is-retryable-and-its-lines-are-re-wrapped-with-the-next-command", func(t *testing.T) {
+	run("a-partial-decide-is-retryable-and-its-lines-are-re-wrapped-with-the-next-command", func(t *testing.T) {
 		r := newRig(t, fxMine, true)
 		res := r.change("apply", id11)
 		if res.code != ExitDecidePartial {
@@ -292,7 +298,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	t.Run("plan-mode-prints-the-plan-and-writes-nothing", func(t *testing.T) {
+	run("plan-mode-prints-the-plan-and-writes-nothing", func(t *testing.T) {
 		r := newRig(t, fxMine, true)
 		res := r.change("plan", id11)
 		if res.code != ExitOK {
@@ -307,7 +313,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	t.Run("the-command-never-exits-1-or-9-and-refuses-a-bad-id-with-a-usage-code", func(t *testing.T) {
+	run("the-command-never-exits-1-or-9-and-refuses-a-bad-id-with-a-usage-code", func(t *testing.T) {
 		r := newRig(t, fxMerged, true)
 		for _, args := range [][]string{
 			{},
@@ -334,7 +340,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	t.Run("a-search-at-the-100-hit-cap-or-a-degraded-beads-row-exits-transient-and-raises-no-escalation", func(t *testing.T) {
+	run("a-search-at-the-100-hit-cap-or-a-degraded-beads-row-exits-transient-and-raises-no-escalation", func(t *testing.T) {
 		r := newRig(t, fxOpenAnchor, true)
 		r.hydrate()
 		r.ctlWrite("fail.pr-show", "not_found")
@@ -360,7 +366,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 	})
 
-	t.Run("a-degraded-non-beads-row-is-ignored-and-a-failing-open-anchor-probe-is-transient", func(t *testing.T) {
+	run("a-degraded-non-beads-row-is-ignored-and-a-failing-open-anchor-probe-is-transient", func(t *testing.T) {
 		r := newRig(t, fxOpenAnchor, true)
 		r.hydrate()
 		r.ctlWrite("fail.pr-show", "not_found")
@@ -385,4 +391,8 @@ func TestPRChangeRealTools(t *testing.T) {
 			t.Fatalf("a failing probe still searched or escalated")
 		}
 	})
+
+	if scenarios != minScenarios {
+		t.Errorf("the test declares %d scenarios, but minScenarios is %d (and the nix check's minScenarios must equal it)", scenarios, minScenarios)
+	}
 }
