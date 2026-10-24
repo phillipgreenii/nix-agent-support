@@ -52,16 +52,26 @@ const dispatchRoundTripBudgetMs = 200.0
 
 // TestPerfBaseline_DispatchRoundTripThroughWire measures one full
 // handler.dispatch round trip through the wire boundary Task 5.4
-// introduced: this module's REAL compiled binary, invoked exactly as the
-// core's wireclient.Client invokes a registered participant (a "command"
-// role, argv ["true"] — the same trivial always-succeeding real subprocess
-// TestLiveDispatch_command already uses, so this measures the wire
-// adapter's own overhead, not ccpool session cost), over `rounds`
-// independent round trips.
+// introduced: this module's REAL compiled pg-router-handler-command binary,
+// invoked exactly as the core's wireclient.Client invokes a registered
+// participant on the new path (the role object on stdin; a "command" role,
+// argv ["true"] — the same trivial always-succeeding real subprocess
+// TestLiveDispatch_command uses, so this measures the wire adapter's own
+// overhead, not ccpool session cost), over `rounds` independent round trips.
 func TestPerfBaseline_DispatchRoundTripThroughWire(t *testing.T) {
-	const rounds = 20
+	bin := buildBinary(t, commandAdapterCmd)
+	reqBytes, err := json.Marshal(newShapeDispatchRequest("conformance-perf", commandRoleConfig()))
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	measureDispatchRoundTrip(t, bin, []string{"dispatch"}, reqBytes)
+}
 
-	bin := buildHandlerBinary(t)
+// TestPerfBaseline_DispatchRoundTripThroughWireOldPath is the same measurement
+// and budget against the old binary on today's path (--role-config), kept
+// until packet cleanup-go (pg2-12gr4.10.17) removes that binary.
+func TestPerfBaseline_DispatchRoundTripThroughWireOldPath(t *testing.T) {
+	bin := buildBinary(t, oldHandlerCmd)
 	roleConfig := writeRoleConfig(t, `{"name":"conformance-perf","type":"command","command":{"argv":["true"]}}`)
 
 	req, err := conformance.Golden("handler.dispatch")
@@ -72,18 +82,27 @@ func TestPerfBaseline_DispatchRoundTripThroughWire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
+	measureDispatchRoundTrip(t, bin, []string{"dispatch", "--role-config", roleConfig}, reqBytes)
+}
+
+// measureDispatchRoundTrip runs `rounds` timed dispatch round trips of bin with
+// args and reqBytes on stdin (after one untimed warm-up) and fails when the
+// median exceeds dispatchRoundTripBudgetMs.
+func measureDispatchRoundTrip(t *testing.T, bin string, args []string, reqBytes []byte) {
+	t.Helper()
+	const rounds = 20
 
 	// One untimed warm-up round: excludes the binary's first-exec page-cache
 	// cost from the measured samples, matching this module's own
-	// buildHandlerBinary/runBinary helpers' steady-state assumption.
-	if _, code, err := runBinary(t, bin, []string{"dispatch", "--role-config", roleConfig}, reqBytes); err != nil || code != conformance.ExitOK {
+	// buildBinary/runBinary helpers' steady-state assumption.
+	if _, code, err := runBinary(t, bin, args, reqBytes); err != nil || code != conformance.ExitOK {
 		t.Fatalf("warm-up dispatch: err=%v code=%d", err, code)
 	}
 
 	samples := make([]time.Duration, rounds)
 	for i := 0; i < rounds; i++ {
 		start := time.Now()
-		reply, code, err := runBinary(t, bin, []string{"dispatch", "--role-config", roleConfig}, reqBytes)
+		reply, code, err := runBinary(t, bin, args, reqBytes)
 		samples[i] = time.Since(start)
 		if err != nil {
 			t.Fatalf("round %d: run dispatch: %v", i, err)
