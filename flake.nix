@@ -1064,6 +1064,47 @@
           require_serial = true;
         };
 
+        # docket pg2-6mo45.3, packet P4c-1: the real-tracker end-to-end gate of the
+        # PR lane. `checks.<system>.pg-decider-lane-e2e` runs it in the nix sandbox
+        # (real bd works there; see its comment), but a nix check is not run at land
+        # and this repository has no CI, so this path-scoped hook is what puts it
+        # under the commit-time and `pg-hooks run pre-land` runs. The logic is
+        # scripts/run-pg-decider-lane-e2e.sh (it builds the five binaries from source,
+        # runs TestLaneE2E and asserts a PASS line per named scenario, no SKIP and a
+        # non-zero minimum count); its path regex lives in
+        # scripts/pg-decider-lane-e2e-files.regex, which this hook and
+        # tests/pg-decider-lane-e2e-hook.bats both read (the bats case feeds the regex
+        # one path of every input, the binaries the script builds included, and runs the
+        # script against PATH shims, so a missing tool is shown to fail loudly). A
+        # missing `bd`, `go` or `git` is a LOUD failure, never a skip. Cost is the
+        # point: it builds three modules and runs several real bd stores, a few
+        # minutes, paid only on diffs touching these paths.
+        pg-decider-lane-e2e = {
+          enable = true;
+          name = "pg-decider-lane-e2e";
+          description = "PR lane: run the real-tracker end-to-end gate (real bd, pg-connector, pg-desk, pg-decider, pg-pr-change) (docket pg2-6mo45.3, P4c-1)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "pg-decider-lane-e2e-hook";
+              runtimeInputs = [ pkgs.git ];
+              text = ''
+                # The nix check of the same name is the sandboxed run; this hook is the
+                # operator's machine only (it builds from source and needs the module cache).
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "pg-decider-lane-e2e: inside the nix build sandbox; skipping (checks.<system>.pg-decider-lane-e2e is the sandboxed run)" >&2
+                  exit 0
+                fi
+
+                exec bash ${./scripts/run-pg-decider-lane-e2e.sh} "$@"
+              '';
+            }
+          }/bin/pg-decider-lane-e2e-hook";
+          language = "system";
+          files = pkgs.lib.removeSuffix "\n" (builtins.readFile ./scripts/pg-decider-lane-e2e-files.regex);
+          pass_filenames = false;
+          require_serial = true;
+        };
+
         # docket pg2-6mo45.3, packet P3b1b: pg-pr-change's not-found escalation
         # looks for an earlier escalation in EVERY status, closed included, with
         # `pg-connector search` against the beads tracker. Whether that lookup
@@ -5654,6 +5695,53 @@
                         exit 1
                       fi
                       echo "pg-pr-backfill-real-tools: $found scenarios, each with a PASS line, none skipped"
+                      runHook postBuild
+                    '';
+                  });
+
+              # Real-tracker end-to-end gate of the PR lane (docket pg2-6mo45.3, packet
+              # P4c-1; design 10 "Test strategy"). TestLaneE2E runs the BUILT pg-desk,
+              # pg-decider and pg-pr-change against the BUILT pg-connector and
+              # pg-connector-issue-beads over a REAL bd in a throwaway embedded store, so
+              # the tracker's own listing is the ground truth: N keyless anchors adopted
+              # with no creates, the second apply writing nothing, plan and apply agreeing
+              # per kind and operation, an unhydrated view refused, a listing above the
+              # ceiling or reporting itself truncated failing the run closed, the review
+              # item query, and pg-desk's zero-filled decision labels against the
+              # decider's own rule and reason lists. SPIKE (recorded on the bead): real bd
+              # runs in this sandbox, but needs git on PATH (bd init initializes a
+              # repository) and a git identity, which the test's environment supplies.
+              # Like every real-binary gate it has a path-scoped hook beside it
+              # (`pg-decider-lane-e2e`, below), because a nix check is not run at land; both run
+              # scripts/run-pg-decider-lane-e2e.sh, which asserts the test's PASS line, a
+              # PASS line for every scenario NAMED in testdata/lane-e2e-scenarios.txt, NO
+              # SKIP line and at least minScenarios scenarios (keep equal to
+              # MIN_SCENARIOS in the script and minLaneE2EScenarios in
+              # internal/prchange/lane_e2e_test.go). One scenario scrapes the real
+              # `pg-desk serve` on a loopback port.
+              pg-decider-lane-e2e =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-decider-lane-e2e";
+                  src = lib.cleanSource ./packages/pg-decider; # matches default.nix
+                  gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
+                }).overrideAttrs
+                  (old: {
+                    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
+                      (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
+                      pkgs.git
+                    ];
+                    PG_PR_CHANGE_PG_DESK_BIN = "${pkgs.pg-desk}/bin/pg-desk";
+                    PG_PR_CHANGE_PG_DECIDER_BIN = "${pkgs.pg-decider}/bin/pg-decider";
+                    PG_PR_CHANGE_BIN = "${pkgs.pg-decider}/bin/pg-pr-change";
+                    PG_PR_CHANGE_SQLITE3_BIN = "${lib.getBin pkgs.sqlite}/bin/sqlite3";
+                    PG_LANE_E2E_PG_CONNECTOR_BIN = "${pkgs.pg-connector}/bin/pg-connector";
+                    PG_LANE_E2E_PG_CONNECTOR_ISSUE_BEADS_BIN = "${pkgs.pg-connector-issue-beads}/bin/pg-connector-issue-beads";
+                    __darwinAllowLocalNetworking = true;
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      bash ${./scripts/run-pg-decider-lane-e2e.sh} --prebuilt --module-dir "$PWD"
                       runHook postBuild
                     '';
                   });

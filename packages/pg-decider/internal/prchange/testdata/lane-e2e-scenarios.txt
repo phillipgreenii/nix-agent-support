@@ -1,0 +1,14 @@
+# The scenarios of TestLaneE2E (lane_e2e_test.go), one per line. The test fails
+# when its own scenarios differ from this list, and the nix check
+# pg-decider-lane-e2e and the hook of the same name assert a PASS line for each.
+n-keyless-anchors-are-adopted-from-the-trackers-own-listing-with-no-creates
+the-second-apply-writes-nothing
+plan-and-apply-agree-per-kind-and-operation
+an-unhydrated-view-is-refused-and-nothing-is-written
+a-listing-above-the-ceiling-fails-the-run-and-writes-nothing
+a-listing-of-exactly-the-ceiling-is-accepted
+a-listing-that-reports-itself-truncated-fails-the-run-and-writes-nothing
+the-bd-list-query-of-a-prs-review-items-returns-every-state
+pg-desks-zero-filled-decision-labels-equal-the-deciders-rules-and-reasons
+the-drift-check-fails-on-a-decider-value-pg-desk-lacks-and-on-the-reverse
+the-scenario-list-is-the-list-the-gate-asserts

@@ -14,6 +14,23 @@ behavior lives in `docs/behavior/pg-decider/`; this page covers building and tes
   tag and run from the `pg-pr-change-contract-test` hook, or by hand with
   `go test -tags contract -run RealBD ./internal/prchange/`.
 
+- Real-tracker end-to-end gate of the PR lane (the real `pg-desk`, `pg-decider`, `pg-pr-change`,
+  `pg-connector` and beads backend over a real `bd` in a throwaway embedded store, so the tracker's own
+  listing is the ground truth): `nix build .#checks.<system>.pg-decider-lane-e2e -L`. It runs
+  `TestLaneE2E` (`internal/prchange/lane_e2e_test.go`) through `scripts/run-pg-decider-lane-e2e.sh`,
+  which asserts a PASS line for every scenario named in
+  `internal/prchange/testdata/lane-e2e-scenarios.txt`, no SKIP line and a minimum scenario count. A
+  nix check is not run at land, so the same script runs from the path-scoped `pg-decider-lane-e2e` hook
+  (it builds the five binaries from source; `bd`, `go`, `git` and `sqlite3` must be on `PATH`, and a
+  missing one is a loud failure). The scenarios: N keyless anchors adopted with no creates, the second
+  apply writing nothing, plan and apply agreeing per kind and operation, an unhydrated view refused, a
+  lookup listing above the ceiling or reporting itself truncated failing the run closed, the `bd list`
+  query that finds a PR's review items in every state, and the drift check of pg-desk's zero-filled
+  `pg_decider_decisions_total` rule and reason labels against the decider's own lists (a change to
+  `internal/action` reasons or to a registered rule needs `packages/pg-desk/internal/lanestate/vocab.go`
+  updated in the same change, or this gate fails). The sandbox has real `bd`, but it needs `git` on
+  `PATH` and a git identity (`bd init` initializes a repository).
+
 ## `pg-pr-change`
 
 `cmd/pg-pr-change` and `internal/prchange` are the composed command a `pr-change` role runs for one

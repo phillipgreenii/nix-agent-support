@@ -161,6 +161,10 @@ type rigOpts struct {
 type realTracker struct {
 	connector string   // absolute path of the real pg-connector
 	env       []string // KEY=value entries the real connector runs under
+	// all routes EVERY issue verb and `search` to the real connector (the
+	// end-to-end lane gate): the work-beads read, the decider's all-status lookup,
+	// every tracker write. Only the forge reads (`pr ...`) stay with the fake.
+	all bool
 }
 
 func newRigWith(t *testing.T, fxJSON string, o rigOpts) *rig {
@@ -275,7 +279,17 @@ func forgeShim(ctl, base string, real *realTracker) string {
 	// of the control-file answers below.
 	realCase := ""
 	if real != nil {
-		realCase = "'search '*|'issue create '*|'issue show '*)\n  exec env " + strings.Join(quoteAll(real.env), " ") + " " + shq(real.connector) + ` "$@";;` + "\n"
+		verbs := "'search '*|'issue create '*|'issue show '*"
+		if real.all {
+			verbs = "'search '*|'issue '*"
+		}
+		realExec := "exec env " + strings.Join(quoteAll(real.env), " ") + " " + shq(real.connector) + ` "$@"`
+		realCase = verbs + ")\n  " + realExec + ";;\n"
+		if real.all {
+			// The lookup listing is the real tracker's own unless a test overrides
+			// its answer (work-items.out, work-items.code).
+			realCase = "'issue list --query " + parity.WorkItemsQuery + "'*)\n  if [ -f \"$CTL/work-items.out\" ]; then\n    cat \"$CTL/work-items.out\"\n    exit \"$(cat \"$CTL/work-items.code\" 2>/dev/null || echo 0)\"\n  fi\n  " + realExec + ";;\n" + realCase
+		}
 	}
 	return `#!/bin/sh
 CTL=` + c + `
@@ -621,15 +635,17 @@ func (r *rig) scrape() string {
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		resp, err := client.Get("http://" + addr + "/metrics")
+		last := ""
 		if err == nil {
 			body, rerr := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
 			if rerr == nil && resp.StatusCode == http.StatusOK {
 				return string(body)
 			}
+			last = fmt.Sprintf("status %d: %.300s", resp.StatusCode, body)
 		}
 		if time.Now().After(deadline) {
-			r.t.Fatalf("pg-desk serve never answered /metrics on %s (last error %v): %s", addr, err, errb.String())
+			r.t.Fatalf("pg-desk serve never answered /metrics on %s (last error %v, last answer %s): %s", addr, err, last, errb.String())
 		}
 		select {
 		case <-done:
