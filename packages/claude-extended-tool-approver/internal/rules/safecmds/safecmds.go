@@ -441,9 +441,19 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		}
 		// xargs: evaluate the inner command being run
 		if basename == "xargs" {
-			innerExec, innerArgs := extractXargsCommand(pc.Args)
+			innerExec, innerArgs, replStrs := extractXargsCommand(pc.Args)
 			if innerExec == "" {
 				return hookio.NotApplicable()
+			}
+			// pg2-imjrv: xargs substitutes every replacement string (-I, -J, -i,
+			// --replace) with each stdin item, in the command name and every
+			// argument. A replacement string inside the executable or the sh/bash
+			// `-c` flag/script makes the program or the shell code itself
+			// runtime-chosen by stdin, which no static look at the text can judge.
+			// The positional form (`sh -c 'echo "$1"' _ {}`) passes the string as a
+			// separate argument after the script and is not caught here.
+			if xargsReplacementIn(replStrs, innerExec) {
+				return r.refuse("safe-commands: xargs replacement string appears in the command name (deferred to claude-code)")
 			}
 			innerBase := filepath.Base(innerExec)
 			// sh/bash -c '<script>': delegate the SOLE -c script argument through
@@ -464,6 +474,9 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// text handed onward is the SAME source cmdparse.Parse below lowers.
 			if (innerBase == "sh" || innerBase == "bash") && len(innerArgs) >= 2 && innerArgs[0] == "-c" {
 				scriptText := innerArgs[1]
+				if xargsReplacementIn(replStrs, innerArgs[0]) || xargsReplacementIn(replStrs, scriptText) {
+					return r.refuse("safe-commands: xargs stdin item substituted into shell code (deferred to claude-code)")
+				}
 				innerParsed := cmdparse.Parse(scriptText)
 				if len(innerParsed) == 0 {
 					return hookio.NotApplicable()
@@ -566,6 +579,15 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				continue
 			}
 			if safeWriteCmds[innerBase] {
+				// pg2-imjrv: an argument carrying a replacement string is a path xargs
+				// fills in from stdin at run time, so hasUnsafeWritePath is judging the
+				// placeholder text, not the real target (`xargs -J echo rm -rf echo`
+				// looks like an in-project `rm -rf echo`).
+				for _, a := range innerArgs {
+					if xargsReplacementIn(replStrs, a) {
+						return r.refuse("safe-commands: xargs " + innerBase + " has a stdin item substituted into its arguments, so the target is not statically known (deferred to claude-code)")
+					}
+				}
 				if unsafe, path := hasUnsafeWritePath(innerArgs, pe); unsafe {
 					return r.refuse("safe-commands: xargs " + innerBase + " references non-writable path " + path + " (deferred to claude-code)")
 				}
@@ -2037,21 +2059,74 @@ func normalizeExpr(s string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
 }
 
-// xargsValueFlags are xargs flags that consume the next argument as a value.
-var xargsValueFlags = map[string]bool{
-	"-I": true, "-L": true, "-n": true, "-P": true, "-d": true,
+// xargs option tables. extractXargsCommand parses the flags getopt-style so the
+// VALUE of a value-taking flag is never mistaken for the inner command
+// (pg2-imjrv: `xargs -E echo rm -rf` takes `echo` as the EOF string and runs
+// `rm -rf <items>`, not `echo`). A dash token that appears in no table makes
+// the whole leaf un-judgeable: guessing whether it takes a value is exactly how
+// the wrong inner command got approved.
+//
+// Short flags (GNU findutils and BSD/macOS xargs together), by the letter that
+// follows the dash. A cluster such as `-0rt` or `-n1` is walked letter by
+// letter, as getopt does.
+const (
+	// xargsShortNoValue take no value.
+	xargsShortNoValue = "0rtpxo"
+	// xargsShortValue take a value: the rest of the token when non-empty
+	// (`-n5`, `-I{}`), otherwise the NEXT argument (`-n 5`, `-I {}`).
+	xargsShortValue = "adEIJLnPRSs"
+	// xargsShortOptGlued are GNU's optional-argument flags (`-e[eof]`,
+	// `-i[replace]`, `-l[lines]`): the value, if any, must be glued; they never
+	// consume the next argument.
+	xargsShortOptGlued = "eil"
+	// xargsShortReplace take a replacement string (every occurrence in the
+	// command is substituted with a stdin item). `-i` is the GNU optional-glued
+	// spelling; its default replacement string is "{}".
+	xargsShortReplace = "IJ"
+)
+
+// xargsDefaultReplace is the replacement string GNU `-i` / `--replace` use
+// when none is glued on.
+const xargsDefaultReplace = "{}"
+
+// xargsLongNoValue are long flags that take no value (and no `=value`).
+var xargsLongNoValue = map[string]bool{
+	"null": true, "no-run-if-empty": true, "verbose": true, "interactive": true,
+	"exit": true, "open-tty": true, "show-limits": true,
 }
 
-// xargsNoValueFlags are xargs flags that take no value.
-var xargsNoValueFlags = map[string]bool{
-	"-0": true, "--null": true,
-	"-r": true, "--no-run-if-empty": true,
-	"-t": true, "--verbose": true,
+// xargsLongValue are long flags that require a value, given as `--flag value`
+// or `--flag=value`.
+var xargsLongValue = map[string]bool{
+	"arg-file": true, "delimiter": true, "max-args": true,
+	"max-procs": true, "max-chars": true, "process-slot-var": true,
 }
 
-// extractXargsCommand skips xargs flags and returns the inner command executable
-// and its remaining arguments. Returns ("", nil) if no command is found.
-func extractXargsCommand(args []string) (string, []string) {
+// xargsLongOptGlued are long flags whose value is optional and, when present,
+// MUST be glued with `=` (`--eof=END`, `--replace=R`, `--max-lines=2`); the
+// next argument is never consumed.
+var xargsLongOptGlued = map[string]bool{
+	"eof": true, "replace": true, "max-lines": true,
+}
+
+// xargsReplacementIn reports whether any xargs replacement string occurs in
+// text. An empty replacement string matches everything (fail closed).
+func xargsReplacementIn(replStrs []string, text string) bool {
+	for _, rs := range replStrs {
+		if strings.Contains(text, rs) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractXargsCommand parses xargs' own flags and returns the inner command
+// executable, its remaining arguments, and the replacement strings (-I, -J,
+// -i, --replace) that xargs substitutes with each stdin item. Returns
+// ("", nil, nil) when no command is found OR when an option is not in the
+// tables above (the leaf cannot be judged).
+func extractXargsCommand(args []string) (string, []string, []string) {
+	var repl []string
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -2063,32 +2138,76 @@ func extractXargsCommand(args []string) (string, []string) {
 		// The inner command's own args (returned below) go through this
 		// file's ordinary zone checks once Evaluate recurses into them.
 		if !strings.HasPrefix(a, "-") {
-			// Found the command executable
-			return a, args[i+1:]
+			return a, args[i+1:], repl
 		}
-		if xargsValueFlags[a] {
-			i += 2 // skip flag and its value
-			continue
-		}
-		if xargsNoValueFlags[a] {
-			i++
-			continue
-		}
-		// Could be a combined flag like -I{} or unknown flag — try to detect
-		// -I with attached replacement string (e.g., -I{})
-		for prefix := range xargsValueFlags {
-			if strings.HasPrefix(a, prefix) && len(a) > len(prefix) {
-				// Value is attached to the flag (e.g., -I{}, -n5, -d,)
-				goto nextArg
+		i++
+		switch {
+		case a == "--":
+			// End of xargs' options: the next token is the command.
+			if i < len(args) {
+				return args[i], args[i+1:], repl
+			}
+			return "", nil, nil
+		case strings.HasPrefix(a, "--"):
+			name, val, glued := strings.Cut(a[2:], "=")
+			switch {
+			case xargsLongNoValue[name] && !glued:
+			case xargsLongValue[name]:
+				if !glued {
+					if i >= len(args) {
+						return "", nil, nil
+					}
+					i++
+				}
+			case xargsLongOptGlued[name]:
+				if name == "replace" {
+					if glued {
+						repl = append(repl, val)
+					} else {
+						repl = append(repl, xargsDefaultReplace)
+					}
+				}
+			default:
+				return "", nil, nil
+			}
+		default:
+			for j := 1; j < len(a); j++ {
+				c := a[j]
+				if strings.IndexByte(xargsShortNoValue, c) >= 0 {
+					continue
+				}
+				if strings.IndexByte(xargsShortOptGlued, c) >= 0 {
+					if c == 'i' {
+						if rest := a[j+1:]; rest != "" {
+							repl = append(repl, rest)
+						} else {
+							repl = append(repl, xargsDefaultReplace)
+						}
+					}
+					break
+				}
+				if strings.IndexByte(xargsShortValue, c) < 0 {
+					return "", nil, nil
+				}
+				val := a[j+1:]
+				if val == "" {
+					if i >= len(args) {
+						return "", nil, nil
+					}
+					val = args[i]
+					i++
+				}
+				if strings.IndexByte(xargsShortReplace, c) >= 0 {
+					repl = append(repl, val)
+				}
+				break
+			}
+			if a == "-" {
+				return "", nil, nil
 			}
 		}
-		// Unknown flag — skip it
-		i++
-		continue
-	nextArg:
-		i++
 	}
-	return "", nil
+	return "", nil, nil
 }
 
 // isYqInPlace returns true if args carry a flag that turns yq into a WRITER:

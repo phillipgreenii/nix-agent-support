@@ -232,7 +232,7 @@ var guard3Fixtures = []string{
 	// safecmds: xargs sh -c (pg2-1zrup's own regression shape). safecmds
 	// unwraps the -c script into its own leaves before delegating, same as
 	// docker/kubectl, so no residual here either.
-	`echo foo | xargs -I{} sh -c "echo {}; echo done" -- extraarg`,
+	`echo foo | xargs -I{} sh -c "echo \"\$1\"; echo done" _ {}`,
 	// gitdir: assignment value carrying its own substitution over a .git
 	// path (LOWERING.md's own residual example -- a DIFFERENT, ACCEPTED
 	// residual than the two above: it is a distinct source string, parsed

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1734,7 +1735,8 @@ func TestSafecmds_Xargs(t *testing.T) {
 	// would do for a bare `echo {}` (alwaysSafe) without depending on one.
 	mockEval := &mockEvaluator{
 		results: map[string]hookio.RuleResult{
-			"echo {}": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			"echo {}":   {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			`echo "$1"`: {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
 		},
 		defaultResult: hookio.RuleResult{Decision: hookio.NoOpinion, Module: "mock"},
 	}
@@ -1746,7 +1748,31 @@ func TestSafecmds_Xargs(t *testing.T) {
 	}{
 		{"find pipe xargs cat", "find /home/user/project | xargs cat", hookio.Approve},
 		{"find pipe xargs ls", "find /home/user/project | xargs ls -la", hookio.Approve},
-		{"xargs sh -c echo", "xargs -I {} sh -c 'echo {}'", hookio.Approve},
+		// pg2-imjrv: a replacement string inside the -c script splices each stdin
+		// item into shell code, so it is refused (the mock would approve the
+		// static text "echo {}"; the refusal must happen before delegation).
+		{"xargs sh -c replacement in script", "xargs -I {} sh -c 'echo {}'", hookio.NoOpinion},
+		{"xargs sh -c replacement in script glued", "xargs -I{} sh -c 'echo {}'", hookio.NoOpinion},
+		{"xargs sh -c replacement in script percent", "xargs -I % sh -c 'echo %'", hookio.NoOpinion},
+		{"xargs sh -c replacement via -J", "xargs -J % sh -c 'echo %'", hookio.NoOpinion},
+		{"xargs sh -c replacement via GNU -i default", "xargs -i sh -c 'echo {}'", hookio.NoOpinion},
+		{"xargs sh -c replacement via GNU -i glued", "xargs -iXX sh -c 'echo XX'", hookio.NoOpinion},
+		{"xargs sh -c replacement via --replace default", "xargs --replace sh -c 'echo {}'", hookio.NoOpinion},
+		{"xargs sh -c replacement via --replace=R", "xargs --replace=R sh -c 'echo R'", hookio.NoOpinion},
+		{"xargs replacement in command name", "xargs -I echo echo hi", hookio.NoOpinion},
+		{"xargs sh -c positional form keeps approve", `xargs -I{} sh -c 'echo "$1"' _ {}`, hookio.Approve},
+		{"xargs sh -c positional form spaced", `xargs -I {} sh -c 'echo "$1"' _ {}`, hookio.Approve},
+		{"xargs write cmd replacement in args", "xargs -I{} cp {} sub", hookio.NoOpinion},
+		{"xargs write cmd no replacement keeps approve", "xargs cp -t sub", hookio.Approve},
+		{"xargs sh -c no replacement string", `xargs sh -c 'echo {}'`, hookio.Approve},
+		{"xargs -n1 echo", "xargs -n1 echo hi", hookio.Approve},
+		{"xargs -n 1 echo", "xargs -n 1 echo hi", hookio.Approve},
+		// pg2-imjrv: the value of a value flag is never the inner command.
+		{"xargs -E value not command", "xargs -E echo rm -rf /etc/x", hookio.NoOpinion},
+		{"xargs -J value not command", "xargs -J echo rm -rf /etc/x echo", hookio.NoOpinion},
+		{"xargs -a value not command", "xargs -a echo rm -rf /etc/x", hookio.NoOpinion},
+		{"xargs --arg-file= value not command", "xargs --arg-file=echo rm -rf /etc/x", hookio.NoOpinion},
+		{"xargs unrecognised flag not applicable", "xargs --bogus echo hi", hookio.NoOpinion},
 		{"xargs unknown cmd", "xargs curl http://example.com", hookio.NoOpinion},
 		{"xargs no command", "xargs -I {}", hookio.NoOpinion},
 	}
@@ -1761,6 +1787,98 @@ func TestSafecmds_Xargs(t *testing.T) {
 			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("Decision = %v, want %v (reason: %s)", got.Decision, tt.want, got.Reason)
+			}
+		})
+	}
+}
+
+// TestExtractXargsCommand pins pg2-imjrv: every value-taking xargs flag, in each
+// spelling it accepts, consumes its value so the value is never read as the
+// inner command, the replacement strings are returned, and a dash token in no
+// table yields NO inner command (never a guessed one).
+func TestExtractXargsCommand(t *testing.T) {
+	t.Parallel()
+	type xargsCase struct {
+		name     string
+		args     []string
+		wantExec string
+		wantArgs []string
+		wantRepl []string
+	}
+	tests := []xargsCase{
+		{name: "plain", args: []string{"ls", "-la"}, wantExec: "ls", wantArgs: []string{"-la"}},
+		{name: "no value flags", args: []string{"-0", "-r", "-t", "-p", "-x", "-o", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "no value long flags", args: []string{"--null", "--no-run-if-empty", "--verbose", "--interactive", "--exit", "--open-tty", "echo", "x"}, wantExec: "echo", wantArgs: []string{"x"}},
+		{name: "cluster no value", args: []string{"-0rt", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "cluster ending in value", args: []string{"-0n", "2", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "cluster glued value", args: []string{"-0n2", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "double dash ends options", args: []string{"--", "echo", "x"}, wantExec: "echo", wantArgs: []string{"x"}},
+		{name: "double dash nothing after", args: []string{"--"}},
+		{name: "-I separate", args: []string{"-I", "R", "echo"}, wantExec: "echo", wantArgs: []string{}, wantRepl: []string{"R"}},
+		{name: "-I glued", args: []string{"-IR", "echo"}, wantExec: "echo", wantArgs: []string{}, wantRepl: []string{"R"}},
+		{name: "-J separate", args: []string{"-J", "R", "echo"}, wantExec: "echo", wantArgs: []string{}, wantRepl: []string{"R"}},
+		{name: "-J glued", args: []string{"-JR", "echo"}, wantExec: "echo", wantArgs: []string{}, wantRepl: []string{"R"}},
+		{name: "-i bare default", args: []string{"-i", "echo"}, wantExec: "echo", wantArgs: []string{}, wantRepl: []string{"{}"}},
+		{name: "-i glued", args: []string{"-iR", "echo"}, wantExec: "echo", wantArgs: []string{}, wantRepl: []string{"R"}},
+		{name: "--replace bare default", args: []string{"--replace", "echo"}, wantExec: "echo", wantArgs: []string{}, wantRepl: []string{"{}"}},
+		{name: "--replace=R", args: []string{"--replace=R", "echo"}, wantExec: "echo", wantArgs: []string{}, wantRepl: []string{"R"}},
+		{name: "-e bare does not consume", args: []string{"-e", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "-e glued", args: []string{"-eEND", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "-l bare does not consume", args: []string{"-l", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "-l glued", args: []string{"-l2", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "--eof bare does not consume", args: []string{"--eof", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "--eof=", args: []string{"--eof=END", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "--max-lines bare does not consume", args: []string{"--max-lines", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "--max-lines=", args: []string{"--max-lines=2", "echo"}, wantExec: "echo", wantArgs: []string{}},
+		{name: "missing value", args: []string{"-I"}},
+		{name: "missing long value", args: []string{"--arg-file"}},
+		{name: "no command", args: []string{"-n1"}},
+		{name: "unrecognised short flag", args: []string{"-Z", "echo", "x"}},
+		{name: "unrecognised cluster letter", args: []string{"-0Z", "echo", "x"}},
+		{name: "unrecognised long flag", args: []string{"--bogus", "echo", "x"}},
+		{name: "long flag abbreviation not guessed", args: []string{"--arg", "echo", "x"}},
+		{name: "no-value long flag with value", args: []string{"--null=1", "echo"}},
+		{name: "lone dash", args: []string{"-", "echo"}},
+	}
+	// Every value-taking short flag, in separate and glued spelling: the value
+	// must be consumed and `echo` stays the command.
+	for _, f := range []string{"a", "d", "E", "I", "J", "L", "n", "P", "R", "S", "s"} {
+		repl := []string(nil)
+		if f == "I" || f == "J" {
+			repl = []string{"VAL"}
+		}
+		tests = append(
+			tests,
+			xargsCase{"-" + f + " separate", []string{"-" + f, "VAL", "echo", "x"}, "echo", []string{"x"}, repl},
+			xargsCase{"-" + f + " glued", []string{"-" + f + "VAL", "echo", "x"}, "echo", []string{"x"}, repl},
+		)
+	}
+	// Every value-taking long flag: `--flag value` and `--flag=value`.
+	for _, f := range []string{"arg-file", "delimiter", "max-args", "max-procs", "max-chars", "process-slot-var"} {
+		tests = append(
+			tests,
+			xargsCase{"--" + f + " separate", []string{"--" + f, "echo", "rm", "-rf"}, "rm", []string{"-rf"}, nil},
+			xargsCase{"--" + f + "=value", []string{"--" + f + "=echo", "rm", "-rf"}, "rm", []string{"-rf"}, nil},
+		)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			gotExec, gotArgs, gotRepl := extractXargsCommand(tt.args)
+			if gotExec != tt.wantExec {
+				t.Fatalf("exec = %q, want %q (args %q)", gotExec, tt.wantExec, tt.args)
+			}
+			if gotExec == "" {
+				if gotArgs != nil || gotRepl != nil {
+					t.Errorf("not-applicable result must carry no args/repl, got %q / %q", gotArgs, gotRepl)
+				}
+				return
+			}
+			if !reflect.DeepEqual(append([]string{}, gotArgs...), append([]string{}, tt.wantArgs...)) {
+				t.Errorf("args = %q, want %q", gotArgs, tt.wantArgs)
+			}
+			if !reflect.DeepEqual(append([]string{}, gotRepl...), append([]string{}, tt.wantRepl...)) {
+				t.Errorf("repl = %q, want %q", gotRepl, tt.wantRepl)
 			}
 		})
 	}
