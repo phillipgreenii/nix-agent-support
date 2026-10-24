@@ -14299,6 +14299,22 @@
                     ' ${rendered.github.enabled} >/dev/null
                     # an absent system scope renders no OTel endpoint
                     jq -e 'has("otel_endpoint") | not' ${rendered.github.enabledNoOs} >/dev/null
+                    # watched queries (docket pg2-6mo45.3, packet P2a-2): the daemon
+                    # config carries watched = true on exactly the query declared
+                    # { expr, watched = true }; an unwatched string or list query
+                    # renders no watched key, and a config without any watched
+                    # declaration renders none at all (the negative fixture)
+                    jq -e '
+                      .pr.queries.mine.watched == true
+                      and .pr.queries.mine.expr == "is:pr is:open author:@me"
+                      and (.pr.queries.team | type) == "array"
+                      and (.pr.queries.sweep | type) == "string"
+                      and ([.pr.queries[] | select(type == "object" and .watched == true)] | length) == 1
+                    ' ${rendered.github.watched} >/dev/null
+                    if jq -e '[.pr.queries[] | select(type == "object" and (.watched // false))] | length > 0' ${rendered.github.enabled} >/dev/null; then
+                      echo "an undeclared query renders watched in the daemon config" >&2
+                      exit 1
+                    fi
                     # the same registry text, as the umbrella reads it, carries the
                     # SAME --config path in every occurrence and the stamp in both blocks
                     yq -e '

@@ -271,6 +271,29 @@ let
     }
   ) osWithObs;
   ghDisabled = ghCase { enable = false; } osWithObs;
+  # A watched query (docket pg2-6mo45.3, packet P2a-2): the object form
+  # { expr, watched = true } on one query and the unchanged string and list
+  # forms on the others. The backends block is free-form, so the option that
+  # carries the flag is the query value itself; the daemon config and the
+  # umbrella block render it from that one declaration.
+  githubWatchedRegistry = githubRegistry // {
+    backends = githubRegistry.backends // {
+      "pg-connector-pr-github" = githubRegistry.backends."pg-connector-pr-github" // {
+        queries = {
+          mine = {
+            expr = "is:pr is:open author:@me";
+            watched = true;
+          };
+          team = [
+            "is:pr is:open review-requested:@me"
+            "is:pr is:open assignee:@me"
+          ];
+          sweep = "is:pr is:open label:example";
+        };
+      };
+    };
+  };
+  ghWatched = evaluate (githubWatchedRegistry // { github = githubOn; }) osWithObs;
   # No github.* attribute at all: today's configuration.
   ghAbsent = evaluate githubRegistry null;
 
@@ -383,6 +406,13 @@ let
     enabledBlockKeepsKeys =
       (rc ghEnabled).backends."pg-connector-pr-github".queries.mine == "is:pr is:open author:@me"
       && (rc ghEnabled).backends."pg-connector-ci-github-actions".example_key == "example-value";
+
+    # a watched query renders as the object form in the umbrella block and the
+    # unwatched ones keep their plain string and list forms
+    watchedBlockKeepsForms =
+      (rc ghWatched).backends."pg-connector-pr-github".queries.mine.watched == true
+      && builtins.isString (rc ghWatched).backends."pg-connector-pr-github".queries.sweep
+      && builtins.isList (rc ghWatched).backends."pg-connector-pr-github".queries.team;
 
     # supervisor = none, no allowUnsupervised: binary and config installed,
     # old backends kept exactly, no stamp, and the evaluation warning.
@@ -537,6 +567,7 @@ in
     enabled = (ghOpts ghEnabled).configFile;
     enabledHash = (ghOpts ghEnabled).configHash;
     enabledNoOs = (ghOpts ghEnabledNoOs).configFile;
+    watched = (ghOpts ghWatched).configFile;
     enabledRegistry = render (githubRegistry // { github = githubOn; });
     package = pkgs.pg-connector-github;
     ghPath = lib.getExe pkgs.gh;

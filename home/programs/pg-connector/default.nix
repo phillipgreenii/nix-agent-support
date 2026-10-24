@@ -659,6 +659,13 @@ in
         "treat config as opaque" rule -- this module MUST NOT validate a
         backend's own keys either). A backend documents its own recognized
         keys itself.
+
+        A configured query (`queries.<name>`) may be a string, a list of
+        strings, or `{ expr = <string or list>; watched = true; }`; the last
+        form marks the query's members watched. The same declaration renders
+        into the umbrella's block and, with `github.enable`, into the GitHub
+        daemon's own config, so a query is declared once. Nothing is watched
+        by default.
       '';
     };
 
