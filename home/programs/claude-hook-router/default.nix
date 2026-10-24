@@ -262,9 +262,11 @@ in
       # delegates cannot go through `sources` themselves). This gets us the same
       # `<declared>+<digest>` version stamping and `.claude-plugin/plugin.json` shape
       # every other in-repo plugin has.
+      pluginName = "hook-router";
+      declaredVersion = "1.0.0";
       pluginSkeleton = marketplaceBuilders.mkClaudeHookRouterPlugin {
-        name = "hook-router";
-        declared = "1.0.0";
+        name = pluginName;
+        declared = declaredVersion;
         description = "Dispatches Claude Code hook events to first-party delegates registered via programs.claude-hook-router.delegates (ADR 0071).";
         inherit routerCommand;
         sources = [ ];
@@ -292,34 +294,67 @@ in
             mv "$out/.claude-plugin/plugin.json.tmp" "$out/.claude-plugin/plugin.json"
           '';
 
-      # mkClaudeMarketplace needs a source tree carrying its own
-      # .claude-plugin/marketplace.json listing the plugin(s) it bundles (the same
-      # shape this repo's own committed claude-marketplace/ tree has) -- built here
-      # rather than committed, since the router plugin's content is HM-config-dependent
-      # (cfg.delegates), unlike every statically-registered plugin under claude-marketplace/.
+      # The marketplace is assembled HERE rather than through repo-base's
+      # `mkClaudeMarketplace`. That builder reads its `src` (marketplace.json and each
+      # plugin.json) at EVALUATION time and digests it with `builtins.path`; fed this
+      # module's `pluginDir` -- a derivation, because its content depends on
+      # `cfg.delegates` -- that is import from derivation (IFD): evaluation would have to
+      # BUILD the source tree first, which serializes eval and build and fails outright
+      # with `--option allow-import-from-derivation false` (pg2-8l6hx). Everything
+      # evaluation needs is known statically here (plugin name, declared version,
+      # marketplace name), and the version digest is taken over `pluginDir`'s output PATH
+      # (`mkSrcDigest` accepts a derivation and hashes its store-path string; that path is
+      # itself a function of every input, so the digest tracks the rendered content as
+      # `mkClaudeMarketplace`'s does) without realizing it. The result keeps
+      # `mkClaudeMarketplace`'s shape: `.claude-plugin/marketplace.json` plus the stamped
+      # plugin dir, and `passthru.{marketplaceName,plugins}`.
+      marketplaceBaseName = "claude-hook-router";
+      marketplaceName = "${marketplaceBaseName}-marketplace-local";
+      pluginVersion = "${declaredVersion}+${inputs.phillipgreenii-nix-base.lib.mkSrcDigest pluginDir}";
+
       marketplaceManifest = pkgs.writeText "claude-hook-router-marketplace.json" (
         builtins.toJSON {
-          name = "claude-hook-router";
+          name = marketplaceName;
           owner = {
             name = "phillipgreenii";
           };
           plugins = [
             {
-              name = "hook-router";
-              source = "./hook-router";
+              name = pluginName;
+              source = "./${pluginName}";
+              version = pluginVersion;
             }
           ];
         }
       );
 
-      marketplaceSrc = pkgs.runCommand "claude-hook-router-marketplace-src" { } ''
-        mkdir -p "$out/.claude-plugin" "$out/hook-router"
-        cp ${marketplaceManifest} "$out/.claude-plugin/marketplace.json"
-        cp -r ${pluginDir}/. "$out/hook-router/"
-        chmod -R u+w "$out"
-      '';
-
-      marketplace = marketplaceBuilders.mkClaudeMarketplace { src = marketplaceSrc; };
+      marketplace =
+        pkgs.runCommand "claude-marketplace-${marketplaceBaseName}"
+          {
+            nativeBuildInputs = [ pkgs.jq ];
+            passthru = {
+              inherit marketplaceName;
+              plugins = [
+                {
+                  name = pluginName;
+                  version = pluginVersion;
+                  defaultEnabled = true;
+                  key = "${pluginName}@${marketplaceName}";
+                }
+              ];
+            };
+          }
+          ''
+            mkdir -p "$out/.claude-plugin" "$out/${pluginName}"
+            cp ${marketplaceManifest} "$out/.claude-plugin/marketplace.json"
+            cp -r ${pluginDir}/. "$out/${pluginName}/"
+            chmod -R u+w "$out/${pluginName}"
+            jq --arg v ${lib.escapeShellArg pluginVersion} '.version = $v' \
+              "$out/${pluginName}/.claude-plugin/plugin.json" \
+              > "$out/${pluginName}/.claude-plugin/plugin.json.tmp"
+            mv "$out/${pluginName}/.claude-plugin/plugin.json.tmp" \
+              "$out/${pluginName}/.claude-plugin/plugin.json"
+          '';
     in
     {
       assertions = [

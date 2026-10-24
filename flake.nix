@@ -10842,90 +10842,16 @@
               # real built plugin directory's hooks.json/router-config.json/plugin.json.
               test-claude-hook-router =
                 let
-                  evalCfg =
-                    cfg:
-                    (lib.evalModules {
-                      specialArgs = { inherit pkgs lib inputs; };
-                      modules = [
-                        ./home/programs/claude-hook-router/default.nix
-                        (
-                          { lib, ... }:
-                          {
-                            # Minimal stubs for the config surface this module reads and
-                            # contributes to (the real options live in claude-code /
-                            # claude-marketplaces, not pulled in here).
-                            options = {
-                              # Real home-manager/NixOS module sets provide `assertions`
-                              # (base "misc" module); this standalone evalModules harness
-                              # does not pull that in, so stub it -- unlike
-                              # test-claude-marketplaces above, this module DOES define
-                              # assertions (delegate contract/matcher validation).
-                              assertions = lib.mkOption {
-                                type = lib.types.listOf lib.types.unspecified;
-                                default = [ ];
-                              };
-                              phillipgreenii = {
-                                programs.claude-code = {
-                                  enable = lib.mkEnableOption "claude (stub)";
-                                  settings = {
-                                    extraKnownMarketplaces = lib.mkOption {
-                                      type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
-                                      default = { };
-                                    };
-                                    enabledPlugins = lib.mkOption {
-                                      type = lib.types.attrsOf lib.types.bool;
-                                      default = { };
-                                    };
-                                    plugins = lib.mkOption {
-                                      type = lib.types.listOf lib.types.str;
-                                      default = [ ];
-                                    };
-                                  };
-                                  marketplaces.nixProvided = lib.mkOption {
-                                    type = lib.types.listOf lib.types.package;
-                                    default = [ ];
-                                  };
-                                };
-                              };
-                              home.homeDirectory = lib.mkOption {
-                                type = lib.types.str;
-                                default = "/home/test";
-                              };
-                              home.packages = lib.mkOption {
-                                type = lib.types.listOf lib.types.package;
-                                default = [ ];
-                              };
-                            };
-                          }
-                        )
-                        cfg
-                      ];
-                    }).config;
-
-                  withDelegate = evalCfg {
-                    phillipgreenii.programs.claude-code.enable = true;
-                    phillipgreenii.programs.claude-hook-router = {
-                      enable = true;
-                      delegates = lib.mkOrder 1000 [
-                        {
-                          name = "test-tool";
-                          event = "PreToolUse";
-                          matcher = null;
-                          command = "test-tool-hook";
-                          contract = "decide";
-                          priority = 1000;
-                        }
-                      ];
-                    };
-                  };
-
+                  inherit (import ./tests/claude-hook-router-eval.nix { inherit lib pkgs inputs; })
+                    withDelegate
+                    marketplaceDrv
+                    ;
                   marketplaceDrvs = withDelegate.phillipgreenii.programs.claude-code.marketplaces.nixProvided;
-                  marketplaceDrv = builtins.elemAt marketplaceDrvs 0;
                 in
                 # Exactly one marketplace registered, carrying the expected plugin key —
                 # forces the module to evaluate end to end (delegates -> assertions ->
                 # rendered files -> mkClaudeHookRouterPlugin skeleton -> overlay ->
-                # mkClaudeMarketplace) before any derivation is realized.
+                # marketplace assembly) before any derivation is realized.
                 assert lib.length marketplaceDrvs == 1;
                 assert lib.elem "hook-router@claude-hook-router-marketplace-local" (
                   map (p: p.key) marketplaceDrv.passthru.plugins
@@ -10947,6 +10873,103 @@
                   jq -e '.hooks.PreToolUse[0] | has("matcher") | not' "$plugin/hooks/hooks.json" > /dev/null
                   jq -e '.PreToolUse[0].name == "test-tool" and .PreToolUse[0].priority == 1000 and .PreToolUse[0].contract == "decide" and .PreToolUse[0].matcher == null' \
                     "$plugin/router-config.json" > /dev/null
+
+                  # The marketplace itself (pg2-8l6hx: assembled in the module, not by
+                  # mkClaudeMarketplace, so its manifest and version stamping are asserted here).
+                  mkt="${marketplaceDrv}"
+                  jq -e '.name == "claude-hook-router-marketplace-local" and (.plugins | length == 1) and .plugins[0].name == "hook-router" and .plugins[0].source == "./hook-router"' \
+                    "$mkt/.claude-plugin/marketplace.json" > /dev/null
+                  v="$(jq -r '.version' "$plugin/.claude-plugin/plugin.json")"
+                  test "$v" = "${(builtins.elemAt marketplaceDrv.passthru.plugins 0).version}"
+                  jq -e --arg v "$v" '.plugins[0].version == $v' "$mkt/.claude-plugin/marketplace.json" > /dev/null
+                  case "$v" in 1.0.0+*) ;; *) echo "unexpected plugin version: $v" >&2; exit 1 ;; esac
+
+                  touch $out
+                '';
+
+              # Regression guard (pg2-8l6hx) against import from derivation (IFD) in the
+              # claude-hook-router module. IFD makes evaluation BUILD a derivation (or
+              # fetch one) before it can continue, so it serializes eval and build and
+              # makes the eval-only land check (`pn workspace flake-check --no-build`,
+              # `pre-land-eval`) depend on a build; with `--no-ifd` it fails outright.
+              # This module used to hand repo-base's `mkClaudeMarketplace` a source tree
+              # that was itself a derivation (its content depends on `cfg.delegates`), so
+              # the builder read `marketplace.json` out of a derivation output at eval time.
+              #
+              # The check runs REAL nix (no mock): `nix-instantiate --eval` with
+              # `--option allow-import-from-derivation false` over the module's real
+              # marketplace derivation (same harness as test-claude-hook-router, a fresh
+              # nixpkgs import, repo-base's real builders), against a `dummy://` store so the
+              # sandbox needs no daemon. Two assertions: (1) the module evaluates; (2) a
+              # negative control, a deliberate IFD expression under the SAME nix and flags,
+              # fails with nix's allow-import-from-derivation error -- without it a pass could
+              # only mean "the flag did nothing". The whole-repo version of this guard is
+              # `scripts/check-no-ifd.sh` (a full drvPath evaluation needs every flake input
+              # fetched, which a build sandbox cannot do).
+              test-claude-hook-router-no-ifd =
+                let
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./tests/claude-hook-router-eval.nix
+                      ./home/programs/claude-hook-router/default.nix
+                    ];
+                  };
+                  prelude = ''
+                    let
+                      pkgs = import ${nixpkgs} { system = "${pkgs.stdenv.hostPlatform.system}"; };
+                      lib = pkgs.lib;
+                      base = ${phillipgreenii-nix-base};
+                  '';
+                  moduleExpr = ''
+                    ${prelude}
+                      inputs.phillipgreenii-nix-base.lib =
+                        (import (base + "/lib/version.nix"))
+                        // { inherit ((import (base + "/nix/packages.nix") { })) mkClaudeMarketplaceBuilders; };
+                      h = import ${src}/tests/claude-hook-router-eval.nix { inherit lib pkgs inputs; };
+                    in
+                    h.marketplaceDrv.drvPath
+                  '';
+                  # The negative control needs no external store path: a hand-written
+                  # derivation imported at eval time.
+                  ifdProbeExpr = ''
+                    import (derivation {
+                      name = "ifd-probe";
+                      system = builtins.currentSystem;
+                      builder = "/bin/sh";
+                      args = [ "-c" "echo 1 > $out" ];
+                    })
+                  '';
+                in
+                pkgs.runCommand "test-claude-hook-router-no-ifd" { nativeBuildInputs = [ pkgs.nix ]; } ''
+                  set -euo pipefail
+                  export HOME="$TMPDIR/home" NIX_STATE_DIR="$TMPDIR/state" NIX_LOG_DIR="$TMPDIR/log"
+                  mkdir -p "$HOME" "$NIX_STATE_DIR" "$NIX_LOG_DIR"
+
+                  # (1) The module's marketplace derivation evaluates with IFD forbidden.
+                  # `nix-instantiate --eval` runs in read-only mode, which writes no .drv
+                  # files, so it needs only the `dummy://` store; a source tree that is a
+                  # derivation (the pre-pg2-8l6hx shape) fails here ("path ... is not valid").
+                  nix-instantiate --eval --strict --store dummy:// \
+                    --option allow-import-from-derivation false \
+                    --expr ${lib.escapeShellArg moduleExpr} > module.out
+                  cat module.out >&2
+                  grep -Eq '^"/nix/store/[a-z0-9]{32}-claude-marketplace-claude-hook-router\.drv"$' module.out
+
+                  # (2) Negative control: under the SAME flag a deliberate IFD expression
+                  # fails with nix's own allow-import-from-derivation error. This needs a
+                  # store that accepts writes (--read-write-mode on a throwaway local root;
+                  # `dummy://` rejects them and the error would be a different one), so a
+                  # pass above cannot mean "the flag did nothing".
+                  root="$(cd "$TMPDIR" && pwd -P)/ctl-root"
+                  if nix-instantiate --eval --strict --read-write-mode --store "local?root=$root" \
+                    --option allow-import-from-derivation false \
+                    --expr ${lib.escapeShellArg ifdProbeExpr} > probe.out 2> probe.err; then
+                    echo "FAIL: the IFD negative control evaluated; allow-import-from-derivation=false is not in force" >&2
+                    exit 1
+                  fi
+                  cat probe.err >&2
+                  grep -q "because the option 'allow-import-from-derivation' is disabled" probe.err
 
                   touch $out
                 '';

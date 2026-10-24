@@ -221,6 +221,14 @@ only while editing files under `home/programs/claude-status-line/`.
 - **Format**: Use `nix fmt` for formatting Nix files
 - **Test**: Build the targeted checks relevant to your change (`nix build .#checks.<system>.<name>`, in the background); a full `nix flake check` is NOT a per-change or land-time gate
 - **Build**: Flake provides reusable modules, not direct machine configs
+- **No import from derivation (IFD)**: evaluation MUST NOT build or fetch a derivation (no
+  `import`/`readFile`/`builtins.path` of a derivation output), so the eval-only land check can run
+  with `--no-ifd`. A module whose content depends on config hands consumers a path or computes the
+  value at build time (see `home/programs/claude-hook-router`'s marketplace). Guards:
+  `checks.<system>.test-claude-hook-router-no-ifd` (real `nix-instantiate` with
+  `allow-import-from-derivation=false` over that module, plus an IFD negative control) and
+  `scripts/check-no-ifd.sh` (all of `checks`, `packages`, `devShells` for one system; run it through
+  `pg-nix-log-wrapped`/`bgrun`, with the workspace `--override-input` siblings).
 
 ## Beads Labels
 
