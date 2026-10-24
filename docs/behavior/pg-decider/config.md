@@ -12,8 +12,9 @@ The configuration is one JSON file whose path is named by the environment variab
 - When it names a file that is missing or is not valid JSON, `apply` exits `1` with a message
   naming the path, before it writes anything.
 - Unknown keys are tolerated, so a deployment MAY carry a key a later version of the decider reads.
-- `apply` loads the file for every key. `plan` writes nothing and reads the file only for
-  `area_labels`, so the plan it prints shows the labels `apply` would write; a file that is named
+- `apply` loads the file for every key. `plan` writes nothing and reads the file for `area_labels`
+  (so the plan it prints shows the labels `apply` would write), for the focus keys, and, for a `pr`,
+  for the two lookup keys below (so it reads the very listing `apply` reads); a file that is named
   but unusable makes `plan` exit `1`.
 
 ```json
@@ -24,6 +25,8 @@ The configuration is one JSON file whose path is named by the environment variab
   "escalate_after": 3,
   "bead_id_pattern": "^bd-[a-z0-9]+$",
   "focus_beads_query": "focus-beads",
+  "work_items_query": "work-items-all",
+  "work_items_ceiling": 7000,
   "focus_priority_map": {
     "Highest": "P0",
     "High": "P1",
@@ -77,6 +80,31 @@ project or tracker of its own.
 
 The focus rule's condition has a durable home: the section "The `focus.item` rule" of
 [`work-items.md`](work-items.md), which [`README.md`](README.md) names. This doc owns only the keys.
+
+### The work-item lookup keys
+
+These two keys serve the bounded work-item lookup of a `pr` run (see "The work-item lookup" in
+[`plan-and-apply.md`](plan-and-apply.md)). A `pr` `plan` or `apply` needs both; an `issue` run makes
+no such lookup and needs neither.
+
+| Key                  | Type    | Default | Effect                                                                                                                                                                                                                                                                                           |
+| -------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `work_items_query`   | string  | empty   | The name of the pg-connector named query that lists the work items of all six PR kinds (`merge-request`, `process-feedback`, `review-pr`, `fix-ci`, `resolve-conflict`, `focus-item`) in EVERY status, closed included, with no result cap. It MUST NOT be a feed name the work-bead feeds share |
+| `work_items_ceiling` | integer | unset   | The largest listing the lookup accepts: a listing with MORE items than this fails the run closed. It MUST be at least `1`                                                                                                                                                                        |
+
+Both keys are required for a `pr` run: with either unset the run fails closed (exit `4`, nothing
+written) with a message naming the missing key, and it never falls back to the gather's work-beads
+query or to a default ceiling. An `issue` run, and any run with no `pr`, is unaffected.
+
+The ceiling is a recurring operational cost, not a one-time setting. Closed work items only
+accumulate, so the listing only grows, and the lane WILL reach any fixed ceiling at a predictable
+point, at which every `pr` run fails closed until an operator acts. The deployment therefore starts
+the ceiling at about twice the listing size measured against the real tracker, the decider reports
+the item count and the ceiling on every run (so the growth is visible before the lane stops: the
+alert on the item count over a fraction of the ceiling is the warning), and the operator remedy is
+to raise `work_items_ceiling` or to compact (archive) closed items, as the runbook says. The
+decider names no project or tracker of its own: the deployment supplies the query's name and its
+expression.
 
 ### Area labels
 
@@ -137,3 +165,8 @@ configuration.
   to `review-pr` and `process-feedback` items, MUST NOT remove a label for this reason, MUST NOT
   create a write whose only purpose is to add one, and with no `area_labels` configured MUST emit
   exactly the plan it would emit without the key.
+- **INV-DECIDER-26.** <!-- uuid: 5115c572-0c55-43ce-8e22-a911be8a373b --> A `pr` run MUST have both `work_items_query` and `work_items_ceiling`
+  and MUST fail closed, writing nothing, with a message naming the key when either is unset;
+  `work_items_ceiling` MUST be at least `1` and a blank `work_items_query` MUST make the file
+  invalid. The ceiling is the largest accepted listing: a listing of exactly the ceiling is
+  accepted, a larger one is not.

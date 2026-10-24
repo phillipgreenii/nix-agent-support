@@ -198,3 +198,47 @@ func TestEmitFailureLinePrintsOneCountedFailureAndNoRules(t *testing.T) {
 		t.Fatalf("got %q\nwant %q", buf.String(), want)
 	}
 }
+
+// The lookup figures are additive members: present when the run read a lookup,
+// omitted otherwise, and the failure line carries what is known.
+func TestTheLookupFiguresRideTheCountersLineOnlyWhenTheRunReadOne(t *testing.T) {
+	var buf bytes.Buffer
+	env := apply.Env{Stderr: &buf}
+	h := New(nil, "pr", "acme/widgets#42")
+	if err := h.Finish(context.Background(), env, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "lookup_") {
+		t.Fatalf("a run with no lookup carries figures: %s", buf.String())
+	}
+	buf.Reset()
+	h.Lookup(0, 7000) // a zero count is a figure, not an absent one
+	if err := h.Finish(context.Background(), env, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"lookup_items":0,"lookup_ceiling":7000`) {
+		t.Fatalf("line = %s", buf.String())
+	}
+}
+
+func TestLookupFailureLineReportsTheFiguresKnown(t *testing.T) {
+	items, ceiling := 7100, 7000
+	for _, tc := range []struct {
+		name            string
+		items, ceiling  *int
+		wantHas, wantNo string
+	}{
+		{"both known", &items, &ceiling, `"lookup_items":7100,"lookup_ceiling":7000`, ""},
+		{"only the ceiling", nil, &ceiling, `"lookup_ceiling":7000`, "lookup_items"},
+		{"neither", nil, nil, `"failures":{"lookup-unavailable":1}`, "lookup_"},
+	} {
+		var buf bytes.Buffer
+		if err := EmitLookupFailureLine(&buf, "pr", "acme/widgets#42", "lookup-unavailable", tc.items, tc.ceiling); err != nil {
+			t.Fatal(err)
+		}
+		got := buf.String()
+		if !strings.Contains(got, tc.wantHas) || (tc.wantNo != "" && strings.Contains(got, tc.wantNo)) || !strings.Contains(got, `"rules":{}`) {
+			t.Errorf("%s: line = %s", tc.name, got)
+		}
+	}
+}

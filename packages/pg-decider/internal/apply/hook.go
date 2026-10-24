@@ -88,6 +88,10 @@ type Input struct {
 	Item     *item.Routed // nil without --from-item
 	Env      Env
 	Hooks    []Hook
+	// Lookup is the run's all-status work-item listing (a pr run reads it once,
+	// before it decides). When set it is the dedup lookup of every create, in
+	// place of one `issue list` call per create; nil keeps that per-create call.
+	Lookup *Lookup
 }
 
 // Result is a run's outcome.

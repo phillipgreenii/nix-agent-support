@@ -5562,7 +5562,10 @@
                     PG_PR_CHANGE_BIN = "${pkgs.pg-decider}/bin/pg-pr-change";
                     PG_PR_CHANGE_SQLITE3_BIN = "${lib.getBin pkgs.sqlite}/bin/sqlite3";
                     PG_PR_CHANGE_REQUIRE_BINARIES = "1";
-                    minScenarios = "20";
+                    # Two scenarios scrape the real `pg-desk serve` on a loopback port
+                    # to read the lane lookup gauges the way a scraper does.
+                    __darwinAllowLocalNetworking = true;
+                    minScenarios = "22";
                     buildPhase = ''
                       runHook preBuild
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"

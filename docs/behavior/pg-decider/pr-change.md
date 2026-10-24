@@ -147,8 +147,13 @@ neither, and leaves the PR's persisted apply-mode residual alone. The residual p
 after an `apply` is passed as the residual OF that run, never as a run of its own; in `plan` mode the
 residual is the number of actions the plan lists, which is non-zero by definition when there is work.
 A run that ends at the lock is in the run record only: it holds no lock to write the PR's own state
-under. When the decider reports its work-item lookup item count and ceiling they are forwarded too
-(the decider starts to in a later packet).
+under. The decider's work-item lookup item count and ceiling are forwarded too: the command reads
+`lookup_items` and `lookup_ceiling` from the decider's run counters line (an `apply`, and a run that
+failed closed on the lookup, whose line carries the figures known), or, for a `plan` run, from the
+read-only `plan --json` it makes after the plan. A run that failed closed on the lookup (the decider
+exits `4`) is the class `decide_failed` and still forwards the figures, so the two gauges that
+export them keep following the lane at the moment it stops; a decider that reports none leaves them
+out and the store keeps what it has.
 
 The decisions counter's `action` comes from the plan read just before an `apply` (the operation of
 each action) and its `outcome` from the decider's apply counters, assigned to a rule's actions in plan

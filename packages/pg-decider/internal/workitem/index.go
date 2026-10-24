@@ -282,3 +282,21 @@ func (ix *Index) Adoptable() []Adoptable {
 	}
 	return append([]Adoptable(nil), ix.adoptable...)
 }
+
+// TitleNames reports whether a work item's title has one of the shapes by which
+// a keyless item is adopted for the viewed entity: a kind prefix followed by
+// the entity reference ("fix-ci: <repo>#<n>") or the anchor prefix
+// "<repo>#<n>: ". The all-status lookup uses it to keep a legacy keyless item
+// that a metadata-only filter would hide.
+func TitleNames(title string, v *view.View) bool {
+	if v == nil {
+		return false
+	}
+	ref := entityTitleRef(v)
+	for _, k := range titlePrefixKinds {
+		if title == string(k)+": "+ref {
+			return true
+		}
+	}
+	return strings.HasPrefix(title, ref+": ")
+}

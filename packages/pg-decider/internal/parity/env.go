@@ -202,6 +202,10 @@ func newSandbox(env Env, fx *Fixture, side, syncMode string) (*sandbox, func(), 
 	if err := os.WriteFile(sb.configPath, []byte(configYAML(syncMode)), 0o644); err != nil {
 		return fail(fmt.Errorf("parity: write config: %w", err))
 	}
+	deciderConfig := filepath.Join(filepath.Dir(sb.configPath), "pg-decider.json")
+	if err := os.WriteFile(deciderConfig, []byte(DeciderConfigJSON()), 0o644); err != nil {
+		return fail(fmt.Errorf("parity: write decider config: %w", err))
+	}
 
 	sb.env = []string{
 		"PATH=" + sb.binDir,
@@ -211,6 +215,7 @@ func newSandbox(env Env, fx *Fixture, side, syncMode string) (*sandbox, func(), 
 		"XDG_CONFIG_HOME=" + filepath.Join(run, "config"),
 		"XDG_RUNTIME_DIR=" + runtimeDir,
 		"PG_DESK_CONFIG=" + sb.configPath,
+		"PG_DECIDER_CONFIG=" + deciderConfig,
 	}
 	return sb, cleanup, nil
 }

@@ -147,3 +147,49 @@ func TestFactSummaryIsSortedAndStable(t *testing.T) {
 		t.Fatal("no facts, no summary")
 	}
 }
+
+func TestJSONWithLookupAddsTheFiguresAfterSkippedAndKeepsTheListsArrays(t *testing.T) {
+	var with, without bytes.Buffer
+	res := action.PlanResult{}
+	if err := JSONWithLookup(&with, res, &Lookup{Items: 0, Ceiling: 7000}); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(with.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if a, ok := got["actions"].([]any); !ok || len(a) != 0 {
+		t.Errorf("actions = %v", got["actions"])
+	}
+	if s, ok := got["skipped"].([]any); !ok || len(s) != 0 {
+		t.Errorf("skipped = %v", got["skipped"])
+	}
+	if got["lookup_items"] != float64(0) || got["lookup_ceiling"] != float64(7000) {
+		t.Errorf("figures = %v %v (a zero count must still be printed)", got["lookup_items"], got["lookup_ceiling"])
+	}
+	if i, j := strings.Index(with.String(), `"skipped"`), strings.Index(with.String(), `"lookup_items"`); i < 0 || j < i {
+		t.Errorf("lookup_items does not follow skipped:\n%s", with.String())
+	}
+	// With no lookup the output is exactly JSON's.
+	var plain bytes.Buffer
+	if err := JSON(&plain, res); err != nil {
+		t.Fatal(err)
+	}
+	if err := JSONWithLookup(&without, res, nil); err != nil || without.String() != plain.String() {
+		t.Errorf("a nil lookup must print exactly JSON's output: %q vs %q (%v)", without.String(), plain.String(), err)
+	}
+}
+
+func TestTextWithLookupNamesTheFiguresAndTextWithoutOneDoesNot(t *testing.T) {
+	v := loadView(t, "pr_view.json")
+	var with, without bytes.Buffer
+	if err := TextWithLookup(&with, v, action.PlanResult{}, &Lookup{Items: 12, Ceiling: 40}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(with.String(), "\nlookup: 12 work items listed, ceiling 40\n") {
+		t.Errorf("text:\n%s", with.String())
+	}
+	if err := Text(&without, v, action.PlanResult{}); err != nil || strings.Contains(without.String(), "lookup:") {
+		t.Errorf("text without a lookup:\n%s (%v)", without.String(), err)
+	}
+}

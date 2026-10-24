@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -147,6 +150,10 @@ type rigOpts struct {
 	env []string
 	// laneMode, when set, is the configured pr_lane.mode (off, plan or apply).
 	laneMode string
+	// deciderConfig, when set, is the pg-decider configuration file's JSON
+	// instead of parity.DeciderConfigJSON (the lookup query and a ceiling far
+	// above any fixture).
+	deciderConfig string
 }
 
 // realTracker is a real pg-connector (and the real bd behind it) that the
@@ -200,7 +207,14 @@ func newRigWith(t *testing.T, fxJSON string, o rigOpts) *rig {
 	}
 	cfg := filepath.Join(dir, "config", "pg-desk.yaml")
 	must(t, os.WriteFile(cfg, []byte(fmt.Sprintf(rigConfigTmpl, parity.FixtureRepo, laneConfig(o.laneMode))), 0o644))
+	deciderCfg := filepath.Join(dir, "config", "pg-decider.json")
+	cfgJSON := o.deciderConfig
+	if cfgJSON == "" {
+		cfgJSON = parity.DeciderConfigJSON()
+	}
+	must(t, os.WriteFile(deciderCfg, []byte(cfgJSON), 0o644))
 	r.env = []string{
+		"PG_DECIDER_CONFIG=" + deciderCfg,
 		"PATH=" + r.binDir,
 		"HOME=" + filepath.Join(dir, "home"),
 		"TMPDIR=" + filepath.Join(dir, "tmp"),
@@ -249,6 +263,9 @@ func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'
 // wire code `pr show` answers with, or "not_found" for the connector's exit 4),
 // fail.detail (the wire code `pr files` answers with: a degraded read),
 // search.out and search.code (the answer and exit code of `search`),
+// work-items.out and work-items.code (the answer and exit code of the decider's
+// all-status lookup `issue list --query work-items-all`; the fixture's beads
+// answer it when absent),
 // fail.create (the wire code `issue create` answers with). Every call is
 // appended to calls.log; every `issue create` (its whole argv, a multi-line description included) to created.log.
 func forgeShim(ctl, base string, real *realTracker) string {
@@ -288,6 +305,11 @@ case "$*" in
   fi
   printf '{"sources":[{"source":"pg-connector-issue-beads","status":"succeeded","count":0}],"groups":[]}\n'
   exit 0;;
+'issue list --query ` + parity.WorkItemsQuery + `'*)
+  if [ -f "$CTL/work-items.out" ]; then
+    cat "$CTL/work-items.out"
+    exit "$(cat "$CTL/work-items.code" 2>/dev/null || echo 0)"
+  fi;;
 'issue create '*)
   if [ -f "$CTL/fail.create" ]; then code_answer "$(cat "$CTL/fail.create")"; fi
   printf '%s\n' "$*" >> "$CTL/created.log"
@@ -548,4 +570,61 @@ func (r *rig) runRecords() []RunRecord {
 		return nil
 	}
 	return readRecords(r.t, r.runRecordPath())
+}
+
+// scrape starts the real `pg-desk serve` on a free loopback port of the
+// sandbox's store, GETs /metrics once the server answers, stops it and returns
+// the exposition text. It is how the lane gauges (exported at scrape time from
+// the persisted lane state) are read the way a scraper reads them.
+func (r *rig) scrape() string {
+	r.t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	must(r.t, err)
+	addr := l.Addr().String()
+	must(r.t, l.Close())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, filepath.Join(r.binDir, "pg-desk"), "serve", "--addr", addr)
+	cmd.Env = r.env
+	cmd.Dir = filepath.Join(r.dir, "work")
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	must(r.t, cmd.Start())
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		resp, err := client.Get("http://" + addr + "/metrics")
+		if err == nil {
+			body, rerr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if rerr == nil && resp.StatusCode == http.StatusOK {
+				return string(body)
+			}
+		}
+		if time.Now().After(deadline) {
+			r.t.Fatalf("pg-desk serve never answered /metrics on %s (last error %v): %s", addr, err, errb.String())
+		}
+		select {
+		case <-done:
+			r.t.Fatalf("pg-desk serve exited early: %s", errb.String())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// gauge reads one unlabeled sample of a metrics exposition ("" when absent).
+func gauge(exposition, name string) string {
+	for _, l := range strings.Split(exposition, "\n") {
+		if v, ok := strings.CutPrefix(l, name+" "); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }

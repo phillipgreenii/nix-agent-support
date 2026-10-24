@@ -561,6 +561,23 @@ func (fx *Fixture) issueDepsJSON(b BeadFixture) []byte {
 	return mustJSON(map[string]any{"ids": []string{}, "entities": []any{}})
 }
 
+// allBeadsJSON is the fan-out answer of the decider's all-status lookup query:
+// every fixture bead, closed included, however work_beads_open_only models the
+// work-beads query. It carries the truncated flag and one succeeded source, as
+// the connector's own answer does.
+func (fx *Fixture) allBeadsJSON() []byte {
+	entities := make([]issueWire, 0, len(fx.Beads))
+	ids := make([]string, 0, len(fx.Beads))
+	for _, b := range fx.Beads {
+		entities = append(entities, b.wire())
+		ids = append(ids, b.ID)
+	}
+	return mustJSON(map[string]any{
+		"entities": entities, "present_ids": ids, "truncated": false,
+		"sources": []any{map[string]any{"source": "fake-beads", "status": "succeeded", "count": len(ids)}},
+	})
+}
+
 // workBeadsJSON is the bare fan-out answer of `issue list --query work-beads`.
 //
 // Production's query is `list --type merge-request --status open` (the

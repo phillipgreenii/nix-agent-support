@@ -147,15 +147,15 @@ func TestFixtureSandboxIsHermetic(t *testing.T) {
 		k, v, _ := strings.Cut(kv, "=")
 		got[k] = v
 	}
-	for _, k := range []string{"PATH", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "PG_DESK_CONFIG", "HOME", "TMPDIR"} {
+	for _, k := range []string{"PATH", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "PG_DESK_CONFIG", "PG_DECIDER_CONFIG", "HOME", "TMPDIR"} {
 		if got[k] == "" {
 			t.Errorf("child env lacks %s", k)
 		}
 	}
-	if len(got) != 7 {
+	if len(got) != 8 {
 		t.Errorf("child env has unexpected members: %v", sb.env)
 	}
-	for _, k := range []string{"XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "PG_DESK_CONFIG", "HOME", "TMPDIR"} {
+	for _, k := range []string{"XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "PG_DESK_CONFIG", "PG_DECIDER_CONFIG", "HOME", "TMPDIR"} {
 		if !strings.HasPrefix(got[k], sb.dir+string(filepath.Separator)) {
 			t.Errorf("%s=%q is not under the sandbox %q", k, got[k], sb.dir)
 		}

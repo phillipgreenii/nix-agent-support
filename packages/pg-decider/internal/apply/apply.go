@@ -142,7 +142,14 @@ func (r *runner) create(ctx context.Context, a action.Action, finish finishFn) E
 	}
 	if key := a.Fields.Metadata["dedup_key"]; key != "" {
 		lookup := lookupDedup
-		if focus {
+		switch {
+		case r.in.Lookup != nil:
+			// The run's own all-status listing, read once and bounded.
+			lookup = func(_ context.Context, _ Env, ref workitem.EntityRef, key string) (string, bool, error) {
+				id, ok := r.in.Lookup.Find(ref, key)
+				return id, ok, nil
+			}
+		case focus:
 			lookup = lookupFocusDedup
 		}
 		id, found, err := lookup(ctx, env, r.ref, key)

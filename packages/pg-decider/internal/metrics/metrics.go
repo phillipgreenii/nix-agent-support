@@ -30,7 +30,13 @@
 //     run_id and seq;
 //   - line level, "failures": {"<reason>":1}, the counted failure of a run
 //     that failed closed (EmitFailureLine), which has no rules and writes
-//     nothing.
+//     nothing;
+//   - line level, "lookup_items" and "lookup_ceiling": the size of the
+//     all-status work-item listing a pr run read and the configured ceiling it
+//     was checked against (omitted for a run that made no lookup). A run that
+//     failed closed because of the lookup still reports them, as far as they
+//     are known (the ceiling always, the item count when a listing was read),
+//     so the composed command can persist them on that path too.
 //
 // planned is every action of the rule (planned = applied + deduped + failed +
 // skipped); skipped counts skipped-dependency outcomes, which are not failures.
@@ -89,6 +95,10 @@ type Line struct {
 	FromItem string `json:"from_item,omitempty"`
 	// Failures counts a run that failed closed, by reason.
 	Failures map[string]int `json:"failures,omitempty"`
+	// LookupItems and LookupCeiling are the work-item lookup figures of a pr
+	// run; nil (omitted) when not known.
+	LookupItems   *int `json:"lookup_items,omitempty"`
+	LookupCeiling *int `json:"lookup_ceiling,omitempty"`
 }
 
 // transitions is the closed set of facts.transition values counted.
@@ -96,11 +106,12 @@ var transitions = map[string]bool{"mint": true, "hold": true, "release": true, "
 
 // Hook implements apply.Hook.
 type Hook struct {
-	typ, id     string
-	escalations int
-	seq         int64
-	fromItem    string
-	skipped     []action.Skip
+	typ, id                    string
+	escalations                int
+	seq                        int64
+	fromItem                   string
+	skipped                    []action.Skip
+	lookupItems, lookupCeiling *int
 }
 
 var _ apply.Hook = (*Hook)(nil)
@@ -122,6 +133,10 @@ func (h *Hook) Routed(it *item.Routed) {
 // Skipped hands the hook the plan's skips, read once per run: the focus.item
 // skips of a source that has a focus bead are counted by cause.
 func (h *Hook) Skipped(skips []action.Skip) { h.skipped = skips }
+
+// Lookup records the work-item lookup figures of the run (the listing's size
+// and the configured ceiling), so the line carries them.
+func (h *Hook) Lookup(items, ceiling int) { h.lookupItems, h.lookupCeiling = &items, &ceiling }
 
 // Escalated records one escalation created by the run.
 func (h *Hook) Escalated(string) { h.escalations++ }
@@ -205,7 +220,7 @@ func (h *Hook) Finish(_ context.Context, env apply.Env, evs []apply.Event) error
 	countSkips(rules, h.skipped)
 	return emit(env, Line{
 		Contract: Contract, Type: h.typ, ID: h.id, Rules: rules, Escalations: h.escalations,
-		Seq: h.seq, FromItem: h.fromItem,
+		Seq: h.seq, FromItem: h.fromItem, LookupItems: h.lookupItems, LookupCeiling: h.lookupCeiling,
 	})
 }
 
@@ -216,5 +231,15 @@ func EmitFailureLine(w io.Writer, typ, id, reason string) error {
 	return emit(apply.Env{Stderr: w}, Line{
 		Contract: Contract, Type: typ, ID: id, Rules: map[string]RuleCounters{},
 		Failures: map[string]int{reason: 1},
+	})
+}
+
+// EmitLookupFailureLine is EmitFailureLine for a run that failed closed because
+// its work-item lookup could not be trusted: the same line plus the lookup
+// figures known at that point (nil members are omitted).
+func EmitLookupFailureLine(w io.Writer, typ, id, reason string, items, ceiling *int) error {
+	return emit(apply.Env{Stderr: w}, Line{
+		Contract: Contract, Type: typ, ID: id, Rules: map[string]RuleCounters{},
+		Failures: map[string]int{reason: 1}, LookupItems: items, LookupCeiling: ceiling,
 	})
 }

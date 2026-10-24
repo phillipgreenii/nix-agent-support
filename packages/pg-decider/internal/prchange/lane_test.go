@@ -487,3 +487,79 @@ func TestTheRunRecordIsNotTheLegacyRunRecord(t *testing.T) {
 		t.Fatalf("the run record file name %q collides with pg-desk's run-record.log", RunRecordFileName)
 	}
 }
+
+// The real extraction (the default of lookupFromDecider): the figures the decider
+// reports in its run counters line, in its --json plan, and on its failure path.
+const planJSONWithLookup = `{"actions":[],"skipped":[{"rule":"all.closed","reason":"not matched"}],"lookup_items":3443,"lookup_ceiling":7000}`
+
+func figures(t *testing.T, in laneInput, items, ceiling int64) {
+	t.Helper()
+	if in.LookupItems == nil || *in.LookupItems != items || in.LookupCeiling == nil || *in.LookupCeiling != ceiling {
+		t.Fatalf("lookup figures = %v, %v, want %d and %d", in.LookupItems, in.LookupCeiling, items, ceiling)
+	}
+}
+
+func TestPlanModeForwardsTheFiguresOfThePlanJSONRead(t *testing.T) {
+	s := hydrated().
+		on("pg-decider plan pr acme/api#7 --json", ok(planJSONWithLookup)).
+		on("pg-decider plan pr", ok("pr acme/api#7  mine\nlookup: 3443 work items listed, ceiling 7000\n"))
+	o, _, errb := opts(t, ModePlan, s)
+	if got := Run(context.Background(), o); got != ExitOK {
+		t.Fatalf("exit %d: %s", got, errb)
+	}
+	figures(t, laneCalls(t, s)[0], 3443, 7000)
+}
+
+func TestApplyModeForwardsTheFiguresOfTheCountersLine(t *testing.T) {
+	line := strings.TrimSuffix(applyCounters, "}") + `,"lookup_items":3443,"lookup_ceiling":7000}`
+	s := hydrated().
+		on("pg-decider plan pr", ok(planWithWork)).
+		on("pg-decider apply", Result{Stderr: line + "\n"})
+	o, _, errb := opts(t, ModeApply, s)
+	Run(context.Background(), o)
+	if len(laneCalls(t, s)) != 1 {
+		t.Fatalf("lane calls: %v\n%s", s.calls, errb)
+	}
+	figures(t, laneCalls(t, s)[0], 3443, 7000)
+}
+
+// A decider that failed closed on the lookup (exit 4) still reports the figures
+// in its failure line, and the composed command persists them on that path: the
+// run is classed decide_failed and the gauges keep following the lane.
+func TestAFailedClosedLookupIsDecideFailedAndStillForwardsTheFigures(t *testing.T) {
+	failLine := `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"acme/api#7","rules":{},"escalations":0,` +
+		`"failures":{"lookup-above-ceiling":1},"lookup_items":7100,"lookup_ceiling":7000}`
+	for _, mode := range []string{ModePlan, ModeApply} {
+		t.Run(mode, func(t *testing.T) {
+			s := hydrated().
+				on("pg-decider plan pr", Result{Code: 4, Stderr: "pg-decider: cannot plan pr acme/api#7: work-item lookup: above the ceiling\n" + failLine + "\n"}).
+				on("pg-decider apply", Result{Code: 4, Stderr: "pg-decider: cannot apply pr acme/api#7: work-item lookup: above the ceiling\n" + failLine + "\n"})
+			o, _, errb := opts(t, mode, s)
+			got := Run(context.Background(), o)
+			if got != ExitDecideFailed {
+				t.Fatalf("exit %d, want %d (decide_failed): %s", got, ExitDecideFailed, errb)
+			}
+			if !strings.Contains(errb.String(), "class=decide_failed") {
+				t.Errorf("failure line lacks the class: %s", errb)
+			}
+			calls := laneCalls(t, s)
+			if len(calls) != 1 {
+				t.Fatalf("lane calls = %d: %v", len(calls), s.calls)
+			}
+			figures(t, calls[0], 7100, 7000)
+			if calls[0].LastOutcome != "decide.decide_failed" {
+				t.Errorf("last outcome = %q", calls[0].LastOutcome)
+			}
+		})
+	}
+}
+
+// A decider that reports neither figure leaves them out (no invented zero).
+func TestADeciderThatReportsNoFiguresForwardsNone(t *testing.T) {
+	s := hydrated().on("pg-decider plan pr", ok(planEmpty))
+	o, _, _ := opts(t, ModePlan, s)
+	Run(context.Background(), o)
+	if in := laneCalls(t, s)[0]; in.LookupItems != nil || in.LookupCeiling != nil {
+		t.Fatalf("figures invented: %v %v", in.LookupItems, in.LookupCeiling)
+	}
+}

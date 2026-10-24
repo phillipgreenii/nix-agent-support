@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/metrics"
 	"github.com/phillipgreenii/pg-decider/internal/plan"
 	"github.com/phillipgreenii/pg-decider/internal/rules"
+	"github.com/phillipgreenii/pg-decider/internal/workitem"
 )
 
 // planFn is the replaceable seam for `plan` behavior (tests stub it). It runs
@@ -50,11 +51,20 @@ var planFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, as
 		_ = metrics.EmitFailureLine(errOut, typ, id, rules.FocusAbsentReason)
 		return exitcode.ViewUnreadable
 	}
-	res := arealabels.Apply(decide.DecideWith(v, typ, cfg), v, cfg)
+	// A pr run reads the all-status work-item lookup ONCE, before any rule runs,
+	// and fails closed (exit 4, nothing printed as a plan) when it cannot be
+	// trusted. The very same lookup feeds apply (applyFn), so what plan shows is
+	// what apply then does on the same state.
+	lk, ok := readRunLookup(ctx, errOut, cfg, "plan", typ, id)
+	if !ok {
+		return exitcode.LookupUntrusted
+	}
+	v = lk.Augment(v)
+	res := arealabels.Apply(lk.DedupePlan(workitem.EntityRefFrom(v), decide.DecideWith(v, typ, cfg)), v, cfg)
 	if asJSON {
-		err = plan.JSON(out, res)
+		err = plan.JSONWithLookup(out, res, lookupFigures(lk))
 	} else {
-		err = plan.Text(out, v, res)
+		err = plan.TextWithLookup(out, v, res, lookupFigures(lk))
 	}
 	if err != nil {
 		fmt.Fprintf(errOut, "pg-decider: cannot print the plan: %v\n", err)

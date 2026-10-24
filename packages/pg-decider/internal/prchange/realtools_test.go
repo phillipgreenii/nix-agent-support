@@ -54,7 +54,7 @@ const (
 // minScenarios is the number of subtests TestPRChangeRealTools has; the nix
 // check requires at least this many PASS lines, so a filtered-out or renamed
 // scenario cannot pass vacuously. Keep it equal to the number of t.Run calls.
-const minScenarios = 20
+const minScenarios = 22
 
 func contains(t *testing.T, what, got string, want ...string) {
 	t.Helper()
@@ -564,6 +564,96 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 		if !strings.Contains(r.lane()["pr_lane.marked_inactive"], "1") {
 			t.Errorf("the not-found PR was not counted as marked inactive: %v", r.lane())
+		}
+	})
+
+	run("the-real-decider-reports-the-lookup-figures-and-the-lane-gauges-are-non-zero-after-a-run-in-each-mode", func(t *testing.T) {
+		held := func(n int) string {
+			var items []string
+			for i := 0; i < n; i++ {
+				items = append(items, fmt.Sprintf(`{"id":"wb-%d","title":"fix-ci: acme/api#11","state":"closed","metadata":{"repo":"acme/api","pr_number":"11","dedup_key":"pr:acme/api#11:fix-ci:head%04d"}}`, i, i))
+			}
+			return `{"entities":[` + strings.Join(items, ",") + `],"present_ids":[],"sources":[{"source":"fake-beads","status":"succeeded","count":` + strconv.Itoa(n) + `}],"truncated":false}` + "\n"
+		}
+		for _, mode := range []string{"plan", "apply"} {
+			r := newRigWith(t, fxMine, rigOpts{cutover: true, laneMode: mode, deciderConfig: `{"work_items_query":"work-items-all","work_items_ceiling":500}`})
+			r.ctlWrite("work-items.out", held(3))
+			res := r.change(mode, id11, "5")
+			if res.code != ExitOK && res.code != ExitDecidePartial {
+				t.Fatalf("%s: exit %d:\n%s", mode, res.code, res.stderr)
+			}
+			lane := r.lane()
+			if lane["pr_lane.state.lookup_items"] != "3" || lane["pr_lane.state.lookup_ceiling"] != "500" {
+				t.Fatalf("%s: persisted lookup figures = %q, %q, want 3 and 500: %v", mode, lane["pr_lane.state.lookup_items"], lane["pr_lane.state.lookup_ceiling"], lane)
+			}
+			exposition := r.scrape()
+			if got := gauge(exposition, "pg_desk_pr_lane_lookup_items"); got != "3" {
+				t.Errorf("%s: pg_desk_pr_lane_lookup_items = %q after the run, want 3:\n%s", mode, got, exposition)
+			}
+			if got := gauge(exposition, "pg_desk_pr_lane_lookup_ceiling"); got != "500" {
+				t.Errorf("%s: pg_desk_pr_lane_lookup_ceiling = %q after the run, want 500", mode, got)
+			}
+			if recs := r.runRecords(); len(recs) != 1 || recs[0].Lane.Result != laneRecorded {
+				t.Errorf("%s: run records = %+v", mode, recs)
+			}
+		}
+	})
+
+	run("a-listing-above-the-ceiling-fails-the-run-decide_failed-writes-nothing-and-still-moves-the-gauges", func(t *testing.T) {
+		three := `{"entities":[` +
+			`{"id":"wb-1","title":"t","state":"closed","metadata":{"dedup_key":"pr:acme/api#11:fix-ci:aaa"}},` +
+			`{"id":"wb-2","title":"t","state":"closed","metadata":{"dedup_key":"pr:acme/api#11:fix-ci:bbb"}},` +
+			`{"id":"wb-3","title":"t","state":"closed","metadata":{"dedup_key":"pr:acme/api#11:fix-ci:ccc"}}],` +
+			`"present_ids":[],"sources":[{"source":"fake-beads","status":"succeeded","count":3}],"truncated":false}` + "\n"
+		cases := []struct {
+			name, listing, code string
+			items               string // the persisted count; "" = not reported
+		}{
+			{"above the ceiling", three, "0", "3"},
+			{"truncated", strings.Replace(three, `"truncated":false`, `"truncated":true`, 1), "0", "3"},
+			{"unavailable", `{"error":{"code":"unavailable","message":"tracker down"}}` + "\n", "1", ""},
+		}
+		for _, mode := range []string{"plan", "apply"} {
+			for _, c := range cases {
+				ceiling := "50"
+				if c.name == "above the ceiling" {
+					ceiling = "2"
+				}
+				r := newRigWith(t, fxMine, rigOpts{cutover: true, laneMode: mode, deciderConfig: `{"work_items_query":"work-items-all","work_items_ceiling":` + ceiling + `}`})
+				r.ctlWrite("work-items.out", c.listing)
+				r.ctlWrite("work-items.code", c.code)
+				res := r.change(mode, id11, "5")
+				if res.code != ExitDecideFailed {
+					t.Fatalf("%s/%s: exit %d, want %d (decide_failed):\n%s", mode, c.name, res.code, ExitDecideFailed, res.stderr)
+				}
+				contains(t, c.name+" failure line", res.stderr, "stage=decide", "class=decide_failed")
+				if r.created() != 0 || len(r.calls("issue comment")) != 0 {
+					t.Errorf("%s/%s: a run that failed closed wrote to the tracker", mode, c.name)
+				}
+				recs := r.runRecords()
+				if len(recs) != 1 || recs[0].ErrorClass != ClassDecideFailed || recs[0].FailingStage != StageDecide || recs[0].Lane.Result != laneRecorded {
+					t.Fatalf("%s/%s: run records = %+v", mode, c.name, recs)
+				}
+				lane := r.lane()
+				if lane["pr_lane.runs.decide.decide_failed"] != "1" {
+					t.Errorf("%s/%s: the lane-run counter: %v", mode, c.name, lane)
+				}
+				if got := lane["pr_lane.state.lookup_ceiling"]; got != ceiling {
+					t.Errorf("%s/%s: persisted ceiling = %q, want %s (the failure path persists the figures too)", mode, c.name, got, ceiling)
+				}
+				if c.items != "" && lane["pr_lane.state.lookup_items"] != c.items {
+					t.Errorf("%s/%s: persisted item count = %q, want %s", mode, c.name, lane["pr_lane.state.lookup_items"], c.items)
+				}
+				exposition := r.scrape()
+				if got := gauge(exposition, "pg_desk_pr_lane_lookup_ceiling"); got != ceiling {
+					t.Errorf("%s/%s: the ceiling gauge = %q, want %s", mode, c.name, got, ceiling)
+				}
+				if c.items != "" {
+					if got := gauge(exposition, "pg_desk_pr_lane_lookup_items"); got != c.items {
+						t.Errorf("%s/%s: the item-count gauge = %q, want %s", mode, c.name, got, c.items)
+					}
+				}
+			}
 		}
 	})
 

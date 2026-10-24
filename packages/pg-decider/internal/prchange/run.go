@@ -2,6 +2,7 @@ package prchange
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -96,6 +97,10 @@ type run struct {
 	// lookupItems and lookupCeiling are the decider's work-item lookup figures,
 	// when it reported them (see lookupFromDecider).
 	lookupItems, lookupCeiling *int64
+	// planItems and planCeiling are the same figures as read from a read-only
+	// `plan --json` of the run (the plan mode's only source: the decider's plan
+	// prints no counters line).
+	planItems, planCeiling *int64
 }
 
 func (r *run) execute() int {
@@ -324,6 +329,9 @@ func (r *run) readPlan() (*action.PlanResult, string) {
 	if err != nil {
 		return nil, "the plan is not readable JSON: " + err.Error()
 	}
+	if items, ceiling := lookupFromPlanJSON(res.Stdout); items != nil || ceiling != nil {
+		r.planItems, r.planCeiling = items, ceiling
+	}
 	return p, ""
 }
 
@@ -371,15 +379,49 @@ func (r *run) decide() int {
 	r.decisions = decisionsFor(r.o.Mode, pre, counters)
 	r.rec.Adoption = adoptionOutcome(r.o.Mode, r.view, pre, counters)
 	r.lookupItems, r.lookupCeiling = lookupFromDecider(res)
+	if r.lookupItems == nil && r.lookupCeiling == nil {
+		r.lookupItems, r.lookupCeiling = r.planItems, r.planCeiling
+	}
 	return code
 }
 
 // lookupFromDecider extracts the decider's work-item lookup item count and its
-// ceiling from a decider run, when it reports them. The decider does not report
-// them yet (the bounded lookup of the readiness packet adds it), so this
-// returns nil, nil; the lane write path call already accepts and forwards the
-// two values, and a test replaces this function to show it.
-var lookupFromDecider = func(Result) (items, ceiling *int64) { return nil, nil }
+// ceiling from the deciding call, when it reports them: the `lookup_items` and
+// `lookup_ceiling` members of the run counters line on its stderr (an apply, a
+// failed-closed plan or apply: that line carries them as far as they are known
+// on the failure path too), else the same two members of a `--json` plan on its
+// stdout. A plan in text form prints them in prose only, so a plan run takes
+// them from the read-only `plan --json` that follows (see readPlan). The lane
+// write path call forwards the two values; a test replaces this function to
+// show that with a stub.
+var lookupFromDecider = func(res Result) (items, ceiling *int64) {
+	if c := parseCounters(res.Stderr); c != nil && (c.LookupItems != nil || c.LookupCeiling != nil) {
+		return intp64(c.LookupItems), intp64(c.LookupCeiling)
+	}
+	return lookupFromPlanJSON(res.Stdout)
+}
+
+func intp64(p *int) *int64 {
+	if p == nil {
+		return nil
+	}
+	n := int64(*p)
+	return &n
+}
+
+// lookupFromPlanJSON reads lookup_items and lookup_ceiling out of a decider
+// plan printed with --json; nil, nil for anything else (a text plan, an older
+// decider that prints neither member).
+func lookupFromPlanJSON(stdout string) (items, ceiling *int64) {
+	var p struct {
+		Items   *int `json:"lookup_items"`
+		Ceiling *int `json:"lookup_ceiling"`
+	}
+	if json.Unmarshal([]byte(stdout), &p) != nil {
+		return nil, nil
+	}
+	return intp64(p.Items), intp64(p.Ceiling)
+}
 
 // mapDecide maps the decider's exit. Its stderr is re-wrapped: the run counters
 // line passes through unchanged, and every other line becomes part of this

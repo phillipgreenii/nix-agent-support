@@ -84,8 +84,8 @@ not durable, so these docs MUST NOT point a reader there for the condition.
 The invariants of this set are numbered `INV-DECIDER-<n>` across the docs, in RFC 2119 language:
 
 - `INV-DECIDER-1` to `INV-DECIDER-6` are in [`work-items.md`](work-items.md).
-- `INV-DECIDER-7` to `INV-DECIDER-20` and `INV-DECIDER-25` are in [`plan-and-apply.md`](plan-and-apply.md).
-- `INV-DECIDER-21` to `INV-DECIDER-24` are in [`config.md`](config.md).
+- `INV-DECIDER-7` to `INV-DECIDER-20`, `INV-DECIDER-25`, `INV-DECIDER-27` and `INV-DECIDER-28` are in [`plan-and-apply.md`](plan-and-apply.md).
+- `INV-DECIDER-21` to `INV-DECIDER-24` and `INV-DECIDER-26` are in [`config.md`](config.md).
 - `INV-PRCHANGE-1` to `INV-PRCHANGE-8` are in [`pr-change.md`](pr-change.md).
 
 ## Scope

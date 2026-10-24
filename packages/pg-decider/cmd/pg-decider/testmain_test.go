@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-decider/internal/apply"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
@@ -80,4 +81,11 @@ func writeFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// The existing tests of plan and apply exercise the rules and the writes, not
+// the work-item lookup; they run with none (lookupRead answers nil, nil, which
+// production never does). lookup_test.go swaps the real reader back in.
+func init() {
+	lookupRead = func(context.Context, apply.Env) (*apply.Lookup, error) { return nil, nil }
 }

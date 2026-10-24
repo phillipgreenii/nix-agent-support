@@ -80,6 +80,15 @@ type Config struct {
 	// query that lists focus beads in every status, closed included, which the
 	// focus rule's dedup lookup reads. Empty means unset.
 	FocusBeadsQuery string `json:"focus_beads_query,omitempty"`
+	// WorkItemsQuery is work_items_query: the name of the pg-connector named
+	// query that lists every work item of the six PR kinds in every status,
+	// closed included, with no result cap. A pr plan or apply reads it once per
+	// run (the bounded lookup). Empty means unset, which fails a pr run closed.
+	WorkItemsQuery string `json:"work_items_query,omitempty"`
+	// WorkItemsCeiling is work_items_ceiling: the largest listing the pr lookup
+	// accepts; a listing above it fails the run closed. nil means unset, which
+	// fails a pr run closed; an explicit value below 1 makes Load fail.
+	WorkItemsCeiling *int `json:"work_items_ceiling,omitempty"`
 	// FocusPriorityMap is focus_priority_map: tracker priority name to P0..P4,
 	// the priority of a focus bead minted for that source. When set it
 	// replaces the default (Highest:P0, High:P1, Medium:P2, Low:P3, Lowest:P4)
@@ -115,6 +124,18 @@ func (c *Config) FocusPriority(name string) string {
 		return p
 	}
 	return DefaultFocusPriority
+}
+
+// validateLookupKeys checks the two keys of the bounded work-item lookup that
+// are present; an absent key is not a load error (a pr run fails closed on it).
+func validateLookupKeys(c *Config) error {
+	if c.WorkItemsQuery != "" && strings.TrimSpace(c.WorkItemsQuery) == "" {
+		return fmt.Errorf("work_items_query %q must not be blank", c.WorkItemsQuery)
+	}
+	if c.WorkItemsCeiling != nil && *c.WorkItemsCeiling < 1 {
+		return fmt.Errorf("work_items_ceiling is %d; it must be at least 1", *c.WorkItemsCeiling)
+	}
+	return nil
 }
 
 func validateFocusKeys(c *Config) error {
@@ -181,6 +202,9 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: %q: %w", path, err)
 	}
 	if err := validateFocusKeys(&c); err != nil {
+		return nil, fmt.Errorf("config: %q: %w", path, err)
+	}
+	if err := validateLookupKeys(&c); err != nil {
 		return nil, fmt.Errorf("config: %q: %w", path, err)
 	}
 	return &c, nil

@@ -6,6 +6,23 @@ import (
 	"strings"
 )
 
+// WorkItemsQuery is the named query the harness's decider configuration names
+// as work_items_query (the decider's bounded all-status lookup), and
+// WorkItemsCeiling the work_items_ceiling it sets: far above any fixture, so a
+// scenario never trips it. The fake connector answers the query with every
+// fixture bead whatever its state, the way the production query lists every
+// status.
+const (
+	WorkItemsQuery   = "work-items-all"
+	WorkItemsCeiling = 100000
+)
+
+// DeciderConfigJSON is the pg-decider configuration file the harness (and the
+// composed command's real-tool rig) runs the real decider under.
+func DeciderConfigJSON() string {
+	return fmt.Sprintf(`{"work_items_query":%q,"work_items_ceiling":%d}`+"\n", WorkItemsQuery, WorkItemsCeiling)
+}
+
 // FakeConnectorScript is fakeConnectorScript for another package's real-tool
 // tests (internal/prchange): the fixture-driven fake pg-connector, logging each
 // call to callLog. It adds nothing to the parity gate itself.
@@ -26,6 +43,9 @@ func FakeConnectorScript(fx *Fixture, callLog string) string { return fakeConnec
 //	issue list --query work-beads             every fixture bead, or only the open
 //	                                          ones when the fixture sets
 //	                                          work_beads_open_only (bare)
+//	issue list --query work-items-all        every fixture bead, whatever its state
+//	                                          (the decider's all-status lookup; see
+//	                                          WorkItemsQuery)
 //	issue show <bead id> [--fresh]            one bead (exit 4 when unknown)
 //	issue deps <bead id> --full               no dependencies
 //	pr review pending <id>                    no pending review
@@ -67,6 +87,7 @@ func fakeConnectorScript(fx *Fixture, callLog string) string {
 		emit("issue deps "+bd.ID+" --full", wireEnvelope(fx.issueDepsJSON(bd)))
 	}
 	emit("issue list --query work-beads", fx.workBeadsJSON())
+	emit("issue list --query "+WorkItemsQuery, fx.allBeadsJSON())
 
 	// An unknown PR or bead is "not found" (exit 4) for a targeted read, and an
 	// empty answer for a fan-out one.

@@ -229,3 +229,39 @@ func TestInvalidFocusKeysFailLoudly(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadReadsTheLookupKeys(t *testing.T) {
+	writeCfg(t, `{"work_items_query":"work-items-all","work_items_ceiling":7000}`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WorkItemsQuery != "work-items-all" || c.WorkItemsCeiling == nil || *c.WorkItemsCeiling != 7000 {
+		t.Fatalf("got %+v", c)
+	}
+}
+
+func TestAbsentLookupKeysLoadAsUnset(t *testing.T) {
+	writeCfg(t, `{"actor":"bot"}`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WorkItemsQuery != "" || c.WorkItemsCeiling != nil {
+		t.Fatalf("absent keys must load as unset: %+v", c)
+	}
+}
+
+// Negative cases: a ceiling below 1 and a blank query are refused at load.
+func TestInvalidLookupKeysFailLoudly(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{`{"work_items_ceiling":0}`, "work_items_ceiling"},
+		{`{"work_items_ceiling":-5}`, "work_items_ceiling"},
+		{`{"work_items_query":"   "}`, "work_items_query"},
+	} {
+		writeCfg(t, tc.body)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: err = %v", tc.body, err)
+		}
+	}
+}

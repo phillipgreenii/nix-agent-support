@@ -22,6 +22,7 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/metrics"
 	"github.com/phillipgreenii/pg-decider/internal/rules"
 	"github.com/phillipgreenii/pg-decider/internal/view"
+	"github.com/phillipgreenii/pg-decider/internal/workitem"
 )
 
 // decideFn computes the action list from the view and the configuration (the
@@ -37,11 +38,14 @@ var applyCommand apply.CmdFactory = exec.CommandContext
 // applyHooks returns the per-action hooks of an apply run, in call order: the
 // audit comment, then the failure counter and escalation, then the run
 // counters (which count the escalations the failure hook created).
-var applyHooks = func(v *view.View, typ, id string, it *item.Routed, skipped []action.Skip) []apply.Hook {
+var applyHooks = func(v *view.View, typ, id string, it *item.Routed, skipped []action.Skip, lk *apply.Lookup) []apply.Hook {
 	fail := failure.New(v, typ, id)
 	run := metrics.New(v, typ, id)
 	run.Routed(it)
 	run.Skipped(skipped)
+	if lk != nil {
+		run.Lookup(lk.Items(), lk.Ceiling())
+	}
 	fail.OnEscalate(run.Escalated)
 	return []apply.Hook{audit.New(), fail, run}
 }
@@ -73,10 +77,21 @@ var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, i
 		_ = metrics.EmitFailureLine(errOut, typ, id, rules.FocusAbsentReason)
 		return exitcode.ViewUnreadable
 	}
-	plan := arealabels.Apply(decideFn(v, typ, cfg), v, cfg)
+	// A pr run reads the all-status work-item lookup ONCE, before any rule runs,
+	// and fails closed (exit 4, nothing written) when it cannot be trusted. It
+	// goes through the very same steps as plan (planFn): the rules decide from
+	// the view plus the PR's listed items, and a create the listing already
+	// holds is not planned, so apply executes exactly the actions plan lists.
+	lk, ok := readRunLookup(ctx, errOut, cfg, "apply", typ, id)
+	if !ok {
+		return exitcode.LookupUntrusted
+	}
+	vd := lk.Augment(v)
+	plan := arealabels.Apply(lk.DedupePlan(workitem.EntityRefFrom(vd), decideFn(vd, typ, cfg)), vd, cfg)
 	res := apply.Run(ctx, apply.Input{
-		Type: typ, ID: id, View: v, Actions: plan.Actions, Item: it, Hooks: applyHooks(v, typ, id, it, plan.Skipped),
-		Env: apply.Env{Command: applyCommand, Config: cfg, Clock: time.Now, Stderr: errOut},
+		Type: typ, ID: id, View: v, Actions: plan.Actions, Item: it, Hooks: applyHooks(v, typ, id, it, plan.Skipped, lk),
+		Env:    apply.Env{Command: applyCommand, Config: cfg, Clock: time.Now, Stderr: errOut},
+		Lookup: lk,
 	})
 	for _, ev := range res.Events {
 		if ev.Err != nil {

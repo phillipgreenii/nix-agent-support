@@ -16,7 +16,10 @@ nothing else: the decider reads no tracker or forge data directly.
 ```mermaid
 flowchart TD
     V["read view: pg-desk TYPE show ID --json"] -->|"unreadable"| X3["exit 3, nothing applied"]
-    V --> D["decide: rules over the view"]
+    V -->|"pr only"| L["read the all-status work-item listing, once"]
+    L -->|"above the ceiling, truncated or unavailable"| X4["exit 4, nothing written"]
+    L --> D
+    V --> D["decide: rules over the view plus the listed items of the PR"]
     D --> PL["plan: print actions and skipped rules"]
     D --> AP["apply: execute actions in order"]
     AP --> H["after each action: audit comment"]
@@ -25,10 +28,11 @@ flowchart TD
 
 ## Deciding
 
-Deciding is a pure function of the view alone. It does not look at why pg-router routed the item,
-because delivery is at-least-once and possibly reordered, so the routed kind is only a hint that
-something changed. Every run re-derives the whole action set from current state, which is what
-makes a decider idempotent: re-running on an unchanged view writes nothing.
+Deciding is a pure function of the view, plus, for a `pr`, the work-item listing of the run (see
+"The work-item lookup"). It does not look at why pg-router routed the item, because delivery is
+at-least-once and possibly reordered, so the routed kind is only a hint that something changed. Every
+run re-derives the whole action set from current state, which is what makes a decider idempotent:
+re-running on an unchanged view and listing writes nothing.
 
 The result is an ordered list of actions plus the list of rules that produced no action.
 
@@ -56,6 +60,47 @@ other action changes.
 
 Actions follow rule order and, within a rule, the order the rule returned them. An anchor create
 always precedes every action that is parented to it.
+
+### The work-item lookup
+
+The decider can only avoid duplicates, and reopen items, that it can see, and the view links only
+what the gather's work-beads query lists (open work, title-matched), so a closed `fix-ci` item would
+be minted again on every run. A `pr` `plan` or `apply` therefore gets its own lookup, and that lookup
+is a separate query: the gather's query is never widened, because the same query also feeds the
+issue-change feed, and widening it would pull every closed work item into the issue store.
+
+- **One listing, once per run.** The run reads the named query `work_items_query` (see
+  [`config.md`](config.md)) through `pg-connector issue list --query <name>` once, before any rule
+  runs. The query lists the work items of all six PR kinds in every status, closed included, with no
+  result cap (the tracker backend passes `--limit 0`); the PR is not part of the query, because the
+  connector takes only a named query.
+- **Bounded in the decider.** The run counts the listing against `work_items_ceiling`. It FAILS
+  CLOSED, exiting `4` with nothing written (and, for `plan`, nothing printed as a plan), when the
+  listing holds more items than the ceiling, when the connector reports it truncated, when the call
+  fails or its answer is unreadable, when any queried source did not succeed (a degraded or cached
+  answer is not trusted), and when either key is unset.
+- **Filtered to the PR.** From the listing the run keeps the items of the viewed PR: an item whose
+  `dedup_key` names the PR in either key form, and an item with no `dedup_key` (a legacy anchor or
+  child) whose `repo` and `pr_number` metadata name the PR, whose `node_id` is the PR's, or whose
+  title is a kind prefix plus the PR reference, or the anchor prefix `<repo>#<n>: `. A metadata-only
+  filter would hide the legacy keyless anchors and mint duplicates. An item the view already links
+  is not added again.
+- **Seen by the rules.** The kept items that the view does not link are added to the view the rules
+  decide from, as work items linked to the PR (a focus bead with the `source` relation), so a closed
+  `fix-ci` item is found, a closed review request is not recreated, and a keyless legacy anchor is
+  adopted instead of duplicated, exactly as if the view had linked them.
+- **The same for `plan` and `apply`.** Both run the same steps over the same listing: the rules decide
+  from the view plus the kept items, and a `create` whose `dedup_key` the listing already holds (in
+  either key form) is not an action of the plan. Such a `create` is listed in `skipped` with the
+  reason `already handled`, its facts naming the operation, the kind, the `dedup_key` and the work
+  item that holds it, and a child parented at a removed anchor `create` is parented at the work item
+  that holds it. `apply` removes the same creates before it executes, so `plan` and `apply` agree
+  per kind and operation on the same state: what `plan` lists is what `apply` then writes.
+- **Reported.** The listing's size and the ceiling are reported, as `lookup_items` and
+  `lookup_ceiling`: in the plan `--json` (after `skipped`), in a `lookup:` line of the text plan, and
+  in the run counters line (see "Run counters"), including the line of a run that failed closed, so
+  the figures are visible exactly when the lane stops. The decider emits no telemetry: the composed
+  command persists the two numbers, and the metrics that export them belong to pg-desk.
 
 ### Precedence
 
@@ -114,8 +159,12 @@ skipped:
   fixci.failing-on-head  suppressed   kind=fix-ci
 ```
 
-`--json` prints exactly `{"actions": [...], "skipped": [{"rule", "reason", "facts"}]}`, both lists
-always arrays (never null), so a program can parse the plan.
+`--json` prints `{"actions": [...], "skipped": [{"rule", "reason", "facts"}]}`, both lists always
+arrays (never null), so a program can parse the plan. A `pr` plan adds two members after `skipped`,
+`lookup_items` (the size of the work-item listing the run read, which is zero for an empty listing) and
+`lookup_ceiling`; a plan of another type prints exactly the two lists. The text form of a `pr` plan
+adds one line after `linked work:`, `lookup: <n> work items listed, ceiling <c>`, and its `linked
+work:` line includes the items the listing added.
 
 ## `pg-decider apply`
 
@@ -133,7 +182,10 @@ before anything else happens.
 ### Executing actions
 
 - **Dedup before create.** A `create` that carries a `dedup_key` first looks the key up in the
-  tracker's work items, in either key form (see [`work-items.md`](work-items.md)). A hit applies
+  tracker's work items, in either key form (see [`work-items.md`](work-items.md)). For a `pr` the
+  lookup is the run's own all-status listing (see "The work-item lookup"), read once and already
+  applied to the plan, so a `create` the listing holds is not executed at all; for any other type
+  the lookup is one `pg-connector issue list --query work-beads` per `create`. A hit applies
   nothing and is reported as `deduped`. A lookup that fails or returns an unreadable result fails
   the action rather than creating, because creating without a trustworthy lookup could duplicate.
 - **The focus dedup lookup.** The lookup for the `focus-item` kind does not use the work-beads
@@ -184,14 +236,16 @@ before anything else happens.
 
 ### Exit codes
 
-| Code | Meaning                                                                                                      |
-| ---- | ------------------------------------------------------------------------------------------------------------ |
-| `0`  | Every action was applied, deduped or `skipped-stale`, or none was needed                                     |
-| `1`  | Usage or other error: bad arguments, unknown entity type, no decider for the type, unreadable item or config |
-| `2`  | Some actions failed or were skipped for a failed dependency, or a hook failed; captured and retried next run |
-| `3`  | The view could not be read, or lacks `annotations.focus_selected`; nothing was applied                       |
+| Code | Meaning                                                                                                                                |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Every action was applied, deduped or `skipped-stale`, or none was needed                                                               |
+| `1`  | Usage or other error: bad arguments, unknown entity type, no decider for the type, unreadable item or config                           |
+| `2`  | Some actions failed or were skipped for a failed dependency, or a hook failed; captured and retried next run                           |
+| `3`  | The view could not be read, or lacks `annotations.focus_selected`; nothing was applied                                                 |
+| `4`  | A `pr` run's work-item lookup could not be trusted (above the ceiling, truncated, unavailable, or its keys unset); nothing was written |
 
-`plan` uses `0`, `1` and `3` the same way; it never exits `2` because it executes nothing. A view of
+`plan` uses `0`, `1`, `3` and `4` the same way; it never exits `2` because it executes nothing. The
+composed command maps exit `4` to the class `decide_failed`. A view of
 an entity type the `focus.item` rule serves (`pr` or `issue`) whose `annotations` carries no
 `focus_selected` member at all fails the run closed with exit `3` before any rule or hook runs (see
 "A view without the annotation" in [`work-items.md`](work-items.md)). Before it exits, the failed-closed
@@ -354,6 +408,13 @@ focus activity keeps the shape above.
   failed closed. A view that lacks `annotations.focus_selected` prints one line with
   `"rules":{}` and `"failures":{"view-lacks-focus_selected":1}` and exits `3`, writing nothing; `plan`
   prints the same line on stderr before exiting `3`.
+- `lookup_items` and `lookup_ceiling` (line level) are the size of the work-item listing a `pr` run
+  read and the configured ceiling it was checked against (see "The work-item lookup"); both are
+  omitted for a run that made no lookup, and a zero count is printed. A run that failed closed
+  because of the lookup prints one line with `"rules":{}`, a `failures` reason (`lookup-above-ceiling`,
+  `lookup-truncated`, `lookup-unavailable`, `lookup-query-absent` or `lookup-ceiling-absent`) and the
+  figures known at that point: the ceiling whenever it is configured, the item count when a listing
+  was read; the exit code is `4` and nothing was written. `plan` prints the same line on stderr.
 
 Volume and telemetry. The line is the decider's only telemetry: it emits nothing over OpenTelemetry
 or Prometheus, and logs the counters line and its error lines on stderr. Once the issue decider role
@@ -365,10 +426,11 @@ change rate of the watched issues and not their number.
 ## Invariants
 
 - **INV-DECIDER-7.** <!-- uuid: 12284826-d903-4a8c-a30f-5324aaa7f474 --> `plan` MUST write nothing: no work-item write, no annotation and no comment.
-- **INV-DECIDER-8.** <!-- uuid: 9ef3afe4-d71a-4e94-9134-1cd24ac0654b --> Deciding MUST be a pure function of the view alone and MUST NOT depend on why
-  the item was routed; re-running on an unchanged view MUST write nothing. The one declared second
-  input is `apply`'s live read of a focus bead before a hold or release: `apply` MAY read that work
-  item live to ABANDON a write, and MUST NOT use the read to choose a different write.
+- **INV-DECIDER-8.** <!-- uuid: 9ef3afe4-d71a-4e94-9134-1cd24ac0654b --> Deciding MUST be a pure function of the view (and, for a `pr`, the run's work-item
+  listing, INV-DECIDER-27) and MUST NOT depend on why the item was routed; re-running on an
+  unchanged view and listing MUST write nothing. The one other declared input is `apply`'s live
+  read of a focus bead before a hold or release: `apply` MAY read that work item live to ABANDON a
+  write, and MUST NOT use the read to choose a different write.
 - **INV-DECIDER-9.** <!-- uuid: 612fea48-b15b-4b09-8d37-40da82918dad --> `apply` MUST re-read the view on every run. `--from-item` MUST only identify
   the trigger and MUST NOT decide what is applied. The live read of a focus bead (INV-DECIDER-8) MAY
   only abandon a planned write; it MUST NOT add, change or substitute one.
@@ -379,7 +441,8 @@ change rate of the watched issues and not their number.
 - **INV-DECIDER-12.** <!-- uuid: 9c2466e3-de47-4a24-ad29-1ca0622776ca --> A `create` that carries a `dedup_key` MUST look the key up in the tracker
   before creating, and MUST NOT create when the lookup hits or cannot be trusted. The lookup for a
   focus bead MUST list every status, closed included, through `focus_beads_query`, and MUST fail
-  closed when that key is unset.
+  closed when that key is unset. For a `pr` the lookup of every kind is the run's own all-status
+  listing (INV-DECIDER-27).
 - **INV-DECIDER-13.** <!-- uuid: 8b490340-7a6d-407d-a1f0-d5981fb0cec4 --> Actions MUST apply in order and best effort: a failure MUST NOT stop
   independent actions, and an action that depends on a failed one MUST be reported as
   `skipped-dependency` rather than attempted. A focus hold or release whose live re-read shows the
@@ -404,10 +467,22 @@ change rate of the watched issues and not their number.
   counters line to stderr whose counts satisfy `planned = applied + deduped + failed + skipped` for
   every rule. The outcome set is `applied`, `deduped`, `failed`, `skipped-dependency` and
   `skipped-stale`; the last two are counted under `skipped`. The additive members `transitions`,
-  `skips`, `seq`, `from_item` and `failures` MUST NOT change what any existing member means.
+  `skips`, `seq`, `from_item`, `failures`, `lookup_items` and `lookup_ceiling` MUST NOT change what
+  any existing member means.
 - **INV-DECIDER-25.** <!-- uuid: 6f0cdfcc-c665-4a73-bf75-28f3c34042c3 --> For a merged or closed PR, the rules that keep the anchor in step with the PR
   and close its open work are the only ones that MAY act, with one deliberate exception: the
   `focus.item` rule MAY hold (one `update` of status and marker, never a `create`, `reopen` or
   `close`) an unclaimed focus bead whose source is the terminal PR. Every other rule MUST skip it,
   so a terminal PR with no anchor and no work items MUST yield no action, and no work item or
   annotation MUST be created, reopened or updated for it.
+- **INV-DECIDER-27.** <!-- uuid: 864ba3c1-5491-47e7-ad55-50aca0b97e63 --> A `pr` `plan` or `apply` MUST read the all-status work-item listing named by
+  `work_items_query` exactly once per run, before any rule runs, and MUST fail closed (exit `4`,
+  nothing written, no plan printed) when the listing is larger than `work_items_ceiling`, reports
+  itself truncated, is unavailable or unreadable, has a source that did not succeed, or when either
+  key is unset. The failed run's counters line MUST still carry the figures known. The gather's
+  work-beads query MUST NOT be widened to serve this lookup.
+- **INV-DECIDER-28.** <!-- uuid: 284030a9-f6aa-4d09-8741-92c89a07d5a6 --> `plan` MUST use the same read-only lookup, and the same steps over it, as `apply`:
+  on the same view and listing the `create` actions of the plan MUST be exactly the creates `apply`
+  writes, per kind. A `create` the listing already holds MUST NOT be an action of either, and MUST
+  be listed as skipped with the reason `already handled`. The listing MUST report `lookup_items` and
+  `lookup_ceiling` in the plan `--json` and in the run counters line.

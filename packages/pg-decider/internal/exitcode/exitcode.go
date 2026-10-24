@@ -17,6 +17,11 @@ const (
 	// ViewUnreadable: the composite view could not be read; nothing was
 	// applied.
 	ViewUnreadable = 3
+	// LookupUntrusted: a pr run's work-item lookup could not be trusted (the
+	// listing was above the ceiling, truncated or unavailable, or the lookup
+	// keys are not configured); nothing was written. The composed command
+	// maps it to the class decide_failed.
+	LookupUntrusted = 4
 )
 
 // osExit is os.Exit, swapped by tests.

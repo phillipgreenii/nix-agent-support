@@ -3,7 +3,7 @@ package exitcode
 import "testing"
 
 func TestCodes(t *testing.T) {
-	if OK != 0 || Failure != 1 || Partial != 2 || ViewUnreadable != 3 {
+	if OK != 0 || Failure != 1 || Partial != 2 || ViewUnreadable != 3 || LookupUntrusted != 4 {
 		t.Fatalf("exit codes drifted: OK=%d Failure=%d Partial=%d ViewUnreadable=%d",
 			OK, Failure, Partial, ViewUnreadable)
 	}

@@ -26,12 +26,53 @@ func JSON(w io.Writer, res action.PlanResult) error {
 	return err
 }
 
+// Lookup is the work-item lookup figures of a pr plan: the size of the
+// all-status listing the run read and the configured ceiling it was checked
+// against. A nil *Lookup means the run made no lookup.
+type Lookup struct{ Items, Ceiling int }
+
+// JSONWithLookup is JSON plus, when lk is not nil, the two members
+// "lookup_items" and "lookup_ceiling" after "skipped". The two lists are still
+// always arrays; with a nil lk the output is byte-identical to JSON's.
+func JSONWithLookup(w io.Writer, res action.PlanResult, lk *Lookup) error {
+	if lk == nil {
+		return JSON(w, res)
+	}
+	out := struct {
+		Actions       []action.Action `json:"actions"`
+		Skipped       []action.Skip   `json:"skipped"`
+		LookupItems   int             `json:"lookup_items"`
+		LookupCeiling int             `json:"lookup_ceiling"`
+	}{Actions: res.Actions, Skipped: res.Skipped, LookupItems: lk.Items, LookupCeiling: lk.Ceiling}
+	if out.Actions == nil {
+		out.Actions = []action.Action{}
+	}
+	if out.Skipped == nil {
+		out.Skipped = []action.Skip{}
+	}
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(append(b, '\n'))
+	return err
+}
+
 // Text prints the design 7.2 form: a header line, a "linked work:" line, an
 // "actions:" block and a "skipped:" block (each block may be empty).
 func Text(w io.Writer, v *view.View, res action.PlanResult) error {
+	return TextWithLookup(w, v, res, nil)
+}
+
+// TextWithLookup is Text plus, when lk is not nil, a "lookup:" line after the
+// "linked work:" line naming the listing size and the ceiling.
+func TextWithLookup(w io.Writer, v *view.View, res action.PlanResult, lk *Lookup) error {
 	var sb strings.Builder
 	sb.WriteString(Header(v) + "\n")
 	sb.WriteString("linked work: " + linkedWork(v) + "\n")
+	if lk != nil {
+		fmt.Fprintf(&sb, "lookup: %d work items listed, ceiling %d\n", lk.Items, lk.Ceiling)
+	}
 
 	sb.WriteString("\nactions:\n")
 	if err := table(&sb, len(res.Actions), func(i int) []string {
