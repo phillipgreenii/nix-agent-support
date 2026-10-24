@@ -51,3 +51,28 @@ func TestLadderPinsTheRungNamesByIndex(t *testing.T) {
 		t.Errorf("rung names = %q, want %q", got, want)
 	}
 }
+
+// TestLadderFinalRungNamesAndOrder is the exact final list of the ladder, in
+// order (rung 7, entity closed-at, is the last rung): a later consumer that needs
+// a rung adds it with a new ladder step and edits this list with it.
+func TestLadderFinalRungNamesAndOrder(t *testing.T) {
+	want := []string{
+		"query, alias, entity, entity_group, budget",
+		"job",
+		"pending_change, change_log, consumer",
+		"store identity",
+		"watched flag and log snapshot",
+		"consumer cursor per consumer",
+		"entity closed-at",
+	}
+	var got []string
+	for i, m := range BuiltinMigrations() {
+		got = append(got, m.Name)
+		if m.Version != i+1 {
+			t.Errorf("rung at index %d has version %d, want %d", i, m.Version, i+1)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("rung names = %q, want %q", got, want)
+	}
+}

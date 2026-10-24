@@ -156,7 +156,7 @@ func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
 		"alias": {"node_id", "ref", "seen_at"},
 		"entity": {
 			"kind", "id", "version", "last_access", "keep_alive", "last_known_mergeable",
-			"tombstoned_at", "watched_at", "watched_via",
+			"tombstoned_at", "watched_at", "watched_via", "closed_at",
 		},
 		"entity_group": {
 			"kind", "id", "group_name", "content", "fingerprint", "fetched_at", "fresh_until",

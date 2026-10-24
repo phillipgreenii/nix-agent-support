@@ -3,6 +3,7 @@ package serve_test
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -39,7 +40,8 @@ import (
 const updateExpectationsEnv = "PG_CONNECTOR_SERVE_UPDATE_EXPECTATIONS"
 
 const (
-	v3FixturePath    = "../../../../pkg/connectord/store/testdata/v3.sqlite3"
+	fixtureDirPath   = "../../../../pkg/connectord/store/testdata"
+	v3FixturePath    = fixtureDirPath + "/v3.sqlite3"
 	v3ExpectedPath   = "testdata/changes_v3_expected.json"
 	identityToken    = "(store-identity)"
 	timeToken        = "(time)"
@@ -80,9 +82,30 @@ func normaliseAnswer(t *testing.T, raw json.RawMessage) map[string]any {
 }
 
 func TestStoreFixtureV3_ServesAChangesPollWithTheSameAnswerAsBeforeTheLaterRungs(t *testing.T) {
-	fixture, err := os.ReadFile(v3FixturePath)
+	servesTheV3Answer(t, v3FixturePath, os.Getenv(updateExpectationsEnv) != "")
+}
+
+// TestStoreFixturesV4ToV7_ServeTheSameAnswerAsTheV3Store opens each later
+// committed fixture of the store package through the daemon's open path and
+// compares the answer with the version 3 one: a rung leaves the GitHub scenario
+// unchanged (the store identity and schema-version fields are normalised).
+func TestStoreFixturesV4ToV7_ServeTheSameAnswerAsTheV3Store(t *testing.T) {
+	for v := 4; v <= 7; v++ {
+		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
+			servesTheV3Answer(t, fmt.Sprintf("%s/v%d.sqlite3", fixtureDirPath, v), false)
+		})
+	}
+}
+
+// servesTheV3Answer copies the store fixture at path into a fresh daemon's state
+// directory, starts the daemon over it, polls once as a fresh consumer and
+// compares the normalised answer with the committed one (or writes it, when
+// update is set).
+func servesTheV3Answer(t *testing.T, path string, update bool) {
+	t.Helper()
+	fixture, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read the version 3 store fixture: %v", err)
+		t.Fatalf("read the store fixture %s: %v", path, err)
 	}
 	d := servetest.NewDaemon(t, servetest.Options{Before: func(d *servetest.Daemon) {
 		seed3a(d)
@@ -101,11 +124,11 @@ func TestStoreFixtureV3_ServesAChangesPollWithTheSameAnswerAsBeforeTheLaterRungs
 
 	resp := pollChanges(t, d, "pr", "example-serve", servetest.QueryMine, nil)
 	if resp.Error != nil {
-		t.Fatalf("changes poll over the version 3 store: %s: %s", resp.Error.Code, resp.Error.Message)
+		t.Fatalf("changes poll over the store fixture: %s: %s", resp.Error.Code, resp.Error.Message)
 	}
 	got := normaliseAnswer(t, resp.Result)
 
-	if os.Getenv(updateExpectationsEnv) != "" {
+	if update {
 		b, err := json.MarshalIndent(got, "", "  ")
 		if err != nil {
 			t.Fatal(err)
@@ -130,7 +153,7 @@ func TestStoreFixtureV3_ServesAChangesPollWithTheSameAnswerAsBeforeTheLaterRungs
 	}
 	if !reflect.DeepEqual(got, want) {
 		gotJSON, _ := json.MarshalIndent(got, "", "  ")
-		t.Errorf("the changes answer over the version 3 store differs from the committed one.\ngot:\n%s\nwant:\n%s", gotJSON, raw)
+		t.Errorf("the changes answer over the store fixture %s differs from the committed one.\ngot:\n%s\nwant:\n%s", path, gotJSON, raw)
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 
 // SchemaVersion is the newest schema version this binary knows. A store
 // above it is refused (ErrSchemaNewer); a store below it is migrated up.
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 // builtinMigrations is the ladder; len(builtinMigrations) == SchemaVersion
 // (asserted by a test). A migration, once shipped, MUST NOT change: add a
@@ -24,6 +24,7 @@ var builtinMigrations = []Migration{
 	{Version: 4, Name: "store identity", Apply: migrateV4},
 	{Version: 5, Name: "watched flag and log snapshot", Apply: migrateV5},
 	{Version: 6, Name: "consumer cursor per consumer", Apply: migrateV6},
+	{Version: 7, Name: "entity closed-at", Apply: migrateV7},
 }
 
 // BuiltinMigrations returns a copy of the built-in ladder. A caller that wants
@@ -370,6 +371,24 @@ func migrateV6(tx *sql.Tx, report func(string)) error {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("create version 6 schema: %w", err)
 		}
+	}
+	return nil
+}
+
+// schemaV7 adds the entity's closed-at stamp.
+//
+//   - entity.closed_at: Unix milliseconds the entity was marked closed; NULL
+//     means not closed. Only Store.SetClosedAt writes it: PutEntity never does.
+//   - entity_closed_at: the partial index a listing of closed entities reads.
+const schemaV7 = `
+ALTER TABLE entity ADD COLUMN closed_at INTEGER;
+CREATE INDEX entity_closed_at ON entity (kind, closed_at) WHERE closed_at IS NOT NULL;
+`
+
+func migrateV7(tx *sql.Tx, report func(string)) error {
+	report("adding the entity closed-at stamp")
+	if _, err := tx.Exec(schemaV7); err != nil {
+		return fmt.Errorf("create version 7 schema: %w", err)
 	}
 	return nil
 }

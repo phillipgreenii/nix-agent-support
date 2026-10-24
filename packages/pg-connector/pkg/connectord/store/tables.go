@@ -303,12 +303,16 @@ type EntityRow struct {
 	// only: PutEntity never writes them; Tx.SetWatched is the only writer.
 	WatchedAt  time.Time
 	WatchedVia string
+	// ClosedAt is the entity's closed-at stamp (rung 7): the zero time while it
+	// is not closed. Read only: PutEntity never writes it; Store.SetClosedAt is
+	// the only writer.
+	ClosedAt time.Time
 }
 
 // PutEntity inserts or replaces the row for (e.Kind, e.ID). It never writes
-// watched_at or watched_via: the update list names neither, so a read-modify-write
-// of an old copy of the row cannot clear the watched flag (an insert leaves them
-// at their defaults).
+// watched_at, watched_via or closed_at: the update list names none of them, so a
+// read-modify-write of an old copy of the row cannot clear the watched flag or the
+// closed-at stamp (an insert leaves them at their defaults).
 func (s *Store) PutEntity(ctx context.Context, e EntityRow) error {
 	return putEntity(ctx, s.db, e)
 }
@@ -345,6 +349,17 @@ ON CONFLICT (kind, id) DO UPDATE SET last_access = excluded.last_access, keep_al
 	return nil
 }
 
+// SetClosedAt sets the entity's closed-at stamp to at; a zero at clears it. It
+// touches only closed_at (the entity's version, the change log and ChangeHead are
+// untouched), and a missing row updates nothing and is not an error.
+func (s *Store) SetClosedAt(ctx context.Context, kind, id string, at time.Time) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE entity SET closed_at = ? WHERE kind = ? AND id = ?`, msOrNull(at), kind, id); err != nil {
+		return fmt.Errorf("store: set closed_at %s/%s: %w", kind, id, err)
+	}
+	return nil
+}
+
 // EnsureEntity creates an empty row for (kind, id) when there is none and
 // leaves an existing row exactly as it is.
 func (s *Store) EnsureEntity(ctx context.Context, kind, id string) error {
@@ -362,19 +377,20 @@ ON CONFLICT (kind, id) DO NOTHING`, kind, id)
 	return nil
 }
 
-const entityCols = `kind, id, version, last_access, keep_alive, last_known_mergeable, tombstoned_at, watched_at, watched_via`
+const entityCols = `kind, id, version, last_access, keep_alive, last_known_mergeable, tombstoned_at, watched_at, watched_via, closed_at`
 
 func scanEntity(sc interface{ Scan(...any) error }) (EntityRow, error) {
 	var (
-		e                  EntityRow
-		access, tomb, wtch sql.NullInt64
-		keep               int
+		e                          EntityRow
+		access, tomb, wtch, closed sql.NullInt64
+		keep                       int
 	)
-	if err := sc.Scan(&e.Kind, &e.ID, &e.Version, &access, &keep, &e.LastKnownMergeable, &tomb, &wtch, &e.WatchedVia); err != nil {
+	if err := sc.Scan(&e.Kind, &e.ID, &e.Version, &access, &keep, &e.LastKnownMergeable, &tomb, &wtch, &e.WatchedVia, &closed); err != nil {
 		return EntityRow{}, err
 	}
 	e.LastAccess, e.KeepAlive, e.TombstonedAt = timeOf(access), keep != 0, timeOf(tomb)
 	e.WatchedAt = timeOf(wtch)
+	e.ClosedAt = timeOf(closed)
 	return e, nil
 }
 

@@ -46,10 +46,11 @@ func TestGenerateFixture(t *testing.T) {
 		`INSERT INTO query (key, configured, ids, complete, fetched_at, fresh_until, last_success_at, last_error, baseline_at)
 		 VALUES ('open-prs:org/repo', 1, '["PR_1","PR_2"]', 1, 1760000000000, 1760000060000, 1760000000000, '', 1760000000000)`,
 		`INSERT INTO alias VALUES ('PR_1', 'org/repo#1', 1760000000000)`,
-		// Named columns: the table has grown (watched_at and watched_via, version 5).
+		// Named columns: the table has grown (watched_at and watched_via, version 5;
+		// closed_at, version 7).
 		`INSERT INTO entity (kind, id, version, last_access, keep_alive, last_known_mergeable, tombstoned_at,
-		   watched_at, watched_via)
-		 VALUES ('pr', 'PR_1', 3, 1760000000000, 1, 'MERGEABLE', NULL, 1760000006000, 'direct')`,
+		   watched_at, watched_via, closed_at)
+		 VALUES ('pr', 'PR_1', 3, 1760000000000, 1, 'MERGEABLE', NULL, 1760000006000, 'direct', 1760000007000)`,
 		`INSERT INTO entity_group (kind, id, group_name, content, fingerprint, fetched_at, fresh_until, max_age_at,
 		   last_error, generation, fetched_for_head, fetched_for_base)
 		 VALUES ('pr', 'PR_1', 'summary', x'7b227469746c65223a2253616d706c65227d', 'fp-1', 1760000000000, 1760000060000,
