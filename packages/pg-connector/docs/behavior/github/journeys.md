@@ -123,7 +123,7 @@ _Includes:_ `USECASE-GH-FETCH-STALE`.
 
 1. The caller runs a read verb through the umbrella, which executes the backend in client mode.
 2. The client forwards the request to the daemon.
-3. The daemon records the access, which keeps the entity in the keep-alive set.
+3. The daemon records the access, which makes the entity tracked (`INV-GH-FRESH-3`).
 4. Every group the op needs is inside its freshness window: the daemon answers from the store, with
    no origin call.
 5. The answer carries `served_from`, `stale`, `age_seconds` and `groups[]`.

@@ -18,28 +18,30 @@ import (
 	sharedsvc "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/groupsvc"
 )
 
-// TestTheRetentionTableBooksTheSameSetAsBeforeTheMove is HT-38's GitHub half: the
-// pre-move keep-alive rule (tombstoned out, member of a configured query in,
-// otherwise summary.Service.InKeepAlive) runs behind the shared service's
-// KeepAlive interface and books exactly the same set.
-func TestTheRetentionTableBooksTheSameSetAsBeforeTheMove(t *testing.T) {
+// TestTheRetentionTableBooksTheTrackedUntilClosedSet is the GitHub half of HT-38
+// under the PR lane's rule: tombstoned out, member of a configured query in,
+// otherwise summary.Service.InKeepAlive (an open PR in however long ago it was
+// read, a merged or closed one out) runs behind the shared service's KeepAlive
+// interface and books exactly that set.
+func TestTheRetentionTableBooksTheTrackedUntilClosedSet(t *testing.T) {
 	ctx := context.Background()
 	r := groupsvctest.NewRig(t, groupsvctest.RigOptions{})
 	register(r, groups.Detail)
-	window := r.Settings.KeepaliveWindow.Std()
 	now := r.Clock.Now()
 	const (
 		tombstoned = "PR_tombstoned"
 		member     = "PR_member"
-		inside     = "PR_inside"
-		outside    = "PR_outside"
+		open       = "PR_open"
+		closed     = "PR_closed"
 	)
-	// The tombstoned entity was accessed inside the window and the member outside
-	// it, so only the two facts (not the window) can decide them.
+	// The tombstoned entity was read just now and the member long ago, so only
+	// the two facts (not the age of a read) can decide them; the open PR was read
+	// long ago too and stays in, and the closed one leaves.
+	r.Origin.Update(closed, func(p *groupsvctest.PR) { p.State = "CLOSED" })
 	r.SeedSummary(tombstoned, now)
-	r.SeedSummary(member, now.Add(-window-time.Hour))
-	r.SeedSummary(inside, now.Add(-window/2))
-	r.SeedSummary(outside, now.Add(-window-time.Hour))
+	r.SeedSummary(member, now.Add(-30*24*time.Hour))
+	r.SeedSummary(open, now.Add(-30*24*time.Hour))
+	r.SeedSummary(closed, now)
 	e, _ := r.Entity(tombstoned)
 	e.TombstonedAt = now
 	if err := r.Store.PutEntity(ctx, e); err != nil {
@@ -50,7 +52,7 @@ func TestTheRetentionTableBooksTheSameSetAsBeforeTheMove(t *testing.T) {
 	if _, err := r.Svc.Rebuild(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for id, want := range map[string]bool{tombstoned: false, member: true, inside: true, outside: false} {
+	for id, want := range map[string]bool{tombstoned: false, member: true, open: true, closed: false} {
 		if _, queued, _, err := r.Svc.Inspect(ctx, id, groups.Detail); err != nil || queued != want {
 			t.Errorf("%s: detail queued = %v (err %v), want %v", id, queued, err, want)
 		}
@@ -58,7 +60,7 @@ func TestTheRetentionTableBooksTheSameSetAsBeforeTheMove(t *testing.T) {
 	if c, _, _, _ := r.Svc.Inspect(ctx, member, groups.Detail); c != governor.ClassQuery {
 		t.Errorf("member task class = %v, want 3", c)
 	}
-	if c, _, _, _ := r.Svc.Inspect(ctx, inside, groups.Detail); c != governor.ClassKeepAlive {
+	if c, _, _, _ := r.Svc.Inspect(ctx, open, groups.Detail); c != governor.ClassKeepAlive {
 		t.Errorf("kept-alive task class = %v, want 4", c)
 	}
 }

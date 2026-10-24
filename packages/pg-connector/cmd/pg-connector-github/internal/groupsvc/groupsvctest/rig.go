@@ -122,7 +122,7 @@ func NewRig(t *testing.T, o RigOptions) *Rig {
 	sched := scheduler.New(opt)
 	sum, err := summary.NewService(summary.ServiceConfig{
 		Store: st, Persister: pers, Fetcher: origin, Identity: aliases, Scheduler: sched, Clock: clk,
-		KeepaliveWindow: settings.KeepaliveWindow.Std(), Expiry: expiry, BatchSize: o.BatchSize,
+		Expiry: expiry, BatchSize: o.BatchSize,
 		OnSummaryRefreshed: o.OnSummaryRefreshed, OnGone: o.SummaryOnGone,
 	})
 	if err != nil {

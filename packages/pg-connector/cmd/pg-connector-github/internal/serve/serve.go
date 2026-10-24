@@ -426,14 +426,13 @@ func (d *daemon) start(ctx context.Context) error {
 			Store: st, Identity: ent, TTL: cfg.SummaryTTL.Std(), TerminalTTL: cfg.TerminalTTL.Std(),
 			Hook: chg.DetectSummary,
 		},
-		OnGone:          chg.DetectGone,
-		Fetcher:         &summary.Fetcher{GH: gh, Governor: gov, Feed: feed, BatchSize: cfg.BatchSize},
-		Identity:        ent,
-		Scheduler:       sched,
-		KeepaliveWindow: cfg.KeepaliveWindow.Std(),
-		Expiry:          cfg.Expiry.Std(),
-		BatchSize:       cfg.BatchSize,
-		OnBatchSent:     onBatch,
+		OnGone:      chg.DetectGone,
+		Fetcher:     &summary.Fetcher{GH: gh, Governor: gov, Feed: feed, BatchSize: cfg.BatchSize},
+		Identity:    ent,
+		Scheduler:   sched,
+		Expiry:      cfg.Expiry.Std(),
+		BatchSize:   cfg.BatchSize,
+		OnBatchSent: onBatch,
 		OnSummaryRefreshed: func(prev *summary.Summary, next summary.Stored) {
 			if h := onRefreshed.Load(); h != nil {
 				(*h)(prev, next)
@@ -590,7 +589,7 @@ func (d *daemon) start(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	for op, h := range prread.Handlers(prread.Deps{Engine: engine, Sidecar: view}) {
+	for op, h := range prread.Handlers(prread.Deps{Engine: engine, Sidecar: view, Watcher: prread.NewWatcher(chg, st, ent)}) {
 		d.rt.Register("pr", op, h)
 	}
 	d.rt.Register("pr", review.OpName, review.Handler(review.Deps{

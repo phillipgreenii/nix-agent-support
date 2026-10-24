@@ -64,8 +64,8 @@ restated.
   be one of: a window the decision docs set; "until the head or base commit changes" (files and
   commits); or, for a PR's CI runs, the window rule of `INV-GH-FRESH-10`. Merged and closed PRs MUST
   use one longer terminal window for every group.
-- **`INV-GH-FRESH-2`** <!-- uuid: 3c15f744-e205-425e-adc0-6299a8165782 --> — An entity read MUST record the access, which keeps
-  the entity in the keep-alive set. When every group the op needs is inside its freshness window the
+- **`INV-GH-FRESH-2`** <!-- uuid: 3c15f744-e205-425e-adc0-6299a8165782 --> — An entity read MUST record the access, which makes
+  the entity tracked (`INV-GH-FRESH-3`) and raises its refresh priority. When every group the op needs is inside its freshness window the
   daemon MUST answer from the store with **no origin call** (a local hit). Otherwise it MUST queue
   the stale groups at the interactive class, fetch them **in parallel**, and wait up to the client's
   deadline; concurrent requests for one (entity, group) MUST share one fetch (single-flight); a
@@ -74,11 +74,16 @@ restated.
   completes in the background and is stored. The answer at the deadline MUST be the stale content
   when it is inside expiry and `unavailable` otherwise, and the same rule applies when the origin
   fails. A failed fetch MUST leave the previous content in place.
-- **`INV-GH-FRESH-3`** <!-- uuid: 56e0314b-5577-4dab-a6b6-9790cf2e4d7a --> — An entity MUST be in the **keep-alive set** while it
-  is a member of a configured query or was accessed within the keep-alive window, and the daemon
-  MUST refresh the summary of every entity in the set on the summary window, in batches. An entity
-  outside the set MUST NOT be refreshed. Once every group of an entity is older than expiry, the
-  entity and its groups MUST be evicted; change rows MUST be kept for their own retention
+- **`INV-GH-FRESH-3`** <!-- uuid: 56e0314b-5577-4dab-a6b6-9790cf2e4d7a --> — An entity MUST be in the **keep-alive set**
+  (it is **tracked**) from the moment the daemon is told about it, whether by a query result, a
+  direct read or a watch, until its PR is merged or closed, and the daemon MUST refresh the summary
+  of every entity in the set on the summary window, in batches. There MUST be no decay by access: an
+  open PR MUST stay in the set however long ago it was last read, so a direct read has no different
+  rule from a query result, and there is no manual untrack. A merged or closed PR MUST leave the set
+  unless a configured query still lists it, and from then the terminal window (`INV-GH-FRESH-1`)
+  and then expiry apply. An entity outside the set MUST NOT be refreshed. Once every group of an
+  entity outside the set is older than expiry, the entity and its groups MUST be evicted; an entity
+  in the set MUST NOT be evicted, and change rows MUST be kept for their own retention
   (`INV-GH-CHG-8`). The `pending` group MUST NOT be refreshed in the background; it is read through
   only when asked for.
 - **`INV-GH-FRESH-4`** <!-- uuid: b7632d42-0e2a-46c0-9533-c2d8b26653f3 --> — The daemon MUST **revalidate** an entity's summary
@@ -119,7 +124,8 @@ restated.
   arguments. An argument that only filters a configured query's result (a time range) MUST be
   applied locally to the cached ids and MUST cost no origin call; an argument that changes what the
   origin is asked MUST make an **ad-hoc key**, cached for its own window and never re-run by the
-  scheduler (its ids still join the keep-alive set by being read). A query MUST be re-run on its
+  scheduler (its ids join the keep-alive set as soon as the daemon is told of them and stay in it
+  until closed, `INV-GH-FRESH-3`). A query MUST be re-run on its
   own window by the scheduler when configured. An answer MUST stay summary-level. A departure from a
   query MUST be recorded only from a **complete** listing and only after one entity read confirms
   it, so a closed or merged PR is told apart from one that merely left the query's filter
@@ -183,7 +189,9 @@ restated.
 - **`INV-GH-CHG-4`** <!-- uuid: 319c8249-f853-4cf9-99f9-f8b4b98c0e66 --> — The daemon MUST be the **only source of upstream
   change kinds** for the entities it serves, drawn from the closed catalog in `INTF-GH-WIRE`, and
   MUST classify per group from each group's before and after content. `left_query` MUST be recorded
-  only per `INV-GH-FRESH-9`. `ci_changed` MUST be emitted when the summary's CI rollup changes or
+  only per `INV-GH-FRESH-9`, and a `left_query` row is a fact about membership alone: a PR that
+  left a query MUST stay in the keep-alive set until it is closed (`INV-GH-FRESH-3`), so its closing
+  is still seen. `ci_changed` MUST be emitted when the summary's CI rollup changes or
   when the runs group changes in a field the catalog names.
 - **`INV-GH-CHG-5`** <!-- uuid: 4eec868c-bb8f-4b7b-9261-fd9e2932c23e --> — `changes --consumer C --query Q` MUST return the rows
   after C's acknowledged position for Q, filtered to Q's members **plus** rows for entities that

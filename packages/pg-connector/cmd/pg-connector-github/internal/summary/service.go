@@ -2,6 +2,7 @@ package summary
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -61,10 +62,10 @@ type ServiceConfig struct {
 	// Clock is the time source; nil means the Persister's, then the system's.
 	Clock governor.Clock
 
-	// KeepaliveWindow is keepalive_window and Expiry is expiry; zero means the
-	// config defaults.
-	KeepaliveWindow time.Duration
-	Expiry          time.Duration
+	// Expiry is expiry; zero means the config default. There is no
+	// keepalive_window here: an entity is tracked until it is closed, so reading
+	// one decays nothing (INV-GH-FRESH-3).
+	Expiry time.Duration
 	// BatchSize is batch_size; zero means the config default, and anything above
 	// MaxBatch is lowered to it.
 	BatchSize int
@@ -98,9 +99,6 @@ func NewService(cfg ServiceConfig) (*Service, error) {
 	switch {
 	case cfg.Store == nil, cfg.Persister == nil, cfg.Fetcher == nil, cfg.Identity == nil, cfg.Scheduler == nil:
 		return nil, errors.New("summary: service needs a store, persister, fetcher, identity and scheduler")
-	}
-	if cfg.KeepaliveWindow <= 0 {
-		cfg.KeepaliveWindow = config.DefaultKeepaliveWindow
 	}
 	if cfg.Expiry <= 0 {
 		cfg.Expiry = config.DefaultExpiry
@@ -191,15 +189,13 @@ func (s *Service) members(ctx context.Context) (map[string]bool, error) {
 	return set, nil
 }
 
-// accessedWithin reports whether the entity was accessed within keepalive_window
-// of now.
-func (s *Service) accessedWithin(row store.EntityRow, now time.Time) bool {
-	return !row.LastAccess.IsZero() && now.Sub(row.LastAccess) <= s.cfg.KeepaliveWindow
-}
-
-// InKeepAlive reports whether the entity is in the keep-alive set: a member of a
-// configured query, or accessed within keepalive_window. A tombstoned entity
-// (GitHub no longer returns it) is not.
+// InKeepAlive reports whether the entity is in the keep-alive set, the PRs the
+// daemon keeps tracked: every entity it was told about (a query result, a direct
+// read or a watch) until the PR is closed or merged, and every member of a
+// configured query. Reading an entity decays nothing: there is no access window.
+// A tombstoned entity (GitHub no longer returns it) is not in the set, and a
+// closed or merged entity leaves it unless a configured query still lists it;
+// terminal_ttl then expiry take it from there.
 func (s *Service) InKeepAlive(ctx context.Context, id string) (bool, error) {
 	node, err := s.nodeID(ctx, id)
 	if err != nil {
@@ -213,14 +209,37 @@ func (s *Service) InKeepAlive(ctx context.Context, id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return s.inSet(row, m, s.now()), nil
+	return s.inSet(ctx, row, m)
 }
 
-func (s *Service) inSet(row store.EntityRow, members map[string]bool, now time.Time) bool {
+// inSet is the tracked-until-closed rule for one entity row.
+func (s *Service) inSet(ctx context.Context, row store.EntityRow, members map[string]bool) (bool, error) {
 	if !row.TombstonedAt.IsZero() {
-		return false
+		return false, nil
 	}
-	return members[row.ID] || s.accessedWithin(row, now)
+	if members[row.ID] {
+		return true, nil
+	}
+	closed, err := s.closed(ctx, row.ID)
+	return !closed, err
+}
+
+// closed reports whether the entity's stored summary says the PR is merged or
+// closed. An entity with no stored summary (not fetched yet) or one whose
+// content does not decode is not closed: it stays tracked until a summary says
+// otherwise.
+func (s *Service) closed(ctx context.Context, node string) (bool, error) {
+	g, ok, err := s.cfg.Store.GetGroup(ctx, entity.KindPR, node, GroupName)
+	if err != nil || !ok || len(g.Content) == 0 {
+		return false, err
+	}
+	var stored struct {
+		State string `json:"state"`
+	}
+	if json.Unmarshal(g.Content, &stored) != nil {
+		return false, nil
+	}
+	return IsTerminal(stored.State), nil
 }
 
 // taskFor is the task that refreshes a summary due at due: class 3 for a member
@@ -444,10 +463,11 @@ func (s *Service) Rebuild(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	now := s.now()
 	n := 0
 	for _, row := range rows {
-		if !s.inSet(row, m, now) {
+		if in, err := s.inSet(ctx, row, m); err != nil {
+			return n, err
+		} else if !in {
 			continue
 		}
 		due := time.Time{}
@@ -485,7 +505,10 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 	now := s.now()
 	evicted := 0
 	for _, row := range rows {
-		in := s.inSet(row, m, now)
+		in, err := s.inSet(ctx, row, m)
+		if err != nil {
+			return evicted, err
+		}
 		if in != row.KeepAlive {
 			if err := s.cfg.Store.SetKeepAlive(ctx, entity.KindPR, row.ID, in); err != nil {
 				return evicted, err
@@ -580,7 +603,14 @@ func (e executor) Execute(ctx context.Context, items []scheduler.Item) []schedul
 		rows[i] = row
 		if it.Task.Class >= governor.ClassKeepAlive {
 			// A background refresh is for the keep-alive set only.
-			if !ok || !s.inSet(row, members, now) {
+			in := false
+			if ok {
+				if in, err = s.inSet(ctx, row, members); err != nil {
+					res[i].Err = err
+					continue
+				}
+			}
+			if !in {
 				res[i].Skipped = true
 				continue
 			}
@@ -673,8 +703,8 @@ func (s *Service) store(ctx context.Context, sum Summary, row store.EntityRow, m
 	if err != nil || !ok {
 		return err
 	}
-	if !s.inSet(cur, members, now) {
-		return nil
+	if in, err := s.inSet(ctx, cur, members); err != nil || !in {
+		return err
 	}
 	due := now.Add(s.cfg.Persister.FreshFor(sum.State))
 	return s.cfg.Scheduler.Reschedule(taskFor(sum.NodeID, members[sum.NodeID], due, cur.LastAccess))

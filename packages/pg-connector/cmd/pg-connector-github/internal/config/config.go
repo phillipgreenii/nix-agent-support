@@ -129,7 +129,7 @@ type Settings struct {
 
 	TerminalTTL        Duration `json:"terminal_ttl"`
 	SettleTimeout      Duration `json:"settle_timeout"`
-	KeepaliveWindow    Duration `json:"keepalive_window"`
+	KeepaliveWindow    Duration `json:"keepalive_window"` // retired: accepted, decides nothing (INV-GH-FRESH-3)
 	Expiry             Duration `json:"expiry"`
 	FillHorizon        Duration `json:"fill_horizon"`
 	ChangeLogRetention Duration `json:"change_log_retention"`

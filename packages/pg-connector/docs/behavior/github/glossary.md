@@ -47,8 +47,9 @@ Inheritance follows `INV-20`: where this set needs a different meaning it takes 
 - **Expiry** — the age after which an entity none of whose groups has been fetched is evicted from
   the entity cache; change rows outlive it and are kept for their own retention
   (`INV-GH-FRESH-3`).
-- **Keep-alive set** — the entities the daemon refreshes in the background: members of a configured
-  query, and any entity accessed within the keep-alive window (`INV-GH-FRESH-3`).
+- **Keep-alive set** — the entities the daemon refreshes in the background, also called **tracked**:
+  every entity it was told about (a query result, a direct read or a watch), from then until its PR
+  is merged or closed, whatever the age of the last read (`INV-GH-FRESH-3`).
 - **Local hit** — a read answered from the store with no origin call, because every group it needs
   is inside its freshness window (`INV-GH-FRESH-2`).
 - **Single-flight** — concurrent requests for the same (entity, group) share one fetch

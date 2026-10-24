@@ -35,7 +35,7 @@ const (
 
 	DefaultTerminalTTL         = 24 * time.Hour
 	DefaultSettleTimeout       = 30 * time.Second
-	DefaultKeepaliveWindow     = 24 * time.Hour
+	DefaultKeepaliveWindow     = 24 * time.Hour // retired: accepted, decides nothing (INV-GH-FRESH-3)
 	DefaultExpiry              = 7 * 24 * time.Hour
 	DefaultFillHorizon         = DefaultSummaryTTL // "one summary_ttl"; follows summary_ttl when unset
 	DefaultChangeLogRetention  = 14 * 24 * time.Hour

@@ -883,7 +883,8 @@ flowchart LR
   `queries` when it starts and report a difference as a configuration error, rather than choose
   between the two lists.
 - **`INTF-WIRE-WATCH-1`** <!-- uuid: e812a808-4466-4101-bf98-f184dee46f57 --> **The `--watch`
-  option on `show`.** `pg-connector issue show <id> [--backend <binary>] [--watch]` is a lookup of
+  option on `show`.** `pg-connector issue show <id> [--backend <binary>] [--watch]` and
+  `pg-connector pr show <id> [--backend <binary>] [--watch]` are each a lookup of
   one entity that, with `--watch`, also asks that one entity to be watched: the umbrella forwards
   `watch: true` in the `show` request to the backend that serves the id, and a backend that keeps a
   store of its own and owns its changes marks that entity watched and answers the ordinary `show`.
@@ -893,7 +894,7 @@ flowchart LR
   the option, whatever its kind (`show`, `list`, a member of any query, `children`, `search`),
   MUST NOT watch anything and MUST NOT clear a watch. There is deliberately no watch option on
   `list` or `changes`: a set of entities is watched by declaring its query watched, never by running
-  a query with an option. `--watch` is accepted by `issue show` only, and combines freely with
+  a query with an option. `--watch` is accepted by `issue show` and `pr show` only, and combines freely with
   `--fresh`. A `show` that carries `--watch` MUST reach the backend: the umbrella never answers it
   from its own cache alone.
 - **`INTF-WIRE-WATCH-2`** <!-- uuid: 280ea9c4-1f46-4d50-a494-dae0542f2509 --> **A backend that

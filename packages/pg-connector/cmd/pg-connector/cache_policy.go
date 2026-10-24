@@ -247,6 +247,15 @@ func servedCacheResponse(hit showCacheHit, now time.Time) *scriptout.Response {
 // every answer carries served_from and age_seconds (INV-CACHE-5). A cache
 // problem of any kind degrades to today's behavior, never to a failure.
 func dispatchShow(ctx context.Context, reg *Registry, entityType, id, pinned string, fresh bool) (*scriptout.Response, error) {
+	return dispatchShowWatch(ctx, reg, entityType, id, pinned, fresh, false)
+}
+
+// dispatchShowWatch is dispatchShow with --watch. A show that carries the option
+// MUST reach the backend (INTF-WIRE-WATCH-1): the umbrella never answers it from
+// its own cache alone, so the read-through lookups (the first one, and the
+// re-check of a reader that waited for the single-flight lock) are skipped. The
+// live answer is still written to the cache like any other.
+func dispatchShowWatch(ctx context.Context, reg *Registry, entityType, id, pinned string, fresh, watch bool) (*scriptout.Response, error) {
 	candidates := candidateShowBackends(reg, entityType, pinned)
 	ttl := resolveCacheReadTTL(reg)
 	// A backend that declares cache_opt_out keeps its own cache (INV-CACHE-9):
@@ -270,7 +279,7 @@ func dispatchShow(ctx context.Context, reg *Registry, entityType, id, pinned str
 	readThrough := ttl > 0 && len(backends) > 0 && !typeOptedOut(reg, entityType)
 	start := time.Now()
 
-	if readThrough && !fresh {
+	if readThrough && !fresh && !watch {
 		if hit, ok := lookupShowCache(ctx, reg, entityType, backends, id, ttl, time.Time{}); ok {
 			return servedCacheResponse(hit, time.Now()), nil
 		}
@@ -284,7 +293,7 @@ func dispatchShow(ctx context.Context, reg *Registry, entityType, id, pinned str
 		// accepts only an entry fetched after it started (as_of has one-second
 		// resolution, so compare against the start truncated to the second).
 		// A reader that took the lock at once has nothing to re-check.
-		if waited {
+		if waited && !watch {
 			notBefore := time.Time{}
 			if fresh {
 				notBefore = start.Truncate(time.Second)
@@ -295,7 +304,7 @@ func dispatchShow(ctx context.Context, reg *Registry, entityType, id, pinned str
 		}
 	}
 
-	resp, backend, fromCache, err := dispatchShowWithCacheFresh(ctx, reg, entityType, id, pinned, fresh)
+	resp, backend, fromCache, err := dispatchShowWithCacheOpts(ctx, reg, entityType, id, pinned, fresh, watch)
 	if err != nil || resp == nil {
 		return resp, err
 	}

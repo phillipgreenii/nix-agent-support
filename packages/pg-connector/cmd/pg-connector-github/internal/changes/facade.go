@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
@@ -60,8 +61,14 @@ type Engine struct {
 	*engine.Engine
 }
 
-// New builds an Engine from cfg, applying the defaults.
-func New(cfg Config) (*Engine, error) {
+// New builds an Engine from cfg over the daemon's registration (Spec), applying
+// the defaults.
+func New(cfg Config) (*Engine, error) { return NewWithSpec(cfg, Spec()) }
+
+// NewWithSpec is New over another registration. The daemon always runs New; a
+// test uses this to run the engine under a registration the daemon does not use
+// yet (for example emission by watched entities only).
+func NewWithSpec(cfg Config, spec registry.Spec) (*Engine, error) {
 	if cfg.SettleTimeout < 0 {
 		return nil, fmt.Errorf("changes: settle timeout %s is negative", cfg.SettleTimeout)
 	}
@@ -75,7 +82,7 @@ func New(cfg Config) (*Engine, error) {
 		cfg.BodyCap = config.DefaultChangeBodyCap
 	}
 	e, err := engine.New(engine.Config{
-		Spec: Spec(), Classifier: classifier{}, Clock: cfg.Clock,
+		Spec: spec, Classifier: classifier{}, Clock: cfg.Clock,
 		SettleTimeout: cfg.SettleTimeout, BodyCap: cfg.BodyCap,
 	})
 	if err != nil {

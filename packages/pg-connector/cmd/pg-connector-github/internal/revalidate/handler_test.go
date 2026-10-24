@@ -338,7 +338,8 @@ func TestAMergeableToConflictingMoveThroughUnknownQueuesDetailAndUnknownAloneQue
 
 func TestAFirstSightingOfAKeptAlivePRBooksDetailConversationAndRunsOnly(t *testing.T) {
 	e := newEnv(t, groupsvctest.RigOptions{})
-	e.refresh(nil) // no stored summary: a first sighting; the entity is not in the set yet
+	e.r.Origin.Update(node, func(p *groupsvctest.PR) { p.State = "MERGED" })
+	e.refresh(nil) // no stored summary: a first sighting of a merged PR, which is outside the set
 	if e.ev.total() != 0 {
 		t.Fatalf("a PR outside the keep-alive set got %v", e.ev.all)
 	}

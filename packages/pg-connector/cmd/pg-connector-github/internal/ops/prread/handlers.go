@@ -4,8 +4,10 @@
 // for a single PR.
 //
 // Each op takes the wire id owner/repo#n (matched case-insensitively on
-// owner/repo by the engine's alias table) and the wire argument fresh, asks the
-// group engine (groupsvc.Service.Ensure) for the groups the op reads, and
+// owner/repo by the engine's alias table), the wire argument fresh and the wire
+// argument watch (the read also asks the daemon to watch the PR, see Watcher),
+// asks the group engine (groupsvc.Service.Ensure) for the groups the op reads,
+// and
 //
 //   - answers from the store with no origin call when every group is inside its
 //     freshness;
@@ -38,6 +40,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/pending"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/prfacts"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/feedop"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -68,6 +71,9 @@ type Deps struct {
 	Engine Engine
 	// Sidecar supplies review_pending's last_append; nil means none.
 	Sidecar *pending.SidecarView
+	// Watcher applies the watch argument; nil means a read that carries it is
+	// answered unavailable.
+	Watcher Watcher
 	// Clock is the time source; nil means the system clock.
 	Clock governor.Clock
 }
@@ -103,10 +109,13 @@ type handlers struct{ deps Deps }
 func (h *handlers) now() time.Time { return h.deps.Clock.Now() }
 
 // request is the wire argument of all four ops. Unknown extra keys are ignored,
-// as in the old handlers.
+// as in the old handlers. Watch is the watch option: the read also asks the daemon
+// to watch the PR (it appends change rows for it from then on). It is read with
+// feedop.WatchArg, so a value that is not a boolean is invalid_argument.
 type request struct {
 	ID    string `json:"id"`
 	Fresh bool   `json:"fresh"`
+	Watch bool   `json:"-"`
 }
 
 func decodeRequest(raw json.RawMessage) (request, error) {
@@ -118,14 +127,47 @@ func decodeRequest(raw json.RawMessage) (request, error) {
 		return request{}, scriptout.WrapError(scriptout.ErrInvalidArgument,
 			fmt.Sprintf("id %q is not in \"<owner>/<repo>#<number>\" form", a.ID))
 	}
+	watch, err := feedop.WatchArg(raw)
+	if err != nil {
+		return request{}, err
+	}
+	a.Watch = watch
 	return a, nil
+}
+
+// ensureGroups asks the engine for want, applying the watch option around it: a
+// PR the daemon already knows is watched before the read (so a change the read
+// finds is a row of a watched PR), and one it had never seen is watched after the
+// read stored it. A read without the option is the engine call alone. A PR that
+// is gone is not watched.
+func (h *handlers) ensureGroups(ctx context.Context, a request, want []string) (groupsvc.EnsureResult, error) {
+	opt := groupsvc.EnsureOptions{Fresh: a.Fresh}
+	if !a.Watch {
+		return h.deps.Engine.Ensure(ctx, a.ID, want, opt)
+	}
+	w := h.deps.Watcher
+	if w == nil {
+		return groupsvc.EnsureResult{}, scriptout.WrapError(scriptout.ErrUnavailable, "the watch option is not available")
+	}
+	known, err := w.WatchKnown(ctx, a.ID)
+	if err != nil {
+		return groupsvc.EnsureResult{}, err
+	}
+	res, err := h.deps.Engine.Ensure(ctx, a.ID, want, opt)
+	if err != nil || known || res.Summary.Gone || res.Summary.NodeID == "" {
+		return res, err
+	}
+	if err := w.WatchSeen(ctx, res.Summary.NodeID, a.ID); err != nil {
+		return groupsvc.EnsureResult{}, err
+	}
+	return res, nil
 }
 
 // ensure asks the engine for want and refuses the whole answer when any group is
 // unavailable (the engine already serves a stored row inside expiry as Stale, so
 // a group is Unavailable only when no usable row exists) or the PR is gone.
 func (h *handlers) ensure(ctx context.Context, a request, want []string) (groupsvc.EnsureResult, error) {
-	res, err := h.deps.Engine.Ensure(ctx, a.ID, want, groupsvc.EnsureOptions{Fresh: a.Fresh})
+	res, err := h.ensureGroups(ctx, a, want)
 	if err != nil {
 		return groupsvc.EnsureResult{}, engineError(a.ID, err)
 	}
@@ -219,7 +261,7 @@ func (h *handlers) commits(ctx context.Context, a request) (any, error) {
 // never a "no pending review" answer. The live head it judges the review against
 // is the stored summary's headRefOid.
 func (h *handlers) reviewPending(ctx context.Context, a request) (any, error) {
-	res, err := h.deps.Engine.Ensure(ctx, a.ID, []string{groups.Pending}, groupsvc.EnsureOptions{Fresh: a.Fresh})
+	res, err := h.ensureGroups(ctx, a, []string{groups.Pending})
 	if err != nil {
 		return nil, pendingError(err)
 	}

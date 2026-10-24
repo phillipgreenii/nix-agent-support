@@ -50,7 +50,7 @@ window is a local hit (`INV-GH-FRESH-2`).
 
 | Instance | Op               | Served from                                | Groups read                        | Note                                                                         |
 | -------- | ---------------- | ------------------------------------------ | ---------------------------------- | ---------------------------------------------------------------------------- |
-| `pr`     | `show`           | store, read-through                        | summary, detail, conversation      |                                                                              |
+| `pr`     | `show`           | store, read-through                        | summary, detail, conversation      | the argument `watch` also marks the PR watched (`INTF-WIRE-WATCH-1`)         |
 | `pr`     | `list`           | query cache and store                      | summary                            | a configured query name is required (`INV-GH-FRESH-9`)                       |
 | `pr`     | `files`          | store, read-through                        | files                              |                                                                              |
 | `pr`     | `commits`        | store, read-through                        | commits                            |                                                                              |
@@ -163,8 +163,7 @@ Every failure is answered from the parent's seven-value taxonomy (`INV-GH-ERR-1`
   deployment renders them). **Participation:** essential. **Initiator:** the operator.
 - **What crosses.** One rendered file, named on the backend's command line, that carries every setting
   the daemon and its client need: the origin host, the paths of the tools and the state, the socket
-  path, the configured queries, each group's freshness window and hard age, the keep-alive window,
-  expiry, retention, the settle timeout, the batch size and worker count, and the caps, the reserve and
+  path, the configured queries, each group's freshness window and hard age, expiry, retention, the settle timeout, the batch size and worker count, and the caps, the reserve and
   the background share per bucket. The queries and the registry entry are rendered from one source,
   so the file and the umbrella's own `backends.<name>` block carry the same config hash.
 - **What must hold.** Nothing the daemon or the client needs comes from the environment (the one

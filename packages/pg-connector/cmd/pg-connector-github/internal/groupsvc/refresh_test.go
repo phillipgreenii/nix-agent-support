@@ -319,7 +319,8 @@ func TestAnEntityOutsideTheKeepAliveSetIsSkippedByTheExecutor(t *testing.T) {
 	ctx := context.Background()
 	r := groupsvctest.NewRig(t, groupsvctest.RigOptions{})
 	f := register(r, groups.Detail)
-	r.SeedSummary(node, r.Clock.Now().Add(-48*time.Hour)) // last access older than keepalive_window
+	r.Origin.Update(node, func(p *groupsvctest.PR) { p.State = "MERGED" }) // closed: tracked no longer
+	r.SeedSummary(node, r.Clock.Now())
 	r.SeedGroup(staleRow(r, node, groups.Detail, "old"))
 
 	if err := r.Svc.QueueGroup(ctx, node, groups.Detail, governor.ClassKeepAlive, time.Time{}); err != nil {
@@ -346,7 +347,8 @@ func TestAfterARestartRebuildQueuesNoOriginCallForFreshGroupsAndCatchesUpTheRest
 	register(r1, groups.Detail, groups.Conversation, groups.Runs, groups.Files)
 	seed(r1, node, freshRow(r1, node, groups.Detail, "d"), staleRow(r1, node, groups.Runs, "r"), freshRow(r1, node, groups.Files, "f"))
 	// conversation: no row at all. A second entity is outside the keep-alive set.
-	r1.SeedSummary("PR_idle", r1.Clock.Now().Add(-72*time.Hour))
+	r1.Origin.Update("PR_idle", func(p *groupsvctest.PR) { p.State = "CLOSED" })
+	r1.SeedSummary("PR_idle", r1.Clock.Now())
 	r1.SeedGroup(staleRow(r1, "PR_idle", groups.Detail, "idle"))
 
 	// The restart: a NEW service and scheduler over the same store and clock.
@@ -360,7 +362,7 @@ func TestAfterARestartRebuildQueuesNoOriginCallForFreshGroupsAndCatchesUpTheRest
 		t.Fatal(err)
 	}
 	// detail (due later), conversation (missing: due now), runs (stale: due now); files has
-	// no time limit; PR_idle is outside the set.
+	// no time limit; PR_idle is closed, so outside the set.
 	if n != 3 {
 		t.Fatalf("Rebuild queued %d tasks, want 3", n)
 	}

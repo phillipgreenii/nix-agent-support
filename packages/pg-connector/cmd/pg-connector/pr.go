@@ -13,7 +13,9 @@
 // per-backend "unavailable" answer, and uses the Tier-1 targeted-op
 // exit-code scheme (0/4/1) via outcome.go's TargetedExitCode — this file calls the dispatcher and
 // hands TargetedExitCode the raw per-call result/error it got back; it
-// never decides the exit code itself (INV-EXIT-1). show and files/commits
+// never decides the exit code itself (INV-EXIT-1). show also takes --watch
+// (INTF-WIRE-WATCH-1): forwarded as watch: true in the show request, and a show
+// that carries it always reaches the backend. show and files/commits
 // (below), PLUS the new "list" verb below, carry their own --backend flag
 // (bead pg2-2j5ac.28.1, design's "id-less op rule"): on the targeted ops
 // it PINS DispatchTargeted straight to that one backend, skipping the
@@ -61,6 +63,8 @@ func newPrShowCmd() *cobra.Command {
 	}
 	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
 	freshFlag := cmd.Flags().Bool("fresh", false, "skip the cache read-through and ask the origin (the unavailable stale fallback still applies)")
+	watchFlag := cmd.Flags().Bool("watch", false, "also ask the backend that serves the PR to watch it (forwarded as watch: true; "+
+		"a backend that keeps no store ignores it; the answer is the ordinary show and is never served from the umbrella cache alone)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		reg, err := LoadRegistry()
 		if err != nil {
@@ -70,7 +74,7 @@ func newPrShowCmd() *cobra.Command {
 		// within read_ttl answers with no backend call unless --fresh, a live
 		// success keeps the cache current, and the result carries served_from
 		// and age_seconds (INV-CACHE-4, INV-CACHE-5).
-		resp, dispatchErr := dispatchShow(cmd.Context(), reg, "pr", args[0], *backendFlag, *freshFlag)
+		resp, dispatchErr := dispatchShowWatch(cmd.Context(), reg, "pr", args[0], *backendFlag, *freshFlag, *watchFlag)
 		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRShow)
 	}
 	return cmd

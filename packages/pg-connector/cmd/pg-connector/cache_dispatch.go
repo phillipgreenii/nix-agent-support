@@ -91,11 +91,24 @@ func dispatchShowWithCache(ctx context.Context, reg *Registry, entityType, id, p
 // fresh: true, and the request to every other backend is exactly the {id} one
 // dispatchShowWithCache sends. The cache fallback is untouched.
 func dispatchShowWithCacheFresh(ctx context.Context, reg *Registry, entityType, id, pinned string, fresh bool) (resp *scriptout.Response, backend string, fromCache bool, err error) {
+	return dispatchShowWithCacheOpts(ctx, reg, entityType, id, pinned, fresh, false)
+}
+
+// dispatchShowWithCacheOpts is dispatchShowWithCacheFresh with --watch: with
+// watch set, the show request to EVERY backend tried carries watch: true beside
+// the id (INTF-WIRE-WATCH-1), and a backend that keeps no store ignores it
+// (INTF-WIRE-WATCH-2), so the call is never rejected for a backend's kind. The
+// key is omitted, never sent as false, so a request without the flag is exactly
+// the {id} one it was before the flag existed.
+func dispatchShowWithCacheOpts(ctx context.Context, reg *Registry, entityType, id, pinned string, fresh, watch bool) (resp *scriptout.Response, backend string, fromCache bool, err error) {
 	backends, err := resolveBackends(reg, entityType)
 	if err != nil {
 		return nil, "", false, err
 	}
 	base := map[string]any{"id": id}
+	if watch {
+		base[watchArgKey] = true
+	}
 	argsFor := func(b string) any { return withFresh(ctx, reg, b, base, fresh) }
 
 	if pinned != "" {

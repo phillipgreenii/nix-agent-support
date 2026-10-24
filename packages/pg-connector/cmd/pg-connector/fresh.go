@@ -26,6 +26,10 @@ import (
 // freshArgKey is the request argument a cache_opt_out backend reads.
 const freshArgKey = "fresh"
 
+// watchArgKey is the request argument of the --watch option on show
+// (INTF-WIRE-WATCH-1): sent as true when the flag is set and omitted otherwise.
+const watchArgKey = "watch"
+
 // withFresh returns the request arguments to send to backend: args itself when
 // fresh is unset or the backend does not declare cache_opt_out (a failed
 // capabilities call reads as "not declared", so an unreachable probe never

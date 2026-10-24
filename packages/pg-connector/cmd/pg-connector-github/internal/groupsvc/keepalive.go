@@ -8,8 +8,9 @@ import (
 )
 
 // keepAlive is summary.Service as the shared service's retention rule: the
-// summary service's own keep-alive rule (accessed within the keep-alive window)
-// and access bookkeeping. This is the one seam the keep-alive rewrite changes.
+// summary service's own keep-alive rule (tracked until closed: an entity stays in
+// the set until its PR is merged or closed, whatever the age of the last read)
+// and access bookkeeping. This is the one seam the keep-alive rule lives behind.
 type keepAlive struct{ s *summary.Service }
 
 var _ sharedsvc.KeepAlive = keepAlive{}

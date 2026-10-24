@@ -20,7 +20,6 @@ import (
 const (
 	testTTL      = 60 * time.Second
 	testTerminal = 24 * time.Hour
-	testWindow   = 24 * time.Hour
 	testExpiry   = 7 * 24 * time.Hour
 )
 
@@ -157,7 +156,7 @@ func newRig(t *testing.T, o rigOpts) *rig {
 	sched := scheduler.New(opt)
 	svc, err := NewService(ServiceConfig{
 		Store: st, Persister: pers, Fetcher: f, Identity: pers.Identity, Scheduler: sched, Clock: clk,
-		KeepaliveWindow: testWindow, Expiry: testExpiry, BatchSize: o.batchSize,
+		Expiry: testExpiry, BatchSize: o.batchSize,
 		OnSummaryRefreshed: o.onRefresh, OnBatchSent: o.onBatch, OnGone: o.onGone,
 	})
 	if err != nil {
@@ -178,6 +177,18 @@ func (r *rig) putGroup(t *testing.T, id, group string, fetched, fresh time.Time)
 	t.Helper()
 	err := r.st.PutGroup(context.Background(), store.GroupRow{
 		Kind: entity.KindPR, ID: id, Group: group, Content: []byte(`{}`), FetchedAt: fetched, FreshUntil: fresh,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// putSummaryOf seeds a stored summary group of a PR in state, fetched at fetched.
+func (r *rig) putSummaryOf(t *testing.T, id, state string, fetched time.Time) {
+	t.Helper()
+	err := r.st.PutGroup(context.Background(), store.GroupRow{
+		Kind: entity.KindPR, ID: id, Group: GroupName, Content: []byte(`{"state":"` + state + `"}`),
+		FetchedAt: fetched, FreshUntil: fetched.Add(testTerminal),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -208,26 +219,102 @@ func ids(prefix string, n int) []string {
 	return out
 }
 
-func TestKeepAliveMembershipAndWindowBoundaries(t *testing.T) {
+func TestKeepAliveIsTrackedUntilClosed(t *testing.T) {
 	r := newRig(t, rigOpts{})
 	ctx := context.Background()
-	r.putQuery(t, "mine", true, "member-1", "old-and-member")
-	r.putQuery(t, "adhoc", false, "adhoc-only") // a query that is not configured does not keep anything alive
-	r.putEntity(t, "member-1", time.Time{})
-	r.putEntity(t, "adhoc-only", time.Time{})
-	r.putEntity(t, "inside", t0.Add(-testWindow+time.Second))
-	r.putEntity(t, "at-edge", t0.Add(-testWindow))
-	r.putEntity(t, "outside", t0.Add(-testWindow-time.Second))
-	r.putEntity(t, "never", time.Time{})
-	r.putEntity(t, "old-and-member", t0.Add(-30*24*time.Hour))
+	r.putQuery(t, "mine", true, "member-1", "closed-member")
+	r.putQuery(t, "adhoc", false, "adhoc-only") // a query that is not configured is still a query result: tracked
+	for _, id := range []string{"member-1", "adhoc-only", "never-read", "read-long-ago", "open", "no-summary-yet"} {
+		r.putEntity(t, id, time.Time{})
+	}
+	r.putEntity(t, "read-long-ago", t0.Add(-365*24*time.Hour)) // no access window: the age of a read decays nothing
+	r.putSummaryOf(t, "open", "OPEN", t0)
+	r.putSummaryOf(t, "read-long-ago", "OPEN", t0)
+	r.putEntity(t, "merged", t0)
+	r.putSummaryOf(t, "merged", "MERGED", t0)
+	r.putEntity(t, "closed", t0)
+	r.putSummaryOf(t, "closed", "CLOSED", t0)
+	r.putEntity(t, "closed-member", t0)
+	r.putSummaryOf(t, "closed-member", "CLOSED", t0)
+	r.putEntity(t, "tombstoned", t0)
+	if err := r.st.PutEntity(ctx, store.EntityRow{Kind: entity.KindPR, ID: "tombstoned", LastAccess: t0, TombstonedAt: t0}); err != nil {
+		t.Fatal(err)
+	}
 	for id, want := range map[string]bool{
-		"member-1": true, "adhoc-only": false, "inside": true, "at-edge": true, "outside": false,
-		"never": false, "old-and-member": true, // a member stays in regardless of access
+		"member-1": true, "adhoc-only": true, "never-read": true, "read-long-ago": true, "open": true,
+		"no-summary-yet": true,                   // not fetched yet: tracked until a summary says closed
+		"merged":         false, "closed": false, // closed or merged leaves the set
+		"closed-member": true, // a member of a configured query stays in regardless
+		"tombstoned":    false,
 	} {
 		got, err := r.svc.InKeepAlive(ctx, id)
 		if err != nil || got != want {
 			t.Errorf("InKeepAlive(%s) = %v %v, want %v", id, got, err, want)
 		}
+	}
+	// A row that is not a PR the daemon knows is not in the set.
+	if got, err := r.svc.InKeepAlive(ctx, "unknown-node"); err != nil || got {
+		t.Errorf("InKeepAlive(unknown) = %v %v, want false", got, err)
+	}
+}
+
+func TestAnOpenPRThatWasOnlyReadStaysTrackedAfter24hAnd7dThenTerminalTTLAndExpiryApplyOnceItCloses(t *testing.T) {
+	r := newRig(t, rigOpts{})
+	ctx := context.Background()
+	if err := r.svc.Access(ctx, "read-only"); err != nil { // a direct read: no query, no watch
+		t.Fatal(err)
+	}
+	r.sched.Drain(ctx)
+	if n := len(r.fetch.callList()); n != 1 {
+		t.Fatalf("the first refresh: %d calls, want 1", n)
+	}
+
+	// 24 hours and 7 days later, with no read in between and in no query, the open
+	// PR is still refreshed and still in the set.
+	for _, gap := range []time.Duration{24 * time.Hour, testExpiry} {
+		before := len(r.fetch.callList())
+		r.clk.Advance(gap)
+		r.sched.Drain(ctx)
+		if n := len(r.fetch.callList()) - before; n != 1 {
+			t.Fatalf("%v after the last refresh: %d calls, want 1: a read-only open PR decays nothing", gap, n)
+		}
+		if in, err := r.svc.InKeepAlive(ctx, "read-only"); err != nil || !in {
+			t.Fatalf("%v later the open PR left the set (%v, %v)", gap, in, err)
+		}
+		if n, err := r.svc.Sweep(ctx); err != nil || n != 0 {
+			t.Fatalf("%v later Sweep evicted %d (%v), want 0: an entity in the set is never evicted", gap, n, err)
+		}
+	}
+
+	// It closes: the refresh that sees it stores it for terminal_ttl and books no
+	// next cycle; expiry then evicts it once every group is older than expiry.
+	r.fetch.mu.Lock()
+	r.fetch.state = map[string]string{"read-only": "MERGED"}
+	r.fetch.mu.Unlock()
+	r.clk.Advance(testTTL + time.Second)
+	r.sched.Drain(ctx)
+	g, ok := r.group(t, "read-only")
+	if !ok || g.FreshUntil.Sub(g.FetchedAt) != testTerminal {
+		t.Fatalf("the closed PR must be stored for terminal_ttl: %+v %v", g, ok)
+	}
+	if in, _ := r.svc.InKeepAlive(ctx, "read-only"); in {
+		t.Fatal("a merged PR must leave the keep-alive set")
+	}
+	before := len(r.fetch.callList())
+	r.clk.Advance(testTerminal + time.Hour)
+	r.sched.Drain(ctx)
+	if len(r.fetch.callList()) != before {
+		t.Error("a closed PR is not refreshed again in the background")
+	}
+	if n, err := r.svc.Sweep(ctx); err != nil || n != 0 {
+		t.Fatalf("Sweep inside expiry evicted %d (%v), want 0", n, err)
+	}
+	r.clk.Advance(testExpiry)
+	if n, err := r.svc.Sweep(ctx); err != nil || n != 1 {
+		t.Fatalf("Sweep past expiry evicted %d (%v), want 1", n, err)
+	}
+	if _, ok, _ := r.st.GetEntity(ctx, entity.KindPR, "read-only"); ok {
+		t.Error("the closed PR must be evicted past expiry")
 	}
 }
 
@@ -517,13 +604,18 @@ func TestSummaryTTLRefreshOfEveryMemberAndTheRefreshedCallback(t *testing.T) {
 	}
 }
 
-func TestAnEntityOutsideTheSetIsNotRefreshed(t *testing.T) {
+func TestAClosedEntityOutsideTheSetIsNotRefreshed(t *testing.T) {
 	r := newRig(t, rigOpts{})
 	ctx := context.Background()
 	r.putEntity(t, "in", t0.Add(-time.Hour))
 	r.putGroup(t, "in", GroupName, t0.Add(-time.Hour), t0.Add(-time.Minute))
-	r.putEntity(t, "out", t0.Add(-testWindow-time.Hour))
-	r.putGroup(t, "out", GroupName, t0.Add(-time.Hour), t0.Add(-time.Minute))
+	r.putEntity(t, "out", t0.Add(-time.Hour))
+	if err := r.st.PutGroup(context.Background(), store.GroupRow{
+		Kind: entity.KindPR, ID: "out", Group: GroupName, Content: []byte(`{"state":"CLOSED"}`),
+		FetchedAt: t0.Add(-time.Hour), FreshUntil: t0.Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// Both have a queued task (as after a restart that queued them, or after the
 	// entity fell out of the set while its task waited).
 	for _, id := range []string{"in", "out"} {
@@ -552,21 +644,25 @@ func TestExpiryEvictsOnlyOnceEveryGroupIsOlderThanExpiry(t *testing.T) {
 	ctx := context.Background()
 	old := t0.Add(-testExpiry - time.Second)
 	justInside := t0.Add(-testExpiry + time.Second)
-	out := t0.Add(-testWindow - time.Hour) // outside keepalive_window
+	out := t0.Add(-30 * 24 * time.Hour) // read long ago, which no longer matters
 
+	// The two closed entities are outside the set: only they can be evicted.
 	r.putEntity(t, "one-group-inside", out)
-	r.putGroup(t, "one-group-inside", GroupName, old, old)
+	r.putSummaryOf(t, "one-group-inside", "CLOSED", old)
 	r.putGroup(t, "one-group-inside", "detail", justInside, justInside)
 
 	r.putEntity(t, "all-older", out)
-	r.putGroup(t, "all-older", GroupName, old, old)
+	r.putSummaryOf(t, "all-older", "MERGED", old)
 	r.putGroup(t, "all-older", "detail", old.Add(-time.Hour), old)
 
-	r.putEntity(t, "in-the-set", t0.Add(-time.Hour)) // accessed recently: never evicted
+	r.putEntity(t, "in-the-set", t0.Add(-time.Hour)) // open: never evicted
 	r.putGroup(t, "in-the-set", GroupName, old, old)
 
+	r.putEntity(t, "open-read-long-ago", out) // open, however long ago it was read: never evicted
+	r.putGroup(t, "open-read-long-ago", GroupName, old, old)
+
 	r.putEntity(t, "member", out)
-	r.putGroup(t, "member", GroupName, old, old)
+	r.putSummaryOf(t, "member", "CLOSED", old)
 	r.putQuery(t, "mine", true, "member")
 
 	n, err := r.svc.Sweep(ctx)
@@ -579,7 +675,7 @@ func TestExpiryEvictsOnlyOnceEveryGroupIsOlderThanExpiry(t *testing.T) {
 	if gs, _ := r.st.ListGroups(ctx, entity.KindPR, "all-older"); len(gs) != 0 {
 		t.Errorf("its groups must go with it: %v", gs)
 	}
-	for _, id := range []string{"one-group-inside", "in-the-set", "member"} {
+	for _, id := range []string{"one-group-inside", "in-the-set", "open-read-long-ago", "member"} {
 		if _, ok, _ := r.st.GetEntity(ctx, entity.KindPR, id); !ok {
 			t.Errorf("%s must be kept", id)
 		}
@@ -619,14 +715,14 @@ func TestTrackQueuesClass3SummariesAndReportsUnresolvedRefs(t *testing.T) {
 	if st := r.sched.State(); st.Classes[2].Depth != 1 {
 		t.Errorf("a tracked entity is a class 3 task: %+v", st.Classes)
 	}
-	// Not in the keep-alive set (never accessed, in no configured query), yet the
-	// first fetch happens: class 3 is the query's own work.
+	// A tracked entity is in the keep-alive set while open: it gets its first
+	// summary and its next cycle is booked.
 	r.sched.Drain(ctx)
 	if g, ok := r.group(t, "PR_7"); !ok || g.Fingerprint == "" {
 		t.Fatal("a tracked entity must get its first summary")
 	}
-	if r.sched.Queued("PR_7", GroupName) {
-		t.Error("outside the set, no next cycle is booked")
+	if !r.sched.Queued("PR_7", GroupName) {
+		t.Error("an open tracked entity must have its next cycle booked")
 	}
 }
 
