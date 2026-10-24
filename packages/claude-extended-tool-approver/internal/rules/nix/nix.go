@@ -185,8 +185,8 @@ func (r *Rule) evaluateStatix(args []string) (hookio.RuleResult, error) {
 //     pre-existing, tracked gap for a future, dedicated pass rather than
 //     folded into this change.
 func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) (hookio.RuleResult, error) {
-	subcmd := firstNonFlag(args)
-	if subcmd == "" {
+	subcmd, ok := nixSubcommand(args)
+	if !ok || subcmd == "" {
 		return hookio.NotApplicable()
 	}
 	if subcmd == "develop" && r.exprEval != nil {
@@ -289,7 +289,7 @@ var rebuildApproved = map[string]bool{
 }
 
 func (r *Rule) evaluateRebuild(basename string, args []string) (hookio.RuleResult, error) {
-	subcmd := firstNonFlag(args)
+	subcmd, clean := rebuildVerb(args)
 	if rebuildReject[subcmd] {
 		return hookio.RuleResult{
 			Decision: hookio.Reject,
@@ -297,7 +297,7 @@ func (r *Rule) evaluateRebuild(basename string, args []string) (hookio.RuleResul
 			Module:   r.Name(),
 		}, nil
 	}
-	if rebuildApproved[subcmd] {
+	if clean && rebuildApproved[subcmd] {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "nix: " + basename + " " + subcmd + " is safe (no activation)",
@@ -396,6 +396,80 @@ func (r *Rule) evaluateNixShell(args []string, input *hookio.HookInput) (hookio.
 
 func normalizeExpr(s string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+}
+
+// nixBoolFlags are the nix global flags that take NO value and so may sit
+// before the subcommand without hiding it. Anything else that starts with a
+// dash before the subcommand (a value-taking option such as --option NAME VALUE,
+// --arg, --argstr, --override-input, -I, --store, --extra-experimental-features,
+// or a flag this list does not know) makes the subcommand unidentifiable: its
+// VALUE would be read as the subcommand (`nix --option build x run <flake>`
+// looks like `nix build`). nixSubcommand then reports not-ok and the rule
+// returns NotApplicable, deferring to the prompt. The list is deliberately
+// small: an unknown flag costs a prompt, a misread subcommand costs an
+// unreviewed `nix run`.
+var nixBoolFlags = map[string]bool{
+	"-L": true, "--print-build-logs": true,
+	"-v": true, "--verbose": true, "-vv": true, "-vvv": true,
+	"--quiet": true, "--offline": true, "--impure": true,
+	"--refresh": true, "--show-trace": true, "--no-warn-dirty": true,
+	"-k": true, "--keep-going": true, "--debug": true,
+}
+
+// nixSubcommand returns the nix subcommand, and false when a dash token
+// before it is not a known boolean flag (so the subcommand cannot be told
+// apart from an option value).
+func nixSubcommand(args []string) (string, bool) {
+	for _, a := range args {
+		if len(a) > 0 && a[0] == '-' {
+			if nixBoolFlags[a] {
+				continue
+			}
+			return "", false
+		}
+		return a, true
+	}
+	return "", true
+}
+
+// rebuildBoolFlags are the rebuild tools' value-less flags; rebuildValueFlags
+// maps each value-taking option to how many values it consumes.
+var rebuildBoolFlags = map[string]bool{
+	"-L": true, "--print-build-logs": true,
+	"-v": true, "--verbose": true, "-vv": true, "-vvv": true,
+	"--show-trace": true, "--impure": true, "--offline": true,
+	"--keep-going": true, "-k": true,
+}
+
+var rebuildValueFlags = map[string]int{
+	"--flake": 1, "-f": 1, "--file": 1, "-I": 1, "-A": 1, "--attr": 1,
+	"--profile-name": 1, "-p": 1, "--target-host": 1, "--build-host": 1,
+	"--store": 1, "-j": 1, "--max-jobs": 1, "--cores": 1, "-b": 1,
+	"--log-format": 1, "--extra-experimental-features": 1,
+	"--option": 2, "--arg": 2, "--argstr": 2, "--override-input": 2,
+}
+
+// rebuildVerb returns the rebuild verb with known value options' values
+// skipped (so `home-manager --flake build switch` is verb `switch`, never
+// `build`), and whether the scan was clean: clean is false when anything but
+// a known boolean flag preceded the verb. Only a clean scan may APPROVE; a
+// reject verb is honoured either way.
+func rebuildVerb(args []string) (string, bool) {
+	clean := true
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if len(a) == 0 || a[0] != '-' {
+			return a, clean
+		}
+		if rebuildBoolFlags[a] {
+			continue
+		}
+		clean = false
+		if n, ok := rebuildValueFlags[a]; ok {
+			i += n
+		}
+	}
+	return "", clean
 }
 
 func firstNonFlag(args []string) string {
