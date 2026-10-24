@@ -37,8 +37,9 @@ It prints a `change_flow` section, human-readable, per entity type and per consu
 change-flow families `serve` exposes on `/metrics` (see [`serve.md`](serve.md)). Per type it
 reports the active entity count, the due backlog, the change-log records by kind and origin, the
 hydration and hydration-failure totals, the optimistic-concurrency retries, and the entities with
-repeated degraded hydrations. For `pr` and `thread` the due backlog is the active entities whose
-`hydrated_at` is older than the sweep max age, or that were never hydrated. For `issue`, which has no
+repeated degraded hydrations. For `thread` the due backlog is the active entities whose
+`hydrated_at` is older than the sweep max age, or that were never hydrated. For `pr` it is always 0 (no
+sweep re-hydrates a PR on a clock any more; never-hydrated PRs are counted by `pg_desk_pr_unhydrated`). For `issue`, which has no
 age-driven sweep, the due backlog counts ONLY hydrations that are pending: a changed or watched entity
 not yet hydrated, plus the entries of the failed-ingest table. An unchanged issue is never due for its
 age. Per consumer it reports the cursor, the lag (the type's highest change

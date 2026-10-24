@@ -70,20 +70,41 @@ func TestComputeCoverage(t *testing.T) {
 		f.cfg.Watch.PR.Queries = []string{"mine"}
 	})
 	t.Run("a small backlog is a notice, a large one is incomplete", func(t *testing.T) {
-		setListing(t, f, "pr", "mine", "ok", "")
+		// The age rule is shown on the issue type: a PR has no due backlog (next test).
+		g := newFixture(t)
+		g.issue("K-1", issueSpec{state: "open"})
+		g.cfg.Watch.Issue.Queries = []string{"mine"}
+		setListing(t, g, "issue", "mine", "ok", "")
 		late := fixtureNow.Add(30 * 24 * time.Hour) // every entity is past the sweep max age
-		rep, _ := ComputeCoverage(f.st, f.cfg, late, in.Entities)
+		rep, _ := ComputeCoverage(g.st, g.cfg, late, g.inputs().Entities)
 		// 1 due of 1 active: the default bound is ceil(10%) = 1, so within it.
 		if rep.State.Incomplete || len(rep.Notices) != 1 {
 			t.Errorf("within the bound: %+v", rep)
 		}
 		n := 1
-		f.cfg.Focus.CoverageBacklogMax = &n
-		f.pr("2", prSpec{ownership: "mine"})
-		in2 := f.inputs()
-		rep, _ = ComputeCoverage(f.st, f.cfg, late, in2.Entities)
+		g.cfg.Focus.CoverageBacklogMax = &n
+		g.issue("K-2", issueSpec{state: "open"})
+		rep, _ = ComputeCoverage(g.st, g.cfg, late, g.inputs().Entities)
 		if !rep.State.Incomplete || !strings.Contains(strings.Join(rep.State.Reasons, ";"), "backlog") {
 			t.Errorf("above the bound: %+v", rep)
+		}
+	})
+	t.Run("PRs never count toward the backlog however old they are", func(t *testing.T) {
+		// PR lane refactor, packet P3b2: with the sweeps gone every quiet PR ages past
+		// the sweep max age; the daily focus draft must not read incomplete for it.
+		setListing(t, f, "pr", "mine", "ok", "")
+		n := 1
+		f.cfg.Focus.CoverageBacklogMax = &n
+		defer func() { f.cfg.Focus.CoverageBacklogMax = nil }()
+		f.pr("2", prSpec{ownership: "mine"})
+		f.pr("3", prSpec{ownership: "mine"})
+		late := fixtureNow.Add(30 * 24 * time.Hour)
+		rep, _ := ComputeCoverage(f.st, f.cfg, late, f.inputs().Entities)
+		if rep.State.Incomplete || len(rep.Notices) != 0 {
+			t.Errorf("old PRs made coverage incomplete or noisy: %+v", rep)
+		}
+		if got := rep.State.PerType["pr"]; got.Active != 3 || got.DueBacklog != 0 {
+			t.Errorf("pr coverage = %+v, want 3 active and no due backlog", got)
 		}
 	})
 }

@@ -291,7 +291,7 @@ func TestStatusReportsChangeFlowPerTypeAndConsumer(t *testing.T) {
 		"change_flow:\n",
 		"  type pr:\n",
 		"    active: 2\n",
-		"    due_backlog: 1\n",
+		"    due_backlog: 0\n", // o/r#2 is older than the max age, and a PR has no due backlog
 		"    sweep_bound: active_count=2 max_per_poll=20 max_age=6h0m0s poll_interval=unknown\n",
 		"    hydrations: 2\n",
 		"    hydration_failures: 2\n",

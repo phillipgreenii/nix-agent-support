@@ -812,14 +812,27 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 			f.cfg.Watch.PR.Queries = []string{"never-ran"}
 		}, 0, ""},
 		{"backlog above the bound", func(t *testing.T, f *showFixture) {
-			// Both entities were hydrated long before the sweep max age.
+			// All entities were hydrated long before the sweep max age. The PR is
+			// shown in the table; the backlog is counted on the issues, because a PR
+			// has no due backlog (the next case).
+			f.hydrated = "2026-10-01T00:00:00Z"
+			f.pr(t, 1, "a", showAt)
+			f.jira(t, "K-1", "a", "", showAt)
+			f.jira(t, "K-2", "b", "", showAt)
+			setListing(t, f, "mine", "ok")
+			n := 1
+			f.cfg.Focus.CoverageBacklogMax = &n
+		}, 2, "backlog"},
+		{"old PRs are no backlog", func(t *testing.T, f *showFixture) {
+			// PR lane refactor, packet P3b2: with the sweeps gone every quiet PR ages
+			// past the sweep max age; they MUST NOT make coverage incomplete.
 			f.hydrated = "2026-10-01T00:00:00Z"
 			f.pr(t, 1, "a", showAt)
 			f.pr(t, 2, "b", showAt)
 			setListing(t, f, "mine", "ok")
 			n := 1
 			f.cfg.Focus.CoverageBacklogMax = &n
-		}, 2, "backlog"},
+		}, 0, ""},
 		{"no candidates computable", func(t *testing.T, f *showFixture) { setListing(t, f, "mine", "failed") }, 3, "no candidates are computable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

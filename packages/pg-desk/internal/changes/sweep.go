@@ -29,10 +29,24 @@ func ActiveCount(entities []store.Entity, entityType string) int {
 	return n
 }
 
+// EntityTypePR is the pr entity type, whose rows no sweep re-hydrates (see
+// DueBacklog).
+const EntityTypePR = "pr"
+
 // DueBacklog is the number of ACTIVE entities of entityType the sweep would
 // re-hydrate at now: never hydrated (empty or unparseable HydratedAt) or
 // hydrated longer than maxAge ago.
+//
+// The pr type is always 0 (PR lane refactor, packet P3b2): the router sweeps
+// that re-listed every open pull request are gone, so a quiet PR is never
+// re-hydrated on a clock, and counting it as due would age every quiet PR past
+// maxAge and mark the daily focus draft incomplete for a backlog nothing is
+// going to work off. A PR that was never hydrated is reported by its own
+// gauge (the unhydrated count), not by this one.
 func DueBacklog(entities []store.Entity, entityType string, now time.Time, maxAge time.Duration) int {
+	if entityType == EntityTypePR {
+		return 0
+	}
 	n := 0
 	for _, e := range entities {
 		if e.EntityType == entityType && !e.Inactive && sweepDue(e, now, maxAge) {

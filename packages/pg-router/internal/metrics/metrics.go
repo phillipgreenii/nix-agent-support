@@ -411,8 +411,8 @@ const (
 
 // ReasonUpstreamKilled is the "reason" label a FailureClassHandlerError series
 // carries when the handler error contains BOTH upstream-killed sentinels.
-// Killed gh calls are transient GitHub slowness healed by the 30-minute
-// pr-sweep, so they are excluded from pg-router-failure-rate and page only on a
+// Killed gh calls are transient GitHub slowness healed by the router's bounded re-run
+// or the next change event, so they are excluded from pg-router-failure-rate and page only on a
 // sustained burst via pg-router-upstream-killed (>= 10 in 30m). Precedence is
 // triager-failure, then budget-exceeded, then upstream-killed. (pg2-fy2pm)
 const ReasonUpstreamKilled = "upstream-killed"

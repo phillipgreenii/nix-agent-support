@@ -72,8 +72,10 @@ func TestObserveReportsEveryChangeFlowFamily(t *testing.T) {
 	if !reflect.DeepEqual(pr.Records, wantRecords) {
 		t.Errorf("Records = %+v, want %+v", pr.Records, wantRecords)
 	}
-	if pr.MaxSeq != 3 || pr.Active != 2 || pr.Due != 1 {
-		t.Errorf("MaxSeq/Active/Due = %d/%d/%d, want 3/2/1", pr.MaxSeq, pr.Active, pr.Due)
+	// One of the two active PRs is older than the max age, and still not due: a PR
+	// has no due backlog (DueBacklog).
+	if pr.MaxSeq != 3 || pr.Active != 2 || pr.Due != 0 {
+		t.Errorf("MaxSeq/Active/Due = %d/%d/%d, want 3/2/0", pr.MaxSeq, pr.Active, pr.Due)
 	}
 	if pr.Stats.Hydrations != 3 || pr.Stats.Failures != 2 || pr.Stats.OCCRetries != 2 {
 		t.Errorf("Stats = %+v, want 3 hydrations, 2 failures, 2 retries", pr.Stats)

@@ -872,12 +872,39 @@ func TestView_WidensPaneContentAcrossAllThreeTiers(t *testing.T) {
 	}
 }
 
-// TestRenderQueuesPane_HeartbeatTypeHasNoBarButHasLabel is this packet's own
-// acceptance bar: a queue type in the heartbeat set (pr.reconcile today)
-// renders with a (heartbeat) label and no depth bar [design: Task 5, Step 1;
-// Global Constraints].
+// withHeartbeatPrefix sets the heartbeat set to one fixture prefix for the
+// test (the shipped set is empty: the one type that was a monitored-universe
+// count, the PR sweeps' event type, was removed with the sweeps).
+func withHeartbeatPrefix(t *testing.T, prefix string) {
+	t.Helper()
+	old := heartbeatQueuePrefixes
+	heartbeatQueuePrefixes = []string{prefix}
+	t.Cleanup(func() { heartbeatQueuePrefixes = old })
+}
+
+// TestHeartbeatQueuePrefixesShippedEmpty pins that no deployed type is
+// labelled a heartbeat: the removed PR sweep type no longer is one and
+// nothing else is.
+func TestHeartbeatQueuePrefixesShippedEmpty(t *testing.T) {
+	if len(heartbeatQueuePrefixes) != 0 {
+		t.Fatalf("heartbeatQueuePrefixes = %v, want empty (the removed pr.reconcile was the only heartbeat type)", heartbeatQueuePrefixes)
+	}
+	for _, typ := range []string{"pr.reconcile", "pr.changed", "desk.heartbeat"} {
+		out := renderQueuesPane([]Queue{{Type: typ, Depth: 5}}, 0, "", "Queues", 0)
+		if strings.Contains(out, "(heartbeat)") {
+			t.Errorf("type %q is labelled a heartbeat:\n%s", typ, out)
+		}
+		if !strings.Contains(out, "█") {
+			t.Errorf("type %q has no depth bar:\n%s", typ, out)
+		}
+	}
+}
+
+// TestRenderQueuesPane_HeartbeatTypeHasNoBarButHasLabel: a queue type in the
+// heartbeat set renders with a (heartbeat) label and no depth bar.
 func TestRenderQueuesPane_HeartbeatTypeHasNoBarButHasLabel(t *testing.T) {
-	out := renderQueuesPane([]Queue{{Type: "pr.reconcile", Depth: 70}}, 0, "", "Queues", 0)
+	withHeartbeatPrefix(t, "batch.sweep")
+	out := renderQueuesPane([]Queue{{Type: "batch.sweep", Depth: 70}}, 0, "", "Queues", 0)
 	if strings.ContainsAny(out, "█░") {
 		t.Fatalf("heartbeat queue row rendered a depth bar:\n%s", out)
 	}
@@ -901,11 +928,12 @@ func TestRenderQueuesPane_IncrementalTypeHasBarNoLabel(t *testing.T) {
 
 // TestRenderQueuesPane_HeartbeatPrefixMatchNotExactMatch closes the round-1
 // semantic post-check finding: the Global Constraint says the heartbeat set
-// matches queue types that "start with" pr.reconcile, not only the exact
+// matches queue types that "start with" a heartbeat prefix, not only the exact
 // string, so a dot-delimited prefixed variant must also render the
 // heartbeat label.
 func TestRenderQueuesPane_HeartbeatPrefixMatchNotExactMatch(t *testing.T) {
-	out := renderQueuesPane([]Queue{{Type: "pr.reconcile.detail", Depth: 5}}, 0, "", "Queues", 0)
+	withHeartbeatPrefix(t, "batch.sweep")
+	out := renderQueuesPane([]Queue{{Type: "batch.sweep.detail", Depth: 5}}, 0, "", "Queues", 0)
 	if strings.ContainsAny(out, "█░") {
 		t.Fatalf("prefixed heartbeat queue row rendered a depth bar:\n%s", out)
 	}
@@ -916,16 +944,17 @@ func TestRenderQueuesPane_HeartbeatPrefixMatchNotExactMatch(t *testing.T) {
 
 // TestRenderQueuesPane_NonDelimitedFalsePositiveExcluded closes the round-2
 // semantic post-check finding: a plain (non-dot-delimited) strings.HasPrefix
-// check would also match "pr.reconciled" -- a plausible distinct future
-// queue type name ("reconcile completed" event), not itself a heartbeat --
-// so the match must require the dot boundary, not bare prefix.
+// check would also match "batch.sweeper" -- a plausible distinct future
+// queue type name, not itself a heartbeat -- so the match must require the
+// dot boundary, not bare prefix.
 func TestRenderQueuesPane_NonDelimitedFalsePositiveExcluded(t *testing.T) {
-	out := renderQueuesPane([]Queue{{Type: "pr.reconciled", Depth: 4}}, 0, "", "Queues", 0)
+	withHeartbeatPrefix(t, "batch.sweep")
+	out := renderQueuesPane([]Queue{{Type: "batch.sweeper", Depth: 4}}, 0, "", "Queues", 0)
 	if strings.Contains(out, "(heartbeat)") {
-		t.Fatalf("\"pr.reconciled\" must not be misclassified as a heartbeat type via bare prefix match:\n%s", out)
+		t.Fatalf("\"batch.sweeper\" must not be misclassified as a heartbeat type via bare prefix match:\n%s", out)
 	}
 	if !strings.Contains(out, "█") {
-		t.Fatalf("\"pr.reconciled\" should render an ordinary depth bar:\n%s", out)
+		t.Fatalf("\"batch.sweeper\" should render an ordinary depth bar:\n%s", out)
 	}
 }
 

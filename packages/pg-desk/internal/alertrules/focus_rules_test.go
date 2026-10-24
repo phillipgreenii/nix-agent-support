@@ -75,16 +75,49 @@ func labelEq(k, want string) func(map[string]string) bool {
 	return func(l map[string]string) bool { return l[k] == want }
 }
 
+// laneMode is the pg_desk_pr_lane_mode series set the gauge emits for one lane
+// mode: one series per mode, 1 on the configured one and 0 on the other two.
+func laneMode(mode string) []focusSample {
+	var out []focusSample
+	for _, m := range []string{"off", "plan", "apply"} {
+		v := 0.0
+		if m == mode {
+			v = 1
+		}
+		out = append(out, focusSample{map[string]string{"__name__": "pg_desk_pr_lane_mode", "mode": m}, v})
+	}
+	return out
+}
+
+// laneIsApply models the right operand `pg_desk_pr_lane_mode{mode="apply"} == 1`:
+// true when a lane-mode series of mode apply reads 1.
+func laneIsApply(in []focusSample) bool {
+	for _, s := range in {
+		if s.labels["__name__"] == "pg_desk_pr_lane_mode" && s.labels["mode"] == "apply" && s.v == 1 {
+			return true
+		}
+	}
+	return false
+}
+
 // focusRules lists the eight rules. Every threshold is `gt`.
 var focusRules = []focusRule{
 	{
 		uid:       "pg-desk-focus-pending-beads-age",
-		expr:      `max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"})`,
+		expr:      `max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"}) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1)`,
 		forText:   "10m",
 		forDur:    10 * time.Minute,
 		threshold: 1800,
 		agg: func(in []focusSample) (float64, bool) {
-			return maxOf(matchSeries(in, labelEq("reason", "unminted")))
+			// `and on() (lane mode apply == 1)`: the left side survives only while the
+			// lane-mode series of mode apply reads 1; with no such series (the gauge
+			// absent, or on another mode) the whole result is empty (NoData).
+			if !laneIsApply(in) {
+				return 0, false
+			}
+			return maxOf(matchSeries(in, func(l map[string]string) bool {
+				return l["__name__"] == "" && l["reason"] == "unminted"
+			}))
 		},
 	},
 	{
@@ -203,7 +236,7 @@ func repeat(s []focusSample, n int) [][]focusSample {
 func (r focusRule) hot() []focusSample {
 	switch r.uid {
 	case "pg-desk-focus-pending-beads-age":
-		return []focusSample{{map[string]string{"reason": "unminted"}, 1801}}
+		return append([]focusSample{{map[string]string{"reason": "unminted"}, 1801}}, laneMode("apply")...)
 	case "pg-desk-focus-divergence-selected-held":
 		return []focusSample{{map[string]string{"kind": "selected_bead_held"}, 1}}
 	case "pg-desk-focus-divergence-rm-claimable":
@@ -225,11 +258,13 @@ func (r focusRule) hot() []focusSample {
 func (r focusRule) cold() []focusSample {
 	switch r.uid {
 	case "pg-desk-focus-pending-beads-age":
-		// At the threshold exactly (gt, not gte), and a different reason far over it.
-		return []focusSample{
+		// At the threshold exactly (gt, not gte), and a different reason far over it,
+		// both in apply mode so that the threshold and the reason selector are what
+		// keep it quiet (the mode suppression has its own test).
+		return append([]focusSample{
 			{map[string]string{"reason": "unminted"}, 1800},
 			{map[string]string{"reason": "hidden"}, 999999},
-		}
+		}, laneMode("apply")...)
 	case "pg-desk-focus-divergence-selected-held":
 		return []focusSample{{map[string]string{"kind": "selected_bead_held"}, 0}, {map[string]string{"kind": "stale_period"}, 3}}
 	case "pg-desk-focus-divergence-rm-claimable":
@@ -384,7 +419,7 @@ func TestUnmintedAgeHoldsTenMinutesBeforeFiring(t *testing.T) {
 	if r.uid != "pg-desk-focus-pending-beads-age" {
 		t.Fatalf("focusRules[0] = %s", r.uid)
 	}
-	old := []focusSample{{map[string]string{"reason": "unminted"}, 2400}}
+	old := append([]focusSample{{map[string]string{"reason": "unminted"}, 2400}}, laneMode("apply")...)
 	if at, fired := r.firesAt(repeat(old, 30)); !fired || at != 10 {
 		t.Errorf("firesAt = (%d, %v), want (10, true)", at, fired)
 	}
@@ -395,8 +430,41 @@ func TestUnmintedAgeHoldsTenMinutesBeforeFiring(t *testing.T) {
 		{map[string]string{"reason": "unwatched"}, 90000},
 		{map[string]string{"reason": "source_terminal"}, 90000},
 	}
+	permanent = append(permanent, laneMode("apply")...)
 	if _, fired := r.firesAt(repeat(permanent, 60)); fired {
 		t.Error("fired on a legitimate permanent pending reason")
+	}
+}
+
+// TestUnmintedAgeIsSuppressedWhileTheLaneIsNotApply is the PR lane refactor
+// (packet P3b2) case: in plan or off mode nothing mints a focus bead by design, so
+// an unminted row that has waited for hours is the expected state and the rule
+// MUST stay quiet however long it lasts. The control is the same row in apply
+// mode, which fires, so the suppression is the lane-mode clause and not a
+// threshold or an empty fixture. A lane gauge with no series (a store below
+// schema 2) and one whose apply series reads 0 both suppress as well.
+func TestUnmintedAgeIsSuppressedWhileTheLaneIsNotApply(t *testing.T) {
+	r := focusRules[0]
+	unminted := []focusSample{{map[string]string{"reason": "unminted"}, 90000}}
+	withMode := func(mode string) []focusSample {
+		return append(append([]focusSample{}, unminted...), laneMode(mode)...)
+	}
+
+	if _, fired := r.firesAt(repeat(withMode("apply"), 30)); !fired {
+		t.Fatal("control: the same unminted row did not fire in apply mode")
+	}
+	for _, mode := range []string{"off", "plan"} {
+		if _, fired := r.firesAt(repeat(withMode(mode), 600)); fired {
+			t.Errorf("fired in %s mode: the unminted row is expected there", mode)
+		}
+	}
+	if _, fired := r.firesAt(repeat(unminted, 600)); fired {
+		t.Error("fired with no lane-mode series at all")
+	}
+	// Flipping to apply mid-series starts the hold at the flip, not before it.
+	s := append(repeat(withMode("plan"), 20), repeat(withMode("apply"), 15)...)
+	if at, fired := r.firesAt(s); !fired || at != 30 {
+		t.Errorf("firesAt over a plan-then-apply series = (%d, %v), want (30, true): the 10m hold counts from the flip", at, fired)
 	}
 }
 

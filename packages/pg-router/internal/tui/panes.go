@@ -413,23 +413,21 @@ func renderListenersPane(listeners []Listener, tier, width int, theme render.The
 
 // heartbeatQueuePrefixes names queue-type prefixes whose depth is a
 // reconciliation heartbeat (a monitored-universe count), not an
-// incremental/actionable backlog -- pr.reconcile today. pg-router has no
-// per-type metadata to derive this from, so it is a hardcoded set; promote
-// to config if a second heartbeat-style prefix is ever added. Matched by
-// EXACT string or by prefix at a dot boundary, per the docket's Global
-// Constraints ("starts with pr.reconcile") -- this docket's semantic
-// post-check found the design's own Task 5 Step 3 code sample used an
-// exact-match lookup (round 1), then found a naive prefix fix would
-// misclassify a same-prefix sibling like "pr.reconciled" (round 2); the
-// dot-boundary check here closes both.
-var heartbeatQueuePrefixes = []string{
-	"pr.reconcile",
-}
+// incremental/actionable backlog. It is EMPTY: the one such type, the PR
+// sweeps' pr.reconcile, was removed with the sweeps (PR lane refactor), and
+// every type the deployment binds now carries real work. The mechanism stays
+// (the "(heartbeat)" label, the drill-down kind) for a type that is a
+// monitored-universe count again. pg-router has no per-type metadata to
+// derive this from, so it is a hardcoded set; promote to config if a
+// heartbeat-style prefix is ever added. Matched by EXACT string or by prefix
+// at a dot boundary, never by a bare character-level prefix (a same-prefix
+// sibling such as "<prefix>d" is not a heartbeat).
+var heartbeatQueuePrefixes = []string{}
 
 // isHeartbeatQueueType reports whether t equals a heartbeat prefix exactly,
 // or starts with one immediately followed by "." -- never a bare
 // character-level prefix match, which would also match an unrelated
-// same-prefix type name like "pr.reconciled".
+// same-prefix type name such as "<prefix>d".
 func isHeartbeatQueueType(t string) bool {
 	for _, prefix := range heartbeatQueuePrefixes {
 		if t == prefix || strings.HasPrefix(t, prefix+".") {
@@ -467,9 +465,8 @@ func depthBar(depth int) string {
 // tiers. width is the available terminal width, see renderListenersPane's
 // doc [pg2-hlpuv]. DEPTH renders a coarse depth bar for ordinary
 // incremental queue types, or a (heartbeat) label with no bar for a queue
-// type in the heartbeat set (pr.reconcile today) -- that depth is a
-// monitored-universe count, not an actionable backlog [design: Task 5,
-// "pr.reconcile relabeling"; Global Constraints].
+// type in the heartbeat set (none today) -- that depth is a
+// monitored-universe count, not an actionable backlog.
 //
 // maxLines is the same total-rendered-line budget renderListenersPane's own
 // doc explains (bead pg2-zxf3d) -- <= 0 unbounded, otherwise threaded

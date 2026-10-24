@@ -121,7 +121,8 @@ series.
 - `pg_desk_repeated_degraded_entities{type}` — entities with repeated degraded hydrations (the one
   definition `status` and `doctor` share).
 - `pg_desk_due_backlog{type}` — active entities whose `hydrated_at` is older than the sweep max age
-  (or that were never hydrated).
+  (or that were never hydrated); always 0 for `pr` (no sweep re-hydrates a PR on a clock, and the
+  never-hydrated PRs are `pg_desk_pr_unhydrated`).
 - `pg_desk_consumer_lag{type,consumer}` — the type's highest change sequence minus the consumer's
   cursor.
 - `pg_desk_sweep_bound_violated{type,tier}` — `1` for a (type, tier) whose sweep sizing bound
@@ -299,18 +300,18 @@ plan, no series) is no data and is Normal, never an alert. Each rule fires only 
 has held for the whole `for` duration. Each expression, selector and `for` is pinned by
 `internal/alertrules/focus_rules_test.go`.
 
-| uid                                       | expression                                                                              | threshold | for   | meaning                                                                                                                       |
-| ----------------------------------------- | --------------------------------------------------------------------------------------- | --------- | ----- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `pg-desk-focus-pending-beads-age`         | `max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"})`                 | `> 1800`  | `10m` | a selected, live row has waited over 30 minutes for a bead: the decider role is unbound, still in plan mode, or failing       |
-| `pg-desk-focus-divergence-selected-held`  | `max(pg_desk_focus_divergence{kind="selected_bead_held"})`                              | `> 0`     | `30m` | a selected item's bead is held although its source is not terminal                                                            |
-| `pg-desk-focus-divergence-rm-claimable`   | `max(pg_desk_focus_divergence{kind="removed_bead_open_unclaimed"})`                     | `> 0`     | `1h`  | a removed item's bead is still open and unclaimed, so a worker can claim work the operator dropped                            |
-| `pg-desk-focus-annotation-divergence`     | `sum(pg_desk_focus_divergence{kind=~"row_without_annotation\|annotation_without_row"})` | `> 0`     | `15m` | a plan row and its `focus_selected` annotation disagree, so a select was interrupted between the two writes                   |
-| `pg-desk-focus-terminal-source-bead-open` | `max(pg_desk_focus_divergence{kind="terminal_source_bead_open"})`                       | `> 0`     | `1h`  | a finished item's bead is still open: the issue-closed listener is missing or its role is in plan mode                        |
-| `pg-desk-watch-listing-degraded`          | `sum(pg_desk_watch_listing_status{status!="ok"})`                                       | `> 0`     | `30m` | a configured watch query's persisted listing is degraded or failed, so the watch sets and the candidate set may be incomplete |
-| `pg-desk-focus-rank-degraded`             | `sum(pg_desk_focus_rank_degraded_inputs)`                                               | `> 0`     | `30m` | the rank is silently running on a degraded input (the `input` label names which)                                              |
-| `pg-desk-focus-consumer-lag`              | `max(pg_desk_consumer_lag{type="issue"})`                                               | `> 500`   | `30m` | the focus role's single `issue.changed` consumer is over 500 changes behind                                                   |
+| uid                                       | expression                                                                                                                 | threshold | for   | meaning                                                                                                                                |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `pg-desk-focus-pending-beads-age`         | `max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"}) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1)` | `> 1800`  | `10m` | while the PR lane is in apply mode, a selected, live row has waited over 30 minutes for a bead: the decider role is unbound or failing |
+| `pg-desk-focus-divergence-selected-held`  | `max(pg_desk_focus_divergence{kind="selected_bead_held"})`                                                                 | `> 0`     | `30m` | a selected item's bead is held although its source is not terminal                                                                     |
+| `pg-desk-focus-divergence-rm-claimable`   | `max(pg_desk_focus_divergence{kind="removed_bead_open_unclaimed"})`                                                        | `> 0`     | `1h`  | a removed item's bead is still open and unclaimed, so a worker can claim work the operator dropped                                     |
+| `pg-desk-focus-annotation-divergence`     | `sum(pg_desk_focus_divergence{kind=~"row_without_annotation\|annotation_without_row"})`                                    | `> 0`     | `15m` | a plan row and its `focus_selected` annotation disagree, so a select was interrupted between the two writes                            |
+| `pg-desk-focus-terminal-source-bead-open` | `max(pg_desk_focus_divergence{kind="terminal_source_bead_open"})`                                                          | `> 0`     | `1h`  | a finished item's bead is still open: the issue-closed listener is missing or its role is in plan mode                                 |
+| `pg-desk-watch-listing-degraded`          | `sum(pg_desk_watch_listing_status{status!="ok"})`                                                                          | `> 0`     | `30m` | a configured watch query's persisted listing is degraded or failed, so the watch sets and the candidate set may be incomplete          |
+| `pg-desk-focus-rank-degraded`             | `sum(pg_desk_focus_rank_degraded_inputs)`                                                                                  | `> 0`     | `30m` | the rank is silently running on a degraded input (the `input` label names which)                                                       |
+| `pg-desk-focus-consumer-lag`              | `max(pg_desk_consumer_lag{type="issue"})`                                                                                  | `> 500`   | `30m` | the focus role's single `issue.changed` consumer is over 500 changes behind                                                            |
 
-The lag threshold of `pg-desk-focus-consumer-lag` is provisional: the design does not fix it, and
+`pg-desk-focus-pending-beads-age` is suppressed while the lane mode is not `apply`: its expression ends\nin `and on() (pg_desk_pr_lane_mode{mode="apply"} == 1)`, so with the lane in `off` or `plan` mode, or with\nno lane-mode series at all, the whole result is empty and the rule stays Normal. In those modes nothing\nmints a focus bead by design, and `pg-desk doctor` keeps reporting the unminted selections.\n\nThe lag threshold of `pg-desk-focus-consumer-lag` is provisional: the design does not fix it, and
 the operator checkpoint sets the final budget from the decider cost it measures. Decider failures
 are not covered by a rule here: they reach `pg_router_failures_total{role="<focus role>"}`, which the
 existing `pg-router-failure-rate` rule already watches.
@@ -327,7 +328,7 @@ existing `pg-router-failure-rate` rule already watches.
   schema 2 or the read fails. The residual gauges' `mode` label MUST be the lane-level mode, which follows the
   configured `pr_lane.mode`.
 
-## Out of scope (Phase 9, narrowed by Phase 10)
+- **INV-SERVE-3.** <!-- uuid: 7c3e5a91-2f4b-4d8e-9b06-1a5d7e2c4f38 --> The rule `pg-desk-focus-pending-beads-age` MUST NOT fire while `pg_desk_pr_lane_mode` does not read `1` on\n `apply` (the lane in `off` or `plan` mode, or the gauge absent), and MUST fire as before once it does.\n\n## Out of scope (Phase 9, narrowed by Phase 10)
 
 The primary port (`9818`) and the removal of the temporary soak board are the Phase 11 flip.
 `sync_error` is populated once sync runs and fails for a PR (Phase 10, see

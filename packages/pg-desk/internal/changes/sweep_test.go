@@ -41,14 +41,48 @@ func TestActiveCount(t *testing.T) {
 	}
 }
 
+// asType returns the entities with every pr row retyped to entityType, so a
+// test of the age rule can run it on a type that still has one (pr has none).
+func asType(es []store.Entity, entityType string) []store.Entity {
+	out := make([]store.Entity, len(es))
+	for i, e := range es {
+		if e.EntityType == "pr" {
+			e.EntityType = entityType
+		}
+		out[i] = e
+	}
+	return out
+}
+
 func TestDueBacklog(t *testing.T) {
 	// due: old-b, old-a, oldest, never, garbled; not due: fresh, edge (6h is
-	// not older than 6h), gone (inactive), other-type.
-	if got := DueBacklog(sweepEntities(), "pr", sweepTestNow, 6*time.Hour); got != 5 {
+	// not older than 6h), gone (inactive), other-type. The age rule is shown on
+	// the thread type: pr has no due backlog (TestDueBacklogOfPRIsAlwaysZero).
+	es := asType(sweepEntities(), "thread")
+	if got := DueBacklog(es, "thread", sweepTestNow, 6*time.Hour); got != 5 {
 		t.Errorf("DueBacklog = %d, want 5", got)
 	}
-	if got := DueBacklog(sweepEntities(), "pr", sweepTestNow, 100*24*time.Hour); got != 2 {
+	if got := DueBacklog(es, "thread", sweepTestNow, 100*24*time.Hour); got != 2 {
 		t.Errorf("DueBacklog with a huge max age = %d, want 2 (never hydrated and unparseable)", got)
+	}
+}
+
+// PR lane refactor, packet P3b2: with the router sweeps gone every quiet PR ages
+// past the sweep max age, so counting PRs as due would mark the daily focus draft
+// incomplete for a backlog nothing works off. The same rows of another type are
+// counted (the control), so the zero is the PR exclusion and not an empty fixture.
+func TestDueBacklogOfPRIsAlwaysZero(t *testing.T) {
+	es := sweepEntities()
+	for _, maxAge := range []time.Duration{time.Hour, 6 * time.Hour, 100 * 24 * time.Hour} {
+		if got := DueBacklog(es, "pr", sweepTestNow, maxAge); got != 0 {
+			t.Errorf("DueBacklog(pr, max age %s) = %d, want 0", maxAge, got)
+		}
+	}
+	if got := DueBacklog(asType(es, "thread"), "thread", sweepTestNow, 6*time.Hour); got != 5 {
+		t.Errorf("control: the same rows as thread are %d due, want 5", got)
+	}
+	if got := ActiveCount(es, "pr"); got != 7 {
+		t.Errorf("pr active = %d, want 7 (the exclusion must not touch the active count)", got)
 	}
 }
 

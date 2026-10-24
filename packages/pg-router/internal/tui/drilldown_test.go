@@ -124,7 +124,7 @@ func TestDrillDown_QueueSiblingStepping(t *testing.T) {
 		Queues: []Queue{
 			{Type: "issue", Depth: 3},
 			{Type: "empty-type", Depth: 0},
-			{Type: "pr.reconcile", Depth: 7},
+			{Type: "pr.changed", Depth: 7},
 		},
 	}
 	m.drillKind = rowQueue
@@ -149,8 +149,8 @@ func TestDrillDown_QueueSiblingStepping(t *testing.T) {
 	if m.drillIndex != 2 {
 		t.Fatalf("drillIndex after second +1 = %d, want 2", m.drillIndex)
 	}
-	if got := m.drillBreadcrumb(); !strings.Contains(got, "pr.reconcile") {
-		t.Fatalf("breadcrumb = %q, want it to name pr.reconcile (index 2)", got)
+	if got := m.drillBreadcrumb(); !strings.Contains(got, "pr.changed") {
+		t.Fatalf("breadcrumb = %q, want it to name pr.changed (index 2)", got)
 	}
 
 	// Past the end: clamps at the last index, never wraps to 0.
@@ -174,6 +174,7 @@ func TestDrillDown_QueueSiblingStepping(t *testing.T) {
 // one, matching renderQueuesPane's own depth-bar-vs-"(heartbeat)" split so
 // the drill-down detail never disagrees with the pane row it drilled from.
 func TestRenderQueueDetail(t *testing.T) {
+	withHeartbeatPrefix(t, "batch.sweep")
 	incremental := renderQueueDetail(Queue{Type: "issue", Depth: 3})
 	if !strings.Contains(incremental, "issue") || !strings.Contains(incremental, "Depth: 3") {
 		t.Errorf("renderQueueDetail(incremental) = %q, want it to name the type and depth verbatim", incremental)
@@ -182,12 +183,12 @@ func TestRenderQueueDetail(t *testing.T) {
 		t.Errorf("renderQueueDetail(incremental) = %q, want no heartbeat classification for a non-heartbeat type", incremental)
 	}
 
-	heartbeat := renderQueueDetail(Queue{Type: "pr.reconcile", Depth: 0})
-	if !strings.Contains(heartbeat, "pr.reconcile") || !strings.Contains(heartbeat, "Depth: 0") {
+	heartbeat := renderQueueDetail(Queue{Type: "batch.sweep", Depth: 0})
+	if !strings.Contains(heartbeat, "batch.sweep") || !strings.Contains(heartbeat, "Depth: 0") {
 		t.Errorf("renderQueueDetail(heartbeat) = %q, want it to name the type and depth verbatim (depth 0 included)", heartbeat)
 	}
 	if !strings.Contains(heartbeat, "heartbeat") {
-		t.Errorf("renderQueueDetail(heartbeat) = %q, want a heartbeat classification for pr.reconcile", heartbeat)
+		t.Errorf("renderQueueDetail(heartbeat) = %q, want a heartbeat classification for the fixture prefix", heartbeat)
 	}
 }
 

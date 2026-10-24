@@ -257,7 +257,7 @@ func focusLines(h focus.Health, cfg *config.Config, now time.Time, contract focu
 	}
 	lines = append(lines, focusLine{
 		Name: "coverage backlog", Kind: focusLineReport, Count: backlogTotal, Detail: strings.Join(backlog, "; "),
-		Remedy: "run pg-desk sweep, or raise focus.coverage_backlog_max",
+		Remedy: "run pg-desk issue refresh <id> for each due issue, or raise focus.coverage_backlog_max",
 	})
 	var failed []string
 	for _, l := range h.Listings {

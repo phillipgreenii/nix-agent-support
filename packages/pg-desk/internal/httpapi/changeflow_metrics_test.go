@@ -65,7 +65,7 @@ func TestMetricsExposeEveryChangeFlowFamilyForANewSchemaStore(t *testing.T) {
 		`pg_desk_hydrations_total{type="pr"} 2`,
 		`pg_desk_hydration_failures_total{type="pr"} 1`,
 		`pg_desk_occ_retries_total{type="pr"} 2`,
-		`pg_desk_due_backlog{type="pr"} 1`,
+		`pg_desk_due_backlog{type="pr"} 0`, // one PR is older than the max age; a PR has no due backlog
 		`pg_desk_consumer_lag{consumer="alpha",type="pr"} 2`,
 		`pg_desk_repeated_degraded_entities{type="pr"} 0`,
 	} {

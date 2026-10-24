@@ -321,11 +321,11 @@ tests:
     input_series:
       - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
         values: "15x240"
-      - series: pg_router_listener_in_flight{role="desk-issue",job="pg-router"}
+      - series: pg_router_listener_in_flight{role="issue-decider",job="pg-router"}
         values: "0x240"
       # One 1s dispatch settles a minute for the first hour (the counter advances 1 a minute),
       # then the counter stops: the consumer has gone silent with a backlog.
-      - series: pg_router_throughput_total{type="issue.changed",role="desk-issue",job="pg-router"}
+      - series: pg_router_throughput_total{type="issue.changed",role="issue-decider",job="pg-router"}
         values: "0+0.5x120 60x120"
     alert_rule_test:
       - eval_time: 30m
@@ -367,22 +367,24 @@ tests:
               job: pg-router
               severity: warning
 
-  - name: desk-pr binds two types, so it covers both of them whether busy or idle
+  - name: pr-change binds pr.changed only, so it covers that type whether busy or idle and the retired pr.reconcile is not covered
     interval: 30s
     input_series:
       - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}
         values: "5x240"
+      # A type no role binds any more (the sweeps and their event type were removed): no
+      # clause maps it to a role, so a leftover backlog of it is not reported as a stall.
       - series: pg_router_queue_depth{type="pr.reconcile",job="pg-router"}
         values: "30x240"
       # Busy for the first 30m, idle afterwards.
-      - series: pg_router_listener_in_flight{role="desk-pr",job="pg-router"}
+      - series: pg_router_listener_in_flight{role="pr-change",job="pg-router"}
         values: "1x60 0x180"
     alert_rule_test:
-      # Busy with one type (or the other): neither waiting type is stalled.
+      # Busy: the waiting type is not stalled.
       - eval_time: 28m
         alertname: pg-router-queue-stalled
         exp_alerts: []
-      # Idle since 30m: both types page, each under its own type label.
+      # Idle since 30m: pr.changed pages under its own type label, and only it does.
       - eval_time: 50m
         alertname: pg-router-queue-stalled
         exp_alerts:
@@ -390,8 +392,23 @@ tests:
               type: pr.changed
               job: pg-router
               severity: warning
+
+  - name: the retired desk-pr role no longer joins pr.changed, so an in-flight series under that name excuses nothing
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}
+        values: "5x240"
+      # The old role name reads busy the whole time; the bound role, pr-change, is idle.
+      - series: pg_router_listener_in_flight{role="desk-pr",job="pg-router"}
+        values: "1x240"
+      - series: pg_router_listener_in_flight{role="pr-change",job="pg-router"}
+        values: "0x240"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
           - exp_labels:
-              type: pr.reconcile
+              type: pr.changed
               job: pg-router
               severity: warning
 
@@ -404,7 +421,7 @@ tests:
         values: "0x240"
       - series: pg_router_queue_depth{type="issue.changed"}
         values: "2x240"
-      - series: pg_router_listener_in_flight{role="desk-issue"}
+      - series: pg_router_listener_in_flight{role="issue-decider"}
         values: "0x240"
       - series: pg_router_queue_depth{type="desk.heartbeat"}
         values: "2x240"
@@ -422,12 +439,24 @@ tests:
         values: "2x240"
       - series: pg_router_listener_in_flight{role="disk-watchdog"}
         values: "0x240"
+      - series: pg_router_queue_depth{type="pr.changed"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="pr-change"}
+        values: "0x240"
+      - series: pg_router_queue_depth{type="resolve-conflict.ready"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="resolve-conflict-script"}
+        values: "0x240"
+      - series: pg_router_queue_depth{type="fix-ci.ready"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="fix-ci-script"}
+        values: "0x240"
     promql_expr_test:
       - expr: count(wrapped:pg_router_queue_stalled)
         eval_time: 20m
         exp_samples:
           - labels: "{}"
-            value: 6
+            value: 9
 
   - name: a type the table does not know is not covered, and neither is a role that is not bound
     interval: 30s

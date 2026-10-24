@@ -128,6 +128,13 @@ that lacks the sentinel (for example `error connecting to api.github.com`) keeps
 rule individually. Same bounds as above: the reason is a fixed constant and `role` stays
 config-bounded.
 
+**Amended** (PR lane refactor, packet P3b2). The 30-minute PR sweep named above no longer exists.
+A killed upstream call is now healed by the router's bounded re-run (a role's
+`max_dispatch_retries`, only inside the event's retry window) or by the next change event for the
+same entity. The rule's expression, threshold and exclusion are unchanged (design call V6-6: no
+scoped exclusion for the PR role); only the text that named the sweep, the rule description and the
+comments, was rewritten.
+
 **Clarified** (bead `pg2-gp50o`, the second triage of the desk-pr failure series; scope-preserving,
 not a new ruling). The same connector exec-timeout event can read `deadline exceeded after <elapsed>
 (limit <limit>) in op=...` ending in `context deadline exceeded` instead of `signal: killed`,

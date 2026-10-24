@@ -541,6 +541,12 @@ PENDING: a changed or watched entity not yet hydrated, and the entries of the fa
 It MUST NOT count entities past an age, because with no sweep `hydrated_at` no longer advances for an
 unchanged entity, and coverage would otherwise read incomplete for ever.
 
+For `pr` the due backlog is NOT counted at all: it is always 0, in the series, `status`, `doctor` and the
+focus coverage header. The router sweeps that re-listed every open pull request are gone, so a quiet PR
+is never re-hydrated on a clock; counting it as due once it is older than the sweep max age would mark
+every daily focus draft incomplete for a backlog nothing works off. A PR the store lists that was never
+hydrated is reported by its own series (`pg_desk_pr_unhydrated`), not by this one.
+
 ## Issue-dependency hydration (`hydration.read_issue_deps`)
 
 `hydration.read_issue_deps` (boolean, default `false`; home-module option `hydration.readIssueDeps`)
@@ -749,6 +755,8 @@ changes`; for a backend that owns its changes it calls `<type> changes` (in manu
   whose source has not been observed for more than a day; a member of a watched query that has no
   watched mark across two consecutive polls (members of a baseline that has been open less than one
   day excluded); and a failed decider run with no later change.
+- **INV-CHANGES-32.** <!-- uuid: a2d449c6-a4a5-478e-8e70-9f99cdea8283 --> For `pr`, the due backlog (the series, `status`, `doctor` and the coverage header) MUST be 0 whatever
+  the age or hydration state of the active PRs, so no quiet PR can make the focus coverage incomplete.
 
 ## Telemetry and logs
 

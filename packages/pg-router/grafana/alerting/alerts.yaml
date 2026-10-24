@@ -335,9 +335,15 @@ groups:
       # explicit label_replace table below, one clause per role of the daemon config
       # (the same shape as the pool mapping of pg-router-pool-full-idle, and without
       # capture-group references so nothing in the provisioning layer can expand them).
-      # A type missing from the table is NOT covered. A new role MUST be added to the
-      # table, to the type-to-role cases in rule-tests/pg-router-queue-stalled.test.yaml
-      # and to stalledRoles in internal/alertrules/queue_stalled_test.go. `max without
+      # A type missing from the table is NOT covered, and this table is the only
+      # idle-consumer detection for the types it lists (pr.changed included: a role
+      # removed from the config leaves its clause dead, a role renamed or added
+      # leaves its type silent until the clause follows). A new role MUST be added to
+      # the table, to the type-to-role cases in rule-tests/pg-router-queue-stalled.test.yaml
+      # and to stalledRoles in internal/alertrules/queue_stalled_test.go. The
+      # deployment derives the expected (role, type) pairs from the roles it renders
+      # and checks every one against this rendered rule, so a role bound without a
+      # clause fails its build instead of going silent. `max without
       # (role)` drops the helper label again, so the alert keeps the labels of the rule
       # it replaced (rule uid, alertname, severity, type, instance, job,
       # otel_scope_name) and an open bead for that fingerprint keeps matching.
@@ -376,7 +382,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "desk-pr", "type", "pr[.](changed|reconcile)"), "role", "desk-issue", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "desk-reconcile", "type", "desk[.]reconcile"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "disk-watchdog", "type", "disk[.]check"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2") and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)
+              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "resolve-conflict-script", "type", "resolve-conflict[.]ready"), "role", "fix-ci-script", "type", "fix-ci[.]ready"), "role", "pr-change", "type", "pr[.]changed"), "role", "issue-decider", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "disk-watchdog", "type", "disk[.]check"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2") and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -724,10 +730,12 @@ groups:
       # a slow `gh pr view` -- is counted by internal/metrics OnHandlerFailure
       # as class=handler-error,reason=upstream-killed (precedence: triager-
       # failure, then budget-exceeded, then upstream-killed). It is transient
-      # GitHub slowness healed by the 30-minute pr-sweep, so it no longer pages
+      # GitHub slowness healed by the router's bounded re-run (a role's
+      # max_dispatch_retries, inside the event's retry window) or by the next
+      # change event for the same entity, so it no longer pages
       # pg-router-failure-rate one at a time; THIS rule pages only on a
       # sustained burst: >= 10 kills in 30 minutes for a role. Observed bursts
-      # (2026-10-03/04, role desk-pr): 14 in 20 min (page), 7 in 22 min (no),
+      # (2026-10-03/04, the then PR role): 14 in 20 min (page), 7 in 22 min (no),
       # 3 in ~33 min (no). Suppressed singles stay visible in the metric
       # (pg_router_failures_total{reason="upstream-killed"}).
       #
@@ -752,7 +760,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router role {{ $labels.role }} has had 10 or more upstream calls killed in 30 minutes"
-          description: 'sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="upstream-killed"}[30m])) >= 10 for role {{ $labels.role }} -- handler errors carrying both "scriptout:" and "signal: killed" (pg-connector''s 30s scriptout exec timeout killing a slow upstream call, typically gh) are piling up, which a 30-minute pr-sweep will not heal: GitHub is persistently slow or down. Isolated kills do not page; they are excluded from pg-router-failure-rate and stay visible as pg_router_failures_total{reason="upstream-killed"} (pg2-fy2pm). A fresh series after a pg-router restart undercounts by one (increase() does not count the first sample).'
+          description: 'sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="upstream-killed"}[30m])) >= 10 for role {{ $labels.role }} -- handler errors carrying both "scriptout:" and "signal: killed" (pg-connector''s 30s scriptout exec timeout killing a slow upstream call, typically gh) are piling up, which the router''s bounded re-run and the next change event for the entity will not heal: GitHub is persistently slow or down. Isolated kills do not page; they are excluded from pg-router-failure-rate and stay visible as pg_router_failures_total{reason="upstream-killed"} (pg2-fy2pm). A fresh series after a pg-router restart undercounts by one (increase() does not count the first sample).'
         data:
           - refId: A
             relativeTimeRange:

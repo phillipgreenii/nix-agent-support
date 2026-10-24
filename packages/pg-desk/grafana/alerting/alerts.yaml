@@ -448,7 +448,12 @@ groups:
       #
       # The wired-and-evaluating-but-doing-nothing shape: pending-beads-age
       # is the alert that catches a decider role that is unbound or still in
-      # plan mode -- plan rows exist, nothing mints their beads.
+      # plan mode -- plan rows exist, nothing mints their beads. While the PR
+      # lane is not in apply mode that is the expected state, not a fault (the
+      # lane runs in plan until the first apply), so the rule is suppressed
+      # unless pg_desk_pr_lane_mode reads 1 on apply (`and on()` drops the whole
+      # result otherwise, and an absent gauge, a store below schema 2, drops it
+      # too).
       - uid: pg-desk-focus-pending-beads-age
         title: pg-desk focus rows have waited too long for their bead
         condition: C
@@ -459,7 +464,7 @@ groups:
           severity: warning
         annotations:
           summary: "A selected focus row has had no bead for over 30 minutes"
-          description: "The oldest focus row that is selected, live and has no bead (reason=unminted) has waited over 1800 seconds for 10 minutes. The decider role that mints focus beads is unbound, still in plan mode, or failing. Run `pg-desk doctor` for the focus block, then check the router's focus role binding and mode."
+          description: "The PR lane is in apply mode, and the oldest focus row that is selected, live and has no bead (reason=unminted) has waited over 1800 seconds for 10 minutes. The decider role that mints focus beads is unbound, still in plan mode, or failing. Run `pg-desk doctor` for the focus block, then check the router's focus role binding and mode."
         data:
           - refId: A
             relativeTimeRange:
@@ -470,7 +475,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"})
+              expr: max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"}) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1)
           - refId: B
             datasourceUid: __expr__
             model:
