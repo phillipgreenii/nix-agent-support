@@ -52,7 +52,7 @@ hydrates the PR with `pg-desk pr refresh` and then decides it, under a per-PR lo
 
 | Doc                                      | Covers                                                                                                                  |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| [`work-items.md`](work-items.md)         | The work-item contract: the six kinds, the bead shapes, the dedup key and the same-context rule                         |
+| [`work-items.md`](work-items.md)         | The work-item contract: the kinds, the bead shapes, the dedup key, the same-context rule, the rule conditions           |
 | [`plan-and-apply.md`](plan-and-apply.md) | `pg-decider plan` and `apply`, exit codes, precedence, skip reasons, audit, failure escalation, run counters            |
 | [`config.md`](config.md)                 | The decider configuration file: location, format and keys                                                               |
 | [`pr-change.md`](pr-change.md)           | `pg-pr-change`, the composed command: per-PR lock, hydrate then decide, delivery key, run record, exit codes            |
@@ -60,31 +60,30 @@ hydrates the PR with `pg-desk pr refresh` and then decides it, under a per-PR lo
 
 ## The rules
 
-The PR decider evaluates a set of rules against the view. Rule behavior is specified in exactly one
-place, the PR rule table of the entity-change-flow design (its decisions are recorded in
-`docs/adr/0077-entity-change-flow.md`), and these docs MUST NOT restate any rule's condition. They cite rule ids and state the invariants the rules
-uphold. The rule ids registered so far, in evaluation order:
+The PR decider evaluates a set of rules against the view. The condition of every rule is specified in
+exactly one place, [`work-items.md`](work-items.md): the section "The PR rules" for the PR rules
+(`review.head-advanced`, `feedback.digest-changed`, `fixci.failing-on-head`, `conflict.present`, and
+the closure and reopen rules `all.closed` and `all.reopened`), the section "Adoption" for the adoption
+policy, and the section "The `focus.item` rule" for the focus rule. The decisions behind the entity
+change flow are recorded in `docs/adr/0077-entity-change-flow.md`, which holds no rule table. Other
+docs MUST NOT restate a rule's condition; they cite rule ids and state the invariants the rules
+uphold. The rule ids registered so far, in evaluation order of the work-creating rules:
 
 | Rule id                   | Work-item kind it governs |
 | ------------------------- | ------------------------- |
 | `review.head-advanced`    | `review-pr`               |
 | `feedback.digest-changed` | `process-feedback`        |
 | `fixci.failing-on-head`   | `fix-ci`                  |
+| `conflict.present`        | `resolve-conflict`        |
 | `focus.item`              | `focus-item`              |
 
-A rule is added to this table in the change that registers it.
-
-The single-home statement above covers the PR rules. One rule lies outside the PR rule table: the
-condition of the `focus.item` rule (the rule of the `focus-item` kind, which mints, holds and
-releases focus beads) is specified in exactly one durable place, the section "The `focus.item`
-rule" of [`work-items.md`](work-items.md). The design document that first described that rule is
-not durable, so these docs MUST NOT point a reader there for the condition.
+A rule is added to this table, and its condition to `work-items.md`, in the change that registers it.
 
 ## Invariants
 
 The invariants of this set are numbered `INV-DECIDER-<n>` across the docs, in RFC 2119 language:
 
-- `INV-DECIDER-1` to `INV-DECIDER-6` are in [`work-items.md`](work-items.md).
+- `INV-DECIDER-1` to `INV-DECIDER-6` and `INV-DECIDER-29` to `INV-DECIDER-31` are in [`work-items.md`](work-items.md).
 - `INV-DECIDER-7` to `INV-DECIDER-20`, `INV-DECIDER-25`, `INV-DECIDER-27` and `INV-DECIDER-28` are in [`plan-and-apply.md`](plan-and-apply.md).
 - `INV-DECIDER-21` to `INV-DECIDER-24` and `INV-DECIDER-26` are in [`config.md`](config.md).
 - `INV-PRCHANGE-1` to `INV-PRCHANGE-13` are in [`pr-change.md`](pr-change.md).
@@ -101,7 +100,8 @@ that type.
 
 Out of scope for the whole set:
 
-- The conditions of individual rules (the design's PR rule table).
+- The wiring of the reviewer role that claims review items: the head to review is the item's
+  `head_sha` and a refused submit closes the item as superseded. Its prompt is deployment configuration.
 - The pg-desk `sync` stage that the decider replaces; its retirement belongs to the cutover phase.
 - The pg-desk annotation verbs and the composite view contract; see
   `annotate.md` and `show.md` of the set `phillipgreenii-nix-agent-support · docs/behavior/pg-desk`.

@@ -35,12 +35,12 @@
       "kind": "review-pr",
       "target": null,
       "fields": {
-        "title": "review-pr: acme/widgets#42",
+        "title": "review-pr: acme/widgets#42 @ 9f3c1e2",
         "issue_type": "task",
         "parent": "$anchor",
         "metadata": {
           "branch": "feature/retry",
-          "dedup_key": "pr:acme/widgets#42:review-pr",
+          "dedup_key": "pr:acme/widgets#42:review-pr:9f3c1e2",
           "head_sha": "9f3c1e2",
           "ownership": "mine",
           "pr_number": "42",
@@ -83,7 +83,7 @@
       "kind": "fix-ci",
       "target": null,
       "fields": {
-        "title": "fix-ci: acme/widgets#42",
+        "title": "fix-ci: acme/widgets#42 @ 9f3c1e2",
         "issue_type": "task",
         "description": "CI is failing on head 9f3c1e2 of acme/widgets#42. Failing checks:\n- unit (run 900, attempt 1): failure - log: https://ci.example/runs/900\n",
         "parent": "$anchor",
@@ -110,7 +110,7 @@
       "kind": "resolve-conflict",
       "target": null,
       "fields": {
-        "title": "resolve-conflict: acme/widgets#42",
+        "title": "resolve-conflict: acme/widgets#42 @ 9f3c1e2",
         "issue_type": "task",
         "description": "acme/widgets#42 conflicts with main (base commit b45e000). Rebase feature/retry onto main, resolve the conflicts and push.",
         "parent": "$anchor",

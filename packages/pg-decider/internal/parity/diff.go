@@ -114,9 +114,12 @@ func Diff(scenario string, old, new []Entry, expected []Expected) Report {
 // names a ruling, not a design-spec section. "D-F13" is the daily-focus
 // decision that one focus bead per source entity is minted, held and released
 // by the decider (the focus.item rule), which has no counterpart on the old side.
+// "R16" is operator ruling 16 of the PR lane refactor: a PR may have several
+// review items over time and a closed one is never reopened, so a head that
+// advanced past a closed item gets a new item where the old sync reopened it.
 var knownIDs = map[string]bool{
 	"S13": true, "S14": true, "S15": true, "S16": true, "S19": true, "S24": true, "S26": true,
-	"UNOBS": true, "pg2-nbkps": true, "D-F13": true,
+	"UNOBS": true, "pg2-nbkps": true, "D-F13": true, "R16": true,
 }
 
 // ParseExpected decodes and validates an expected-diff document (the input of

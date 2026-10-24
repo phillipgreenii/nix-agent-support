@@ -1,6 +1,7 @@
 package workitem
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/phillipgreenii/pg-decider/internal/view"
@@ -12,7 +13,39 @@ type EntityRef struct{ Type, ID, NodeID string }
 
 // Context carries the values a kind's "same context" is made of (spec 7.3);
 // only the fields a kind's context uses are read.
-type Context struct{ HeadSHA, Branch, Base, BaseSHA, Digest string }
+type Context struct {
+	HeadSHA, Branch, Base, BaseSHA, Digest string
+	// Nonce makes one review-pr key unique to a request: a forced review at a
+	// head that already has an item gets a new item, so its key cannot equal the
+	// key the apply step would dedup against. Empty for every other creation.
+	Nonce string
+}
+
+// ShortHeadLen is the number of leading characters of a head sha that titles
+// carry after " @ ".
+const ShortHeadLen = 7
+
+// ShortHead is the title form of a head sha: its first ShortHeadLen
+// characters, or the whole value when shorter.
+func ShortHead(sha string) string {
+	if len(sha) > ShortHeadLen {
+		return sha[:ShortHeadLen]
+	}
+	return sha
+}
+
+// TitleWithHead is the title of a work item of a head-scoped kind (review-pr,
+// fix-ci, resolve-conflict): "<kind>: <repo>#<n> @ <short head>". A head-less
+// value gives the title without the suffix.
+func TitleWithHead(k Kind, repo string, number int, head string) string {
+	t := string(k) + ": " + repo + "#" + strconv.Itoa(number)
+	if head == "" {
+		return t
+	}
+	return t + titleHeadSep + ShortHead(head)
+}
+
+const titleHeadSep = " @ "
 
 // EntityRefFrom reads the entity identity out of a view.
 func EntityRefFrom(v *view.View) EntityRef {
@@ -20,13 +53,19 @@ func EntityRefFrom(v *view.View) EntityRef {
 }
 
 // ContextSuffix is the dedup-key suffix naming k's context where that context
-// is narrower than the PR (spec 9.8): ":<head_sha>" for fix-ci,
+// is narrower than the PR (spec 9.8): ":<head_sha>" for fix-ci and review-pr
+// (a review-pr forced at a head that already has an item adds ":<nonce>"),
 // ":<branch>:<head_sha>:<base>:<base_sha>" for resolve-conflict, ":<digest>"
-// for process-feedback, and "" for review-pr, anchor, focus-item (one bead per
-// source entity, no per-day suffix) and unknown kinds.
+// for process-feedback, and "" for anchor, focus-item (one bead per source
+// entity, no per-day suffix) and unknown kinds.
 func ContextSuffix(k Kind, c Context) string {
 	switch k {
 	case KindFixCI:
+		return ":" + c.HeadSHA
+	case KindReviewPR:
+		if c.Nonce != "" {
+			return ":" + c.HeadSHA + ":" + c.Nonce
+		}
 		return ":" + c.HeadSHA
 	case KindResolveConflict:
 		return ":" + strings.Join([]string{c.Branch, c.HeadSHA, c.Base, c.BaseSHA}, ":")

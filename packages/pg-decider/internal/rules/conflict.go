@@ -82,7 +82,7 @@ func conflictPresent(in decide.Input) decide.Result {
 		Op:   action.OpCreate,
 		Kind: string(workitem.KindResolveConflict),
 		Fields: action.Fields{
-			Title:       fmt.Sprintf("resolve-conflict: %s#%d", snap.Repo, snap.Number),
+			Title:       workitem.TitleWithHead(workitem.KindResolveConflict, snap.Repo, snap.Number, ctx.HeadSHA),
 			IssueType:   c.IssueType,
 			Description: conflictDescription(snap.Repo, snap.Number, ctx),
 			Parent:      parent,

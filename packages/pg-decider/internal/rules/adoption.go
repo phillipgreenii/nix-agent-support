@@ -57,15 +57,15 @@ func (anchorAdoptionRule) Evaluate(in decide.Input) decide.Result {
 // the fbsum: label digest of a process-feedback item, the head_sha of a
 // fix-ci item, the branch/head_sha/base/base_sha tuple of a resolve-conflict
 // item. ok is false when a value the kind's key needs is missing, because a
-// key with an empty context part would name no real context. review-pr and the
-// anchor key on the PR alone.
+// key with an empty context part would name no real context. A review-pr item
+// keys on its head_sha like a fix-ci item; the anchor keys on the PR alone.
 func anchorAdoptionContext(it workitem.Item, k workitem.Kind) (workitem.Context, bool) {
 	md := it.Metadata
 	switch k {
 	case workitem.KindProcessFeedback:
 		c := workitem.Context{Digest: it.Digest()}
 		return c, c.Digest != ""
-	case workitem.KindFixCI:
+	case workitem.KindFixCI, workitem.KindReviewPR:
 		c := workitem.Context{HeadSHA: md["head_sha"]}
 		return c, c.HeadSHA != ""
 	case workitem.KindResolveConflict:

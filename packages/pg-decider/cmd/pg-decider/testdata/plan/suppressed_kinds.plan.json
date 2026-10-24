@@ -30,7 +30,7 @@
       "kind": "resolve-conflict",
       "target": null,
       "fields": {
-        "title": "resolve-conflict: acme/widgets#42",
+        "title": "resolve-conflict: acme/widgets#42 @ 9f3c1e2",
         "issue_type": "task",
         "description": "acme/widgets#42 conflicts with main (base commit b45e000). Rebase feature/retry onto main, resolve the conflicts and push.",
         "parent": "bd-1",

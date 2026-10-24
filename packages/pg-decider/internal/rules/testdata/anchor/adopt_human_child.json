@@ -47,7 +47,9 @@
       "state": "open",
       "title": "review-pr: acme/widgets#42",
       "labels": ["human"],
-      "metadata": {}
+      "metadata": {
+        "head_sha": "9f3c1e2"
+      }
     }
   ]
 }

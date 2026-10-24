@@ -27,7 +27,7 @@ var newWantActions = map[string][]rule{
 	"09-": {{"close", "anchor", "all.closed"}, {"close", "review-pr", "all.closed"}, {"close", "process-feedback", "all.closed"}},
 	"10-": {{"update", "anchor", "adoption"}, {"update", "review-pr", "adoption"}, {"update", "process-feedback", "adoption"}},
 	"11-": {{"reopen", "anchor", "all.reopened"}},
-	"12-": {{"reopen", "review-pr", "review.head-advanced"}},
+	"12-": {{"create", "review-pr", "review.head-advanced"}},
 	"13-": {{"update", "review-pr", "adoption"}, {"update", "process-feedback", "adoption"}},
 	"14-": {{"create", "process-feedback", "feedback.digest-changed"}},
 	"15-": {{"create", "process-feedback", "feedback.digest-changed"}},
@@ -39,6 +39,8 @@ var newWantActions = map[string][]rule{
 }
 
 var newWantAbsent = map[string][]rule{
+	// Ruling 16: a closed review item is never reopened; the advanced head gets a new item.
+	"12-": {{"reopen", "review-pr", "review.head-advanced"}, {"update", "review-pr", "review.head-advanced"}},
 	"02-": {{"create", "process-feedback", "feedback.digest-changed"}},
 	"03-": {{"create", "process-feedback", "feedback.digest-changed"}},
 	"10-": {{"create", "anchor", "anchor.lazy"}, {"create", "review-pr", "review.head-advanced"}},

@@ -125,6 +125,9 @@ func (r *runner) step(ctx context.Context, a action.Action) Event {
 		if _, ok := focusTransition(a); ok {
 			return r.holdOrRelease(ctx, a, finish)
 		}
+		if isReviewRefresh(a) {
+			return r.refreshReview(ctx, a, finish)
+		}
 		return r.write(ctx, a, finish)
 	case action.OpAnnotate:
 		return r.annotate(ctx, a, finish)

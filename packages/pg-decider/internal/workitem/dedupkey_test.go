@@ -10,7 +10,7 @@ func TestDedupKeyExactStrings(t *testing.T) {
 		k    Kind
 		want string
 	}{
-		{KindReviewPR, "pr:acme/widgets#42:review-pr"},
+		{KindReviewPR, "pr:acme/widgets#42:review-pr:9f3c1e2"},
 		{KindFixCI, "pr:acme/widgets#42:fix-ci:9f3c1e2"},
 		{KindResolveConflict, "pr:acme/widgets#42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000"},
 		{KindProcessFeedback, "pr:acme/widgets#42:process-feedback:d1"},
@@ -21,7 +21,7 @@ func TestDedupKeyExactStrings(t *testing.T) {
 		k    Kind
 		want string
 	}{
-		{KindReviewPR, "pr:PR_node_42:review-pr"},
+		{KindReviewPR, "pr:PR_node_42:review-pr:9f3c1e2"},
 		{KindFixCI, "pr:PR_node_42:fix-ci:9f3c1e2"},
 		{KindResolveConflict, "pr:PR_node_42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000"},
 		{KindProcessFeedback, "pr:PR_node_42:process-feedback:d1"},
@@ -52,7 +52,7 @@ func TestContextSuffix(t *testing.T) {
 	c := Context{HeadSHA: "h", Branch: "b", Base: "m", BaseSHA: "s", Digest: "d"}
 	cases := map[Kind]string{
 		KindAnchor:          "",
-		KindReviewPR:        "",
+		KindReviewPR:        ":h",
 		KindFixCI:           ":h",
 		KindResolveConflict: ":b:h:m:s",
 		KindProcessFeedback: ":d",
@@ -144,5 +144,40 @@ func TestEntityRefOwnsEitherForm(t *testing.T) {
 	}
 	if (EntityRef{Type: "pr", ID: "", NodeID: ""}).Owns("pr::review-pr") {
 		t.Error("empty ref owns something")
+	}
+}
+
+func TestShortHeadAndTitleWithHead(t *testing.T) {
+	for _, tc := range []struct{ sha, want string }{
+		{"", ""}, {"abc", "abc"}, {"1234567", "1234567"}, {"0123456789abcdef", "0123456"},
+	} {
+		if got := ShortHead(tc.sha); got != tc.want {
+			t.Errorf("ShortHead(%q) = %q, want %q", tc.sha, got, tc.want)
+		}
+	}
+	if got := TitleWithHead(KindReviewPR, "acme/widgets", 42, "0123456789abcdef"); got != "review-pr: acme/widgets#42 @ 0123456" {
+		t.Errorf("title = %q", got)
+	}
+	if got := TitleWithHead(KindFixCI, "acme/widgets", 42, ""); got != "fix-ci: acme/widgets#42" {
+		t.Errorf("head-less title = %q", got)
+	}
+}
+
+// A forced review at a head that has an item carries a nonce after the head;
+// the suffix parses back as one piece after the kind.
+func TestReviewContextSuffixWithNonce(t *testing.T) {
+	c := Context{HeadSHA: "h", Nonce: "r1"}
+	if got := ContextSuffix(KindReviewPR, c); got != ":h:r1" {
+		t.Fatalf("suffix = %q", got)
+	}
+	e := EntityRef{Type: "pr", ID: "acme/widgets#42"}
+	key := DedupKey(e, KindReviewPR, c)
+	typ, ident, k, suffix, ok := ParseKey(key)
+	if !ok || typ != "pr" || ident != "acme/widgets#42" || k != KindReviewPR || suffix != ":h:r1" {
+		t.Fatalf("ParseKey(%q) = %q %q %q %q %v", key, typ, ident, k, suffix, ok)
+	}
+	// no other kind reads the nonce
+	if got := ContextSuffix(KindFixCI, c); got != ":h" {
+		t.Errorf("fix-ci suffix = %q", got)
 	}
 }

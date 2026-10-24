@@ -18,20 +18,40 @@ const (
 	reviewAnnotationConsumed = "decider.pr-decider.force_review_consumed"
 	// reviewAnnotationForce is the one-shot flag the clear path removes.
 	reviewAnnotationForce = "force_review"
+
+	// reviewTransitionFact names, in an update's facts, the transition the
+	// review rule plans; the apply step reads it to re-check the item live.
+	reviewTransitionFact = "transition"
+	// reviewTransitionRefreshHead is the transition of moving an unclaimed
+	// review item to the current head.
+	reviewTransitionRefreshHead = "refresh-head"
 )
 
 func init() {
 	decide.Register(decide.EntityTypePR, decide.OrdinalReviewHeadAdvanced, reviewHeadAdvanced{})
 }
 
-// reviewHeadAdvanced is the review.head-advanced rule (entity-change-flow
-// design 7.3): a qualifying PR (mine or co-owned, draft included; or team and
-// not draft) gets one review-pr item, reopened and refreshed whenever the PR
-// head moves past the item's reviewed head. An unchanged head is no action
-// however the item was closed. The one-shot force-review flag reopens or
-// refreshes the item once, then is consumed: the SHA is recorded and the flag
-// cleared, both gated on every earlier action of this rule having succeeded.
-// It is a pure function of the view and never reads who closed an item.
+// reviewHeadAdvanced is the review.head-advanced rule (docs/behavior/pg-decider
+// work-items.md, "review.head-advanced"): a qualifying PR (mine or co-owned,
+// draft included; or team and not draft) may have several review-pr items over
+// time, one per head that was reviewed or is waiting for review.
+//
+//   - an item of ANY state whose head_sha is the PR's current head means that
+//     head is being reviewed or was reviewed: nothing is created (the test is
+//     on metadata, never on the dedup key, because an update rewrites head_sha);
+//   - else an UNCLAIMED item (status open, no assignee) is refreshed in place:
+//     its head_sha, its dedup_key suffix and its title move to the current head,
+//     so a burst of pushes before any claim yields one item;
+//   - else one item is created for the current head;
+//   - a claimed item for an older head is left alone, and a closed one is never
+//     reopened: only this rule creates review items.
+//
+// The one-shot force-review flag refreshes an unclaimed item the same way;
+// without one it creates a NEW item even when an item for the head exists, with
+// a dedup key made unique by a suffix. The flag is consumed (the SHA recorded,
+// then the flag cleared) only after every earlier action of this rule
+// succeeded. It is a pure function of the view and never reads who closed an
+// item.
 type reviewHeadAdvanced struct{}
 
 func (reviewHeadAdvanced) ID() string { return reviewRuleID }
@@ -53,26 +73,71 @@ func (reviewHeadAdvanced) Evaluate(in decide.Input) decide.Result {
 	}
 	force := v.Annotations.ForceReview
 
-	existing, found := in.Items.Find(workitem.KindReviewPR, workitem.Context{})
-	var actions []action.Action
-	switch {
-	case !found:
-		actions = append(actions, reviewCreate(in, head, force))
-	case existing.Metadata["head_sha"] != head || force:
-		if !existing.Open() {
-			actions = append(actions, reviewReopen(existing, head, force))
+	items := in.Items.ByKind(workitem.KindReviewPR)
+	var atHead []workitem.Item
+	var target *workitem.Item // the unclaimed item to refresh; one at the head wins
+	for i := range items {
+		it := items[i]
+		if it.Metadata["head_sha"] == head {
+			atHead = append(atHead, it)
 		}
-		actions = append(actions, reviewUpdate(existing, v, head, force))
-	case existing.Open():
-		return reviewSkip(action.ReasonReviewPending, map[string]any{"head_sha": head, "item": existing.ID})
-	default:
-		return reviewSkip(action.ReasonAlreadyHandled, map[string]any{"head_sha": head, "item": existing.ID})
+		if reviewUnclaimed(it) && (target == nil || it.Metadata["head_sha"] == head && target.Metadata["head_sha"] != head) {
+			target = &items[i]
+		}
 	}
 
+	if !force && len(atHead) > 0 {
+		open := atHead[0]
+		for _, it := range atHead {
+			if it.Open() {
+				open = it
+				break
+			}
+		}
+		reason := action.ReasonAlreadyHandled
+		if open.Open() {
+			reason = action.ReasonReviewPending
+		}
+		return reviewSkip(reason, map[string]any{"head_sha": head, "item": open.ID})
+	}
+
+	var actions []action.Action
+	if target != nil {
+		actions = append(actions, reviewRefresh(*target, items, v, head, force))
+	} else {
+		actions = append(actions, reviewCreate(in, items, head, force))
+	}
 	if force {
 		actions = append(actions, reviewConsume(v, head)...)
 	}
 	return decide.Result{Actions: actions}
+}
+
+// reviewUnclaimed reports whether an item is free to be refreshed: its status
+// is exactly open (not in_progress, deferred, blocked or closed) and it has no
+// assignee.
+func reviewUnclaimed(it workitem.Item) bool { return it.State == "open" && it.Assignee == "" }
+
+// reviewContext is the key context of a review item for head, made unique by
+// a nonce when another item's key already carries the suffix (a forced review
+// at a head that has an item, or an inconsistent key), so apply never dedups
+// the write away. self is the id of an item being refreshed, whose own key is
+// not a collision.
+func reviewContext(items []workitem.Item, self, head string) workitem.Context {
+	used := map[string]bool{}
+	for _, it := range items {
+		if it.ID == self || it.DedupKey == "" {
+			continue
+		}
+		if _, _, _, suffix, ok := workitem.ParseKey(it.DedupKey); ok {
+			used[suffix] = true
+		}
+	}
+	ctx := workitem.Context{HeadSHA: head}
+	for n := 1; used[workitem.ContextSuffix(workitem.KindReviewPR, ctx)]; n++ {
+		ctx.Nonce = "r" + strconv.Itoa(n)
+	}
+	return ctx
 }
 
 func reviewQualifies(relationship string, draft bool) bool {
@@ -99,19 +164,19 @@ func reviewItemMetadata(v *view.View, head string) map[string]string {
 	}
 }
 
-func reviewCreate(in decide.Input, head string, forced bool) action.Action {
+func reviewCreate(in decide.Input, items []workitem.Item, head string, forced bool) action.Action {
 	v := in.View
 	parent := action.AnchorParent
 	if a, ok := in.Items.Anchor(); ok {
 		parent = a.ID
 	}
 	md := reviewItemMetadata(v, head)
-	md["dedup_key"] = workitem.DedupKey(workitem.EntityRefFrom(v), workitem.KindReviewPR, workitem.Context{})
+	md["dedup_key"] = workitem.DedupKey(workitem.EntityRefFrom(v), workitem.KindReviewPR, reviewContext(items, "", head))
 	return action.Action{
 		Op:   action.OpCreate,
 		Kind: string(workitem.KindReviewPR),
 		Fields: action.Fields{
-			Title:     "review-pr: " + v.Snapshot.Repo + "#" + strconv.Itoa(v.Snapshot.Number),
+			Title:     workitem.TitleWithHead(workitem.KindReviewPR, v.Snapshot.Repo, v.Snapshot.Number, head),
 			IssueType: workitem.ContractFor(workitem.KindReviewPR).IssueType,
 			Parent:    parent,
 			Metadata:  md,
@@ -120,24 +185,36 @@ func reviewCreate(in decide.Input, head string, forced bool) action.Action {
 	}
 }
 
-func reviewReopen(it workitem.Item, head string, forced bool) action.Action {
+// reviewRefresh moves an unclaimed item to the current head: head_sha, the
+// dedup_key suffix and the title. It keeps the identity segment of the item's
+// own key (id or node_id form), and keeps the whole key when the item is
+// already at the head. The apply step re-reads the item live first and drops
+// the write when a claim landed in the meantime (facts.transition).
+func reviewRefresh(it workitem.Item, items []workitem.Item, v *view.View, head string, forced bool) action.Action {
 	target := it.ID
-	return action.Action{
-		Op:     action.OpReopen,
-		Kind:   string(workitem.KindReviewPR),
-		Target: &target,
-		Facts:  map[string]any{"head_sha": head, "reviewed_head_sha": it.Metadata["head_sha"], "forced": forced},
+	md := reviewItemMetadata(v, head)
+	ref := workitem.EntityRefFrom(v)
+	switch typ, ident, _, _, ok := workitem.ParseKey(it.DedupKey); {
+	case ok && it.Metadata["head_sha"] == head:
+		md["dedup_key"] = it.DedupKey
+	case ok:
+		md["dedup_key"] = typ + ":" + ident + ":" + string(workitem.KindReviewPR) +
+			workitem.ContextSuffix(workitem.KindReviewPR, reviewContext(items, it.ID, head))
+	default:
+		md["dedup_key"] = workitem.DedupKey(ref, workitem.KindReviewPR, reviewContext(items, it.ID, head))
 	}
-}
-
-func reviewUpdate(it workitem.Item, v *view.View, head string, forced bool) action.Action {
-	target := it.ID
 	return action.Action{
 		Op:     action.OpUpdate,
 		Kind:   string(workitem.KindReviewPR),
 		Target: &target,
-		Fields: action.Fields{Metadata: reviewItemMetadata(v, head)},
-		Facts:  map[string]any{"head_sha": head, "reviewed_head_sha": it.Metadata["head_sha"], "forced": forced},
+		Fields: action.Fields{
+			Title:    workitem.TitleWithHead(workitem.KindReviewPR, v.Snapshot.Repo, v.Snapshot.Number, head),
+			Metadata: md,
+		},
+		Facts: map[string]any{
+			"head_sha": head, "reviewed_head_sha": it.Metadata["head_sha"], "forced": forced,
+			reviewTransitionFact: reviewTransitionRefreshHead,
+		},
 	}
 }
 

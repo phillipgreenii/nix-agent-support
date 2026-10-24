@@ -35,7 +35,8 @@ const (
 //   - Labels hold the table's label tokens verbatim, so "pbase:<n>" and
 //     "fbsum:<digest>" are templates and "co-owned" / "mine" are conditional
 //     on ownership (spec 9.8, S16); roles rely only on what the table lists;
-//   - TitleTemplate placeholders are <repo>, <n> and <pr title>;
+//   - TitleTemplate placeholders are <repo>, <n>, <short head> and <pr title>;
+//     <short head> is the first ShortHeadLen characters of head_sha;
 //   - Parent is "anchor" or "" (the table's "none");
 //   - the focus-item TitleTemplate placeholders are <source ref> and
 //     <source title>;
@@ -84,20 +85,20 @@ var contracts = map[Kind]KindContract{
 	},
 	KindReviewPR: {
 		IssueType:     "task",
-		TitleTemplate: "review-pr: <repo>#<n>",
+		TitleTemplate: "review-pr: <repo>#<n> @ <short head>",
 		MetadataKeys:  []string{"repo", "pr_number", "branch", "head_sha", "ownership", "dedup_key"},
 		Parent:        "anchor",
 	},
 	KindFixCI: {
 		IssueType:     "task",
-		TitleTemplate: "fix-ci: <repo>#<n>",
+		TitleTemplate: "fix-ci: <repo>#<n> @ <short head>",
 		Labels:        []string{"mine", "worker-ready"},
 		MetadataKeys:  []string{"repo", "pr_number", "branch", "head_sha", "failing_checks", "failing_builds", "dedup_key"},
 		Parent:        "anchor",
 	},
 	KindResolveConflict: {
 		IssueType:     "task",
-		TitleTemplate: "resolve-conflict: <repo>#<n>",
+		TitleTemplate: "resolve-conflict: <repo>#<n> @ <short head>",
 		Labels:        []string{"mine", "worker-ready"},
 		MetadataKeys:  []string{"repo", "pr_number", "branch", "head_sha", "base", "base_sha", "dedup_key"},
 		Parent:        "anchor",

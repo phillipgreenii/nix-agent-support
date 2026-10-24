@@ -119,7 +119,7 @@ func fixciCreate(in decide.Input, head string, failing []ciRun, builds, checks [
 		Op:   action.OpCreate,
 		Kind: string(workitem.KindFixCI),
 		Fields: action.Fields{
-			Title:       fmt.Sprintf("fix-ci: %s#%d", snap.Repo, snap.Number),
+			Title:       workitem.TitleWithHead(workitem.KindFixCI, snap.Repo, snap.Number, head),
 			IssueType:   c.IssueType,
 			Description: fixciDescription(snap.Repo, snap.Number, head, failing),
 			Parent:      parent,

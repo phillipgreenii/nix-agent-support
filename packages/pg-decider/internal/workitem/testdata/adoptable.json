@@ -76,7 +76,10 @@
       "id": "bd-56",
       "state": "open",
       "title": "review-pr: acme/widgets#42",
-      "metadata": { "dedup_key": "pr:acme/widgets#42:review-pr" }
+      "metadata": {
+        "dedup_key": "pr:acme/widgets#42:review-pr",
+        "head_sha": "9f3c1e2"
+      }
     },
     {
       "type": "issue",

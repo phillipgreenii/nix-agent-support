@@ -87,7 +87,7 @@ func TestFixCICreate(t *testing.T) {
 				t.Fatalf("action = %+v", a)
 			}
 			f := a.Fields
-			if f.Title != "fix-ci: acme/widgets#42" || f.IssueType != "task" || f.Parent != tc.parent {
+			if f.Title != "fix-ci: acme/widgets#42 @ 9f3c1e2" || f.IssueType != "task" || f.Parent != tc.parent {
 				t.Fatalf("fields = %+v", f)
 			}
 			if !reflect.DeepEqual(f.Labels, []string{"mine", "worker-ready"}) {

@@ -132,6 +132,22 @@ func (anchorClosedRule) Evaluate(in decide.Input) decide.Result {
 			Fields: action.Fields{Description: reason}, Facts: facts(),
 		})
 	}
+	// A PR may have several review-pr items (ruling 16): every open one closes,
+	// also one the view lists without the anchor-child shape (a listed item of
+	// the all-status lookup carries no relation).
+	closing := map[string]bool{}
+	for _, a := range acts {
+		closing[*a.Target] = true
+	}
+	for _, it := range in.Items.ByKind(workitem.KindReviewPR) {
+		if !it.Open() || closing[it.ID] {
+			continue
+		}
+		acts = append(acts, action.Action{
+			Op: action.OpClose, Kind: string(workitem.KindReviewPR), Target: anchorTarget(it.ID),
+			Fields: action.Fields{Description: reason}, Facts: facts(),
+		})
+	}
 	if anchor.Open() {
 		acts = append(acts, action.Action{
 			Op: action.OpClose, Kind: string(workitem.KindAnchor), Target: anchorTarget(anchor.ID),

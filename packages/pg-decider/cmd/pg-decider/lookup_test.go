@@ -122,9 +122,15 @@ func closedItem(id, title, key string) string {
 	return `{"id":"` + id + `","title":"` + title + `","state":"closed","metadata":{"repo":"acme/widgets","pr_number":"42","dedup_key":"` + key + `"}}`
 }
 
+// closedReviewItem is a closed review item reviewed at the view's head: the rule
+// reads its head_sha, never its key.
+func closedReviewItem(id string) string {
+	return `{"id":"` + id + `","title":"review-pr: acme/widgets#42 @ 9f3c1e2","state":"closed","metadata":{"repo":"acme/widgets","pr_number":"42","head_sha":"9f3c1e2","dedup_key":"` + keyReview + `"}}`
+}
+
 const (
 	keyFixCI  = "pr:acme/widgets#42:fix-ci:9f3c1e2"
-	keyReview = "pr:acme/widgets#42:review-pr"
+	keyReview = "pr:acme/widgets#42:review-pr:9f3c1e2"
 )
 
 type planDoc struct {
@@ -173,7 +179,7 @@ func TestPlanSeesAClosedItemTheViewDoesNotLinkAndReportsTheFigures(t *testing.T)
 	lookupConfig(t, `"work_items_query":"work-items-all","work_items_ceiling":7000`)
 
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(lookupView))
-	trackerDouble(t, listingOf(closedItem("ci-closed", "fix-ci: acme/widgets#42", keyFixCI), closedItem("rv-closed", "review-pr: acme/widgets#42", keyReview)), 0)
+	trackerDouble(t, listingOf(closedItem("ci-closed", "fix-ci: acme/widgets#42", keyFixCI), closedReviewItem("rv-closed")), 0)
 	p, errOut, code := runPlanJSON(t)
 	if code != exitcode.OK {
 		t.Fatalf("code %d err %q", code, errOut)
@@ -227,7 +233,7 @@ func TestPlanAndApplyAgreePerKindAndOperation(t *testing.T) {
 	for name, listing := range map[string]string{
 		"empty listing": listingOf(),
 		"one held":      listingOf(closedItem("ci-closed", "fix-ci: acme/widgets#42", keyFixCI)),
-		"two held":      listingOf(closedItem("ci-closed", "fix-ci: acme/widgets#42", keyFixCI), closedItem("rv-closed", "review-pr: acme/widgets#42", keyReview)),
+		"two held":      listingOf(closedItem("ci-closed", "fix-ci: acme/widgets#42", keyFixCI), closedReviewItem("rv-closed")),
 	} {
 		t.Run(name, func(t *testing.T) {
 			withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(lookupView))
@@ -267,7 +273,7 @@ func TestApplyAgainstAListingThatHoldsEveryItemWritesNothing(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(lookupView))
 	all := listingOf(
 		closedItem("an-1", "acme/widgets#42: Retry", "pr:acme/widgets#42:anchor"),
-		closedItem("rv-1", "review-pr: acme/widgets#42", keyReview),
+		closedReviewItem("rv-1"),
 		closedItem("pf-1", "process-feedback: acme/widgets#42", "pr:acme/widgets#42:process-feedback:5ff7c41ebe23"),
 		closedItem("ci-1", "fix-ci: acme/widgets#42", keyFixCI),
 		closedItem("rc-1", "resolve-conflict: acme/widgets#42", "pr:acme/widgets#42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000"),

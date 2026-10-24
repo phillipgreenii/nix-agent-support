@@ -51,7 +51,10 @@
       "id": "bd-9",
       "state": "open",
       "title": "review-pr: old/name#42",
-      "metadata": { "dedup_key": "pr:acme/old-name#42:review-pr" }
+      "metadata": {
+        "dedup_key": "pr:acme/old-name#42:review-pr",
+        "head_sha": "9f3c1e2"
+      }
     }
   ]
 }

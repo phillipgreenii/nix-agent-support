@@ -17,13 +17,13 @@ func TestAnchorAdoption(t *testing.T) {
 		key     string
 		by      string
 	}{
-		{"adopt_review_by_title", "review-pr", "bd-2", "pr:acme/widgets#42:review-pr", "title"},
+		{"adopt_review_by_title", "review-pr", "bd-2", "pr:acme/widgets#42:review-pr:9f3c1e2", "title"},
 		{"adopt_anchor_by_prefix", "anchor", "bd-1", "pr:acme/widgets#42:anchor", "anchor-prefix"},
 		// A closed item is adopted like an open one; the node_id form is NOT written here.
-		{"adopt_by_node_id", "review-pr", "bd-2", "pr:acme/widgets#42:review-pr", "node_id"},
+		{"adopt_by_node_id", "review-pr", "bd-2", "pr:acme/widgets#42:review-pr:9f3c1e2", "node_id"},
 		{"adopt_feedback_digest", "process-feedback", "bd-4", "pr:acme/widgets#42:process-feedback:abc123", "title"},
 		{"adopt_fixci_head", "fix-ci", "bd-5", "pr:acme/widgets#42:fix-ci:9f3c1e2", "title"},
-		{"adopt_human_child", "review-pr", "bd-6", "pr:acme/widgets#42:review-pr", "title"},
+		{"adopt_human_child", "review-pr", "bd-6", "pr:acme/widgets#42:review-pr:9f3c1e2", "title"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.fixture, func(t *testing.T) {

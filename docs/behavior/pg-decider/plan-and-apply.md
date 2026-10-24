@@ -87,7 +87,7 @@ issue-change feed, and widening it would pull every closed work item into the is
   is not added again.
 - **Seen by the rules.** The kept items that the view does not link are added to the view the rules
   decide from, as work items linked to the PR (a focus bead with the `source` relation), so a closed
-  `fix-ci` item is found, a closed review request is not recreated, and a keyless legacy anchor is
+  `fix-ci` item is found, a closed review item for the current head is not recreated, and a keyless legacy anchor is
   adopted instead of duplicated, exactly as if the view had linked them.
 - **The same for `plan` and `apply`.** Both run the same steps over the same listing: the rules decide
   from the view plus the kept items, and a `create` whose `dedup_key` the listing already holds (in
@@ -132,7 +132,7 @@ A rule that produced no action is listed with exactly one of five reasons:
 | `hidden`          | The entity is hidden, so no rule ran                                                           |
 | `suppressed`      | The rule's kind is suppressed on the entity                                                    |
 | `already handled` | A work item of the rule's kind already exists for the current context, so nothing is recreated |
-| `review-pending`  | `review.head-advanced` only: an open review item already covers the current head               |
+| `review-pending`  | `review.head-advanced` only: an open review item already has the current head                  |
 | `not matched`     | The rule's own condition is false (also the reason when a rule reports no outcome)             |
 
 The vocabulary is closed. A rule MUST NOT report any other reason.
@@ -148,10 +148,10 @@ kind with their state; an `actions:` block; and a `skipped:` block.
 
 ```text
 pr acme/widgets#42  co-owned  open  ready  head=9f3c1e2  ci=failing  conflict=no
-linked work: anchor (open), process-feedback (open, fbsum:ab12), review-pr (closed, reviewed_head=4b7a0d1)
+linked work: anchor (open), process-feedback (open, fbsum:ab12), review-pr (open, reviewed_head=4b7a0d1)
 
 actions:
-  reopen    review-pr         rule=review.head-advanced     head_sha=9f3c1e2 reviewed_head=4b7a0d1
+  update    review-pr         rule=review.head-advanced     head_sha=9f3c1e2 reviewed_head=4b7a0d1
   update    process-feedback  rule=feedback.digest-changed  unaddressed=[c-881, c-902]
   create    fix-ci            rule=fixci.failing-on-head    check=unit
 
@@ -208,6 +208,16 @@ before anything else happens.
   ABANDONED with the outcome `skipped-stale`, no audit comment, and a `pg-desk issue refresh <bead>`
   that repairs the stale store row (without it every later run would re-plan the same write and
   abandon it forever). The live read MAY only abandon a write; it MUST NOT choose a different one.
+- **A review head refresh re-reads the item live.** The review rule moves an unclaimed review item to
+  the PR's current head with one `update` (its `head_sha`, the head suffix of its `dedup_key` and
+  its title; `facts.transition` is `refresh-head`), decided from the stored view. Before the write
+  `apply` reads the item live exactly as for a focus hold (`issue show <id> --fresh`, trusted only
+  when served from the origin and not stale) and re-checks the condition the plan used: the item is
+  still `open` and has no assignee. An item that was claimed, deferred, blocked or closed in the
+  meantime, and a live read that fails or cannot be trusted, ABANDON the write as `skipped-stale`
+  (no update, no audit comment, the same `pg-desk issue refresh` repair), so a refresh never
+  rewrites an item under its reviewer. A force-review consumption that follows an abandoned refresh
+  is `skipped-dependency`, so the flag stays set and the next run decides again from the new state.
 - **A hold reads the bead's children live.** The "no open children" condition of a hold is read with
   `pg-connector issue children <id>`, a live read that bypasses the entity cache. Open children
   abandon the hold as `skipped-stale`. A children read that fails (including a backend without the
@@ -290,7 +300,10 @@ comment whose write has already happened.
 The one-shot force-review flag asks for a review at the current head regardless of whether the
 head moved. The review rule consumes it in a fixed order, once per request:
 
-1. the item actions: create the review item, or reopen and refresh it;
+1. the item actions: refresh the unclaimed review item to the current head, or, when none is
+   unclaimed, create a NEW review item (even when an item for this head exists: its dedup key then
+   carries a request-unique suffix, so the create is not reported as a dedup and the request is not
+   consumed without a review); a closed review item is never reopened;
 2. the consumption record: an annotation recording the head the request was made at, under the
    key `decider.pr-decider.force_review_consumed`;
 3. the clear of the `force_review` flag.
@@ -429,10 +442,11 @@ change rate of the watched issues and not their number.
 - **INV-DECIDER-8.** <!-- uuid: 9ef3afe4-d71a-4e94-9134-1cd24ac0654b --> Deciding MUST be a pure function of the view (and, for a `pr`, the run's work-item
   listing, INV-DECIDER-27) and MUST NOT depend on why the item was routed; re-running on an
   unchanged view and listing MUST write nothing. The one other declared input is `apply`'s live
-  read of a focus bead before a hold or release: `apply` MAY read that work item live to ABANDON a
-  write, and MUST NOT use the read to choose a different write.
+  read of a focus bead before a hold or release, and of an unclaimed review item before its head
+  refresh: `apply` MAY read that work item live to ABANDON a write, and MUST NOT use the read to
+  choose a different write.
 - **INV-DECIDER-9.** <!-- uuid: 612fea48-b15b-4b09-8d37-40da82918dad --> `apply` MUST re-read the view on every run. `--from-item` MUST only identify
-  the trigger and MUST NOT decide what is applied. The live read of a focus bead (INV-DECIDER-8) MAY
+  the trigger and MUST NOT decide what is applied. The live read of a focus bead or of a review item (INV-DECIDER-8) MAY
   only abandon a planned write; it MUST NOT add, change or substitute one.
 - **INV-DECIDER-10.** <!-- uuid: 2af98d94-8a46-49fe-bdca-88b377e58e9c --> A hidden entity MUST skip every rule, and a suppressed kind MUST skip only the
   rules of that kind. Both stops MUST be evaluated before any rule runs.
@@ -445,11 +459,11 @@ change rate of the watched issues and not their number.
   listing (INV-DECIDER-27).
 - **INV-DECIDER-13.** <!-- uuid: 8b490340-7a6d-407d-a1f0-d5981fb0cec4 --> Actions MUST apply in order and best effort: a failure MUST NOT stop
   independent actions, and an action that depends on a failed one MUST be reported as
-  `skipped-dependency` rather than attempted. A focus hold or release whose live re-read shows the
-  bead changed, or cannot be trusted, MUST NOT be written and MUST be reported as `skipped-stale`.
+  `skipped-dependency` rather than attempted. A focus hold or release, or a review head refresh,
+  whose live re-read shows the item changed, or cannot be trusted, MUST NOT be written and MUST be reported as `skipped-stale`.
 - **INV-DECIDER-14.** <!-- uuid: e8eb50b9-b9ad-4c6a-b9c7-1fec00a3c62c --> `apply` MUST NOT roll back an applied tracker write.
-- **INV-DECIDER-15.** <!-- uuid: a7b65bbd-f07c-4414-b92f-1922e7b3ec34 --> After an external work-item write, and after an abandoned focus hold or
-  release (`skipped-stale`), `apply` MUST refresh the work item in pg-desk; a failed refresh MUST
+- **INV-DECIDER-15.** <!-- uuid: a7b65bbd-f07c-4414-b92f-1922e7b3ec34 --> After an external work-item write, and after an abandoned focus hold, release
+  or review head refresh (`skipped-stale`), `apply` MUST refresh the work item in pg-desk; a failed refresh MUST
   NOT make the run fail.
 - **INV-DECIDER-16.** <!-- uuid: 06870b48-69c3-407b-8e7e-1836faa1adc7 --> Every applied external action MUST append exactly one audit comment on the
   work item it wrote, carrying the rule id, the facts, the routed `seq` and a timestamp. No other

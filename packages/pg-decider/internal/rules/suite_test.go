@@ -477,7 +477,7 @@ func TestWorkItemForCurrentContextNeverRecreated(t *testing.T) { // S26
 		{workitem.KindReviewPR, "review.head-advanced", "review", []struct {
 			fixture string
 			ops     []action.Op
-		}{{"pr_ctx_review_new_head", []action.Op{action.OpReopen, action.OpUpdate}}}},
+		}{{"pr_ctx_review_new_head", []action.Op{action.OpCreate}}}},
 		{workitem.KindProcessFeedback, "feedback.digest-changed", "feedback", []struct {
 			fixture string
 			ops     []action.Op

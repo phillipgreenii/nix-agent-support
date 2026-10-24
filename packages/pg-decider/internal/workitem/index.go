@@ -95,6 +95,14 @@ func entityTitleRef(v *view.View) string {
 	return v.ID
 }
 
+// titleNamesKind reports whether title is "<kind>: <ref>", optionally followed
+// by the head suffix " @ <short head>" the head-scoped kinds carry. The suffix
+// is delimited, so "<kind>: repo#4" never names "repo#42".
+func titleNamesKind(title string, k Kind, ref string) bool {
+	base := string(k) + ": " + ref
+	return title == base || strings.HasPrefix(title, base+titleHeadSep)
+}
+
 // BuildIndex classifies the view's links. A link is a work item when its type
 // is "issue"; its kind is the kind segment of its dedup_key, or else (an
 // adoptable item) comes from its title. A link matching neither is ignored,
@@ -154,7 +162,7 @@ func adoptionMatch(it Item, ref, nodeID string) (Kind, string, bool) {
 		return "", "", false
 	}
 	for _, k := range titlePrefixKinds {
-		if it.Title == string(k)+": "+ref {
+		if titleNamesKind(it.Title, k, ref) {
 			return k, "title", true
 		}
 	}
@@ -206,8 +214,9 @@ func (ix *Index) ByKind(k Kind) []Item {
 // scope an item to this entity, so a pre-rename id form still counts). A
 // keyless adoptable item matches on its metadata: fix-ci by head_sha,
 // resolve-conflict by branch, head_sha, base and base_sha, process-feedback
-// by its fbsum label digest, review-pr and anchor always. An empty context
-// value never matches. With several matches an open item wins, then a keyed
+// by its fbsum label digest, anchor always. A review-pr item matches on its
+// head_sha metadata, keyed or not (a PR may have several, one per head). An
+// empty context value never matches. With several matches an open item wins, then a keyed
 // one, then link order.
 func (ix *Index) Find(k Kind, c Context) (Item, bool) {
 	best, bestRank, found := Item{}, 0, false
@@ -230,6 +239,11 @@ func (ix *Index) Find(k Kind, c Context) (Item, bool) {
 }
 
 func matchesContext(it Item, k Kind, c Context) bool {
+	if k == KindReviewPR {
+		// By metadata, never by key: a refresh rewrites head_sha together with the
+		// key suffix, and a legacy item has no suffix at all.
+		return c.HeadSHA != "" && it.Metadata["head_sha"] == c.HeadSHA
+	}
 	if it.DedupKey != "" {
 		_, _, _, suffix, _ := ParseKey(it.DedupKey)
 		return suffix == ContextSuffix(k, c)
@@ -245,7 +259,7 @@ func matchesContext(it Item, k Kind, c Context) bool {
 	case KindProcessFeedback:
 		return eq(it.Digest(), c.Digest)
 	}
-	return true // review-pr and anchor: one item per PR
+	return true // anchor: one item per PR
 }
 
 // OpenHumanParked reports whether an open item labeled human exists for k;
@@ -294,7 +308,7 @@ func TitleNames(title string, v *view.View) bool {
 	}
 	ref := entityTitleRef(v)
 	for _, k := range titlePrefixKinds {
-		if title == string(k)+": "+ref {
+		if titleNamesKind(title, k, ref) {
 			return true
 		}
 	}

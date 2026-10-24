@@ -71,37 +71,62 @@ func reviewMetadata(head string) map[string]string {
 	}
 }
 
+// reviewWantCreate checks a create for the current head; keySuffix is the part
+// of the dedup key after the head ("" for the plain key, ":r1" for a nonce).
 func reviewWantCreate(t *testing.T, a action.Action, parent, ownership string) {
+	t.Helper()
+	reviewWantCreateKey(t, a, parent, ownership, "")
+}
+
+func reviewWantCreateKey(t *testing.T, a action.Action, parent, ownership, keySuffix string) {
 	t.Helper()
 	if a.Op != action.OpCreate || a.Kind != "review-pr" || a.Target != nil || a.Rule != "" && a.Rule != reviewRuleID {
 		t.Fatalf("shape: %+v", a)
 	}
 	f := a.Fields
-	if f.Title != "review-pr: acme/widgets#42" || f.IssueType != "task" || f.Parent != parent {
+	if f.Title != "review-pr: acme/widgets#42 @ "+reviewHead || f.IssueType != "task" || f.Parent != parent {
 		t.Errorf("fields: %+v", f)
 	}
 	want := reviewMetadata(reviewHead)
 	want["ownership"] = ownership
-	want["dedup_key"] = "pr:acme/widgets#42:review-pr"
+	want["dedup_key"] = "pr:acme/widgets#42:review-pr:" + reviewHead + keySuffix
 	if !reflect.DeepEqual(f.Metadata, want) {
 		t.Errorf("metadata: %v", f.Metadata)
 	}
 }
 
-func reviewWantReopen(t *testing.T, a action.Action) {
+// reviewWantUpdate checks the refresh of the unclaimed item bd-2 to head: its
+// head_sha, dedup key suffix and title, planned as an update that the apply
+// step re-checks live. The key keeps the identity segment of the old key.
+func reviewWantUpdate(t *testing.T, a action.Action, head string) {
 	t.Helper()
-	if a.Op != action.OpReopen || a.Kind != "review-pr" || a.Target == nil || *a.Target != "bd-2" {
-		t.Fatalf("reopen shape: %+v", a)
+	reviewWantUpdateKey(t, a, "bd-2", head, "pr:acme/widgets#42:review-pr:"+head)
+}
+
+func reviewWantUpdateKey(t *testing.T, a action.Action, id, head, key string) {
+	t.Helper()
+	if a.Op != action.OpUpdate || a.Kind != "review-pr" || a.Target == nil || *a.Target != id {
+		t.Fatalf("update shape: %+v", a)
+	}
+	want := reviewMetadata(head)
+	want["dedup_key"] = key
+	if !reflect.DeepEqual(a.Fields.Metadata, want) {
+		t.Errorf("metadata: %v, want %v", a.Fields.Metadata, want)
+	}
+	if a.Fields.Title != "review-pr: acme/widgets#42 @ "+head {
+		t.Errorf("title = %q", a.Fields.Title)
+	}
+	if a.Facts["transition"] != "refresh-head" {
+		t.Errorf("an update of a review item names its transition for the live re-read: %v", a.Facts)
 	}
 }
 
-func reviewWantUpdate(t *testing.T, a action.Action, head string) {
+func reviewWantNoReopen(t *testing.T, as []action.Action) {
 	t.Helper()
-	if a.Op != action.OpUpdate || a.Kind != "review-pr" || a.Target == nil || *a.Target != "bd-2" {
-		t.Fatalf("update shape: %+v", a)
-	}
-	if !reflect.DeepEqual(a.Fields.Metadata, reviewMetadata(head)) {
-		t.Errorf("metadata: %v", a.Fields.Metadata)
+	for _, a := range as {
+		if a.Op == action.OpReopen {
+			t.Errorf("a review item is never reopened: %+v", a)
+		}
 	}
 }
 
@@ -164,15 +189,21 @@ func TestReviewNotMatchedWhenPRDoesNotQualify(t *testing.T) {
 	reviewWantSkip(t, "no_head", action.ReasonNotMatched)
 }
 
-func TestReviewHeadAdvancedOpenItemIsRefreshed(t *testing.T) {
+func TestReviewHeadAdvancedUnclaimedItemIsRefreshedInPlace(t *testing.T) {
 	as := reviewWantActions(t, "advanced_open", 1)
 	reviewWantUpdate(t, as[0], reviewHead)
+	// the legacy key had no suffix; the refreshed key carries the head
+	if as[0].Facts["reviewed_head_sha"] != "1a2b3c4" {
+		t.Errorf("facts: %v", as[0].Facts)
+	}
 }
 
-func TestReviewHeadAdvancedClosedItemIsReopenedThenRefreshed(t *testing.T) {
-	as := reviewWantActions(t, "advanced_closed", 2)
-	reviewWantReopen(t, as[0])
-	reviewWantUpdate(t, as[1], reviewHead)
+// A closed item for an older head is history: it is never reopened, and the
+// new head gets a new item.
+func TestReviewHeadAdvancedClosedItemIsNotReopenedANewItemIsCreated(t *testing.T) {
+	as := reviewWantActions(t, "advanced_closed", 1)
+	reviewWantCreate(t, as[0], "bd-1", "mine")
+	reviewWantNoReopen(t, as)
 }
 
 func TestReviewUnchangedHeadOpenItemIsReviewPending(t *testing.T) {
@@ -195,24 +226,25 @@ func TestReviewUnchangedHeadClosedItemIsAlreadyHandledHoweverClosed(t *testing.T
 	}
 }
 
-func TestReviewForceOpenItemSameHeadIsRefreshedAndConsumed(t *testing.T) {
+func TestReviewForceUnclaimedItemSameHeadIsRefreshedAndConsumed(t *testing.T) {
 	as := reviewWantActions(t, "force_open_same_head", 3)
-	reviewWantUpdate(t, as[0], reviewHead)
+	reviewWantUpdateKey(t, as[0], "bd-2", reviewHead, "pr:acme/widgets#42:review-pr")
 	reviewWantConsumption(t, as[1:], reviewHead)
 }
 
-func TestReviewForceClosedItemSameHeadIsReopenedAndConsumed(t *testing.T) {
-	as := reviewWantActions(t, "force_closed_same_head", 4)
-	reviewWantReopen(t, as[0])
-	reviewWantUpdate(t, as[1], reviewHead)
-	reviewWantConsumption(t, as[2:], reviewHead)
+// force-review with only a closed item at the same head: one NEW item, never a
+// reopen; the legacy key has no suffix, so the plain head key is already new.
+func TestReviewForceClosedItemSameHeadCreatesANewItemAndConsumes(t *testing.T) {
+	as := reviewWantActions(t, "force_closed_same_head", 3)
+	reviewWantCreate(t, as[0], "bd-1", "mine")
+	reviewWantConsumption(t, as[1:], reviewHead)
+	reviewWantNoReopen(t, as)
 }
 
 func TestReviewForceWithAdvancedHead(t *testing.T) {
-	as := reviewWantActions(t, "force_closed_advanced", 4)
-	reviewWantReopen(t, as[0])
-	reviewWantUpdate(t, as[1], reviewHead)
-	reviewWantConsumption(t, as[2:], reviewHead)
+	as := reviewWantActions(t, "force_closed_advanced", 3)
+	reviewWantCreate(t, as[0], "bd-1", "mine")
+	reviewWantConsumption(t, as[1:], reviewHead)
 
 	as = reviewWantActions(t, "force_open_advanced", 3)
 	reviewWantUpdate(t, as[0], reviewHead)
@@ -226,15 +258,14 @@ func TestReviewForceWithoutItemCreatesThenConsumes(t *testing.T) {
 }
 
 func TestReviewForceWritesCurrentHeadNotTheRequestedSHA(t *testing.T) {
-	as := reviewWantActions(t, "force_sha_differs", 4)
-	reviewWantReopen(t, as[0])
-	reviewWantUpdate(t, as[1], reviewHead)
-	reviewWantConsumption(t, as[2:], "0ldsha1")
+	as := reviewWantActions(t, "force_sha_differs", 3)
+	reviewWantCreate(t, as[0], "bd-1", "mine")
+	reviewWantConsumption(t, as[1:], "0ldsha1")
 }
 
 func TestReviewForceSHAMissingFallsBackToCurrentHead(t *testing.T) {
-	as := reviewWantActions(t, "force_sha_null", 4)
-	reviewWantConsumption(t, as[2:], reviewHead)
+	as := reviewWantActions(t, "force_sha_null", 3)
+	reviewWantConsumption(t, as[1:], reviewHead)
 }
 
 func TestReviewForceOfNonQualifyingPRNeitherActsNorClears(t *testing.T) {
@@ -246,7 +277,7 @@ func TestReviewForceOfNonQualifyingPRNeitherActsNorClears(t *testing.T) {
 // second forced review of the same SHA still acts.
 func TestReviewFlagPresentIsFreshRequestDespiteConsumedRecord(t *testing.T) {
 	as := reviewWantActions(t, "force_with_prior_consumed_record", 3)
-	reviewWantUpdate(t, as[0], reviewHead)
+	reviewWantUpdateKey(t, as[0], "bd-2", reviewHead, "pr:acme/widgets#42:review-pr")
 	reviewWantConsumption(t, as[1:], reviewHead)
 }
 

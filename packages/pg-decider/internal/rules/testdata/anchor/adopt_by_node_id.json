@@ -48,7 +48,8 @@
       "title": "review-pr: acme/widgets#42",
       "labels": [],
       "metadata": {
-        "node_id": "PR_node_42"
+        "node_id": "PR_node_42",
+        "head_sha": "9f3c1e2"
       }
     }
   ]

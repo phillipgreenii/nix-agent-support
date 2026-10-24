@@ -48,7 +48,7 @@ func TestIndexFindsAnchorAndEveryKind(t *testing.T) {
 		id  string
 		len int
 	}{
-		{KindReviewPR, Context{}, "bd-2", 1},
+		{KindReviewPR, ctxFixCI, "bd-2", 1},
 		{KindFixCI, ctxFixCI, "bd-3", 1},
 		{KindResolveConflict, ctxConf, "bd-4", 1},
 		{KindProcessFeedback, Context{Digest: "d1"}, "bd-5", 1},
@@ -104,7 +104,7 @@ func TestClosedItemsAreFoundHoweverClosed(t *testing.T) {
 		c  Context
 		id string
 	}{
-		{KindReviewPR, Context{}, "bd-10"},
+		{KindReviewPR, ctxFixCI, "bd-10"},
 		{KindFixCI, ctxFixCI, "bd-11"},
 		{KindResolveConflict, ctxConf, "bd-12"},
 	} {
@@ -248,7 +248,7 @@ func TestAdoptableItems(t *testing.T) {
 	if it, ok := ix.Find(KindProcessFeedback, Context{Digest: "zzz"}); !ok || it.ID != "bd-52" {
 		t.Errorf("adopted feedback by label digest: %+v %v", it, ok)
 	}
-	if it, ok := ix.Find(KindReviewPR, Context{}); !ok || it.ID != "bd-56" {
+	if it, ok := ix.Find(KindReviewPR, ctxFixCI); !ok || it.ID != "bd-56" {
 		t.Errorf("keyed review-pr must be found first: %+v %v", it, ok)
 	}
 	// the keyed item and nothing else is the keyed review-pr.
@@ -278,7 +278,7 @@ func TestNodeIDKeyFormIsEqualIdentity(t *testing.T) {
 		t.Fatalf("fix-ci under node form: %+v %v", it, ok)
 	}
 	// a rename leaves the old id form behind; the link still scopes it to this entity.
-	if it, ok := ix.Find(KindReviewPR, Context{}); !ok || it.ID != "bd-9" {
+	if it, ok := ix.Find(KindReviewPR, ctxFixCI); !ok || it.ID != "bd-9" {
 		t.Fatalf("renamed id form: %+v %v", it, ok)
 	}
 }
@@ -406,5 +406,60 @@ func TestKeylessSourceLinkIsNeverAdopted(t *testing.T) {
 		if len(BuildIndex(v).Adoptable()) != 1 {
 			t.Errorf("title %q: control link under relation work was not adopted", title)
 		}
+	}
+}
+
+// A head-scoped kind's title carries " @ <short head>"; the suffix is delimited,
+// so a keyless item with that title is adopted and "#4" never names "#42".
+func TestTitleShapeAcceptsTheShortHeadSuffix(t *testing.T) {
+	v := &view.View{Type: "pr", ID: "acme/widgets#4", Snapshot: view.PRSnapshot{Repo: "acme/widgets", Number: 4}}
+	for title, want := range map[string]bool{
+		"review-pr: acme/widgets#4":                       true,
+		"review-pr: acme/widgets#4 @ 9f3c1e2":             true,
+		"fix-ci: acme/widgets#4 @ 9f3c1e2":                true,
+		"resolve-conflict: acme/widgets#4 @ 9f3c1e2":      true,
+		"acme/widgets#4: the anchor":                      true,
+		"review-pr: acme/widgets#42 @ 9f3c1e2":            false,
+		"review-pr: acme/widgets#4 @":                     false,
+		"review-pr: acme/widgets#4 plus a trailing words": false,
+	} {
+		if got := TitleNames(title, v); got != want {
+			t.Errorf("TitleNames(%q) = %v, want %v", title, got, want)
+		}
+		l := view.Link{Type: "issue", ID: "bd-x", State: "open", Title: title, Relation: "work"}
+		ix := BuildIndex(&view.View{Type: "pr", ID: v.ID, Snapshot: v.Snapshot, Links: []view.Link{l}})
+		if got := len(ix.Adoptable()) == 1; got != want {
+			t.Errorf("adoptable(%q) = %v, want %v", title, got, want)
+		}
+	}
+}
+
+// Several review items of one PR are all indexed; Find picks by head, open first.
+func TestSeveralReviewItemsAreFoundByHead(t *testing.T) {
+	mk := func(id, state, head, key string) view.Link {
+		return view.Link{
+			Type: "issue", ID: id, State: state, Relation: "work", Title: "review-pr: acme/widgets#42 @ " + head,
+			Metadata: map[string]string{"head_sha": head, "dedup_key": key},
+		}
+	}
+	v := &view.View{Type: "pr", ID: "acme/widgets#42", Links: []view.Link{
+		mk("bd-1", "closed", "aaaaaaa", "pr:acme/widgets#42:review-pr:aaaaaaa"),
+		mk("bd-2", "open", "bbbbbbb", "pr:acme/widgets#42:review-pr:bbbbbbb"),
+	}}
+	ix := BuildIndex(v)
+	if n := len(ix.ByKind(KindReviewPR)); n != 2 {
+		t.Fatalf("review items = %d", n)
+	}
+	if it, ok := ix.Find(KindReviewPR, Context{HeadSHA: "aaaaaaa"}); !ok || it.ID != "bd-1" {
+		t.Errorf("Find(aaaaaaa) = %+v %v", it, ok)
+	}
+	if it, ok := ix.Find(KindReviewPR, Context{HeadSHA: "bbbbbbb"}); !ok || it.ID != "bd-2" {
+		t.Errorf("Find(bbbbbbb) = %+v %v", it, ok)
+	}
+	if _, ok := ix.Find(KindReviewPR, Context{HeadSHA: "ccccccc"}); ok {
+		t.Error("an unknown head must not match")
+	}
+	if _, ok := ix.Find(KindReviewPR, Context{}); ok {
+		t.Error("an empty head must not match")
 	}
 }
