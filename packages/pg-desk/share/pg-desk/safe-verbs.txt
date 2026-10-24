@@ -42,8 +42,10 @@ pr force-review
 pr head-check
 pr hide
 pr history
+pr lane-record
 pr link add
 pr link remove
+pr mark-inactive
 pr refresh
 pr show
 pr suppress

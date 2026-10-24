@@ -176,6 +176,38 @@ would file a bead for that. The threshold is the first version, and a later chan
 rule file carries plain negative cases (a rule file whose `SYSTEM_PAUSE` guard was removed, one whose
 `noDataState` differs, and one whose absence branch was removed each fail).
 
+#### Persisted lane state
+
+The composed command is short-lived and handles one PR, so it cannot hold a cumulative counter or
+compute a fleet-wide gauge. It records each run through `pg-desk pr lane-record` (see
+[`operator-commands.md`](operator-commands.md), "pr lane-record and pr mark-inactive"), which keeps the
+state in the store's `meta` table (see [`store-schema.md`](store-schema.md), "PR lane state in
+`meta`"), and `serve` aggregates it at scrape time. Every series below is emitted with a value, `0`
+before any run, so the first event is not lost to `increase()`:
+
+- `pg_desk_pr_lane_runs_total{stage,class}` — the lane's non-clean run events: `stage` is `hydrate` or
+  `decide`, `class` one of `not_found`, `transient`, `degraded`, `unhydrated`, `unauthenticated`,
+  `hydrate_error`, `decide_partial` and `decide_failed` (there is no `retry_exhausted`: pg-router owns
+  every retry). Every stage and class pair is emitted.
+- `pg_decider_decisions_total{rule,action,outcome,reason}` — the decider's per-rule results. `action`
+  is `create`, `update`, `reopen`, `close`, `annotate`, `escalate` or `skip`; `outcome` is `planned`,
+  `applied`, `deduped`, `skipped` or `failed`; `reason` is the decider's closed skip reason (carried only
+  by a `skip`, empty otherwise); `rule` is one of the decider's rule ids. For every rule, each skip
+  reason and each other action with each outcome other than `skipped` is emitted; a recorded series
+  outside that set is emitted too. It has a dashboard panel and no alert.
+- `pg_desk_pr_lane_residual_prs{mode}` and `pg_desk_pr_lane_residual_oldest_age_seconds{mode}` — the number
+  of PRs whose plan after the last recorded run still lists an action, and the age of the oldest such
+  residual. `mode` is the persisted LANE-LEVEL mode, which follows the configured `pr_lane.mode`: the value
+  sits on that mode's series and the other two read `0`. A residual recorded in another mode (a plan-era
+  residual after the flip) is not counted.
+- `pg_desk_pr_marked_inactive_total` — PRs the lane marked inactive.
+- `pg_desk_pr_lane_lookup_items` and `pg_desk_pr_lane_lookup_ceiling` — the decider's last reported
+  work-item lookup item count and configured ceiling (the decider emits no telemetry of its own); `0`
+  until a run reports them.
+
+On a store that is not at schema 2, or when the read of the lane state fails, these families have NO
+series, never `0`; every other family is unaffected.
+
 ### Focus metrics
 
 `/metrics` also exposes the daily-focus families, computed from the store by the one function
@@ -289,6 +321,11 @@ existing `pg-router-failure-rate` rule already watches.
   the other two), and `pg_desk_pr_unhydrated` with its oldest-age companion MUST be emitted with a value
   whenever the store read succeeds on a store at schema 2 (`0` for an empty set), and MUST have no series,
   never `0`, when the store read fails or the store is not at schema 2.
+- **INV-SERVE-2.** <!-- uuid: c6c54f9d-a0fb-4544-b613-5c3fffdbd7db --> The persisted lane families (`pg_desk_pr_lane_runs_total`, `pg_decider_decisions_total`, the two
+  residual gauges, `pg_desk_pr_marked_inactive_total` and the two lookup gauges) MUST be emitted with a value,
+  `0` before any run, on every scrape of a store at schema 2, and MUST have no series when the store is not at
+  schema 2 or the read fails. The residual gauges' `mode` label MUST be the lane-level mode, which follows the
+  configured `pr_lane.mode`.
 
 ## Out of scope (Phase 9, narrowed by Phase 10)
 

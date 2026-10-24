@@ -192,6 +192,11 @@ func OpenReadOnly(path string) (*Store, error) {
 	return &Store{sql: sqlDB, path: path}, nil
 }
 
+// Path returns the database file the store was opened on, so a caller that
+// needs a second handle on the same file (concurrent writers in a test) can
+// open one.
+func (s *Store) Path() string { return s.path }
+
 // Close closes the underlying handle.
 func (s *Store) Close() error { return s.sql.Close() }
 

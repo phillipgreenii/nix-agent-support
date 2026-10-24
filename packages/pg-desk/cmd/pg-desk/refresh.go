@@ -51,7 +51,14 @@ pg-connector, classify the change against the previous snapshot, and log it.
 
 Exit codes: 0 hydrated; 2 hydration degraded (the previous snapshot is kept
 and the entity stays due); 3 hydration failed entirely (previous snapshot
-kept, entity stays due), including an entity that is not found.`, entityType),
+kept, entity stays due), including an entity that is not found.
+
+On exit 2 and 3 a line "class=<class>" is printed on standard output, so a
+caller can tell the failures apart without reading the message text. The class
+is one of: not_found (the source says the entity is absent), transient (the
+source or the connector failed in a way a later attempt may clear),
+unauthenticated (the source refused the credentials), degraded (exit 2: part
+of the read failed) or hydrate_error (any other failure).`, entityType),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRefresh(cmd, entityType, args[0])
@@ -76,6 +83,13 @@ func runRefresh(cmd *cobra.Command, entityType, ref string) error {
 	cmd.SilenceUsage = true
 
 	res, err := refreshEntity(cmd.Context(), cfg, st, entityType, id)
+	if class := changes.RefreshClass(err, res.Degraded); class != "" {
+		// The machine-readable class goes to standard output, ahead of the
+		// error text main prints to standard error.
+		if _, perr := fmt.Fprintf(cmd.OutOrStdout(), "class=%s\n", class); perr != nil {
+			return perr
+		}
+	}
 	switch {
 	case err != nil:
 		return newExitError(exitTotal, fmt.Errorf("refresh: %s %s: %w", entityType, id, notFoundLoud(err)))

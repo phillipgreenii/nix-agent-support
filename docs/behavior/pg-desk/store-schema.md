@@ -390,6 +390,43 @@ failing issue never blocks every other issue's feed.
   query. `change_flow.listing.<type>.<query>` above is overwritten by every call, failures included, so
   it cannot say when a query was last observed; this key can.
 
+### PR lane state in `meta`
+
+The PR lane's persisted state lives in `meta` too, written by `pg-desk pr lane-record` and
+`pg-desk pr mark-inactive` and read by `serve` at scrape time. It adds no table, no column, no ladder
+rung and no schema version: `user_version` and `meta.schema_version` do not change. (An additive table
+created idempotently was the alternative and is not chosen, because every reader of the store would then
+have to know a table that is outside the ladder.) Every key starts with `pr_lane.`, and none of them is the
+configuration key `pr_lane.mode`, which keeps the rendered configuration as its one source:
+
+- **`pr_lane.runs.<stage>.<class>`** — one counter per lane-run series (see [`serve.md`](serve.md)).
+- **`pr_lane.decisions.<rule>|<action>|<outcome>|<reason>`** — one counter per decisions series.
+- **`pr_lane.marked_inactive`** — the count of PRs marked inactive.
+- **`pr_lane.state.mode`**, **`pr_lane.state.flip_at`**, **`pr_lane.state.last_run_at`** — the lane-level
+  mode, the flip time (an RFC 3339 time) and the time of the last recorded run.
+- **`pr_lane.state.lookup_items`**, **`pr_lane.state.lookup_ceiling`** — the decider's last reported lookup
+  figures.
+- **`pr_lane.pr.<normalized id>`** — one JSON value per PR (`mode`, `residual`, `residual_since`,
+  `last_outcome`, `updated_at`).
+
+Every counter is incremented by ONE statement that adds the delta inside SQLite
+(`INSERT ... ON CONFLICT (key) DO UPDATE SET value = CAST(meta.value AS INTEGER) + excluded.value`, the
+value kept as text as the table requires), never by a read followed by a write, so concurrent runs (the
+backfill beside live dispatches, in one process or several) lose no increment. The change-flow hydration
+totals that the dead-man alert reads use the same increment. A per-PR key is written only by the run for
+that PR, which holds the per-PR lock, so it needs no atomic form. The flip time is written by an insert that
+only succeeds when the key is absent, so exactly one of several concurrent first apply runs sets it.
+
+The lane-level mode and the flip time follow the CONFIGURED `pr_lane.mode`. A recorded run writes them, and
+the PR's own key, only when the run's mode equals the configured one: the first such run in `apply` that
+finds the lane-level mode not yet `apply` sets the flip time once (a later PR's first apply run does not move
+it), and a recorded run that leaves `apply` clears it, so a later flip starts a new one. A run in another
+mode (a by-hand `plan` run after the flip) writes its counters and the last-run time and nothing else, so it
+cannot overwrite a PR's persisted apply-mode residual or mode and hide it from the alert that reads
+`mode="apply"`. The read-only residual `plan` that an `apply` run makes afterwards is not a recorded run: it is
+reported as the apply run's residual and never sets the lane-level mode. The flip time is a display value;
+the rollback listing is bounded by the backfill driver's flip marker, not by this key.
+
 ## Invariants
 
 - **INV-STORE-1.** <!-- uuid: 9489e4b0-84a9-4c17-acae-982ab8b8b5bd --> The `backend`, `watched`, `read_attempt_at` and `read_ok_at` columns and the failed-ingest
@@ -415,6 +452,13 @@ failing issue never blocks every other issue's feed.
   identifies as a redelivery MUST append no row, bump no version and produce no event.
 - **INV-STORE-9.** <!-- uuid: 5f21abb6-468d-4cdb-8d1b-efb1335bc922 --> `change_flow.baseline.<query>` MUST be written only in the poll in which the last unhydrated
   member of the query's baseline run was hydrated.
+- **INV-STORE-10.** <!-- uuid: fa94ad18-f4fa-4725-91cd-58557f3373ce --> The PR lane state MUST live in `meta` under `pr_lane.`-prefixed keys, none equal to the configuration key
+  `pr_lane.mode`, and MUST NOT change `user_version` or `meta.schema_version`.
+- **INV-STORE-11.** <!-- uuid: 98d7a9dd-28bb-44c6-bca7-e811f481373d --> A lane counter and the change-flow hydration totals MUST be incremented by one statement that adds
+  inside SQLite, so concurrent writers lose no increment.
+- **INV-STORE-12.** <!-- uuid: e7ba0000-b19e-4502-8ca6-1ce4b0d3aa05 --> The lane-level mode, the flip time and a PR's lane state MUST be written only by a recorded run whose
+  mode equals the configured `pr_lane.mode`; the flip time MUST be set once, by the first such `apply` run that
+  finds the lane-level mode not yet `apply`.
 
 ## Exit codes, telemetry, and logs
 

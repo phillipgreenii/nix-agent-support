@@ -7,6 +7,8 @@ import (
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/lanestate"
 )
 
 func collectPRLane(t *testing.T, mode func() string, fn PRUnhydratedFunc) (metricdata.ResourceMetrics, error) {
@@ -110,5 +112,47 @@ func TestPRUnhydratedFailedReadNeverYieldsZero(t *testing.T) {
 				t.Errorf("the mode gauge must survive a failed store read, got %v", got)
 			}
 		})
+	}
+}
+
+func TestPRLaneStateFamiliesEmitNothingWhenTheStoreCannotAnswer(t *testing.T) {
+	for name, fn := range map[string]PRLaneStateFunc{
+		"not schema 2": func() (lanestate.Snapshot, bool, error) { return lanestate.Snapshot{}, false, nil },
+		"read failed":  func() (lanestate.Snapshot, bool, error) { return lanestate.Snapshot{}, true, errors.New("boom") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader := sdkmetric.NewManualReader()
+			mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			if err := RegisterPRLaneState(mp, fn); err != nil {
+				t.Fatal(err)
+			}
+			var rm metricdata.ResourceMetrics
+			_ = reader.Collect(context.Background(), &rm)
+			for _, sm := range rm.ScopeMetrics {
+				if len(sm.Metrics) != 0 {
+					t.Errorf("%d metric families exported when the store cannot answer, want none", len(sm.Metrics))
+				}
+			}
+		})
+	}
+}
+
+func TestPRLaneResidualGaugesCarryTheLaneLevelModeLabel(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	snap := lanestate.Snapshot{LaneMode: "plan", ResidualPRs: 4, ResidualOldestAgeSeconds: 90}
+	if err := RegisterPRLaneState(mp, func() (lanestate.Snapshot, bool, error) { return snap, true, nil }); err != nil {
+		t.Fatal(err)
+	}
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	got := points(rm, MetricPRLaneResidualPRs)
+	if got["plan"] != 4 || got["apply"] != 0 || got["off"] != 0 || len(got) != 3 {
+		t.Errorf("residual by mode = %v, want the 4 on plan and 0 on the other two", got)
+	}
+	if age := points(rm, MetricPRLaneResidualOldestAge); age["plan"] != 90 || age["apply"] != 0 {
+		t.Errorf("oldest age by mode = %v", age)
 	}
 }

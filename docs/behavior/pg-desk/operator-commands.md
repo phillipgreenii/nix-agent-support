@@ -1,4 +1,4 @@
-# pg-desk — show, status, sweep, reconcile, pr head-check, issue refresh --watch, issue backfill-backend, issue changes --reset, doctor, heartbeat, heartbeat-item, freshness
+# pg-desk — show, status, sweep, reconcile, pr head-check, pr lane-record, pr mark-inactive, issue refresh --watch, issue backfill-backend, issue changes --reset, doctor, heartbeat, heartbeat-item, freshness
 
 ## show
 
@@ -243,6 +243,30 @@ origin `reset`, never as `reconcile`: an issue that is not watched is not replay
 semantics (no cursor movement, exemption from the hydration budget, every consumer of the type
 receiving the replay) are in [`changes.md`](changes.md), "Behavior".
 
+## pr lane-record and pr mark-inactive
+
+These two verbs are pg-desk's write path for the PR lane's persisted state (see
+[`store-schema.md`](store-schema.md), "PR lane state in `meta`"). The composed command is another binary
+and never touches the store itself: it calls them. Both need a store at schema 2 and refuse an older one
+with the cutover message (exit `1`); neither calls the tracker or the connector.
+
+`pg-desk pr lane-record [--input FILE]` records one run. It reads one JSON document from standard input
+(or `--input FILE`) with these members: `pr` (any reference `pr show` accepts, stored normalized), `mode`
+(`off`, `plan` or `apply`), `events` (a list of `{stage, class}` run events, empty for a clean run),
+`residual` (the number of actions a read-only plan still lists after the run; absent when the run did not
+learn it, which keeps the recorded one), `last_outcome`, `decisions` (a list of `{rule, action, outcome,
+reason, count}`), and `lookup_items` and `lookup_ceiling` (the decider's lookup figures). An unknown member
+or a value outside its closed vocabulary rejects the whole document and writes nothing (exit `1`). On
+success it prints `recorded pr <id>: mode <mode>` and exits `0`. The mode rules, which decide what is
+written for a run whose mode differs from the configured `pr_lane.mode`, are those of
+[`store-schema.md`](store-schema.md).
+
+`pg-desk pr mark-inactive <id>` sets the PR's `active` flag to `0` and adds one to the marked-inactive
+counter, in one transaction. A PR the source reports not found, with no open anchor, then drops out of the
+never-hydrated set. It is a store write, never a tracker write, so a run in `plan` mode may call it as well
+as one in `apply`. The snapshot, version and `hydrated_at` are left alone, so a later successful hydration
+brings the PR back. A PR that is absent or already inactive is left alone, counts nothing and exits `0`.
+
 ## Dropped-key runbook
 
 A feed key that its backend has not seen for `consumer_stale_after` is dropped, and the next poll
@@ -483,6 +507,9 @@ can drift.
 - **INV-OPERATOR-9.** <!-- uuid: 661b5e25-4dc3-4e01-9e78-fbe86e036042 --> `status` and `doctor` MUST each print the static `pr lane` line, read from `sync.mode` and `pr_lane.mode`, and
   the line MUST report an absent or invalid `pr_lane.mode` as `off`; `doctor` MUST NOT count the line as a
   failure.
+- **INV-OPERATOR-10.** <!-- uuid: aef55489-c70e-4057-a04d-0cad4fd53595 --> `pr lane-record` MUST reject a document with an unknown member or a value outside a closed
+  vocabulary without writing anything, and `pr mark-inactive` MUST work from a run in either lane mode and
+  count a PR once.
 
 ## Telemetry and logs
 

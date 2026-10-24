@@ -2,6 +2,8 @@ package changes
 
 import (
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -108,5 +110,40 @@ func TestRepeatedDegradedUsesThresholdTwo(t *testing.T) {
 	}
 	if got := RepeatedDegraded(HydrationStats{}); got == nil || len(got) != 0 {
 		t.Errorf("empty stats = %+v", got)
+	}
+}
+
+// TestRecordHydrationLosesNoTotalUnderConcurrentRuns is the dead-man alert's
+// guard: runs on separate handles of one store (the backfill beside live
+// dispatches) must not lose a hydration, failure or retry count.
+func TestRecordHydrationLosesNoTotalUnderConcurrentRuns(t *testing.T) {
+	seed := store.OpenNewSchemaForTest(t)
+	const runners, perRunner = 6, 30
+	var wg sync.WaitGroup
+	for r := 0; r < runners; r++ {
+		h, err := store.Open(seed.Path())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = h.Close() })
+		wg.Add(1)
+		go func(r int) {
+			defer wg.Done()
+			for i := 0; i < perRunner; i++ {
+				// A unique entity per call keeps the degraded set's own
+				// best-effort read-modify-write out of the totals under test.
+				RecordHydration(h, "pr", fmt.Sprintf("o/r#%d-%d", r, i), pipeline.EntityChangeResult{Retries: 1}, errors.New("boom"))
+			}
+		}(r)
+	}
+	wg.Wait()
+	got, err := ReadHydrationStats(seed, "pr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := int64(runners * perRunner)
+	if got.Hydrations != want || got.Failures != want || got.OCCRetries != want {
+		t.Errorf("totals hydrations=%d failures=%d retries=%d, want %d each: a concurrent increment was lost",
+			got.Hydrations, got.Failures, got.OCCRetries, want)
 	}
 }

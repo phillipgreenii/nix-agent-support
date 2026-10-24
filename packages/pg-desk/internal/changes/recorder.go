@@ -9,10 +9,13 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
-// The hydration recorder persists best-effort running totals in the store's
-// meta key/value table (no schema change) because serve, status and doctor
-// run in other processes than the verbs that hydrate. A lost concurrent
-// update is acceptable: the counters are observability, not state.
+// The hydration recorder persists running totals in the store's meta
+// key/value table (no schema change) because serve, status and doctor run in
+// other processes than the verbs that hydrate. The three totals (hydrations,
+// failures, OCC retries) are incremented by one SQL statement
+// (store.IncrMeta), so concurrent runs (the backfill beside live dispatches)
+// lose none: the dead-man alert reads the hydrations total. The degraded set
+// is a per-entity read-modify-write and stays best-effort.
 const (
 	metaHydrationsPrefix        = "change_flow.hydrations."
 	metaHydrationFailuresPrefix = "change_flow.hydration_failures."
@@ -136,11 +139,7 @@ func readInt(st *store.Store, key string) (int64, error) {
 }
 
 func addInt(st *store.Store, key string, delta int64) {
-	n, err := readInt(st, key)
-	if err != nil {
-		return
-	}
-	_ = st.SetMeta(key, strconv.FormatInt(n+delta, 10))
+	_ = st.IncrMeta(key, delta)
 }
 
 func readDegraded(st *store.Store, key string) map[string]DegradedEntity {

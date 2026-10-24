@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"unicode/utf8"
 )
 
@@ -77,4 +78,41 @@ func (s *Store) ListMetaPrefix(prefix string) (map[string]string, error) {
 		return nil, fmt.Errorf("store: list meta prefix %q: %w", prefix, err)
 	}
 	return out, nil
+}
+
+// IncrMeta adds delta to the integer counter stored under key, creating it at
+// delta when absent, in ONE statement. The increment happens inside SQLite
+// (the existing text value is cast to an integer and the delta added), never
+// in a read in this process followed by a write, so concurrent writers (the
+// backfill beside live dispatches, in this or another process) cannot lose an
+// increment. The value stays text, as the meta table requires. A stored value
+// that is not an integer casts to 0.
+func (s *Store) IncrMeta(key string, delta int64) error {
+	_, err := s.sql.Exec(
+		`INSERT INTO meta (key, value) VALUES (?, ?)
+		 ON CONFLICT (key) DO UPDATE SET value = CAST(meta.value AS INTEGER) + excluded.value`,
+		key, strconv.FormatInt(delta, 10),
+	)
+	if err != nil {
+		return fmt.Errorf("store: increment meta %q: %w", key, err)
+	}
+	return nil
+}
+
+// SetMetaIfAbsent writes value under key only when the key has no row yet, in
+// one statement, and reports whether it wrote. Of several concurrent callers
+// exactly one gets true, which makes it the write for a set-once value.
+func (s *Store) SetMetaIfAbsent(key, value string) (bool, error) {
+	res, err := s.sql.Exec(
+		`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`,
+		key, value,
+	)
+	if err != nil {
+		return false, fmt.Errorf("store: set meta if absent %q: %w", key, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: set meta if absent %q: %w", key, err)
+	}
+	return n > 0, nil
 }

@@ -152,8 +152,10 @@ func TestRefreshFailureKeepsSnapshotAndEntityStaysDue(t *testing.T) {
 	if err == nil || exitCodeFor(err) != exitTotal {
 		t.Fatalf("err = %v (exit %d), want exit %d", err, exitCodeFor(err), exitTotal)
 	}
-	if out != "" {
-		t.Errorf("stdout = %q, want empty on failure", out)
+	// The fixture's connector answers exit 1 with an error envelope whose code is
+	// "boom": a failure that is neither absent nor transient.
+	if out != "class=hydrate_error\n" {
+		t.Errorf("stdout = %q, want only the class line on failure", out)
 	}
 	after := f.entity("issue", "bd-1")
 	if after.Version != before.Version || after.HydratedAt != before.HydratedAt || after.Facts != before.Facts || after.Inactive {
@@ -187,8 +189,8 @@ func TestRefreshNotFoundFailsLoudly(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.id) || !strings.Contains(err.Error(), "not found") {
 				t.Errorf("error %q must name the entity %q and contain \"not found\"", err, tc.id)
 			}
-			if out != "" {
-				t.Errorf("stdout = %q, want empty", out)
+			if out != "class=not_found\n" {
+				t.Errorf("stdout = %q, want only the line class=not_found", out)
 			}
 			if _, found, gerr := f.seed.GetEntity("o/r", tc.typ, tc.id); gerr != nil || found {
 				t.Errorf("a not-found refresh created an entity row: found=%v err=%v", found, gerr)
@@ -235,8 +237,8 @@ func TestRefreshDegradedHydrationExitsTwoAndKeepsSnapshot(t *testing.T) {
 	if !strings.Contains(err.Error(), "ci list") || !strings.Contains(err.Error(), "bd-1") {
 		t.Errorf("error %q must name the entity and the degraded note", err)
 	}
-	if out != "" {
-		t.Errorf("stdout = %q, want empty", out)
+	if out != "class=degraded\n" {
+		t.Errorf("stdout = %q, want only the line class=degraded", out)
 	}
 	if after := f.entity("issue", "bd-1"); after.Version != before.Version || after.HydratedAt != before.HydratedAt {
 		t.Errorf("a degraded refresh changed the entity: %+v -> %+v", before, after)
@@ -311,5 +313,45 @@ func TestRefreshRequiresExactlyOneID(t *testing.T) {
 	}
 	if _, err := runRefreshCmd(t, "issue", "a", "b"); err == nil {
 		t.Error("refresh with two ids succeeded")
+	}
+}
+
+// TestRefreshClassTellsATransientFailureFromNotFound is the point of the class
+// line: a source that answers with a transient failure (the connector's
+// "unavailable" code, which carries a message that may even say "not found")
+// is never reported as not_found, and each code lands in its class.
+func TestRefreshClassTellsATransientFailureFromNotFound(t *testing.T) {
+	for _, tc := range []struct {
+		name, exit, body, wantClass string
+	}{
+		{"transient", "1", `{"error":{"code":"unavailable","message":"upstream 502: repository not found behind the proxy"}}`, "transient"},
+		{"unauthenticated", "1", `{"error":{"code":"unauthenticated","message":"bad credentials"}}`, "unauthenticated"},
+		{"not found", "4", `{"error":{"code":"not_found","message":"gone"}}`, "not_found"},
+		{"other wire code", "1", `{"error":{"code":"version_mismatch","message":"skew"}}`, "hydrate_error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRefreshFixture(t)
+			f.write("show-o_r_1.json", tc.body)
+			f.write("show-o_r_1.exit", tc.exit)
+			out, err := runRefreshCmd(t, "pr", "o/r#1")
+			if err == nil || exitCodeFor(err) != exitTotal {
+				t.Fatalf("err = %v (exit %d), want exit %d", err, exitCodeFor(err), exitTotal)
+			}
+			if want := "class=" + tc.wantClass + "\n"; out != want {
+				t.Errorf("stdout = %q, want %q", out, want)
+			}
+		})
+	}
+}
+
+func TestRefreshSuccessPrintsNoClassLine(t *testing.T) {
+	f := newRefreshFixture(t)
+	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
+	out, err := runRefreshCmd(t, "issue", "bd-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "class=") {
+		t.Errorf("stdout %q carries a class line on success", out)
 	}
 }

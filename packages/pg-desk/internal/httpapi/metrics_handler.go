@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/focus"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/freshness"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/lanestate"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/metrics"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
@@ -153,6 +154,28 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 	}
 	if err := metrics.RegisterPRLane(mp, cfg.PRLaneMode, unhydratedFn); err != nil {
 		return nil, fmt.Errorf("httpapi: register pr lane metrics: %w", err)
+	}
+
+	// The persisted PR lane families (P3b1a): the composed command writes the
+	// lane state through `pg-desk pr lane-record`, and serve aggregates it here
+	// at scrape time, zero-filled. Like the never-hydrated set it needs a
+	// schema-2 store; an older one or a failed read has no series for it.
+	laneStateFn := func() (lanestate.Snapshot, bool, error) {
+		v, err := st.SchemaVersion()
+		if err != nil {
+			return lanestate.Snapshot{}, false, err
+		}
+		if v < store.NewSchemaVersion {
+			return lanestate.Snapshot{}, false, nil
+		}
+		snap, err := lanestate.Read(st, nowUTC())
+		if err != nil {
+			return lanestate.Snapshot{}, false, err
+		}
+		return snap, true, nil
+	}
+	if err := metrics.RegisterPRLaneState(mp, laneStateFn); err != nil {
+		return nil, fmt.Errorf("httpapi: register pr lane state metrics: %w", err)
 	}
 
 	return scrapeHandler(registry, scrapeTimeout), nil

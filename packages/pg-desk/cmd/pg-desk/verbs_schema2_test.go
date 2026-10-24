@@ -157,6 +157,12 @@ func verbClasses() map[string]verbClass {
 	m["pr feedback set"] = safe("1", "c1", "--disposition", "will-fix")
 	m["pr force-review"] = safe("1")
 	m["pr head-check"] = safe("1", "--head-sha", "0123456789abcdef")
+	// The PR lane's pg-desk-owned write path (P3b1a): both write the lane
+	// state in the meta table and the entity's active flag, all schema 2.
+	// lane-record runs here on an empty input (/dev/null), which it rejects
+	// with a decode error, not a schema error.
+	m["pr lane-record"] = safe("--input", "/dev/null")
+	m["pr mark-inactive"] = safe("1")
 	// The verbs `version` reads nothing from the store at all.
 	m["version"] = safe()
 	return m
