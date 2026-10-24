@@ -37,7 +37,7 @@ inside Claude Code; an explicit `--actor` override only outside it).
   `--render`, prints the fully assembled prompt.
 - **`explain ID`** -- classification, stage, workflow, kind, component, premise state, open
   questions, round count, and the current holder.
-- **`history ID`** -- the verdict and round trail (`metadata.wi_verdicts`).
+- **`history ID`** -- the verdict and round trail (every `wi_verdict_r<round>_<concern>` record, with its round).
 - **`duplicates ID`** -- title/key-term duplicate candidates plus same-component related
   candidates.
 - **`docs ID`** -- the applicable-docs candidate search on its own.

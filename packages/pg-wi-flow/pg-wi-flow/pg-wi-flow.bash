@@ -617,7 +617,8 @@ pgwf_cmd_annotate() {
 # contract for the illustrative --json shape]. `round` reads it back.
 # Concrete schema (this packet's own freedom boundary, documented per the
 # packet's Binding decisions): the raw --json payload is stored verbatim,
-# compacted, under metadata key "wi_verdict_r<round>_<concern>" -- round
+# compacted, under metadata key "wi_verdict_r<round>_<concern>" (concern
+# characters outside [A-Za-z0-9_] mapped to "_", bd's key rule) -- round
 # re-parses it directly (bd metadata values are plain strings throughout
 # this codebase, e.g. wi_workflow; no double-JSON-encoding is introduced).
 pgwf_cmd_record_verdict() {
@@ -684,7 +685,13 @@ pgwf_cmd_record_verdict() {
   round="$(pgwf_tracker_metadata_field "$id" wi_round)" || return 1
   round="${round:-0}"
 
-  pgwf_tracker_update "$id" "$actor" --set-metadata "wi_verdict_r${round}_${concern}=${compact}" >/dev/null
+  # bd rejects metadata keys outside ^[a-zA-Z_][a-zA-Z0-9_./]*$, so a concern
+  # name such as secondary-effects is keyed with every other character mapped
+  # to "_" (tc-2t7dc). The record's own "concern" field keeps the real name;
+  # `round` matches by the wi_verdict_r<round>_ prefix and `history` reads
+  # the concern back from the record, so neither needs the original key.
+  local key_concern="${concern//[^A-Za-z0-9_]/_}"
+  pgwf_tracker_update "$id" "$actor" --set-metadata "wi_verdict_r${round}_${key_concern}=${compact}" >/dev/null
 }
 
 # pgwf_cmd_round ID -- reads every verdict record-verdict recorded for the

@@ -62,7 +62,7 @@ Commands:
       open questions, round count, and the current holder.
 
   history ID
-      The verdict and round trail (metadata.wi_verdicts).
+      The verdict and round trail (wi_verdict_r<round>_<concern> records).
 
   duplicates ID
       Title/key-term duplicate candidates plus same-component related

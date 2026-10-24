@@ -162,6 +162,15 @@ write_workflow_config() {
   [[ "$line" == *'--set-metadata wi_verdict_r0_intent={"concern":"intent","verdict":"ready"}'* ]]
 }
 
+@test "record-verdict: maps a hyphenated concern to a bd-valid metadata key (tc-2t7dc)" {
+  show_fixture tc-1 '{"id":"tc-1","labels":[],"metadata":{}}'
+  echo '{"concern":"secondary-effects","verdict":"gaps"}' >"$TEST_DIR/verdict.json"
+  run pgwf_cmd_record_verdict tc-1 --concern secondary-effects --json "$TEST_DIR/verdict.json"
+  [ "$status" -eq 0 ]
+  line="$(grep '^update tc-1' "$MOCK_BD_LOG")"
+  [[ "$line" == *'--set-metadata wi_verdict_r0_secondary_effects={"concern":"secondary-effects","verdict":"gaps"}'* ]]
+}
+
 @test "record-verdict: refuses an unknown verdict value" {
   show_fixture tc-1 '{"id":"tc-1","labels":[],"metadata":{}}'
   echo '{"concern":"intent","verdict":"maybe"}' >"$TEST_DIR/verdict.json"

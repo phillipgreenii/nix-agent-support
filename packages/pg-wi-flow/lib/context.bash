@@ -924,9 +924,10 @@ pgwf_cmd_explain() {
 }
 
 # pgwf_cmd_history ID -- the verdict and round trail [design: ##
-# Components -> history row]. round/record-verdict is packet P3's scope;
-# under this phase's null workflow no round is ever recorded, so this
-# prints an empty trail -- the general mechanism (read whatever rounds
+# Components -> history row]. Prints a JSON array of every verdict
+# record-verdict stored (metadata keys wi_verdict_r<round>_<concern>), each
+# record plus its "round", ordered by round then concern; an item with no
+# recorded verdict prints [] -- the general mechanism (read whatever rounds
 # exist in metadata), not a null-workflow special case.
 pgwf_cmd_history() {
   local id="$1"
@@ -936,7 +937,14 @@ pgwf_cmd_history() {
   fi
   local item_json
   item_json="$(pgwf_tracker_show_json "$id")" || return 1
-  jq -c '.metadata.wi_verdicts // []' <<<"$item_json"
+  jq -c '
+    [(.metadata // {}) | to_entries[]
+      | (.key | capture("^wi_verdict_r(?<round>[0-9]+)_(?<concern>.*)$")?) as $k
+      | select($k != null)
+      | ((.value | if type == "string" then (. as $v | try fromjson catch {raw: $v}) else . end)
+          + {round: ($k.round | tonumber)})
+      | . + {concern: (.concern // $k.concern)}]
+    | sort_by([.round, .concern])' <<<"$item_json"
 }
 
 # pgwf_cmd_duplicates ID -- WI_DUPLICATES/WI_RELATED on their own [design:
