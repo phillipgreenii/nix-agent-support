@@ -286,7 +286,8 @@ Extensions:
 - The daemon is unreachable: `unavailable`, no acknowledgement, no movement of the position
   (`USECASE-GH-DAEMON-DOWN`).
 - The consumer reads the CI view with `ci changes`: the same flow over the
-  PR rows whose kinds include a CI change or a membership change, with its own key.
+  PR rows whose kinds include a CI change or a membership change, for a consumer whose one position
+  is bound to the `ci` view.
 
 ### `USECASE-GH-DIAGNOSE` — ask whether the daemon is healthy and why data is stale <!-- uuid: d1f29fbf-fadc-4d48-b085-1f8304992e97 -->
 

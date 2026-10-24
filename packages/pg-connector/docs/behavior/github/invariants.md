@@ -200,8 +200,12 @@ restated.
   exactly **one position**: the first poll of a consumer fixes the view (`pr` or `ci`) and the
   optional query filter that position is bound to, and a later call that names another view or
   another query MUST be refused (a `--reset` MAY rebind the query), so one consumer name never
-  keeps two independent positions. Calls for one consumer MUST be serialized. Every answer MUST
-  carry the daemon store's `store_identity`, which differs for a replaced store.
+  keeps two independent positions. A store that still holds several positions for one consumer
+  (from the time positions were kept per view and query) MUST be migrated to the one with the lowest
+  acknowledged position and MUST record the ones it dropped, so the consumer is never moved past a
+  row it has not acknowledged and the loss is visible. Calls for one consumer MUST be serialized.
+  Every `changes` and `changes_ack` answer MUST carry the daemon store's `store_identity`, which
+  differs for a replaced store.
 - **`INV-GH-CHG-7`** <!-- uuid: 248c0b20-cf19-41b8-a0b6-77bcc82e0942 --> — The **first poll** of a new key MUST start at the
   tail of the log, taken after the query's baseline exists (`INV-GH-CHG-2`), so neither a new key nor
   a cold store pushes every open PR to its consumer at once. `--reset` MUST replay the query's
@@ -223,11 +227,12 @@ restated.
   consumer of a PR query, and one CI event MUST cause one row, not one per feed. `ci changes`
   MUST offer the same rows in the CI view: the PR rows for members of Q
   whose kinds include `ci_changed`, `entered_query`, `left_query` or `removed`, each change's entity
-  the PR's current CI state with the row's own `version` and `head_sha`, with its own cursor key,
-  its own acknowledgement and the same retention, first-poll, `--cached`, `--reset` and
-  `cursor_expired:` rules. The daemon MUST refuse to create the key (C, `ci`, Q) while the key
-  (C, `pr`, Q) exists, and the reverse, with `invalid_argument` naming the existing key, so one
-  consumer never acts twice on one CI event.
+  the PR's current CI state with the row's own `version` and `head_sha`, with its own
+  acknowledgement and the same retention, first-poll, `--cached`, `--reset` and `cursor_expired:`
+  rules. Because a consumer holds exactly one position (`INV-GH-CHG-6`), the daemon MUST refuse a
+  poll of the `ci` view by a consumer whose position is bound to the `pr` view, and the reverse, with
+  `invalid_argument` naming the consumer's existing binding, so one consumer never acts twice on one
+  CI event.
 - **`INV-GH-CHG-11`** <!-- uuid: ea2d1e2e-e07d-4936-868d-d65580032c61 --> — The daemon MUST record, per configured query, the
   time of its last **whole-query** origin answer and its last error, and MUST return them on every
   forwarded `changes` answer as `sources_freshness[]`. A cache answer MUST NOT advance the time

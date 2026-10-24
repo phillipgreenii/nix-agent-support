@@ -86,8 +86,10 @@ Inheritance follows `INV-20`: where this set needs a different meaning it takes 
   the store (`INV-GH-CHG-3`). An **Aggregator** over one entity.
 - **Pending row** — the durable, not yet visible form of a change held by the settle rule; it
   merges later changes to the same entity and survives a crash (`INV-GH-CHG-3`).
-- **Cursor key** — the triple (consumer, kind, query) a consumer position is kept for
-  (`INV-GH-CHG-6`). `kind` is `pr` or `ci`.
+- **Cursor key** — the consumer name a consumer position is kept for (`INV-GH-CHG-6`). A consumer
+  holds exactly one position, bound by its first poll to a view (`pr` or `ci`) and to the optional
+  query filter that poll named; the view and the query are what the position is bound to, not part
+  of the key.
 - **Consumer position** — the log position a cursor key has acknowledged: the rows after it are the
   ones the next poll returns (`INV-GH-CHG-5`).
 - **Acknowledgement** — the explicit `changes_ack` that moves a consumer position to a `next_seq`,

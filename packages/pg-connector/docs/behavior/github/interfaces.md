@@ -92,8 +92,9 @@ served.
   position count for the key).
 - Each forwarded `changes` answer carries `sources_freshness[]`, one entry per configured query:
   the time of the last whole-query origin answer and the last error (`INV-GH-CHG-11`).
-- `changes_ack` carries `{consumer, query, next_seq}` (and the instance, which gives the cursor key's
-  kind).
+- `changes_ack` carries `{consumer, query, next_seq}` (and the instance, which names the view the
+  consumer's one position is bound to); its answer carries `store_identity` as every `changes` answer
+  does (`INV-GH-CHG-6`).
 
 ### Change kinds (catalog)
 
