@@ -2520,6 +2520,60 @@ func TestSafecmds_Tc_zo10s_FindDangerousFlags(t *testing.T) {
 	}
 }
 
+// TestSafecmds_FdExecFlags pins fd's exec-flag refusal: -x/-X/--exec/
+// --exec-batch run a program for every match (the same capability as find's
+// -exec), and that payload is not path-shaped, so the browsing zone check
+// cannot see it. Every spelling (separate, =-glued, glued value, clustered
+// short flag) and the xargs route must refuse; ordinary fd keeps approving.
+func TestSafecmds_FdExecFlags(t *testing.T) {
+	t.Parallel()
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	verdict := func(cmd string) hookio.RuleResult {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		return hookio.Verdict(r.Evaluate(input))
+	}
+	dangerous := []string{
+		`fd . -x rm -rf`,
+		`fd -X rm`,
+		`fd --exec rm`,
+		`fd --exec=rm`,
+		`fd --exec-batch rm`,
+		`fd --exec-batch=rm`,
+		`fd -e go -x wc -l`,
+		`fd -Hx rm`,
+		`fd -xrm`,
+		`fd -HIX rm`,
+		`echo . | xargs fd -x rm`,
+		`echo . | xargs fd --exec rm`,
+		`echo . | xargs fd -Hx rm`,
+	}
+	for _, cmd := range dangerous {
+		got := verdict(cmd)
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain (fd exec flag)", cmd, got.Decision, got.Reason)
+		}
+	}
+	// No exec flag: unchanged browsing treatment. `-ex` is `--extension x`
+	// (a value-taking short flag swallows the rest of its cluster), and a
+	// pattern that merely contains an x is not a flag.
+	safe := []string{
+		`fd -HI name`,
+		`fd -e go`,
+		`fd pattern src`,
+		`fd -ex`,
+		`fd -e x`,
+		`fd xargs`,
+		`echo . | xargs fd -HI name`,
+	}
+	for _, cmd := range safe {
+		got := verdict(cmd)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (no fd exec flag)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
 // TestSafecmds_Tc_zo10s_FindPatternFlagsNotPaths pins findPatternFlags: a
 // -name/-path/-iname/-ipath/-wholename/-iwholename/-regex/-iregex VALUE is a
 // PATTERN find matches against each walked entry's name, never a path find

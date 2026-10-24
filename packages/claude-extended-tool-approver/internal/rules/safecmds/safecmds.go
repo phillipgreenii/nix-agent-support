@@ -197,6 +197,10 @@ var alwaysSafe = map[string]bool{
 // read-only. find otherwise stays conceptually part of THIS pg2-4k7yd
 // decision (still metadata-only, still zone-checked); see findPathIssue's own
 // doc for the one deliberate widening beyond browsingPathIssue's check.
+//
+// "fd" stays here but is refused up front when it carries an exec flag
+// (-x/-X/--exec/--exec-batch, see fdExecFlag): those run a program for every
+// match, the same capability as find's -exec.
 var browsingCmds = map[string]bool{
 	"ls": true, "fd": true, "du": true, "stat": true, "file": true,
 	"lsof": true,
@@ -405,6 +409,11 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			continue
 		}
 		if browsingCmds[basename] {
+			if basename == "fd" {
+				if flag, dangerous := fdExecFlag(pc.Args); dangerous {
+					return r.refuse("safe-commands: fd " + flag + " runs a program for every match, so this is not a read-only invocation (deferred to claude-code)")
+				}
+			}
 			if issue := browsingPathIssue(pc.Args, pe); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
 			}
@@ -508,6 +517,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				continue
 			}
 			if browsingCmds[innerBase] {
+				// fd exec flags: mirrors the main loop's fd refusal above.
+				if innerBase == "fd" {
+					if flag, dangerous := fdExecFlag(innerArgs); dangerous {
+						return r.refuse("safe-commands: xargs fd " + flag + " runs a program for every match, so this is not a read-only invocation (deferred to claude-code)")
+					}
+				}
 				if issue := browsingPathIssue(innerArgs, pe); issue != "" {
 					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
 				}
@@ -1223,6 +1238,39 @@ func findDangerousFlag(args []string) (string, bool) {
 	for _, a := range args {
 		if findDangerousFlags[a] {
 			return a, true
+		}
+	}
+	return "", false
+}
+
+// fdValueShortFlags are fd's short flags that take a value; in a clustered or
+// glued short-flag argument everything after one of them is that flag's value,
+// not further flags (`-ex` is `--extension x`, not `-e -x`).
+const fdValueShortFlags = "dEetSocj"
+
+// fdExecFlag reports the first fd flag in args that runs a program for every
+// match: -x/--exec or -X/--exec-batch. It recognizes the separate, =-glued
+// (`--exec=rm`), glued-value (`-xrm`) and clustered (`-Hx`) spellings. Like
+// findDangerousFlag, presence alone disqualifies the whole invocation: the
+// command payload is opaque and not path-shaped, so browsingPathIssue cannot
+// see it. fd is otherwise a browsingCmds member and keeps that treatment.
+func fdExecFlag(args []string) (string, bool) {
+	for _, a := range args {
+		switch {
+		case a == "--exec" || strings.HasPrefix(a, "--exec="):
+			return "--exec", true
+		case a == "--exec-batch" || strings.HasPrefix(a, "--exec-batch="):
+			return "--exec-batch", true
+		case strings.HasPrefix(a, "--") || !strings.HasPrefix(a, "-"):
+			continue
+		}
+		for _, c := range a[1:] {
+			if c == 'x' || c == 'X' {
+				return "-" + string(c), true
+			}
+			if strings.ContainsRune(fdValueShortFlags, c) {
+				break
+			}
 		}
 	}
 	return "", false
