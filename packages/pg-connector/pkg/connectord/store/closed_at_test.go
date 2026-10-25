@@ -44,13 +44,13 @@ func rawEntities(t *testing.T, s *Store) []string {
 	return out
 }
 
-func TestLadderRung7IsNamedAndLast(t *testing.T) {
+func TestLadderRung7IsNamed(t *testing.T) {
 	ladder := BuiltinMigrations()
-	if len(ladder) != closedAtVersion || SchemaVersion != closedAtVersion {
-		t.Fatalf("the ladder has %d rungs and SchemaVersion = %d, want %d of each", len(ladder), SchemaVersion, closedAtVersion)
+	if len(ladder) < closedAtVersion || SchemaVersion < closedAtVersion {
+		t.Fatalf("the ladder has %d rungs and SchemaVersion = %d, want at least %d of each", len(ladder), SchemaVersion, closedAtVersion)
 	}
-	if last := ladder[closedAtVersion-1]; last.Version != closedAtVersion || last.Name != "entity closed-at" {
-		t.Errorf("last rung = %d %q, want %d %q", last.Version, last.Name, closedAtVersion, "entity closed-at")
+	if r := ladder[closedAtVersion-1]; r.Version != closedAtVersion || r.Name != "entity closed-at" {
+		t.Errorf("rung 7 = %d %q, want %d %q", r.Version, r.Name, closedAtVersion, "entity closed-at")
 	}
 	for _, part := range []string{
 		"ALTER TABLE entity ADD COLUMN closed_at INTEGER;",
@@ -129,8 +129,8 @@ func TestVersion7FixtureCarriesTheClosedEntity(t *testing.T) {
 	path := dbPath(t)
 	copyFile(t, fx, path)
 	s, res := mustOpen(t, path, fastOpts())
-	if res.Outcome != OutcomeOpened {
-		t.Fatalf("result = %+v, want opened", res)
+	if res.Outcome != OutcomeMigrated || res.FromVersion != closedAtVersion || res.ToVersion != SchemaVersion {
+		t.Fatalf("result = %+v, want migrated %d -> %d", res, closedAtVersion, SchemaVersion)
 	}
 	var kind, id string
 	if err := s.DB().QueryRow(`SELECT kind, id FROM entity WHERE closed_at IS NOT NULL`).Scan(&kind, &id); err != nil {

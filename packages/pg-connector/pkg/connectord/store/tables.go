@@ -188,10 +188,15 @@ ON CONFLICT (node_id) DO UPDATE SET ref = excluded.ref, seen_at = excluded.seen_
 	return nil
 }
 
+// aliasGetSQL is the statement getAlias runs for column or expression col.
+func aliasGetSQL(col string) string {
+	return `SELECT node_id, ref, seen_at FROM alias WHERE ` + col + ` = ? ORDER BY seen_at DESC LIMIT 1`
+}
+
 func (s *Store) getAlias(ctx context.Context, col, val string) (a AliasRow, ok bool, err error) {
 	var seen int64
 	err = s.db.QueryRowContext(ctx,
-		`SELECT node_id, ref, seen_at FROM alias WHERE `+col+` = ? ORDER BY seen_at DESC LIMIT 1`, val).
+		aliasGetSQL(col), val).
 		Scan(&a.NodeID, &a.Ref, &seen)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AliasRow{}, false, nil
@@ -216,21 +221,27 @@ func (s *Store) AliasByRef(ctx context.Context, ref string) (AliasRow, bool, err
 
 // AliasByRefFold is AliasByRef matching the reference case-insensitively (ASCII
 // folding, which covers GitHub owner and repository names), the most recently
-// seen row first. It does not use the alias_ref index; the table holds one row
-// per entity the daemon has seen, which is small enough for a scan.
+// seen row first. It reads the alias_ref_fold index (rung 8, an index on
+// lower(ref)), so it does not scan the table; the SQL MUST keep the exact
+// expression lower(ref) for the planner to use it.
 func (s *Store) AliasByRefFold(ctx context.Context, ref string) (AliasRow, bool, error) {
-	return s.getAlias(ctx, "lower(ref)", strings.ToLower(ref))
+	return s.getAlias(ctx, aliasFoldedRefExpr, strings.ToLower(ref))
 }
+
+// aliasFoldedRefExpr is the indexed expression of alias_ref_fold (rung 8). Every
+// fold lookup spells it this way; a different spelling would not match the index.
+const aliasFoldedRefExpr = "lower(ref)"
 
 // aliasFoldChunk bounds the references one AliasesByRefFold statement binds, to
 // stay well under SQLite's bound-variable limit.
 const aliasFoldChunk = 500
 
 // AliasesByRefFold is AliasByRefFold for many references at once: it answers
-// them with one table scan per aliasFoldChunk references instead of one scan per
-// reference. The result is keyed by the ASCII-lower-cased reference; a reference
-// with no alias is absent, and one carried by several node ids maps to the most
-// recently seen row, exactly as AliasByRefFold would answer it.
+// them with one statement per aliasFoldChunk references (index lookups on
+// alias_ref_fold, no table scan) instead of one statement per reference. The
+// result is keyed by the ASCII-lower-cased reference; a reference with no alias
+// is absent, and one carried by several node ids maps to the most recently seen
+// row, exactly as AliasByRefFold would answer it.
 func (s *Store) AliasesByRefFold(ctx context.Context, refs []string) (map[string]AliasRow, error) {
 	out := make(map[string]AliasRow, len(refs))
 	want := make([]string, 0, len(refs))
@@ -252,14 +263,20 @@ func (s *Store) AliasesByRefFold(ctx context.Context, refs []string) (map[string
 	return out, nil
 }
 
+// aliasesByFoldedRefsSQL is the statement aliasesByFoldedRefs runs for n folded
+// references (n >= 1).
+func aliasesByFoldedRefsSQL(n int) string {
+	return `SELECT node_id, ref, seen_at FROM alias WHERE ` + aliasFoldedRefExpr + ` IN (?` +
+		strings.Repeat(",?", n-1) + `)
+ORDER BY seen_at DESC`
+}
+
 func (s *Store) aliasesByFoldedRefs(ctx context.Context, folded []string, out map[string]AliasRow) error {
 	args := make([]any, len(folded))
 	for i, f := range folded {
 		args[i] = f
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT node_id, ref, seen_at FROM alias WHERE lower(ref) IN (?`+strings.Repeat(",?", len(folded)-1)+`)
-ORDER BY seen_at DESC`, args...)
+	rows, err := s.db.QueryContext(ctx, aliasesByFoldedRefsSQL(len(folded)), args...)
 	if err != nil {
 		return fmt.Errorf("store: get aliases by folded refs: %w", err)
 	}

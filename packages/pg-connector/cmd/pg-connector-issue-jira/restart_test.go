@@ -279,13 +279,12 @@ func TestRestartMigratesAnOlderStoreKeepingItsDataAndABackup(t *testing.T) {
 		t.Fatalf("exit = %d; output: %s", code, d.Stderr())
 	}
 
-	// Take the last rung back off: the entity's closed-at stamp, and the version
-	// that says it was applied.
+	// Take the last rung back off: the alias folded-reference index, and the
+	// version that says it was applied.
 	w := d.WritableStore(t)
 	for _, stmt := range []string{
-		`DROP INDEX entity_closed_at`,
-		`ALTER TABLE entity DROP COLUMN closed_at`,
-		`PRAGMA user_version = 6`,
+		`DROP INDEX alias_ref_fold`,
+		`PRAGMA user_version = 7`,
 		`PRAGMA wal_checkpoint(TRUNCATE)`,
 	} {
 		if _, err := w.Exec(stmt); err != nil {
@@ -298,12 +297,12 @@ func TestRestartMigratesAnOlderStoreKeepingItsDataAndABackup(t *testing.T) {
 
 	d.Shim.ClearCalls()
 	d.Start(t)
-	if backups, _ := filepath.Glob(d.StorePath() + ".pre-schema-6-*"); len(backups) == 0 {
+	if backups, _ := filepath.Glob(d.StorePath() + ".pre-schema-7-*"); len(backups) == 0 {
 		t.Error("the migration of a populated store left no verified backup")
 	}
 	var version int
-	if err := d.OpenStore(t).QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 7 {
-		t.Errorf("schema version after the start = %d (%v), want 7", version, err)
+	if err := d.OpenStore(t).QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 8 {
+		t.Errorf("schema version after the start = %d (%v), want 8", version, err)
 	}
 	invoke(t, b, `{"op":"show","args":{"id":"EXA-1"}}`).wantResult(t, "show from the migrated store", schema.IssueSchemaVersion)
 	if migrated := servetest.HasChange(d.DaemonLog(t), "store_migrated"); !migrated {

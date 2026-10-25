@@ -85,12 +85,12 @@ func TestStoreFixtureV3_ServesAChangesPollWithTheSameAnswerAsBeforeTheLaterRungs
 	servesTheV3Answer(t, v3FixturePath, os.Getenv(updateExpectationsEnv) != "")
 }
 
-// TestStoreFixturesV4ToV7_ServeTheSameAnswerAsTheV3Store opens each later
+// TestStoreFixturesV4ToV8_ServeTheSameAnswerAsTheV3Store opens each later
 // committed fixture of the store package through the daemon's open path and
 // compares the answer with the version 3 one: a rung leaves the GitHub scenario
 // unchanged (the store identity and schema-version fields are normalised).
-func TestStoreFixturesV4ToV7_ServeTheSameAnswerAsTheV3Store(t *testing.T) {
-	for v := 4; v <= 7; v++ {
+func TestStoreFixturesV4ToV8_ServeTheSameAnswerAsTheV3Store(t *testing.T) {
+	for v := 4; v <= 8; v++ {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
 			servesTheV3Answer(t, fmt.Sprintf("%s/v%d.sqlite3", fixtureDirPath, v), false)
 		})

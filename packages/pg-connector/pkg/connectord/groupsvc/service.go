@@ -212,9 +212,10 @@ func (s *Service) members(ctx context.Context) (map[string]bool, error) {
 	}
 	set := map[string]bool{}
 	// References are resolved together, in one alias read: a lookup by reference
-	// can cost a scan of the table, so a canonical() per member would cost one scan
-	// each on every call. A reference that does not parse or is not known names no
-	// entity and is left out, as canonical reports it.
+	// is an index read per statement (alias_ref_fold, rung 8), so one batched read
+	// replaces a canonical() statement per member on every call. A reference that
+	// does not parse or is not known names no entity and is left out, as canonical
+	// reports it.
 	var refs []string
 	seen := map[string]bool{}
 	for _, q := range qs {

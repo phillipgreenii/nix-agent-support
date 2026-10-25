@@ -53,7 +53,7 @@ func TestLadderPinsTheRungNamesByIndex(t *testing.T) {
 }
 
 // TestLadderFinalRungNamesAndOrder is the exact final list of the ladder, in
-// order (rung 7, entity closed-at, is the last rung): a later consumer that needs
+// order (rung 8, alias folded-ref index, is the last rung): a later consumer that needs
 // a rung adds it with a new ladder step and edits this list with it.
 func TestLadderFinalRungNamesAndOrder(t *testing.T) {
 	want := []string{
@@ -64,6 +64,7 @@ func TestLadderFinalRungNamesAndOrder(t *testing.T) {
 		"watched flag and log snapshot",
 		"consumer cursor per consumer",
 		"entity closed-at",
+		"alias folded-ref index",
 	}
 	var got []string
 	for i, m := range BuiltinMigrations() {

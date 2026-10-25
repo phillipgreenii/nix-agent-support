@@ -12,7 +12,7 @@ import (
 
 // SchemaVersion is the newest schema version this binary knows. A store
 // above it is refused (ErrSchemaNewer); a store below it is migrated up.
-const SchemaVersion = 7
+const SchemaVersion = 8
 
 // builtinMigrations is the ladder; len(builtinMigrations) == SchemaVersion
 // (asserted by a test). A migration, once shipped, MUST NOT change: add a
@@ -25,6 +25,7 @@ var builtinMigrations = []Migration{
 	{Version: 5, Name: "watched flag and log snapshot", Apply: migrateV5},
 	{Version: 6, Name: "consumer cursor per consumer", Apply: migrateV6},
 	{Version: 7, Name: "entity closed-at", Apply: migrateV7},
+	{Version: 8, Name: "alias folded-ref index", Apply: migrateV8},
 }
 
 // BuiltinMigrations returns a copy of the built-in ladder. A caller that wants
@@ -389,6 +390,27 @@ func migrateV7(tx *sql.Tx, report func(string)) error {
 	report("adding the entity closed-at stamp")
 	if _, err := tx.Exec(schemaV7); err != nil {
 		return fmt.Errorf("create version 7 schema: %w", err)
+	}
+	return nil
+}
+
+// schemaV8 adds the expression index the case-insensitive alias lookups read.
+//
+//   - alias_ref_fold: an index on lower(ref). AliasByRefFold and AliasesByRefFold
+//     match `lower(ref) = ?` and `lower(ref) IN (...)`; without an index on that
+//     exact expression SQLite scans the whole alias table for every statement
+//     (the alias_ref index is on ref, which `lower(ref)` cannot use). The
+//     queries MUST spell the expression exactly as below for the planner to use
+//     the index. It is an index only: no column or row changes, so no data
+//     moves.
+const schemaV8 = `
+CREATE INDEX alias_ref_fold ON alias (lower(ref));
+`
+
+func migrateV8(tx *sql.Tx, report func(string)) error {
+	report("indexing the alias table by folded reference")
+	if _, err := tx.Exec(schemaV8); err != nil {
+		return fmt.Errorf("create version 8 schema: %w", err)
 	}
 	return nil
 }

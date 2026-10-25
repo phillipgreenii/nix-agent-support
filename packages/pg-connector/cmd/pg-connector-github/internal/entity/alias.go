@@ -17,7 +17,7 @@ type AliasStore interface {
 	AliasByRefFold(ctx context.Context, ref string) (store.AliasRow, bool, error)
 	// AliasesByRefFold answers many references in one read (keyed by the
 	// lower-cased reference); a caller with a list uses it, never a loop of
-	// AliasByRefFold, which scans the table once per call.
+	// AliasByRefFold, which costs one statement per call.
 	AliasesByRefFold(ctx context.Context, refs []string) (map[string]store.AliasRow, error)
 }
 
@@ -88,7 +88,7 @@ type KnownAlias struct {
 }
 
 // NodeIDs is NodeID for many references at once, in one batched read of the
-// alias table instead of one scan per reference. The result is keyed by
+// alias table instead of one statement per reference. The result is keyed by
 // Ref.Key (the case-folded reference); a reference the table does not know is
 // absent.
 func (i *Identity) NodeIDs(ctx context.Context, refs []Ref) (map[string]KnownAlias, error) {
