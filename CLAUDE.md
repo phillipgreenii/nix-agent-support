@@ -168,31 +168,67 @@ log sources and dashboard follow `observability.enable` alone. Checks:
 escalated to a bead unless its uid is also registered with `pg-router-probe`
 (`docs/investigations/2026-10-19-pg-connector-github-daemon-down-alert.md`).
 
-The Jira daemon (docket `pg2-2qyyh.2`) is the sibling: `phillipgreenii.programs.pg-connector.jira`
-renders `pg-connector-issue-jira-config.json` (queries copied from `backends.<instance>.queries`, so
-a query is declared once; `pjiraPath` is a REQUIRED absolute path, asserted) and registers
-`pg-connector-issue-jira-daemon` (label `com.phillipg.pg-connector-issue-jira-daemon`, state directory
-`pg-connector-issue-jira-daemon`) through the same registry. Unlike GitHub's, its registry rewrite is
-DEPLOY-GATED: `jira.registry.rewrite` is false by default, so enabling the daemon changes nothing the
-umbrella reads until a later phase sets it, and a host MUST NOT set it before then. Checks:
-`test-pg-connector-issue-jira-hm-launchd` (`tests/pg-connector-issue-jira-hm-launchd.nix`, which runs
-the entry under `env -i` against a fake binary), `test-pg-connector-home-rendering` and
-`test-pg-connector-issue-jira-daemon-capabilities`.
+### pg-connector-issue-jira daemon (`phillipgreenii.programs.pg-connector.jira`)
 
-The Jira daemon's alert rules (`packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml`,
-ten `pg-conn-jira-*` uids; the old `issue-jira-alerts.yaml` stays until a cleanup) have a `deleteRules:` twin
-(`pg-connector-issue-jira-daemon-alerts-delete.yaml`) for a machine without the daemon, promtool tests under
-`grafana/alerting/rule-tests/`, logcli fixtures for the four Loki rules under `rule-tests/loki/`, and the checks
-`test-pg-connector-issue-jira-alert-rules`, `-alert-structure` and `-metrics-catalog`. The ten uids are in the
-router probe's built-in `registeredRuleUIDs`, but a deployment that passes its own `--rule-uid` list REPLACES that
-list, so the deployment's list MUST be extended too.
+The Jira daemon (docket `pg2-2qyyh.2`) is the sibling of the GitHub daemon above: a long-lived process that owns
+the Jira store, the origin budget and the change feed, with the umbrella's backend entry becoming its thin client.
+Its binary modes, op catalog, config keys and operational notes are in `packages/pg-connector/README.md` ("The
+Jira daemon"). This phase has NO shadow harness and NO shadow run (operator ruling, 2026-10-24): the daemon was
+built as the primary, replaces the old stateless Jira backend and is tested as primary after the deploy; the
+fix is forward, there is no rollback path to look for.
 
-`darwin/modules/pg-connector-issue-jira-daemon` registers the daemon's three exact-path log sources
-(`events.jsonl`, `daemon.log.jsonl`, `client.log.jsonl` under `$XDG_STATE_HOME/pg-connector-issue-jira-daemon`,
-generic `errorAlert` off on each) with `observability.enable`, and lists the alerts file only while some
-`home-manager.users.<u>` sets `jira.enable` (the `deleteRules:` twin otherwise). It sits beside the old
-`darwin/modules/pg-connector-issue-jira`, which stays untouched until the cleanup. Check:
-`test-pg-connector-issue-jira-daemon-darwin-module`.
+**Options** (`home/programs/pg-connector/default.nix`, all under `phillipgreenii.programs.pg-connector.jira`):
+`enable` (off), `package`, `supervisor` (`launchd` on darwin, else `none`), `allowUnsupervised` (false),
+`pprof.enable` (true), `instance` (`pg-connector-issue-jira`), `pjiraPath` (REQUIRED absolute path, asserted: launchd
+supplies no `PATH`), `pjiraEnvironment` (the ONLY environment every `pjira` process gets), `registry.rewrite` (false),
+`settings` (daemon keys merged into the rendered file) and the read-only `configFile` and `configHash`. The rendered
+file is the store file `pg-connector-issue-jira-config.json`; its queries are copied from
+`backends.<instance>.queries`, so a query is declared once.
+
+**Launchd and state.** The entry is `pg-connector-issue-jira-daemon`, label `com.phillipg.pg-connector-issue-jira-daemon`,
+KeepAlive and RunAtLoad, whose whole command is `exec <pkg>/bin/pg-connector-issue-jira --config <file> serve`. The state
+directory is `~/.local/state/pg-connector-issue-jira-daemon` (it MUST differ from the old backend's
+`pg-connector-issue-jira`, which keeps the old event log until the cleanup); it holds the store, the socket, the lock, the
+three logs, the launchd stdout and stderr files and, while `pprof.enable`, `pprof.sock`.
+
+**Logs.** Three exact-path JSONL files under the state directory, each with its own Loki `service_name`:
+`events.jsonl` (`pg-connector-issue-jira-daemon`), `daemon.log.jsonl` (`pg-connector-issue-jira-daemon`) and
+`client.log.jsonl` (`pg-connector-issue-jira-daemon-client`). `darwin/modules/pg-connector-issue-jira-daemon` registers
+the three sources with `observability.enable`, with the generic `errorAlert` off on each. A glob over the directory MUST
+NOT replace them: it would label the client log with the daemon's name.
+
+**Alerts.** `packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml` holds ten rules
+(`pg-conn-jira-daemon-down`, `-query-stale`, `-consumer-stuck`, `-settle-holding`, `-tracked-over`, `-rows-no-kind`,
+`-store-aside`, `-auth-failing`, `-unavailable`, `-rate-limited`) with promtool tests under `grafana/alerting/rule-tests/`
+and logcli fixtures for the four Loki rules under `rule-tests/loki/`. Its twin
+`pg-connector-issue-jira-daemon-alerts-delete.yaml` is a `deleteRules:`-only file for exactly those ten uids. The rules
+are registered ONLY while some `home-manager.users.<u>` sets `jira.enable` (the daemon-down rule alerts on no data, so a
+host without the daemon would fire forever; Grafana also keeps a file-provisioned rule live after its file is dropped, so
+the twin is registered instead). The two files MUST never be loaded together. The ten uids are in the router probe's
+built-in `registeredRuleUIDs`; a deployment that passes its own `--rule-uid` list REPLACES that list, so the deployment's
+list MUST be extended with them. The old `issue-jira-alerts.yaml`, the old darwin module
+`darwin/modules/pg-connector-issue-jira` and the old log stay untouched until the cleanup.
+
+**Registry rewrite.** `jira.registry.rewrite` is the deploy gate and is OFF by default: while it is false, enabling the
+daemon changes nothing the umbrella reads (the rendered registry, the backends block and the agents stay byte-identical).
+Setting it (with a supervisor, or `allowUnsupervised`) rewrites every registry list entry named `instance` to
+`[pg-connector-issue-jira, --config, <configFile>, --instance, <instance>]` and stamps the umbrella block with the config
+hash and path. A host MUST NOT set it before the cutover phase.
+
+**Checks** (build one with `nix build .#checks.<system>.<name>`, in the background): `pg-connector-go-tests` (the whole
+module, including the Linux cross-compile gate), `test-pg-connector-issue-jira-hm-launchd`
+(`tests/pg-connector-issue-jira-hm-launchd.nix`, which also runs the entry under `env -i` against a fake binary),
+`test-pg-connector-home-rendering`, `test-pg-connector-issue-jira-daemon-capabilities`,
+`test-pg-connector-issue-jira-daemon-darwin-module`, `test-pg-connector-issue-jira-alert-rules`,
+`test-pg-connector-issue-jira-alert-structure` and `test-pg-connector-issue-jira-metrics-catalog`.
+
+**Stubbing rules for its eval tests** (the GitHub daemon's, unchanged). Any eval test that loads the pg-connector module
+with `enable = true` MUST stub `assertions`, `warnings` and `home.homeDirectory`, and MUST stub `home.file` where the
+module writes it. The launchd registry is stubbed with the shared `tests/launchd-registry-stub.nix`. A test MUST present
+the platform explicitly, and the attribute-level gate is the registry option's DECLARATION
+(`options.phillipgreenii.programs ? launchdServices`), never `pkgs.stdenv.hostPlatform.isDarwin`: `pkgs` can be a
+`_module.args` value, and choosing attribute names from it is infinite recursion. The platform gates the entry's VALUE
+(`mkIf`) and the assertion.
 
 ### pg-keep-awake keeper (`phillipgreenii.programs.pg-keep-awake`)
 

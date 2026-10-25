@@ -367,18 +367,9 @@ auth failure, sustained `unavailable` (excluding throttling) and repeated 429s. 
 NO remaining-budget alert: the backend reads no Jira quota figure, header or `Retry-After`, so the 429
 itself is the only quota signal it can see.
 
-`pg-connector-issue-jira --config <file> --instance <name>` is the daemon's client mode, the thin
-scriptout backend the umbrella execs. `capabilities` is answered without the daemon (it declares
-`owns_changes`, `cache_opt_out` and `queries.<name>.watched`), the five writes (`create`, `comment`,
-`transition`, `update`, `close`) run in the calling process under the caller's own environment and
-send the daemon the `write_begin` and `invalidate` notices around each (bounded by
-`write_notice_timeout`; a write never depends on the daemon), and every other op is forwarded over
-the socket. A read with the daemon down answers `unavailable` (naming the socket, the supervisor and
-its restart hint) or, while the daemon migrates, `unavailable` beginning `migrating:`; a caller MUST
-treat it as retryable. `pg-connector-issue-jira --config <file> status [--json]` prints the health
-report (exit 0 healthy, 2 degraded, 3 down; the static report when the daemon is down). An
-`--instance` that differs from the config's instance exits 4. With no `--config` the binary stays
-the old stateless backend.
+The daemon behind `pg-connector-issue-jira --config <file>` (serve, client and status modes) is described in
+"The Jira daemon (pg-connector-issue-jira)" below. With no `--config` the binary stays the old stateless backend that
+the paragraph above describes.
 
 `pg-connector-issue-beads` follows the same pattern: it appends to
 `${XDG_STATE_HOME}/pg-connector-issue-beads/events.jsonl` (override with
@@ -438,6 +429,126 @@ MUST allow the key: `pg-connector-github`'s `internal/config/config.go` uses `Di
 The writer mechanics the backends share (the common event fields, size-based rotation, the path
 rule, call timing) live in `pkg/eventlog`; each backend still owns its log path, its event shape and
 its alert rules. Other external-service connectors are expected to follow the same pattern.
+
+## The Jira daemon (pg-connector-issue-jira)
+
+`pg-connector-issue-jira` is a daemon-backed backend (docket `pg2-2qyyh.2`). One long-lived process owns a SQLite
+store of Jira issues, a request budget on the origin tool (`pjira`) and the change feed; the binary the umbrella execs
+is the thin client of that process. Like the GitHub daemon it has no shadow harness and no shadow run: it is built as
+the primary and replaces the old stateless Jira backend at the cutover. The home-manager options, the launchd entry,
+the alerts and the checks are in the repository's `CLAUDE.md`
+("pg-connector-issue-jira daemon (`phillipgreenii.programs.pg-connector.jira`)").
+
+### The modes of the binary
+
+| Invocation                                                | Mode                                                                                                                                           |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pg-connector-issue-jira --config <file> serve`           | The daemon. Takes the single-instance lock, opens the socket, opens and migrates the store, then serves until SIGTERM (a drain).               |
+| `pg-connector-issue-jira --config <file> --instance <n>`  | The client the umbrella execs: one request on stdin, one response on stdout.                                                                   |
+| `pg-connector-issue-jira --config <file> status [--json]` | The health report. Exit 0 healthy, 2 degraded, 3 down (the static report is printed when the daemon is down).                                  |
+| `pg-connector-issue-jira` with no `--config`              | The old stateless backend, unchanged, kept until the registry flip. Any other argument without `--config` is ignored by it, exactly as before. |
+
+`--version` and `--help` work in every form. An `--instance` that differs from the config's `instance`, and a config
+that cannot be loaded, exit 4; a `serve` that refuses to start (lock held, socket path too long, store newer than the
+binary) exits 5; any other `--config` form is a usage error (exit 2).
+
+The client answers `capabilities` itself from compiled-in values plus the config, never from the daemon (the umbrella
+fails open when `capabilities` fails, so a forwarded call to a down daemon would silently re-enable its cache). The
+answer declares `owns_changes`, `cache_opt_out`, the state and priority vocabularies, `activity_kinds` and `queries`
+(an object from each configured query name to `{"watched": <bool>}`). The five writes (`create`, `comment`,
+`transition`, `update`, `close`) run in the calling process, under the caller's own environment, so a writer keeps
+working while the daemon is down; around each one the client sends the daemon the two notices `write_begin` and
+`invalidate`, each bounded by `write_notice_timeout`, and a notice never fails a write. Every other op is forwarded over
+the socket. A forwarded op with the daemon down answers `unavailable` naming the socket, the supervisor and its restart
+hint (and appends a `daemon_unreachable` row to the client log); while the daemon migrates it answers `unavailable`
+beginning `migrating:`. A caller MUST treat `unavailable` as retryable.
+
+### The op catalog
+
+The daemon registers these ops under the router instance `issue`:
+
+| Op                                    | What it does                                                                                                                                                                                       |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `show`                                | One issue from the store with read-through freshness. Args `{id, fresh?, watch?}`; `watch: true` watches the issue as a one-off. Annotated with `served_from`, `stale`, `age_seconds`, `groups[]`. |
+| `list`                                | A configured query's stored members (`{query, cursor?, ids_only?}`); the name must be one the daemon's own config defines, else `query_not_recognized`.                                            |
+| `children`, `search`, `list_activity` | Live pass-through reads through the governor; nothing they return is stored.                                                                                                                       |
+| `deps`                                | The old backend's existence check followed by an empty result. Registered although the behavior docs' op catalog does not list it, because pg-desk's hydration calls it.                           |
+| `auth_status`                         | The origin tool's authentication state.                                                                                                                                                            |
+| `changes`, `changes_ack`              | The change feed (view `issue`): `{consumer, query?, next_seq}`; one cursor per consumer, delivery by the watched flag, `cursor_expired:` when a position is outside retention.                     |
+| `write_begin`, `invalidate`           | The write notices (`{id}` or `{instance}`): a per-entity hold bounded by `write_lease`, so no refresh begun before or during a write can store older content.                                      |
+| `explain`                             | Why one issue is stale or silent, from the store and scheduler alone (no origin call).                                                                                                             |
+| `status`                              | The health report (the same document the status mode prints).                                                                                                                                      |
+
+The five writes and `capabilities` are the client's own.
+
+A change row has a `change` word (`added`, `removed` or `changed`), the delivered entity (the summary-level issue as
+stored now, with `version` set to the row's OWN version), a `seq`, the `kinds` and the `fields` changed. The kinds are
+`closed`, `reopened`, `status_changed`, `assignee_changed`, `priority_changed`, `labels_changed`, `parent_changed`,
+`title_changed`, `description_changed`, `deps_changed`, `comments_changed`, `renamed`, `removed`, `fields_changed` (the
+catch-all, which names its fields) and the first-observation kind `added`; `entered_query` and `left_query` are
+membership words, never stored rows. Every `changes` and `changes_ack` answer carries `store_identity`, which differs
+after the store is replaced, so a consumer MUST key its redelivery marker on it as well as on `seq`.
+
+### Config keys and defaults
+
+The file is rendered by the home-manager module (`jira.settings` merges extra keys; an unknown key fails the load and
+names it). The daemon reads NO environment variable except the opt-in profiler address. `state_dir` and `pjira_path`
+have no default and MUST be absolute.
+
+| Key                       | Default                                       | Meaning                                                                       |
+| ------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------- |
+| `state_dir`               | none (required)                               | The state directory.                                                          |
+| `socket_path`             | `<state_dir>/sock`                            | The unix socket.                                                              |
+| `pjira_path`              | none (required)                               | Absolute path of `pjira`.                                                     |
+| `pjira_env`               | `{}`                                          | The ONLY environment every `pjira` process gets.                              |
+| `instance`                | `pg-connector-issue-jira`                     | The registry name of the backend.                                             |
+| `supervisor_label`        | `com.phillipg.pg-connector-issue-jira-daemon` | The launchd label shown in a down report.                                     |
+| `otel_endpoint`           | unset (no export)                             | OpenTelemetry endpoint.                                                       |
+| `queries`                 | `{}`                                          | Name to a JQL string, a list of them, or `{expr, watched}`; none is built in. |
+| `request_rate_per_second` | 2                                             | Cap of the one `requests` bucket (one-second window, 0.9 background share).   |
+| `concurrency`             | 2                                             | Concurrent `pjira` processes.                                                 |
+| `default_pause`           | 60s                                           | Pause after a 429 that states no `Retry-After` (doubles with jitter).         |
+| `write_notice_timeout`    | 500ms                                         | Bound of each write notice.                                                   |
+| `write_lease`             | 30s                                           | Longest hold a `write_begin` takes.                                           |
+| `summary_ttl`             | 60s                                           | Freshness of the summary group.                                               |
+| `detail_ttl`              | 10m                                           | Freshness of the detail group.                                                |
+| `detail_max_age`          | 30m                                           | Longest the detail group is served stale.                                     |
+| `query_ttl_default`       | 120s                                          | Query freshness; `query_ttl.<name>` overrides it per query.                   |
+| `terminal_ttl`            | 24h                                           | An issue is refreshed until this long after it closes.                        |
+| `expiry`                  | 168h (7 days)                                 | An issue is evicted this long after it closes.                                |
+| `tracked_set_alert_size`  | 55                                            | The tracked-set size the alert fires over.                                    |
+| `settle_timeout`          | 30s                                           | How long a change waits for its groups before it is recorded anyway.          |
+| `change_log_retention`    | 336h (14 days)                                | How long change rows are kept.                                                |
+| `consumer_stale_after`    | 168h (7 days)                                 | A cursor not seen for this long is dropped.                                   |
+| `change_body_cap`         | 4 KiB                                         | Cap of a recorded change body.                                                |
+| `fill_horizon`            | `summary_ttl`                                 | A short batch is topped up with entries due within this horizon.              |
+| `batch_size`              | 74                                            | Issues per background `pjira` search.                                         |
+| `workers`                 | `concurrency`                                 | Scheduler workers.                                                            |
+
+Durations are Go duration strings. The state directory holds `store.sqlite`, `sock`, `daemon.lock`, `events.jsonl`,
+`daemon.log.jsonl` and `client.log.jsonl`. The profiler is off unless `PG_CONNECTOR_ISSUE_JIRA_PPROF_ADDR` is set (the
+launchd entry sets it to `<state_dir>/pprof.sock` unless `jira.pprof.enable` is false).
+
+### Operational notes
+
+- **Read before you watch.** A query declared `watched` marks its members watched. Its first complete run is a baseline
+  (the members become watched, no row is appended); every later member is one `added` row. A query flipped from
+  unwatched to watched therefore emits one `added` row per member already known to be open (the late-watch burst), so
+  read the known open members of a query (`list`) BEFORE flipping it, and be ready for that burst on the feed.
+- **A moved-aside store loses flags and baselines.** A corrupt store, or one whose migration fails, is moved aside with a
+  timestamp and the daemon starts empty; a store newer than the binary is refused (exit 5) and left untouched. Nothing
+  restores watched flags: the members of a watched query become watched again at that query's next run, as a baseline
+  run, and a one-off `watch` is not restored. The store identity changes, so every cursor's first poll answers
+  `cursor_expired:`.
+- **`pjira` needs an absolute path and its own environment.** The daemon execs `pjira` ONLY by the absolute `pjira_path`
+  and gives it ONLY `pjira_env`: launchd supplies no `PATH`, and the daemon never inherits the process environment, so
+  anything `pjira` needs (a credential or config location) MUST be in `pjira_env`. The client's writes are the
+  opposite: they run under the CALLER's environment.
+- **Budget.** The request rate and concurrency are internal and conservative; `pjira` surfaces no rate-limit header, so
+  the only quota signal is a 429, which pauses background work (interactive calls made during the pause are refused,
+  and stored content is served stale where there is some).
+- **Closed issues.** An issue is stamped closed when it reaches the done status category, is refreshed until
+  `terminal_ttl` after that and evicted `expiry` after it (the flag goes with it); a reopen clears the stamp.
 
 ## Profiling (pg-connector-github)
 
