@@ -802,6 +802,17 @@ func TestNew_RecordingChangesNeedsTheMembershipRoles(t *testing.T) {
 	}
 }
 
+func TestNamesAndWatched_ComeFromTheSettings(t *testing.T) {
+	r := newRig(t)
+	got := r.runner.Names()
+	if len(got) == 0 || !slices.IsSorted(got) || !slices.Equal(got, r.runner.cfg.Settings.Names()) {
+		t.Errorf("Names() = %v, want the settings' names, sorted and not empty", got)
+	}
+	if r.runner.Watched("nope") {
+		t.Error("an unknown name must not be watched")
+	}
+}
+
 func TestExprAndTTL_ComeFromTheSettings(t *testing.T) {
 	r := newRig(t)
 	if e, ok := r.runner.Expr("team"); !ok || !slices.Equal(e, []string{exprTeamOpen, exprTeamSecond}) {

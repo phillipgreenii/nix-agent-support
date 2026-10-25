@@ -206,6 +206,14 @@ func (r *Runner) fold(ref string) string {
 // connector's own settings do not define it.
 func (r *Runner) Expr(name string) ([]string, bool) { return r.cfg.Settings.Expr(name) }
 
+// Names lists the configured query names, sorted, as the connector's own
+// settings define them.
+func (r *Runner) Names() []string { return r.cfg.Settings.Names() }
+
+// Watched reports whether the configured query name is a watched one; false for
+// a name the settings do not define.
+func (r *Runner) Watched(name string) bool { return r.cfg.Settings.Watched(name) }
+
 // TTL is how long a stored result of key stays fresh.
 func (r *Runner) TTL(key Key) time.Duration { return r.cfg.Settings.TTL(key) }
 
