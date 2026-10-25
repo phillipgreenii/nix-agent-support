@@ -1,0 +1,28 @@
+[
+  {
+    "call": "{\"args\":{\"consumer\":\"example-consumer\",\"next_seq\":0,\"query\":\"mine\"},\"op\":\"changes_ack\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 11,
+      "result": {
+        "consumer": "example-consumer",
+        "query": "mine",
+        "acked_seq": 0,
+        "store_identity": "example-store-identity"
+      }
+    }
+  },
+  {
+    "call": "{\"args\":{\"consumer\":\"example-consumer\",\"next_seq\":1,\"query\":\"mine\"},\"op\":\"changes_ack\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 11,
+      "result": {
+        "consumer": "example-consumer",
+        "query": "mine",
+        "acked_seq": 1,
+        "store_identity": "example-store-identity"
+      }
+    }
+  }
+]

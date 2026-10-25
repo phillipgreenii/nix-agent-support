@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/serve"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/servetest"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -30,6 +31,7 @@ func TestMain(m *testing.M) {
 	}
 	code := m.Run()
 	removeBuilds()
+	servetest.RemoveBuilds()
 	os.Exit(code)
 }
 
@@ -288,5 +290,101 @@ func TestRealServeOpensTheProfilingListenerOnlyWhenTheVariableIsSet(t *testing.T
 	}
 	if !strings.Contains(stderr.String(), "pprof listening on 127.0.0.1:") {
 		t.Errorf("want the pprof listening line on stderr, got %q", stderr.String())
+	}
+}
+
+// ---- the assembled daemon as a real child, with a fake origin -----------------
+
+// A write performed with the daemon running is bracketed by the two notices: the
+// daemon has seen write_begin by the time the origin tool runs, and invalidate
+// only after it ended. The shim holds the write's own pjira call, so the daemon
+// is inspected while the write is in the air.
+func TestServedWriteNoticesBracketTheOriginCall(t *testing.T) {
+	d := servetest.StartDaemon(t, servetest.Options{Hooks: "poll_interval=50ms", Before: func(d *servetest.Daemon) {
+		d.Shim.SetIssues(servetest.MineJQL, servetest.Open("EXA-1"))
+	}})
+	t.Cleanup(d.Shim.Release)
+	if resp := d.MustCall(t, servetest.Op("list", `{"query":"`+servetest.QueryMine+`"}`), 20*time.Second); resp.Error != nil {
+		t.Fatalf("warm the mine query: %+v", resp.Error)
+	}
+	d.Shim.WaitQuiet(t, 300*time.Millisecond, 30*time.Second)
+
+	noticeOps := func() []string {
+		var ops []string
+		for _, row := range d.EventLog(t) {
+			if op, _ := row["op"].(string); (op == "write_begin" || op == "invalidate") && row["outcome"] == "ok" {
+				ops = append(ops, op)
+			}
+		}
+		return ops
+	}
+
+	d.Shim.Hold("comment")
+	done := make(chan servetest.ClientResult, 1)
+	go func() {
+		done <- d.Client(t, `{"op":"comment","args":{"id":"EXA-1","body":"example comment"}}`)
+	}()
+	d.Shim.WaitHeld(t, 30*time.Second)
+	// The origin tool is running the write: the daemon has the first notice and
+	// not yet the second.
+	if got := noticeOps(); len(got) != 1 || got[0] != "write_begin" {
+		t.Fatalf("while the write runs the daemon has seen %v, want only write_begin", got)
+	}
+	d.Shim.Release()
+	select {
+	case res := <-done:
+		if res.Exit != 0 || res.Resp.Error != nil {
+			t.Fatalf("the write: exit %d %s %s", res.Exit, res.Stdout, res.Stderr)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the write never finished")
+	}
+	if got := noticeOps(); len(got) != 2 || got[0] != "write_begin" || got[1] != "invalidate" {
+		t.Errorf("after the write the daemon has seen %v, want write_begin then invalidate", got)
+	}
+	// The invalidate queued one re-pull of the issue, after the write.
+	until(t, 20*time.Second, "the re-pull of EXA-1 after the write", func() bool {
+		seenWrite := false
+		for _, c := range d.Shim.Calls() {
+			if c.Kind() == "write" {
+				seenWrite = true
+				continue
+			}
+			if seenWrite && (c.Kind() == "search_batch" || c.Kind() == "search_key") && strings.Contains(c.JQL(), "EXA-1") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// A second serve on the state directory of a running daemon refuses, naming the
+// lock; a SIGKILL leaves a stale socket a new serve removes and logs.
+func TestServedSecondInstanceRefusesAndAKilledOneLeavesAStaleSocket(t *testing.T) {
+	d := servetest.StartDaemon(t, servetest.Options{})
+	if fi, err := os.Stat(d.StateDir); err != nil || fi.Mode().Perm() != 0o700 {
+		t.Errorf("state dir: %v %v, want 0700", fi, err)
+	}
+	if fi, err := os.Lstat(d.Socket); err != nil || fi.Mode().Perm() != 0o600 || fi.Mode()&os.ModeSocket == 0 {
+		t.Errorf("socket: %v %v, want a 0600 socket", fi, err)
+	}
+	second := servetest.RunBinary(t, d.Bin(), "", []string{}, "--config", d.ConfigPath, "serve")
+	if second.Exit != serve.ExitRefused || !strings.Contains(second.Stderr, "daemon.lock") {
+		t.Errorf("a second serve: exit %d stderr %q, want %d naming daemon.lock", second.Exit, second.Stderr, serve.ExitRefused)
+	}
+
+	d.Kill(t)
+	if fi, err := os.Lstat(d.Socket); err != nil || fi.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("fixture: SIGKILL must leave the stale socket: %v", err)
+	}
+	d.Start(t)
+	if !servetest.HasChange(d.DaemonLog(t), "stale_socket_removed") {
+		t.Errorf("the daemon log has no stale_socket_removed line: %v", d.DaemonLog(t))
+	}
+	if code := servetest.StopDaemon(t, d); code != 0 {
+		t.Errorf("SIGTERM exit = %d; output: %s", code, d.Stderr())
+	}
+	if _, err := os.Lstat(d.Socket); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the drained serve must remove its socket: %v", err)
 	}
 }

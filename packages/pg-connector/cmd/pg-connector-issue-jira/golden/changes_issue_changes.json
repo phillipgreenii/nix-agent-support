@@ -1,0 +1,199 @@
+[
+  {
+    "call": "{\"args\":{\"consumer\":\"example-consumer\",\"query\":\"mine\"},\"op\":\"changes\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 11,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-issue-jira",
+            "status": "succeeded",
+            "version": 0,
+            "truncated": false,
+            "next_seq": 0
+          }
+        ],
+        "changes": [],
+        "sources_freshness": [
+          {
+            "query": "mine",
+            "last_success_at": "example-time"
+          },
+          {
+            "query": "team",
+            "last_success_at": "example-time"
+          }
+        ],
+        "store_identity": "example-store-identity"
+      }
+    }
+  },
+  {
+    "call": "{\"args\":{\"consumer\":\"example-reset\",\"query\":\"mine\",\"reset\":true},\"op\":\"changes\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 11,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-issue-jira",
+            "status": "succeeded",
+            "version": 0,
+            "truncated": false,
+            "next_seq": 0
+          }
+        ],
+        "changes": [
+          {
+            "change": "added",
+            "source": "pg-connector-issue-jira",
+            "entity": {
+              "id": "EXA-1",
+              "title": "Example issue EXA-1",
+              "state": "To Do",
+              "url": "https://jira.example.test/browse/EXA-1",
+              "status_category": "new",
+              "priority": "Medium",
+              "issue_type": "Task",
+              "tracker": "EXA",
+              "assignee": "Fixture Person",
+              "as_of": "example-time",
+              "stale": false,
+              "created_at": "example-time"
+            },
+            "seq": 0,
+            "kinds": [],
+            "fields": []
+          },
+          {
+            "change": "added",
+            "source": "pg-connector-issue-jira",
+            "entity": {
+              "id": "EXA-2",
+              "title": "Example issue EXA-2",
+              "state": "To Do",
+              "url": "https://jira.example.test/browse/EXA-2",
+              "status_category": "new",
+              "priority": "Medium",
+              "issue_type": "Task",
+              "tracker": "EXA",
+              "assignee": "Fixture Person",
+              "as_of": "example-time",
+              "stale": false,
+              "created_at": "example-time"
+            },
+            "seq": 0,
+            "kinds": [],
+            "fields": []
+          }
+        ],
+        "sources_freshness": [
+          {
+            "query": "mine",
+            "last_success_at": "example-time"
+          },
+          {
+            "query": "team",
+            "last_success_at": "example-time"
+          }
+        ],
+        "store_identity": "example-store-identity"
+      }
+    }
+  },
+  {
+    "call": "{\"args\":{\"consumer\":\"example-consumer\",\"query\":\"mine\"},\"op\":\"changes\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 11,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-issue-jira",
+            "status": "succeeded",
+            "version": 0,
+            "truncated": false,
+            "next_seq": 1
+          }
+        ],
+        "changes": [
+          {
+            "change": "changed",
+            "source": "pg-connector-issue-jira",
+            "entity": {
+              "id": "EXA-1",
+              "title": "Example issue EXA-1",
+              "state": "In Progress",
+              "url": "https://jira.example.test/browse/EXA-1",
+              "status_category": "indeterminate",
+              "priority": "Medium",
+              "issue_type": "Task",
+              "tracker": "EXA",
+              "assignee": "Fixture Person",
+              "as_of": "example-time",
+              "stale": false,
+              "created_at": "example-time",
+              "version": 1
+            },
+            "seq": 1,
+            "kinds": ["status_changed"],
+            "fields": [
+              {
+                "name": "state",
+                "before": "To Do",
+                "after": "In Progress"
+              },
+              {
+                "name": "status_category",
+                "before": "new",
+                "after": "indeterminate"
+              }
+            ]
+          }
+        ],
+        "sources_freshness": [
+          {
+            "query": "mine",
+            "last_success_at": "example-time"
+          },
+          {
+            "query": "team",
+            "last_success_at": "example-time"
+          }
+        ],
+        "store_identity": "example-store-identity"
+      }
+    }
+  },
+  {
+    "call": "{\"args\":{\"consumer\":\"example-consumer\",\"query\":\"mine\"},\"op\":\"changes\"}",
+    "answer": {
+      "protocolVersion": 1,
+      "schemaVersion": 11,
+      "result": {
+        "sources": [
+          {
+            "backend": "pg-connector-issue-jira",
+            "status": "succeeded",
+            "version": 1,
+            "truncated": false,
+            "next_seq": 1
+          }
+        ],
+        "changes": [],
+        "sources_freshness": [
+          {
+            "query": "mine",
+            "last_success_at": "example-time"
+          },
+          {
+            "query": "team",
+            "last_success_at": "example-time"
+          }
+        ],
+        "store_identity": "example-store-identity"
+      }
+    }
+  }
+]
