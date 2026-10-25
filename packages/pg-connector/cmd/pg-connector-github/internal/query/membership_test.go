@@ -13,6 +13,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/classify"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/entity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	shared "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/query"
@@ -112,6 +113,20 @@ type engineRig struct {
 	log  *logs
 }
 
+// runKeyStep is how far runKey moves the fake clock after each run.
+const runKeyStep = time.Minute
+
+// engineQueryTTL is the query_ttl of every query in an engine rig. A run books
+// its next background run at its own FreshUntil, and the scheduler loop runs
+// that task as soon as the fake clock reaches it. With the default 60 s TTL for
+// "mine" and runKeyStep of one minute, every runKey made that background run
+// due at once, and it then raced the test's own writes and runs: it read the
+// previous row before the test planted its fixture row and stored its own result
+// after, erasing the fixture (a "log = []" failure), or it logged an event a
+// second time. The membership rows under test are produced only by the runs the
+// test makes, so the TTL is far beyond any clock movement a test makes.
+const engineQueryTTL = 24 * time.Hour
+
 func newEngineRig(t *testing.T) *engineRig {
 	t.Helper()
 	conf := &fakeConfirmer{by: map[string]Confirmation{}}
@@ -127,9 +142,26 @@ func newEngineRig(t *testing.T) *engineRig {
 		}
 		c.Changes, c.Confirm, c.Log = e, conf, lg.log
 		c.Tracker = noTracker{} // the members are not refreshed: only the membership rows are under test
+		for name := range c.Settings.PR.Queries {
+			c.Settings.QueryTTL[name] = config.Duration(engineQueryTTL)
+		}
 	})
 	r.run(t)
 	return &engineRig{rig: r, conf: conf, log: lg}
+}
+
+// The scheduler loop of an engine rig runs in the background, so a refresh that
+// came due while a test is mid-way would race that test's fixture writes. A
+// stored row must therefore stay fresh far longer than the clock moves in any
+// test, so the run's booked next run never comes due.
+func TestEngineRig_ABaselineRunBooksNoBackgroundRunWithinATestsClockMovement(t *testing.T) {
+	r := newEngineRig(t)
+	r.baselined(t, memA, memB)
+	row := r.row(t, "mine")
+	const runs = 100 // far more runKey calls than any test makes
+	if ttl := row.FreshUntil.Sub(row.FetchedAt); ttl <= runs*runKeyStep {
+		t.Errorf("a run stays fresh for %v, want more than %d runKey steps of %v: the next background run would come due during a test", ttl, runs, runKeyStep)
+	}
 }
 
 // list sets the listing the next run reads. The scheduler goroutine may be
@@ -146,7 +178,7 @@ func (r *rig) runKey(t *testing.T) store.QueryRow {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	r.clk.Advance(time.Minute)
+	r.clk.Advance(runKeyStep)
 	return row
 }
 
