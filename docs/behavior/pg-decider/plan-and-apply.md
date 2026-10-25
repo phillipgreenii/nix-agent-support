@@ -255,7 +255,8 @@ before anything else happens.
 | `4`  | A `pr` run's work-item lookup could not be trusted (above the ceiling, truncated, unavailable, or its keys unset); nothing was written |
 
 `plan` uses `0`, `1`, `3` and `4` the same way; it never exits `2` because it executes nothing. The
-composed command maps exit `4` to the class `decide_failed`. A view of
+composed command maps exit `4` to the class `decide_failed`, except a run whose counters line names the reason
+`lookup-unavailable`, which it maps to the retryable class `transient` (see `pr-change.md`). A view of
 an entity type the `focus.item` rule serves (`pr` or `issue`) whose `annotations` carries no
 `focus_selected` member at all fails the run closed with exit `3` before any rule or hook runs (see
 "A view without the annotation" in [`work-items.md`](work-items.md)). Before it exits, the failed-closed

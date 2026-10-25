@@ -35,7 +35,8 @@ const (
 
 // The failure classes (`error_class`). The first five are pg-desk's refresh
 // classes (docs/behavior/pg-desk/refresh.md), `unhydrated` is set by this
-// command's fail-closed check, and the last two classify the decider's exit.
+// command's fail-closed check, and the last two classify the decider's exit (`transient` is reused at the decide stage for an
+// unavailable work-item lookup).
 const (
 	ClassNotFound        = "not_found"
 	ClassTransient       = "transient"
@@ -71,6 +72,10 @@ const (
 	// Stage decide.
 	ExitDecidePartial = 30
 	ExitDecideFailed  = 31
+	// ExitDecideUnavailable: the decider failed closed because its work-item
+	// lookup was unavailable (exit 4, reason lookup-unavailable); nothing was
+	// written and a later attempt may clear it.
+	ExitDecideUnavailable = 32
 )
 
 // FailureSpec is one row of the published exit-code table.
@@ -92,6 +97,7 @@ var Table = []FailureSpec{
 	{ExitUnhydrated, StageHydrate, ClassUnhydrated, false},
 	{ExitDecidePartial, StageDecide, ClassDecidePartial, true},
 	{ExitDecideFailed, StageDecide, ClassDecideFailed, false},
+	{ExitDecideUnavailable, StageDecide, ClassTransient, true},
 	{ExitLockTimeout, StageLock, ClassTransient, true},
 	{ExitLockError, StageLock, ClassHydrateError, false},
 }

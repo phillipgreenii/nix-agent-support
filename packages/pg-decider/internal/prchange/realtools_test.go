@@ -608,10 +608,11 @@ func TestPRChangeRealTools(t *testing.T) {
 		cases := []struct {
 			name, listing, code string
 			items               string // the persisted count; "" = not reported
+			retryable           bool   // an unavailable lookup is retried by the router, the others are not
 		}{
-			{"above the ceiling", three, "0", "3"},
-			{"truncated", strings.Replace(three, `"truncated":false`, `"truncated":true`, 1), "0", "3"},
-			{"unavailable", `{"error":{"code":"unavailable","message":"tracker down"}}` + "\n", "1", ""},
+			{"above the ceiling", three, "0", "3", false},
+			{"truncated", strings.Replace(three, `"truncated":false`, `"truncated":true`, 1), "0", "3", false},
+			{"unavailable", `{"error":{"code":"unavailable","message":"tracker down"}}` + "\n", "1", "", true},
 		}
 		for _, mode := range []string{"plan", "apply"} {
 			for _, c := range cases {
@@ -623,19 +624,39 @@ func TestPRChangeRealTools(t *testing.T) {
 				r.ctlWrite("work-items.out", c.listing)
 				r.ctlWrite("work-items.code", c.code)
 				res := r.change(mode, id11, "5")
-				if res.code != ExitDecideFailed {
-					t.Fatalf("%s/%s: exit %d, want %d (decide_failed):\n%s", mode, c.name, res.code, ExitDecideFailed, res.stderr)
+				wantCode, wantClass := ExitDecideFailed, ClassDecideFailed
+				if c.retryable {
+					// The tracker could not be read: the router must re-run the delivery.
+					wantCode, wantClass = ExitDecideUnavailable, ClassTransient
 				}
-				contains(t, c.name+" failure line", res.stderr, "stage=decide", "class=decide_failed")
+				if res.code != wantCode {
+					t.Fatalf("%s/%s: exit %d, want %d (%s):\n%s", mode, c.name, res.code, wantCode, wantClass, res.stderr)
+				}
+				contains(t, c.name+" failure line", res.stderr, "stage=decide", "class="+wantClass)
+				// What the router reads is the failure line: it retries exactly the
+				// lines that carry one of its retry words.
+				line := ""
+				for _, l := range strings.Split(res.stderr, "\n") {
+					if strings.Contains(l, "pg-pr-change:") {
+						line = l
+					}
+				}
+				got := false
+				for _, w := range retryWords {
+					got = got || hasRetryWord(line, w)
+				}
+				if got != c.retryable {
+					t.Errorf("%s/%s: the router-visible failure line %q: retried = %v, want %v", mode, c.name, line, got, c.retryable)
+				}
 				if r.created() != 0 || len(r.calls("issue comment")) != 0 {
 					t.Errorf("%s/%s: a run that failed closed wrote to the tracker", mode, c.name)
 				}
 				recs := r.runRecords()
-				if len(recs) != 1 || recs[0].ErrorClass != ClassDecideFailed || recs[0].FailingStage != StageDecide || recs[0].Lane.Result != laneRecorded {
+				if len(recs) != 1 || recs[0].ErrorClass != wantClass || recs[0].FailingStage != StageDecide || recs[0].Lane.Result != laneRecorded {
 					t.Fatalf("%s/%s: run records = %+v", mode, c.name, recs)
 				}
 				lane := r.lane()
-				if lane["pr_lane.runs.decide.decide_failed"] != "1" {
+				if lane["pr_lane.runs.decide."+wantClass] != "1" {
 					t.Errorf("%s/%s: the lane-run counter: %v", mode, c.name, lane)
 				}
 				if got := lane["pr_lane.state.lookup_ceiling"]; got != ceiling {

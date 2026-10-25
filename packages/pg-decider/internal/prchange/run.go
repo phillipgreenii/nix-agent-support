@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
+	"github.com/phillipgreenii/pg-decider/internal/apply"
 	"github.com/phillipgreenii/pg-decider/internal/config"
+	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
@@ -449,10 +451,23 @@ func (r *run) mapDecide(res Result) int {
 	if detail == "" {
 		detail = fmt.Sprintf("pg-decider exited %d with no diagnostic", res.Code)
 	}
+	if res.Code == exitcode.LookupUntrusted && lookupUnavailable(res.Stderr) {
+		// The decider failed closed because the tracker could not be read, and
+		// wrote nothing: retryable, unlike a listing above the ceiling or a
+		// truncated one, which a retry cannot clear.
+		return r.fail(StageDecide, ClassTransient, "the decider's work-item lookup could not be read", detail, r.planCmd())
+	}
 	if res.Code == 2 {
 		return r.fail(StageDecide, ClassDecidePartial, "the decider applied only part of its plan", detail, r.planCmd())
 	}
 	return r.fail(StageDecide, ClassDecideFailed, "the decider failed", fmt.Sprintf("exit %d: %s", res.Code, detail), r.planCmd())
+}
+
+// lookupUnavailable reports whether the decider's run counters line names the
+// failed-closed reason lookup-unavailable.
+func lookupUnavailable(stderr string) bool {
+	c := parseCounters(stderr)
+	return c != nil && c.Failures[apply.LookupReasonUnavailable] > 0
 }
 
 // splitDeciderStderr separates the run counters line from every other line.

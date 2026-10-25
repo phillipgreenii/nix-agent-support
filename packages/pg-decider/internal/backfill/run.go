@@ -49,6 +49,7 @@ var ExitClasses = map[int]ExitClass{
 	25: {Class: "unhydrated"},
 	30: {Class: "decide_partial"},
 	31: {Class: "decide_failed", Stop: true},
+	32: {Class: "transient"},
 	40: {Class: "transient"},
 	41: {Class: "hydrate_error"},
 	64: {Class: "usage", Stop: true},

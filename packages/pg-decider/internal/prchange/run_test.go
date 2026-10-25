@@ -280,6 +280,12 @@ func TestViewReadFailures(t *testing.T) {
 	}
 }
 
+// lookupCounters is the failed-closed counters line of a run whose lookup
+// failed for reason.
+func lookupCounters(reason string) string {
+	return `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"acme/api#7","rules":{},"escalations":0,"failures":{"` + reason + `":1}}`
+}
+
 func TestDeciderExitMapping(t *testing.T) {
 	counters := `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"acme/api#7","rules":{},"escalations":0}`
 	cases := []struct {
@@ -293,6 +299,11 @@ func TestDeciderExitMapping(t *testing.T) {
 		{"exit 1 is failed", exit(1, "", "bad config: deadline exceeded"), ExitDecideFailed, false},
 		{"exit 1 no text", exit(1, "", ""), ExitDecideFailed, false},
 		{"killed is partial", Result{Code: -1, Signaled: true}, ExitDecidePartial, true},
+		{"exit 4 with an unavailable lookup is transient and retryable", exit(4, "", "pg-decider: cannot apply pr acme/api#7: work-item lookup is unavailable: down\n"+lookupCounters("lookup-unavailable")+"\n"), ExitDecideUnavailable, true},
+		{"exit 4 above the ceiling is failed", exit(4, "", "pg-decider: cannot apply pr acme/api#7: work-item lookup: the listing holds 9 work items, above the ceiling\n"+lookupCounters("lookup-above-ceiling")+"\n"), ExitDecideFailed, false},
+		{"exit 4 truncated is failed", exit(4, "", "pg-decider: work-item lookup: truncated\n"+lookupCounters("lookup-truncated")+"\n"), ExitDecideFailed, false},
+		{"exit 4 with no counters line is failed", exit(4, "", "pg-decider: work-item lookup is unavailable: down\n"), ExitDecideFailed, false},
+		{"exit 1 naming an unavailable lookup is failed", exit(1, "", "x\n"+lookupCounters("lookup-unavailable")+"\n"), ExitDecideFailed, false},
 		{"cannot start", Result{Code: -1, StartErr: fmt.Errorf("not found in PATH")}, ExitDecideFailed, false},
 	}
 	for _, c := range cases {

@@ -28,6 +28,8 @@ flowchart TD
     D -->|"exit 0"| OK["exit 0"]
     D -->|"exit 2"| P["exit 30: class decide_partial"]
     D -->|"exit 1 or 3"| DF["exit 31: class decide_failed"]
+    D -->|"exit 4, lookup unavailable"| DU["exit 32: class transient"]
+    D -->|"exit 4, any other reason"| DF
 ```
 
 ## The id
@@ -154,7 +156,8 @@ under. The decider's work-item lookup item count and ceiling are forwarded too: 
 `lookup_items` and `lookup_ceiling` from the decider's run counters line (an `apply`, and a run that
 failed closed on the lookup, whose line carries the figures known), or, for a `plan` run, from the
 read-only `plan --json` it makes after the plan. A run that failed closed on the lookup (the decider
-exits `4`) is the class `decide_failed` and still forwards the figures, so the two gauges that
+exits `4`) is the class `decide_failed`, or the retryable class `transient` (exit `32`) when the
+lookup was unavailable, and still forwards the figures, so the two gauges that
 export them keep following the lane at the moment it stops; a decider that reports none leaves them
 out and the store keeps what it has.
 
@@ -170,18 +173,19 @@ No exit code is `1` (reserved for unexpected errors) or `9` (the router's "busy,
 code names the failing stage and the class; `0` is success and `64` is a usage or configuration
 error (a bad mode or id, an unknown flag, a decider configuration file that cannot be read).
 
-| Code | Stage     | Class             | Retried by the router | Meaning                                                                              |
-| ---- | --------- | ----------------- | --------------------- | ------------------------------------------------------------------------------------ |
-| `20` | `hydrate` | `transient`       | yes                   | Forge or connector failure a later attempt may clear: a 5xx, a rate limit, a timeout |
-| `21` | `hydrate` | `degraded`        | yes                   | Part of the read failed; the previous detail is kept and nothing was written         |
-| `22` | `hydrate` | `not_found`       | no                    | The PR no longer exists at its source; see "A PR that no longer exists"              |
-| `23` | `hydrate` | `unauthenticated` | no                    | A missing or invalid credential; needs a person                                      |
-| `24` | `hydrate` | `hydrate_error`   | no                    | Refresh exit `1`, or any other failure that is not one of the classes above          |
-| `25` | `hydrate` | `unhydrated`      | no                    | The stored view is at version `0` or marked stale, so the decider was not run        |
-| `30` | `decide`  | `decide_partial`  | yes                   | The decider exited `2`: some actions failed or were skipped; captured and retried    |
-| `31` | `decide`  | `decide_failed`   | no                    | The decider exited `1` or `3`, or could not be started                               |
-| `40` | `lock`    | `transient`       | yes                   | The per-PR lock was not free within the wait                                         |
-| `41` | `lock`    | `hydrate_error`   | no                    | The lock file could not be created or opened                                         |
+| Code | Stage     | Class             | Retried by the router | Meaning                                                                                  |
+| ---- | --------- | ----------------- | --------------------- | ---------------------------------------------------------------------------------------- |
+| `20` | `hydrate` | `transient`       | yes                   | Forge or connector failure a later attempt may clear: a 5xx, a rate limit, a timeout     |
+| `21` | `hydrate` | `degraded`        | yes                   | Part of the read failed; the previous detail is kept and nothing was written             |
+| `22` | `hydrate` | `not_found`       | no                    | The PR no longer exists at its source; see "A PR that no longer exists"                  |
+| `23` | `hydrate` | `unauthenticated` | no                    | A missing or invalid credential; needs a person                                          |
+| `24` | `hydrate` | `hydrate_error`   | no                    | Refresh exit `1`, or any other failure that is not one of the classes above              |
+| `25` | `hydrate` | `unhydrated`      | no                    | The stored view is at version `0` or marked stale, so the decider was not run            |
+| `30` | `decide`  | `decide_partial`  | yes                   | The decider exited `2`: some actions failed or were skipped; captured and retried        |
+| `31` | `decide`  | `decide_failed`   | no                    | The decider exited `1` or `3`, or could not be started                                   |
+| `32` | `decide`  | `transient`       | yes                   | The decider exited `4` because its work-item lookup was unavailable; nothing was written |
+| `40` | `lock`    | `transient`       | yes                   | The per-PR lock was not free within the wait                                             |
+| `41` | `lock`    | `hydrate_error`   | no                    | The lock file could not be created or opened                                             |
 
 There is no `retry_exhausted` class: the router keeps its attempt count in memory and passes none
 to the command, so the command cannot know that a run is the last attempt.
@@ -218,7 +222,9 @@ while the event carries a future `expiresAt`, and only if the role opts in with
 - the failure line of every other class carries none of the three words, including when it re-wraps
   upstream text: the command rewrites each of them in the upstream text before it is quoted;
 - a failure that the router does not retry is never re-run, so every transient condition is marked
-  retryable: a transient or degraded hydrate, a lock wait that ran out, a decider exit `2`, and
+  retryable: a transient or degraded hydrate, a lock wait that ran out, a decider exit `2`, a decider
+  exit `4` whose lookup was unavailable (a listing above the ceiling, a truncated one or an unset
+  query or ceiling stays `decide_failed`: a retry cannot clear it), and
   every step of the not-found handling below that cannot be trusted.
 
 ## A PR that no longer exists
@@ -299,3 +305,7 @@ in `apply` mode.
   not as a run, and MUST NOT change its exit code because the lane write path failed.
 - **INV-PRCHANGE-13.** <!-- uuid: fb5e3dd5-6ec3-4f8b-8504-654d9061d887 --> The audit comment of an applied action names the delivery key, not a change sequence; a
   failure note MUST NOT carry any of the router's retry words after a failure that is not retryable.
+- **INV-PRCHANGE-14.** <!-- uuid: 5b0f0c7e-3d0e-4f6a-9a53-7c2d1e8b4a16 --> A decider exit `4` whose run counters line names the failed-closed reason
+  `lookup-unavailable` MUST end the delivery in the retryable class `transient` (exit `32`), with a
+  failure line that carries the router's `unavailable` word; every other exit `4` MUST stay
+  `decide_failed`.
