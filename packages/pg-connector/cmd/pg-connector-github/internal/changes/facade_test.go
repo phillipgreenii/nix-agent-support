@@ -6,7 +6,20 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/classify"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 )
+
+// legacySpec is the registration as it was before the PR lane flip: a row for
+// every observed PR (EmitAll) and delivery by query membership
+// (DeliverByMembership). The engine tests that pin the detection, pending-row
+// and settle rules run under it, because those rules do not depend on the modes
+// and their fixtures are not watched.
+func legacySpec() registry.Spec {
+	s := Spec()
+	s.Emission = registry.EmitAll
+	s.Delivery = registry.DeliverByMembership
+	return s
+}
 
 // encodeAwaited is the stored form of an awaited list, for the tests that seed
 // a pending row directly.
@@ -24,13 +37,16 @@ func TestNewAppliesTheGitHubDefaultsToAZeroConfigAndRejectsNegatives(t *testing.
 	}
 }
 
-func TestTheRegistrationIsValidAndKeepsTheLegacyModes(t *testing.T) {
+func TestTheRegistrationIsValidAndEmitsAndDeliversByTheWatchedFlag(t *testing.T) {
 	s := Spec()
 	if err := s.Validate(); err != nil {
 		t.Fatalf("Spec().Validate() = %v", err)
 	}
 	if s.EntityKind != LogKindPR || !slices.Equal(s.Changes, append(classify.Kinds(), "added")) {
 		t.Errorf("spec = %+v", s)
+	}
+	if s.Emission != registry.EmitWatchedOnly || s.Delivery != registry.DeliverByWatched {
+		t.Errorf("emission = %v, delivery = %v, want EmitWatchedOnly and DeliverByWatched", s.Emission, s.Delivery)
 	}
 	if !s.Membership.StoreRows || !s.AdHocQueryWatch {
 		t.Errorf("membership policy = %+v, ad hoc watch = %v", s.Membership, s.AdHocQueryWatch)

@@ -10,8 +10,10 @@ import (
 const LogKindPR = "pr"
 
 // Spec is the GitHub daemon's registration with the shared change engine.
-// Emission and Delivery are the legacy modes until the PR lane refactor flips
-// them.
+// Emission and Delivery are the watched modes: a row exists only for a watched
+// PR and the feed delivers by the watched flag (a PR that was only read is
+// tracked and delivers nothing). Membership rows (entered_query, left_query)
+// are still stored.
 func Spec() registry.Spec {
 	return registry.Spec{
 		EntityKind:   LogKindPR,
@@ -27,8 +29,8 @@ func Spec() registry.Spec {
 			{Name: "ci", AnyOf: []string{classify.KindCIChanged}},
 		},
 		FoldRef:         foldOwnerRepo,
-		Emission:        registry.EmitAll,
-		Delivery:        registry.DeliverByMembership,
+		Emission:        registry.EmitWatchedOnly,
+		Delivery:        registry.DeliverByWatched,
 		Membership:      registry.MembershipPolicy{StoreRows: true},
 		AdHocQueryWatch: true,
 	}

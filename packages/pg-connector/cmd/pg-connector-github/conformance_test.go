@@ -44,15 +44,28 @@ var (
 	confPRB = servetest.PR{NodeID: "PR_conf_b", Repo: "example-org/gadget", Number: 7}
 )
 
+// confWatchedQueries is the pr config block whose two queries are watched, as a
+// deployment declares the queries a consumer follows: the feed delivers rows and
+// replays only for watched PRs.
+func confWatchedQueries() map[string]any {
+	return map[string]any{"queries": map[string]any{
+		servetest.QueryMine: map[string]any{"expr": servetest.MineExpr, "watched": true},
+		servetest.QueryTeam: map[string]any{"expr": servetest.TeamExpr, "watched": true},
+	}}
+}
+
 // confDaemon starts a real daemon with fixture pull requests behind the mine
 // query and warms the query, so a conformance call is answered from the store
 // rather than racing a cold fetch.
 func confDaemon(t *testing.T) *servetest.Daemon {
 	t.Helper()
-	d := servetest.StartDaemon(t, servetest.Options{Before: func(d *servetest.Daemon) {
-		d.Shim.SetPRs(servetest.MineExpr, confPRA, confPRB)
-		d.Shim.SetPRs(servetest.TeamExpr, confPRA)
-	}})
+	d := servetest.StartDaemon(t, servetest.Options{
+		Config: map[string]any{"pr": confWatchedQueries()},
+		Before: func(d *servetest.Daemon) {
+			d.Shim.SetPRs(servetest.MineExpr, confPRA, confPRB)
+			d.Shim.SetPRs(servetest.TeamExpr, confPRA)
+		},
+	})
 	listReq := scriptout.Request{Op: scriptout.OpList, Args: json.RawMessage(`{"query":"` + servetest.QueryMine + `"}`)}
 	if resp := d.MustCall(t, "pr", listReq, 20*time.Second); resp.Error != nil {
 		t.Fatalf("warm the mine query: %+v", resp.Error)

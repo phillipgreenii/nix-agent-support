@@ -11,13 +11,12 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 )
 
-// The legacy matrix on the real GitHub assembly: a configuration whose queries
-// carry watched = true, still in EmitAll and DeliverByMembership, appends the
-// same rows and answers the same changes as the same configuration without the
-// flag. The flag only marks entities (and snapshots the log rows) until the
-// modes are flipped.
+// Emission by the watched flag on the real GitHub assembly: a configuration whose
+// queries carry watched = true appends rows for the arrival and the departure the
+// daemon sees and answers them, while the same configuration without the flag
+// tracks the same PRs and appends and answers nothing.
 
-type legacyOutcome struct {
+type scenarioOutcome struct {
 	// Answers are the changes the member poll delivered: change word, entity id
 	// and kinds, ordered by entity id.
 	Answers []string
@@ -27,9 +26,9 @@ type legacyOutcome struct {
 	Watched int
 }
 
-// runLegacyScenario runs the brand-new-member and confirmed-departure scenario
+// runScenario runs the brand-new-member and confirmed-departure scenario
 // over a daemon whose two queries are defined by queries.
-func runLegacyScenario(t *testing.T, queries map[string]any) legacyOutcome {
+func runScenario(t *testing.T, queries map[string]any, wantRows bool) scenarioOutcome {
 	t.Helper()
 	d := servetest.NewDaemon(t, servetest.Options{
 		Before: seed3a,
@@ -42,7 +41,7 @@ func runLegacyScenario(t *testing.T, queries map[string]any) legacyOutcome {
 	defer p.stop(t)
 	settle(t, d)
 	awaitBaselines(t, d, servetest.QueryMine, servetest.QueryTeam)
-	pollPR(t, d, "legacy-reader", servetest.QueryMine) // the key starts at the tail
+	pollPR(t, d, "reader", servetest.QueryMine) // the key starts at the tail
 
 	prD := servetest.PR{NodeID: "PR_node_d", Repo: "example-org/gadget", Number: 15}
 	prCMerged := prC
@@ -51,12 +50,23 @@ func runLegacyScenario(t *testing.T, queries map[string]any) legacyOutcome {
 	d.Shim.SetPRs(servetest.MineExpr, prA, prB, prD)
 
 	var res schema.PRChangesResult
-	until(t, 60*time.Second, "the arrival and the departure to be delivered", func() bool {
-		res = pollPR(t, d, "legacy-reader", servetest.QueryMine)
-		return len(res.Changes) >= 2
-	})
+	if wantRows {
+		until(t, 60*time.Second, "the arrival and the departure to be delivered", func() bool {
+			res = pollPR(t, d, "reader", servetest.QueryMine)
+			return len(res.Changes) >= 2
+		})
+	} else {
+		// Nothing will be delivered, so wait until the daemon has tracked the arrival.
+		until(t, 60*time.Second, "the arrival to be tracked", func() bool {
+			var n int
+			err := d.OpenStore(t).QueryRow(`SELECT COUNT(*) FROM entity WHERE kind = 'pr' AND id = ?`, prD.NodeID).Scan(&n)
+			return err == nil && n == 1
+		})
+		time.Sleep(3 * time.Second) // a few query runs (mine re-runs every second) after the arrival
+		res = pollPR(t, d, "reader", servetest.QueryMine)
+	}
 
-	var out legacyOutcome
+	var out scenarioOutcome
 	for _, c := range res.Changes {
 		kinds := slices.Clone(c.Kinds)
 		sort.Strings(kinds)
@@ -87,27 +97,24 @@ func runLegacyScenario(t *testing.T, queries map[string]any) legacyOutcome {
 	return out
 }
 
-func TestLegacyMatrix_WatchedQueriesInTheLegacyModesChangeNothingButTheFlag(t *testing.T) {
-	plain := runLegacyScenario(t, map[string]any{
+func TestEmissionByWatched_OnlyWatchedQueriesAppendRowsForTheirArrivalsAndDepartures(t *testing.T) {
+	plain := runScenario(t, map[string]any{
 		servetest.QueryMine: servetest.MineExpr,
 		servetest.QueryTeam: servetest.TeamExpr,
-	})
-	flagged := runLegacyScenario(t, map[string]any{
+	}, false)
+	flagged := runScenario(t, map[string]any{
 		servetest.QueryMine: map[string]any{"expr": servetest.MineExpr, "watched": true},
 		servetest.QueryTeam: map[string]any{"expr": servetest.TeamExpr, "watched": true},
-	})
+	}, true)
 
-	if len(plain.Rows) == 0 || len(plain.Answers) < 2 {
-		t.Fatalf("the scenario produced rows %v and answers %v, want the arrival and the departure", plain.Rows, plain.Answers)
-	}
-	if !slices.Equal(plain.Rows, flagged.Rows) {
-		t.Errorf("rows differ with the flag:\n without: %v\n with:    %v", plain.Rows, flagged.Rows)
-	}
-	if !slices.Equal(plain.Answers, flagged.Answers) {
-		t.Errorf("answers differ with the flag:\n without: %v\n with:    %v", plain.Answers, flagged.Answers)
+	if len(plain.Rows) != 0 || len(plain.Answers) != 0 {
+		t.Errorf("unwatched queries appended rows %v and answered %v, want neither", plain.Rows, plain.Answers)
 	}
 	if plain.Watched != 0 {
 		t.Errorf("%d entities are watched without the flag, want none", plain.Watched)
+	}
+	if len(flagged.Rows) == 0 || len(flagged.Answers) < 2 {
+		t.Errorf("watched queries appended rows %v and answered %v, want the arrival and the departure", flagged.Rows, flagged.Answers)
 	}
 	if flagged.Watched == 0 {
 		t.Error("no entity is watched with the flag: the runner did not mark the members of the watched queries")

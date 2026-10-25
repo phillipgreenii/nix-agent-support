@@ -55,7 +55,21 @@ func (q *fakeQueries) Names() []string {
 
 func (q *fakeQueries) Watched(string) bool { return false }
 
-func (q *fakeQueries) WatchedRefs(context.Context) ([]string, error) { return nil, nil }
+// WatchedRefs is the union of every query's members: the fake treats the members
+// of its queries as the watched entities (the rows the rig appends are watched).
+func (q *fakeQueries) WatchedRefs(context.Context) ([]string, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(q.members)) {
+		for _, ref := range q.members[name].Refs {
+			if !slices.Contains(out, ref) {
+				out = append(out, ref)
+			}
+		}
+	}
+	return out, nil
+}
 
 func (q *fakeQueries) Members(_ context.Context, name string) (feed.Members, error) {
 	q.mu.Lock()
@@ -175,7 +189,7 @@ func (r *rig) add(ref string, version int64, head string, kinds []string, fields
 	err = r.st.InTx(context.Background(), func(tx *store.Tx) error {
 		var aerr error
 		seq, aerr = tx.AppendChange(context.Background(), store.ChangeRow{
-			Kind: "pr", ID: ref, Version: version, HeadSHA: head, Kinds: kinds, Fields: raw, Origin: "refresh", At: r.clk.Now(),
+			Kind: "pr", ID: ref, Version: version, HeadSHA: head, Kinds: kinds, Fields: raw, Origin: "refresh", At: r.clk.Now(), Watched: true,
 		})
 		return aerr
 	})

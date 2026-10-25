@@ -7,6 +7,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/changes"
 	shared "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/feed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
@@ -50,10 +51,15 @@ type (
 // (the views pr and ci). A consumer holds one cursor.
 type Feed struct{ sh *shared.Feed }
 
-// New returns a Feed.
-func New(cfg Config) (*Feed, error) {
+// New returns a Feed over the daemon's registration (changes.Spec).
+func New(cfg Config) (*Feed, error) { return NewWithSpec(cfg, changes.Spec()) }
+
+// NewWithSpec is New over another registration. The daemon always runs New; a
+// test uses this to run the feed under a registration the daemon no longer uses
+// (for example delivery by query membership over rows nothing watches).
+func NewWithSpec(cfg Config, spec registry.Spec) (*Feed, error) {
 	sh, err := shared.New(shared.Config{
-		Spec: changes.Spec(), Store: cfg.Store, Queries: cfg.Queries, Clock: cfg.Clock,
+		Spec: spec, Store: cfg.Store, Queries: cfg.Queries, Clock: cfg.Clock,
 		Retention: cfg.Retention, ConsumerStaleAfter: cfg.ConsumerStaleAfter, Observer: cfg.Observer,
 		ConflictReason: conflictReason,
 	})

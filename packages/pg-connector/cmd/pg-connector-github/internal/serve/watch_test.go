@@ -2,6 +2,7 @@ package serve_test
 
 import (
 	"database/sql"
+	"slices"
 	"testing"
 	"time"
 
@@ -11,7 +12,17 @@ import (
 
 // The tracking rules of a PR as the assembled daemon shows them, with the real
 // binary over the fake gh: a PR that was only read is tracked and delivers
-// nothing, and a read with the watch option marks it watched.
+// nothing, and a read with the watch option marks it watched (a PR the daemon
+// already knew appends one added row, a PR it had never seen appends none).
+// The queries are the plain, unwatched form, so only a read can watch a PR.
+
+// unwatchedQueries is the pr config block whose queries are not watched.
+func unwatchedQueries() map[string]any {
+	return map[string]any{"pr": map[string]any{"queries": map[string]any{
+		servetest.QueryMine: servetest.MineExpr,
+		servetest.QueryTeam: servetest.TeamExpr,
+	}}}
+}
 
 // seedUnqueried is seed3a plus prW, a PR the daemon can answer for but that no
 // configured query lists, so only a direct read ever shows it to the daemon.
@@ -45,7 +56,7 @@ func readEntity(t *testing.T, db *sql.DB, node string) entityFlags {
 }
 
 func TestAPRThatWasOnlyReadIsTrackedAndDeliversNoChangeRow(t *testing.T) {
-	d := servetest.NewDaemon(t, servetest.Options{Before: seedUnqueried})
+	d := servetest.NewDaemon(t, servetest.Options{Before: seedUnqueried, Config: unwatchedQueries()})
 	d.Start(t)
 	settle(t, d)
 	awaitBaselines(t, d, servetest.QueryMine, servetest.QueryTeam)
@@ -73,7 +84,7 @@ func TestAPRThatWasOnlyReadIsTrackedAndDeliversNoChangeRow(t *testing.T) {
 }
 
 func TestAWatchReadMarksAPRWatchedWhetherTheStoreHasSeenItOrNot(t *testing.T) {
-	d := servetest.NewDaemon(t, servetest.Options{Before: seedUnqueried})
+	d := servetest.NewDaemon(t, servetest.Options{Before: seedUnqueried, Config: unwatchedQueries()})
 	d.Start(t)
 	settle(t, d)
 	awaitBaselines(t, d, servetest.QueryMine, servetest.QueryTeam)
@@ -104,10 +115,15 @@ func TestAWatchReadMarksAPRWatchedWhetherTheStoreHasSeenItOrNot(t *testing.T) {
 	if got := readEntity(t, db, prW.NodeID); !got.watched {
 		t.Errorf("a read without the option cleared the watch: %+v", got)
 	}
-	// The registration still emits for every tracked PR until the flip, so a watch
-	// read adds no row of its own.
-	if rowsAfter := countRows(t, d, "change_log"); rowsAfter != rowsBefore {
-		t.Errorf("the watch reads appended %d rows under the transitional emission", rowsAfter-rowsBefore)
+	// The registration emits for watched PRs only: the PR that was known
+	// (prA) became watched and appended exactly one added row, the PR the daemon
+	// had never seen (prW) was only flagged and appended none.
+	rows := d.ChangeLog(t)
+	if got := countRows(t, d, "change_log"); got != rowsBefore+1 || len(rows) != got {
+		t.Fatalf("the watch reads left %d rows after %d, want exactly one more (prA becoming watched): %+v", got, rowsBefore, rows)
+	}
+	if last := rows[len(rows)-1]; last.ID != prA.Ref() || !slices.Contains(last.Kinds, "added") {
+		t.Errorf("the row appended by the watch read = %+v, want an added row of %s", last, prA.Ref())
 	}
 
 	// A malformed option is refused and watches nothing.

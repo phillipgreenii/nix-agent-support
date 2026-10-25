@@ -251,7 +251,6 @@ func TestAnUnknownQueryAndABadRequestAreRefused(t *testing.T) {
 	for name, req := range map[string]PollRequest{
 		"kind":     {View: "issue", Consumer: "c", Scope: "mine"},
 		"consumer": {View: KindPR, Scope: "mine"},
-		"query":    {View: KindPR, Consumer: "c"},
 	} {
 		if _, err := r.f.Poll(ctx, req); !errors.Is(err, scriptout.ErrInvalidArgument) {
 			t.Errorf("poll with a bad %s = %v", name, err)

@@ -253,8 +253,8 @@ _Requires:_ `INV-GH-CHG-1`, `INV-GH-CHG-2`, `INV-GH-CHG-4`, `INV-GH-CHG-5`, `INV
 **Main success scenario.**
 
 1. The consumer runs `changes --consumer C --query Q` through the umbrella.
-2. The daemon returns the rows after C's acknowledged position for Q, filtered to Q's members plus
-   rows for entities that just left Q, each with its `seq`, `kinds`, `fields` and its own `version` and
+2. The daemon returns the rows of watched PRs after C's acknowledged position for Q, filtered to Q's
+   members plus rows for entities that just left Q, each with its `seq`, `kinds`, `fields` and its own `version` and
    `head_sha`, a `next_seq` per source, and `sources_freshness[]`.
 3. The umbrella writes the output to the consumer and flushes it.
 4. Only then does it send `changes_ack` with the `next_seq` it received, and the consumer's position

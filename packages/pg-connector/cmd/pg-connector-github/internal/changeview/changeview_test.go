@@ -94,7 +94,7 @@ func (r *rig) appendChange(ref string, kinds []string, origin string) int64 {
 	err := r.st.InTx(context.Background(), func(tx *store.Tx) error {
 		var err error
 		seq, err = tx.AppendChange(context.Background(), store.ChangeRow{
-			Kind: changes.LogKindPR, ID: ref, Version: seq + 1, Kinds: kinds, Origin: origin, At: r.clk.Now(),
+			Kind: changes.LogKindPR, ID: ref, Version: seq + 1, Kinds: kinds, Origin: origin, At: r.clk.Now(), Watched: true,
 		})
 		return err
 	})

@@ -193,14 +193,22 @@ restated.
   left a query MUST stay in the keep-alive set until it is closed (`INV-GH-FRESH-3`), so its closing
   is still seen. `ci_changed` MUST be emitted when the summary's CI rollup changes or
   when the runs group changes in a field the catalog names.
-- **`INV-GH-CHG-5`** <!-- uuid: 4eec868c-bb8f-4b7b-9261-fd9e2932c23e --> — `changes --consumer C --query Q` MUST return the rows
-  after C's acknowledged position for Q, filtered to Q's members **plus** rows for entities that
-  just left Q, so a consumer sees the departure. `--query` MUST stay required, so an entity a skill
-  merely read is not delivered to a consumer of another query. Each change's `entity` MUST carry
-  the row's **own** `version` and `head_sha`, not the entity's current ones, so a redelivered row
-  keeps its identity after a newer change and two rows for one PR in one poll are told apart. Each
-  source MUST carry `next_seq`, the position scanned up to, and its existing `version` MUST keep
-  carrying the position count so a reader that compares it keeps working.
+- **`INV-GH-CHG-5`** <!-- uuid: 4eec868c-bb8f-4b7b-9261-fd9e2932c23e --> — The change feed MUST deliver by the **watched flag**:
+  a change row exists only for a **watched** PR, and `changes --consumer C [--query Q]` MUST return
+  the watched PRs' rows after C's acknowledged position. A PR that was only read, listed by an
+  unwatched query or refreshed in the background is tracked (`INV-GH-FRESH-3`) and MUST NOT
+  produce a row, so it is never delivered to any consumer. A PR becomes watched when a query that
+  declares `watched = true` lists it, or when a read carries the watch option (`INTF-WIRE-WATCH-1`);
+  the flag MUST stay after the PR leaves its query, survive a restart, and end only when the entity
+  is evicted. A PR that becomes watched while the daemon already knows it MUST append exactly one
+  `added` row; one the daemon had never seen is flagged and appends none. The query MUST be
+  **optional** at the daemon: without it the feed is every watched PR's rows, and with it the query
+  is a filter, the rows of Q's members **plus** rows for entities that just left Q, so a consumer sees
+  the departure. The umbrella's `changes` verb still requires Q (the umbrella interface doc owns that). Each change's
+  `entity` MUST carry the row's **own** `version` and `head_sha`, not the entity's current ones, so a
+  redelivered row keeps its identity after a newer change and two rows for one PR in one poll are told
+  apart. Each source MUST carry `next_seq`, the position scanned up to, and its existing `version`
+  MUST keep carrying the position count so a reader that compares it keeps working.
 - **`INV-GH-CHG-6`** <!-- uuid: d5bf79c4-044c-4542-ac08-d6c6e4fff06f --> — Delivery MUST be **at least once** with **explicit
   acknowledgement**: rows are not acknowledged by being returned. A consumer that crashes before its
   caller has the rows MUST receive them again. A poll that returns no rows MUST still be able to
@@ -215,10 +223,14 @@ restated.
   Every `changes` and `changes_ack` answer MUST carry the daemon store's `store_identity`, which
   differs for a replaced store.
 - **`INV-GH-CHG-7`** <!-- uuid: 248c0b20-cf19-41b8-a0b6-77bcc82e0942 --> — The **first poll** of a new key MUST start at the
-  tail of the log, taken after the query's baseline exists (`INV-GH-CHG-2`), so neither a new key nor
-  a cold store pushes every open PR to its consumer at once. `--reset` MUST replay the query's
-  current members as `added` and move the key to the tail, deliberately. `--cached` MUST answer from
-  the store without running the query, even when it is stale.
+  tail of the log, taken after the baseline it needs exists (`INV-GH-CHG-2`): the named query's, or,
+  for a key with no query, that of every watched query. Neither a new key nor a cold store pushes
+  every open PR to its consumer at once, and a query's first complete run appends no row. `--reset`
+  MUST replay, as `added` and with `seq` 0, the watched PRs among the query's current members (every
+  watched PR when no query is named) and move the key to the tail, deliberately. `--cached` MUST
+  answer from the store without running the query, even when it is stale. A store that was moved
+  aside keeps no watched flags: they are set again only as the watched queries run, so a reset
+  replays only the PRs they list again.
 - **`INV-GH-CHG-8`** <!-- uuid: d1e96af5-03e8-4990-bb63-d07f7976b00c --> — Change rows MUST be kept for the retention interval,
   and a key unseen for the stale-consumer interval MUST be dropped. A key whose position fell outside
   retention MUST be answered `invalid_argument` whose message starts with `cursor_expired:` and tells
@@ -231,16 +243,17 @@ restated.
   for comment-heavy PRs.
 - **`INV-GH-CHG-10`** <!-- uuid: 6fd08ee5-7cc9-4fae-af67-162f7dd0e35c --> — A CI change MUST be a change of the PR: a runs change
   MUST be logged as a row of the PR, with kind `ci_changed` and the run and job fields that changed,
-  after the settle rule has refreshed the data. It is therefore delivered by `pr changes` to every
-  consumer of a PR query, and one CI event MUST cause one row, not one per feed. `ci changes`
-  MUST offer the same rows in the CI view: the PR rows for members of Q
-  whose kinds include `ci_changed`, `entered_query`, `left_query` or `removed`, each change's entity
-  the PR's current CI state with the row's own `version` and `head_sha`, with its own
-  acknowledgement and the same retention, first-poll, `--cached`, `--reset` and `cursor_expired:`
-  rules. Because a consumer holds exactly one position (`INV-GH-CHG-6`), the daemon MUST refuse a
-  poll of the `ci` view by a consumer whose position is bound to the `pr` view, and the reverse, with
-  `invalid_argument` naming the consumer's existing binding, so one consumer never acts twice on one
-  CI event.
+  after the settle rule has refreshed the data, and only for a watched PR (`INV-GH-CHG-5`). It is
+  therefore delivered by `pr changes` to every consumer of the PR, and one CI event MUST cause one row,
+  not one per feed. `ci changes` MUST offer the same rows in the CI view: the watched PRs' rows whose
+  kinds include `ci_changed`, plus the `entered_query`, `left_query` and `removed` rows of the named
+  query when one is given (and, for a member of it, its `ci_changed` rows only), each change's entity
+  the PR's current CI state with the row's own `version` and `head_sha`. The CI view has **its own
+  position**: its own acknowledgement and the same retention, first-poll, `--cached`, `--reset` and
+  `cursor_expired:` rules, and the query is optional as for `pr changes`. Because a consumer holds
+  exactly one position (`INV-GH-CHG-6`), the daemon MUST refuse a poll of the `ci` view by a consumer
+  whose position is bound to the `pr` view, and the reverse, with `invalid_argument` naming the
+  consumer's existing binding, so one consumer never acts twice on one CI event.
 - **`INV-GH-CHG-11`** <!-- uuid: ea2d1e2e-e07d-4936-868d-d65580032c61 --> — The daemon MUST record, per configured query, the
   time of its last **whole-query** origin answer and its last error, and MUST return them on every
   forwarded `changes` answer as `sources_freshness[]`. A cache answer MUST NOT advance the time

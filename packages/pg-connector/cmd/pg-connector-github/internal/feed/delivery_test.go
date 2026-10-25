@@ -13,7 +13,7 @@ func rowOf(t *testing.T, kinds []string, fields ...classify.Field) store.ChangeR
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store.ChangeRow{Kind: "pr", ID: refA, Kinds: kinds, Fields: raw}
+	return store.ChangeRow{Kind: "pr", ID: refA, Kinds: kinds, Fields: raw, Watched: true}
 }
 
 func TestDeliveryForPRKey(t *testing.T) {

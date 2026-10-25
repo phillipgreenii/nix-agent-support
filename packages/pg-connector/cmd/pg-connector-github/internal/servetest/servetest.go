@@ -161,9 +161,13 @@ func (d *Daemon) writeConfig() {
 		"gh_path":     d.Shim.Path,
 		"state_dir":   d.StateDir,
 		"socket_path": d.Socket,
+		// Both queries are watched, as a deployment declares the queries a consumer
+		// follows: the registration emits change rows for watched PRs only, so a test
+		// of the rows needs its PRs watched. A test of an unwatched PR overrides "pr"
+		// through Options.Config with the plain string form.
 		"pr": map[string]any{"queries": map[string]any{
-			QueryMine: MineExpr,
-			QueryTeam: TeamExpr,
+			QueryMine: map[string]any{"expr": MineExpr, "watched": true},
+			QueryTeam: map[string]any{"expr": TeamExpr, "watched": true},
 		}},
 		// A long freshness keeps a test's data fresh unless it chooses otherwise.
 		"summary_ttl":     "1h",

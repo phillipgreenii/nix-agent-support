@@ -156,7 +156,7 @@ func TestNewQueriesOverTheRealRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := NewQueries(runner, r.st)
+	q := NewQueries(runner, r.st, entity.NewIdentity(r.st, r.clk))
 	if !q.Known("mine") || q.Known("nope") {
 		t.Fatal("Known")
 	}
@@ -180,11 +180,11 @@ func TestNewQueriesOverTheRealRunner(t *testing.T) {
 	}
 }
 
-// TestNewQueriesTakesNamesAndWatchedFromTheDaemonConfigAndStubsWatchedRefs pins
+// TestNewQueriesTakesNamesAndWatchedFromTheDaemonConfigAndListsWatchedRefs pins
 // the three methods the shared interface adds to the legacy three: the names and
-// the watched flag come from query.Settings, and WatchedRefs is an empty stub
-// while the registration delivers by membership.
-func TestNewQueriesTakesNamesAndWatchedFromTheDaemonConfigAndStubsWatchedRefs(t *testing.T) {
+// the watched flag come from query.Settings, and WatchedRefs lists the watched
+// entities the registration delivers by.
+func TestNewQueriesTakesNamesAndWatchedFromTheDaemonConfigAndListsWatchedRefs(t *testing.T) {
 	r := newRig(t)
 	cfg := config.Defaults()
 	cfg.PR.Queries = map[string]schema.QueryDef{
@@ -203,14 +203,66 @@ func TestNewQueriesTakesNamesAndWatchedFromTheDaemonConfigAndStubsWatchedRefs(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := NewQueries(runner, r.st)
+	q := NewQueries(runner, r.st, entity.NewIdentity(r.st, r.clk))
 	if got := q.Names(); !slices.Equal(got, []string{"alpha", "zeta"}) {
 		t.Fatalf("Names = %v, want the configured names sorted", got)
 	}
 	if !q.Watched("alpha") || q.Watched("zeta") || q.Watched("nope") {
 		t.Fatalf("Watched = alpha %v, zeta %v, nope %v", q.Watched("alpha"), q.Watched("zeta"), q.Watched("nope"))
 	}
-	if refs, err := q.WatchedRefs(context.Background()); err != nil || len(refs) != 0 {
-		t.Fatalf("WatchedRefs = %v, %v, want the empty stub", refs, err)
+	ctx := context.Background()
+	if refs, err := q.WatchedRefs(ctx); err != nil || len(refs) != 0 {
+		t.Fatalf("WatchedRefs with nothing watched = %v, %v, want none", refs, err)
+	}
+
+	// Three watched PRs (the flag set at distinct times), one unwatched, one
+	// watched without an alias row and one watched but tombstoned: only the three
+	// with a recorded reference and no tombstone are listed, in the order the flag
+	// was first set.
+	ids := entity.NewIdentity(r.st, r.clk)
+	put := func(id, ref string) {
+		t.Helper()
+		parsed, err := entity.ParseRef(ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ids.Put(ctx, id, parsed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	watch := func(id string, at time.Time) {
+		t.Helper()
+		err := r.st.InTx(ctx, func(tx *store.Tx) error {
+			_, err := tx.SetWatched(ctx, "pr", id, "query", at)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("N2", "acme-org/widget#2")
+	put("N1", "acme-org/widget#1")
+	put("N3", "acme-org/Gadget#3")
+	put("N4", "acme-org/widget#4")
+	put("GONE", "acme-org/widget#9")
+	watch("N2", t0)
+	watch("N1", t0.Add(time.Minute))
+	watch("NOALIAS", t0.Add(2*time.Minute))
+	watch("N3", t0.Add(3*time.Minute))
+	watch("GONE", t0.Add(4*time.Minute))
+	if err := r.st.InTx(ctx, func(tx *store.Tx) error { return tx.EnsureEntity(ctx, "pr", "N4") }); err != nil {
+		t.Fatal(err)
+	}
+	gone, ok, err := r.st.GetEntity(ctx, "pr", "GONE")
+	if err != nil || !ok {
+		t.Fatalf("entity GONE = %v, %v", ok, err)
+	}
+	gone.TombstonedAt = t0
+	if err := r.st.PutEntity(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"acme-org/widget#2", "acme-org/widget#1", "acme-org/Gadget#3"}
+	if refs, err := q.WatchedRefs(ctx); err != nil || !slices.Equal(refs, want) {
+		t.Fatalf("WatchedRefs = %v, %v, want %v", refs, err, want)
 	}
 }

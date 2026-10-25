@@ -344,9 +344,10 @@ func TestConformanceChangesFailuresOverTheRealClient(t *testing.T) {
 		n := inst.name
 
 		invoke(t, b, `{"op":"changes","args":{"query":"mine"}}`).wantError(t, n+" changes without a consumer", "invalid_argument")
-		invoke(t, b, `{"op":"changes","args":{"consumer":"errs-`+n+`"}}`).wantError(t, n+" changes without a query", "invalid_argument")
+		// The query is optional: a poll without one is the unscoped feed.
+		invoke(t, b, `{"op":"changes","args":{"consumer":"unscoped-`+n+`"}}`).wantResult(t, n+" changes without a query", inst.schemaVersion)
 		invoke(t, b, `{"op":"changes_ack","args":{"query":"mine","next_seq":0}}`).wantError(t, n+" changes_ack without a consumer", "invalid_argument")
-		invoke(t, b, `{"op":"changes_ack","args":{"consumer":"errs-`+n+`","next_seq":0}}`).wantError(t, n+" changes_ack without a query", "invalid_argument")
+		invoke(t, b, `{"op":"changes_ack","args":{"consumer":"unscoped-`+n+`","next_seq":0}}`).wantResult(t, n+" changes_ack without a query", inst.schemaVersion)
 		invoke(t, b, confChangesReq("errs-"+n, "no-such-query", nil)).wantError(t, n+" changes of an unconfigured query", "query_not_recognized")
 
 		// An acknowledgement beyond the head of the log is refused.
@@ -429,7 +430,10 @@ func TestConformanceExplainReportsARecordedChange(t *testing.T) {
 		},
 		// The mine query is re-run every second, so a poll that is not cached
 		// finds the run of the new answer without waiting an hour.
-		Config: map[string]any{"query_ttl": map[string]any{servetest.QueryMine: "1s", servetest.QueryTeam: "1h"}},
+		Config: map[string]any{
+			"pr":        confWatchedQueries(),
+			"query_ttl": map[string]any{servetest.QueryMine: "1s", servetest.QueryTeam: "1h"},
+		},
 	})
 	bin := servetest.Binary(t, "", "")
 	confAwaitBaseline(t, d, servetest.QueryMine)
@@ -525,6 +529,7 @@ func TestConformanceExplainReportsAPendingSettleWhileTheAwaitedGroupIsHeld(t *te
 			d.Shim.SetRuns(confPRA.Repo, "feature-3", servetest.Run{ID: 3001, Name: "ci", Status: "completed", Conclusion: "success", Head: "head-3"})
 		},
 		Config: map[string]any{
+			"pr":          confWatchedQueries(),
 			"summary_ttl": "1s", "terminal_ttl": "1s", "settle_timeout": "50s",
 			"query_ttl": map[string]any{servetest.QueryMine: "1h", servetest.QueryTeam: "1h"},
 		},

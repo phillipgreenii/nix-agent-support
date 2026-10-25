@@ -89,8 +89,11 @@ Inheritance follows `INV-20`: where this set needs a different meaning it takes 
   merges later changes to the same entity and survives a crash (`INV-GH-CHG-3`).
 - **Cursor key** — the consumer name a consumer position is kept for (`INV-GH-CHG-6`). A consumer
   holds exactly one position, bound by its first poll to a view (`pr` or `ci`) and to the optional
-  query filter that poll named; the view and the query are what the position is bound to, not part
-  of the key.
+  query filter that poll named, or to no query at all (the feed of every watched PR); the view and the
+  query are what the position is bound to, not part of the key.
+- **Watched PR** — a PR whose watched flag is set: by a query that declares `watched = true`, or by a
+  read with the watch option. Only a watched PR produces change rows and is delivered by the feed; the
+  flag is sticky until the entity is evicted (`INV-GH-CHG-5`).
 - **Consumer position** — the log position a cursor key has acknowledged: the rows after it are the
   ones the next poll returns (`INV-GH-CHG-5`).
 - **Acknowledgement** — the explicit `changes_ack` that moves a consumer position to a `next_seq`,

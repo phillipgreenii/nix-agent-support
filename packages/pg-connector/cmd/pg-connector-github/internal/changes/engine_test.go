@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groupsvc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
@@ -55,7 +56,10 @@ type rig struct {
 	purpose governor.Purpose
 }
 
-func newRig(t *testing.T) *rig {
+func newRig(t *testing.T) *rig { return newRigWithSpec(t, legacySpec()) }
+
+// newRigWithSpec is newRig over the registration spec.
+func newRigWithSpec(t *testing.T, spec registry.Spec) *rig {
 	t.Helper()
 	st, _, err := store.Open(filepath.Join(t.TempDir(), "store.db"), store.Options{Synchronous: "OFF"})
 	if err != nil {
@@ -63,7 +67,7 @@ func newRig(t *testing.T) *rig {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	clk := governor.NewManualClock(t0)
-	e, err := New(Config{Clock: clk, BodyCap: 64})
+	e, err := NewWithSpec(Config{Clock: clk, BodyCap: 64}, spec)
 	if err != nil {
 		t.Fatal(err)
 	}

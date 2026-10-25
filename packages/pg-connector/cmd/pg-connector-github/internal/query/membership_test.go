@@ -16,6 +16,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/entity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	shared "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/query"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
@@ -116,7 +117,11 @@ func newEngineRig(t *testing.T) *engineRig {
 	conf := &fakeConfirmer{by: map[string]Confirmation{}}
 	lg := &logs{}
 	r := newRigWith(t, func(c *Config) {
-		e, err := changes.New(changes.Config{Clock: c.Clock})
+		// The membership rows are asserted for entities nothing watches, so the engine
+		// runs the registration as it was before emission by the watched flag.
+		spec := changes.Spec()
+		spec.Emission, spec.Delivery = registry.EmitAll, registry.DeliverByMembership
+		e, err := changes.NewWithSpec(changes.Config{Clock: c.Clock}, spec)
 		if err != nil {
 			t.Fatal(err)
 		}

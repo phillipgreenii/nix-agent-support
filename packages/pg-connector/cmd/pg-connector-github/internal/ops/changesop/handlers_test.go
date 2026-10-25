@@ -289,7 +289,6 @@ func TestArgumentErrorsAreInvalidArgument(t *testing.T) {
 	for _, args := range []string{
 		`{"query":"mine"}`,
 		`{"consumer":"  ","query":"mine"}`,
-		`{"consumer":"c"}`,
 		``,
 		`{"consumer":"c","query":"mine","since":"2026-10-01T00:00:00Z"}`,
 		`{"consumer":"c","query":"mine","before":"2026-10-01T00:00:00Z"}`,
@@ -308,7 +307,6 @@ func TestArgumentErrorsAreInvalidArgument(t *testing.T) {
 		"textual":            `{"consumer":"c","query":"mine","next_seq":"3"}`,
 		"null next_seq":      `{"consumer":"c","query":"mine","next_seq":null}`,
 		"no consumer":        `{"query":"mine","next_seq":0}`,
-		"no query":           `{"consumer":"c","next_seq":0}`,
 		"blank consumer ack": `{"consumer":"","query":"mine","next_seq":0}`,
 	} {
 		resp := r.call(OpChangesAck, args)

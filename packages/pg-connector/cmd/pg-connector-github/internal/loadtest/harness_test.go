@@ -28,6 +28,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/runs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 )
@@ -557,7 +558,13 @@ func newHarness(t *testing.T, o scenarioOpts) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.chg, err = changes.New(changes.Config{Clock: h.clk, SettleTimeout: h.cfg.SettleTimeout.Std(), BodyCap: int(h.cfg.ChangeBodyCap)})
+	// The load properties (barrier deadlines, rows against truth, one consumer
+	// seeing every row) are about the pending-row machinery under a burst of head
+	// changes on PRs nobody watches, so the engine runs the registration as it was
+	// before emission by the watched flag: a row for every observed PR.
+	spec := changes.Spec()
+	spec.Emission, spec.Delivery = registry.EmitAll, registry.DeliverByMembership
+	h.chg, err = changes.NewWithSpec(changes.Config{Clock: h.clk, SettleTimeout: h.cfg.SettleTimeout.Std(), BodyCap: int(h.cfg.ChangeBodyCap)}, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -603,10 +610,10 @@ func newHarness(t *testing.T, o scenarioOpts) *harness {
 	for i := range refs {
 		refs[i] = refOf(i)
 	}
-	h.fd, err = feed.New(feed.Config{
+	h.fd, err = feed.NewWithSpec(feed.Config{
 		Store: h.rig.Store, Queries: allQueries{refs: refs}, Clock: h.clk,
 		Retention: h.cfg.ChangeLogRetention.Std(), ConsumerStaleAfter: h.cfg.ConsumerStaleAfter.Std(),
-	})
+	}, spec)
 	if err != nil {
 		t.Fatal(err)
 	}

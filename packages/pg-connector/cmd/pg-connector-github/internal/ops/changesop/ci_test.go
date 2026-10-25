@@ -380,7 +380,6 @@ func TestCIArgumentErrorsAreInvalidArgument(t *testing.T) {
 	r := newRig(t)
 	for _, args := range []string{
 		`{"query":"mine"}`,
-		`{"consumer":"c"}`,
 		``,
 		`{"consumer":"c","query":"mine","since":"2026-10-01T00:00:00Z"}`,
 		`{"consumer":"c","query":"mine","before":"2026-10-01T00:00:00Z"}`,

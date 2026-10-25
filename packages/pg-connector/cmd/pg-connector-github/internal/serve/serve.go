@@ -519,7 +519,7 @@ func (d *daemon) start(ctx context.Context) error {
 	// change log and every cursor, so the feed is told, and the first poll of
 	// every key answers cursor_expired.
 	chgFeed, err := chgfeed.New(chgfeed.Config{
-		Store: st, Queries: chgfeed.NewQueries(runner, st),
+		Store: st, Queries: chgfeed.NewQueries(runner, st, ent),
 		Retention: cfg.ChangeLogRetention.Std(), ConsumerStaleAfter: cfg.ConsumerStaleAfter.Std(),
 		Observer: telemetry.NewFeedObserver(tel),
 	})
