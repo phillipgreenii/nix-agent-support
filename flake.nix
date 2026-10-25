@@ -6025,6 +6025,93 @@
                     touch "$out"
                   '';
 
+              # pg-connector-issue-jira daemon (docket pg2-2qyyh.2): the behaviour of its alert rules.
+              # The six Prometheus rules run under `promtool test rules` (the same wrapping script as
+              # the GitHub daemon's, which reads the rule uids from the file), the four Loki rules run
+              # their LogQL pipeline with `logcli --stdin` over the fixture logs under
+              # grafana/alerting/rule-tests/loki/ (promtool cannot evaluate LogQL), then the Loki
+              # script's own mutant self-tests.
+              test-pg-connector-issue-jira-alert-rules =
+                pkgs.runCommand "test-pg-connector-issue-jira-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.gnused
+                      pkgs.gnugrep
+                      pkgs.prometheus.cli
+                      pkgs.grafana-loki
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    alerts=${./packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml}
+                    bash ${./packages/pg-connector/grafana/check-alert-rules.sh} \
+                      "$alerts" \
+                      ${./packages/pg-connector/grafana/alerting/rule-tests}
+                    loki=${./packages/pg-connector/grafana/alerting/rule-tests/loki}
+                    bash ${./packages/pg-connector/grafana/check-loki-rules.sh} "$alerts" "$loki"
+                    bash ${./packages/pg-connector/grafana/check-loki-rules.sh} --self-test "$alerts" "$loki"
+                    touch "$out"
+                  '';
+
+              # pg-connector-issue-jira metric catalog vs the Metric* constants of the daemon's
+              # telemetry package (whose change instruments are registered by the shared
+              # changemetrics package): the catalog checks, then the script's own mutant self-tests.
+              test-pg-connector-issue-jira-metrics-catalog =
+                pkgs.runCommand "test-pg-connector-issue-jira-metrics-catalog"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.gawk
+                      pkgs.diffutils
+                    ];
+                  }
+                  ''
+                    script=${./packages/pg-connector/grafana/check-metrics-catalog.sh}
+                    catalog=${./packages/pg-connector/grafana/pg-connector-issue-jira-metrics.txt}
+                    gofile=${./packages/pg-connector/cmd/pg-connector-issue-jira/internal/telemetry/telemetry.go}
+                    shared=${./packages/pg-connector/pkg/connectord/changemetrics/changemetrics.go}
+                    bash "$script" "$catalog" "$gofile" "$shared"
+                    bash "$script" --self-test "$catalog" "$gofile" "$shared"
+                    touch "$out"
+                  '';
+
+              # pg-connector-issue-jira daemon alert rules file: structure rules S1-S7 over the file
+              # and the metric catalog, rule S8 over the deleteRules twin (pg2-susum), then the
+              # script's own mutant self-tests. The promtool and logcli behaviour checks are the
+              # separate check above.
+              test-pg-connector-issue-jira-alert-structure =
+                pkgs.runCommand "test-pg-connector-issue-jira-alert-structure"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.yq-go
+                      pkgs.jq
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.gawk
+                      pkgs.diffutils
+                      pkgs.coreutils
+                      pkgs.grafana-loki
+                    ];
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    script=${./packages/pg-connector/grafana/check-jira-alert-structure.sh}
+                    alerts=${./packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml}
+                    catalog=${./packages/pg-connector/grafana/pg-connector-issue-jira-metrics.txt}
+                    deletes=${./packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts-delete.yaml}
+                    bash "$script" "$alerts" "$catalog" "$deletes"
+                    bash "$script" --self-test "$alerts" "$catalog" "$deletes"
+                    touch "$out"
+                  '';
+
               # pg-desk PR lane tripwire rule (pg-desk-pr-never-hydrated, PR lane refactor P0b):
               # structure rules T1-T5 over packages/pg-desk/grafana/alerting/alerts.yaml (uid,
               # noDataState OK, the SYSTEM_PAUSE guard copied from pg-desk-sync-stale, the absence

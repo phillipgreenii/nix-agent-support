@@ -353,6 +353,16 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-router-budget-stops",
 		"pg-router-upstream-killed",
 		"pg-router-queue-slow-growth",
+		"pg-conn-jira-daemon-down",
+		"pg-conn-jira-query-stale",
+		"pg-conn-jira-consumer-stuck",
+		"pg-conn-jira-settle-holding",
+		"pg-conn-jira-tracked-over",
+		"pg-conn-jira-rows-no-kind",
+		"pg-conn-jira-store-aside",
+		"pg-conn-jira-auth-failing",
+		"pg-conn-jira-unavailable",
+		"pg-conn-jira-rate-limited",
 	}
 	if strings.Join(registeredRuleUIDs, ",") != strings.Join(want, ",") {
 		t.Fatalf("registeredRuleUIDs = %v, want %v", registeredRuleUIDs, want)

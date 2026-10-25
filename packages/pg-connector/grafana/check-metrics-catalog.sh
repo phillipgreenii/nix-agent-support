@@ -212,13 +212,38 @@ mutant() {
   fi
 }
 
-mutant M1 "a catalog line removed" '/^pg_connector_github_store_bytes /d' ''
-mutant M2 "a line without its labels field" 's/^(pg_connector_github_queue_depth gauge) class$/\1/' ''
+# The mutants are written against this daemon's own names, derived from the inputs so the same
+# script serves every daemon whose catalog follows the layout: the common name prefix (the
+# catalog line of <prefix>daemon_up), and the first cataloged counter whose constant the Go file
+# registers directly (a Go constant, not one registered through the shared change metrics).
+pfx="$(awk '$1 ~ /_daemon_up$/ {sub(/daemon_up$/, "", $1); print $1; exit}' "$catalog")"
+if [ -z "$pfx" ]; then
+  echo "self-test: no <prefix>daemon_up line in the catalog" >&2
+  exit 2
+fi
+ctr="" ctr_dotted=""
+while read -r cname ctype _; do
+  [ "$ctype" = counter ] || continue
+  cconst="$(sed -nE 's/^[[:space:]]*(Metric[A-Za-z0-9]+)[[:space:]]*=[[:space:]]*"([^"]*)".*/\1 \2/p' "$gofile" |
+    awk -v n="$cname" '{ v = $2; gsub(/\./, "_", v); if (v == n) { print $1 " " $2; exit } }')"
+  [ -n "$cconst" ] || continue
+  if grep -qE "\.(Int64|Float64)Counter\(${cconst%% *}," "$gofile"; then
+    ctr="$cname" ctr_dotted="${cconst#* }"
+    break
+  fi
+done <"$catalog"
+if [ -z "$ctr" ]; then
+  echo "self-test: no cataloged counter is registered directly in $(basename "$gofile")" >&2
+  exit 2
+fi
+
+mutant M1 "a catalog line removed" "/^${pfx}store_bytes /d" ''
+mutant M2 "a line without its labels field" "s/^(${pfx}queue_depth gauge) class\$/\\1/" ''
 mutant M3 "a name with a _total suffix (catalog and Go constant renamed together)" \
-  's/^pg_connector_github_budget_spent /pg_connector_github_budget_spent_total /' \
-  's/"pg_connector_github\.budget\.spent"/"pg_connector_github.budget.spent_total"/'
-mutant M4 "a label key the daemon never emits" 's/^(pg_connector_github_queue_depth gauge) class$/\1 colour/' ''
-mutant M5 "a counter cataloged as a gauge" 's/^(pg_connector_github_budget_spent) counter /\1 gauge /' ''
+  "s/^${ctr} /${ctr}_total /" \
+  "s/\"${ctr_dotted//./\\.}\"/\"${ctr_dotted}_total\"/"
+mutant M4 "a label key the daemon never emits" "s/^(${pfx}queue_depth gauge) class\$/\\1 colour/" ''
+mutant M5 "a counter cataloged as a gauge" "s/^(${ctr}) counter /\\1 gauge /" ''
 if [ -n "$shared" ]; then
   # The constants registered through the shared change metrics carry no constructor call in
   # the Go file, so M5 must find theirs in the changemetrics file.

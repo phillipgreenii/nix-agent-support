@@ -1,0 +1,72 @@
+# promtool unit tests for the pg-conn-jira-rows-no-kind alert. Run by the flake check
+# test-pg-connector-issue-jira-alert-rules, which generates rules.yml next to this file: the Grafana
+# rule's refId A wrapped as `alert: <uid>` with
+# `expr: (max(pg_connector_issue_jira_change_rows_without_kind)) > 0`, the rule's `for: 2m` and
+# labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Any non-zero value is the signal. One gauge sample per 1m scrape; a firing alert carries severity
+# only.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a value of 1 held for the 2m for fires with severity warning only, then clears when it returns to 0
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_change_rows_without_kind{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "1x6 0x40"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: pg-conn-jira-rows-no-kind
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: pg-conn-jira-rows-no-kind
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      # Back to 0 from 7m on.
+      - eval_time: 12m
+        alertname: pg-conn-jira-rows-no-kind
+        exp_alerts: []
+
+  - name: a steady 0 never fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_change_rows_without_kind{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "0x60"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_jira_rows_no_kind)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-rows-no-kind
+        exp_alerts: []
+
+  - name: a single scrape of 1 (shorter than the 2m for) never fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_change_rows_without_kind{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "0x3 1 0x40"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: pg-conn-jira-rows-no-kind
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: pg-conn-jira-rows-no-kind
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-conn-jira-rows-no-kind
+        exp_alerts: []
+
+  - name: an absent series gives no alert (noDataState is OK for this rule)
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_daemon_up{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-rows-no-kind
+        exp_alerts: []

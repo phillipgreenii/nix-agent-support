@@ -1,0 +1,90 @@
+# promtool unit tests for the pg-conn-jira-tracked-over alert. Run by the flake check
+# test-pg-connector-issue-jira-alert-rules, which generates rules.yml next to this file: the Grafana
+# rule's refId A wrapped as `alert: <uid>` with
+# `expr: (sum(pg_connector_issue_jira_tracked_entities)) > 55`, the rule's `for: 10m` and labels,
+# plus a recording rule `wrapped:<uid with _>`.
+#
+# 55 is the default of tracked_set_alert_size. The sum is over ALL classes, so several classes that
+# are each under the bar can together fire it. One gauge sample per 1m scrape; a firing alert
+# carries severity only (`sum` has no `by`).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a tracked total above 55 held for the 10m for fires with severity warning only, then clears when it falls back
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_tracked_entities{class="summary",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "40x14 20x40"
+      - series: pg_connector_issue_jira_tracked_entities{class="detail",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "20x14 10x40"
+    alert_rule_test:
+      # 60 in total from 0m, pending, not yet through `for`.
+      - eval_time: 9m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      # 30 in total from 14m on.
+      - eval_time: 25m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts: []
+
+  - name: a tracked total of exactly 55 and a healthy 30 never fire
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_tracked_entities{class="summary",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "35x60"
+      - series: pg_connector_issue_jira_tracked_entities{class="detail",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "20x60"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_jira_tracked_over)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts: []
+
+  - name: a total of 56, just over the bar, fires after the for
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_tracked_entities{class="summary",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "56x60"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a breach shorter than the 10m for never fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_tracked_entities{class="summary",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "80x5 30x60"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts: []
+
+  - name: an absent series gives no alert (noDataState is OK for this rule)
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_daemon_up{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts: []

@@ -1,0 +1,93 @@
+# promtool unit tests for the pg-conn-jira-query-stale alert. Run by the flake check
+# test-pg-connector-issue-jira-alert-rules, which generates rules.yml next to this file: the
+# Grafana rule's refId A wrapped as `alert: <uid>` with
+# `expr: (max by (query) (pg_connector_issue_jira_query_last_success_age_seconds)) > 600`, the
+# rule's `for: 5m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# The threshold 600 is 5 x the default query_ttl_default (120 s), see the rule's comment.
+# Time model: one gauge sample per 1m scrape. A firing alert carries the `by` label (query) plus
+# severity.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an age above 600 held for the 5m for fires with the query label and severity warning, then clears when the query succeeds
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_query_last_success_age_seconds{query="team",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "700x8 5x30"
+    alert_rule_test:
+      # Pending since 0, not yet through `for`.
+      - eval_time: 4m
+        alertname: pg-conn-jira-query-stale
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: pg-conn-jira-query-stale
+        exp_alerts:
+          - exp_labels:
+              query: team
+              severity: warning
+      # The query succeeds again from 8m on.
+      - eval_time: 15m
+        alertname: pg-conn-jira-query-stale
+        exp_alerts: []
+
+  - name: an age of exactly 600 and of a healthy 100 never fire
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_query_last_success_age_seconds{query="team",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "600x60"
+      - series: pg_connector_issue_jira_query_last_success_age_seconds{query="mine",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "100x60"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_jira_query_stale)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-query-stale
+        exp_alerts: []
+
+  - name: a breach shorter than the 5m for never fires
+    interval: 1m
+    input_series:
+      # Over 600 at 0m..2m (3 samples), then refreshed.
+      - series: pg_connector_issue_jira_query_last_success_age_seconds{query="team",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "900x2 10x60"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: pg-conn-jira-query-stale
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: pg-conn-jira-query-stale
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-conn-jira-query-stale
+        exp_alerts: []
+
+  - name: only the stale query fires, a fresh one stays quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_query_last_success_age_seconds{query="team",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "5000x60"
+      - series: pg_connector_issue_jira_query_last_success_age_seconds{query="mine",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "30x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-conn-jira-query-stale
+        exp_alerts:
+          - exp_labels:
+              query: team
+              severity: warning
+
+  - name: an absent series gives no alert (noDataState is OK for this rule)
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_daemon_up{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-query-stale
+        exp_alerts: []

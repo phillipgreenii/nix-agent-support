@@ -124,6 +124,13 @@ import (
 //     over 6h while its consumer IS working, which pg-router-queue-stalled
 //     cannot see (pg2-53n39 added it, pg2-fp65l registered it). The rule
 //     carries no escalation label, so its bead goes to the triager.
+//   - the ten pg-conn-jira-* rules of the Jira daemon's alert file
+//     (packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml,
+//     docket pg2-2qyyh.2): daemon-down, query-stale, consumer-stuck, settle-holding,
+//     tracked-over, rows-no-kind, store-aside, auth-failing, unavailable and rate-limited.
+//     Registered so a firing one reaches the escalation flow; none carries an escalation
+//     label, so each bead goes to the triager. A machine where the daemon is not deployed
+//     never holds the rules (the file's deleteRules twin is registered instead).
 //
 // pg-router-triager-failures (pg2-u2yub) is deliberately NOT registered: the
 // probe files escalated beads/dispatches triagers, so probing triager failures
@@ -142,6 +149,16 @@ var registeredRuleUIDs = []string{
 	"pg-router-budget-stops",
 	"pg-router-upstream-killed",
 	"pg-router-queue-slow-growth",
+	"pg-conn-jira-daemon-down",
+	"pg-conn-jira-query-stale",
+	"pg-conn-jira-consumer-stuck",
+	"pg-conn-jira-settle-holding",
+	"pg-conn-jira-tracked-over",
+	"pg-conn-jira-rows-no-kind",
+	"pg-conn-jira-store-aside",
+	"pg-conn-jira-auth-failing",
+	"pg-conn-jira-unavailable",
+	"pg-conn-jira-rate-limited",
 }
 
 func defaultSnapshotPath() string {

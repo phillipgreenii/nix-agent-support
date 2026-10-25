@@ -1,0 +1,85 @@
+# promtool unit tests for the pg-conn-jira-settle-holding alert. Run by the flake check
+# test-pg-connector-issue-jira-alert-rules, which generates rules.yml next to this file: the Grafana
+# rule's refId A wrapped as `alert: <uid>` with
+# `expr: (min_over_time(max(pg_connector_issue_jira_change_settle_pending)[10m:1m])) > 0`, the
+# rule's `for: 5m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# The expression is the lowest pending count of the trailing 10 minutes, so it is above 0 only when
+# the pending gauge did NOT touch 0 for a whole 10 minutes; with the 5m for, rows have been held
+# for 15 minutes. One gauge sample per 1m scrape.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: pending rows that never drain fire once 10m of window and the 5m for have passed, then clear when they drain
+    interval: 1m
+    input_series:
+      # Quiet for 10 minutes, then 3 pending rows held for 30 minutes, then drained.
+      - series: pg_connector_issue_jira_change_settle_pending{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "0x10 3x30 0x40"
+    alert_rule_test:
+      # The 10m minimum first rises above 0 at 20m (a full window of non-zero samples), so the alert
+      # is pending from 20m and not yet through `for` at 22m.
+      - eval_time: 22m
+        alertname: pg-conn-jira-settle-holding
+        exp_alerts: []
+      - eval_time: 27m
+        alertname: pg-conn-jira-settle-holding
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      # Drained at 40m: the 10m minimum is 0 again at once.
+      - eval_time: 45m
+        alertname: pg-conn-jira-settle-holding
+        exp_alerts: []
+
+  - name: a pending count that drains to 0 within every window never fires
+    interval: 1m
+    input_series:
+      # Busy but healthy: pending rises and falls to 0 every 5 minutes.
+      - series: pg_connector_issue_jira_change_settle_pending{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "0 2 3 1 0 0 2 3 1 0 0 2 3 1 0 0 2 3 1 0 0 2 3 1 0 0 2 3 1 0 0 2 3 1 0 0 2 3 1 0"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_jira_settle_holding)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-settle-holding
+        exp_alerts: []
+
+  - name: a steady 0 never fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_change_settle_pending{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-settle-holding
+        exp_alerts: []
+
+  - name: a hold shorter than the window never fires
+    interval: 1m
+    input_series:
+      # Held at 4 for 6 minutes only, then drained.
+      - series: pg_connector_issue_jira_change_settle_pending{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "0x5 4x6 0x60"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-conn-jira-settle-holding
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-conn-jira-settle-holding
+        exp_alerts: []
+
+  - name: an absent series gives no alert (noDataState is OK for this rule)
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_daemon_up{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-settle-holding
+        exp_alerts: []

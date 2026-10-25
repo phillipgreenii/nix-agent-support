@@ -1,0 +1,509 @@
+# pg-connector-issue-jira daemon unified-alerting rules (docket pg2-2qyyh.2): the
+# alerts of the Jira daemon's design ("7. Observability"), as six Prometheus
+# rules over the daemon's own metrics and four Loki rules over its two logs
+# (events.jsonl and daemon.log.jsonl, one Loki service_name).
+#
+# This file sits BESIDE issue-jira-alerts.yaml (the old one-shot backend's three
+# rules, service_name pg-connector-issue-jira), which stays installed until a
+# later cleanup. Its sibling pg-connector-issue-jira-daemon-alerts-delete.yaml
+# lists the same ten uids under `deleteRules:` and is what a machine without the
+# daemon registers INSTEAD of this file (Grafana keeps a file-provisioned rule
+# live after its file is dropped, pg2-bry0w and pg2-susum). Which of the two a
+# machine registers is the darwin module's business, not this file's.
+#
+# Metric names are the Prometheus names the OpenTelemetry collector produces
+# (dots to underscores, no _total, no unit suffix) and every one of them is
+# catalogued in packages/pg-connector/grafana/pg-connector-issue-jira-metrics.txt;
+# check-jira-alert-structure.sh (flake check
+# test-pg-connector-issue-jira-alert-structure) enforces that. The expression of
+# every Prometheus rule has a fixed shape (no service_name filter, the names are
+# already specific) because the promtool tests under rule-tests/ are written
+# against it; a firing alert's labels are the `by` labels of its expression plus
+# severity. The Loki rules are exercised by check-loki-rules.sh against the
+# fixture logs under rule-tests/loki/.
+#
+# Shape notes (copied from pg-connector-github-alerts.yaml and
+# issue-jira-alerts.yaml): condition C over refIds A (the query), B (reduce,
+# last), C (threshold); a Prometheus rule is `datasourceUid: prometheus` with the
+# boolean `instant: true`; a Loki rule is `datasourceUid: loki` with the string
+# `queryType: instant`. Folder "pg-connector" converges by title (ADR 0039 in
+# phillipgreenii-nix-support-apps), so no folderUid is ever written. Rule uids
+# stay under Grafana's 40-char cap. Annotations are static text. Severity
+# follows docs/alert-severity.md of nix-repo-base (critical, error, warning,
+# info; a continuous daemon "not running" alert defaults to error).
+#
+# Thresholds the design leaves open (the query staleness age, the settle-holding
+# window) are stated with their reason on the rule and in its annotation.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-connector-issue-jira-daemon
+    folder: pg-connector
+    interval: 1m
+    rules:
+      # Daemon up. daemon_up is the daemon's OWN single liveness gauge, so
+      # noDataState is Alerting (the pg-router-liveness-down polarity): once the
+      # daemon is supposed to run, an absent series means the daemon, or its
+      # export, is gone. The rule exists only on a machine where the daemon is
+      # deployed: a machine without it registers the deleteRules twin instead,
+      # so the absent series never pages there.
+      - uid: pg-conn-jira-daemon-down
+        title: pg-connector-issue-jira daemon is down
+        condition: C
+        for: 2m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: error
+        annotations:
+          summary: "pg-connector-issue-jira daemon has been down for over 2 minutes"
+          description: "pg_connector_issue_jira_daemon_up has reported 0, or gone missing from Prometheus entirely, for over 2 minutes: the daemon is not running or is not exporting. Every pg-connector Jira call is answered unavailable meanwhile. Check the launchd entry for the daemon and read daemon.log.jsonl in its state directory."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: min(pg_connector_issue_jira_daemon_up)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+
+      # Configured queries fresh. The design leaves the threshold open. The
+      # literal 600 seconds STANDS FOR 5 x 120 s, five times the default
+      # query_ttl_default: a Jira throttle (HTTP 429) pauses background
+      # refreshes for minutes and is the rate-limited rule's business, so this
+      # rule must not fire on a single missed refresh or a short pause, only on
+      # a query that has gone without a whole-query success for 10 minutes. A
+      # deployment that raises query_ttl_default or a query's query_ttl above 120
+      # s needs a larger literal here, or this rule fires for a healthy query.
+      - uid: pg-conn-jira-query-stale
+        title: pg-connector-issue-jira configured query is stale
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-jira: a configured query has had no whole-query success for over 10 minutes"
+          description: "query_last_success_age_seconds for at least one configured query has been above 600 seconds (5 x the default query_ttl_default of 120 s, so a short throttle pause does not page) for over 5 minutes: its refreshes keep failing or are starved, so callers read stale rows. The query label names it. Check budget pauses (pg_connector_issue_jira_governor_paused), auth, and daemon.log.jsonl and events.jsonl."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (query) (pg_connector_issue_jira_query_last_success_age_seconds)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [600]
+
+      # Consumer stuck: a consumer's oldest unacknowledged change row is older
+      # than 15 minutes (900 seconds).
+      - uid: pg-conn-jira-consumer-stuck
+        title: pg-connector-issue-jira consumer is stuck
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-jira: a change consumer has had an unacknowledged row for over 15 minutes"
+          description: "The oldest unacknowledged change row of a consumer (labels consumer and query; an unscoped consumer, one that names no query, carries query=other) is older than 15 minutes, so that consumer is not reading or acknowledging. Check the consumer process, pg_connector_issue_jira_consumer_redeliveries for a poison row, and cursor_expired lines in daemon.log.jsonl."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (consumer, query) (pg_connector_issue_jira_consumer_oldest_unacked_age_seconds)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [900]
+
+      # Settle holding: change rows that wait to be settled and do not drain.
+      # The design leaves the window open. A row ends its settle within the
+      # settle_timeout (default 30 s), so a pending count that never touches
+      # zero in a trailing 10 minutes (the minimum of the pending gauge over
+      # that window stays above 0), and does so for 5 minutes on top, means rows
+      # are held past their timeout. A momentary pending count while changes are
+      # being detected drains within the timeout and never holds the minimum
+      # above 0 for 10 minutes. A deployment that raises settle_timeout past a
+      # few minutes needs a longer window here.
+      - uid: pg-conn-jira-settle-holding
+        title: pg-connector-issue-jira change settle is holding
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-jira: change rows have been waiting to settle without draining for over 15 minutes"
+          description: "The change settle pending gauge has stayed above 0 for a trailing 10 minutes, sustained for 5 minutes (the settle timeout is 30 s by default, so pending rows normally drain in well under a minute): rows are held and consumers' reads are going back to origin. Check Jira reachability, the budget pause state (pg_connector_issue_jira_governor_paused) and daemon.log.jsonl."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1200
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: min_over_time(max(pg_connector_issue_jira_change_settle_pending)[10m:1m])
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Tracked set over its configured size. The literal 55 STANDS FOR the
+      # default of the daemon's tracked_set_alert_size key (this static file
+      # cannot read the rendered config). A deployment that changes
+      # tracked_set_alert_size MUST change this literal, the summary and the
+      # description with it, or the rule alerts at the wrong size. The count is
+      # the sum over all classes of tracked_entities.
+      - uid: pg-conn-jira-tracked-over
+        title: pg-connector-issue-jira tracked set is over its size
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-jira is tracking more than 55 entities"
+          description: "The daemon tracks more than 55 entities across all classes (55 is the default of tracked_set_alert_size) for over 10 minutes, so the set it keeps fresh is larger than the size it was configured and measured for and refreshes cost more Jira calls than planned. See pg_connector_issue_jira_tracked_entities by class for which class is growing."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum(pg_connector_issue_jira_tracked_entities)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [55]
+
+      # Change rows without a kind: any non-zero value. A change row the
+      # detector could not classify carries no kind, so consumers cannot route
+      # it; the design treats any occurrence as a defect to look at.
+      - uid: pg-conn-jira-rows-no-kind
+        title: pg-connector-issue-jira change rows without a kind
+        condition: C
+        for: 2m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-jira has change rows without a kind"
+          description: "pg_connector_issue_jira_change_rows_without_kind is above 0 for over 2 minutes: the change detector wrote rows that carry no kind, so consumers cannot route them. Any non-zero value is a defect; read daemon.log.jsonl and the change feed rows."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_connector_issue_jira_change_rows_without_kind)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Store moved aside or refused to start: any daemon.log.jsonl line whose
+      # `change` field is store_moved_aside or store_refused in the trailing 10
+      # minutes. There is no metric for it (the store did not open), hence a
+      # Loki rule. The events.jsonl rows carry no `change` field, so the filter
+      # selects the structured log only although both files share one
+      # service_name. noDataState is OK: a quiet log is the healthy case.
+      #
+      # Overlap: this rule selects the same service_name as the generic
+      # "Daemon Health" error-rate alert the observability module generates for
+      # a logSources entry of that name, and a store_refused line is written at
+      # error level, so one incident could page twice. The darwin module decides
+      # whether that generic alert is switched off for this entry.
+      - uid: pg-conn-jira-store-aside
+        title: pg-connector-issue-jira store moved aside or refused
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: error
+        annotations:
+          summary: "pg-connector-issue-jira moved its store aside or refused to start in the last 10 minutes"
+          description: 'The daemon logged store_moved_aside or store_refused in the last 10 minutes: its store was corrupt or unmigratable and was moved aside and recreated (the cache is rebuilt from scratch), or the store schema is newer than this binary (a downgrade) and the daemon refused to start. Inspect the lines with {service_name="pg-connector-issue-jira-daemon"} | json | change=~"store_moved_aside|store_refused" and read the cause, found_version and supported_version fields.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-issue-jira-daemon"} | json | change=~"store_moved_aside|store_refused" [10m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # (a) Auth, ported from pg-conn-issue-jira-auth-failing: Jira rejected the
+      # credential on a real call (failure_class auth). The daemon log carries NO
+      # auth_state field (the old backend's `pjira auth-status` event did), so the
+      # rule selects failure_class auth AND error_code unauthenticated, which is
+      # the kind=request row of a rejected call. It is therefore narrower than the
+      # old rule: a missing or forbidden credential seen only by an auth_status
+      # check is not alerted. One occurrence in the last 15m is enough.
+      - uid: pg-conn-jira-auth-failing
+        title: pg-connector-issue-jira daemon authentication failing
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: error
+        annotations:
+          summary: "pg-connector-issue-jira daemon: Jira rejected the credential within the last 15 minutes"
+          description: 'The pg-connector-issue-jira daemon saw an authentication failure (a 401/403 from Jira, error_code unauthenticated) at least once in the last 15 minutes, so every Jira panel it feeds is empty or stale. Run `pjira auth-status` and refresh the API token in pjira''s secret source. Inspect the events with {service_name="pg-connector-issue-jira-daemon"} | json | failure_class="auth" and read error.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-issue-jira-daemon"} | json | failure_class="auth" | error_code="unauthenticated" [15m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # (b) Availability, ported from pg-conn-issue-jira-unavailable: requests
+      # keep failing as `unavailable` (pjira missing from PATH, Jira answering 5xx
+      # or unreachable, an undecodable reply). Throttling is `unavailable` on the
+      # wire too but is rule (c)'s business, so it is excluded via failure_class
+      # (a row with no failure_class passes the != filter). The client log's
+      # daemon_unreachable rows carry another service_name and never match.
+      - uid: pg-conn-jira-unavailable
+        title: pg-connector-issue-jira daemon unavailable
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-jira daemon has been failing as unavailable for over 10 minutes"
+          description: 'The pg-connector-issue-jira daemon has answered unavailable (not counting throttling) in every 5 minute window for over 10 minutes -- pjira is missing or failing, or Jira is unreachable or answering 5xx. Inspect the events with {service_name="pg-connector-issue-jira-daemon"} | json | error_code="unavailable" and read error.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-issue-jira-daemon"} | json | error_code="unavailable" | failure_class!="rate_limited" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # (c) Throttling, ported from pg-conn-issue-jira-rate-limited: Jira
+      # answered HTTP 429 (failure_class rate_limited). The daemon writes the
+      # class on BOTH its kind=request rows and its kind=origin rows (one per
+      # Jira call, including background work tied to no request), so one throttle
+      # that reaches a caller would count twice. The rule counts the kind=origin
+      # rows, one per throttled Jira call. One 429 is routine burst behaviour, so
+      # the rule needs MORE THAN TWO within a trailing 10m and that to hold for
+      # 5m.
+      - uid: pg-conn-jira-rate-limited
+        title: pg-connector-issue-jira daemon rate limited
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-jira daemon is being rate limited by Jira (HTTP 429)"
+          description: 'Jira answered HTTP 429 to the pg-connector-issue-jira daemon more than twice in the last 10 minutes, sustained for 5 minutes, so Jira panels and attention data are going stale. Something is polling Jira too often. Inspect the events with {service_name="pg-connector-issue-jira-daemon"} | json | failure_class="rate_limited" and read op, purpose and group.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-issue-jira-daemon"} | json | kind="origin" | failure_class="rate_limited" [10m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
