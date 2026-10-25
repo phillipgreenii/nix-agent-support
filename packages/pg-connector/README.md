@@ -367,6 +367,19 @@ auth failure, sustained `unavailable` (excluding throttling) and repeated 429s. 
 NO remaining-budget alert: the backend reads no Jira quota figure, header or `Retry-After`, so the 429
 itself is the only quota signal it can see.
 
+`pg-connector-issue-jira --config <file> --instance <name>` is the daemon's client mode, the thin
+scriptout backend the umbrella execs. `capabilities` is answered without the daemon (it declares
+`owns_changes`, `cache_opt_out` and `queries.<name>.watched`), the five writes (`create`, `comment`,
+`transition`, `update`, `close`) run in the calling process under the caller's own environment and
+send the daemon the `write_begin` and `invalidate` notices around each (bounded by
+`write_notice_timeout`; a write never depends on the daemon), and every other op is forwarded over
+the socket. A read with the daemon down answers `unavailable` (naming the socket, the supervisor and
+its restart hint) or, while the daemon migrates, `unavailable` beginning `migrating:`; a caller MUST
+treat it as retryable. `pg-connector-issue-jira --config <file> status [--json]` prints the health
+report (exit 0 healthy, 2 degraded, 3 down; the static report when the daemon is down). An
+`--instance` that differs from the config's instance exits 4. With no `--config` the binary stays
+the old stateless backend.
+
 `pg-connector-issue-beads` follows the same pattern: it appends to
 `${XDG_STATE_HOME}/pg-connector-issue-beads/events.jsonl` (override with
 `PG_CONNECTOR_ISSUE_BEADS_EVENTS_FILE`; `off` disables it), same rotation, with the common fields plus

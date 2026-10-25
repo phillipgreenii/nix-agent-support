@@ -28,7 +28,9 @@ func TestMain(m *testing.M) {
 		main() // exits the process
 		return
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	removeBuilds()
+	os.Exit(code)
 }
 
 // shortTempDir returns a fresh directory with a short absolute path: a unix
@@ -165,7 +167,6 @@ func TestRealProcessAnyOtherConfigFormIsAUsageErrorAndABadConfigExitsFour(t *tes
 	for _, args := range [][]string{
 		{"--config", cfg},
 		{"--config", cfg, "client"},
-		{"--config", cfg, "status"},
 		{"--config", cfg, "serve", "extra"},
 		{"--config"},
 	} {

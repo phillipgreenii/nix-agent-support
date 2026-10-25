@@ -11,6 +11,11 @@
 // via pjira's own auth-status op (see internal/backend.go's CheckAuth doc
 // comment) — capabilities.ops (via scriptout.AddCapabilities) reflects that
 // automatically, with no separate hand-typed ops list.
+//
+// With --config <file> the binary has three more modes (see dispatch): serve
+// (the daemon), --instance <name> (the client the umbrella execs: capabilities
+// and the five writes in-process, every other op forwarded to the daemon over
+// its socket; internal/client) and status [--json] (the health report).
 package main
 
 import (
@@ -44,66 +49,138 @@ const (
 	exitConfig = 4
 )
 
-// modeServe is the daemon, the only mode that takes a config file for now.
-const modeServe = "serve"
+// The modes selected by what follows --config.
+const (
+	// modeServe is the daemon.
+	modeServe = "serve"
+	// modeStatus is the operator-facing health report.
+	modeStatus = "status"
+	// modeClient is the client, selected by --instance and no mode word.
+	modeClient = "client"
+)
 
 func main() {
-	os.Exit(dispatch(os.Args[1:], os.Stderr))
+	os.Exit(dispatch(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
-// dispatch selects the mode. With no --config flag the binary is the old
-// stateless backend, exactly as before (scriptout.ServeLoop over the old
-// dispatch table), whatever other arguments it was given. With --config <path>
-// serve it runs the daemon; any other --config form is a usage error.
-func dispatch(args []string, stderr io.Writer) int {
+// dispatch selects the mode. --version and --help work in every form. With no
+// --config flag the binary is the old stateless backend, exactly as before
+// (scriptout.ServeLoop over the old dispatch table), whatever other arguments
+// it was given. With --config <path> it runs
+//
+//	serve                  the daemon
+//	--instance <name>      the client: one request on stdin, one response on stdout
+//	status [--json]        the health report (exit 0 healthy, 2 degraded, 3 down)
+//
+// and any other --config form is a usage error. An --instance that differs from
+// the config's instance exits 4, like a config that cannot be loaded.
+func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	for _, a := range args {
+		switch a {
+		case "--version", "-version":
+			fmt.Fprintf(stdout, "pg-connector-issue-jira %s\n", Version)
+			return 0
+		case "--help", "-h", "-help":
+			fmt.Fprint(stdout, usage)
+			return 0
+		}
+	}
 	path, rest, given, err := splitConfigFlag(args)
 	if !given {
 		return run()
+	}
+	var instance string
+	var instanceGiven bool
+	if err == nil {
+		instance, rest, instanceGiven, err = splitInstanceFlag(rest)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "pg-connector-issue-jira: %v\n\n%s", err, usage)
 		return exitUsage
 	}
-	if len(rest) != 1 || rest[0] != modeServe {
-		fmt.Fprintf(stderr, "pg-connector-issue-jira: --config takes the mode %q\n\n%s", modeServe, usage)
+	var mode string
+	switch {
+	case len(rest) == 0 && instanceGiven:
+		mode = modeClient
+	case len(rest) == 1 && rest[0] == modeServe && !instanceGiven:
+		mode = modeServe
+	case len(rest) >= 1 && rest[0] == modeStatus:
+		mode = modeStatus
+	default:
+		fmt.Fprintf(stderr, "pg-connector-issue-jira: --config takes --instance <name>, %q or %q\n\n%s", modeServe, modeStatus, usage)
 		return exitUsage
+	}
+	var modeArgs []string
+	if mode == modeStatus {
+		modeArgs = rest[1:]
+		// A bad argument is a usage error before the config is read.
+		if _, err := parseStatusArgs(modeArgs); err != nil {
+			fmt.Fprintf(stderr, "pg-connector-issue-jira status: %v\n\n%s", err, usage)
+			return exitUsage
+		}
 	}
 	cfg, err := config.Load(path, nil)
 	if err != nil {
-		fmt.Fprintf(stderr, "pg-connector-issue-jira %s: %v\n", modeServe, err)
+		fmt.Fprintf(stderr, "pg-connector-issue-jira %s: %v\n", mode, err)
 		return exitConfig
 	}
-	return runServe(cfg, stderr)
+	if instanceGiven && instance != cfg.Instance {
+		fmt.Fprintf(stderr, "pg-connector-issue-jira %s: --instance %q is not the config's instance %q\n", mode, instance, cfg.Instance)
+		return exitConfig
+	}
+	switch mode {
+	case modeServe:
+		return runServe(cfg, stderr)
+	case modeStatus:
+		return runStatus(modeArgs, cfg, stdout, stderr)
+	}
+	return runClient(cfg, stdin, stdout)
 }
 
-const usage = `usage: pg-connector-issue-jira                          (the stateless backend: one request on stdin)
-       pg-connector-issue-jira --config <path> serve    (the daemon)
+const usage = `usage: pg-connector-issue-jira                                    (the stateless backend: one request on stdin)
+       pg-connector-issue-jira --config <path> serve              (the daemon)
+       pg-connector-issue-jira --config <path> --instance <name>  (client: one request on stdin)
+       pg-connector-issue-jira --config <path> status [--json]    (health report: exit 0 healthy, 2 degraded, 3 down)
+       pg-connector-issue-jira --version
 `
 
 // splitConfigFlag scans args for --config <path> / --config=<path> (also with a
 // single dash) and returns the path, the remaining arguments and whether the
 // flag appeared at all. A --config with no path is an error.
 func splitConfigFlag(args []string) (path string, rest []string, given bool, err error) {
+	return splitValueFlag(args, "config", "a path")
+}
+
+// splitInstanceFlag scans args for --instance <name> / --instance=<name> (also
+// with a single dash), like splitConfigFlag does for --config.
+func splitInstanceFlag(args []string) (name string, rest []string, given bool, err error) {
+	return splitValueFlag(args, "instance", "a name")
+}
+
+// splitValueFlag scans args for --name <value> / --name=<value> (also with a
+// single dash) and returns the value, the remaining arguments and whether the
+// flag appeared at all. A flag with no value is an error naming what it needs.
+func splitValueFlag(args []string, name, needs string) (value string, rest []string, given bool, err error) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
-		case a == "--config" || a == "-config":
+		case a == "--"+name || a == "-"+name:
 			given = true
 			if i+1 >= len(args) {
-				err = fmt.Errorf("--config requires a path")
+				err = fmt.Errorf("--%s requires %s", name, needs)
 				continue
 			}
 			i++
-			path = args[i]
-		case strings.HasPrefix(a, "--config="):
-			given, path = true, strings.TrimPrefix(a, "--config=")
-		case strings.HasPrefix(a, "-config="):
-			given, path = true, strings.TrimPrefix(a, "-config=")
+			value = args[i]
+		case strings.HasPrefix(a, "--"+name+"="):
+			given, value = true, strings.TrimPrefix(a, "--"+name+"=")
+		case strings.HasPrefix(a, "-"+name+"="):
+			given, value = true, strings.TrimPrefix(a, "-"+name+"=")
 		default:
 			rest = append(rest, a)
 		}
 	}
-	return path, rest, given, err
+	return value, rest, given, err
 }
 
 // run builds this backend's Provider (a pjira-CLI-backed Backend) and its
