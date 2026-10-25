@@ -14,10 +14,14 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
@@ -30,8 +34,76 @@ import (
 // mirroring every existing Tier-2 backend's own convention).
 var Version = "dev"
 
+// Exit codes of the process itself that precede any request. 1 is reserved for
+// unexpected errors; a client mode's own codes are the scriptout taxonomy's.
+const (
+	// exitUsage is a command line the binary does not accept.
+	exitUsage = 2
+	// exitConfig is a config file that cannot be loaded; it shares the value 4
+	// with unavailable on purpose: both mean "this backend cannot be used".
+	exitConfig = 4
+)
+
+// modeServe is the daemon, the only mode that takes a config file for now.
+const modeServe = "serve"
+
 func main() {
-	os.Exit(run())
+	os.Exit(dispatch(os.Args[1:], os.Stderr))
+}
+
+// dispatch selects the mode. With no --config flag the binary is the old
+// stateless backend, exactly as before (scriptout.ServeLoop over the old
+// dispatch table), whatever other arguments it was given. With --config <path>
+// serve it runs the daemon; any other --config form is a usage error.
+func dispatch(args []string, stderr io.Writer) int {
+	path, rest, given, err := splitConfigFlag(args)
+	if !given {
+		return run()
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "pg-connector-issue-jira: %v\n\n%s", err, usage)
+		return exitUsage
+	}
+	if len(rest) != 1 || rest[0] != modeServe {
+		fmt.Fprintf(stderr, "pg-connector-issue-jira: --config takes the mode %q\n\n%s", modeServe, usage)
+		return exitUsage
+	}
+	cfg, err := config.Load(path, nil)
+	if err != nil {
+		fmt.Fprintf(stderr, "pg-connector-issue-jira %s: %v\n", modeServe, err)
+		return exitConfig
+	}
+	return runServe(cfg, stderr)
+}
+
+const usage = `usage: pg-connector-issue-jira                          (the stateless backend: one request on stdin)
+       pg-connector-issue-jira --config <path> serve    (the daemon)
+`
+
+// splitConfigFlag scans args for --config <path> / --config=<path> (also with a
+// single dash) and returns the path, the remaining arguments and whether the
+// flag appeared at all. A --config with no path is an error.
+func splitConfigFlag(args []string) (path string, rest []string, given bool, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--config" || a == "-config":
+			given = true
+			if i+1 >= len(args) {
+				err = fmt.Errorf("--config requires a path")
+				continue
+			}
+			i++
+			path = args[i]
+		case strings.HasPrefix(a, "--config="):
+			given, path = true, strings.TrimPrefix(a, "--config=")
+		case strings.HasPrefix(a, "-config="):
+			given, path = true, strings.TrimPrefix(a, "-config=")
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return path, rest, given, err
 }
 
 // run builds this backend's Provider (a pjira-CLI-backed Backend) and its
