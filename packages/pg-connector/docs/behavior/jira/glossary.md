@@ -40,7 +40,7 @@ GitHub set's **instance**.
   the detail group and is not itself content (`INV-JIRA-FRESH-1`, `INV-JIRA-CHG-3`).
 - **Comment summary** — the count of an issue's comments and the time of the latest one, carried on
   the entity so a comment is a visible difference (`INV-JIRA-FRESH-3`).
-- **Pass-through read** — `children`, `search` or `list_activity`: an op the daemon performs
+- **Pass-through read** — `children`, `search`, `list_activity` or `deps`: an op the daemon performs
   against the origin itself, so the governor sees its spend, but whose result it does not store
   (`INV-JIRA-FRESH-2`).
 - **Tracked** — the daemon keeps the issue's content and keeps it fresh: every issue it retrieves,

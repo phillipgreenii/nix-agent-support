@@ -82,8 +82,11 @@ different meaning for a shared term it takes a different name (`INV-20`).
   the answer is a **local hit** with no origin call; otherwise the stale groups are fetched at the
   interactive class, the answer waits up to the client's deadline, and a failed fetch leaves the
   previous content in place and answers stale content inside expiry, `unavailable` otherwise.
-  `children`, `search` and `list_activity` MUST be **live pass-through reads** performed by the
-  daemon under the governor, and nothing they return is stored. A read with `fresh: true` MUST
+  `children`, `search`, `list_activity` and `deps` MUST be **live pass-through reads** performed by
+  the daemon under the governor, and nothing they return is stored. `deps` is the parent's
+  dependency op (`INTF-WIRE`'s per-capability catalog): this backend has no dependency concept of its own, so it checks
+  that the issue exists at the origin (an unknown or non-Jira-shaped id answers `not_found`, so the
+  umbrella's try-each resolution falls through to the next backend) and then answers an empty set. A read with `fresh: true` MUST
   force a fetch of every group it needs; the backend decides how current its answer is
   (`INV-CACHE-8`). A read carrying the watch option is forwarded to the daemon (`INV-JIRA-WATCH-1`).
   Every read answer MUST carry `served_from`, `stale`, `age_seconds` and `groups[]`, as the GitHub

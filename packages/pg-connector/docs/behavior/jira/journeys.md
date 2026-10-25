@@ -117,7 +117,7 @@ Extensions:
 - The caller passed `--fresh`: every group the op needs is fetched.
 - The issue is closed: it keeps being refreshed for 24 hours, is served unrefreshed until 7 days
   after closing, and is evicted after that.
-- The op is `children`, `search` or `list_activity`: a live pass-through read, nothing stored.
+- The op is `children`, `search`, `list_activity` or `deps`: a live pass-through read, nothing stored.
 
 ### `USECASE-JIRA-READ-QUERY` — list the issues of a configured query <!-- uuid: b21ad61e-c270-4b6e-bb13-cb20e4652454 -->
 

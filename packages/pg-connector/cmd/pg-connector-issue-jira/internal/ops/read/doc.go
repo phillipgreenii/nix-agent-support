@@ -47,8 +47,8 @@
 // shared dispatch tables over the governed backend, so every origin call passes
 // the governor (class 1, purpose passthrough), and nothing they return is
 // stored. children is never cached. deps is the old backend's existence check
-// followed by an empty result; it is registered although the behavior docs'
-// operation catalog does not list it, because pg-desk's hydration calls it when
+// followed by an empty result (the behavior docs' operation catalog lists it:
+// INV-JIRA-FRESH-2); it is registered because pg-desk's hydration calls it when
 // issue dependencies are read and would fail on unknown_op.
 //
 // # When the origin cannot answer

@@ -53,24 +53,25 @@ flowchart LR
 An op's **groups** are the field groups it needs; a read whose groups are all inside their freshness
 window is a local hit (`INV-JIRA-FRESH-2`).
 
-| Op              | Served from                                | Groups read     | Note                                                       |
-| --------------- | ------------------------------------------ | --------------- | ---------------------------------------------------------- |
-| `show`          | store, read-through                        | summary, detail | accepts the watch option (`INV-JIRA-WATCH-1`)              |
-| `list`          | query cache and store                      | summary         | a configured query name is required (`INV-JIRA-ERR-1`)     |
-| `children`      | metered pass-through                       |                 | the children group is never held (`INV-JIRA-FRESH-2`)      |
-| `search`        | metered pass-through                       |                 | live, not stored                                           |
-| `list_activity` | metered pass-through                       |                 | live, not stored                                           |
-| `create`        | the origin, performed by the client        |                 | a write; never needs the daemon (`INV-JIRA-WRITE-1`)       |
-| `comment`       | the origin, performed by the client        |                 | a write                                                    |
-| `transition`    | the origin, performed by the client        |                 | a write                                                    |
-| `update`        | the origin, performed by the client        |                 | a write                                                    |
-| `close`         | the origin, performed by the client        |                 | a write                                                    |
-| `changes`       | change log                                 |                 | the feed (`INV-JIRA-CHG-6`)                                |
-| `changes_ack`   | change log                                 |                 | moves a consumer's one position (`INV-JIRA-CHG-7`)         |
-| `explain`       | store                                      |                 | `INV-JIRA-DIAG-2`                                          |
-| `capabilities`  | the client, without the daemon             |                 | `INV-JIRA-PROC-2`                                          |
-| `auth_status`   | the daemon                                 |                 | reports the acting identity and any authentication failure |
-| `status`        | the daemon; a local report when it is down |                 | `INTF-JIRA-STATUS`                                         |
+| Op              | Served from                                | Groups read     | Note                                                          |
+| --------------- | ------------------------------------------ | --------------- | ------------------------------------------------------------- |
+| `show`          | store, read-through                        | summary, detail | accepts the watch option (`INV-JIRA-WATCH-1`)                 |
+| `list`          | query cache and store                      | summary         | a configured query name is required (`INV-JIRA-ERR-1`)        |
+| `children`      | metered pass-through                       |                 | the children group is never held (`INV-JIRA-FRESH-2`)         |
+| `search`        | metered pass-through                       |                 | live, not stored                                              |
+| `list_activity` | metered pass-through                       |                 | live, not stored                                              |
+| `deps`          | metered pass-through                       |                 | an existence check, then an empty result (`INV-JIRA-FRESH-2`) |
+| `create`        | the origin, performed by the client        |                 | a write; never needs the daemon (`INV-JIRA-WRITE-1`)          |
+| `comment`       | the origin, performed by the client        |                 | a write                                                       |
+| `transition`    | the origin, performed by the client        |                 | a write                                                       |
+| `update`        | the origin, performed by the client        |                 | a write                                                       |
+| `close`         | the origin, performed by the client        |                 | a write                                                       |
+| `changes`       | change log                                 |                 | the feed (`INV-JIRA-CHG-6`)                                   |
+| `changes_ack`   | change log                                 |                 | moves a consumer's one position (`INV-JIRA-CHG-7`)            |
+| `explain`       | store                                      |                 | `INV-JIRA-DIAG-2`                                             |
+| `capabilities`  | the client, without the daemon             |                 | `INV-JIRA-PROC-2`                                             |
+| `auth_status`   | the daemon                                 |                 | reports the acting identity and any authentication failure    |
+| `status`        | the daemon; a local report when it is down |                 | `INTF-JIRA-STATUS`                                            |
 
 ### Write handling
 
@@ -149,7 +150,7 @@ Every failure is answered from the parent's seven-value taxonomy (`INV-JIRA-ERR-
   **Participation:** essential. **Initiator:** the daemon for every read, and the calling process
   for a write.
 - **What crosses (out).** Full query runs for the summary group, per-issue reads for the detail
-  group, the three pass-through reads, and the five writes. Every read is made by the daemon, under
+  group, the four pass-through reads, and the five writes. Every read is made by the daemon, under
   the governor, through the origin tool. A write is made by the calling process, through the same
   tool, under that caller's identity.
 - **What crosses (in).** Content, a refusal for rate with its stated retry delay when it states one,
