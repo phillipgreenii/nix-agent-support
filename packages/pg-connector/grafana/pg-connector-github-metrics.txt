@@ -2,6 +2,7 @@ pg_connector_github_daemon_up gauge -
 pg_connector_github_budget_spent counter bucket,purpose,group
 pg_connector_github_budget_remaining gauge bucket
 pg_connector_github_governor_paused gauge bucket,reason
+pg_connector_github_governor_backlog gauge class
 pg_connector_github_queue_depth gauge class
 pg_connector_github_queue_oldest_overdue_seconds gauge class
 pg_connector_github_request_duration histogram op,served_from
@@ -18,3 +19,5 @@ pg_connector_github_consumer_oldest_unacked_age_seconds gauge consumer,query
 pg_connector_github_consumer_redeliveries counter consumer,query
 pg_connector_github_query_last_success_age_seconds gauge query
 pg_connector_github_watched_entities gauge -
+pg_connector_github_tracked_entities gauge class
+pg_connector_github_tracked_limit gauge -

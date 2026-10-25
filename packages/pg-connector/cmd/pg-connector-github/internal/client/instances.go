@@ -112,6 +112,7 @@ func PR() Instance {
 			scriptout.OpList:         {SchemaVersion: v},
 			"status":                 {SchemaVersion: v},
 			"explain":                {SchemaVersion: v},
+			"inspect":                {SchemaVersion: v},
 			"show":                   {SchemaVersion: v},
 			"files":                  {SchemaVersion: v},
 			"commits":                {SchemaVersion: v},

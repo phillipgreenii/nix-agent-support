@@ -352,6 +352,12 @@ func TestStateListsEveryClassInOrderAndMeasuresOverdueOnlyForDueTimes(t *testing
 	if cs := st.Classes[2]; cs.Depth != 1 || cs.OldestOverdue != 0 {
 		t.Errorf("class 3: depth %d overdue %v, want 1 and 0 (a task due now is not overdue)", cs.Depth, cs.OldestOverdue)
 	}
+	if cs := st.Classes[3]; cs.Backlog != 4 {
+		t.Errorf("class 4 backlog = %d, want 4 (the zero, now and two past due times; the task due in an hour is queued but not backlog)", cs.Backlog)
+	}
+	if cs := st.Classes[2]; cs.Backlog != 1 {
+		t.Errorf("class 3 backlog = %d, want 1 (a zero due time is due)", cs.Backlog)
+	}
 	if cs := st.Classes[4]; cs.Depth != 0 {
 		t.Errorf("class 5: depth %d, want 0", cs.Depth)
 	}

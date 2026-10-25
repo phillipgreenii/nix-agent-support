@@ -250,21 +250,23 @@ func TestUnknownKeyRejectedByName(t *testing.T) {
 
 func TestInvalidValuesRejected(t *testing.T) {
 	cases := map[string]string{
-		"missing state_dir":      `{}`,
-		"numeric duration":       `{"state_dir":"/s","summary_ttl": 60}`,
-		"bad duration":           `{"state_dir":"/s","summary_ttl": "soon"}`,
-		"non-positive duration":  `{"state_dir":"/s","summary_ttl": "0s", "pending_ttl": "-1s"}`,
-		"zero batch":             `{"state_dir":"/s","batch_size": 0}`,
-		"share above one":        `{"state_dir":"/s","background_share": 1.5}`,
-		"negative reserve":       `{"state_dir":"/s","rate_reserve_points": -1}`,
-		"trailing data":          `{"state_dir":"/s"} {}`,
-		"not json":               `state_dir: /s`,
-		"empty host":             `{"state_dir":"/s","host": ""}`,
-		"bad size":               `{"state_dir":"/s","change_body_cap": "lots"}`,
-		"non-positive query ttl": `{"state_dir":"/s","query_ttl": {"mine": "0s"}}`,
-		"relative state_dir":     `{"state_dir":"state"}`,
-		"relative socket_path":   `{"state_dir":"/s","socket_path":"run/sock"}`,
-		"null state_dir":         `{"state_dir":null}`,
+		"missing state_dir":          `{}`,
+		"numeric duration":           `{"state_dir":"/s","summary_ttl": 60}`,
+		"bad duration":               `{"state_dir":"/s","summary_ttl": "soon"}`,
+		"non-positive duration":      `{"state_dir":"/s","summary_ttl": "0s", "pending_ttl": "-1s"}`,
+		"zero batch":                 `{"state_dir":"/s","batch_size": 0}`,
+		"share above one":            `{"state_dir":"/s","background_share": 1.5}`,
+		"negative reserve":           `{"state_dir":"/s","rate_reserve_points": -1}`,
+		"trailing data":              `{"state_dir":"/s"} {}`,
+		"not json":                   `state_dir: /s`,
+		"empty host":                 `{"state_dir":"/s","host": ""}`,
+		"bad size":                   `{"state_dir":"/s","change_body_cap": "lots"}`,
+		"non-positive query ttl":     `{"state_dir":"/s","query_ttl": {"mine": "0s"}}`,
+		"relative state_dir":         `{"state_dir":"state"}`,
+		"relative socket_path":       `{"state_dir":"/s","socket_path":"run/sock"}`,
+		"null state_dir":             `{"state_dir":null}`,
+		"negative tracked_set_limit": `{"state_dir":"/s","tracked_set_limit": -1}`,
+		"string tracked_set_limit":   `{"state_dir":"/s","tracked_set_limit": "many"}`,
 	}
 	for name, body := range cases {
 		if _, err := Load(write(t, body), noEnv); err == nil {
@@ -488,5 +490,37 @@ func TestRenderedGolden(t *testing.T) {
 	}
 	if !cfg.HasQuery("mine") || !cfg.HasQuery("team") {
 		t.Errorf("queries = %#v", cfg.PR.Queries)
+	}
+}
+
+// TestTrackedSetLimitIsAnOptionalCountThatLeavesTheHashAloneWhenUnset: the
+// limit is a daemon configuration key the daemon only exports as a gauge; a
+// file that never names it loads as zero (no limit) with the same hash as
+// before the key existed, and a file that sets it carries the value and a
+// different hash.
+func TestTrackedSetLimitIsAnOptionalCountThatLeavesTheHashAloneWhenUnset(t *testing.T) {
+	plain, err := Load(write(t, minimal), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.TrackedSetLimit != 0 {
+		t.Errorf("an unset tracked_set_limit = %d, want 0 (no limit configured)", plain.TrackedSetLimit)
+	}
+	zero, err := Load(write(t, `{"state_dir":"/tmp/s","tracked_set_limit":0}`), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if zero.Hash != plain.Hash {
+		t.Errorf("an explicit zero changes the hash: %q vs %q", zero.Hash, plain.Hash)
+	}
+	set, err := Load(write(t, `{"state_dir":"/tmp/s","tracked_set_limit":900}`), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set.TrackedSetLimit != 900 {
+		t.Errorf("tracked_set_limit = %d, want 900", set.TrackedSetLimit)
+	}
+	if set.Hash == plain.Hash {
+		t.Error("a configured limit must change the hash of the effective settings")
 	}
 }

@@ -301,6 +301,24 @@ restated.
 - **`INV-GH-DIAG-3`** <!-- uuid: 3ba638f6-aacc-4afe-9b13-7f3eea58c455 --> — `refresh`, through
   `pr refresh <id>` and `pr refresh --query Q`, MUST queue the named groups at the write-invalidated
   class and return at once, without waiting for the fetch.
+- **`INV-GH-DIAG-4`** <!-- uuid: 57ca3bb2-4fb4-4c14-971b-cae069d4c17d --> — `inspect`, through
+  `pr inspect <id>...`, MUST answer for each pull request named whether it is **tracked** (in the
+  keep-alive set, `INV-GH-FRESH-3`) and whether it is **watched** (its stored watched flag is set, `INV-GH-CHG-5`), and for a watched one when the flag was first set and by what cause (`query:<name>`,
+  `direct` or `adhoc:<name>`). A PR that was only read MUST answer tracked and not watched, and a PR
+  the daemon has never seen MUST answer unknown, not an error. The answer MUST end with the counts
+  over the distinct PRs named (requested, known, unknown, tracked, watched), so that a caller can
+  compare the watched count of a set it marked against its own. It MUST read the store and call no
+  origin, and it MUST accept at least two thousand ids in one call.
+- **`INV-GH-DIAG-5`** <!-- uuid: 077ed31c-edea-423f-a668-29f52ed1434b --> — The daemon MUST export
+  the number of tracked pull requests by class (`members`: listed by a configured query;
+  `other_open`: kept by a read or a watch alone; `closed_grace`: closed or merged and still held
+  until `terminal_ttl` and then expiry take them, which is not tracked), the number of watched
+  entities, and the governor's backlog by priority class (the queued tasks that are due now and have
+  not gone out, which is a part of the queue depth). It MUST also export the configured
+  tracked-set limit as its own gauge, from the daemon setting `tracked_set_limit`, and MUST NOT
+  report that gauge while no limit is configured, so an alert can compare the tracked count with
+  the limit as a ratio. The limit MUST NOT cap, evict or refuse anything: it is read by an alert
+  only.
 
 ## Errors
 

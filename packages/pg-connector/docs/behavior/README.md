@@ -119,7 +119,7 @@ the GitHub backend's own set ([github](github/README.md)). The Jira backend's si
 ([jira](jira/README.md)) owns no element cited here. It owns the read-answer provenance
 (`INV-GH-FRESH-8`), the budget governor's hard cap, priority classes, background share and limit
 handling (`INV-GH-BUDGET-1`, `INV-GH-BUDGET-2`, `INV-GH-BUDGET-3`, `INV-GH-BUDGET-5`), and the
-operator verbs that explain and refresh a stale entity (`INV-GH-DIAG-2`, `INV-GH-DIAG-3`). The
+operator verbs that explain and refresh a stale entity and that inspect whether a PR is tracked or watched (`INV-GH-DIAG-2`, `INV-GH-DIAG-3`, `INV-GH-DIAG-4`). The
 as-of contract (`INV-ASOF-1`) and the single-computer rule for the staleness flag (`INV-ASOF-2`),
 the pair every read capability's wire result carries, are this set's own
 ([invariants](invariants.md), "Read as-of and staleness"), so they are not listed below.
@@ -158,3 +158,4 @@ implementation has not yet built, one row per gap.
 | `INV-GH-BUDGET-5` | a secondary or primary limit pauses the background classes while interactive reads are served stale | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior/github` | [08b3ffb4-0b25-4850-809d-96c3b3e5248e](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/github/invariants.md) |
 | `INV-GH-DIAG-2`   | explain answers why an entity is stale, per group                                                   | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior/github` | [74d55235-019d-44ad-babd-91f3de1ac04f](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/github/invariants.md) |
 | `INV-GH-DIAG-3`   | refresh queues the named groups at the write-invalidated class and returns at once                  | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior/github` | [3ba638f6-aacc-4afe-9b13-7f3eea58c455](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/github/invariants.md) |
+| `INV-GH-DIAG-4`   | inspect says whether each PR is tracked and watched, and how it became watched, with counts         | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior/github` | [57ca3bb2-4fb4-4c14-971b-cae069d4c17d](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/github/invariants.md) |

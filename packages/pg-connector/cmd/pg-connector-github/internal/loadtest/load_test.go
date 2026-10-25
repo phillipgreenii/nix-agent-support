@@ -152,9 +152,10 @@ type result struct {
 	driver    string
 
 	// the scale the run had
-	prs, queries, burstHeads int
-	burstAt, summaryTTL      time.Duration
-	maxAges                  []time.Duration
+	prs, members, queries, burstHeads int
+	burstAt, summaryTTL               time.Duration
+	maxAges                           []time.Duration
+	samples                           []metricSample
 }
 
 func (h *harness) collect() *result {
@@ -165,11 +166,11 @@ func (h *harness) collect() *result {
 	r := &result{
 		opt: h.opt, t0: h.t0, end: h.clk.Now(), caps: h.govCaps, share: h.cfg.BackgroundShare,
 		govs: h.govs, waits: h.waits, rows: rows, changes: map[string]int{},
-		prs: nPRs, queries: len(h.queryNames), burstHeads: h.burstHeads, burstAt: h.burstAt,
+		prs: h.nPRs, members: h.nMembers, queries: len(h.queryNames), burstHeads: h.burstHeads, burstAt: h.burstAt,
 		summaryTTL: h.cfg.SummaryTTL.Std(),
 		maxAges:    []time.Duration{h.cfg.DetailMaxAge.Std(), h.cfg.ConversationMaxAge.Std(), h.cfg.CIMaxAge.Std()},
 		driver:     fmt.Sprintf("%d scheduler steps, %d batches, %d origin calls", h.stepCalls, h.batches, h.released),
-		maxPend:    h.maxPend, late: h.late, steps: h.steps, delivered: h.cons.delivered, twice: h.cons.twice,
+		samples:    h.samples, maxPend: h.maxPend, late: h.late, steps: h.steps, delivered: h.cons.delivered, twice: h.cons.twice,
 	}
 	h.rec.mu.Lock()
 	r.spends = slices.Clone(h.rec.spends)
@@ -185,7 +186,7 @@ func (h *harness) collect() *result {
 	}
 	r.errs = slices.Clone(h.rec.errs)
 	h.rec.mu.Unlock()
-	for i := 0; i < nPRs; i++ {
+	for i := 0; i < h.nPRs; i++ {
 		r.changes[refOf(i)] = h.rig.Origin.Changes(nodeOf(i))
 	}
 	for _, p := range h.pend {
@@ -349,7 +350,7 @@ func checkProgress(r *result) []string {
 			if !in(s.at) {
 				continue
 			}
-			if s.node < nMembers {
+			if s.node < r.members {
 				c3 = true
 			} else {
 				c4 = true
@@ -456,11 +457,11 @@ func checkPending(r *result) []string {
 			break
 		}
 	}
-	if len(r.pend) < nPRs/2 {
+	if len(r.pend) < r.prs/2 {
 		bad = append(bad, fmt.Sprintf("only %d pending rows were seen: the burst did not exercise the barrier", len(r.pend)))
 	}
-	if r.maxPend > nPRs {
-		bad = append(bad, fmt.Sprintf("%d pending rows at one time, more than the %d PRs", r.maxPend, nPRs))
+	if r.maxPend > r.prs {
+		bad = append(bad, fmt.Sprintf("%d pending rows at one time, more than the %d PRs", r.maxPend, r.prs))
 	}
 	return bad
 }

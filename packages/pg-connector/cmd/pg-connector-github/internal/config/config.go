@@ -136,6 +136,16 @@ type Settings struct {
 	ConsumerStaleAfter Duration `json:"consumer_stale_after"`
 	ChangeBodyCap      ByteSize `json:"change_body_cap"`
 
+	// TrackedSetLimit is the size the operator expects the tracked set not to
+	// exceed. The daemon only exports it, as the gauge tracked.limit, so an alert
+	// can compare the tracked count with it (a ratio, not a number copied into a
+	// rule); it caps nothing and evicts nothing. Zero (the default, and the value
+	// of a file that omits the key) means no limit is configured and the gauge is
+	// not reported. omitempty keeps an unset value out of the hashed encoding, so
+	// the hash of a file that never named the key is the same as before the key
+	// existed.
+	TrackedSetLimit int `json:"tracked_set_limit,omitempty"`
+
 	BatchSize            int     `json:"batch_size"`
 	Workers              int     `json:"workers"`
 	RateReservePoints    int     `json:"rate_reserve_points"`
@@ -431,6 +441,9 @@ func (c *Config) validate() error {
 		if n <= 0 {
 			return fmt.Errorf("%s must be positive", name)
 		}
+	}
+	if c.TrackedSetLimit < 0 {
+		return errors.New("tracked_set_limit must not be negative")
 	}
 	if c.RateReservePoints < 0 {
 		return errors.New("rate_reserve_points must not be negative")

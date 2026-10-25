@@ -62,6 +62,7 @@ window is a local hit (`INV-GH-FRESH-2`).
 | `pr`     | `changes_ack`    | change log                                 |                                    | moves a consumer position (`INV-GH-CHG-6`)                                                     |
 | `pr`     | `refresh`        | queues a refresh, returns at once          | the named groups                   | the verb `pr refresh <id>` or `pr refresh --query Q` (`INV-GH-DIAG-3`)                         |
 | `pr`     | `explain`        | store                                      |                                    | the verb `pr explain <id>` (`INV-GH-DIAG-2`)                                                   |
+| `pr`     | `inspect`        | store                                      |                                    | the verb `pr inspect <id>...` (`INV-GH-DIAG-4`)                                                |
 | `ci`     | `list_runs`      | store, read-through                        | runs                               |                                                                                                |
 | `ci`     | `get_logs`       | metered pass-through                       |                                    | not stored                                                                                     |
 | `ci`     | `rerun_failed`   | origin, through the daemon                 |                                    | invalidates runs; a run already re-running is a no-op answer                                   |
@@ -163,7 +164,8 @@ Every failure is answered from the parent's seven-value taxonomy (`INV-GH-ERR-1`
   deployment renders them). **Participation:** essential. **Initiator:** the operator.
 - **What crosses.** One rendered file, named on the backend's command line, that carries every setting
   the daemon and its client need: the origin host, the paths of the tools and the state, the socket
-  path, the configured queries, each group's freshness window and hard age, expiry, retention, the settle timeout, the batch size and worker count, and the caps, the reserve and
+  path, the configured queries, each group's freshness window and hard age, expiry, retention, the settle timeout, the batch size and worker count, the optional tracked-set limit
+  (`tracked_set_limit`, which the daemon only exports as a gauge, `INV-GH-DIAG-5`), and the caps, the reserve and
   the background share per bucket. The queries and the registry entry are rendered from one source,
   so the file and the umbrella's own `backends.<name>` block carry the same config hash.
 - **What must hold.** Nothing the daemon or the client needs comes from the environment (the one
@@ -186,7 +188,8 @@ Every failure is answered from the parent's seven-value taxonomy (`INV-GH-ERR-1`
   last whole-query success and last error, authentication state and the acting identity, the change
   log's head position, pending settle rows and settle timeouts in the last hour, per-consumer
   positions, the supervisor, and which registry name is served by which instance. A `--json` form
-  carries the same values.
+  carries the same values. The tracked, watched and backlog counts are exported as metrics
+  (`INV-GH-DIAG-5`) and read per pull request with `inspect` (`INV-GH-DIAG-4`).
 - **What must hold.** The report is produced even with the daemon down (`INV-GH-DIAG-1`). Its exit
   code follows the parent's `INV-EXIT-1`: 0 healthy, 2 degraded, 3 down.
 - **How agreement is confirmed.** Actor: the definition is the agreement; the conformance suite

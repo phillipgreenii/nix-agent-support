@@ -10,6 +10,10 @@
 //
 //   - "pr explain <id>" and "ci explain <pr-id>" send explain {id} and answer
 //     "why is this stale", group by group.
+//   - "pr inspect <id>..." sends inspect {ids} and answers, for each PR, whether
+//     the daemon tracks it, whether it watches it and how it became watched,
+//     then the counts over the whole list (the count the PR lane's marking step
+//     checks). It reads the store and calls no origin.
 //   - "pr refresh <id>" sends refresh {id} and "pr refresh --query Q" sends
 //     refresh {query}; the backend queues an interactive refresh and answers at
 //     once with its queued list, which this verb prints without waiting for the
@@ -34,6 +38,7 @@ import (
 // Wire op names of the verbs of this file.
 const (
 	opExplain = "explain"
+	opInspect = "inspect"
 	opRefresh = "refresh"
 )
 
@@ -116,6 +121,90 @@ any.`,
 		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizeExplain)
 	}
 	return cmd
+}
+
+// newPrInspectCmd is "pr inspect <id>...": for each PR named, is it tracked, is
+// it watched, and how did it become watched, then the counts over the list.
+func newPrInspectCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "inspect <id>...",
+		Short: "Say whether each PR is tracked and whether it is watched, and how it became watched",
+		Long: `Answer, from the backend's inspect op and without calling the origin, for each
+PR named: whether the daemon tracks it (refreshes it in the background: listed by
+a configured query, or told about by a read or a watch and not yet closed), whether
+it is watched (its change rows are delivered), and when and by what cause it
+became watched ("query:<name>", "direct" or "adhoc:<name>"). A PR read once is tracked and
+not watched; a watched PR stays watched. A PR the daemon has never seen is
+answered as unknown, not as a failure.
+
+The answer ends with the counts over every PR named (requested, known, unknown,
+tracked, watched): the watched count is how a caller checks that a set of PRs it
+marked as watched is all watched. Name at most 2000 PRs per call.`,
+		Args: cobra.MinimumNArgs(1),
+	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportPrTargetedOutcome(cmd, nil, err, humanizeInspect)
+		}
+		resp, dispatchErr := DispatchTargetedOptional(cmd.Context(), reg, "pr", opInspect, map[string]any{"ids": args}, *backendFlag)
+		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizeInspect)
+	}
+	return cmd
+}
+
+// inspectDoc decodes the daemon's inspect answer for the human rendering.
+type inspectDoc struct {
+	Results []struct {
+		ID         string `json:"id"`
+		Ref        string `json:"ref"`
+		NodeID     string `json:"node_id"`
+		Known      bool   `json:"known"`
+		Tracked    bool   `json:"tracked"`
+		Watched    bool   `json:"watched"`
+		WatchedAt  string `json:"watched_at"`
+		WatchedVia string `json:"watched_via"`
+		Tombstoned bool   `json:"tombstoned"`
+	} `json:"results"`
+	Counts struct {
+		Requested int `json:"requested"`
+		Known     int `json:"known"`
+		Unknown   int `json:"unknown"`
+		Tracked   int `json:"tracked"`
+		Watched   int `json:"watched"`
+	} `json:"counts"`
+}
+
+// humanizeInspect formats an inspect answer: one line per PR, then the counts.
+func humanizeInspect(raw json.RawMessage) (string, error) {
+	var d inspectDoc
+	if err := scriptout.Decode(raw, &d); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, r := range d.Results {
+		if !r.Known {
+			fmt.Fprintf(&b, "%s: unknown to the daemon (not tracked, not watched)\n", r.ID)
+			continue
+		}
+		fmt.Fprintf(&b, "%s: tracked=%t watched=%t", r.ID, r.Tracked, r.Watched)
+		if r.Watched {
+			if r.WatchedVia != "" {
+				fmt.Fprintf(&b, " via=%s", r.WatchedVia)
+			}
+			if r.WatchedAt != "" {
+				fmt.Fprintf(&b, " since=%s", r.WatchedAt)
+			}
+		}
+		if r.Tombstoned {
+			b.WriteString(" tombstoned")
+		}
+		b.WriteString("\n")
+	}
+	c := d.Counts
+	fmt.Fprintf(&b, "requested %d: known %d, unknown %d, tracked %d, watched %d", c.Requested, c.Known, c.Unknown, c.Tracked, c.Watched)
+	return b.String(), nil
 }
 
 // newCiExplainCmd is "ci explain <pr-id>": the same document for the CI view of

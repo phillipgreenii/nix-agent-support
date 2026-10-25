@@ -22,6 +22,14 @@ const (
 	diagNotFound  = `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"gone"}}`
 	diagDown      = `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"daemon socket /run/example/daemon.sock is not reachable; start the daemon (restart hint: restart the daemon agent)"}}`
 
+	// diagInspectResult is a canned inspect answer: a watched PR, a tracked-only
+	// PR and one the daemon never saw.
+	diagInspectResult = `{"instance":"pr","results":[` +
+		`{"id":"org/repo#7","ref":"org/repo#7","node_id":"PR_7","known":true,"tracked":true,"watched":true,"watched_at":"2026-01-02T03:04:05Z","watched_via":"direct"},` +
+		`{"id":"org/repo#8","ref":"org/repo#8","node_id":"PR_8","known":true,"tracked":true,"watched":false},` +
+		`{"id":"org/repo#9","known":false,"tracked":false,"watched":false}],` +
+		`"counts":{"requested":3,"known":2,"unknown":1,"tracked":2,"watched":1}}`
+
 	diagRefreshResult = `{"queued":[{"id":"org/repo#7","groups":["summary","detail","files"]}]}`
 
 	// diagExplainResult is a canned explain document: two groups (the second
@@ -132,6 +140,7 @@ type diagVerb struct {
 var diagVerbs = []diagVerb{
 	{name: "pr explain", cmd: []string{"pr", "explain", "org/repo#7"}, op: "explain", args: `{"id":"org/repo#7"}`, ans: diagExplainResult},
 	{name: "ci explain", cmd: []string{"ci", "explain", "org/repo#7"}, op: "explain", args: `{"id":"org/repo#7"}`, ans: diagExplainResult},
+	{name: "pr inspect", cmd: []string{"pr", "inspect", "org/repo#7", "org/repo#8", "org/repo#9"}, op: "inspect", args: `{"ids":["org/repo#7","org/repo#8","org/repo#9"]}`, ans: diagInspectResult},
 	{name: "pr refresh <id>", cmd: []string{"pr", "refresh", "org/repo#7"}, op: "refresh", args: `{"id":"org/repo#7"}`, ans: diagRefreshResult},
 	{name: "pr refresh --query", cmd: []string{"pr", "refresh", "--query", "mine"}, op: "refresh", args: `{"query":"mine"}`, ans: diagRefreshResult},
 }
@@ -268,6 +277,41 @@ func TestPRDiag_HumanExplainOmitsAbsentOptionalFields(t *testing.T) {
 	}
 }
 
+func TestPRDiag_HumanInspectSaysTrackedWatchedAndHowForEachPRThenTheCounts(t *testing.T) {
+	b := newDiagBackend(t, "diag-human-inspect", map[string]string{"inspect": diagOK(diagInspectResult)})
+	writeDiagConfig(t, b)
+	stdout, _, code := executePr(t, []string{"pr", "inspect", "org/repo#7", "org/repo#8", "org/repo#9", "--output", "human"})
+	if code != 0 {
+		t.Fatalf("exit code = %d; stdout=%s", code, stdout)
+	}
+	lines := strings.Split(stdout, "\n")
+	want := []string{
+		"org/repo#7: tracked=true watched=true via=direct since=2026-01-02T03:04:05Z",
+		"org/repo#8: tracked=true watched=false",
+		"org/repo#9: unknown to the daemon (not tracked, not watched)",
+		"requested 3: known 2, unknown 1, tracked 2, watched 1",
+	}
+	if len(lines) < len(want) {
+		t.Fatalf("human inspect output has %d lines, want at least %d:\n%s", len(lines), len(want), stdout)
+	}
+	for i, w := range want {
+		if strings.TrimSpace(lines[i]) != w {
+			t.Errorf("line %d = %q, want %q (the tracked-only and the watched PR must read differently)", i+1, lines[i], w)
+		}
+	}
+}
+
+func TestPRDiag_InspectNeedsAtLeastOneID(t *testing.T) {
+	b := newDiagBackend(t, "diag-inspect-usage", map[string]string{"inspect": diagOK(diagInspectResult)})
+	writeDiagConfig(t, b)
+	if _, _, code := executePr(t, []string{"pr", "inspect"}); code == 0 {
+		t.Error("pr inspect with no id exited 0, want a usage failure")
+	}
+	if got := b.requests(t); len(got) != 0 {
+		t.Fatalf("a malformed command line reached the backend: %+v", got)
+	}
+}
+
 func TestPRDiag_BackendFlagPins(t *testing.T) {
 	for _, v := range diagVerbs {
 		t.Run(v.name, func(t *testing.T) {
@@ -396,6 +440,7 @@ func TestPRDiag_HelpDocumentsEachVerb(t *testing.T) {
 	}{
 		{[]string{"pr", "explain", "--help"}, []string{"explain <id>", "--backend", "settle row"}},
 		{[]string{"ci", "explain", "--help"}, []string{"explain <pr-id>", "--backend", "settle row"}},
+		{[]string{"pr", "inspect", "--help"}, []string{"inspect <id>...", "--backend", "watched", "tracked"}},
 		{[]string{"pr", "refresh", "--help"}, []string{"refresh [<id>]", "--query", "--backend", "return at once", "giving both or neither"}},
 	} {
 		t.Run(strings.Join(tc.cmd, " "), func(t *testing.T) {

@@ -28,6 +28,7 @@ const (
 	MetricBudgetSpent        = "pg_connector_github.budget.spent"
 	MetricBudgetRemaining    = "pg_connector_github.budget.remaining"
 	MetricGovernorPaused     = "pg_connector_github.governor.paused"
+	MetricGovernorBacklog    = "pg_connector_github.governor.backlog"
 	MetricQueueDepth         = "pg_connector_github.queue.depth"
 	MetricQueueOldestOverdue = "pg_connector_github.queue.oldest_overdue_seconds"
 	MetricRequestDuration    = "pg_connector_github.request.duration"
@@ -45,6 +46,8 @@ const (
 	MetricConsumerRedeliveries  = "pg_connector_github.consumer.redeliveries"
 	MetricQueryLastSuccessAge   = "pg_connector_github.query.last_success_age_seconds"
 	MetricWatchedEntities       = "pg_connector_github.watched.entities"
+	MetricTrackedEntities       = "pg_connector_github.tracked.entities"
+	MetricTrackedLimit          = "pg_connector_github.tracked.limit"
 
 	meterName                 = "pg-connector-github"
 	metricPrefix              = "pg_connector_github."
@@ -56,6 +59,23 @@ const (
 	maxReasonLabelLen         = 40
 	pausedReasonWhenNotPaused = none
 )
+
+// The tracked-entity classes, the label values of tracked.entities. Members and
+// other_open are the keep-alive set (the PRs the daemon refreshes in the
+// background); closed_grace are closed or merged PRs the store still holds
+// until terminal_ttl and then expiry take them.
+const (
+	ClassMembers     = "members"
+	ClassOtherOpen   = "other_open"
+	ClassClosedGrace = "closed_grace"
+)
+
+// TrackedCounts are the tracked-entity class counts behind tracked.entities
+// (summary.Counts without the watched count, which the hoisted
+// watched.entities gauge reports).
+type TrackedCounts struct {
+	Members, OtherOpen, ClosedGrace int
+}
 
 // Label keys. Their values come from closed vocabularies; see the package doc.
 const (
@@ -127,6 +147,13 @@ type Options struct {
 	// watched.entities (store.Store.CountWatched for the entity kind); nil
 	// leaves it unreported.
 	Watched func(context.Context) (int, error)
+	// Tracked returns the tracked-entity class counts, polled for
+	// tracked.entities (summary.Service.Classes); nil leaves it unreported.
+	Tracked func(context.Context) (TrackedCounts, error)
+	// TrackedLimit is the configured tracked-set limit, exported as tracked.limit
+	// so an alert can compare tracked.entities with it; zero or negative means
+	// none is configured and the gauge is not reported.
+	TrackedLimit int
 }
 
 // Telemetry holds the instruments of the daemon's metric table and records the
@@ -139,6 +166,7 @@ type Telemetry struct {
 	up        metric.Int64ObservableGauge
 	remaining metric.Int64ObservableGauge
 	paused    metric.Int64ObservableGauge
+	backlog   metric.Int64ObservableGauge
 	depth     metric.Int64ObservableGauge
 	overdue   metric.Float64ObservableGauge
 	spent     metric.Int64Counter
@@ -149,6 +177,9 @@ type Telemetry struct {
 	staleness    metric.Float64Histogram
 	storeBytes   metric.Int64ObservableGauge
 	evictions    metric.Int64Counter
+
+	tracked      metric.Int64ObservableGauge
+	trackedLimit metric.Int64ObservableGauge
 
 	// changes holds the change feed's and change engine's instruments
 	// (pkg/connectord/changemetrics), registered under metricPrefix.
@@ -191,6 +222,11 @@ func New(opts Options) (*Telemetry, error) {
 	if t.paused, err = m.Int64ObservableGauge(MetricGovernorPaused,
 		metric.WithDescription("1 while a bucket's background work is held back (reason names why), else 0 with reason none"),
 		metric.WithUnit("1")); err != nil {
+		return nil, err
+	}
+	if t.backlog, err = m.Int64ObservableGauge(MetricGovernorBacklog,
+		metric.WithDescription("Queued refresh tasks per priority class that are due now and have not gone out: the work the workers and the governor have not got to"),
+		metric.WithUnit("{task}")); err != nil {
 		return nil, err
 	}
 	if t.depth, err = m.Int64ObservableGauge(MetricQueueDepth,
@@ -237,6 +273,17 @@ func New(opts Options) (*Telemetry, error) {
 		return nil, err
 	}
 
+	if t.tracked, err = m.Int64ObservableGauge(MetricTrackedEntities,
+		metric.WithDescription("Tracked pull requests by class: members of a configured query, other open (kept by a read or a watch), and closed within the grace period"),
+		metric.WithUnit("{entity}")); err != nil {
+		return nil, err
+	}
+	if t.trackedLimit, err = m.Int64ObservableGauge(MetricTrackedLimit,
+		metric.WithDescription("The configured tracked-set limit (tracked_set_limit); absent while none is configured"),
+		metric.WithUnit("{entity}")); err != nil {
+		return nil, err
+	}
+
 	if t.changes, err = changemetrics.New(m, changemetrics.Config{
 		Prefix:  metricPrefix,
 		Kinds:   classify.Kinds(),
@@ -253,7 +300,7 @@ func New(opts Options) (*Telemetry, error) {
 		return nil, err
 	}
 
-	t.registration, err = m.RegisterCallback(t.observe, t.up, t.remaining, t.paused, t.depth, t.overdue, t.storeBytes)
+	t.registration, err = m.RegisterCallback(t.observe, t.up, t.remaining, t.paused, t.backlog, t.depth, t.overdue, t.storeBytes, t.tracked, t.trackedLimit)
 	if err != nil {
 		_ = t.changes.Close()
 		return nil, err
@@ -268,7 +315,7 @@ func (t *Telemetry) Close() error {
 
 // observe is the polled-gauge callback: it reads the governor's and the
 // scheduler's state at collection time.
-func (t *Telemetry) observe(_ context.Context, o metric.Observer) error {
+func (t *Telemetry) observe(ctx context.Context, o metric.Observer) error {
 	o.ObserveInt64(t.up, 1)
 	if t.opts.StorePath != "" {
 		o.ObserveInt64(t.storeBytes, storeSize(t.opts.StorePath))
@@ -291,8 +338,22 @@ func (t *Telemetry) observe(_ context.Context, o metric.Observer) error {
 		for _, c := range t.opts.Scheduler().Classes {
 			class := metric.WithAttributes(attribute.String(keyClass, classLabel(c.Class)))
 			o.ObserveInt64(t.depth, int64(c.Depth), class)
+			o.ObserveInt64(t.backlog, int64(c.Backlog), class)
 			o.ObserveFloat64(t.overdue, c.OldestOverdue.Seconds(), class)
 		}
+	}
+	if t.opts.Tracked != nil {
+		if c, err := t.opts.Tracked(ctx); err == nil {
+			for _, kv := range []struct {
+				class string
+				n     int
+			}{{ClassMembers, c.Members}, {ClassOtherOpen, c.OtherOpen}, {ClassClosedGrace, c.ClosedGrace}} {
+				o.ObserveInt64(t.tracked, int64(kv.n), metric.WithAttributes(attribute.String(keyClass, kv.class)))
+			}
+		}
+	}
+	if t.opts.TrackedLimit > 0 {
+		o.ObserveInt64(t.trackedLimit, int64(t.opts.TrackedLimit))
 	}
 	return nil
 }

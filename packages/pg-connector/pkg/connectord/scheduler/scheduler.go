@@ -488,6 +488,10 @@ type ClassState struct {
 	// OldestOverdue is how far past its Due the most overdue task is; zero when
 	// none is overdue.
 	OldestOverdue time.Duration
+	// Backlog is the number of queued tasks of the class that are due now (a zero
+	// Due included) and have not gone out: the work the workers and the governor
+	// have not got to. A task not yet due is in Depth but not in Backlog.
+	Backlog int
 }
 
 // BatchItem is one task of a batch.
@@ -541,6 +545,9 @@ func (s *Scheduler) State() State {
 	for _, e := range s.queue {
 		cs := &st.Classes[int(e.Class)-1]
 		cs.Depth++
+		if due(e.Task, now) {
+			cs.Backlog++
+		}
 		if !e.Due.IsZero() && e.Due.Before(now) {
 			cs.OldestOverdue = max(cs.OldestOverdue, now.Sub(e.Due))
 		}

@@ -121,7 +121,7 @@ func TestCapabilitiesAnsweredStaticallyWithNoDaemon(t *testing.T) {
 // to cache_opt_out and owns_changes).
 func TestPhase3aOpTablesAndTheCapabilitiesDeclaration(t *testing.T) {
 	wantPR := []string{
-		"auth_status", "capabilities", "changes", "changes_ack", "commits", "explain", "files", "list",
+		"auth_status", "capabilities", "changes", "changes_ack", "commits", "explain", "files", "inspect", "list",
 		"list_activity", "refresh", "review_pending", "review_submit", "search", "show", "status",
 	}
 	wantCI := []string{

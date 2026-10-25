@@ -203,6 +203,7 @@ func TestEveryPhase2MetricAppearsWithExactlyItsLabels(t *testing.T) {
 		"pg_connector_github.budget.spent":                 {"bucket=graphql,group=summary,purpose=query"},
 		"pg_connector_github.budget.remaining":             {"bucket=graphql"},
 		"pg_connector_github.governor.paused":              {"bucket=graphql,reason=none", "bucket=rest_core,reason=none", "bucket=rest_search,reason=none"},
+		"pg_connector_github.governor.backlog":             {"class=fill", "class=interactive", "class=invalidated", "class=keepalive", "class=query"},
 		"pg_connector_github.queue.depth":                  {"class=fill", "class=interactive", "class=invalidated", "class=keepalive", "class=query"},
 		"pg_connector_github.queue.oldest_overdue_seconds": {"class=fill", "class=interactive", "class=invalidated", "class=keepalive", "class=query"},
 		"pg_connector_github.request.duration":             {"op=list,served_from=store"},

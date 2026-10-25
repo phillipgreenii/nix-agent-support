@@ -61,7 +61,7 @@ func TestServeRegistersExactlyTheDaemonsOps(t *testing.T) {
 		"pr": {
 			scriptout.OpAuthStatus, "explain", scriptout.OpList, "status",
 			"show", "files", "commits", "review_pending", "review_submit", "search", scriptout.OpListActivity, "refresh",
-			"changes", "changes_ack",
+			"changes", "changes_ack", "inspect",
 		},
 		"ci": {
 			scriptout.OpAuthStatus, "explain", "status", "list_runs", "get_logs", "rerun_failed", "refresh", "changes", "changes_ack",

@@ -77,6 +77,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -107,6 +108,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/changesop"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/ciops"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/diag"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/inspect"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/list"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/passthrough"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/prread"
@@ -268,6 +270,9 @@ type daemon struct {
 	gov    atomic.Pointer[governor.Governor]
 	sched  atomic.Pointer[scheduler.Scheduler]
 	engine atomic.Pointer[groupsvc.Service]
+	// summaries is the summary service, which the tracked gauges read; nil until
+	// startup built it (the gauges report nothing before).
+	summaries atomic.Pointer[summary.Service]
 	// feed and settle are the change engine's parts the telemetry gauges, the
 	// sweep and the drain reach; nil until startup built them (a hook that finds
 	// nil does nothing).
@@ -322,11 +327,13 @@ func (d *daemon) start(ctx context.Context) error {
 		// The change engine's polled gauges. The feed is built after the telemetry
 		// (it needs the query runner), so its positions are late-bound: until it
 		// exists they report nothing.
-		Pending:   st.CountPending,
-		Watched:   func(ctx context.Context) (int, error) { return st.CountWatched(ctx, changes.Spec().EntityKind) },
-		Queries:   func(ctx context.Context) ([]store.QueryRow, error) { return st.ListQueries(ctx, true) },
-		Started:   time.Now(),
-		Consumers: d.consumerPositions,
+		Pending:      st.CountPending,
+		Watched:      func(ctx context.Context) (int, error) { return st.CountWatched(ctx, changes.Spec().EntityKind) },
+		Tracked:      d.trackedCounts,
+		TrackedLimit: cfg.TrackedSetLimit,
+		Queries:      func(ctx context.Context) ([]store.QueryRow, error) { return st.ListQueries(ctx, true) },
+		Started:      time.Now(),
+		Consumers:    d.consumerPositions,
 		ConfiguredQueries: func() []string {
 			names := make([]string, 0, len(cfg.PR.Queries))
 			for name := range cfg.PR.Queries {
@@ -442,6 +449,7 @@ func (d *daemon) start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("summary service: %w", err)
 	}
+	d.summaries.Store(svc)
 	runner, err := query.New(query.Config{
 		Settings: cfg, Store: st, Identity: ent, Tracker: svc, GH: gh,
 		Governor: gov, Feed: feed, Scheduler: sched, Auth: tracker,
@@ -607,6 +615,9 @@ func (d *daemon) start(ctx context.Context) error {
 		for op, h := range ops {
 			d.rt.Register(instance, op, h)
 		}
+	}
+	if err := inspect.Register(d.rt, inspect.Config{Store: st, Tracker: svc}); err != nil {
+		return err
 	}
 	// refresh and the extended explain (which replaces the Phase 2 explain
 	// registration: the router refuses a duplicate).
@@ -902,4 +913,20 @@ func (d *daemon) closeStore(context.Context) error {
 		cerr = err
 	}
 	return cerr
+}
+
+// trackedCounts is the telemetry's source of the tracked-entity class counts:
+// the summary service's, late-bound because the telemetry is built before the
+// service. Until the service exists it reports an error, so the gauge reports
+// nothing rather than a zero.
+func (d *daemon) trackedCounts(ctx context.Context) (telemetry.TrackedCounts, error) {
+	svc := d.summaries.Load()
+	if svc == nil {
+		return telemetry.TrackedCounts{}, errors.New("summary service not built yet")
+	}
+	c, err := svc.Classes(ctx)
+	if err != nil {
+		return telemetry.TrackedCounts{}, err
+	}
+	return telemetry.TrackedCounts{Members: c.Members, OtherOpen: c.OtherOpen, ClosedGrace: c.ClosedGrace}, nil
 }

@@ -308,6 +308,9 @@ _Requires:_ `INV-GH-DIAG-1`, `INV-GH-DIAG-2`, `INV-GH-FRESH-10`, `INV-EXIT-1`.
 4. For one entity the operator runs `pr explain <id>` (or `ci explain <pr-id>` for the CI view) and reads each group's
    age and freshness end, last error, the head and base it was fetched for, its queue position, any
    pending row and the last change rows.
+5. To see whether the daemon follows a pull request and delivers its changes, the operator runs
+   `pr inspect <id>...` and reads, for each one, whether it is tracked, whether it is watched and
+   how it became watched, then the counts over the list (`INV-GH-DIAG-4`).
 
 Extensions:
 

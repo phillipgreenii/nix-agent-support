@@ -13,6 +13,10 @@ import (
 	"testing"
 	"time"
 
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/conversation"
@@ -27,6 +31,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/revalidate"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/runs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
@@ -43,10 +48,19 @@ const (
 	nPRs     = 150 // kept-alive PRs
 	nMembers = 120 // PRs listed by a configured query; the rest are kept alive by access alone
 
+	// The tracked-set scenario: about five hundred tracked PRs, the hundred
+	// that the configured queries list watched and the rest tracked by a read
+	// alone, under the daemon's post-cutover GraphQL cap.
+	trackedPRs, trackedMembers = 500, 100
+	trackedGraphQLPerHour      = config.CutoverGraphQLPointsPerHour
+
 	// tick is the fake time one driver step advances. The settle lifecycle is
 	// swept every sweepEvery ticks, which is its interval of one second.
 	tick       = 250 * time.Millisecond
 	sweepEvery = 4
+	// sampleEvery is how often the telemetry gauges are read: every ten seconds
+	// of fake time.
+	sampleEvery = 40
 	// originLatency is the fake time one origin call takes. The daemon has four
 	// workers in production; the harness steps ONE worker (so the run is
 	// deterministic) whose calls take a quarter of a second, which gives the same
@@ -72,6 +86,32 @@ type scenarioOpts struct {
 	// ackEarly makes the consumer acknowledge the log head instead of the
 	// poll's NextSeq (mutation c).
 	ackEarly bool
+
+	// The tracked-set scenario (see TestTrackedSetLoad); the zero values are
+	// the default scenario. prs and members override nPRs and nMembers;
+	// graphqlPerHour overrides the GraphQL cap; watchMembers marks every member
+	// PR watched (as a watched query does), and watchDirect further non-member
+	// PRs watched by a direct read; metrics runs the daemon's own telemetry over
+	// the rig and samples its gauges every ten seconds of fake time.
+	prs, members   int
+	graphqlPerHour int
+	watchMembers   bool
+	watchDirect    int
+	metrics        bool
+	// defaultAges keeps the daemon's real freshness windows and maximum ages
+	// instead of the fifth the default scenario uses to cover several maximum
+	// ages in nineteen minutes (the tracked-set scenario covers one summary
+	// cycle in ten).
+	defaultAges bool
+	// realRegistration runs the change engine as the daemon runs it now: a row
+	// only for a watched PR, delivered by the watched flag. The default scenario
+	// keeps the registration of before the flip (a row for every PR) because its
+	// properties are about the pending-row machinery under a burst on PRs nobody
+	// watches; the tracked-set scenario is about what the flip changes, so a PR
+	// nobody watches has no pending row and no dependents queued behind a change.
+	// It runs no consumer (the feed needs a watched query, which the harness does
+	// not model).
+	realRegistration bool
 }
 
 const defaultDuration = 19 * time.Minute
@@ -161,9 +201,9 @@ func queryName(n int) string {
 // queryMembers lists the members of query n: the member PRs i with i mod 11 = n
 // or (i / 10) mod 11 = n, so every member PR is in one or two queries and each
 // query lists a few dozen.
-func queryMembers(n int) []int {
+func queryMembers(n, members int) []int {
 	var out []int
-	for i := 0; i < nMembers; i++ {
+	for i := 0; i < members; i++ {
 		if i%11 == n || (i/10)%11 == n {
 			out = append(out, i)
 		}
@@ -310,7 +350,7 @@ func (g *fakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
 		} `json:"repository"`
 	}
 	var nodes []node
-	for _, i := range queryMembers(n) {
+	for _, i := range queryMembers(n, g.h.nMembers) {
 		x := node{ID: nodeOf(i), Number: i + 1}
 		x.Repository.NameWithOwner = "acme-org/widget"
 		nodes = append(nodes, x)
@@ -463,9 +503,10 @@ type harness struct {
 	cfg    *config.Config
 	rng    *rand.Rand
 
-	queryNames []string
-	reval      *revalidate.Handler
-	govCaps    map[governor.Bucket]governor.Limits // the spec's caps, before any mutation
+	nPRs, nMembers int // the scale of this run
+	queryNames     []string
+	reval          *revalidate.Handler
+	govCaps        map[governor.Bucket]governor.Limits // the spec's caps, before any mutation
 
 	// driver state
 	worker chan struct{}
@@ -490,6 +531,10 @@ type harness struct {
 	steps      []readingStep
 
 	cons consumer
+
+	// the daemon's own telemetry over the rig, sampled when opt.metrics is set
+	reader  *sdkmetric.ManualReader
+	samples []metricSample
 }
 
 type event struct {
@@ -510,15 +555,24 @@ func newHarness(t *testing.T, o scenarioOpts) *harness {
 		lastHead: map[int]time.Duration{},
 		pend:     map[string]*pendRec{},
 	}
+	h.nPRs, h.nMembers = nPRs, nMembers
+	if o.prs > 0 {
+		h.nPRs, h.nMembers = o.prs, o.members
+	}
 	h.cfg = config.Defaults()
+	if o.graphqlPerHour > 0 {
+		h.cfg.GraphQLPointsPerHour = o.graphqlPerHour
+	}
 	// A fifth of the default ages, so that the run covers three maximum ages in
 	// nineteen minutes of fake time instead of the two hours it would take at the
 	// defaults (a run at the defaults costs minutes of real time under the race
 	// detector). The ratios of the defaults hold: a time to live of a third of
 	// the maximum age.
-	h.cfg.DetailTTL, h.cfg.DetailMaxAge = config.Duration(2*time.Minute), config.Duration(6*time.Minute)
-	h.cfg.ConversationTTL, h.cfg.ConversationMaxAge = config.Duration(2*time.Minute), config.Duration(6*time.Minute)
-	h.cfg.CIMaxAge = config.Duration(6 * time.Minute)
+	if !o.defaultAges {
+		h.cfg.DetailTTL, h.cfg.DetailMaxAge = config.Duration(2*time.Minute), config.Duration(6*time.Minute)
+		h.cfg.ConversationTTL, h.cfg.ConversationMaxAge = config.Duration(2*time.Minute), config.Duration(6*time.Minute)
+		h.cfg.CIMaxAge = config.Duration(6 * time.Minute)
+	}
 	// The REST cap is lowered to half its default, so that it binds inside the
 	// nineteen minutes (at the default it binds after about twenty-five of the
 	// 150 requests a minute the runs groups ask for). Nothing else is lowered:
@@ -563,7 +617,9 @@ func newHarness(t *testing.T, o scenarioOpts) *harness {
 	// changes on PRs nobody watches, so the engine runs the registration as it was
 	// before emission by the watched flag: a row for every observed PR.
 	spec := changes.Spec()
-	spec.Emission, spec.Delivery = registry.EmitAll, registry.DeliverByMembership
+	if !o.realRegistration {
+		spec.Emission, spec.Delivery = registry.EmitAll, registry.DeliverByMembership
+	}
 	h.chg, err = changes.NewWithSpec(changes.Config{Clock: h.clk, SettleTimeout: h.cfg.SettleTimeout.Std(), BodyCap: int(h.cfg.ChangeBodyCap)}, spec)
 	if err != nil {
 		t.Fatal(err)
@@ -606,7 +662,7 @@ func newHarness(t *testing.T, o scenarioOpts) *harness {
 	}
 	h.life = &changes.Lifecycle{Engine: h.chg, Store: h.rig.Store, Queue: h.rig.Svc, Clock: h.clk, Interval: time.Second}
 
-	refs := make([]string, nPRs)
+	refs := make([]string, h.nPRs)
 	for i := range refs {
 		refs[i] = refOf(i)
 	}
@@ -618,8 +674,11 @@ func newHarness(t *testing.T, o scenarioOpts) *harness {
 		t.Fatal(err)
 	}
 	h.cons = consumer{h: h, seen: map[int64]bool{}}
+	if o.metrics {
+		h.startTelemetry()
+	}
 
-	for i := 0; i < nPRs; i++ {
+	for i := 0; i < h.nPRs; i++ {
 		h.rig.Origin.Set(nodeOf(i), groupsvctest.PR{
 			Repo: "acme-org/widget", Number: i + 1, State: "OPEN",
 			HeadRefOid: headOf(i, 0), BaseRefOid: "base-1", HeadRefName: fmt.Sprintf("feature-%d", i),
@@ -670,7 +729,7 @@ func (h *harness) plan() {
 	for at := 50 * time.Second; at < injectEnd; at += 90 * time.Second {
 		add(at, "ensure", 2)
 	}
-	for at := 20 * time.Second; at <= h.opt.duration; at += 10 * time.Second {
+	for at := 20 * time.Second; at <= h.opt.duration && !h.opt.realRegistration; at += 10 * time.Second {
 		add(at, "poll", 0)
 	}
 	// Another process drains the token: the reading falls in steps and recovers
@@ -702,12 +761,12 @@ func (h *harness) fire(elapsed time.Duration) {
 			}
 			h.burstHeads, h.burstAt = len(picked), elapsed
 		case "interactive":
-			for _, i := range h.rng.Perm(nPRs)[:e.n] {
+			for _, i := range h.rng.Perm(h.nPRs)[:e.n] {
 				h.startCall("summary", i)
 			}
 		case "ensure":
 			gs := []string{groups.Detail, groups.Conversation, groups.Files, groups.Commits, groups.Runs}
-			for _, i := range h.rng.Perm(nPRs)[:e.n] {
+			for _, i := range h.rng.Perm(h.nPRs)[:e.n] {
 				h.startCall(gs[h.rng.Intn(len(gs))], i)
 			}
 		case "poll":
@@ -732,7 +791,7 @@ func (h *harness) fire(elapsed time.Duration) {
 // for four minutes, so a PR never changes twice inside a settle window.
 func (h *harness) pick(n int, elapsed time.Duration) []int {
 	var cand []int
-	for i := 0; i < nPRs; i++ {
+	for i := 0; i < h.nPRs; i++ {
 		if last, ok := h.lastHead[i]; !ok || elapsed-last >= 4*time.Minute {
 			cand = append(cand, i)
 		}
@@ -760,11 +819,12 @@ func (h *harness) start() {
 	if err := h.runner.Schedule(h.ctx); err != nil {
 		h.t.Fatal(err)
 	}
-	for i := nMembers; i < nPRs; i++ {
+	for i := h.nMembers; i < h.nPRs; i++ {
 		if err := h.rig.Summary.Access(h.ctx, nodeOf(i)); err != nil {
 			h.t.Fatal(err)
 		}
 	}
+	h.markWatched()
 }
 
 // pump dispatches batches and releases parked origin calls until the one worker
@@ -938,6 +998,9 @@ func (h *harness) run() *result {
 		if k%sweepEvery == 0 {
 			h.sweep(h.clk.Now())
 		}
+		if h.opt.metrics && k%sampleEvery == 0 {
+			h.sample()
+		}
 		h.cons.step()
 	}
 	h.finish()
@@ -958,7 +1021,9 @@ func (h *harness) finish() {
 		}
 	}
 	h.sweep(h.clk.Now())
-	h.cons.drain()
+	if !h.opt.realRegistration {
+		h.cons.drain()
+	}
 }
 
 // ---- the consumer ------------------------------------------------------------
@@ -1035,4 +1100,104 @@ func (c *consumer) drain() {
 			return
 		}
 	}
+}
+
+// ---- the tracked-set scenario ------------------------------------------------
+
+// markWatched sets the watched flag of the scenario's watched PRs, the way a
+// watched query does (every member) and a direct read does (the first
+// watchDirect non-members), before the first fetch.
+func (h *harness) markWatched() {
+	mark := func(i int, via string) {
+		err := h.rig.Store.InTx(h.ctx, func(tx *store.Tx) error {
+			_, err := tx.SetWatched(h.ctx, "pr", nodeOf(i), via, h.clk.Now())
+			return err
+		})
+		if err != nil {
+			h.t.Fatal(err)
+		}
+	}
+	if h.opt.watchMembers {
+		for i := 0; i < h.nMembers; i++ {
+			mark(i, registry.ViaQuery+queryName(0))
+		}
+	}
+	for i := h.nMembers; i < h.nMembers+h.opt.watchDirect && i < h.nPRs; i++ {
+		mark(i, registry.ViaDirect)
+	}
+}
+
+// trackedLimit is the tracked-set limit the scenario configures on its
+// telemetry.
+const trackedLimit = 600
+
+// metricSample is one reading of the daemon's gauges, by the label of each
+// series (the class), with the watched count and the limit.
+type metricSample struct {
+	at                   time.Time
+	backlog, depth       map[string]int64
+	tracked              map[string]int64
+	watched, limit       int64
+	hasWatched, hasLimit bool
+}
+
+// startTelemetry builds the daemon's own telemetry over the rig, on a manual
+// reader, with the sources the daemon wires (serve.go): the scheduler's and the
+// governor's state, the summary service's tracked classes and the store's
+// watched count.
+func (h *harness) startTelemetry() {
+	h.reader = sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(h.reader))
+	h.t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	tel, err := telemetry.New(telemetry.Options{
+		MeterProvider:  mp,
+		TracerProvider: tracenoop.NewTracerProvider(),
+		Governor:       h.gov.State,
+		Scheduler:      h.rig.Sched.State,
+		Now:            h.clk.Now,
+		Started:        h.t0,
+		Watched:        func(ctx context.Context) (int, error) { return h.rig.Store.CountWatched(ctx, "pr") },
+		Tracked: func(ctx context.Context) (telemetry.TrackedCounts, error) {
+			c, err := h.rig.Summary.Classes(ctx)
+			return telemetry.TrackedCounts{Members: c.Members, OtherOpen: c.OtherOpen, ClosedGrace: c.ClosedGrace}, err
+		},
+		TrackedLimit: trackedLimit,
+	})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.t.Cleanup(func() { _ = tel.Close() })
+}
+
+// sample reads the gauges once.
+func (h *harness) sample() {
+	var rm metricdata.ResourceMetrics
+	if err := h.reader.Collect(h.ctx, &rm); err != nil {
+		h.t.Fatal(err)
+	}
+	s := metricSample{at: h.clk.Now(), backlog: map[string]int64{}, depth: map[string]int64{}, tracked: map[string]int64{}}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			g, ok := m.Data.(metricdata.Gauge[int64])
+			if !ok {
+				continue
+			}
+			for _, dp := range g.DataPoints {
+				class, _ := dp.Attributes.Value("class")
+				switch m.Name {
+				case telemetry.MetricGovernorBacklog:
+					s.backlog[class.AsString()] = dp.Value
+				case telemetry.MetricQueueDepth:
+					s.depth[class.AsString()] = dp.Value
+				case telemetry.MetricTrackedEntities:
+					s.tracked[class.AsString()] = dp.Value
+				case telemetry.MetricWatchedEntities:
+					s.watched, s.hasWatched = dp.Value, true
+				case telemetry.MetricTrackedLimit:
+					s.limit, s.hasLimit = dp.Value, true
+				}
+			}
+		}
+	}
+	h.samples = append(h.samples, s)
 }
