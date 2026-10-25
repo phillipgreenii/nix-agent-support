@@ -187,6 +187,13 @@ ten `pg-conn-jira-*` uids; the old `issue-jira-alerts.yaml` stays until a cleanu
 router probe's built-in `registeredRuleUIDs`, but a deployment that passes its own `--rule-uid` list REPLACES that
 list, so the deployment's list MUST be extended too.
 
+`darwin/modules/pg-connector-issue-jira-daemon` registers the daemon's three exact-path log sources
+(`events.jsonl`, `daemon.log.jsonl`, `client.log.jsonl` under `$XDG_STATE_HOME/pg-connector-issue-jira-daemon`,
+generic `errorAlert` off on each) with `observability.enable`, and lists the alerts file only while some
+`home-manager.users.<u>` sets `jira.enable` (the `deleteRules:` twin otherwise). It sits beside the old
+`darwin/modules/pg-connector-issue-jira`, which stays untouched until the cleanup. Check:
+`test-pg-connector-issue-jira-daemon-darwin-module`.
+
 ### pg-keep-awake keeper (`phillipgreenii.programs.pg-keep-awake`)
 
 The fourth HM-scoped launchd agent (docket `pg2-8bgxg.2`): `home/programs/pg-keep-awake` renders

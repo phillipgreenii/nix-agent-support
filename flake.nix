@@ -3335,6 +3335,233 @@
                     touch $out
                   '';
 
+              # darwin/modules/pg-connector-issue-jira-daemon (docket pg2-2qyyh.2, "7.
+              # Observability"): the Jira daemon's three exact-path log sources and
+              # its alert rules, the sibling of test-pg-connector-github-darwin-module
+              # above. The stub observability surface mirrors the REAL logSources
+              # submodule's defaults, so the assertions prove every entry sets a
+              # literal single-file `path` and switches the generic error-rate alert
+              # off, that the alert-rules list follows the stack and the daemon-
+              # deployed flag (alerts file when some HM user enables the daemon, the
+              # deleteRules twin otherwise, never both), and that no path can match
+              # the OLD stateless backend's directory. The runCommand pins the state
+              # directory, file names and service names against the Go constants and
+              # expands each path against a state directory holding the live files,
+              # their rotated archives and rotation locks, and the old backend's
+              # event log.
+              test-pg-connector-issue-jira-daemon-darwin-module =
+                let
+                  logSourceSubmodule =
+                    { name, config, ... }:
+                    {
+                      options = {
+                        path = lib.mkOption {
+                          type = lib.types.str;
+                          default = "\${env:XDG_STATE_HOME}/${name}/*.jsonl";
+                        };
+                        serviceName = lib.mkOption {
+                          type = lib.types.str;
+                          default = name;
+                        };
+                        format = lib.mkOption {
+                          type = lib.types.enum [
+                            "jsonl"
+                            "raw"
+                          ];
+                          default = "jsonl";
+                        };
+                        errorAlert.enable = lib.mkOption { type = lib.types.bool; };
+                      };
+                      config.errorAlert.enable = lib.mkDefault (config.format == "jsonl");
+                    };
+                  evalDarwin =
+                    obsEnable: users:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-connector-issue-jira-daemon/default.nix
+                        {
+                          options.home-manager.users = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.anything;
+                            default = { };
+                          };
+                          config.home-manager.users = users;
+                        }
+                        {
+                          options.phillipgreenii.observability = {
+                            enable = lib.mkOption {
+                              type = lib.types.bool;
+                              default = false;
+                            };
+                            logSources = lib.mkOption {
+                              type = lib.types.attrsOf (lib.types.submodule logSourceSubmodule);
+                              default = { };
+                            };
+                            alertRuleFiles = lib.mkOption {
+                              type = lib.types.listOf lib.types.path;
+                              default = [ ];
+                            };
+                          };
+                          config.phillipgreenii.observability.enable = obsEnable;
+                        }
+                      ];
+                    }).config.phillipgreenii.observability;
+                  daemonUser = {
+                    alice.phillipgreenii.programs.pg-connector.jira.enable = true;
+                  };
+                  idleUser = {
+                    alice.phillipgreenii.programs.pg-connector.jira.enable = false;
+                  };
+                  # The GitHub daemon enabled does NOT deploy the Jira daemon.
+                  githubOnlyUser = {
+                    alice.phillipgreenii.programs.pg-connector.github.enable = true;
+                  };
+                  # The daemon is deployed: some HM user sets jira.enable.
+                  enabled = evalDarwin true daemonUser;
+                  disabled = evalDarwin false daemonUser;
+                  noUsers = evalDarwin true { };
+                  noDaemon = evalDarwin true idleUser;
+                  githubOnly = evalDarwin true githubOnlyUser;
+                  otherUser = evalDarwin true { alice.home.username = "alice"; };
+                  alertsFile = ./packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml;
+                  deleteFile = ./packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts-delete.yaml;
+                  stateDir = "\${env:XDG_STATE_HOME}/pg-connector-issue-jira-daemon";
+                  # The old stateless backend's directory (and its module's default
+                  # glob root); no path of this module may fall inside it.
+                  oldDir = "/pg-connector-issue-jira/";
+                  paths = lib.mapAttrsToList (_: s: s.path) enabled.logSources;
+                  alertingServiceNames = lib.mapAttrsToList (_: s: s.serviceName) (
+                    lib.filterAttrs (_: s: s.errorAlert.enable) enabled.logSources
+                  );
+                in
+                assert disabled.logSources == { };
+                assert disabled.alertRuleFiles == [ ];
+                assert
+                  lib.attrNames enabled.logSources == [
+                    "pg-connector-issue-jira-daemon"
+                    "pg-connector-issue-jira-daemon-client"
+                    "pg-connector-issue-jira-daemon-log"
+                  ];
+                assert enabled.logSources.pg-connector-issue-jira-daemon.path == "${stateDir}/events.jsonl";
+                assert
+                  enabled.logSources.pg-connector-issue-jira-daemon.serviceName == "pg-connector-issue-jira-daemon";
+                assert enabled.logSources.pg-connector-issue-jira-daemon-log.path == "${stateDir}/daemon.log.jsonl";
+                assert
+                  enabled.logSources.pg-connector-issue-jira-daemon-log.serviceName
+                  == "pg-connector-issue-jira-daemon";
+                assert
+                  enabled.logSources.pg-connector-issue-jira-daemon-client.path == "${stateDir}/client.log.jsonl";
+                assert
+                  enabled.logSources.pg-connector-issue-jira-daemon-client.serviceName
+                  == "pg-connector-issue-jira-daemon-client";
+                # The generic "Daemon Health" alert is off for every entry: the
+                # dedicated rules carry the service levels, so one incident never
+                # pages twice.
+                assert alertingServiceNames == [ ];
+                assert lib.all (s: s.errorAlert.enable == false) (lib.attrValues enabled.logSources);
+                assert lib.all (p: !(lib.hasInfix "*" p) && !(lib.hasInfix "?" p) && !(lib.hasInfix "[" p)) paths;
+                assert lib.all (p: !(lib.hasInfix oldDir p)) paths;
+                assert lib.length (lib.unique paths) == 3;
+                # Gate: the rules appear only while the daemon is deployed;
+                # otherwise (stack on) the deleteRules file stands in, never both.
+                assert enabled.alertRuleFiles == [ alertsFile ];
+                assert noUsers.alertRuleFiles == [ deleteFile ];
+                assert noDaemon.alertRuleFiles == [ deleteFile ];
+                assert githubOnly.alertRuleFiles == [ deleteFile ];
+                assert otherUser.alertRuleFiles == [ deleteFile ];
+                # The log sources follow the stack alone, not the daemon flag.
+                assert noDaemon.logSources == enabled.logSources;
+                pkgs.runCommand "test-pg-connector-issue-jira-daemon-darwin-module-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.yq-go
+                      pkgs.gnugrep
+                    ];
+                    # One line per entry: name TAB serviceName TAB path.
+                    entries = lib.concatStringsSep "\n" (
+                      lib.mapAttrsToList (n: s: "${n}\t${s.serviceName}\t${s.path}") enabled.logSources
+                    );
+                    alerts = alertsFile;
+                    deleteRules = deleteFile;
+                    configGo = ./packages/pg-connector/cmd/pg-connector-issue-jira/internal/config/defaults.go;
+                    logsGo = ./packages/pg-connector/cmd/pg-connector-issue-jira/internal/logs/writer.go;
+                    darwinDefault = ./darwin/default.nix;
+                    oldModule = ./darwin/modules/pg-connector-issue-jira/default.nix;
+                  }
+                  ''
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+                    shopt -s nullglob
+
+                    # Every live file is matched by exactly one entry (and stamped
+                    # with the right service_name); no rotated archive, rotation lock
+                    # or file of the old backend's directory is matched.
+                    state="$TMPDIR/state/pg-connector-issue-jira-daemon"
+                    old="$TMPDIR/state/pg-connector-issue-jira"
+                    mkdir -p "$state" "$old"
+                    touch "$old/events.jsonl" "$old/events.jsonl.1" "$old/events.jsonl.lock"
+                    for f in events.jsonl daemon.log.jsonl client.log.jsonl; do
+                      touch "$state/$f" "$state/$f.1" "$state/$f.lock"
+                    done
+                    declare -A owner svc
+                    nentries=0
+                    while IFS=$'\t' read -r name service path; do
+                      [ -n "$name" ] || fail "empty entry line"
+                      nentries=$((nentries + 1))
+                      svc[$name]="$service"
+                      case "$path" in
+                        *'*'*|*'?'*|*'['*) fail "entry $name path '$path' has a wildcard" ;;
+                      esac
+                      pattern="''${path/\$\{env:XDG_STATE_HOME\}/$TMPDIR/state}"
+                      # shellcheck disable=SC2206 # a literal path expands to itself
+                      files=( $pattern )
+                      [ "''${#files[@]}" = 1 ] || fail "entry $name path '$path' matches ''${#files[@]} files"
+                      f="''${files[0]}"
+                      b="$(basename "$f")"
+                      [ "$(dirname "$f")" = "$state" ] || fail "entry $name matches outside the daemon state dir: $f"
+                      case "$b" in
+                        events.jsonl|daemon.log.jsonl|client.log.jsonl) ;;
+                        *) fail "entry $name path '$path' matches non-live file $b" ;;
+                      esac
+                      [ -z "''${owner[$b]:-}" ] || fail "$b is matched by both ''${owner[$b]} and $name"
+                      owner[$b]="$name"
+                    done <<<"$entries"
+                    [ "$nentries" = 3 ] || fail "want 3 entries, have $nentries"
+                    want() { # file serviceName
+                      [ -n "''${owner[$1]:-}" ] || fail "$1 is matched by no entry"
+                      [ "''${svc[''${owner[$1]}]}" = "$2" ] \
+                        || fail "$1 is stamped ''${svc[''${owner[$1]}]}, want $2"
+                    }
+                    want events.jsonl pg-connector-issue-jira-daemon
+                    want daemon.log.jsonl pg-connector-issue-jira-daemon
+                    want client.log.jsonl pg-connector-issue-jira-daemon-client
+
+                    # The state directory, file names and service names are pinned
+                    # against the daemon's Go constants (config/defaults.go and
+                    # logs/writer.go).
+                    grep -q 'StateDirName *= *"pg-connector-issue-jira-daemon"' "$configGo" || fail "StateDirName drifted"
+                    grep -q 'EventServiceName *= *"pg-connector-issue-jira-daemon"' "$configGo" || fail "EventServiceName drifted"
+                    grep -q 'DaemonLogServiceName *= *"pg-connector-issue-jira-daemon"' "$configGo" || fail "DaemonLogServiceName drifted"
+                    grep -q 'ClientLogServiceName *= *"pg-connector-issue-jira-daemon-client"' "$configGo" || fail "ClientLogServiceName drifted"
+                    grep -q 'EventLogFileName *= *"events.jsonl"' "$configGo" || fail "EventLogFileName drifted"
+                    grep -q 'DaemonLogFileName *= *"daemon.log.jsonl"' "$configGo" || fail "DaemonLogFileName drifted"
+                    grep -q 'ClientLogFileName *= *"client.log.jsonl"' "$configGo" || fail "ClientLogFileName drifted"
+                    grep -q 'ServiceName *= *"pg-connector-issue-jira-daemon"' "$logsGo" || fail "logs.ServiceName drifted"
+                    grep -q 'ClientServiceName *= *"pg-connector-issue-jira-daemon-client"' "$logsGo" || fail "logs.ClientServiceName drifted"
+
+                    # The two alert files are the daemon's, in one group each, and
+                    # the delete twin carries only deleteRules.
+                    [ "$(yq '.groups[0].name' "$alerts")" = pg-connector-issue-jira-daemon ] || fail "alerts file is not the daemon's group"
+                    [ "$(yq 'has("deleteRules")' "$deleteRules")" = true ] || fail "delete file has no deleteRules"
+                    [ "$(yq 'has("groups")' "$deleteRules")" = false ] || fail "delete file carries groups"
+
+                    # darwin/default.nix imports the module, and still the old one;
+                    # the old module is not touched (it still registers its own file).
+                    grep -q '\./modules/pg-connector-issue-jira-daemon$' "$darwinDefault" || fail "darwin/default.nix does not import the module"
+                    grep -q '\./modules/pg-connector-issue-jira$' "$darwinDefault" || fail "darwin/default.nix lost the old Jira module"
+                    grep -q 'issue-jira-alerts.yaml' "$oldModule" || fail "the old module no longer registers its alert file"
+                    touch $out
+                  '';
+
               # darwin/modules/pg-connector-thread-slack (bead pg2-kjdfi): the Slack
               # sibling of test-pg-connector-pr-github-darwin-module above --
               # registers the backend's own event log as a Loki log source and its
