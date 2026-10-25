@@ -1,0 +1,92 @@
+# promtool unit tests for the pg-desk-pr-hydration-failing alert (PR lane refactor, P8a-1). Run by the flake check
+# test-pg-desk-alert-rules through grafana/check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the
+# rule's `for: 15m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: 1m series. The rule reads the existing persisted hydration counters for type pr: more than
+# 5 failures in 30m, or any entity with repeated degraded hydrations, held for 15m. A counter rising
+# by 1 a minute crosses 5 at about 6m, so it fires after the hold: not at 15m, firing at 30m.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: PR hydration failures at one a minute fire
+    interval: 1m
+    input_series:
+      - series: pg_desk_hydration_failures_total{type="pr",job="pg-desk"}
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: pg-desk-pr-hydration-failing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-desk-pr-hydration-failing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a repeated-degraded PR fires on its own gauge
+    interval: 1m
+    input_series:
+      - series: pg_desk_repeated_degraded_entities{type="pr",job="pg-desk"}
+        values: "2x120"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-desk-pr-hydration-failing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-desk-pr-hydration-failing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: issue and thread hydration trouble is not this rule's
+    interval: 1m
+    input_series:
+      - series: pg_desk_hydration_failures_total{type="issue",job="pg-desk"}
+        values: "0+5x120"
+      - series: pg_desk_repeated_degraded_entities{type="thread",job="pg-desk"}
+        values: "9x120"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-pr-hydration-failing
+        exp_alerts: []
+
+  - name: a few failures (below the rate) and a healthy gauge are quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_hydration_failures_total{type="pr",job="pg-desk"}
+        values: "0x20 3x100"
+      - series: pg_desk_repeated_degraded_entities{type="pr",job="pg-desk"}
+        values: "0x120"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-pr-hydration-failing
+        exp_alerts: []
+      - eval_time: 100m
+        alertname: pg-desk-pr-hydration-failing
+        exp_alerts: []
+
+  - name: empty input is quiet
+    interval: 1m
+    input_series:
+      - series: unrelated_metric{job="other"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-pr-hydration-failing
+        exp_alerts: []
+
+  - name: SYSTEM_PAUSE suppresses it
+    interval: 1m
+    input_series:
+      - series: pg_desk_hydration_failures_total{type="pr",job="pg-desk"}
+        values: "0+1x120"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-pr-hydration-failing
+        exp_alerts: []

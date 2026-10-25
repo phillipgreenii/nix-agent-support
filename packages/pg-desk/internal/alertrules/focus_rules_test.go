@@ -164,12 +164,15 @@ var focusRules = []focusRule{
 	},
 	{
 		uid:       "pg-desk-watch-listing-degraded",
-		expr:      `sum(pg_desk_watch_listing_status{status!="ok"})`,
+		expr:      `sum(pg_desk_watch_listing_status{type=~"issue|thread",status!="ok"})`,
 		forText:   "30m",
 		forDur:    30 * time.Minute,
 		threshold: 0,
 		agg: func(in []focusSample) (float64, bool) {
-			return sumOf(matchSeries(in, func(l map[string]string) bool { return l["status"] != "ok" }))
+			// Scoped to issue and thread (P8a); =~ is fully anchored in PromQL.
+			return sumOf(matchSeries(in, func(l map[string]string) bool {
+				return (l["type"] == "issue" || l["type"] == "thread") && l["status"] != "ok"
+			}))
 		},
 	},
 	{
@@ -246,7 +249,7 @@ func (r focusRule) hot() []focusSample {
 	case "pg-desk-focus-terminal-source-bead-open":
 		return []focusSample{{map[string]string{"kind": "terminal_source_bead_open"}, 1}}
 	case "pg-desk-watch-listing-degraded":
-		return []focusSample{{map[string]string{"type": "pr", "status": "degraded"}, 1}}
+		return []focusSample{{map[string]string{"type": "issue", "status": "degraded"}, 1}}
 	case "pg-desk-focus-rank-degraded":
 		return []focusSample{{map[string]string{"input": "age_fallback"}, 1}}
 	case "pg-desk-focus-consumer-lag":
@@ -280,7 +283,8 @@ func (r focusRule) cold() []focusSample {
 	case "pg-desk-focus-terminal-source-bead-open":
 		return []focusSample{{map[string]string{"kind": "terminal_source_bead_open"}, 0}, {map[string]string{"kind": "selected_bead_held"}, 5}}
 	case "pg-desk-watch-listing-degraded":
-		return []focusSample{{map[string]string{"type": "pr", "status": "ok"}, 3}, {map[string]string{"type": "pr", "status": "degraded"}, 0}}
+		// An issue listing that is ok, and a degraded PR listing: out of scope after P8a.
+		return []focusSample{{map[string]string{"type": "issue", "status": "ok"}, 3}, {map[string]string{"type": "pr", "status": "degraded"}, 7}}
 	case "pg-desk-focus-rank-degraded":
 		return []focusSample{{map[string]string{"input": "age_fallback"}, 0}, {map[string]string{"input": "unmapped_priority"}, 0}}
 	case "pg-desk-focus-consumer-lag":

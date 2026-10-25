@@ -1,0 +1,149 @@
+# promtool unit tests for the pg-desk-pr-lane-hard-failure alert (PR lane refactor, P8a-1). Run by the flake check
+# test-pg-desk-alert-rules through grafana/check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the
+# rule's `for: 0s` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: 1m series. The counter pg_desk_pr_lane_runs_total{stage,class} is persisted by the
+# composed command and exported zero-filled for every stage and class pair. The rule fires on
+# any increase of class unauthenticated or decide_failed over 10m, with NO `for` hold, and also for a
+# series that first appears already above 0 (no sample ten minutes earlier), so a first event is never
+# lost to increase(). Other classes do not fire it.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: unauthenticated stepping from 0 to 1 fires at once, with no hold, and resolves after the window
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_runs_total{stage="hydrate",class="unauthenticated",job="pg-desk"}
+        values: "0x10 1x60"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts:
+          - exp_labels:
+              stage: hydrate
+              class: unauthenticated
+              severity: warning
+      - eval_time: 40m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+
+  - name: decide_failed stepping from 0 to 1 fires at once, with no hold, and resolves after the window
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_runs_total{stage="decide",class="decide_failed",job="pg-desk"}
+        values: "0x10 1x60"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts:
+          - exp_labels:
+              stage: decide
+              class: decide_failed
+              severity: warning
+      - eval_time: 40m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+
+  # A first-ever series that starts at 1 (no zero sample before it): increase() over a window of
+  # equal samples is 0, so the second branch (a series above 0 with no sample ten minutes earlier)
+  # carries it.
+  - name: a first-ever unauthenticated series starting at 1 fires
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_runs_total{stage="hydrate",class="unauthenticated",job="pg-desk"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts:
+          - exp_labels:
+              stage: hydrate
+              class: unauthenticated
+              severity: warning
+      - eval_time: 25m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+
+  - name: the duplicate job series of one event are one alert per stage and class
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_runs_total{stage="decide",class="decide_failed",job="pg-desk"}
+        values: "0x10 3x60"
+      - series: pg_desk_pr_lane_runs_total{stage="decide",class="decide_failed",job="pg-desk-legacy"}
+        values: "0x10 3x60"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts:
+          - exp_labels:
+              stage: decide
+              class: decide_failed
+              severity: warning
+
+  - name: other classes however fast they rise do not fire it
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_runs_total{stage="hydrate",class="transient",job="pg-desk"}
+        values: "0+5x60"
+      - series: pg_desk_pr_lane_runs_total{stage="hydrate",class="not_found",job="pg-desk"}
+        values: "0+5x60"
+      - series: pg_desk_pr_lane_runs_total{stage="decide",class="decide_partial",job="pg-desk"}
+        values: "0+5x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+
+  - name: healthy zero-filled series are quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_runs_total{stage="hydrate",class="unauthenticated",job="pg-desk"}
+        values: "0x60"
+      - series: pg_desk_pr_lane_runs_total{stage="decide",class="decide_failed",job="pg-desk"}
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+
+  - name: a series that stopped rising long ago is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_runs_total{stage="hydrate",class="unauthenticated",job="pg-desk"}
+        values: "7x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+
+  - name: empty input is quiet
+    interval: 1m
+    input_series:
+      - series: unrelated_metric{job="other"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []
+
+  - name: SYSTEM_PAUSE suppresses it
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_runs_total{stage="hydrate",class="unauthenticated",job="pg-desk"}
+        values: "0x10 1x60"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-desk-pr-lane-hard-failure
+        exp_alerts: []

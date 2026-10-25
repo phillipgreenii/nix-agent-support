@@ -1,0 +1,134 @@
+# promtool unit tests for the pg-desk-pr-stale-anchor alert (PR lane refactor, P8a-1). Run by the flake check
+# test-pg-desk-alert-rules through grafana/check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 3600`, the
+# rule's `for: 10m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: 1m series. The gauge is the age of the oldest anchor that is still open on a PR the
+# store shows merged or closed, emitted 0 when healthy. It fires after 10m above 3600s while the
+# lane mode is apply: not at 5m, firing at 20m. In plan mode no anchor is closed, so the same reading
+# is expected there; a missing lane-mode gauge fails closed (quiet).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an old reading while the lane applies fires after 10m, not before
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_stale_anchor_oldest_age_seconds{job="pg-desk"}
+        values: "4000x120"
+      - series: pg_desk_pr_lane_mode{mode="off",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="plan",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "1x120"
+    promql_expr_test:
+      - expr: count(wrapped:pg_desk_pr_stale_anchor)
+        eval_time: 20m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-desk-pr-stale-anchor
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-desk-pr-stale-anchor
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: the duplicate job series of the same gauge are one alert
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_stale_anchor_oldest_age_seconds{job="pg-desk"}
+        values: "4000x120"
+      - series: pg_desk_pr_stale_anchor_oldest_age_seconds{job="pg-desk-legacy"}
+        values: "4000x120"
+      - series: pg_desk_pr_lane_mode{mode="off",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="plan",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-pr-stale-anchor
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: in plan mode the same reading is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_stale_anchor_oldest_age_seconds{job="pg-desk"}
+        values: "72000x120"
+      - series: pg_desk_pr_lane_mode{mode="off",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="plan",job="pg-desk"}
+        values: "1x120"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "0x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-pr-stale-anchor
+        exp_alerts: []
+
+  - name: with the mode gauge absent it is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_stale_anchor_oldest_age_seconds{job="pg-desk"}
+        values: "72000x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-pr-stale-anchor
+        exp_alerts: []
+
+  - name: a healthy reading (0, and exactly at the threshold) is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_stale_anchor_oldest_age_seconds{job="pg-desk"}
+        values: "0x60 3600x60"
+      - series: pg_desk_pr_lane_mode{mode="off",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="plan",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: pg-desk-pr-stale-anchor
+        exp_alerts: []
+      - eval_time: 115m
+        alertname: pg-desk-pr-stale-anchor
+        exp_alerts: []
+
+  - name: empty input is quiet
+    interval: 1m
+    input_series:
+      - series: unrelated_metric{job="other"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-pr-stale-anchor
+        exp_alerts: []
+
+  - name: SYSTEM_PAUSE suppresses it
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_stale_anchor_oldest_age_seconds{job="pg-desk"}
+        values: "4000x120"
+      - series: pg_desk_pr_lane_mode{mode="off",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="plan",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "1x120"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-pr-stale-anchor
+        exp_alerts: []

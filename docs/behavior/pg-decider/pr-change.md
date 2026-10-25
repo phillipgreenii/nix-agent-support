@@ -123,6 +123,14 @@ so a dead log pipeline cannot silence an alert (the outcome alerts read the stor
 rotated away before the plan summary has been consumed: it is kept until the operator declares the
 lane stable.
 
+The default file is registered as a log source (`pg-pr-change-runs`) by the generic pg-desk serve
+launchd module, as `${env:XDG_STATE_HOME}/pg-pr-change/pr-change-runs.jsonl`, with no error alert. A
+registered path that does not match the written one leaves the stream empty without any error, so a
+check runs the real command under a scratch `XDG_STATE_HOME` and requires the file it wrote to be
+exactly the registered path. The log source has no retention or rotation setting and the file is on no
+rotation list, so nothing removes it before the plan summary consumes it. A run given `--run-record`
+or `PG_PR_CHANGE_RUN_RECORD` writes elsewhere and is not collected.
+
 A line carries `contract` (`pg-pr-change.run-record/v1`), `run_id`, `at` and `finished_at`, `entity`
 (the normalized PR id), `event_id` (the item id as the router gave it), `seq` and `seq_source`
 (`sequence`, `id-suffix` or `none`: the delivery key), `mode`, `hydrate` (`result` ok, failed or

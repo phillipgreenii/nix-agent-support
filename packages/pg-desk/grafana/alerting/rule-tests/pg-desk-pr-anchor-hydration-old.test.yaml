@@ -1,0 +1,134 @@
+# promtool unit tests for the pg-desk-pr-anchor-hydration-old alert (PR lane refactor, P8a-1). Run by the flake check
+# test-pg-desk-alert-rules through grafana/check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 604800`, the
+# rule's `for: 30m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: 1m series. The gauge is the oldest last hydration among PRs that have an open anchor
+# and that the store shows as open (a lost or failed `merged` hydration leaves it saying "open"). It
+# fires after 30m above 604800s (7 days, provisional) while the lane mode is apply: not at 20m,
+# firing at 40m.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an old reading while the lane applies fires after 30m, not before
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_open_anchor_oldest_hydration_age_seconds{job="pg-desk"}
+        values: "605200x120"
+      - series: pg_desk_pr_lane_mode{mode="off",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="plan",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "1x120"
+    promql_expr_test:
+      - expr: count(wrapped:pg_desk_pr_anchor_hydration_old)
+        eval_time: 40m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-pr-anchor-hydration-old
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-desk-pr-anchor-hydration-old
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: the duplicate job series of the same gauge are one alert
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_open_anchor_oldest_hydration_age_seconds{job="pg-desk"}
+        values: "605200x120"
+      - series: pg_desk_pr_open_anchor_oldest_hydration_age_seconds{job="pg-desk-legacy"}
+        values: "605200x120"
+      - series: pg_desk_pr_lane_mode{mode="off",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="plan",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-anchor-hydration-old
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: in plan mode the same reading is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_open_anchor_oldest_hydration_age_seconds{job="pg-desk"}
+        values: "12096000x120"
+      - series: pg_desk_pr_lane_mode{mode="off",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="plan",job="pg-desk"}
+        values: "1x120"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "0x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-anchor-hydration-old
+        exp_alerts: []
+
+  - name: with the mode gauge absent it is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_open_anchor_oldest_hydration_age_seconds{job="pg-desk"}
+        values: "12096000x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-anchor-hydration-old
+        exp_alerts: []
+
+  - name: a healthy reading (0, and exactly at the threshold) is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_open_anchor_oldest_hydration_age_seconds{job="pg-desk"}
+        values: "0x60 604800x60"
+      - series: pg_desk_pr_lane_mode{mode="off",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="plan",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: pg-desk-pr-anchor-hydration-old
+        exp_alerts: []
+      - eval_time: 115m
+        alertname: pg-desk-pr-anchor-hydration-old
+        exp_alerts: []
+
+  - name: empty input is quiet
+    interval: 1m
+    input_series:
+      - series: unrelated_metric{job="other"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-anchor-hydration-old
+        exp_alerts: []
+
+  - name: SYSTEM_PAUSE suppresses it
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_open_anchor_oldest_hydration_age_seconds{job="pg-desk"}
+        values: "605200x120"
+      - series: pg_desk_pr_lane_mode{mode="off",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="plan",job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "1x120"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-anchor-hydration-old
+        exp_alerts: []

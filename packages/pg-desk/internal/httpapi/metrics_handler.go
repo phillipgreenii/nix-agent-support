@@ -178,6 +178,32 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 		return nil, fmt.Errorf("httpapi: register pr lane state metrics: %w", err)
 	}
 
+	// The open-anchor families (P8a): derived at scrape time from the store's
+	// links and PR rows, not the sync ledger P9 deletes. Same rule as the
+	// never-hydrated set: a store that is not migrated, or a failed read, has
+	// NO series for them (never 0).
+	anchorsFn := func() (metrics.PRAnchorsSnapshot, bool, error) {
+		v, err := st.SchemaVersion()
+		if err != nil {
+			return metrics.PRAnchorsSnapshot{}, false, err
+		}
+		if v < store.NewSchemaVersion {
+			return metrics.PRAnchorsSnapshot{}, false, nil
+		}
+		a, err := st.CountPRAnchors(nowUTC())
+		if err != nil {
+			return metrics.PRAnchorsSnapshot{}, false, err
+		}
+		return metrics.PRAnchorsSnapshot{
+			Open: a.Open, OpenHidden: a.OpenHidden, Stale: a.Stale,
+			StaleOldestAgeSeconds:     a.StaleOldestAgeSeconds,
+			OldestHydrationAgeSeconds: a.OldestHydrationAgeSeconds,
+		}, true, nil
+	}
+	if err := metrics.RegisterPRAnchors(mp, anchorsFn); err != nil {
+		return nil, fmt.Errorf("httpapi: register pr anchor metrics: %w", err)
+	}
+
 	return scrapeHandler(registry, scrapeTimeout), nil
 }
 

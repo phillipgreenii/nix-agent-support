@@ -1,0 +1,122 @@
+# promtool unit tests for the pg-desk-pr-hydrate-dead-man alert (PR lane refactor, P8a-1). Run by the flake check
+# test-pg-desk-alert-rules through grafana/check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the
+# rule's `for: 15m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: 1m series. The rule compares, over an hour, dispatches of the pr-change role (the router's
+# pg_router_throughput_total{role}) with the persisted PR hydrations counter. Dispatches with no
+# hydration increase, held for 15m, fire: not at 10m, firing at 25m. A window with no dispatch is an
+# idle window, not a failure.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: dispatches with no hydration at all fire after 15m, not before
+    interval: 1m
+    input_series:
+      - series: pg_router_throughput_total{type="pr.changed",role="pr-change",job="pg-router"}
+        values: "0+2x180"
+      - series: pg_desk_hydrations_total{type="pr",job="pg-desk"}
+        values: "50x180"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-desk-pr-hydrate-dead-man
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: pg-desk-pr-hydrate-dead-man
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: dispatches with hydrations are quiet
+    interval: 1m
+    input_series:
+      - series: pg_router_throughput_total{type="pr.changed",role="pr-change",job="pg-router"}
+        values: "0+2x180"
+      - series: pg_desk_hydrations_total{type="pr",job="pg-desk"}
+        values: "0+2x180"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-desk-pr-hydrate-dead-man
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: pg-desk-pr-hydrate-dead-man
+        exp_alerts: []
+
+  - name: an idle window (no dispatch) is quiet
+    interval: 1m
+    input_series:
+      - series: pg_router_throughput_total{type="pr.changed",role="pr-change",job="pg-router"}
+        values: "10x180"
+      - series: pg_desk_hydrations_total{type="pr",job="pg-desk"}
+        values: "50x180"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-desk-pr-hydrate-dead-man
+        exp_alerts: []
+
+  - name: another role's dispatches and other hydration types are not this rule's
+    interval: 1m
+    input_series:
+      - series: pg_router_throughput_total{type="issue.changed",role="issue-decider",job="pg-router"}
+        values: "0+2x180"
+      - series: pg_desk_hydrations_total{type="pr",job="pg-desk"}
+        values: "50x180"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-desk-pr-hydrate-dead-man
+        exp_alerts: []
+
+  - name: hydrations of another type do not count as PR hydrations
+    interval: 1m
+    input_series:
+      - series: pg_router_throughput_total{type="pr.changed",role="pr-change",job="pg-router"}
+        values: "0+2x180"
+      - series: pg_desk_hydrations_total{type="pr",job="pg-desk"}
+        values: "50x180"
+      - series: pg_desk_hydrations_total{type="issue",job="pg-desk"}
+        values: "0+3x180"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-desk-pr-hydrate-dead-man
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a hydration counter that is absent while dispatches continue fires
+    interval: 1m
+    input_series:
+      - series: pg_router_throughput_total{type="pr.changed",role="pr-change",job="pg-router"}
+        values: "0+2x180"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-desk-pr-hydrate-dead-man
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: empty input is quiet
+    interval: 1m
+    input_series:
+      - series: unrelated_metric{job="other"}
+        values: "1x180"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-desk-pr-hydrate-dead-man
+        exp_alerts: []
+
+  - name: SYSTEM_PAUSE suppresses it
+    interval: 1m
+    input_series:
+      - series: pg_router_throughput_total{type="pr.changed",role="pr-change",job="pg-router"}
+        values: "0+2x180"
+      - series: pg_desk_hydrations_total{type="pr",job="pg-desk"}
+        values: "50x180"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x180"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-desk-pr-hydrate-dead-man
+        exp_alerts: []

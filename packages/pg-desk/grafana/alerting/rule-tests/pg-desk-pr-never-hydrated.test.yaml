@@ -1,0 +1,200 @@
+# promtool unit tests for the pg-desk-pr-never-hydrated alert (PR lane refactor, P0b tripwire,
+# finalized by P8a-1). Run by the flake check test-pg-desk-alert-rules through
+# grafana/check-alert-rules.sh, which generates rules.yml next to this file: the Grafana rule's
+# refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for: 30m` and labels,
+# plus a recording rule `wrapped:<uid with _>`.
+#
+# The rule's four states (design 9.2): the gauge live and absent (fires), live and 0 (quiet),
+# pg-desk liveness down (quiet), SYSTEM_PAUSE set (quiet), plus the replay of 2026-10-19 and an
+# empty input. Every series has a 1m interval; a condition that has held for the `for` duration
+# (30m) fires: not at 25m, firing at 35m.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # The replay of 2026-10-19: all 495 PR rows unhydrated, the legacy sync_error rows zero (the
+  # signal that read healthy for the whole outage), and no anchors created. The primary alert
+  # fires, and the outcome rules that need an applying lane stay quiet (the lane was not applying).
+  - name: the 2026-10-19 replay - 495 unhydrated, sync_error rows zero, no anchors - fires
+    interval: 1m
+    input_series:
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x120"
+      - series: pg_desk_pr_unhydrated{job="pg-desk"}
+        values: "495x120"
+      - series: pg_desk_pr_unhydrated_oldest_age_seconds{job="pg-desk"}
+        values: "86400+60x120"
+      - series: pg_desk_sync_error_rows{job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_sync_error_exhausted_rows{job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_open_anchors{job="pg-desk"}
+        values: "0x120"
+    promql_expr_test:
+      - expr: pg_desk_sync_error_exhausted_rows
+        eval_time: 60m
+        exp_samples:
+          - labels: 'pg_desk_sync_error_exhausted_rows{job="pg-desk"}'
+            value: 0
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts:
+          - exp_labels:
+              job: pg-desk
+              severity: warning
+      - eval_time: 60m
+        alertname: pg-desk-pr-stale-anchor
+        exp_alerts: []
+
+  - name: one unhydrated row above the threshold fires
+    interval: 1m
+    input_series:
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x120"
+      - series: pg_desk_pr_unhydrated{job="pg-desk"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts:
+          - exp_labels:
+              job: pg-desk
+              severity: warning
+
+  # State 1: the gauge is absent while pg-desk liveness is up (the store cannot answer).
+  - name: gauge absent while liveness is up fires
+    interval: 1m
+    input_series:
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts:
+          - exp_labels:
+              job: pg-desk
+              severity: warning
+
+  # State 2: the gauge is live and reads 0 (emitted when healthy): quiet.
+  - name: gauge live and 0 is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x120"
+      - series: pg_desk_pr_unhydrated{job="pg-desk"}
+        values: "0x120"
+      - series: pg_desk_pr_unhydrated_oldest_age_seconds{job="pg-desk"}
+        values: "0x120"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts: []
+
+  # State 3: pg-desk liveness is down. With no gauge and liveness 0, or no liveness series at all,
+  # nothing is reported here (pg-desk-liveness-down speaks).
+  - name: liveness down with no gauge is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "0x120"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts: []
+
+  - name: no liveness series and no gauge is quiet
+    interval: 1m
+    input_series:
+      - series: pg_router_liveness{job="pg-router"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts: []
+
+  # State 4: SYSTEM_PAUSE set suppresses both branches.
+  - name: SYSTEM_PAUSE suppresses the gauge above 0
+    interval: 1m
+    input_series:
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x120"
+      - series: pg_desk_pr_unhydrated{job="pg-desk"}
+        values: "495x120"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts: []
+
+  - name: SYSTEM_PAUSE suppresses the absent gauge
+    interval: 1m
+    input_series:
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x120"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts: []
+
+  # A gate of another type, or a SYSTEM_PAUSE series reading 0, is not a pause.
+  - name: another gate type or a pause reading 0 does not suppress
+    interval: 1m
+    input_series:
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x120"
+      - series: pg_desk_pr_unhydrated{job="pg-desk"}
+        values: "495x120"
+      - series: pg_router_gates_active{type="LOW_DISK_USAGE",job="pg-router"}
+        values: "1x120"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router-other"}
+        values: "0x120"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts:
+          - exp_labels:
+              job: pg-desk
+              severity: warning
+
+  # Empty input: no series of any kind.
+  - name: empty input is quiet
+    interval: 1m
+    input_series:
+      - series: unrelated_metric{job="other"}
+        values: "1x120"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts: []
+
+  # The hold: a gauge above 0 for less than the `for` duration does not fire, and a gauge that
+  # recovers to 0 resolves.
+  - name: a gauge that recovers before 30m never fires
+    interval: 1m
+    input_series:
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x120"
+      - series: pg_desk_pr_unhydrated{job="pg-desk"}
+        values: "5x20 0x100"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-desk-pr-never-hydrated
+        exp_alerts: []

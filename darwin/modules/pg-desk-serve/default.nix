@@ -268,6 +268,30 @@ in
           path = pgDeskServeLogPath;
           format = "raw";
         };
+
+        # PR lane refactor, P8a-1: the composed command (`pg-pr-change`) appends one
+        # JSON line per run to $XDG_STATE_HOME/pg-pr-change/pr-change-runs.jsonl
+        # (packages/pg-decider/internal/prchange RunRecordFileName; the command's
+        # stateDir). The record is for people and for the plan summary; no alert reads
+        # it, so there is NO stream-silence alert and errorAlert is off. `path` MUST
+        # be explicit and MUST equal the path the command writes: the submodule's
+        # default glob is derived from the ATTRIBUTE NAME
+        # (${env:XDG_STATE_HOME}/<name>/*.jsonl, a directory that would never exist
+        # here), and a registered path that does not match the written one leaves the
+        # stream empty WITHOUT any error (the pg-router-events precedent). The check
+        # test-pg-desk-module runs the real command under a scratch XDG_STATE_HOME
+        # and asserts the written file is exactly this registered path.
+        #
+        # Retention: this option has no retention or rotation setting, and the command
+        # never rotates the file (design: it is kept until the lane is declared
+        # stable, and the runbook states the policy), so the file is not rotated away
+        # before the plan summary consumes it. It is deliberately NOT in any
+        # manageLogs list (the rotator copy-truncates).
+        logSources.pg-pr-change-runs = {
+          serviceName = "pg-pr-change-runs";
+          path = "\${env:XDG_STATE_HOME}/pg-pr-change/pr-change-runs.jsonl";
+          errorAlert.enable = false;
+        };
       };
     };
   };

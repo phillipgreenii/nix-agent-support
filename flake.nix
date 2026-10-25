@@ -1259,6 +1259,52 @@
           require_serial = true;
         };
 
+        # PR lane refactor, P8a-1: the pg-desk outcome alert rules (grafana/alerting/alerts.yaml)
+        # have a promtool rule-test harness (checks.<system>.test-pg-desk-alert-rules) and a
+        # structure check (test-pg-desk-alert-structure). This path-scoped hook puts both, with
+        # their negative self-tests, under the commit-time and `pg-hooks run pre-land` runs, so a
+        # rule edit that breaks a case or drops a guard fails before it lands. The scripts are the
+        # ones in the working tree (never a store copy), run with promtool, yq and jq from the
+        # nix store. Inside the nix build sandbox the flake checks above cover it, so the hook
+        # skips there.
+        pg-desk-alert-rules-test = {
+          enable = true;
+          name = "pg-desk-alert-rules-test";
+          description = "pg-desk alert rules: promtool rule tests and the structure check, with their negative self-tests (PR lane refactor, P8a-1)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "pg-desk-alert-rules-test-hook";
+              runtimeInputs = [
+                pkgs.bash
+                pkgs.git
+                pkgs.jq
+                pkgs.yq-go
+                pkgs.prometheus.cli
+                pkgs.coreutils
+                pkgs.diffutils
+                pkgs.gnugrep
+                pkgs.gnused
+              ];
+              text = ''
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "pg-desk-alert-rules-test: inside the nix build sandbox; skipping (checks.*.test-pg-desk-alert-rules covers this)" >&2
+                  exit 0
+                fi
+                top="$(git rev-parse --show-toplevel)"
+                g="$top/packages/pg-desk/grafana"
+                bash "$g/check-alert-structure.sh" "$g/alerting/alerts.yaml"
+                bash "$g/check-alert-structure.sh" --self-test "$g/alerting/alerts.yaml"
+                bash "$g/check-alert-rules.sh" "$g/alerting/alerts.yaml" "$g/alerting/rule-tests"
+                bash "$g/check-alert-rules.sh" --self-test "$g/alerting/alerts.yaml" "$g/alerting/rule-tests"
+              '';
+            }
+          }/bin/pg-desk-alert-rules-test-hook";
+          language = "system";
+          files = "^packages/pg-desk/grafana/";
+          pass_filenames = false;
+          require_serial = true;
+        };
+
         # pg2-cahkj: a dependency bump synced into ONE Go module breaks every
         # module that consumes it through a local `replace => ../<module>`
         # (pg2-z5fax.2.3's pg-connector sqlite bump broke `go build ./...` in
@@ -6366,6 +6412,38 @@
                     touch "$out"
                   '';
 
+              # pg-desk PR lane outcome alerts, PromQL behaviour (PR lane refactor, P8a-1): the
+              # promtool harness modelled on test-pg-router-alert-rules. Query A of each rule listed
+              # in packages/pg-desk/grafana/check-alert-rules.sh is wrapped as a Prometheus alert and
+              # the cases under grafana/alerting/rule-tests/ run under `promtool test rules`: a firing,
+              # a healthy and an empty-input case for every new rule, the primary rule's four states
+              # and the replay of 2026-10-19, and the residual rule ignoring mode="plan". The script's
+              # own --self-test then breaks one guard at a time (SYSTEM_PAUSE, absence branch, apply
+              # gate, mode selector, first-event branch, scope, role selector) and requires the cases
+              # to REJECT each broken rule file. The structure check (test-pg-desk-alert-structure)
+              # pins noDataState and the guards; the same harness runs as the pg-desk-alert-rules-test
+              # commit hook.
+              test-pg-desk-alert-rules =
+                pkgs.runCommand "test-pg-desk-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.prometheus.cli
+                      pkgs.coreutils
+                      pkgs.diffutils
+                    ];
+                  }
+                  ''
+                    script=${./packages/pg-desk/grafana/check-alert-rules.sh}
+                    alerts=${./packages/pg-desk/grafana/alerting/alerts.yaml}
+                    cases=${./packages/pg-desk/grafana/alerting/rule-tests}
+                    bash "$script" "$alerts" "$cases"
+                    bash "$script" --self-test "$alerts" "$cases"
+                    touch "$out"
+                  '';
+
               # pg-connector-github dashboard: rules D1-D7 over the dashboard JSON and the metric
               # catalog (uid and title, catalogued names, counters inside rate/increase, the eight
               # topics, descriptions, Prometheus datasource, every expr parses under promtool),
@@ -11051,7 +11129,7 @@
                 assert maxPerPollZeroRejected { sweep.maxPerPoll = 0; };
                 assert maxPerPollZeroRejected { hydration.maxPerPoll = 0; };
                 assert prLaneModeRejected "aplly";
-                pkgs.runCommand "test-pg-desk-module-ok" { } ''
+                pkgs.runCommand "test-pg-desk-module-ok" { nativeBuildInputs = [ pkgs.pg-decider ]; } ''
                   # area_labels absent by default, rendered when set (field defaults to title).
                   ! grep -q area_labels ${hmEnabled.xdg.configFile."pg-desk/config.yaml".source}
                   f=${hmAreaLabels.xdg.configFile."pg-desk/config.yaml".source}
@@ -11146,6 +11224,49 @@
                   fe=${hmFocusEmptyIdentities.xdg.configFile."pg-desk/config.yaml".source}
                   grep -q '^  operator_identities: \[\]$' "$fe"
                   ! grep -qE 'time_zone|coverage_backlog_max|pending_gate_age|priority_map|suppressed_kind|bead_id_pattern' "$fe"
+
+                  # PR lane run record (P8a-1): the log source registered for it MUST be the
+                  # path the composed command really writes, because a registered path that
+                  # does not match leaves the Loki stream empty WITHOUT any error. Run the
+                  # real pg-pr-change under a scratch XDG_STATE_HOME with an empty PATH (so
+                  # its hydrate stage fails; it still holds the lock and appends its record)
+                  # and compare the file it wrote with the registered path, the collector's
+                  # ''${env:XDG_STATE_HOME} resolved to the same scratch directory.
+                  registered=${lib.escapeShellArg darwinEnabledNoSoak.phillipgreenii.observability.logSources.pg-pr-change-runs.path}
+                  xdg="$(mktemp -d)"
+                  resolved="''${registered/'$'\{env:XDG_STATE_HOME\}/$xdg}"
+                  [ "$resolved" != "$registered" ] || { echo "the registered path does not name XDG_STATE_HOME: $registered" >&2; exit 1; }
+                  env -i HOME="$xdg/home" XDG_STATE_HOME="$xdg" PATH="$xdg/empty" \
+                    ${pkgs.pg-decider}/bin/pg-pr-change plan 'example-org/example-repo#1' >/dev/null 2>&1 || true
+                  written="$(find "$xdg" -name '*.jsonl' -type f | head -n 1)"
+                  [ -n "$written" ] || { echo "pg-pr-change wrote no run record under $xdg" >&2; exit 1; }
+                  [ -s "$written" ] || { echo "the run record $written is empty" >&2; exit 1; }
+                  if [ "$written" != "$resolved" ]; then
+                    echo "registered log path $resolved is not the path the command wrote, $written" >&2
+                    exit 1
+                  fi
+                  # Negative case: a registered path that differs by one directory MUST be rejected
+                  # by the same comparison.
+                  wrong="''${resolved/pg-pr-change/pg-pr-changes}"
+                  [ "$wrong" != "$written" ] || { echo "the comparison cannot tell a wrong path from the written one" >&2; exit 1; }
+                  # The source is not under an alert and not rotated away: no manageLogs entry
+                  # names the record, and no error alert reads it.
+                  ${
+                    if
+                      darwinEnabledNoSoak.phillipgreenii.observability.logSources.pg-pr-change-runs.errorAlert.enable
+                    then
+                      "echo 'the run record log source has an error alert' >&2; exit 1"
+                    else
+                      "true"
+                  }
+                  ${
+                    if
+                      lib.any (lib.hasSuffix "pr-change-runs.jsonl") darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.manageLogs.files
+                    then
+                      "echo 'the run record is in a rotated manageLogs list' >&2; exit 1"
+                    else
+                      "true"
+                  }
 
                   touch $out
                 '';

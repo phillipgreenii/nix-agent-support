@@ -1,0 +1,110 @@
+# promtool unit tests for the pg-desk-pr-residual-after-apply alert (PR lane refactor, P8a-1). Run by the flake check
+# test-pg-desk-alert-rules through grafana/check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 3600`, the
+# rule's `for: 15m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: the gauge pg_desk_pr_lane_residual_oldest_age_seconds{mode} has one series per lane
+# mode, all three always emitted, the value on the lane-level mode's series; every series here has a
+# 1m interval. A residual older than 3600s that holds for 15m fires: not at 10m, firing at 20m.
+# The rule reads mode="apply" only: a residual in plan mode is non-zero by definition.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an apply-mode residual older than an hour fires after 15m, not before
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply",job="pg-desk"}
+        values: "4000x60"
+      - series: pg_desk_pr_lane_residual_oldest_age_seconds{mode="plan",job="pg-desk"}
+        values: "0x60"
+      - series: pg_desk_pr_lane_residual_oldest_age_seconds{mode="off",job="pg-desk"}
+        values: "0x60"
+    promql_expr_test:
+      - expr: count(wrapped:pg_desk_pr_residual_after_apply)
+        eval_time: 20m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-desk-pr-residual-after-apply
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-desk-pr-residual-after-apply
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: plan-mode series are ignored however large
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_residual_oldest_age_seconds{mode="plan",job="pg-desk"}
+        values: "999999x60"
+      - series: pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply",job="pg-desk"}
+        values: "0x60"
+      - series: pg_desk_pr_lane_residual_oldest_age_seconds{mode="off",job="pg-desk"}
+        values: "0x60"
+      - series: pg_desk_pr_lane_residual_prs{mode="plan",job="pg-desk"}
+        values: "400x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-residual-after-apply
+        exp_alerts: []
+
+  - name: only a plan-mode series present is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_residual_oldest_age_seconds{mode="plan",job="pg-desk"}
+        values: "999999x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-residual-after-apply
+        exp_alerts: []
+
+  - name: a healthy apply lane (0, and exactly at the threshold) is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply",job="pg-desk"}
+        values: "0x30 3600x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-desk-pr-residual-after-apply
+        exp_alerts: []
+      - eval_time: 55m
+        alertname: pg-desk-pr-residual-after-apply
+        exp_alerts: []
+
+  - name: empty input is quiet
+    interval: 1m
+    input_series:
+      - series: unrelated_metric{job="other"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-residual-after-apply
+        exp_alerts: []
+
+  - name: SYSTEM_PAUSE suppresses it
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply",job="pg-desk"}
+        values: "4000x60"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-residual-after-apply
+        exp_alerts: []
+
+  - name: a residual that clears before 15m never fires
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply",job="pg-desk"}
+        values: "4000x10 0x50"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-residual-after-apply
+        exp_alerts: []

@@ -1,0 +1,82 @@
+# promtool unit tests for the pg-desk-sweep-bound-violated alert (PR lane refactor, P8a-1). Run by the flake check
+# test-pg-desk-alert-rules through grafana/check-alert-rules.sh, which generates rules.yml next to
+# this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) >= 1`, the
+# rule's `for: 15m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: 1m series. The rule is `max by (type, tier)` over the issue and thread series of
+# pg_desk_sweep_bound_violated (scoped in P8a: the PR inputs of the bound vanish after P3b2) and fires
+# at 1 held for 15m: not at 10m, firing at 20m. A pr series is not selected at all.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a violated issue bound fires per type and tier, the duplicate job series being one
+    interval: 1m
+    input_series:
+      - series: pg_desk_sweep_bound_violated{type="issue",tier="local",job="pg-desk"}
+        values: "1x60"
+      - series: pg_desk_sweep_bound_violated{type="issue",tier="local",job="pg-desk-legacy"}
+        values: "1x60"
+      - series: pg_desk_sweep_bound_violated{type="issue",tier="remote",job="pg-desk"}
+        values: "0x60"
+      - series: pg_desk_sweep_bound_violated{type="thread",tier="local",job="pg-desk"}
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-desk-sweep-bound-violated
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-desk-sweep-bound-violated
+        exp_alerts:
+          - exp_labels:
+              type: issue
+              tier: local
+              severity: warning
+
+  - name: a violated thread bound fires
+    interval: 1m
+    input_series:
+      - series: pg_desk_sweep_bound_violated{type="thread",tier="remote",job="pg-desk"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-sweep-bound-violated
+        exp_alerts:
+          - exp_labels:
+              type: thread
+              tier: remote
+              severity: warning
+
+  - name: a violated pr bound is scoped out
+    interval: 1m
+    input_series:
+      - series: pg_desk_sweep_bound_violated{type="pr",tier="local",job="pg-desk"}
+        values: "1x60"
+      - series: pg_desk_sweep_bound_violated{type="pr",tier="remote",job="pg-desk"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-sweep-bound-violated
+        exp_alerts: []
+
+  - name: a holding bound and an empty input are quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_sweep_bound_violated{type="issue",tier="local",job="pg-desk"}
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-sweep-bound-violated
+        exp_alerts: []
+
+  - name: no series at all (poll interval unknown) is quiet
+    interval: 1m
+    input_series:
+      - series: unrelated_metric{job="other"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-sweep-bound-violated
+        exp_alerts: []

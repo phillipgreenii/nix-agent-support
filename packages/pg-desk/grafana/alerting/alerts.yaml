@@ -386,6 +386,11 @@ groups:
       # query) the metric has NO series for that type: no verdict, never a
       # false violation. noDataState: OK treats that absence as Normal.
       #
+      # Scoped to issue and thread (PR lane refactor, P8a): the PR inputs of this
+      # bound vanish after P3b2 (the pr-change role replaces the PR sweep), so a
+      # pr series would read a bound that governs nothing. Scoping only: the alert
+      # itself stays.
+      #
       # `max by (type, tier)` collapses the duplicate job=pg-desk / job=pg-desk-legacy
       # series so each (type, tier) is ONE alert instance. `for: 15m` rides
       # out a transient count spike (the bound is a steady-state sizing
@@ -412,7 +417,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max by (type, tier) (pg_desk_sweep_bound_violated)
+              expr: max by (type, tier) (pg_desk_sweep_bound_violated{type=~"issue|thread"})
           - refId: B
             datasourceUid: __expr__
             model:
@@ -654,6 +659,9 @@ groups:
                     type: gt
                     params: [0]
 
+      # Scoped to issue and thread (PR lane refactor, P8a): the PR half of this
+      # alert reads inputs that vanish after P3b2, so a pr status would read a
+      # listing that governs nothing. Scoping only: the alert itself stays.
       - uid: pg-desk-watch-listing-degraded
         title: pg-desk watch query listing is degraded or failed
         condition: C
@@ -675,7 +683,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: sum(pg_desk_watch_listing_status{status!="ok"})
+              expr: sum(pg_desk_watch_listing_status{type=~"issue|thread",status!="ok"})
           - refId: B
             datasourceUid: __expr__
             model:
@@ -774,8 +782,13 @@ groups:
                     type: gt
                     params: [500]
 
-      # PR never hydrated (PR lane refactor, P0b tripwire; P8a-1 finalizes its
-      # threshold and adds the promtool harness). pg_desk_pr_unhydrated is the
+      # PR never hydrated (PR lane refactor: the P0b tripwire, finalized by P8a-1 with
+      # its promtool rule test, grafana/alerting/rule-tests/, whose four states are
+      # the gauge live and absent, live and 0, pg-desk liveness down and SYSTEM_PAUSE
+      # set, and whose replay of 2026-10-19 fires it). The final threshold is the
+      # one the P0b rule shipped with: above 0 for 30 minutes, because a PR that is
+      # listed and unhydrated for half an hour is one that nothing is hydrating.
+      # pg_desk_pr_unhydrated is the
       # number of PRs the store lists as open that no hydration has ever written
       # (open, not hidden, not marked inactive, version 0), computed from the
       # store at scrape time; pg_desk_pr_unhydrated_oldest_age_seconds is the
@@ -824,6 +837,358 @@ groups:
               editorMode: code
               instant: true
               expr: '((pg_desk_pr_unhydrated > 0) or (pg_desk_liveness == 1 unless on() pg_desk_pr_unhydrated)) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # ---- PR lane outcome alerts (PR lane refactor, P8a-1) ----
+      # The alerts below read OUTCOMES, never "the process ran" (the outage of
+      # 2026-10-19 read sync_errors 0 for its whole duration). Each reads a gauge
+      # or counter that `pg-desk serve` derives at scrape time from the store (the
+      # open-anchor families, internal/metrics/prlane_anchors.go) or from the lane
+      # state the composed command persists (internal/metrics/prlane_state.go), and
+      # every one is exercised by promtool through grafana/check-alert-rules.sh with
+      # a firing, a healthy and an empty-input case (grafana/alerting/rule-tests/).
+      #
+      # Every rule ends with the SYSTEM_PAUSE guard of pg-desk-sync-stale (its
+      # reasoning is documented there): a pause deliberately stops the dispatches
+      # these rules watch. The residual rule reads the mode="apply" series of its
+      # gauge, and the two stale-anchor rules are gated on the configured lane mode
+      # being apply (`and on() (pg_desk_pr_lane_mode{mode="apply"} == 1)`, as
+      # pg-desk-focus-pending-beads-age is): in plan mode a residual is non-zero by
+      # definition and no anchor is closed, so the same readings are expected
+      # there. An absent mode gauge drops the result too (fail closed toward quiet),
+      # and pg-desk-pr-never-hydrated speaks for a store that cannot answer.
+      #
+      # None of these uids is registered with the probe in this change: the
+      # deferred-registration allowlist holds them until the start of P6.
+
+      # Plan residual after apply. The composed command runs a read-only plan after
+      # apply and persists the PR's residual; the gauge is the age of the oldest
+      # non-empty residual, labelled with the lane mode. It covers a missing child
+      # item (review, fix-ci, conflict) as well as a missing anchor. It reads
+      # mode="apply" ONLY, because in plan mode the residual is non-zero by
+      # definition (nothing is applied). 3600 s: a healthy apply leaves no residual
+      # at all, so an hour with one means the lane keeps planning an action it
+      # cannot apply.
+      - uid: pg-desk-pr-residual-after-apply
+        title: pg-desk PR lane leaves a plan residual after apply
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A PR has had actions left in its plan after apply for over an hour"
+          description: 'pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply"} has exceeded 3600 for 15 minutes: at least one PR still has an action in its plan after the lane applied it (a missing anchor or a missing review, fix-ci or conflict item). Run the composed command in plan mode for the PR (the run record names it), then `pg-desk pr show` and `pg-desk pr history`. This rule reads mode=apply only and is suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'max(pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply"}) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3600]
+
+      # Stale anchor, part 1: an anchor is still open although the store shows its PR
+      # merged or closed. The age runs from the PR row's last hydration (the moment
+      # the store learned it was closed) and 3600 s is longer than the apply pass
+      # (one dispatch plus the router's 10 minute retry window), so a healthy
+      # closure never reaches it. Both parts read the store's links and PR rows,
+      # not the tracker and not the daemon; hidden PRs are excluded from the gauge
+      # (pg_desk_pr_open_anchors_hidden counts them apart). Gated on the lane mode
+      # being apply, because plan mode closes nothing.
+      - uid: pg-desk-pr-stale-anchor
+        title: pg-desk has open anchors on merged or closed PRs
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "An anchor has stayed open for over an hour on a PR the store shows as merged or closed"
+          description: "pg_desk_pr_stale_anchor_oldest_age_seconds has exceeded 3600 for 10 minutes while the lane is in apply mode: at least one open anchor belongs to a PR that the store shows merged or closed, so the lane did not close it. Run `pg-desk pr show <id>` for the PR and the composed command in plan mode to see what the decider would do; pg_desk_pr_stale_anchors is the count. Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'max(pg_desk_pr_stale_anchor_oldest_age_seconds) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3600]
+
+      # Stale anchor, part 2: a lost or failed `merged` hydration leaves the store
+      # saying "open", which part 1 cannot see. The signal is the oldest last
+      # hydration among PRs that have an open anchor and that the store shows as
+      # open. A quiet PR is hydrated only when it changes, so the threshold is long:
+      # 604800 s (7 days) is PROVISIONAL and is set from the measured hydration
+      # cadence at the operator checkpoint of the plan period (the same treatment as
+      # pg-desk-focus-consumer-lag's threshold).
+      - uid: pg-desk-pr-anchor-hydration-old
+        title: pg-desk has open anchors on PRs not hydrated for a week
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A PR with an open anchor has not been hydrated for over 7 days"
+          description: "pg_desk_pr_open_anchor_oldest_hydration_age_seconds has exceeded 604800 for 30 minutes while the lane is in apply mode: a PR that has an open anchor, and that the store still shows as open, was last hydrated over 7 days ago. A lost or failed hydration of its merged or closed state leaves the store saying open. Run `pg-desk pr refresh <id>` for the oldest PRs. The 7 day threshold is provisional and is set from the measured hydration cadence at the plan-period checkpoint. Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'max(pg_desk_pr_open_anchor_oldest_hydration_age_seconds) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [604800]
+
+      # Decider and hydrate failures, hard classes. pg_desk_pr_lane_runs_total{stage,
+      # class} is persisted by the composed command; every series is zero-filled, so
+      # the first event is a step from 0 and increase() sees it. `unauthenticated`
+      # (credentials of the connector are gone: nothing hydrates) and `decide_failed`
+      # (the decider itself failed) fire on any increase with NO `for`. The second
+      # branch covers a series that first appears already above 0 (a store that
+      # started counting after the window began): it fires for the ten minutes
+      # during which the series has no sample ten minutes earlier.
+      - uid: pg-desk-pr-lane-hard-failure
+        title: pg-desk PR lane run failed hard (unauthenticated or decide failed)
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "The PR lane recorded an unauthenticated or decide_failed run in the last 10 minutes"
+          description: 'pg_desk_pr_lane_runs_total{class="unauthenticated"} or {class="decide_failed"} (stage {{ $labels.stage }}, class {{ $labels.class }}) increased in the last 10 minutes. unauthenticated: the connector has no valid credentials, so nothing hydrates; decide_failed: the decider itself failed on a PR. Run the composed command by hand in plan mode for the PR named in the run record (pr-change-runs.jsonl). Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '((sum by (stage, class) (increase(pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}[10m])) > 0) or (sum by (stage, class) (pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}) > 0 unless sum by (stage, class) (pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"} offset 10m))) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Decider and hydrate failures, the rest. Every other class (not_found,
+      # transient, degraded, unhydrated, hydrate_error, decide_partial) alerts on a
+      # sustained rate, not a single event: a transient run is written for EVERY
+      # failed router attempt, so one is normal noise, while more than 5 in an hour
+      # is the only signal that deliveries are failing every attempt (the router
+      # exposes no "retries exhausted" series). pg-router-failure-rate already covers
+      # the router side of the pr-change role, so no router failure series is read
+      # here.
+      - uid: pg-desk-pr-lane-failure-rate
+        title: pg-desk PR lane runs keep failing (by stage and class)
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 5 PR lane runs failed in the last hour (stage {{ $labels.stage }}, class {{ $labels.class }})"
+          description: 'sum by (stage, class) (increase(pg_desk_pr_lane_runs_total{class!~"unauthenticated|decide_failed"}[1h])) has exceeded 5 for 15 minutes for stage {{ $labels.stage }}, class {{ $labels.class }}. transient is the only signal that a delivery failed every router attempt; not_found, degraded, unhydrated, hydrate_error and decide_partial name what failed. Read pr-change-runs.jsonl for the PRs, then run the composed command by hand in plan mode. Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'sum by (stage, class) (increase(pg_desk_pr_lane_runs_total{class!~"unauthenticated|decide_failed"}[1h])) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [5]
+
+      # Hydration failure and repeated degradation for type pr: the existing
+      # persisted counters and gauge (internal/metrics/changeflow.go), read here for
+      # the pr type so a lane whose refresh keeps failing or degrading is named even
+      # when the composed command's own classes miss it.
+      - uid: pg-desk-pr-hydration-failing
+        title: pg-desk PR hydration keeps failing or degrading
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "PR hydrations are failing or repeatedly degraded"
+          description: 'More than 5 PR hydrations failed or came back degraded in the last 30 minutes (pg_desk_hydration_failures_total{type="pr"}), or pg_desk_repeated_degraded_entities{type="pr"} is above 0, for 15 minutes. Run `pg-desk pr refresh <id>` for a PR in the run record and read its class line. Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '((sum(increase(pg_desk_hydration_failures_total{type="pr"}[30m])) > 5) or (max(pg_desk_repeated_degraded_entities{type="pr"}) > 0)) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Hydrate stage dead-man: the pr-change role was dispatched (a router series,
+      # pg_router_throughput_total{role="pr-change"}) in the last hour while the
+      # persisted PR hydration counter did not move at all. A role that is accepted
+      # but never reaches the hydrate stage (the composed command failing before
+      # `pg-desk pr refresh`, a wrong binary, a lock held forever) would otherwise
+      # look healthy to every other rule. Silent when the role was not dispatched:
+      # an idle window is not a failure.
+      - uid: pg-desk-pr-hydrate-dead-man
+        title: pg-desk PR hydrate stage is dead (dispatches, no hydrations)
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "The pr-change role was dispatched in the last hour but no PR was hydrated"
+          description: 'pg_router_throughput_total{role="pr-change"} increased in the last hour while pg_desk_hydrations_total{type="pr"} did not: the role is dispatched but its hydrate stage never ran. Run the composed command by hand in plan mode for one PR, and check the role definition and the lock directory. Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '(sum(increase(pg_router_throughput_total{role="pr-change"}[1h])) > 0) unless on() (sum(increase(pg_desk_hydrations_total{type="pr"}[1h])) > 0) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:

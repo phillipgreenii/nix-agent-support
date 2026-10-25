@@ -140,8 +140,9 @@ series.
   and lets an operator override it; where no router daemon is configured, the metric stays absent.
 
 The Grafana rule `pg-desk-sweep-bound-violated` (`packages/pg-desk/grafana/alerting/alerts.yaml`,
-expression `max by (type, tier) (pg_desk_sweep_bound_violated)`, threshold `>= 1`, `for: 15m`,
-warning) fires per (type, tier) while a bound is violated. A cap on the sweep is allowed only while
+expression `max by (type, tier) (pg_desk_sweep_bound_violated{type=~"issue|thread"})`, threshold `>= 1`, `for: 15m`,
+warning) fires per (type, tier) while a bound is violated. It is scoped to issue and thread (PR lane
+refactor): the PR inputs of the bound vanish with the PR sweep, so a `pr` series is not read. A cap on the sweep is allowed only while
 its bound is checked and alerting. An absent series (no verdict) is Normal, not an alert.
 
 On a store that has not been cut over to the new schema these families MUST be absent from the
@@ -172,10 +173,11 @@ no series while `pg_desk_liveness` is `1` (the store cannot answer). The absence
 expression, not in `noDataState`. It is suppressed while a pg-router `SYSTEM_PAUSE` gate is active,
 with the same guard as `pg-desk-sync-stale`. Its uid is NOT registered with the alert probe yet: it is
 red for a known reason until the backfill has hydrated the migrated PRs, and registering it earlier
-would file a bead for that. The threshold is the first version, and a later change finalizes it.
-`internal/alertrules` models the expression and pins it to the YAML, and a structure check over the
-rule file carries plain negative cases (a rule file whose `SYSTEM_PAUSE` guard was removed, one whose
-`noDataState` differs, and one whose absence branch was removed each fail).
+would file a bead for that. The threshold is final (above `0` for `30m`). `internal/alertrules` models
+the expression and pins it to the YAML, a `promtool` rule test exercises its four states (the gauge live
+and absent, live and `0`, `pg-desk` liveness down, and `SYSTEM_PAUSE` set) and replays 2026-10-19, and a
+structure check over the rule file carries plain negative cases (a rule file whose `SYSTEM_PAUSE` guard
+was removed, one whose `noDataState` differs, and one whose absence branch was removed each fail).
 
 #### Persisted lane state
 
@@ -208,6 +210,27 @@ before any run, so the first event is not lost to `increase()`:
 
 On a store that is not at schema 2, or when the read of the lane state fails, these families have NO
 series, never `0`; every other family is unaffected.
+
+#### Open-anchor metrics
+
+An anchor is the parent work item of a PR's feedback, review, fix-ci and resolve-conflict items: an
+active issue entity of type `merge-request` whose stored state is not `closed` and that has a `work`
+link to a PR. These families are derived from the store's links and PR rows at scrape time, not from
+the tracker, not from the daemon and not from the sync ledger (the older anchor gauges read the ledger,
+which the legacy deletion removes). Each is emitted with a value when healthy (`0` for an empty view):
+
+- `pg_desk_pr_open_anchors` — the number of PRs, hidden ones excluded, with at least one open anchor.
+- `pg_desk_pr_open_anchors_hidden` — the hidden PRs with at least one open anchor, counted apart; a
+  hidden PR takes part in none of the other gauges.
+- `pg_desk_pr_stale_anchors` — how many of the open-anchor PRs the store shows as merged or closed.
+- `pg_desk_pr_stale_anchor_oldest_age_seconds` — the age of the oldest of those, from the PR row's last
+  hydration (when the store learned it was closed), `0` when there is none.
+- `pg_desk_pr_open_anchor_oldest_hydration_age_seconds` — the longest time since the last hydration
+  among the open-anchor PRs the store still shows as open (a PR with no hydration counts from when
+  `pg-desk` first saw it; a PR absent from the store has no age). A lost or failed `merged` hydration
+  leaves the store saying "open", which the stale count cannot see; this gauge can.
+
+On a store that is not at schema 2, or when the read fails, these families have NO series, never `0`.
 
 ### Focus metrics
 
@@ -307,7 +330,7 @@ has held for the whole `for` duration. Each expression, selector and `for` is pi
 | `pg-desk-focus-divergence-rm-claimable`   | `max(pg_desk_focus_divergence{kind="removed_bead_open_unclaimed"})`                                                        | `> 0`     | `1h`  | a removed item's bead is still open and unclaimed, so a worker can claim work the operator dropped                                     |
 | `pg-desk-focus-annotation-divergence`     | `sum(pg_desk_focus_divergence{kind=~"row_without_annotation\|annotation_without_row"})`                                    | `> 0`     | `15m` | a plan row and its `focus_selected` annotation disagree, so a select was interrupted between the two writes                            |
 | `pg-desk-focus-terminal-source-bead-open` | `max(pg_desk_focus_divergence{kind="terminal_source_bead_open"})`                                                          | `> 0`     | `1h`  | a finished item's bead is still open: the issue-closed listener is missing or its role is in plan mode                                 |
-| `pg-desk-watch-listing-degraded`          | `sum(pg_desk_watch_listing_status{status!="ok"})`                                                                          | `> 0`     | `30m` | a configured watch query's persisted listing is degraded or failed, so the watch sets and the candidate set may be incomplete          |
+| `pg-desk-watch-listing-degraded`          | `sum(pg_desk_watch_listing_status{type=~"issue\|thread",status!="ok"})`                                                    | `> 0`     | `30m` | an issue or thread watch query's persisted listing is degraded or failed, so the watch sets and the candidate set may be incomplete    |
 | `pg-desk-focus-rank-degraded`             | `sum(pg_desk_focus_rank_degraded_inputs)`                                                                                  | `> 0`     | `30m` | the rank is silently running on a degraded input (the `input` label names which)                                                       |
 | `pg-desk-focus-consumer-lag`              | `max(pg_desk_consumer_lag{type="issue"})`                                                                                  | `> 500`   | `30m` | the focus role's single `issue.changed` consumer is over 500 changes behind                                                            |
 
@@ -315,6 +338,42 @@ has held for the whole `for` duration. Each expression, selector and `for` is pi
 the operator checkpoint sets the final budget from the decider cost it measures. Decider failures
 are not covered by a rule here: they reach `pg_router_failures_total{role="<focus role>"}`, which the
 existing `pg-router-failure-rate` rule already watches.
+
+### PR lane outcome alerts
+
+Eight Grafana rules in `packages/pg-desk/grafana/alerting/alerts.yaml` read OUTCOMES, never "the
+process ran" (the outage of 2026-10-19 read `sync_errors: 0` throughout). Each is a `warning` with
+`noDataState: OK` and `execErrState: Error`; query A is the instant expression below, B reduces it
+with `last`, C is a `gt` threshold. Every rule ends with the `SYSTEM_PAUSE` guard of `pg-desk-sync-stale`,
+so none fires while a pg-router `SYSTEM_PAUSE` gate is active. None of these uids is registered with the
+alert probe yet; registration starts at the start of the first apply period (P6), and until then a
+deferred-registration allowlist names them.
+
+| uid                               | signal                                                                                                                                       | threshold  | for   | meaning                                                                                                                        |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `pg-desk-pr-never-hydrated`       | `pg_desk_pr_unhydrated`, or its absence while `pg_desk_liveness` is `1`                                                                      | `> 0`      | `30m` | the lane is not hydrating the PRs it lists, or the store cannot answer                                                         |
+| `pg-desk-pr-residual-after-apply` | `pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply"}`                                                                                  | `> 3600`   | `15m` | a PR still has an action in its plan after apply (read in `apply` mode only: in `plan` mode a residual is non-zero by design)  |
+| `pg-desk-pr-stale-anchor`         | `pg_desk_pr_stale_anchor_oldest_age_seconds`, only while the lane mode is `apply`                                                            | `> 3600`   | `10m` | an anchor stays open on a PR the store shows merged or closed, longer than the apply pass                                      |
+| `pg-desk-pr-anchor-hydration-old` | `pg_desk_pr_open_anchor_oldest_hydration_age_seconds`, only while the lane mode is `apply`                                                   | `> 604800` | `30m` | a PR with an open anchor was last hydrated over 7 days ago (provisional, set from the measured cadence at the plan checkpoint) |
+| `pg-desk-pr-lane-hard-failure`    | `increase(pg_desk_pr_lane_runs_total{class=~"unauthenticated\|decide_failed"}[10m])`, or a series that first appears above `0`               | `> 0`      | `0s`  | credentials are gone, or the decider itself failed: any increase fires at once                                                 |
+| `pg-desk-pr-lane-failure-rate`    | `increase(pg_desk_pr_lane_runs_total{class!~"unauthenticated\|decide_failed"}[1h])` by stage and class                                       | `> 5`      | `15m` | the other failure classes, including `transient` (the only sign that a delivery failed every router attempt), keep recurring   |
+| `pg-desk-pr-hydration-failing`    | `increase(pg_desk_hydration_failures_total{type="pr"}[30m])` over 5, or `pg_desk_repeated_degraded_entities{type="pr"}` above `0`            | `> 0`      | `15m` | PR hydrations fail or degrade repeatedly                                                                                       |
+| `pg-desk-pr-hydrate-dead-man`     | `pr-change` dispatches (`pg_router_throughput_total{role="pr-change"}`) in an hour with no increase of `pg_desk_hydrations_total{type="pr"}` | `> 0`      | `15m` | the role is dispatched but its hydrate stage never ran                                                                         |
+
+The two stale-anchor rules read the store's links, not the tracker and not the daemon, and are gated on
+`pg_desk_pr_lane_mode{mode="apply"} == 1` (`and on() (...)`): in `plan` mode no anchor is closed, and an
+absent mode gauge drops the result. The decisions metric `pg_decider_decisions_total` has a dashboard
+panel and NO alert: it exists so an operator can see what the decider is doing over time.
+
+Tests. `grafana/check-alert-rules.sh` wraps query A of each rule as a Prometheus alert and runs the
+cases under `grafana/alerting/rule-tests/` with `promtool test rules`: each new rule has a firing, a
+healthy and an empty-input case, the primary rule its four states and the replay of 2026-10-19, and the
+residual rule a case showing it ignores `mode="plan"` series. `grafana/check-alert-structure.sh` pins
+`noDataState` and the `SYSTEM_PAUSE` guard of every outcome rule with plain negative fixtures (a rule
+file with the guard removed and one with another `noDataState` each fail). A catalog test
+(`internal/httpapi`) asserts that every `pg_desk_` and `pg_decider_` metric a rule names is emitted by a
+real scrape of a schema-2 store and, for the lane-run, decisions and residual series, after a run is
+recorded the way the composed command records it.
 
 ## Invariants
 
@@ -328,7 +387,14 @@ existing `pg-router-failure-rate` rule already watches.
   schema 2 or the read fails. The residual gauges' `mode` label MUST be the lane-level mode, which follows the
   configured `pr_lane.mode`.
 
-- **INV-SERVE-3.** <!-- uuid: 7c3e5a91-2f4b-4d8e-9b06-1a5d7e2c4f38 --> The rule `pg-desk-focus-pending-beads-age` MUST NOT fire while `pg_desk_pr_lane_mode` does not read `1` on\n `apply` (the lane in `off` or `plan` mode, or the gauge absent), and MUST fire as before once it does.\n\n## Out of scope (Phase 9, narrowed by Phase 10)
+- **INV-SERVE-3.** <!-- uuid: 7c3e5a91-2f4b-4d8e-9b06-1a5d7e2c4f38 --> The rule `pg-desk-focus-pending-beads-age` MUST NOT fire while `pg_desk_pr_lane_mode` does not read `1` on
+  `apply` (the lane in `off` or `plan` mode, or the gauge absent), and MUST fire as before once it does.
+- **INV-SERVE-4.** <!-- uuid: 8ab8ae5c-3ef1-41ef-be6d-fed60758d532 --> `pg_desk_pr_open_anchors`, `pg_desk_pr_open_anchors_hidden`, `pg_desk_pr_stale_anchors`, `pg_desk_pr_stale_anchor_oldest_age_seconds` and `pg_desk_pr_open_anchor_oldest_hydration_age_seconds` MUST be derived from the store's links and PR rows, MUST be emitted with a value (`0` when none) whenever the store read succeeds on a store at schema 2, and MUST have no series, never `0`, when the read fails or the store is not at schema 2. A hidden PR MUST be counted only in `pg_desk_pr_open_anchors_hidden`.
+- **INV-SERVE-5.** <!-- uuid: 22ef8d46-9ab4-41fe-add0-fc0a25772a75 --> Every outcome rule of "PR lane outcome alerts" MUST read a metric a rule test can exercise, MUST NOT fire while a pg-router `SYSTEM_PAUSE` gate is active, and MUST have `noDataState: OK`. The residual rule MUST read `mode="apply"` series only, and the two stale-anchor rules MUST NOT fire while `pg_desk_pr_lane_mode` does not read `1` on `apply`.
+- **INV-SERVE-6.** <!-- uuid: 09f2a732-be1b-4cc1-aa2d-cda84cf764ba --> `pg-desk-pr-lane-hard-failure` MUST fire on any increase of `pg_desk_pr_lane_runs_total` for class `unauthenticated` or `decide_failed`, with no `for` hold, including the first event of a series that appears already above `0`.
+- **INV-SERVE-7.** <!-- uuid: 66d3ee48-e0c9-4da4-a2dc-f515dc67258a --> `pg-desk-sweep-bound-violated` and `pg-desk-watch-listing-degraded` MUST read the issue and thread series only; a `pr` series MUST NOT make either fire.
+
+## Out of scope (Phase 9, narrowed by Phase 10)
 
 The primary port (`9818`) and the removal of the temporary soak board are the Phase 11 flip.
 `sync_error` is populated once sync runs and fails for a PR (Phase 10, see
