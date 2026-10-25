@@ -271,6 +271,111 @@ func TestChanges_BackendFlag_IsPassedThroughOnlyWhenGiven(t *testing.T) {
 	}
 }
 
+// The query argument is optional (an unscoped consumer): the second positional
+// argument may be absent, and then the pg-connector argv carries no --query at
+// all, never an empty one. An empty second argument is the same as absent.
+func TestChanges_QueryArgumentIsOptional(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		args      []string
+		wantQuery bool   // whether --query is in the child's argv
+		want      string // its value when present
+	}{
+		{"absent", []string{"changes", "pr", "--consumer", "pr-changes"}, false, ""},
+		{"empty", []string{"changes", "pr", "", "--consumer", "pr-changes"}, false, ""},
+		{"given", []string{"changes", "pr", "team", "--consumer", "pr-changes"}, true, "team"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recordFile := filepath.Join(t.TempDir(), "recorded-args")
+			withFactory(t, "changes_ok_empty", "GO_HELPER_ARGS_RECORD_FILE="+recordFile)
+			if _, stderr, code := runCLI(t, tc.args...); code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
+			}
+			got := strings.Fields(readFile(t, recordFile))
+			present := false
+			for _, a := range got {
+				if a == "--query" {
+					present = true
+				}
+			}
+			if present != tc.wantQuery {
+				t.Fatalf("child argv %v: --query present = %v, want %v", got, present, tc.wantQuery)
+			}
+			if tc.wantQuery && flagValue(got, "--query") != tc.want {
+				t.Fatalf("child argv %v: --query = %q, want %q", got, flagValue(got, "--query"), tc.want)
+			}
+			if flagValue(got, "--consumer") != "pr-changes" {
+				t.Fatalf("child argv %v: --consumer lost", got)
+			}
+		})
+	}
+}
+
+// Still a usage error: no entity type, or more than a type and a query.
+func TestChanges_TypeIsStillRequiredAndExtraArgsRejected(t *testing.T) {
+	withFactory(t, "changes_ok_empty")
+	for _, args := range [][]string{
+		{"changes", "--consumer", "c1"},
+		{"changes", "pr", "q", "extra", "--consumer", "c1"},
+	} {
+		if stdout, _, code := runCLI(t, args...); code == 0 || stdout != "" {
+			t.Fatalf("args %v: exit code %d stdout %q, want a usage error with nothing on stdout", args, code, stdout)
+		}
+	}
+}
+
+// An unscoped consumer supports --retry-window exactly as a scoped one does: a
+// source that stamps no expiresAt makes born-expired events that are never
+// retried, so every item carries a future expiresAt (at + window) and the
+// suffixed per-change id.
+func TestChanges_UnscopedConsumer_RetryWindowStampsAFutureExpiresAt(t *testing.T) {
+	pinEmitTime(t)
+	withFactory(t, "changes_pr_rows")
+	stdout, stderr, code := runCLI(t, "changes", "pr", "--consumer", "pr-changes", "--retry-window", "90m")
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
+	}
+	items := mustUnmarshalItems(t, stdout)
+	if len(items) != 5 {
+		t.Fatalf("len(items) = %d, want 5", len(items))
+	}
+	for i, it := range items {
+		if !suffixedID.MatchString(it.ID) {
+			t.Fatalf("items[%d].id = %q, want <entity id>@<12 hex>", i, it.ID)
+		}
+		exp, err := time.Parse(time.RFC3339, it.ExpiresAt)
+		if err != nil || !exp.After(pinnedEmitTime) {
+			t.Fatalf("items[%d].expiresAt = %q (err %v), want a time after the emit time %s", i, it.ExpiresAt, err, pinnedEmitTime)
+		}
+	}
+}
+
+// cursor_expired surfaces through the existing source-failure path: the call
+// fails (this adapter's exit 1, so pg-router's producer tick logs the failed
+// source and the source-failure alert sees it), prints nothing on stdout, and
+// carries the daemon's own message, name and recovery hint intact on stderr. It
+// is never turned into an empty item list, which would read as "nothing changed".
+func TestChanges_CursorExpired_FailsTheCallAndCarriesTheReasonToStderr(t *testing.T) {
+	for _, args := range [][]string{
+		{"changes", "pr", "--consumer", "pr-changes"},
+		{"changes", "pr", "--consumer", "pr-changes", "--retry-window", "90m"},
+		{"changes", "pr", "team", "--consumer", "pr-changes"},
+	} {
+		withFactory(t, "changes_cursor_expired")
+		stdout, stderr, code := runCLI(t, args...)
+		if code != 1 {
+			t.Fatalf("args %v: exit code = %d, want 1 (stdout=%q)", args, code, stdout)
+		}
+		if stdout != "" {
+			t.Fatalf("args %v: stdout = %q, want nothing", args, stdout)
+		}
+		want := "pg-connector-github: cursor_expired: position fell outside retention; re-run with --reset"
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("args %v: stderr = %q, want it to contain %q", args, stderr, want)
+		}
+	}
+}
+
 // --- bead pg2-1ldvy: metadata.entity_id, --retry-window ----------------------
 
 // entity_id is ALWAYS emitted on a changes item, with or without the

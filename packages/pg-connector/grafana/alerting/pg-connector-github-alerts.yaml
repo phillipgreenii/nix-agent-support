@@ -230,7 +230,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-connector-github: a change consumer has had an unacknowledged row for over 15 minutes"
-          description: "The oldest unacknowledged change row of a consumer (labels consumer and query) is older than 15 minutes, so that consumer is not reading or acknowledging. Check the consumer process, pg_connector_github_consumer_redeliveries for a poison row, and cursor_expired lines in daemon.log.jsonl."
+          description: "The oldest unacknowledged change row of a consumer (labels consumer and query; an unscoped consumer, one that names no query, carries query=other) is older than 15 minutes, so that consumer is not reading or acknowledging. Check the consumer process, pg_connector_github_consumer_redeliveries for a poison row, and cursor_expired lines in daemon.log.jsonl."
         data:
           - refId: A
             relativeTimeRange:

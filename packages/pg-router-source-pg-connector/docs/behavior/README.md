@@ -25,9 +25,35 @@ flowchart LR
     ADAPTER -->|"execs, reads stdout+stderr, reads exit code"| CONNECTOR
 ```
 
-- **`changes <type> <query> --consumer <id> [--beads-dir <path>] [--retry-window <duration>]`** —
-  runs `pg-connector <type> changes --query <query> --consumer <id> --output json`, and reprints
-  its response as one rawItem per reported change. Every printed item's `metadata.entity_id` is the
+- **`changes <type> [<query>] --consumer <id> [--beads-dir <path>] [--retry-window <duration>]`** —
+  runs `pg-connector <type> changes [--query <query>] --consumer <id> --output json`, and reprints
+  its response as one rawItem per reported change.
+
+  **The query is optional (an unscoped consumer).** A call that names no query, or names an empty
+  one, is an unscoped consumer: it reads the whole change feed of a backend that owns its changes,
+  for the rows that backend delivers by its watched marker. The adapter then leaves `--query` out of
+  the `pg-connector` call altogether (it never passes an empty one), so the umbrella forwards the
+  call to the daemon without a query. A backend that does not own its changes cannot serve such a
+  call; the umbrella answers for it as disabled with a reason that says a query is required, and
+  that reason travels in the printed items' `degraded_reasons` like any other. The entity type stays
+  required, and a third positional argument is a usage error. A consumer's metrics carry the label
+  `query="other"` when it is unscoped (the daemon folds every non-configured query to `other`).
+  `--retry-window` works for an unscoped consumer exactly as for a scoped one, so a deployment that
+  stamps no `expiresAt` of its own MUST pass it: without it every event is born expired and a
+  failed dispatch is never retried.
+
+  **`cursor_expired`.** When the daemon refuses a poll with `cursor_expired:` (the consumer's cursor
+  fell outside retention, for example after a store was moved aside), the umbrella answers with one
+  degraded source whose reason is that message and no change, and acknowledges nothing. With a
+  single owning backend (the unscoped consumer's case) that is a total failure: this adapter exits
+  1, prints nothing on stdout, and writes `<backend>: cursor_expired: <message>` to stderr, so the
+  producer tick of pg-router logs it and counts it as a failed source (`pg_router_source_failures_total`,
+  the series the `pg-router-source-failure-rate` alert rule reads).
+  The adapter never turns it into an empty list, which would read as "nothing changed". The
+  recovery is a reset of the consumer (`--reset` on the umbrella call), which is the operator's
+  step and not this adapter's. When another backend of the same call is healthy the outcome is
+  degraded (exit 2) instead, and the reason travels in `metadata.degraded_reasons` of the printed
+  items, as for any degraded source. Every printed item's `metadata.entity_id` is the
   bare entity id (always, bead `pg2-1ldvy`), and its `metadata.degraded_sources`
   names every backend that answered degraded on that ONE invocation (the same list on every item,
   never a per-entity fact). When at least one of those degraded backends also reported a reason
@@ -122,10 +148,10 @@ flowchart LR
 This binary's own exit-code scheme is deliberately just two values, never pg-connector's own
 0/1/2/3/4 taxonomy re-emitted as its own:
 
-| pg-connector's own CLI exit                     | This adapter's own exit | What happens                                                                                                                                                                                                                           |
-| ----------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 (complete) or 2 (degraded)                    | 0                       | stdout JSON parsed; rawItems printed (degraded backends, and any reason they reported, named in the items)                                                                                                                             |
-| 1 (invalid_argument/other) or 3 (total failure) | 1                       | nothing printed on this adapter's own stdout; pg-connector's own captured stderr is copied to this adapter's own stderr for diagnosis, and any `sources[].reason` pg-connector's own stdout carries is appended too (bead `pg2-wa5uk`) |
+| pg-connector's own CLI exit                     | This adapter's own exit | What happens                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 (complete) or 2 (degraded)                    | 0                       | stdout JSON parsed; rawItems printed (degraded backends, and any reason they reported, named in the items)                                                                                                                                                                   |
+| 1 (invalid_argument/other) or 3 (total failure) | 1                       | nothing printed on this adapter's own stdout; pg-connector's own captured stderr is copied to this adapter's own stderr for diagnosis, and any `sources[].reason` pg-connector's own stdout carries (a `cursor_expired:` reason included) is appended too (bead `pg2-wa5uk`) |
 
 `sweep`'s own "zero query names given" case never reaches a pg-connector subprocess at all — it
 is classified directly as the same non-zero exit, with this adapter's own usage message on

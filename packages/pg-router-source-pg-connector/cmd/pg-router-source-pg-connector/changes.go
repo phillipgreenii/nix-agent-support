@@ -174,9 +174,9 @@ func newChangesCmd() *cobra.Command {
 	var consumer, beadsDir, backend string
 	var retryWindow time.Duration
 	cmd := &cobra.Command{
-		Use:   "changes <type> <query>",
-		Short: "Report entities changed since a consumer's last call, as pg-router rawItems",
-		Args:  cobra.ExactArgs(2),
+		Use:   "changes <type> [query]",
+		Short: "Report entities changed since a consumer's last call, as pg-router rawItems (query optional: an unscoped consumer)",
+		Args:  cobra.RangeArgs(1, 2),
 	}
 	cmd.Flags().StringVar(&consumer, "consumer", "", "consumer id whose cursor pg-connector's own ledger reads and advances (required)")
 	cmd.Flags().StringVar(&beadsDir, "beads-dir", "", "sets PG_CONNECTOR_ISSUE_BEADS_DIR in the pg-connector child's environment")
@@ -185,12 +185,23 @@ func newChangesCmd() *cobra.Command {
 		"when > 0, give each item a per-change id <entity id>@<12 hex> plus at (emit time) and expiresAt (at + window), so pg-router retries a failed dispatch inside the window; 0 (default) keeps bare entity ids")
 	_ = cmd.MarkFlagRequired("consumer")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		entityType, query := args[0], args[1]
+		entityType := args[0]
+		// The query is optional: an unscoped consumer names none. An empty
+		// second argument is the same as an absent one, so --query is never
+		// passed with an empty value.
+		var query string
+		if len(args) == 2 {
+			query = args[1]
+		}
 		if retryWindow < 0 {
 			fmt.Fprintln(cmd.ErrOrStderr(), "pg-router-source-pg-connector changes: --retry-window must not be negative")
 			return errFailed
 		}
-		changesArgs := []string{entityType, "changes", "--query", query, "--consumer", consumer}
+		changesArgs := []string{entityType, "changes"}
+		if query != "" {
+			changesArgs = append(changesArgs, "--query", query)
+		}
+		changesArgs = append(changesArgs, "--consumer", consumer)
 		if backend != "" {
 			changesArgs = append(changesArgs, "--backend", backend)
 		}

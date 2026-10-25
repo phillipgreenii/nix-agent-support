@@ -95,6 +95,32 @@ tests:
               query: team
               severity: warning
 
+  # An unscoped consumer (one that names no query, such as the pr-changes consumer of the
+  # change feed) has no query component, so the daemon's telemetry folds its query label to the
+  # existing value `other`, the same value every non-configured query already takes (hoist
+  # decision D7, INV-HOIST-17): no new label value exists. The rule groups by (consumer, query),
+  # so the stuck unscoped consumer fires as its own pair with query `other`.
+  - name: a stuck unscoped consumer fires with the query label other, a healthy one stays quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="pr-changes",query="other",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "3000x60"
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="healthy-unscoped",query="other",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "5x60"
+      - series: pg_connector_github_consumer_oldest_unacked_age_seconds{consumer="desk",query="team",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "5x60"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: pg-conn-github-consumer-stuck
+        exp_alerts:
+          - exp_labels:
+              consumer: pr-changes
+              query: other
+              severity: warning
+
   - name: an absent series gives no alert (noDataState is OK for this rule)
     interval: 1m
     input_series:

@@ -195,6 +195,19 @@ func helperMain() {
 		// "exit status 1".
 		_, _ = fmt.Fprint(os.Stdout, `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false,"reason":"rate limited: too many requests"}],"changes":[]}`)
 		os.Exit(3)
+	case "changes_cursor_expired":
+		// The wire the real umbrella (pg-connector's own forwarded "changes",
+		// changes_forward.go) answers when a daemon-backed backend that owns
+		// its changes refuses a poll with invalid_argument "cursor_expired:"
+		// (the consumer's cursor fell outside retention, e.g. a store moved
+		// aside): ONE degraded source carrying the daemon's message verbatim as
+		// its reason, no changes, nothing acknowledged, exit 3 (no healthy
+		// source). Pinned to pg-connector's own
+		// TestForwardedChanges_CursorExpiredReachesTheCaller, whose double
+		// answers the same refusal.
+		_, _ = fmt.Fprint(os.Stdout, `{"sources":[{"backend":"pg-connector-github","status":"degraded","version":1,"truncated":false,`+
+			`"reason":"cursor_expired: position fell outside retention; re-run with --reset"}],"changes":[]}`)
+		os.Exit(3)
 	case "invalid_argument":
 		_, _ = fmt.Fprint(os.Stdout, `{"error":{"code":"invalid_argument","message":"query not recognized"}}`)
 		_, _ = fmt.Fprintln(os.Stderr, "pg-connector: invalid_argument: query \"bogus\" is not recognized by any registered backend")
