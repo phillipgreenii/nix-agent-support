@@ -179,6 +179,14 @@ umbrella reads until a later phase sets it, and a host MUST NOT set it before th
 the entry under `env -i` against a fake binary), `test-pg-connector-home-rendering` and
 `test-pg-connector-issue-jira-daemon-capabilities`.
 
+The Jira daemon's alert rules (`packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml`,
+ten `pg-conn-jira-*` uids; the old `issue-jira-alerts.yaml` stays until a cleanup) have a `deleteRules:` twin
+(`pg-connector-issue-jira-daemon-alerts-delete.yaml`) for a machine without the daemon, promtool tests under
+`grafana/alerting/rule-tests/`, logcli fixtures for the four Loki rules under `rule-tests/loki/`, and the checks
+`test-pg-connector-issue-jira-alert-rules`, `-alert-structure` and `-metrics-catalog`. The ten uids are in the
+router probe's built-in `registeredRuleUIDs`, but a deployment that passes its own `--rule-uid` list REPLACES that
+list, so the deployment's list MUST be extended too.
+
 ### pg-keep-awake keeper (`phillipgreenii.programs.pg-keep-awake`)
 
 The fourth HM-scoped launchd agent (docket `pg2-8bgxg.2`): `home/programs/pg-keep-awake` renders
