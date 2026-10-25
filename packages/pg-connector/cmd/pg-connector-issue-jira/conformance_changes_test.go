@@ -423,3 +423,55 @@ var (
 	_ = context.Background
 	_ = scriptout.ProtocolVersion
 )
+
+// TestConformanceBaselineTimeIsOnTheStatusOpNotTheFeedWire pins where a
+// consumer learns a query's baseline marker time: the status op's
+// queries[].baseline_at (and baseline_open_age_seconds while it is unset), never
+// the feed wire, whose sources_freshness[] entries stay query, last_success_at
+// and last_error because that type is shared with the GitHub daemon's wires.
+func TestConformanceBaselineTimeIsOnTheStatusOpNotTheFeedWire(t *testing.T) {
+	d := confDaemon(t)
+	confAwaitBaseline(t, d, servetest.QueryMine)
+	b := confBackend(d)
+
+	// The status op, over the real client and socket, carries the baseline time
+	// of the query whose first complete run is stored.
+	r := invoke(t, b, `{"op":"status"}`)
+	r.wantResult(t, "status", schema.IssueSchemaVersion)
+	var report struct {
+		Queries []map[string]any `json:"queries"`
+	}
+	r.decode(t, "status", &report)
+	var mine map[string]any
+	for _, q := range report.Queries {
+		if q["name"] == servetest.QueryMine {
+			mine = q
+		}
+	}
+	if mine == nil {
+		t.Fatalf("status queries = %v, want an entry for %s", report.Queries, servetest.QueryMine)
+	}
+	at, _ := mine["baseline_at"].(string)
+	if _, err := time.Parse(time.RFC3339, at); err != nil {
+		t.Errorf("status baseline_at %v for %s: want an RFC 3339 instant (%v)", mine["baseline_at"], servetest.QueryMine, err)
+	}
+	if _, open := mine["baseline_open_age_seconds"]; open {
+		t.Errorf("status carries baseline_open_age_seconds for %s although its baseline is set: %v", servetest.QueryMine, mine)
+	}
+
+	// The feed wire's per-query entries carry no baseline field of any name.
+	doc := invoke(t, b, confChangesReq("baseline-pin", servetest.QueryMine, nil)).confDoc(t)
+	entries, _ := doc["sources_freshness"].([]any)
+	if len(entries) == 0 {
+		t.Fatalf("sources_freshness = %v, want one entry per configured query", doc["sources_freshness"])
+	}
+	allowed := map[string]bool{"query": true, "last_success_at": true, "last_error": true}
+	for _, e := range entries {
+		m, _ := e.(map[string]any)
+		for k := range m {
+			if !allowed[k] {
+				t.Errorf("sources_freshness entry %v has the key %q: the baseline time is read from the status op, a new wire field is a shared-wire schema decision", m, k)
+			}
+		}
+	}
+}

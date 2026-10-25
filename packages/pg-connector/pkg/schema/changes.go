@@ -49,7 +49,10 @@ type PRChange struct {
 
 // SourceFreshness is one sources_freshness[] entry: a configured query's
 // last whole-query origin success and last error. The times are RFC 3339 UTC
-// strings and are omitted when there is none.
+// strings and are omitted when there is none. A query's baseline marker time is
+// deliberately NOT here: this type is shared by every daemon's wire, and a
+// consumer reads the baseline from the Jira daemon's status op (queries[].
+// baseline_at); see packages/pg-connector/README.md, "The op catalog".
 type SourceFreshness struct {
 	Query         string `json:"query"`
 	LastSuccessAt string `json:"last_success_at,omitempty"`

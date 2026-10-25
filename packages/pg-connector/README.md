@@ -489,6 +489,17 @@ catch-all, which names its fields) and the first-observation kind `added`; `ente
 membership words, never stored rows. Every `changes` and `changes_ack` answer carries `store_identity`, which differs
 after the store is replaced, so a consumer MUST key its redelivery marker on it as well as on `seq`.
 
+**Where a consumer learns a query's baseline time.** The feed wire's `sources_freshness[]` carries only `query`,
+`last_success_at` and `last_error`; the baseline marker time is NOT on it. A consumer that must know whether a query's
+baseline exists, or for how long it has been open, MUST read the `status` op: `queries[].baseline_at` once the
+baseline is stored, `queries[].baseline_open_age_seconds` (measured from daemon start) while it is not. This was
+decided against adding `baseline_at` to the wire (bead `pg2-sdmhx`): `SourceFreshness` is the one shared type behind
+the GitHub daemon's `pr` and `ci` wires and the generic `ChangesResult`, so a new field would change those wires and
+their schema versions for no consumer need; the only consumer of the baseline (the open-too-long doctor gate) needs the
+open AGE, which only the status report computes and a stored `baseline_at` alone cannot give while the baseline is
+still open. Adding the field later is a schema bump on every wire that embeds the type (the pin is
+`TestSourceFreshness_OmitsEmptyTimesAndError` plus `TestConformanceBaselineTimeIsOnTheStatusOpNotTheFeedWire`).
+
 ### Config keys and defaults
 
 The file is rendered by the home-manager module (`jira.settings` merges extra keys; an unknown key fails the load and
