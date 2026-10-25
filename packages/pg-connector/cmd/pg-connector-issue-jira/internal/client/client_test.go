@@ -270,7 +270,7 @@ func TestOpTablesAndNamesMatchTheDaemon(t *testing.T) {
 
 func TestForwardedReadWithNoDaemonIsUnavailableNamingSocketAndHint(t *testing.T) {
 	cfg := testConfig(t)
-	for _, op := range []string{"show", "list", "changes", "status", "something_new"} {
+	for _, op := range []string{"show", "list", "changes", "something_new"} {
 		o := baseOptions(cfg, nil)
 		o.ClientLog = logs.NewClientLog(cfg.StateDir, "build-1")
 		res := runClient(t, o, `{"op":"`+op+`"}`)
@@ -293,7 +293,7 @@ func TestForwardedReadWithNoDaemonIsUnavailableNamingSocketAndHint(t *testing.T)
 		t.Fatal(err)
 	}
 	rows := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(rows) != 5 {
+	if len(rows) != 4 {
 		t.Fatalf("want one daemon_unreachable row per unavailable answer, got %d: %s", len(rows), raw)
 	}
 	var row map[string]any
@@ -304,6 +304,44 @@ func TestForwardedReadWithNoDaemonIsUnavailableNamingSocketAndHint(t *testing.T)
 		if row[k] != v {
 			t.Errorf("row %s = %v, want %v", k, row[k], v)
 		}
+	}
+}
+
+// The op catalog says the status op reports even when the daemon is down, so
+// it is the one forwarded op answered locally: the static report as a result
+// (exit 0), health down, source local, naming the socket and the supervisor,
+// stamped with the issue schema version, and no daemon_unreachable row.
+func TestStatusOpWithNoDaemonIsTheLocalDownReportNotUnavailable(t *testing.T) {
+	cfg := testConfig(t)
+	o := baseOptions(cfg, nil)
+	o.ClientLog = logs.NewClientLog(cfg.StateDir, "build-1")
+	res := runClient(t, o, `{"op":"status"}`)
+	var resp struct {
+		SchemaVersion int           `json:"schemaVersion"`
+		Result        status.Report `json:"result"`
+		Error         *scriptout.Error
+	}
+	if err := json.Unmarshal([]byte(res.out), &resp); err != nil {
+		t.Fatalf("%q: %v", res.out, err)
+	}
+	if res.code != 0 || resp.Error != nil {
+		t.Fatalf("exit %d, error %+v: %s", res.code, resp.Error, res.out)
+	}
+	r := resp.Result
+	if r.Health != status.Down || r.Source != status.SourceLocal || r.Socket != cfg.SocketPath || r.Version != "build-1" {
+		t.Errorf("report = %+v, want a local down report for %s", r, cfg.SocketPath)
+	}
+	if r.Supervisor.Label != cfg.SupervisorLabel || r.Supervisor.RestartHint != proc.RestartHint(cfg.SupervisorLabel, cfg.Path, config.DaemonName) {
+		t.Errorf("supervisor = %+v", r.Supervisor)
+	}
+	if len(r.Reasons) == 0 || !strings.Contains(r.Reasons[0], "the daemon is not reachable") || !strings.Contains(r.Reasons[0], cfg.SocketPath) {
+		t.Errorf("reasons = %v, want the unreachable reason naming the socket", r.Reasons)
+	}
+	if resp.SchemaVersion != schema.IssueSchemaVersion {
+		t.Errorf("schemaVersion = %d, want %d", resp.SchemaVersion, schema.IssueSchemaVersion)
+	}
+	if _, err := os.Stat(logs.ClientLogPath(cfg.StateDir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a locally answered status op is not an outage: client log stat err = %v", err)
 	}
 }
 

@@ -33,6 +33,12 @@
 //     unavailable, naming the socket path, the supervisor and its restart hint,
 //     and a daemon_unreachable row is appended to the client log. The client
 //     never reads the store and never calls the origin to answer a read.
+//   - The status op is the one forwarded op with a local answer: the op catalog
+//     (interfaces.md, "status") says it reports even when the daemon is down, so
+//     with the daemon unreachable the client answers it with status.Fallback
+//     (the static report, health down, source local) as an ordinary result,
+//     exit 0, and appends no daemon_unreachable row. A daemon that answers with
+//     an error (migrating, version mismatch) is still relayed as that error.
 //
 // # Callers that treat unavailable as terminal
 //

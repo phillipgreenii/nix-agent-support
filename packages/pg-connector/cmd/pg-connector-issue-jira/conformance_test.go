@@ -528,10 +528,29 @@ func TestConformanceDaemonDownIsUnavailableNeverFromACache(t *testing.T) {
 	if out, exit, err := b.Invoke(context.Background(), []byte(`{"op":"capabilities"}`)); err != nil || exit != 0 {
 		t.Errorf("capabilities with the daemon down: exit %d err %v %s", exit, err, out)
 	}
-	// The status op is a read like the others: it is forwarded, so with the
-	// daemon down it is unavailable; the local report is the status MODE
-	// (status_binary_test.go).
-	invoke(t, b, `{"op":"status"}`).wantError(t, "the status op with the daemon down", "unavailable")
+	// The status op is the one read answered locally: the op catalog says it
+	// reports even when the daemon is down, so it is a result (exit 0) holding
+	// the down report with source local, never unavailable; no daemon_unreachable
+	// row is appended for it.
+	rawBefore, _ := os.ReadFile(filepath.Join(d.StateDir, "client.log.jsonl"))
+	sr := invoke(t, b, `{"op":"status"}`)
+	sr.wantResult(t, "the status op with the daemon down", schema.IssueSchemaVersion)
+	if sr.exit != 0 {
+		t.Errorf("the status op with the daemon down: exit %d, want 0", sr.exit)
+	}
+	var down struct {
+		Health  string   `json:"health"`
+		Source  string   `json:"source"`
+		Socket  string   `json:"socket"`
+		Reasons []string `json:"reasons"`
+	}
+	sr.decode(t, "status", &down)
+	if down.Health != "down" || down.Source != "local" || down.Socket != d.Socket || len(down.Reasons) == 0 {
+		t.Errorf("the status op with the daemon down = %+v, want a local down report for %s", down, d.Socket)
+	}
+	if rawAfter, _ := os.ReadFile(filepath.Join(d.StateDir, "client.log.jsonl")); string(rawAfter) != string(rawBefore) {
+		t.Errorf("the status op answered locally must append no client-log row; before %q after %q", rawBefore, rawAfter)
+	}
 	if raw, err := os.ReadFile(filepath.Join(d.StateDir, "client.log.jsonl")); err != nil || !strings.Contains(string(raw), `"outcome":"daemon_unreachable"`) {
 		t.Errorf("client log %q (%v): want daemon_unreachable rows", raw, err)
 	}

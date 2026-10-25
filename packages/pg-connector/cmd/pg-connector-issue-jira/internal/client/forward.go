@@ -32,7 +32,10 @@ func socketClient(o Options) *socket.Client {
 // daemon down it answers unavailable (naming the socket path, the supervisor
 // and its restart hint) and appends the daemon_unreachable client-log row; it
 // never reads the store, never calls the origin and never answers from a
-// cache.
+// cache. The one exception is the status op, which the op catalog says reports
+// even when the daemon is down: it is answered locally with status.Fallback
+// (health down, source local), exit 0, and no daemon_unreachable row, because
+// a caller that got a report did not see an outage.
 func forward(ctx context.Context, o Options, req scriptout.Request, stdout io.Writer) int {
 	budget := o.Budget
 	if budget <= 0 {
@@ -56,11 +59,32 @@ func forward(ctx context.Context, o Options, req scriptout.Request, stdout io.Wr
 	case errors.As(err, &mismatch):
 		return writeOpError(stdout, req.Op, scriptout.ErrVersionMismatch, mismatch.Error())
 	case errors.As(err, &down):
+		if req.Op == status.Op {
+			return localStatus(ctx, o, req, down, stdout)
+		}
 		o.ClientLog.DaemonUnreachable(o.Config.Instance, req.Op, started, down.Error())
 		return writeOpError(stdout, req.Op, scriptout.ErrUnavailable, down.Error())
 	default:
 		return writeOpError(stdout, req.Op, scriptout.ErrUnavailable, err.Error())
 	}
+}
+
+// localStatus answers the status op while the daemon is down: the static
+// report with the reason the daemon could not be reached, as the op's result.
+func localStatus(ctx context.Context, o Options, req scriptout.Request, cause error, stdout io.Writer) int {
+	result, err := status.Fallback(status.Static(o.Config, o.Build))(ctx, req, cause)
+	if err != nil {
+		return writeOpError(stdout, req.Op, scriptout.ErrUnavailable, err.Error())
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return writeOpError(stdout, req.Op, scriptout.ErrUnavailable, fmt.Sprintf("client: marshal the local status report: %v", err))
+	}
+	return writeResponse(stdout, &scriptout.Response{
+		ProtocolVersion: scriptout.ProtocolVersion,
+		SchemaVersion:   SchemaVersionFor(req.Op),
+		Result:          raw,
+	})
 }
 
 // DefaultStatusBudget is the whole call budget of the status mode.
