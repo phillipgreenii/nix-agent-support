@@ -43,6 +43,10 @@
 // # Callers that treat unavailable as terminal
 //
 // A read answers unavailable while the daemon is down or migrating
-// ("migrating: ..."). The closing note of the packet that added this package
-// lists the callers found.
+// ("migrating: ..."). The audit of the callers that treat that answer as
+// terminal is recorded in packages/pg-connector/README.md, section "Callers
+// and unavailable (audit before the registry flip)": it lists the callers that
+// already retry and the three that do not (unpinned id-keyed reads through the
+// umbrella's try-each resolution, the pg-decider work-item lookup, and the
+// work-report pull).
 package client
