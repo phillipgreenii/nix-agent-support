@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/gofrs/flock v0.13.1
 	github.com/phillipgreenii/claude-transcript v0.0.0
-	github.com/phillipgreenii/x v0.0.0-20261020124917-7ab78bebcb0b
+	github.com/phillipgreenii/x v0.0.0-20261023192149-0ef710c09f57
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.72.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.23.0

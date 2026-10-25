@@ -61,8 +61,8 @@ github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
 github.com/ncruces/go-strftime v1.1.0 h1:vtPmPWMkb539RGV9WpWT9EwJGvrOCKvMNI4obWL47Hk=
 github.com/ncruces/go-strftime v1.1.0/go.mod h1:yVaq7iwCN09vHRrKBrrflXT0M9tTMG2KmZ9Fj7xeG/g=
-github.com/phillipgreenii/x v0.0.0-20261020124917-7ab78bebcb0b h1:QeODYAWZWuAygPXP1M/23FjSz25Oe+T1lj5YBZ7T+Ic=
-github.com/phillipgreenii/x v0.0.0-20261020124917-7ab78bebcb0b/go.mod h1:LqAYe6mzlGG8/2vBMyLjlzbfxKh6nL0KJzbQUASCGqw=
+github.com/phillipgreenii/x v0.0.0-20261023192149-0ef710c09f57 h1:YfAUhmXjs9NU+03bj4TxuhAL9ZHDm66klXucmCIytqI=
+github.com/phillipgreenii/x v0.0.0-20261023192149-0ef710c09f57/go.mod h1:LqAYe6mzlGG8/2vBMyLjlzbfxKh6nL0KJzbQUASCGqw=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
