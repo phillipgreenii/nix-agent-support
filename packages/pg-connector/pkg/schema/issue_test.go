@@ -159,13 +159,14 @@ func TestIssueDepsResult_IDsPopulatedRegardlessOfFull_EntitiesOmittedWhenEmpty(t
 	}
 }
 
-// TestIssueSchemaVersion_PinnedAtTenAndRegistered pins the issue
-// capability's schema version at 10 (bead pg2-2j5ac.44.2 bumped 9 -> 10 for
-// the CreatedAt field; pg2-nd60k's earlier 8 -> 9 added the children op) and that CurrentSchemaVersions derives from the
-// constant rather than carrying its own copy.
-func TestIssueSchemaVersion_PinnedAtTenAndRegistered(t *testing.T) {
-	if IssueSchemaVersion != 10 {
-		t.Fatalf("IssueSchemaVersion = %d, want 10 (9 -> 10 by bead pg2-2j5ac.44.2)", IssueSchemaVersion)
+// TestIssueSchemaVersion_PinnedAtElevenAndRegistered pins the issue
+// capability's schema version at 11 (bead pg2-2qyyh.2.1 bumped 10 -> 11 for
+// the Version, comment-summary and read-annotation fields; pg2-2j5ac.44.2's
+// earlier 9 -> 10 added CreatedAt) and that CurrentSchemaVersions derives
+// from the constant rather than carrying its own copy.
+func TestIssueSchemaVersion_PinnedAtElevenAndRegistered(t *testing.T) {
+	if IssueSchemaVersion != 11 {
+		t.Fatalf("IssueSchemaVersion = %d, want 11 (10 -> 11 by bead pg2-2qyyh.2.1)", IssueSchemaVersion)
 	}
 	if got := CurrentSchemaVersions["issue"]; got != IssueSchemaVersion {
 		t.Fatalf(`CurrentSchemaVersions["issue"] = %d, want %d`, got, IssueSchemaVersion)
@@ -251,5 +252,90 @@ func TestIssue_CreatedAt_RoundTripAndOmitWhenEmpty(t *testing.T) {
 		if out.CreatedAt != created {
 			t.Fatalf("CreatedAt = %q, want %q", out.CreatedAt, created)
 		}
+	}
+}
+
+// TestIssue_VersionCommentSummaryAndReadAnnotations_RoundTripAndOmitWhenZero
+// covers the IssueSchemaVersion 11 fields: each round-trips under its wire
+// key, and an Issue with none of them set omits every one (so the beads
+// backend and the old Jira backend emit byte-identical entities).
+func TestIssue_VersionCommentSummaryAndReadAnnotations_RoundTripAndOmitWhenZero(t *testing.T) {
+	keys := []string{"version", "comment_count", "latest_comment_at", "served_from", "age_seconds", "groups"}
+
+	empty, err := json.Marshal(Issue{ID: "i"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range keys {
+		if strings.Contains(string(empty), `"`+key+`"`) {
+			t.Fatalf("zero %s must be omitted, got %s", key, empty)
+		}
+	}
+
+	age := int64(7)
+	in := Issue{
+		ID:              "i",
+		Version:         42,
+		CommentCount:    3,
+		LatestCommentAt: "2026-01-01T00:00:00.000+0000",
+		ServedFrom:      "cache",
+		AgeSeconds:      &age,
+		Groups:          []GroupInfo{{Group: "summary", FetchedAt: "a", FreshUntil: "b"}},
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range keys {
+		if !strings.Contains(string(raw), `"`+key+`"`) {
+			t.Fatalf("%s missing from %s", key, raw)
+		}
+	}
+	var out Issue
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.Version != 42 || out.CommentCount != 3 || out.LatestCommentAt != in.LatestCommentAt ||
+		out.ServedFrom != "cache" || out.AgeSeconds == nil || *out.AgeSeconds != 7 ||
+		len(out.Groups) != 1 || out.Groups[0].Group != "summary" {
+		t.Fatalf("round trip lost a field: %+v", out)
+	}
+}
+
+// TestIssueListResult_ReadAnnotations_RoundTripAndOmitWhenUnset covers the
+// IssueSchemaVersion 11 list-result annotations, and that an old-shaped
+// result marshals without any of them.
+func TestIssueListResult_ReadAnnotations_RoundTripAndOmitWhenUnset(t *testing.T) {
+	keys := []string{"served_from", "stale", "age_seconds", "groups"}
+
+	empty, err := json.Marshal(IssueListResult{Entities: []Issue{}, PresentIDs: []string{}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range keys {
+		if strings.Contains(string(empty), `"`+key+`"`) {
+			t.Fatalf("unset %s must be omitted, got %s", key, empty)
+		}
+	}
+
+	stale, age := false, int64(5)
+	raw, err := json.Marshal(IssueListResult{
+		ServedFrom: "cache", Stale: &stale, AgeSeconds: &age,
+		Groups: []GroupInfo{{Group: "summary"}},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range keys {
+		if !strings.Contains(string(raw), `"`+key+`"`) {
+			t.Fatalf("%s missing from %s", key, raw)
+		}
+	}
+	var out IssueListResult
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.ServedFrom != "cache" || out.Stale == nil || *out.Stale || out.AgeSeconds == nil || *out.AgeSeconds != 5 || len(out.Groups) != 1 {
+		t.Fatalf("round trip lost a field: %+v", out)
 	}
 }

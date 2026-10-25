@@ -86,7 +86,15 @@ import "encoding/json"
 // tracker's own creation time, so the focus rank's age key is stable across
 // edits) — same "any field-shape change bumps the version" precedent as
 // every earlier bump on this constant.
-const IssueSchemaVersion = 10
+//
+// Bumped 10 -> 11 by bead pg2-2qyyh.2.1 (Jira daemon, comment summary and
+// read annotations), which added Version, CommentCount, LatestCommentAt and
+// the ServedFrom/AgeSeconds/Groups read annotations to Issue, and
+// ServedFrom/Stale/AgeSeconds/Groups to IssueListResult (mirroring the pr
+// capability's own 10 -> 11 and 11 -> 12 additions) - same "any field-shape
+// change bumps the version" precedent as every earlier bump on this
+// constant.
+const IssueSchemaVersion = 11
 
 // Issue is the issue capability's shared JSON wire shape, returned by the
 // issue capability's "show" and "create" ops and carried by
@@ -265,6 +273,30 @@ type Issue struct {
 	// wire shape even though today's beads backend only ever supplies zero
 	// or one (bd's own external_ref field is singular).
 	ExternalRefs []string `json:"external_refs,omitempty"`
+
+	// Version is the per-entity version the daemon counts for this issue (the
+	// PR.Version precedent). On a change answer it is the delivered row's OWN
+	// version. Omitted when zero, so the beads backend and the old Jira
+	// backend, which never set it, emit byte-identical entities. Added with
+	// IssueSchemaVersion 11.
+	Version int64 `json:"version,omitempty"`
+
+	// CommentCount and LatestCommentAt are the entity's comment summary
+	// (INV-ICD-1: a count of comments and the time of the latest comment),
+	// derived from the detail group so that a new comment is a visible field
+	// difference. LatestCommentAt is the origin's own timestamp text carried
+	// UNPARSED, the way CreatedAt is. Both omitted when zero/empty. Added with
+	// IssueSchemaVersion 11.
+	CommentCount    int    `json:"comment_count,omitempty"`
+	LatestCommentAt string `json:"latest_comment_at,omitempty"`
+
+	// ServedFrom, AgeSeconds and Groups are the daemon's read-answer
+	// annotations (IssueSchemaVersion 11), mirroring PR.ServedFrom,
+	// PR.AgeSeconds and PR.Groups. All omitted when empty/nil. Issue.Stale
+	// above is the read's staleness flag.
+	ServedFrom string      `json:"served_from,omitempty"`
+	AgeSeconds *int64      `json:"age_seconds,omitempty"`
+	Groups     []GroupInfo `json:"groups,omitempty"`
 }
 
 // IssueDependency is one edge in Issue.Deps: another issue's id, plus this
@@ -308,6 +340,14 @@ type IssueListResult struct {
 	// sets it, and a consumer that never reads it, are unaffected, so this
 	// does not bump the schema version.
 	FingerprintExcludes []string `json:"fingerprint_excludes,omitempty"`
+
+	// The read-answer annotations (IssueSchemaVersion 11); see
+	// Issue.ServedFrom. Each is omitted when empty/nil, so an old-shaped
+	// result marshals unchanged.
+	ServedFrom string      `json:"served_from,omitempty"`
+	Stale      *bool       `json:"stale,omitempty"`
+	AgeSeconds *int64      `json:"age_seconds,omitempty"`
+	Groups     []GroupInfo `json:"groups,omitempty"`
 }
 
 // IssueDepsResult is the "deps" op's wire result payload for the issue
