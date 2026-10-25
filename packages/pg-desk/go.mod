@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector v0.0.0
-	github.com/phillipgreenii/x v0.0.0-20261023192149-0ef710c09f57
+	github.com/phillipgreenii/x v0.0.0-20261025041111-c7b4ad60c6c2
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/cobra v1.10.2
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1
@@ -49,7 +49,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b // indirect
 	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
-	modernc.org/libc v1.79.0 // indirect
+	modernc.org/libc v1.79.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
