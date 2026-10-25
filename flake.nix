@@ -6542,6 +6542,12 @@
                   # to compare backends' internal/ copies against a checked-in
                   # baseline.
                   pkgs.diffutils
+                  # cmd/pg-connector-github's adapter_e2e_test.go chains the real
+                  # daemon, the real umbrella and the pg-router source adapter. The
+                  # adapter is a module of its own that this check's source does not
+                  # contain, so the built binary rides on PATH; the test fails (it
+                  # never skips) when it is absent here.
+                  pkgs.pg-router-source-pg-connector
                 ];
               };
 
