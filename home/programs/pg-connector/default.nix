@@ -11,6 +11,7 @@
 let
   cfg = config.phillipgreenii.programs.pg-connector;
   gh = cfg.github;
+  jr = cfg.jira;
 
   # Whether the composing flake imports personal's home module, which declares
   # the HM launchdServices registry (personal ADR 0055). Read from the module
@@ -21,6 +22,7 @@ let
   hasLaunchdRegistry = options.phillipgreenii.programs ? launchdServices;
   isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
   wantsLaunchd = gh.enable && gh.supervisor == "launchd";
+  wantsJiraLaunchd = jr.enable && jr.supervisor == "launchd";
 
   # The Tier-2 backends the umbrella execs by BARE name (see the comment at
   # home.packages below), plus the GitHub daemon when it is enabled: the ONE list
@@ -31,21 +33,26 @@ let
   # added to or removed from THIS list MUST be mirrored in that test's pinned
   # `expectedBackendNames` (tests/pg-connector-home-render.nix), which is the
   # only thing that notices a backend dropped from here.
-  backendPackages = [
-    pkgs.pg-connector-pr-github
-    pkgs.pg-connector-ci-github-actions
-    pkgs.pg-connector-issue-beads
-    pkgs.pg-connector-issue-jira
-    pkgs.pg-connector-scm-git
-    pkgs.pg-connector-activity-git
-    pkgs.pg-connector-thread-slack
-    pkgs.pg-connector-calendar-osx-bridge
-    pkgs.pg-connector-calendar-task-focus
-    pkgs.pg-connector-agentsession-pa-monitor
-    pkgs.pg-connector-alert-grafana
-    pkgs.pg-connector-mail-osx-bridge
-  ]
-  ++ lib.optional gh.enable gh.package;
+  backendPackages = lib.unique (
+    [
+      pkgs.pg-connector-pr-github
+      pkgs.pg-connector-ci-github-actions
+      pkgs.pg-connector-issue-beads
+      pkgs.pg-connector-issue-jira
+      pkgs.pg-connector-scm-git
+      pkgs.pg-connector-activity-git
+      pkgs.pg-connector-thread-slack
+      pkgs.pg-connector-calendar-osx-bridge
+      pkgs.pg-connector-calendar-task-focus
+      pkgs.pg-connector-agentsession-pa-monitor
+      pkgs.pg-connector-alert-grafana
+      pkgs.pg-connector-mail-osx-bridge
+    ]
+    ++ lib.optional gh.enable gh.package
+    # The Jira daemon's own binary (jira.package) when it is not the stock one
+    # already listed above; lib.unique keeps a default-package list unchanged.
+    ++ lib.optional jr.enable jr.package
+  );
 
   binDirOf = p: "${lib.getBin p}/bin";
 
@@ -142,6 +149,75 @@ let
     else
       entry;
 
+  # ---- pg-connector-issue-jira (docket pg2-2qyyh.2, Phase 2) -----------------
+  # The Jira daemon's registry rewrite is DEPLOY-GATED: `jira.registry.rewrite`
+  # is false by default, so enabling the daemon renders its config file and
+  # supervisor entry while the old registration stays exactly as it is, until a
+  # later phase flips the gate. Like the GitHub rewrite it also needs a
+  # supervisor (or allowUnsupervised), so a host with nothing keeping the
+  # daemon alive never gets a client with no daemon.
+  rewriteJira = jr.enable && jr.registry.rewrite && (jr.supervisor != "none" || jr.allowUnsupervised);
+
+  jiraEmitterEnv =
+    if obs ? mkEmitterEnv then
+      obs.mkEmitterEnv {
+        serviceName = "pg-connector-issue-jira-daemon";
+        protocol = "grpc";
+      }
+    else
+      { };
+  jiraStateDir = "${config.home.homeDirectory}/.local/state/pg-connector-issue-jira-daemon";
+
+  # The queries are declared ONCE, in the umbrella's backends.<instance> block,
+  # and copied verbatim (string, list or { expr, watched }) into the daemon's
+  # file, so the daemon's `watched` values and the umbrella's block cannot drift.
+  jiraQueries = (cfg.backends.${jr.instance} or { }).queries or { };
+
+  # Everything except the stamp (the hash is taken over this body). The keys
+  # this module derives win over a same-named entry of `jira.settings`; none of
+  # the daemon's budget or retention keys is rendered by default.
+  jiraConfigBody =
+    jr.settings
+    // lib.filterAttrs (_: v: v != null) {
+      state_dir = jiraStateDir;
+      socket_path = "${jiraStateDir}/sock";
+      supervisor_label = "com.phillipg.pg-connector-issue-jira-daemon";
+      otel_endpoint = jiraEmitterEnv.OTEL_EXPORTER_OTLP_ENDPOINT or null;
+      inherit (jr) instance;
+      pjira_path = jr.pjiraPath;
+      pjira_env = jr.pjiraEnvironment;
+      queries = jiraQueries;
+    };
+  jiraConfigHash = builtins.hashString "sha256" (builtins.toJSON jiraConfigBody);
+  jiraConfigFile = pkgs.writeText "pg-connector-issue-jira-config.json" (
+    builtins.toJSON (jiraConfigBody // { config_hash = jiraConfigHash; })
+  );
+  jiraStamp = {
+    config_hash = jiraConfigHash;
+    config_path = toString jiraConfigFile;
+  };
+  jiraArgv = [
+    "pg-connector-issue-jira"
+    "--config"
+    (toString jiraConfigFile)
+    "--instance"
+    jr.instance
+  ];
+  rewriteJiraEntry =
+    entry:
+    let
+      name = if builtins.isString entry then entry else entry.name;
+      base =
+        if builtins.isString entry then
+          {
+            inherit name;
+            previousNames = [ ];
+          }
+        else
+          entry;
+    in
+    if rewriteJira && name == jr.instance then base // { command = jiraArgv; } else entry;
+
   # A registration (bead pg2-91y12, ADR 0062 amendment, INV-REG-4): either a
   # plain string (a bare binary name on PATH, name = binary, exactly as
   # before) or an instance `{ name, command }`. `name` is the instance's
@@ -190,11 +266,11 @@ let
   renderEntries =
     v:
     if builtins.isList v then
-      map (e: renderEntry (rewriteGithubEntry e)) v
+      map (e: renderEntry (rewriteJiraEntry (rewriteGithubEntry e))) v
     else if v == null then
       null
     else
-      renderEntry (rewriteGithubEntry v);
+      renderEntry (rewriteJiraEntry (rewriteGithubEntry v));
 
   # connector.<type> as pg-connector's own registry.go actually requires it:
   # pr/issue/ci MUST be either a non-empty list or ABSENT entirely
@@ -315,6 +391,7 @@ let
         value =
           (cfg.backends.${name} or { })
           // lib.optionalAttrs (rewriteRegistry && githubInstances ? ${name}) githubStamp
+          // lib.optionalAttrs (rewriteJira && name == jr.instance) jiraStamp
           // alertBackendExtra (
             cfg.alertBackends.${name} or {
               queries = { };
@@ -333,6 +410,7 @@ let
           ++ lib.attrNames cfg.alertBackends
           ++ lib.attrNames cfg.attention.perBackend
           ++ lib.optionals rewriteRegistry (lib.attrNames githubInstances)
+          ++ lib.optional rewriteJira jr.instance
         )
       )
   );
@@ -794,6 +872,132 @@ in
       };
     };
 
+    # pg-connector-issue-jira (docket pg2-2qyyh.2, Phase 2): the daemon-backed Jira
+    # connector. Off by default; with it off the module renders and installs
+    # exactly what it did before this option set existed. The registry rewrite
+    # is a separate, deploy-gated switch (`registry.rewrite`, off by default).
+    jira = {
+      enable = lib.mkEnableOption ''
+        pg-connector-issue-jira: renders the daemon config and registers the
+        supervisor entry. The registry is rewritten to the daemon's client mode
+        only when `registry.rewrite` is also set
+      '';
+
+      package = lib.mkPackageOption pkgs "pg-connector-issue-jira" { };
+
+      supervisor = lib.mkOption {
+        type = lib.types.enum [
+          "launchd"
+          "none"
+        ];
+        default = if pkgs.stdenv.hostPlatform.isDarwin then "launchd" else "none";
+        defaultText = lib.literalExpression ''if pkgs.stdenv.hostPlatform.isDarwin then "launchd" else "none"'';
+        description = ''
+          How the daemon is kept running. `launchd` adds the home-manager
+          launchd user-agent entry; `none` registers no service and the
+          operator MAY run `serve` by hand. With `none` and no
+          `allowUnsupervised`, the registry is NOT rewritten even when
+          `registry.rewrite` is set (an evaluation warning says so).
+        '';
+      };
+
+      allowUnsupervised = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "With `supervisor = \"none\"`, permit the registry rewrite anyway (when `registry.rewrite` is set).";
+      };
+
+      pprof.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Expose Go's runtime profiler (`net/http/pprof`) for the daemon on a
+          mode-0600 unix socket at
+          `$XDG_STATE_HOME/pg-connector-issue-jira-daemon/pprof.sock` (the module
+          writes the resolved absolute path into the launchd agent's
+          `PG_CONNECTOR_ISSUE_JIRA_PPROF_ADDR`). When `false` the variable is
+          absent and the daemon opens no profiling listener. Only the `launchd`
+          supervisor sets the variable. Capture recipe:
+          `docs/go-daemon-profiling-runbook.md` in `phillipg-nix-repo-base`.
+        '';
+      };
+
+      instance = lib.mkOption {
+        type = lib.types.str;
+        default = "pg-connector-issue-jira";
+        description = ''
+          The registered backend name the daemon serves: the `instance` key of
+          the daemon's file, the `backends.<name>` block its `queries` are read
+          from, and the registry entry the (gated) rewrite replaces.
+        '';
+      };
+
+      pjiraPath = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "/run/current-system/sw/bin/pjira";
+        description = ''
+          An ABSOLUTE path to `pjira`, rendered as `pjira_path`. There is no
+          default: launchd supplies no `PATH`, so enabling the daemon without it
+          fails evaluation with an assertion.
+        '';
+      };
+
+      pjiraEnvironment = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = { };
+        description = "The ONLY environment the daemon gives every `pjira` process, rendered as `pjira_env`.";
+      };
+
+      registry.rewrite = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          The deploy gate. When `true` (and the daemon is enabled and
+          supervised, or `allowUnsupervised`), every registered entry named
+          `instance`, in every registry list, is rewritten to
+          `[ "pg-connector-issue-jira" "--config" <configFile> "--instance"
+          <instance> ]` and the umbrella's `backends.<instance>` block gets the
+          config stamp. When `false` (the default) NOTHING of the registry
+          changes and the old entry stays registered as it is.
+        '';
+      };
+
+      settings = lib.mkOption {
+        type = lib.types.attrsOf lib.types.anything;
+        default = { };
+        example = {
+          request_rate_per_second = 4;
+        };
+        description = ''
+          The daemon's own settings, merged into the top level of the rendered
+          config file (the snake_case keys of the daemon's defaults table: the
+          budget, retention and TTL keys; an unknown key fails the daemon's
+          load, naming it). The keys this module derives itself (paths, label,
+          OTel endpoint, `instance`, `pjira_path`, `pjira_env`, `queries` and
+          the stamp) win over a same-named entry here.
+        '';
+      };
+
+      configFile = lib.mkOption {
+        type = lib.types.path;
+        readOnly = true;
+        internal = true;
+        description = ''
+          The rendered daemon config, a nix store path (so a config change
+          changes the path). Read by the supervisor entry's wrapper and embedded
+          in every rewritten registry argv as `--config <path>`.
+        '';
+      };
+
+      configHash = lib.mkOption {
+        type = lib.types.str;
+        readOnly = true;
+        internal = true;
+        description = "The config hash stamped into the daemon config and the umbrella block.";
+      };
+    };
+
     # Read-only helper for pg-wrap spec authors (bead pg2-p8xtx): set
     # unconditionally, like pg-router-ccpool-handler's `lib.renderWrapSpec`, so a
     # consumer can read it without enabling the module's own machinery.
@@ -848,6 +1052,10 @@ in
           configFile = githubConfigFile;
           configHash = githubConfigHash;
         };
+        jira = {
+          configFile = jiraConfigFile;
+          configHash = jiraConfigHash;
+        };
       };
     }
     (lib.mkIf cfg.enable {
@@ -893,12 +1101,18 @@ in
       # and config are installed but the registry is left alone; say why, so a
       # shared home-manager config that sets enable = true on a Linux host is not
       # silently a no-op.
-      warnings = lib.optional (gh.enable && !rewriteRegistry) (
-        "phillipgreenii.programs.pg-connector.github.enable is set with supervisor = \"none\" and allowUnsupervised = false: "
-        + "the pg-connector-github binary and config are installed, but the registry is NOT rewritten and the old "
-        + "pg-connector-pr-github and pg-connector-ci-github-actions backends stay registered, because nothing on this host "
-        + "would keep the daemon running. Set github.allowUnsupervised = true to rewrite the registry anyway."
-      );
+      warnings =
+        lib.optional (gh.enable && !rewriteRegistry) (
+          "phillipgreenii.programs.pg-connector.github.enable is set with supervisor = \"none\" and allowUnsupervised = false: "
+          + "the pg-connector-github binary and config are installed, but the registry is NOT rewritten and the old "
+          + "pg-connector-pr-github and pg-connector-ci-github-actions backends stay registered, because nothing on this host "
+          + "would keep the daemon running. Set github.allowUnsupervised = true to rewrite the registry anyway."
+        )
+        ++ lib.optional (jr.enable && jr.registry.rewrite && !rewriteJira) (
+          "phillipgreenii.programs.pg-connector.jira.registry.rewrite is set with supervisor = \"none\" and allowUnsupervised = false: "
+          + "the registry is NOT rewritten and the old pg-connector-issue-jira backend stays registered, because nothing on this host "
+          + "would keep the daemon running. Set jira.allowUnsupervised = true to rewrite the registry anyway."
+        );
 
       # supervisor = "launchd" is a darwin-only construct: the HM registry the
       # entry below goes through has no Linux counterpart until pg2-opk5g. Both
@@ -912,6 +1126,18 @@ in
         {
           assertion = !(wantsLaunchd && isDarwin) || hasLaunchdRegistry;
           message = "phillipgreenii.programs.pg-connector.github.supervisor = \"launchd\" needs phillipgreenii.programs.launchdServices, which phillipgreenii-nix-personal's home module declares (personal ADR 0055); import it alongside this module.";
+        }
+        {
+          assertion = !wantsJiraLaunchd || isDarwin;
+          message = "phillipgreenii.programs.pg-connector.jira.supervisor = \"launchd\" is only supported on darwin: launchd does not exist on this host, and the systemd supervisor is planned work (pg2-opk5g). Set jira.supervisor = \"none\" (and jira.allowUnsupervised = true to rewrite the registry anyway) and start `pg-connector-issue-jira serve` by hand.";
+        }
+        {
+          assertion = !(wantsJiraLaunchd && isDarwin) || hasLaunchdRegistry;
+          message = "phillipgreenii.programs.pg-connector.jira.supervisor = \"launchd\" needs phillipgreenii.programs.launchdServices, which phillipgreenii-nix-personal's home module declares (personal ADR 0055); import it alongside this module.";
+        }
+        {
+          assertion = !jr.enable || (jr.pjiraPath != null && lib.hasPrefix "/" jr.pjiraPath);
+          message = "phillipgreenii.programs.pg-connector.jira.enable needs jira.pjiraPath, an ABSOLUTE path to pjira: launchd supplies no PATH, so the daemon cannot find it by name.";
         }
       ];
 
@@ -973,6 +1199,31 @@ in
             # docs/go-daemon-profiling-runbook.md in phillipg-nix-repo-base.
             // lib.optionalAttrs gh.pprof.enable {
               EnvironmentVariables.PG_CONNECTOR_GITHUB_PPROF_ADDR = "${stateDir}/pprof.sock";
+            };
+          };
+
+      # The Jira daemon's supervisor (docket pg2-2qyyh.2): the same shape as the
+      # GitHub entry above, with its own label, state directory, log names and
+      # `service_name`. Registered whenever the daemon is enabled under launchd,
+      # whether or not the (deploy-gated) registry rewrite is on.
+      phillipgreenii.programs.launchdServices.userAgents.pg-connector-issue-jira-daemon =
+        lib.mkIf (cfg.enable && wantsJiraLaunchd && isDarwin)
+          {
+            label = "com.phillipg.pg-connector-issue-jira-daemon";
+            script = ''
+              exec ${jr.package}/bin/pg-connector-issue-jira --config ${jr.configFile} serve
+            '';
+            runAtLoad = true;
+            keepAlive = true;
+            serviceConfig = {
+              StandardOutPath = "${jiraStateDir}/launchd-stdout.log";
+              StandardErrorPath = "${jiraStateDir}/launchd-stderr.log";
+            }
+            # Profiling endpoint: a 0600 unix socket under the daemon's state
+            # dir; launchd does not expand $XDG_STATE_HOME, so the resolved
+            # path is written out. Absent when jira.pprof.enable is false.
+            // lib.optionalAttrs jr.pprof.enable {
+              EnvironmentVariables.PG_CONNECTOR_ISSUE_JIRA_PPROF_ADDR = "${jiraStateDir}/pprof.sock";
             };
           };
     })

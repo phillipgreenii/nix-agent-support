@@ -448,6 +448,326 @@ let
       (ghOpts ghEnabled).configFile == (ghOpts ghUnsupervisedAllowed).configFile;
   };
 
+  # ---- pg-connector-issue-jira (docket pg2-2qyyh.2, Phase 2) ----------------
+  # The Jira instance name registered in EVERY registry list: a plain string in
+  # three of them and a full instance (with a former name) in search.sources,
+  # next to unrelated names. EXAMPLE values only.
+  jiraName = "pg-connector-issue-jira";
+  jiraRegistry = {
+    connector.issue = [
+      "pg-connector-issue-beads"
+      jiraName
+    ];
+    attention.sources = [
+      "pg-connector-issue-beads"
+      jiraName
+    ];
+    search.sources = [
+      {
+        name = jiraName;
+        command = [ "example-old-binary" ];
+        previousNames = [ "example-former-name" ];
+      }
+    ];
+    activity.sources = [ jiraName ];
+    backends.${jiraName} = {
+      queries = {
+        mine = {
+          expr = "assignee = currentUser()";
+          watched = true;
+        };
+        team = [
+          "project = EXAMPLE AND status = Open"
+          "project = EXAMPLE AND assignee is EMPTY"
+        ];
+        sweep = "labels = example";
+      };
+      example_key = "example-value";
+    };
+  };
+  jiraOn = {
+    enable = true;
+    supervisor = "launchd";
+    pjiraPath = "/example/bin/pjira";
+  };
+  jiraRewriteOn = jiraOn // {
+    registry.rewrite = true;
+  };
+  jiraCase = jira: osConfig: evaluate (jiraRegistry // { inherit jira; }) osConfig;
+  jiraAbsent = evaluate jiraRegistry null;
+  jiraDisabled = jiraCase { enable = false; } osWithObs;
+  jiraEnabled = jiraCase jiraOn osWithObs;
+  jiraRewritten = jiraCase jiraRewriteOn osWithObs;
+  jiraEnabledNoOs = jiraCase jiraOn null;
+  jiraOtherSetting = jiraCase (jiraOn // { settings.request_rate_per_second = 4; }) osWithObs;
+  jiraSettingsOverride = jiraCase (
+    jiraOn
+    // {
+      settings = {
+        workers = 3;
+        state_dir = "/example/other";
+        instance = "example-other";
+        pjira_path = "/example/other/pjira";
+        queries = { };
+      };
+    }
+  ) osWithObs;
+  jiraWithEnv = jiraCase (jiraOn // { pjiraEnvironment.EXAMPLE_VAR = "example-value"; }) osWithObs;
+  jiraNoSupervisor = jiraCase (
+    jiraRewriteOn
+    // {
+      supervisor = "none";
+    }
+  ) osWithObs;
+  jiraNoSupervisorAllowed = jiraCase (
+    jiraRewriteOn
+    // {
+      supervisor = "none";
+      allowUnsupervised = true;
+    }
+  ) osWithObs;
+  # a rewrite gated off keeps its daemon file and warns nothing
+  jiraNoneNoRewrite = jiraCase (jiraOn // { supervisor = "none"; }) osWithObs;
+  # another instance name: only the entries of THAT name are rewritten
+  jiraOtherInstanceName = "pg-connector-issue-jira-example";
+  jiraOtherInstance = evaluate (
+    jiraRegistry
+    // {
+      connector.issue = [
+        jiraName
+        jiraOtherInstanceName
+      ];
+      jira = jiraRewriteOn // {
+        instance = jiraOtherInstanceName;
+      };
+    }
+  ) osWithObs;
+  # both daemons on at once: each rewrites only its own names
+  jiraWithGithub = evaluate (
+    githubRegistry
+    // {
+      connector = githubRegistry.connector // {
+        issue = [ jiraName ];
+      };
+      backends = githubRegistry.backends // jiraRegistry.backends;
+      github = githubOn;
+      jira = jiraRewriteOn;
+    }
+  ) osWithObs;
+
+  jOpts = e: e.config.phillipgreenii.programs.pg-connector.jira;
+  jiraEntry = e: {
+    name = jiraName;
+    command = [
+      "pg-connector-issue-jira"
+      "--config"
+      (toString (jOpts e).configFile)
+      "--instance"
+      jiraName
+    ];
+  };
+  jiraOccurrences =
+    r:
+    builtins.filter (x: builtins.isAttrs x && x.name == jiraName) (
+      r.connector.issue or [ ]
+      ++ r.search.sources or [ ]
+      ++ r.activity.sources or [ ]
+      ++ r.attention.sources or [ ]
+    );
+  # The registry lists as a host without the daemon renders them, the
+  # search.sources instance in its rendered (snake_case) form.
+  oldJiraRegistry = {
+    connector.issue = [
+      "pg-connector-issue-beads"
+      jiraName
+    ];
+    attention.sources = [
+      "pg-connector-issue-beads"
+      jiraName
+    ];
+    search.sources = [
+      {
+        name = jiraName;
+        command = [ "example-old-binary" ];
+        previous_names = [ "example-former-name" ];
+      }
+    ];
+    activity.sources = [ jiraName ];
+  };
+  jiraRegistryOf = r: {
+    inherit (r)
+      connector
+      search
+      activity
+      attention
+      ;
+  };
+  jiraCases = {
+    # jira.enable = false (and no jira.* at all): the registry, the installed
+    # packages, the blocks and the whole rendered document are exactly today's.
+    disabledRegistryUnchanged = jiraRegistryOf (rc jiraDisabled) == oldJiraRegistry;
+    absentRegistryUnchanged = jiraRegistryOf (rc jiraAbsent) == oldJiraRegistry;
+    disabledRenderedIdentical = rc jiraDisabled == rc jiraAbsent;
+    disabledPackagesIdentical =
+      map (p: p.drvPath) jiraDisabled.config.home.packages
+      == map (p: p.drvPath) jiraAbsent.config.home.packages;
+    disabledNoWarning = jiraDisabled.config.warnings == [ ];
+    disabledFailsNoAssertion = !builtins.any (a: !a.assertion) jiraDisabled.config.assertions;
+
+    # The options and their defaults.
+    defaultsAreOff =
+      let
+        o = (evaluate jiraRegistry null).config.phillipgreenii.programs.pg-connector.jira;
+      in
+      o.enable == false
+      && o.registry.rewrite == false
+      && o.allowUnsupervised == false
+      && o.pprof.enable == true
+      && o.instance == jiraName
+      && o.pjiraPath == null
+      && o.pjiraEnvironment == { }
+      && o.settings == { }
+      && o.package.name == pkgs.pg-connector-issue-jira.name;
+    supervisorDefaultFollowsPlatform =
+      (jOpts jiraAbsent).supervisor == (if pkgs.stdenv.hostPlatform.isDarwin then "launchd" else "none");
+
+    # Enabled, registry.rewrite = false (the default): the daemon file exists,
+    # the registry, the blocks and the whole rendered document are unchanged.
+    gateOffRenderedIdentical = rc jiraEnabled == rc jiraAbsent;
+    gateOffRegistryUnchanged = jiraRegistryOf (rc jiraEnabled) == oldJiraRegistry;
+    gateOffNoStamp =
+      !((rc jiraEnabled).backends.${jiraName} ? config_hash)
+      && !((rc jiraEnabled).backends.${jiraName} ? config_path);
+    gateOffNoWarning = jiraEnabled.config.warnings == [ ];
+    gateOffConfigIsAStorePath = lib.hasPrefix builtins.storeDir (
+      toString (jOpts jiraEnabled).configFile
+    );
+    gateOffKeepsStockPackageOnce =
+      lib.count (p: p.name == pkgs.pg-connector-issue-jira.name) jiraEnabled.config.home.packages == 1;
+
+    # registry.rewrite = true: every list naming the backend carries the argv
+    # form with ONE --config path; a plain string is converted; an instance
+    # keeps its former names; the umbrella block is stamped, and keeps its keys.
+    rewriteIssue =
+      (rc jiraRewritten).connector.issue == [
+        "pg-connector-issue-beads"
+        (jiraEntry jiraRewritten)
+      ];
+    rewriteAttention =
+      (rc jiraRewritten).attention.sources == [
+        "pg-connector-issue-beads"
+        (jiraEntry jiraRewritten)
+      ];
+    rewriteSearchKeepsFormerNames =
+      (rc jiraRewritten).search.sources == [
+        (jiraEntry jiraRewritten // { previous_names = [ "example-former-name" ]; })
+      ];
+    rewriteActivity = (rc jiraRewritten).activity.sources == [ (jiraEntry jiraRewritten) ];
+    rewriteOccurrenceCount = builtins.length (jiraOccurrences (rc jiraRewritten)) == 4;
+    rewriteOneConfigPath =
+      builtins.length (
+        lib.unique (map (x: builtins.elemAt x.command 2) (jiraOccurrences (rc jiraRewritten)))
+      ) == 1;
+    rewriteArgvShape =
+      (builtins.elemAt (jiraEntry jiraRewritten).command 0) == "pg-connector-issue-jira"
+      && (builtins.elemAt (jiraEntry jiraRewritten).command 1) == "--config"
+      && (builtins.elemAt (jiraEntry jiraRewritten).command 3) == "--instance"
+      && (builtins.elemAt (jiraEntry jiraRewritten).command 4) == jiraName
+      && builtins.length (jiraEntry jiraRewritten).command == 5;
+    rewriteStamped =
+      (rc jiraRewritten).backends.${jiraName}.config_hash == (jOpts jiraRewritten).configHash
+      && (rc jiraRewritten).backends.${jiraName}.config_path == toString (jOpts jiraRewritten).configFile;
+    rewriteBlockKeepsKeys =
+      (rc jiraRewritten).backends.${jiraName}.example_key == "example-value"
+      && (rc jiraRewritten).backends.${jiraName}.queries.mine.watched == true
+      && builtins.isString (rc jiraRewritten).backends.${jiraName}.queries.sweep
+      && builtins.isList (rc jiraRewritten).backends.${jiraName}.queries.team;
+    rewriteOtherEntriesUntouched = builtins.elem "pg-connector-issue-beads" (rc jiraRewritten)
+    .connector.issue;
+    rewriteNoWarning = jiraRewritten.config.warnings == [ ];
+    # the daemon file does not depend on the gate, so flipping it changes only
+    # the registry (and the stamp), never the config or the supervisor entry
+    gateDoesNotChangeConfig =
+      (jOpts jiraRewritten).configFile == (jOpts jiraEnabled).configFile
+      && (jOpts jiraRewritten).configHash == (jOpts jiraEnabled).configHash;
+
+    # Only the entries named `jira.instance` are rewritten.
+    otherInstanceRewritesOnlyItsName =
+      (rc jiraOtherInstance).connector.issue == [
+        jiraName
+        {
+          name = jiraOtherInstanceName;
+          command = [
+            "pg-connector-issue-jira"
+            "--config"
+            (toString (jOpts jiraOtherInstance).configFile)
+            "--instance"
+            jiraOtherInstanceName
+          ];
+        }
+      ]
+      && (rc jiraOtherInstance).activity.sources == [ jiraName ];
+
+    # supervisor = none without allowUnsupervised withholds the rewrite (and
+    # says so); allowUnsupervised permits it.
+    unsupervisedKeepsRegistry = jiraRegistryOf (rc jiraNoSupervisor) == oldJiraRegistry;
+    unsupervisedNoStamp = !((rc jiraNoSupervisor).backends.${jiraName} ? config_hash);
+    unsupervisedWarns =
+      builtins.length jiraNoSupervisor.config.warnings == 1
+      && lib.hasInfix "allowUnsupervised" (builtins.head jiraNoSupervisor.config.warnings);
+    unsupervisedAllowedRewrites =
+      builtins.length (jiraOccurrences (rc jiraNoSupervisorAllowed)) == 4
+      && jiraNoSupervisorAllowed.config.warnings == [ ];
+    noneWithoutGateIsQuiet =
+      jiraNoneNoRewrite.config.warnings == [ ]
+      && jiraRegistryOf (rc jiraNoneNoRewrite) == oldJiraRegistry;
+
+    # The stamp (hash and path) follows the content: an OTel endpoint, a
+    # setting and a pjira environment each change both.
+    configFollowsOtel =
+      (jOpts jiraEnabled).configHash != (jOpts jiraEnabledNoOs).configHash
+      && (jOpts jiraEnabled).configFile != (jOpts jiraEnabledNoOs).configFile;
+    configFollowsSetting =
+      (jOpts jiraEnabled).configHash != (jOpts jiraOtherSetting).configHash
+      && (jOpts jiraEnabled).configFile != (jOpts jiraOtherSetting).configFile;
+    configFollowsPjiraEnvironment =
+      (jOpts jiraEnabled).configHash != (jOpts jiraWithEnv).configHash
+      && (jOpts jiraEnabled).configFile != (jOpts jiraWithEnv).configFile;
+    configFollowsQueries =
+      (jOpts jiraEnabled).configHash != (jOpts (
+        evaluate (
+          jiraRegistry
+          // {
+            jira = jiraOn;
+            backends.${jiraName}.queries = {
+              mine = "assignee = currentUser()";
+            };
+          }
+        ) osWithObs
+      )).configHash;
+    sameInputsSameConfig =
+      (jOpts (jiraCase jiraOn osWithObs)).configFile == (jOpts jiraEnabled).configFile;
+    # A null or observability-less system scope renders and does not fail.
+    nullOsConfigRenders = lib.hasPrefix builtins.storeDir (toString (jOpts jiraEnabledNoOs).configFile);
+
+    # Both daemons at once: each rewrites only its own names, the GitHub
+    # rewrite is exactly what it is without Jira.
+    bothRewriteOwnNames =
+      builtins.length (occurrences (rc jiraWithGithub)) == 5
+      && builtins.length (jiraOccurrences (rc jiraWithGithub)) == 1
+      && (rc jiraWithGithub).connector.issue == [ (jiraEntry jiraWithGithub) ]
+      && (rc jiraWithGithub).connector.pr == [ (prEntry jiraWithGithub) ];
+    bothStampOwnBlocks =
+      (rc jiraWithGithub).backends.${jiraName}.config_hash == (jOpts jiraWithGithub).configHash
+      &&
+        (rc jiraWithGithub).backends."pg-connector-pr-github".config_hash == (ghOpts jiraWithGithub)
+        .configHash
+      && (jOpts jiraWithGithub).configHash != (ghOpts jiraWithGithub).configHash;
+    # the Jira daemon's binary is installed once the daemon is on, alongside
+    # the GitHub daemon's
+    bothInstallBinaries = installsDaemon jiraWithGithub;
+  };
+
   # lib.backendBinDirs (bead pg2-p8xtx): the helper a pg-wrap spec author calls
   # to get the backend PATH entries. It MUST equal the backend set the module
   # installs, so a package added to home.packages but missing from the helper
@@ -553,6 +873,10 @@ in
       githubOn
       osWithObs
       ghOpts
+      jiraRegistry
+      jiraOn
+      jiraRewriteOn
+      jOpts
       ;
   };
   # github.enable = false renders the legacy golden byte for byte.
@@ -560,6 +884,23 @@ in
   # The pg-connector-github cases: name -> bool, and the failing names.
   inherit githubCases;
   githubFailures = builtins.attrNames (lib.filterAttrs (_: ok: !ok) githubCases);
+  # The pg-connector-issue-jira cases (docket pg2-2qyyh.2).
+  inherit jiraCases;
+  jiraFailures = builtins.attrNames (lib.filterAttrs (_: ok: !ok) jiraCases);
+  # Rendered Jira daemon configs (store paths) for the jq checks of the check.
+  jira = {
+    enabled = (jOpts jiraEnabled).configFile;
+    enabledHash = (jOpts jiraEnabled).configHash;
+    enabledNoOs = (jOpts jiraEnabledNoOs).configFile;
+    withEnv = (jOpts jiraWithEnv).configFile;
+    settingsOverride = (jOpts jiraSettingsOverride).configFile;
+    otherSetting = (jOpts jiraOtherSetting).configFile;
+    enabledRegistry = render (jiraRegistry // { jira = jiraRewriteOn; });
+    pjira = jiraOn.pjiraPath;
+  };
+  # github.enable = false renders the legacy golden byte for byte, jira.enable
+  # = false too.
+  legacyJiraDisabled = render (legacy // { jira.enable = false; });
   inherit backendBinDirsFailures backendSetFailures;
   # Rendered daemon configs (store paths) and the values the shell side of the
   # check compares them against.

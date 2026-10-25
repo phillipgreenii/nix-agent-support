@@ -168,6 +168,17 @@ log sources and dashboard follow `observability.enable` alone. Checks:
 escalated to a bead unless its uid is also registered with `pg-router-probe`
 (`docs/investigations/2026-10-19-pg-connector-github-daemon-down-alert.md`).
 
+The Jira daemon (docket `pg2-2qyyh.2`) is the sibling: `phillipgreenii.programs.pg-connector.jira`
+renders `pg-connector-issue-jira-config.json` (queries copied from `backends.<instance>.queries`, so
+a query is declared once; `pjiraPath` is a REQUIRED absolute path, asserted) and registers
+`pg-connector-issue-jira-daemon` (label `com.phillipg.pg-connector-issue-jira-daemon`, state directory
+`pg-connector-issue-jira-daemon`) through the same registry. Unlike GitHub's, its registry rewrite is
+DEPLOY-GATED: `jira.registry.rewrite` is false by default, so enabling the daemon changes nothing the
+umbrella reads until a later phase sets it, and a host MUST NOT set it before then. Checks:
+`test-pg-connector-issue-jira-hm-launchd` (`tests/pg-connector-issue-jira-hm-launchd.nix`, which runs
+the entry under `env -i` against a fake binary), `test-pg-connector-home-rendering` and
+`test-pg-connector-issue-jira-daemon-capabilities`.
+
 ### pg-keep-awake keeper (`phillipgreenii.programs.pg-keep-awake`)
 
 The fourth HM-scoped launchd agent (docket `pg2-8bgxg.2`): `home/programs/pg-keep-awake` renders

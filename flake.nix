@@ -6639,6 +6639,26 @@
                     touch $out
                   '';
 
+              # The daemon-backed Jira connector (docket pg2-2qyyh.2): the packaged binary
+              # in CLIENT mode against the golden example config answers capabilities
+              # with no daemon running (the answer is compiled in plus the loaded
+              # config; the binary loads and validates --config first).
+              test-pg-connector-issue-jira-daemon-capabilities =
+                pkgs.runCommand "pg-connector-issue-jira-daemon-capabilities" { nativeBuildInputs = [ pkgs.jq ]; }
+                  ''
+                    resp=$(echo '{"op":"capabilities"}' | ${pkgs.pg-connector-issue-jira}/bin/pg-connector-issue-jira --config ${./packages/pg-connector/cmd/pg-connector-issue-jira/internal/config/testdata/example.json} --instance pg-connector-issue-jira)
+                    echo "$resp" | jq -e '
+                      .protocolVersion == 1
+                      and (.schemaVersions.issue | type) == "number"
+                      and (.ops | index("capabilities")) != null
+                      and (.ops | index("list")) != null
+                    ' >/dev/null || {
+                      echo "FAIL: pg-connector-issue-jira client-mode capabilities response malformed: $resp" >&2
+                      exit 1
+                    }
+                    touch $out
+                  '';
+
               test-pg-connector-ci-github-actions-capabilities =
                 pkgs.runCommand "pg-connector-ci-github-actions-capabilities" { nativeBuildInputs = [ pkgs.jq ]; }
                   ''
@@ -14379,6 +14399,56 @@
                     touch $out
                   '';
 
+              # pg-connector-issue-jira's supervisor entry (docket pg2-2qyyh.2, Phase 2):
+              # the sibling of test-pg-connector-github-hm-launchd above. The HM module
+              # registers ONE launchd user agent for the Jira daemon (label
+              # com.phillipg.pg-connector-issue-jira-daemon, KeepAlive, RunAtLoad, the
+              # default manageLogs) whether or not the deploy-gated registry rewrite is
+              # on; supervisor = "none" registers nothing, supervisor = "launchd" off
+              # darwin fails an assertion, and so does enabling the daemon without an
+              # absolute pjira path. The eval cases live in
+              # tests/pg-connector-issue-jira-hm-launchd.nix; this check then RUNS the
+              # rendered entry's command for real: under env -i with working directory /,
+              # against a fake binary (a shell script that records the path it was exec'd
+              # as and its argv), it must exec exactly the configured binary with
+              # `--config <rendered file> serve`. Nothing is applied (no launchctl); the
+              # launchd registration itself is only proven at the terminal flake.
+              test-pg-connector-issue-jira-hm-launchd =
+                let
+                  r = import ./tests/pg-connector-issue-jira-hm-launchd.nix { inherit lib pkgs; };
+                  binary = "${r.live.package}/bin/pg-connector-issue-jira";
+                in
+                pkgs.runCommand "pg-connector-issue-jira-hm-launchd"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                    ];
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "pg-connector-issue-jira launchd eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                      exit 1
+                    ''}
+                    work=$TMPDIR/w
+                    mkdir -p "$work"
+
+                    # The rendered entry's command, exactly as the registration wraps it.
+                    printf '%s' ${lib.escapeShellArg r.live.script} > "$work/entry.sh"
+                    cfgpath=$(sed -n 's/^exec .* --config \([^ ]*\) serve$/\1/p' "$work/entry.sh")
+                    [ "$cfgpath" = "${r.live.configFile}" ] || { echo "entry does not carry the rendered config path: $(cat "$work/entry.sh")" >&2; exit 1; }
+                    grep -q '^exec ${binary} --config ' "$work/entry.sh" || { echo "entry does not exec the configured binary" >&2; exit 1; }
+
+                    # Run it with an EMPTY environment (launchd supplies no PATH), from /.
+                    out="$work/argv.out"
+                    ( cd / && exec env -i FAKE_JIRA_OUT="$out" ${pkgs.bash}/bin/bash "$work/entry.sh" )
+                    [ -s "$out" ] || { echo "the fake binary was never exec'd" >&2; exit 1; }
+                    printf '%s\n' ${binary} --config "$cfgpath" serve > "$work/want"
+                    cmp "$out" "$work/want" || { echo "the fake binary saw a different path or argv:" >&2; cat "$out" >&2; exit 1; }
+                    touch $out
+                  '';
+
               # pg-keep-awake keeper HM module (docket pg2-8bgxg.2, packet 17a): the HM
               # module renders ${XDG_CONFIG_HOME:-~/.config}/pg-keep-awake/config.toml,
               # validates it at build time with `pg-keep-awake config check`, asserts
@@ -14919,6 +14989,16 @@
                       echo "pg-connector-github render cases failed: ${lib.concatStringsSep ", " rendered.githubFailures}" >&2
                       exit 1
                     ''}
+                    # pg-connector-issue-jira (docket pg2-2qyyh.2): jira.enable = false
+                    # renders the legacy golden byte for byte; the eval-level cases
+                    # (the deploy gate, the rewrite in every list, the stamp, the
+                    # supervisor gate, content-following hashes, both daemons at
+                    # once) name every failing case
+                    same ${fixtures + "/legacy.yaml"} ${rendered.legacyJiraDisabled}
+                    ${lib.optionalString (rendered.jiraFailures != [ ]) ''
+                      echo "pg-connector-issue-jira render cases failed: ${lib.concatStringsSep ", " rendered.jiraFailures}" >&2
+                      exit 1
+                    ''}
                     # lib.backendBinDirs (bead pg2-p8xtx): the helper equals the
                     # installed backend set, and a package added to home.packages
                     # but missing from the helper is detected; a failure names
@@ -14993,6 +15073,59 @@
                         exit 1
                       }
                     done
+                    # the rendered Jira daemon config (docket pg2-2qyyh.2): the
+                    # derived paths, the label, the instance, the absolute pjira
+                    # path, the OTel endpoint read from the system scope, the
+                    # queries (watched exactly as declared in the umbrella's
+                    # block) and the stamped hash; no budget or retention key
+                    # unless `settings` sets one
+                    jq -e --arg hash "${rendered.jira.enabledHash}" --arg pjira "${rendered.jira.pjira}" '
+                      .state_dir == "/example/home/.local/state/pg-connector-issue-jira-daemon"
+                      and .socket_path == "/example/home/.local/state/pg-connector-issue-jira-daemon/sock"
+                      and .supervisor_label == "com.phillipg.pg-connector-issue-jira-daemon"
+                      and .instance == "pg-connector-issue-jira"
+                      and .pjira_path == $pjira
+                      and .pjira_env == {}
+                      and .otel_endpoint == "http://otel.example.invalid:4317"
+                      and .queries.mine == {"expr": "assignee = currentUser()", "watched": true}
+                      and (.queries.team | type) == "array" and (.queries.team | length) == 2
+                      and (.queries.sweep | type) == "string"
+                      and ([.queries[] | select(type == "object" and .watched == true)] | length) == 1
+                      and .config_hash == $hash
+                      and ((keys - ["state_dir","socket_path","supervisor_label","instance","pjira_path","pjira_env","otel_endpoint","queries","config_hash"]) | length) == 0
+                    ' ${rendered.jira.enabled} >/dev/null || { echo "rendered Jira daemon config is wrong:" >&2; cat ${rendered.jira.enabled} >&2; exit 1; }
+                    jq -e 'has("otel_endpoint") | not' ${rendered.jira.enabledNoOs} >/dev/null
+                    jq -e '.pjira_env == {"EXAMPLE_VAR": "example-value"}' ${rendered.jira.withEnv} >/dev/null
+                    jq -e '.request_rate_per_second == 4' ${rendered.jira.otherSetting} >/dev/null
+                    # the keys the module derives win over a same-named setting
+                    jq -e '
+                      .workers == 3
+                      and .state_dir == "/example/home/.local/state/pg-connector-issue-jira-daemon"
+                      and .instance == "pg-connector-issue-jira"
+                      and .pjira_path != "/example/other/pjira"
+                      and (.queries | length) == 3
+                    ' ${rendered.jira.settingsOverride} >/dev/null
+                    # the rewritten registry, as the umbrella reads it: ONE --config
+                    # path in every list that names the backend
+                    yq -e '
+                      ([.connector.issue[1], .search.sources[0], .activity.sources[0], .attention.sources[1]]
+                        | map(.command[2]) | unique | length) == 1
+                    ' ${rendered.jira.enabledRegistry} >/dev/null
+                    # live trigger of the rendered wiring: the real daemon binary
+                    # loads the rendered config (an unknown or malformed key fails
+                    # its load) and answers capabilities through the rewritten argv
+                    argv=$(yq -o=json -I=0 '.connector.issue[1].command' ${rendered.jira.enabledRegistry})
+                    mapfile -t cmd < <(echo "$argv" | jq -r '.[]')
+                    export PATH=${pkgs.pg-connector-issue-jira}/bin:$PATH
+                    resp=$(echo '{"op":"capabilities"}' | "''${cmd[@]}")
+                    echo "$resp" | jq -e '
+                      .protocolVersion == 1
+                      and (.ops | index("capabilities") != null)
+                      and .vocabulary.queries.mine.watched == true
+                    ' >/dev/null || {
+                      echo "rendered Jira argv did not answer capabilities: $resp" >&2
+                      exit 1
+                    }
                     touch $out
                   '';
 
