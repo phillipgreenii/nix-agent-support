@@ -194,7 +194,7 @@ run_gate() { run --separate-stderr env PATH="$SHIM" "$BASH" "$SCRIPT" --prebuilt
   [[ $args == *"./internal/prchange/"* ]]
   [ "$(cat "$BATS_TEST_TMPDIR/go-pwd")" = "$(cd "$MODULE" && pwd -P)" ]
   [ "$(cat "$BATS_TEST_TMPDIR/go-require")" = 1 ]
-  [[ $output == *"11 scenarios, each with a PASS line, none skipped"* ]]
+  [[ $output == *"24 scenarios, each with a PASS line, none skipped"* ]]
 }
 
 @test "without --prebuilt it builds the five binaries before the run" {

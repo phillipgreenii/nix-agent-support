@@ -10,7 +10,10 @@
 # the ground truth (adoption, the second apply, plan and apply agreeing, an
 # unhydrated view refused, the lookup ceiling and a truncated listing failing the
 # run closed, the review-item query, and the drift check of pg-desk's decision
-# labels against the decider's lists).
+# labels against the decider's lists, then the review rule against the real
+# tracker, two concurrent composed runs with and without the lock, a duplicate
+# delivery, a kill between a create and its audit comment, and a decider run that
+# exits 2 through a failing passthrough over bd).
 #
 # What it asserts about the run (a real-binary gate that could pass by running
 # nothing guards nothing): the test's own PASS line, NO SKIP line, a PASS line for
@@ -34,7 +37,7 @@ set -euo pipefail
 
 # Keep equal to minLaneE2EScenarios in internal/prchange/lane_e2e_test.go and to
 # minScenarios of the nix check.
-MIN_SCENARIOS=11
+MIN_SCENARIOS=24
 
 root=""
 module_dir=""
@@ -114,7 +117,7 @@ export PG_PR_CHANGE_REQUIRE_BINARIES=1
 
 log="${scratch}/lane-e2e.log"
 status=0
-(cd "${module_dir}" && nice -n 10 go test -p 4 -count=1 -v -timeout 25m -run '^TestLaneE2E$' ./internal/prchange/) >"${log}" 2>&1 || status=$?
+(cd "${module_dir}" && nice -n 10 go test -p 4 -count=1 -v -timeout 90m -run '^TestLaneE2E$' ./internal/prchange/) >"${log}" 2>&1 || status=$?
 cat "${log}"
 if [ "${status}" -ne 0 ]; then
   echo "run-pg-decider-lane-e2e: the end-to-end gate FAILED (go test exit ${status})" >&2

@@ -11,4 +11,17 @@ a-listing-that-reports-itself-truncated-fails-the-run-and-writes-nothing
 the-bd-list-query-of-a-prs-review-items-returns-every-state
 pg-desks-zero-filled-decision-labels-equal-the-deciders-rules-and-reasons
 the-drift-check-fails-on-a-decider-value-pg-desk-lacks-and-on-the-reverse
+a-burst-of-pushes-yields-one-review-item-for-the-head-the-burst-ended-on
+a-claimed-review-item-at-the-current-head-blocks-a-second
+an-item-created-at-one-head-updated-to-another-and-closed-blocks-a-re-create
+legacy-suffix-less-open-and-closed-review-items-are-recognized
+force-review-with-only-a-claimed-or-closed-same-head-item-creates-one-new-item-and-consumes-the-flag-only-on-success
+a-claim-that-lands-between-the-listing-and-the-update-leaves-the-item-unchanged
+a-reopened-pr-with-several-closed-review-items-reopens-none-and-creates-none-for-a-reviewed-head
+a-deferred-review-item-is-left-alone-and-does-not-block-a-create
+two-concurrent-composed-runs-for-one-pr-yield-exactly-one-anchor
+the-same-race-against-a-double-that-skips-the-lock-yields-two-anchors
+a-duplicate-pr-changed-writes-nothing
+a-kill-between-a-tracker-create-and-its-audit-comment-then-a-rerun-creates-no-duplicate
+a-decider-run-that-exits-2-converges-on-rerun-with-the-failure-injected-by-a-passthrough-over-real-bd
 the-scenario-list-is-the-list-the-gate-asserts

@@ -2,7 +2,10 @@ module github.com/phillipgreenii/pg-decider
 
 go 1.25.0
 
-require github.com/spf13/cobra v1.8.1
+require (
+	github.com/spf13/cobra v1.8.1
+	pgregory.net/rapid v1.3.0
+)
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

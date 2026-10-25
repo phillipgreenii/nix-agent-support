@@ -278,12 +278,15 @@ func forgeShim(ctl, base string, real *realTracker) string {
 	// With a real tracker, the tracker verbs go to the real pg-connector instead
 	// of the control-file answers below.
 	realCase := ""
+	realCreate := "exit 1" // no real tracker: the create barrier is not offered
 	if real != nil {
 		verbs := "'search '*|'issue create '*|'issue show '*"
 		if real.all {
 			verbs = "'search '*|'issue '*"
 		}
-		realExec := "exec env " + strings.Join(quoteAll(real.env), " ") + " " + shq(real.connector) + ` "$@"`
+		realRun := "env " + strings.Join(quoteAll(real.env), " ") + " " + shq(real.connector) + ` "$@"`
+		realExec := "exec " + realRun
+		realCreate = realRun
 		realCase = verbs + ")\n  " + realExec + ";;\n"
 		if real.all {
 			// The lookup listing is the real tracker's own unless a test overrides
@@ -301,6 +304,39 @@ code_answer() {
   printf '{"error":{"code":"%s","message":"%s"}}\n' "$1" "${2:-forced $1}"
   exit 1
 }
+# Test hooks of the real-tracker gate (all inert unless the control file exists):
+#  hold.comment      an 'issue comment' call announces itself (hold.comment.reached) and
+#                    waits until hold.comment is removed (the run can be killed there)
+#  hook.issue-show   a shell script run before every 'issue show' passes through (it removes
+#                    itself when it has done its work)
+#  barrier.create    holds every 'issue create' until that many have arrived, then runs
+#                    them one at a time (the real tracker takes one writer)
+case "$*" in
+'issue comment '*)
+  if [ -f "$CTL/hold.comment" ]; then
+    : > "$CTL/hold.comment.reached"
+    while [ -f "$CTL/hold.comment" ]; do sleep 0.05; done
+  fi;;
+'issue show '*)
+  if [ -f "$CTL/hook.issue-show" ]; then sh "$CTL/hook.issue-show"; fi;;
+'issue create '*)
+  if [ -f "$CTL/barrier.create" ]; then
+    want=$(cat "$CTL/barrier.create")
+    printf 'x\n' >> "$CTL/barrier.arrived"
+    i=0
+    while :; do
+      have=$(wc -l < "$CTL/barrier.arrived"); have=$((have + 0))
+      [ "$have" -ge "$want" ] && break
+      i=$((i + 1)); [ "$i" -gt 1200 ] && break
+      sleep 0.05
+    done
+    until mkdir "$CTL/create.mutex" 2>/dev/null; do sleep 0.02; done
+    ` + realCreate + `
+    rc=$?
+    rmdir "$CTL/create.mutex"
+    exit $rc
+  fi;;
+esac
 case "$*" in
 ` + realCase + `'pr show '*)
   while [ -f "$CTL/block" ]; do sleep 0.05; done

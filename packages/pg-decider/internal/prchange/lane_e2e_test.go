@@ -62,7 +62,7 @@ const laneE2EScenariosFile = "testdata/lane-e2e-scenarios.txt"
 
 // minLaneE2EScenarios is the number of scenarios the gate must run; keep it
 // equal to the minScenarios of the nix check and of the hook script.
-const minLaneE2EScenarios = 11
+const minLaneE2EScenarios = 24
 
 // e2eSeeded is N, the number of PRs whose keyless anchors the adoption
 // scenarios seed.
@@ -315,6 +315,7 @@ type e2eWorld struct {
 	ids     []string          // the PR ids, acme/api#301...
 	anchor  map[string]string // PR id to its keyless anchor's bead id
 	review  map[string]string // PR id to its keyless review item's bead id
+	shimCtl string            // the control directory of the bd passthrough ("" without one)
 }
 
 func deciderConfig(dir string, ceiling int) string {
@@ -331,22 +332,48 @@ func deciderConfig(dir string, ceiling int) string {
 // store rows at version 0 (never hydrated); otherwise they are hydrated.
 func newE2EWorld(t *testing.T, tools e2eTools, n int, legacy bool) *e2eWorld {
 	t.Helper()
+	return newE2EWorldWith(t, tools, e2eOpts{n: n, legacy: legacy, seed: true})
+}
+
+// e2eOpts are the variations of one world.
+type e2eOpts struct {
+	n      int  // the number of PRs
+	legacy bool // the PRs' store rows stay at version 0 (never hydrated)
+	// seed gives every PR a keyless anchor and a keyless review item at its head
+	// (the shapes the old sync left); unset, the tracker starts empty.
+	seed bool
+	// shim puts a passthrough over bd on the connector's PATH that logs every
+	// write and fails the Nth one on request (see bdShim).
+	shim bool
+	// head is every PR's head sha; unset, the fixture's default (head0301 ...).
+	head string
+}
+
+func newE2EWorldWith(t *testing.T, tools e2eTools, o e2eOpts) *e2eWorld {
+	t.Helper()
+	n, legacy := o.n, o.legacy
 	w := &e2eWorld{t: t, tools: tools, tr: newTracker(t, tools), anchor: map[string]string{}, review: map[string]string{}}
 	var prs []string
 	for i := 0; i < n; i++ {
 		num := 301 + i
 		id := fmt.Sprintf("acme/api#%d", num)
 		w.ids = append(w.ids, id)
-		md := map[string]string{
-			"repo": "acme/api", "pr_number": strconv.Itoa(num), "state": "open",
-			"branch": fmt.Sprintf("feature-%d", num), "base": "main", "author": "phillipgreenii", "draft": "false",
+		if o.seed {
+			md := map[string]string{
+				"repo": "acme/api", "pr_number": strconv.Itoa(num), "state": "open",
+				"branch": fmt.Sprintf("feature-%d", num), "base": "main", "author": "phillipgreenii", "draft": "false",
+			}
+			w.anchor[id] = w.tr.create(fmt.Sprintf("%s: Cache the lookups %d", id, num), "merge-request", "", md)
+			w.review[id] = w.tr.create("review-pr: "+id, "task", w.anchor[id], map[string]string{
+				"repo": "acme/api", "pr_number": strconv.Itoa(num), "branch": fmt.Sprintf("feature-%d", num),
+				"head_sha": fmt.Sprintf("head%04d", num), "ownership": "mine",
+			})
 		}
-		w.anchor[id] = w.tr.create(fmt.Sprintf("%s: Cache the lookups %d", id, num), "merge-request", "", md)
-		w.review[id] = w.tr.create("review-pr: "+id, "task", w.anchor[id], map[string]string{
-			"repo": "acme/api", "pr_number": strconv.Itoa(num), "branch": fmt.Sprintf("feature-%d", num),
-			"head_sha": fmt.Sprintf("head%04d", num), "ownership": "mine",
-		})
-		prs = append(prs, fmt.Sprintf(`{"number": %d, "title": "Cache the lookups %d", "author": "phillipgreenii"}`, num, num))
+		head := ""
+		if o.head != "" {
+			head = fmt.Sprintf(`, "head_sha": %q`, o.head)
+		}
+		prs = append(prs, fmt.Sprintf(`{"number": %d, "title": "Cache the lookups %d", "author": "phillipgreenii"%s}`, num, num, head))
 	}
 	quoted := make([]string, len(w.ids))
 	for i, id := range w.ids {
@@ -358,8 +385,14 @@ func newE2EWorld(t *testing.T, tools e2eTools, n int, legacy bool) *e2eWorld {
 	conn := tools.connectorDir(t)
 	registry := filepath.Join(t.TempDir(), "config.yaml")
 	must(t, os.WriteFile(registry, []byte(e2eRegistry), 0o600))
+	sep := string(os.PathListSeparator)
+	connPath := conn + sep + filepath.Dir(tools.bd) + sep + filepath.Dir(tools.git) + sep + "/usr/bin:/bin"
+	if o.shim {
+		w.shimCtl = t.TempDir()
+		connPath = writeBDShim(t, tools, w.shimCtl) + sep + connPath
+	}
 	w.connEnv = e2eEnv(tools,
-		"PATH="+conn+string(os.PathListSeparator)+filepath.Dir(tools.bd)+string(os.PathListSeparator)+filepath.Dir(tools.git)+string(os.PathListSeparator)+"/usr/bin:/bin",
+		"PATH="+connPath,
 		"HOME="+t.TempDir(), "XDG_STATE_HOME="+t.TempDir(),
 		"PG_PR_CONFIG="+registry, "PG_CONNECTOR_ISSUE_BEADS_DIR="+w.tr.dir)
 	var legacyIDs []string
@@ -972,6 +1005,11 @@ func TestLaneE2E(t *testing.T) {
 			}
 		}
 	})
+
+	// Packet P4c-2: the review-rule scenarios, then the concurrency and
+	// failure-injection ones, each in a tracker of its own.
+	reviewScenarios(tools, run)
+	failureScenarios(tools, run)
 
 	run("the-scenario-list-is-the-list-the-gate-asserts", func(t *testing.T) {
 		want := readScenarioNames(t)

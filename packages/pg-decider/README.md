@@ -7,6 +7,13 @@ behavior lives in `docs/behavior/pg-decider/`; this page covers building and tes
 
 - Whole module: `nix build .#checks.<system>.pg-decider-go-tests` (or `go test ./...` in this
   directory).
+- Property tests (`internal/workitem/property_test.go`, `internal/rules/property_test.go`): the dedup
+  key round trips, key comparison is symmetric and never matches across entities (`#1`, `#10`,
+  `#100`), adoption by title shape never adopts into another entity, and the plan after an apply is
+  empty over generated views (with a node id, the one remaining step is the deliberate rewrite of the
+  keys to the node_id form). They use `pgregory.net/rapid`, as `pg-task-focus` does, vendored through
+  `go.mod` and `gomod2nix.toml`, with the seed pinned to 1 in code (`RAPID_SEED` or `-rapid.seed`
+  overrides it, e.g. to look for new failures).
 - Parity gate (the decider against its frozen golden): `nix build .#checks.<system>.pg-decider-parity-gate -L`.
 - `pg-pr-change` real-tool gate (the real `pg-desk`, `pg-decider` and `pg-pr-change` against a
   fixture-driven connector): `nix build .#checks.<system>.pg-pr-change-real-tools -L`. The tests that
@@ -25,7 +32,13 @@ behavior lives in `docs/behavior/pg-decider/`; this page covers building and tes
   missing one is a loud failure). The scenarios: N keyless anchors adopted with no creates, the second
   apply writing nothing, plan and apply agreeing per kind and operation, an unhydrated view refused, a
   lookup listing above the ceiling or reporting itself truncated failing the run closed, the `bd list`
-  query that finds a PR's review items in every state, and the drift check of pg-desk's zero-filled
+  query that finds a PR's review items in every state, the review rule against the real tracker (a
+  burst of pushes, claimed, closed, legacy suffix-less, deferred and force-reviewed items, a claim
+  landing between the listing and the update, a reopened PR), two concurrent composed runs for one PR
+  (one anchor with the lock, two with a double that skips it, the interleaving forced by the fake
+  forge's `block` control and a create barrier), a duplicate delivery, a kill between a tracker create
+  and its audit comment, a decider run that exits 2 through a passthrough shim over the real `bd` that
+  fails the Nth write, and the drift check of pg-desk's zero-filled
   `pg_decider_decisions_total` rule and reason labels against the decider's own lists (a change to
   `internal/action` reasons or to a registered rule needs `packages/pg-desk/internal/lanestate/vocab.go`
   updated in the same change, or this gate fails). The sandbox has real `bd`, but it needs `git` on
