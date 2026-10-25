@@ -102,7 +102,9 @@ func anchorsAfterRace(t *testing.T, tools e2eTools, withLock bool) int {
 	r := w.r
 	args := func(n string) []string {
 		if withLock {
-			return []string{"apply", id}
+			// The wait is long: under load the first run can take longer than the
+			// default 30 s lock wait to finish after the block is lifted.
+			return []string{"apply", id, "--lock-wait", "10m"}
 		}
 		return []string{"apply", id, "--lock-dir", filepath.Join(r.dir, "locks-"+n)}
 	}
