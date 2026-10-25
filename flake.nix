@@ -14441,11 +14441,11 @@
                     grep -q '^exec ${binary} --config ' "$work/entry.sh" || { echo "entry does not exec the configured binary" >&2; exit 1; }
 
                     # Run it with an EMPTY environment (launchd supplies no PATH), from /.
-                    out="$work/argv.out"
-                    ( cd / && exec env -i FAKE_JIRA_OUT="$out" ${pkgs.bash}/bin/bash "$work/entry.sh" )
-                    [ -s "$out" ] || { echo "the fake binary was never exec'd" >&2; exit 1; }
+                    argv_out="$work/argv.out"
+                    ( cd / && exec env -i FAKE_JIRA_OUT="$argv_out" ${pkgs.bash}/bin/bash "$work/entry.sh" )
+                    [ -s "$argv_out" ] || { echo "the fake binary was never exec'd" >&2; exit 1; }
                     printf '%s\n' ${binary} --config "$cfgpath" serve > "$work/want"
-                    cmp "$out" "$work/want" || { echo "the fake binary saw a different path or argv:" >&2; cat "$out" >&2; exit 1; }
+                    cmp "$argv_out" "$work/want" || { echo "the fake binary saw a different path or argv:" >&2; cat "$argv_out" >&2; exit 1; }
                     touch $out
                   '';
 
