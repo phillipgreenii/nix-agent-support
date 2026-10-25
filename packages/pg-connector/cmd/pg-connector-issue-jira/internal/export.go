@@ -44,5 +44,6 @@ func IsJiraKey(id string) bool { return jiraKeyRE.MatchString(id) }
 func (b *Backend) WithGetenv(getenv func(string) string) *Backend {
 	cp := *b
 	cp.getenv = getenv
+	cp.opCache = &operatorCache{} // another environment is another operator
 	return &cp
 }

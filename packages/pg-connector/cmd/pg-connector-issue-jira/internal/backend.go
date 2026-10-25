@@ -53,12 +53,16 @@ type Backend struct {
 	// lookup so resolution never depends on this process's real
 	// environment, mirroring CLIRunner's own Getenv field.
 	getenv func(string) string
+	// opCache holds the operator identity OperatorFacts resolves once (see
+	// export_facts.go). Nil means no caching: OperatorFacts resolves on every
+	// call. New and WithGetenv set it.
+	opCache *operatorCache
 }
 
 // New returns a Backend wrapping the given Runner. Production wiring passes
 // NewCLIRunner(); tests inject a fake Runner.
 func New(r Runner) *Backend {
-	return &Backend{runner: recordingRunner{Runner: r}}
+	return &Backend{runner: recordingRunner{Runner: r}, opCache: &operatorCache{}}
 }
 
 // recordingRunner notes each pjira execution and each failed run on the
