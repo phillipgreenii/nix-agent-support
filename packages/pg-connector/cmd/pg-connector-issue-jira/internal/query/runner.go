@@ -73,7 +73,10 @@ func NewRunner(cfg RunnerConfig) (*lq.Runner, error) {
 		AdHocWatch: false,
 		Changes:    cfg.Chg,
 		Confirmer:  NewConfirmer(cfg.Summary),
-		Log:        cfg.Log,
+		// The confirming read runs before the run commits, while the issue still
+		// counts as a member and so books nothing: book it again once it is out.
+		AfterDeparture: cfg.Summary.BookAfterDeparture,
+		Log:            cfg.Log,
 	}
 	if cfg.Auth != nil {
 		rc.Auth = cfg.Auth

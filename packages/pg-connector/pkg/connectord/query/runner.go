@@ -158,6 +158,14 @@ type Config struct {
 	// confirmed, so the run does not store its result (the departure is retried
 	// by the next run, never dropped).
 	Confirmer Confirmer
+	// AfterDeparture, when set, is called once for every departure the run
+	// confirmed (the entity is not gone) AFTER the run's result is committed, so
+	// the stored row no longer lists the entity. The confirming read happens
+	// before that commit, when the entity still counts as a member; a caller that
+	// books follow-up work for an entity that has left every query does it here.
+	// A failure is logged (event "query_after_departure_failed"), not returned:
+	// the run's result is already stored and its departure row appended.
+	AfterDeparture func(ctx context.Context, id string) error
 	// Log reports an event the run survives (a previous id that cannot be a
 	// departure candidate); nil discards.
 	Log func(event string, kv ...any)
@@ -458,6 +466,7 @@ func (r *Runner) runWith(ctx context.Context, key Key, class governor.Class, opt
 		if err := r.cfg.Store.PutQuery(ctx, row); err != nil {
 			return store.QueryRow{}, err
 		}
+		r.afterDeparture(ctx, left)
 		return row, nil
 	}
 	err = r.cfg.Store.InTx(ctx, func(tx *store.Tx) error {
@@ -477,7 +486,21 @@ func (r *Runner) runWith(ctx context.Context, key Key, class governor.Class, opt
 	if err != nil {
 		return store.QueryRow{}, err
 	}
+	r.afterDeparture(ctx, left)
 	return row, nil
+}
+
+// afterDeparture hands each confirmed departure of a committed run to
+// Config.AfterDeparture.
+func (r *Runner) afterDeparture(ctx context.Context, left []membershipRow) {
+	if r.cfg.AfterDeparture == nil {
+		return
+	}
+	for _, m := range left {
+		if err := r.cfg.AfterDeparture(ctx, m.ID); err != nil {
+			r.log("query_after_departure_failed", "id", m.ID, "err", err)
+		}
+	}
 }
 
 // recordError notes a failed run on the stored row (a row is created when there

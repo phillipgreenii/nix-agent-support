@@ -726,3 +726,40 @@ func TestFixtures_SwapWhileTheSchedulerGoroutineReadsThem(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
+
+func TestMembership_AfterDepartureRunsOnlyAfterTheCommitAndOnlyForAConfirmedDeparture(t *testing.T) {
+	r := newEngineRig(t)
+	var (
+		mu     sync.Mutex
+		called []string
+		seen   []string // the stored ids each call saw
+	)
+	r.runner.cfg.AfterDeparture = func(ctx context.Context, id string) error {
+		row, _, err := r.st.GetQuery(ctx, "mine")
+		if err != nil {
+			return err
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		called = append(called, id)
+		seen = append(seen, strings.Join(row.IDs, ","))
+		return errors.New("booking failed")
+	}
+	r.baselined(t, memA, memB, memC)
+	r.conf.set(memB.id, Confirmation{State: "open"})
+	r.conf.set(memC.id, Confirmation{Gone: true})
+	r.list(true, memA)
+	r.runKey(t)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(called, []string{memB.id}) {
+		t.Fatalf("AfterDeparture ids = %v, want only the confirmed departure %s", called, memB.id)
+	}
+	if !slices.Equal(seen, []string{memA.ref}) {
+		t.Errorf("stored ids at the call = %v, want the new row already committed", seen)
+	}
+	if !slices.Contains(r.log.seen(), "query_after_departure_failed") {
+		t.Errorf("log = %v, want a failed booking logged, not returned", r.log.seen())
+	}
+}

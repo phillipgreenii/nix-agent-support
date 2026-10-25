@@ -5,9 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/changes"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/groups"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/summary"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	lq "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -193,6 +196,49 @@ func TestMemberThatClosedAndLeftTheQueryStillGetsItsClosedRow(t *testing.T) {
 	}
 	if got := h.watched(); !eq(got, []string{"A-1", "A-2"}) {
 		t.Errorf("watched = %v, want the flag to outlive membership", got)
+	}
+}
+
+// The run confirms a departure BEFORE it stores the new row, when the issue is
+// still counted as a member, so the confirmer's own booking is a no-op there.
+// The runner books the departed issue again after the run commits.
+func TestIssueThatLeftTheQueryButIsStillOpenIsBookedForRefreshAfterTheRun(t *testing.T) {
+	h := newHarness(t, 100)
+	h.fake.setIssue("A-1", "indeterminate")
+	h.fake.setIssue("A-2", "indeterminate")
+	h.fake.list(jqlMine, "A-1", "A-2")
+	h.fetch("mine")
+	if _, ok := h.sched.InspectQueued("A-1", groups.Summary); ok {
+		t.Fatal("a member's summary refresh is booked, but its query run refreshes it")
+	}
+
+	// A-1 stays open but no longer matches the query.
+	h.fake.list(jqlMine, "A-2")
+	h.fetch("mine")
+	if m, err := Members(context.Background(), h.st); err != nil || m["A-1"] {
+		t.Fatalf("Members = %v, %v, want A-1 to have left", m, err)
+	}
+	if c, ok := h.sched.InspectQueued("A-1", groups.Summary); !ok || c != governor.ClassKeepAlive {
+		t.Fatalf("queued = %v class %v, want the departed issue's summary refresh booked at class 4", ok, c)
+	}
+	if _, ok := h.sched.InspectQueued("A-2", groups.Summary); ok {
+		t.Error("the remaining member's summary refresh is booked")
+	}
+
+	// The booking is carried out: the issue's summary is refreshed from the
+	// origin once its stored freshness lapses.
+	before := len(h.fake.callList())
+	h.fake.setIssue("A-1", "in progress")
+	h.clk.Advance(settingsRules.SummaryTTL + 2*time.Minute)
+	h.sched.Drain(context.Background())
+	refreshed := false
+	for _, c := range h.fake.callList()[before:] {
+		if strings.Contains(strings.Join(c, " "), `key in ("A-1")`) {
+			refreshed = true
+		}
+	}
+	if !refreshed {
+		t.Errorf("origin calls after the lapse = %v, want a key search for A-1", h.fake.callList()[before:])
 	}
 }
 

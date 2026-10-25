@@ -21,7 +21,11 @@
 //   - Tracker (NewTracker): nothing to do; every listed issue already has a row
 //     because the lister persisted it.
 //   - Confirmer (NewConfirmer): the one fresh read that tells an issue that
-//     closed from one that was merely filtered out of a query.
+//     closed from one that was merely filtered out of a query. The read runs
+//     before the run's row is stored, while the issue still counts as a member,
+//     so the runner books the departed issue's summary refresh again after the
+//     run commits (Config.AfterDeparture, summary.Service.BookAfterDeparture);
+//     nothing else refreshes it until the daemon restarts.
 //   - Aliases: the summary package's NewAliases.
 //
 // # Watched queries
