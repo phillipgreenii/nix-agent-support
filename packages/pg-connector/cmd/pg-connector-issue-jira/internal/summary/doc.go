@@ -18,6 +18,13 @@
 //   - NewAliases is the query runner's alias table: a Jira key is its own stable
 //     id, so a reference resolves without an origin call.
 //
+//   - Service is the refresh of the summary group for the issues that are not
+//     members of a configured query: its scheduler executor (one key-in search
+//     per batch), the read-through Ensure that fetches an issue a caller asked
+//     for and so tracks it, Rebuild of the queued tasks at start, and the
+//     re-booking of the next refresh after every store. ContentFromPjira maps a
+//     decoded pjira issue to the stored summary content.
+//
 // This package adds no store rung: the closed-at rung (entity.closed_at) came
 // with the shared library and is written only through Store.SetClosedAt.
 package summary
