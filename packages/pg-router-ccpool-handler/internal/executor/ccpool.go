@@ -1489,7 +1489,10 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 		// active is read once per poll, ahead of the end test, because the stall
 		// bound below reads the row that read observed.
 		isActive := r.active(ctx, name)
-		if !isActive && (!release || r.waitSessionQuiet(ctx, name, r.quietWindow(d.Role.CCPool))) {
+		// An unanswered Bash call inside its declared timeout is activity too
+		// (pg2-r4ig2): a subagent in one long hook run writes nothing until it
+		// returns, and closing the pane would kill the call and park the bead.
+		if !isActive && (!release || r.waitSessionEnded(ctx, name, r.quietWindow(d.Role.CCPool))) {
 			// re-check-after-death: the bead may have closed as the session ended.
 			if done, _, _ = check(true); done {
 				if won() {

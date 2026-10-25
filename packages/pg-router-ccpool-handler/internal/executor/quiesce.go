@@ -48,14 +48,34 @@ import (
 // finishes in one short, flat pass (review) pays ~2.5-3.5 min of counted-slot
 // hold per dispatch for it, so it MAY set a shorter window
 // (roles.CCPoolConfig.WorktreeQuietWindow). The consequence of a wrong "quiet"
-// is bounded: the worktree removal is non-force (git refuses a dirty tree), the
-// settled-session close is non-purge, and a removed worktree only ever strands
-// a subagent that was still running after the session's own bead had already
-// completed.
+// is bounded for THIS function's callers (the post-completion cleanup and
+// settled-session close): the worktree removal is non-force (git refuses a
+// dirty tree), the settled-session close is non-purge, and a removed worktree
+// only ever strands a subagent that was still running after the session's own
+// bead had already completed. It is NOT bounded for the close-or-release END
+// test, which runs before the bead completes (a wrong "quiet" kills the call,
+// releases the claim and parks the bead), so that caller uses waitSessionEnded,
+// which also treats an unanswered Bash call inside its declared timeout plus
+// grace as activity (bead pg2-r4ig2, inflight.go).
 //
 // Fail-safe directions: session absent or no transcript path (nothing
 // observable) => proceed, matching needsInputAlive's "absent => gone".
 func (r *ccpoolRun) waitSessionQuiet(ctx context.Context, name string, window time.Duration) bool {
+	return r.awaitQuiet(ctx, name, window, false)
+}
+
+// waitSessionEnded is waitSessionQuiet for the close-or-release END test
+// (INV-CCH-28, bead pg2-r4ig2): the session is also NOT quiet while a Bash tool
+// call is unanswered inside its declared timeout plus grace (InFlightToolCall).
+// Before the bead completes, a wrong "quiet" kills the call, releases the
+// claim, parks the bead human and counts a failure, so the transcript-mtime
+// heuristic alone is not enough. A window <= 0 still disables the check.
+func (r *ccpoolRun) waitSessionEnded(ctx context.Context, name string, window time.Duration) bool {
+	return r.awaitQuiet(ctx, name, window, true)
+}
+
+// awaitQuiet is the shared body; honorInFlight adds the unanswered-call test.
+func (r *ccpoolRun) awaitQuiet(ctx context.Context, name string, window time.Duration, honorInFlight bool) bool {
 	if window <= 0 {
 		return true
 	}
@@ -77,6 +97,10 @@ func (r *ccpoolRun) waitSessionQuiet(ctx context.Context, name string, window ti
 	if latest == nil {
 		latest = LatestTranscriptActivity
 	}
+	inFlight := r.deps.InFlight
+	if inFlight == nil {
+		inFlight = InFlightToolCall
+	}
 	poll := r.deps.Cfg.PollInterval
 	if poll <= 0 {
 		poll = time.Second
@@ -84,6 +108,9 @@ func (r *ccpoolRun) waitSessionQuiet(ctx context.Context, name string, window ti
 	deadline := r.deps.clock().Add(r.deps.Cfg.WorktreeQuietMax)
 	for {
 		now := r.deps.clock()
+		if honorInFlight && inFlight(transcript, now) {
+			return false // a call is running; do not hold this poll for the quiet loop
+		}
 		t, ok := latest(transcript)
 		if !ok || now.Sub(t) >= window {
 			return true

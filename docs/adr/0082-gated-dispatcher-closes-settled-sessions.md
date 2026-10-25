@@ -128,6 +128,14 @@ The dispatch-time reconcile does not help: it closes only sessions whose bead is
   trade-off is the straggler-subagent risk (a subagent silent for longer than the window is
   mistaken for finished), which is why the override is per role and opt-in rather than a shorter
   default.
+- Later note (2026-10-25, bead `pg2-r4ig2`): the claim that a wrong "quiet" is bounded holds only
+  AFTER the dispatch's bead has completed, which is when this ADR's worktree removal and
+  settled-session close ask it. The close-or-release END test (`INV-CCH-28`) asks the same
+  question before completion, and there a subagent silent inside one long Bash call (a hook run)
+  was closed as `session-idle`, its call killed and its bead parked human (4 traced cases on
+  2026-10-25). The end test therefore also counts an unanswered Bash call, inside its declared
+  timeout plus a grace, as activity. The window itself and the post-completion callers are
+  unchanged: lengthening the window would have held every successful dispatch's slot longer.
 - Rejected: leaving the slot to `idle_ttl` and shortening it. It also shortens the life of
   sessions that are legitimately idle between turns, and adds no signal that the dispatch is
   finished.

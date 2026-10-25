@@ -596,8 +596,15 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   multi-minute test run) writes nothing for that span and looks quiet once the window passes. A
   shorter window shortens the span a silent subagent is tolerated, so it raises the chance of
   removing a worktree, or closing the session, under a subagent that is still working. The
-  consequence is bounded: removal is non-force (git refuses a dirty tree), the close does not
-  purge, and this only arises after the role's own bead has completed. The default stays at 2
+  consequence is bounded only AFTER the role's own bead has completed: removal is non-force (git
+  refuses a dirty tree), the close does not purge, and a removed worktree only strands a subagent
+  that was still running once the bead was done. That statement does NOT hold for the
+  close-or-release END test (`INV-CCH-28`), which asks the same question BEFORE the bead
+  completes, where a wrong "quiet" kills the running call, releases the claim, parks the bead and
+  counts a failure; that test therefore also treats an unanswered tool call as activity (bead
+  `pg2-r4ig2`, see `INV-CCH-28`), while the window itself, and so the post-completion cleanup and
+  settled-session close (`INV-CCH-15`, `INV-CCH-17`) and the review role's override, are
+  unchanged and never wait for an unanswered call. The default stays at 2
   minutes for a role that fans out subagents (code review fan-out); a role that finishes in one
   flat pass with few or no subagents, such as review, MAY shorten it (20 to 30 seconds is the
   intended range). The window is not shortened by default because the risk is invisible until a
@@ -670,6 +677,24 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     quiet, the handler keeps waiting under the same time bound as every other mode. The
     release test runs only once the session has ended, and again after the one bounded re-read
     that `INV-CCH-7`'s death branch already makes.
+  - **An unanswered tool call is activity** (bead `pg2-r4ig2`). The transcript-write heuristic
+    cannot see a subagent inside ONE long Bash call (a `git commit` running the pre-commit hooks,
+    a pre-land hook run): it writes nothing until the call returns, and closing the pane then
+    kills the call, releases the claim, parks the bead human and counts a handler-error. A
+    session is therefore NOT ended, whatever its transcripts' age, while its own transcript or any
+    subagent transcript holds a Bash tool call with no result yet AND the time since that
+    transcript's last write is still inside the call's declared timeout (120 seconds when it
+    declares none, never more than 600 seconds) plus a grace of 30 seconds. Once that time has
+    elapsed with still no result, or when the newest entry is a finished result, the plain quiet
+    test decides as before, so a genuinely dead session is still detected and handled as today
+    (`session-idle`, the bead parked human). Limit: a call started in the background returns at
+    once, so it is not seen. This applies to the end test ONLY: the post-completion cleanup and
+    settled-session close (`INV-CCH-15`, `INV-CCH-17`) keep the plain `INV-CCH-23` window, so a
+    finished dispatch never holds its pool slot for an unanswered call. **Why not a longer
+    window.** The same window gates the post-completion work, so lengthening it would hold every
+    successful dispatch's slot longer, and a role override cannot exceed the quiet bound of
+    `INV-CCH-23` while one call may run to 600 seconds. **Why not the process tree.** ccpool does
+    not expose the session's process id to the handler.
   - **Claim latch.** The handler latches that the session claimed its bead the first time it
     reads the bead `in_progress` AND assigned to the role's own actor. A bead held by anyone else
     MUST NOT set the latch (a peer can win the claim between the precheck and the worker's own

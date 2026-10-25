@@ -98,6 +98,14 @@ Fixture output for the first recipe is `2026-09-23T14:01:00.000000000Z` / `worke
   facts line (`ccpool-session: state=... live=... present=... close_reason=...`) followed by
   `| tail:` and the last three non-empty transcript lines, so it is never empty. ccpool exposes
   no process exit status or signal, so none is recorded.
+- A `session-idle` on a `close-or-release` (drain) role means the session's transcripts were quiet
+  for the window AND no Bash call was still unanswered inside its declared timeout plus a 30 second
+  grace (bead `pg2-r4ig2`; before it, a subagent inside one long hook run was closed as
+  `session-idle` with its call killed, tool result `Exit code 137`). So a `session-idle` whose
+  subagent transcript ends in a Bash `tool_use` with no `tool_result` is only possible after the
+  call's timeout plus grace passed (a hung call, or a dead session): read the tail of the newest
+  file under `<session>/subagents/`. A call started with `run_in_background` is not seen by this
+  test.
 - An `unknown` signature means the session was still alive and working when the failure was
   recorded (for example, `not complete within MAX_WAIT`), or no session row was ever observed. It
   is not evidence of success or of a specific cause; read its evidence.

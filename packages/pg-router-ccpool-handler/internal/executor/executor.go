@@ -79,6 +79,11 @@ type Deps struct {
 	// transcript files (nil ⇒ filesystem scan, LatestTranscriptActivity).
 	// ok=false means nothing observable. Tests substitute a fake.
 	LatestActivity func(transcriptPath string) (t time.Time, ok bool)
+	// InFlight reports whether a session transcript (or a subagent's) ends with
+	// a Bash call still inside its declared timeout plus grace (nil ⇒
+	// InFlightToolCall). Only the close-or-release END test asks (INV-CCH-28,
+	// bead pg2-r4ig2); the post-completion quiet checks never do.
+	InFlight func(transcriptPath string, now time.Time) bool
 	// LockDir is the directory holding the per-session flocks that serialize an
 	// absorbing dispatch against the orphan reconcile (sessionlock, bead
 	// pg2-g2u9m, INV-CCH-18): <handler state dir>/locks. Empty disables the lock
