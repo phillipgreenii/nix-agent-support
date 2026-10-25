@@ -415,6 +415,26 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment
 			return res, nil
 		}
 	}
+	// THE ARGV SPELLINGS OF THE EXEC SINKS THE CONFIG ROUTE ALREADY SCREENS (pg2-x5lf6).
+	// `remote.<n>.uploadpack` / `remote.<n>.receivepack` are configSink keys, and the `-c`
+	// spelling of each is refused by hasGitConfigInjection's floor; the command-line flags
+	// that set the SAME program (`--upload-pack`, `ls-remote -u`/`--exec`, `push
+	// --receive-pack`/`--exec`) were not screened at all, so `git ls-remote
+	// --upload-pack='touch /tmp/pwned;:' .` answered "read-only git command". It sits AFTER
+	// pushVerdict on purpose: a force / delete / URL push keeps its decisive Reject, exactly
+	// as the `-c` floor lets a decisive verdict win, and the answer here is the SAME
+	// refusal (NoOpinion) the `-c` twin gets, so the two spellings cannot disagree.
+	if reason, bad := execSinkFlagReason(subcmd, rest); bad {
+		return r.refuse(reason)
+	}
+	// `--output=<path>` on a read-only subcommand WRITES the command's output to <path>
+	// (git diff/log/show and the diff-family plumbing share the diff options). A read-only
+	// Approve must not cover a write the path evaluator would not allow a `>` redirect to.
+	if readOnlySubcommands[subcmd] {
+		if reason, bad := r.outputFlagReason(rest, cwd); bad {
+			return r.refuse(reason)
+		}
+	}
 	// branch: THE VERDICT IS BY SAFETY, NOT BY FLAG (operator ruling pg2-4yy4r item 5,
 	// implemented by pg2-fkmg4). A spelling from which GIT'S OWN GUARD has been removed
 	// Abstains; every spelling where that guard still stands keeps its Approve by
@@ -3543,6 +3563,91 @@ func hasAbbrevLongFlag(args []string, name string, minLen int) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// execSinkFlagReason reports whether rest carries a command-line flag that names a
+// PROGRAM git will run for the subcommand's transport (pg2-x5lf6): the argv twin of the
+// `remote.<n>.uploadpack` / `remote.<n>.receivepack` config sinks. Measured on git
+// 2.54.0, 2026-10-24, against a local-path remote with a marker script: `ls-remote
+// --upload-pack=<m>`, `ls-remote --upload-pa=<m>`, `ls-remote --exec=<m>`, `fetch
+// --upload-pack=<m>`, `push --receive-pack=<m>` and `push --exec=<m>` each RAN the marker.
+//
+// Long flags use the OPEN prefix matcher (cmdparse.HasLongFlagPrefix): this is a boolean
+// dangerous-flag test, so over-matching a spelling git would reject as ambiguous is the
+// fail-safe direction. `-u` is upload-pack ONLY for ls-remote; for `git fetch` it is
+// `--update-head-ok`, which stays approved. `--exec` is an alias only on ls-remote and
+// push, so it is not tested for fetch/pull. pull is not classified by this rule, but its
+// `--upload-pack` is screened anyway so a future pull verdict cannot reopen the sink.
+func execSinkFlagReason(subcmd string, rest []string) (string, bool) {
+	var flags []string
+	switch subcmd {
+	case "ls-remote":
+		flags = []string{"upload-pack", "exec"}
+		if cmdparse.HasShortFlag(rest, 'u') {
+			return "git ls-remote -u names the upload-pack program git will run (the argv twin of remote.<n>.uploadpack); deferring to prompt", true
+		}
+	case "fetch", "pull":
+		flags = []string{"upload-pack"}
+	case "push":
+		flags = []string{"receive-pack", "exec"}
+	default:
+		return "", false
+	}
+	for _, f := range flags {
+		if cmdparse.HasLongFlagPrefix(rest, f) {
+			return "git " + subcmd + " --" + f + " names a program git will run for the transport (the argv twin of the remote.<n>.uploadpack / receivepack config sinks); deferring to prompt", true
+		}
+	}
+	return "", false
+}
+
+// outputFlagReason reports whether rest carries `--output[=<path>]` (any abbreviation
+// git accepts, `=`-glued or separated value) whose target is not a path the evaluator
+// lets a command WRITE (pg2-x5lf6): the same judgment a `>` redirect target gets. A
+// writable in-project target keeps its Approve. It fails closed on a missing value, a
+// runtime-expanded value, a target under a `.git` directory (hooks), and a rule built
+// without an evaluator (nothing to judge the path with).
+func (r *Rule) outputFlagReason(rest []string, cwd string) (string, bool) {
+	const canonical = "output"
+	for i, a := range rest {
+		if a == "--" {
+			return "", false
+		}
+		if !strings.HasPrefix(a, "--") {
+			continue
+		}
+		name, val, hasVal := strings.Cut(a[2:], "=")
+		if name == "" || len(name) > len(canonical) || canonical[:len(name)] != name {
+			continue
+		}
+		if !hasVal {
+			if i+1 >= len(rest) {
+				return "git --output has no target; deferring to prompt", true
+			}
+			val = rest[i+1]
+		}
+		if !r.outputTargetWritable(val, cwd) {
+			return "git --output writes to " + val + ", which is not a writable in-project path; deferring to prompt", true
+		}
+	}
+	return "", false
+}
+
+func (r *Rule) outputTargetWritable(target, cwd string) bool {
+	if r.eval == nil || target == "" || strings.ContainsAny(target, "$`") {
+		return false
+	}
+	p := expandTilde(target)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(cwd, p)
+	}
+	p = filepath.Clean(p)
+	for _, part := range strings.Split(p, string(filepath.Separator)) {
+		if part == ".git" {
+			return false
+		}
+	}
+	return r.eval.Evaluate(p).CanWrite()
 }
 
 // pushShortFlagTokens returns args with every short-flag cluster truncated at
