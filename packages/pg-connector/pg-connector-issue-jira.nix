@@ -12,36 +12,21 @@ mkGoApp {
   # gomod2nix.toml, N mkGoApp calls building N different binaries out of it;
   # this packet does not create a second Go module (layout_convention_test.go).
   #
-  # Filtered src, mirroring pg-connector-issue-beads.nix's own fileset scoping
-  # (bead pg2-p5at3): this binary's entire build+test dependency graph is
-  # go.mod/go.sum/gomod2nix.toml, pkg/schema, pkg/scriptout's top-level package
-  # (not its schemas/ or conformance/ subpackages), pkg/provider's root
-  # iface.go plus its own pkg/provider/issue AND pkg/provider/search capability
-  # subpackages (search added by bead pg2-8hcnx), and its own
-  # cmd/pg-connector-issue-jira/ tree (main.go, internal/**).
-  # No cross-backend import exists, so editing
-  # pg-connector-scm-git/-pr-github/-ci-github-actions/-issue-beads' own files
-  # does not touch this derivation's content hash.
+  # Filtered src, mirroring pg-connector-github.nix: go.mod/go.sum/gomod2nix.toml,
+  # the whole ./pkg tree and this binary's own cmd/pg-connector-issue-jira/ tree
+  # (main.go, internal/**). The daemon imports the shared connector-daemon
+  # library (pkg/connectord) and its helpers, so ./pkg is included whole and a
+  # later change that adds a shared package under ./pkg needs no edit here;
+  # cmd/pg-connector/fileset_coverage_test.go checks this allowlist covers the
+  # binary's Go import closure. No cross-backend cmd/ import exists, so editing
+  # another backend's cmd/ tree does not touch this derivation's content hash.
   src = lib.fileset.toSource {
     root = ./.;
     fileset = lib.fileset.unions [
       ./go.mod
       ./go.sum
       ./gomod2nix.toml
-      ./pkg/schema
-      (lib.fileset.difference ./pkg/scriptout (
-        lib.fileset.unions [
-          ./pkg/scriptout/schemas
-          ./pkg/scriptout/conformance
-        ]
-      ))
-      ./pkg/provider/iface.go
-      ./pkg/provider/issue
-      ./pkg/provider/search
-      ./pkg/provider/activity
-      # Shared event-log writer (bead pg2-ltddq): this backend's internal/eventlog
-      # imports it, so it is part of the build+test dependency graph.
-      ./pkg/eventlog
+      ./pkg
       ./cmd/pg-connector-issue-jira
     ];
   };
