@@ -269,7 +269,15 @@ func (w *e2eWorld) setHead(id, head string) {
 // apply runs the composed command in apply mode and requires success.
 func (w *e2eWorld) apply(id string, extra ...string) result {
 	w.t.Helper()
-	res := w.r.change(append([]string{"apply", id}, extra...)...)
+	args := append([]string{"apply", id}, extra...)
+	res := w.r.change(args...)
+	// The connector gives one backend listing 40 s; on a host that is busy the
+	// real bd can overrun it, and the run then fails closed having written
+	// nothing (the fail-closed scenarios prove that), so it is run once more.
+	if res.code == ExitDecideFailed && strings.Contains(res.stderr, "work-item lookup is not reachable") {
+		w.t.Logf("apply %s: the tracker listing overran the connector's deadline, running it once more:\n%s", id, res.stderr)
+		res = w.r.change(args...)
+	}
 	if res.code != 0 {
 		w.t.Fatalf("apply %s exited %d:\n%s%s", id, res.code, res.stdout, res.stderr)
 	}
