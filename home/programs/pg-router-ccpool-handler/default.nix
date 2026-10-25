@@ -857,8 +857,8 @@ let
   # checkRenderedScript (bead pg2-12gr4.8.32): `check-rendered [--spec <file>]...
   # [--role <file>]...`, the build-time check of what this module renders. Each
   # `--spec` runs pg-wrap's own `pg-wrap check --spec <file>`; each `--role` runs
-  # the handler's own `validate --skip-pool-dirs --role-config <file>` (the nix
-  # sandbox has no pool directories). The two tools run side by side and neither
+  # the validate of the adapter of the file's `type` (the nix sandbox has no pool
+  # directories). The two tools run side by side and neither
   # calls the other. Every failing file is printed with its messages; the exit
   # is 1 if any check failed, else 0. A `validate` run fails when it exits
   # non-zero, or its reply is not parsable or has a non-empty `problems`;
@@ -867,7 +867,7 @@ let
     PATH=${lib.makeBinPath [ pkgs.coreutils ]}
     jq=${pkgs.jq}/bin/jq
     pgwrap=${pkgs.pg-wrap}/bin/pg-wrap
-    handler=${cfg.package}/bin/pg-router-ccpool-handler
+    handlerBin=${cfg.package}/bin
     failed=0
     while [ $# -gt 0 ]; do
       kind="$1"
@@ -893,8 +893,28 @@ let
       else
         rc=0
         errf="$(mktemp)"
-        reply="$(printf '%s' '{"schemaVersion":"1","id":"check-rendered"}' |
-          "$handler" validate --skip-pool-dirs --role-config "$file" 2>"$errf")" || rc=$?
+        # The old binary is gone (packet pg2-12gr4.10.17): a per-role JSON file is
+        # validated by the adapter of its `type`, handed the same name and
+        # settings as the request's role object (compat bridge; the per-role JSON
+        # and this branch go with packet cleanup-nix).
+        rtype="$("$jq" -r '.type // empty' "$file")"
+        adapter=""
+        adapter_args=()
+        case "$rtype" in
+          ccpool)
+            adapter="$handlerBin/pg-router-handler-ccpool"
+            adapter_args=(--skip-pool-dirs)
+            ;;
+          command) adapter="$handlerBin/pg-router-handler-command" ;;
+        esac
+        if [ -z "$adapter" ]; then
+          reply=""
+          rc=1
+          echo "unknown role type: $rtype" >"$errf"
+        else
+          req="$("$jq" -c '{schemaVersion: "1", id: "check-rendered", role: {name: .name, config: del(.name, .type, .survivesShutdown)}}' "$file")"
+          reply="$(printf '%s' "$req" | "$adapter" validate "''${adapter_args[@]}" 2>"$errf")" || rc=$?
+        fi
         msgs=""
         if [ "$rc" -ne 0 ]; then
           msgs="validate exited $rc: $reply $(cat "$errf")"
