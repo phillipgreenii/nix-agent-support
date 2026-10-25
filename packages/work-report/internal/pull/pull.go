@@ -44,8 +44,9 @@ const (
 const unknownSource = pgconn.Binary
 
 // DefaultRetryWait is how long a pull waits before it re-invokes the sources
-// that degraded on a deadline. Host stalls under load last from tens of
-// seconds to minutes, so an immediate retry would mostly hit the same stall;
+// that degraded on a deadline or as unavailable. Host stalls under load last
+// from tens of seconds to minutes, so an immediate retry would mostly hit the
+// same stall;
 // half a minute is long enough to let a burst of agent work drain and short
 // enough that the hourly pull stays well inside its period (one retry, one
 // wait, so the worst case adds this wait plus one backend deadline).
@@ -192,8 +193,9 @@ func disabledRow(source string) OutcomeRow {
 
 // pending is one outcome row waiting to be persisted: it carries the timing of
 // the attempt that produced it, so holding it back (see Run) never skews the
-// logged duration. retry marks a degraded row whose failure was a deadline; it
-// is the only kind of row Run holds back for a second attempt. retried is set
+// logged duration. retry marks a degraded row whose failure was a deadline or an
+// unavailable backend; it is the only kind of row Run holds back for a second
+// attempt. retried is set
 // on the row that replaced such a row after the retry.
 type pending struct {
 	row       OutcomeRow
@@ -343,11 +345,12 @@ func (r *run) handleDoc(ctx context.Context, u unit, doc wireDoc, unitStart time
 }
 
 // retryable reports whether row, built from the decoded sources[] row wr, is
-// a deadline-kind degradation worth one more attempt: the source itself
-// reported degraded (not a store lock, not a truncation) with a deadline
-// reason.
+// a transient degradation worth one more attempt: the source itself reported
+// degraded (not a store lock, not a truncation) with a deadline or an
+// unavailable reason.
 func retryable(wr wireRow, row OutcomeRow) bool {
-	return row.Status == StatusDegraded && wr.Status == StatusDegraded && isDeadlineReason(row.Reason)
+	return row.Status == StatusDegraded && wr.Status == StatusDegraded &&
+		(isDeadlineReason(row.Reason) || isUnavailableReason(row.Reason))
 }
 
 // The source rows carry no structured failure code (pg-connector's sources[]
@@ -373,11 +376,25 @@ var deadlineReason = regexp.MustCompile(
 
 func isDeadlineReason(reason string) bool { return deadlineReason.MatchString(reason) }
 
-// retryDeadlines waits once, then re-invokes each held deadline-degraded
-// source once, pinned to that source, replacing its held row with the retry's
+// unavailableReason matches the wire-taxonomy "unavailable" error the umbrella
+// writes into a degraded row's reason: pg-connector's fan-out sets
+// reason = err.Error(), and the scriptout sentinel renders as
+// "scriptout: unavailable: <message>" (pkg/scriptout ErrUnavailable). It is what
+// a daemon-forwarded backend (the Jira daemon's list_activity) answers while
+// its daemon is down or restarting, so one more attempt after the wait can
+// recover. The sentinel prefix is matched, not a bare "unavailable", so a source's
+// own prose ("calendar unavailable offline") and the other taxonomy codes
+// (unauthenticated, invalid argument) are never retried. If pg-connector
+// rewords the sentinel the retry silently stops; the tests pin today's wording.
+var unavailableReason = regexp.MustCompile(`scriptout: unavailable(?::|$)`)
+
+func isUnavailableReason(reason string) bool { return unavailableReason.MatchString(reason) }
+
+// retryDeadlines waits once, then re-invokes each held retryable (deadline- or
+// unavailable-degraded) source once, pinned to that source, replacing its held row with the retry's
 // row. A retry that yields no row for the source (cannot run, no decodable
 // document, no row for it) leaves the original row in place. Healthy and
-// non-deadline rows are never re-run.
+// non-retryable rows are never re-run.
 func (r *run) retryDeadlines(ctx context.Context, held []pending) ([]pending, error) {
 	var sources []string
 	for _, p := range held {

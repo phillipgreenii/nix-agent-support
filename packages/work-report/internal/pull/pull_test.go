@@ -816,6 +816,8 @@ func TestNonDeadlineFailuresAreNotRetried(t *testing.T) {
 		"unauthenticated":              "scriptout: unauthenticated: token expired",
 		"mentions a deadline loosely":  "the deadline for this report was exceeded",
 		"a deadline word, wrong shape": "deadline exceeded after a while",
+		"unavailable only in prose":    "calendar unavailable while offline",
+		"another taxonomy code":        "scriptout: invalid argument: unavailable is not a valid state",
 	}
 	for name, reason := range reasons {
 		t.Run(name, func(t *testing.T) {
@@ -968,5 +970,78 @@ func TestRetryWaitDefaultsAndIsConfigurable(t *testing.T) {
 	}
 	if pull.DefaultRetryWait != 30*time.Second {
 		t.Errorf("DefaultRetryWait = %v; the documented default is 30s", pull.DefaultRetryWait)
+	}
+}
+
+// daemonDown is the reason the umbrella's fan-out writes (reason = err.Error())
+// for the Jira daemon's forwarded list_activity while its daemon is down: the
+// wire-taxonomy "unavailable" sentinel followed by the client's message naming
+// the socket and the daemon label (pg-connector-issue-jira client).
+const daemonDown = `scriptout: unavailable: jira daemon not reachable at /Users/x/.local/state/jira/daemon.sock (launchd label com.example.jira-daemon)`
+
+// realFanOutDoc is the document pg-connector's activity list fan-out prints
+// when the Jira daemon is down: the sources[] rows are
+// {source,status,count,reason} exactly as cmd/pg-connector SourceResult
+// marshals them (no truncated key, a zero count and the unavailable reason on
+// the degraded row), beside a healthy source's items.
+const realFanOutDoc = `{"sources":[` +
+	`{"source":"activity-git","status":"succeeded","count":1},` +
+	`{"source":"issue-jira","status":"degraded","count":0,"reason":` + `"` + daemonDown + `"},` +
+	`{"source":"ci-github-actions","status":"disabled","count":0,"reason":"not applicable"}` +
+	`],"items":[` +
+	`{"source":"activity-git","item":{"id":"git-1","kind":"commit","entity_type":"commit","entity_id":"e-git-1","occurred_at":"2026-03-02T10:00:00Z","summary":"s git-1","fields":{}}}` +
+	`]}`
+
+func TestUnavailableDegradedSourceRecoversOnRetry(t *testing.T) {
+	conn := &scriptedConn{answers: map[string][]string{
+		"":           {realFanOutDoc},
+		"issue-jira": {listDoc([]string{srcRow("issue-jira", "succeeded", "")}, goodItem("issue-jira", "j"))},
+	}}
+	e, sl := retryEnv(t, conn)
+
+	res := run(t, e, pull.Opts{})
+
+	if got, want := conn.backends(), []string{"", "issue-jira"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("invocations = %q; want the fan-out then only the unavailable source %q", got, want)
+	}
+	if len(sl.waits) != 1 || sl.waits[0] != pull.DefaultRetryWait {
+		t.Errorf("waits = %v; want exactly one wait of the default %v", sl.waits, pull.DefaultRetryWait)
+	}
+	rows := rowsBySource(res)
+	if r := rows["issue-jira"]; r.Status != pull.StatusSucceeded || r.Count != 1 || r.Reason != "" {
+		t.Errorf("issue-jira = %+v; want succeeded with the retry's entry stored", r)
+	}
+	if r := rows["ci-github-actions"]; r.Status != pull.StatusDisabled {
+		t.Errorf("ci-github-actions = %+v; a disabled row is never re-run", r)
+	}
+	if got := res.ExitCode(); got != 0 {
+		t.Errorf("ExitCode = %d; want 0 (the recovered source leaves nothing degraded)", got)
+	}
+	jira := linesFor(logLines(t, e), "issue-jira")
+	if len(jira) != 1 || jira[0]["status"] != pull.StatusSucceeded || jira[0]["retried"] != true {
+		t.Errorf("issue-jira log = %v; want one succeeded line marked retried", jira)
+	}
+}
+
+func TestUnavailableDegradedSourceThatFailsTheRetryEndsDegradedAfterOneRetry(t *testing.T) {
+	conn := &scriptedConn{answers: map[string][]string{
+		"":           {realFanOutDoc},
+		"issue-jira": {listDoc([]string{srcRow("issue-jira", "degraded", daemonDown)})},
+	}}
+	e, sl := retryEnv(t, conn)
+
+	res := run(t, e, pull.Opts{})
+
+	if got, want := conn.backends(), []string{"", "issue-jira"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("invocations = %q; want exactly one retry %q", got, want)
+	}
+	if len(sl.waits) != 1 {
+		t.Errorf("waits = %v; want one", sl.waits)
+	}
+	if r := rowsBySource(res)["issue-jira"]; r.Status != pull.StatusDegraded || r.Reason != daemonDown {
+		t.Errorf("issue-jira = %+v; want degraded with the retry's own reason", r)
+	}
+	if res.ExitCode() != 2 || res.CouldNotRun {
+		t.Errorf("ExitCode = %d CouldNotRun = %v; want 2/false", res.ExitCode(), res.CouldNotRun)
 	}
 }
