@@ -162,6 +162,7 @@ format = "jsonl"
 name = "` + reofferRole + `"
 enabled = true
 binds = ["` + reofferEventType + `"]
+handler = "` + h.script + `"
 `
 	if err := os.WriteFile(h.configPath, []byte(cfg), 0o644); err != nil {
 		t.Fatalf("write config.toml: %v", err)
@@ -222,7 +223,6 @@ func (h *reofferHarness) startRouter() *router {
 		"PG_ROUTER_GLOBAL_CONFIG=" + filepath.Join(h.base, "no-such-global-config.toml"),
 		"PG_ROUTER_LOG_DIR=" + h.logDir,
 		"PG_ROUTER_WORKTREE_DIR=" + filepath.Join(h.base, "worktrees"),
-		"PG_ROUTER_HANDLER_COMMAND=" + h.script,
 		"PG_ROUTER_POLL_INTERVAL=1",
 		"PG_ROUTER_METRICS_ADDR=" + h.metrics,
 	}

@@ -10,11 +10,10 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
 
-// Docket pg2-12gr4.10: core chooses the handler path PER ROLE. A role with
-// handler is on the new path; a role without it keeps today's path.
+// Docket pg2-12gr4.10: a role is invoked only through its own handler.
 
 func TestHandlerCommandFor_roleWithHandlerResolvesItsOwnCommand(t *testing.T) {
-	// No global handler command at all: the new path needs none.
+	// No global handler command at all: a role's own handler needs none.
 	got, err := handlerCommandFor(config.Config{})(roles.Role{Name: "r", Handler: "/opt/h"}, "dispatch")
 	if err != nil {
 		t.Fatal(err)
@@ -24,57 +23,42 @@ func TestHandlerCommandFor_roleWithHandlerResolvesItsOwnCommand(t *testing.T) {
 	}
 }
 
-// With the global command AND the role-config directory set, a role with
-// handler still gets [handler, subcommand] with no --role-config, while a role
-// without handler gets exactly today's argv.
-func TestHandlerCommandFor_choosesThePathPerRole(t *testing.T) {
-	cfg := config.Config{HandlerCommand: "shared", HandlerCommandDir: "/dir"}
-	commandFor := handlerCommandFor(cfg)
+// Every subcommand resolves to [handler, subcommand]: the role's settings ride
+// on stdin, so no flag follows the subcommand.
+func TestHandlerCommandFor_everySubcommandIsHandlerThenSubcommand(t *testing.T) {
+	commandFor := handlerCommandFor(config.Config{})
 	for _, sub := range []string{"dispatch", "postStartup", "preShutdown", "validate"} {
-		got, err := commandFor(roles.Role{Name: "new", Handler: "/opt/h"}, sub)
+		got, err := commandFor(roles.Role{Name: "r", Handler: "/opt/h"}, sub)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if want := []string{"/opt/h", sub}; !reflect.DeepEqual(got, want) {
-			t.Errorf("new path argv = %v, want %v (no --role-config)", got, want)
-		}
-		got, err = commandFor(roles.Role{Name: "old"}, sub)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if want := []string{"shared", sub, "--role-config", "/dir/old.json"}; !reflect.DeepEqual(got, want) {
-			t.Errorf("old path argv = %v, want %v", got, want)
+			t.Errorf("argv = %v, want %v", got, want)
 		}
 	}
 }
 
-// A role's survival is read from the TOML for a role with handler (even when
-// the old per-role JSON says otherwise), and from the JSON for a role without.
-func TestRoleSurvives_choosesThePathPerRole(t *testing.T) {
-	dir := t.TempDir()
-	writeRoleFile(t, dir, "old-yes", `{"survivesShutdown":true}`)
-	writeRoleFile(t, dir, "new-no", `{"survivesShutdown":true}`) // ignored: the new path reads the TOML
-	cfg := config.Config{HandlerCommandDir: dir}
+// A role's survival is the generic survives_shutdown key core decoded from the
+// TOML, nothing else.
+func TestRoleSurvives_readsTheRolesOwnKey(t *testing.T) {
 	cases := []struct {
 		role roles.Role
 		want bool
 	}{
-		{roles.Role{Name: "old-yes"}, true},
-		{roles.Role{Name: "old-no"}, false},
-		{roles.Role{Name: "old-yes", SurvivesShutdown: false}, true},
-		{roles.Role{Name: "new-yes", Handler: "/h", SurvivesShutdown: true}, true},
-		{roles.Role{Name: "new-no", Handler: "/h", SurvivesShutdown: false}, false},
-		// The TOML key alone does not opt a role without handler in.
-		{roles.Role{Name: "old-no", SurvivesShutdown: true}, false},
+		{roles.Role{Name: "yes", Handler: "/h", SurvivesShutdown: true}, true},
+		{roles.Role{Name: "no", Handler: "/h", SurvivesShutdown: false}, false},
+		{roles.Role{Name: "absent", Handler: "/h"}, false},
 	}
 	for _, tc := range cases {
-		if got := roleSurvives(cfg, tc.role); got != tc.want {
+		if got := roleSurvives(tc.role); got != tc.want {
 			t.Errorf("roleSurvives(%+v) = %v, want %v", tc.role, got, tc.want)
 		}
 	}
 }
 
-func TestSurvivingRoles_includesNewPathRolesFromTheTOML(t *testing.T) {
+// survivingRoles considers only ENABLED roles: a disabled role registers no
+// listener, so it can never have a dispatch to leave running.
+func TestSurvivingRoles_onlyEnabledRolesWithTheKey(t *testing.T) {
 	cfg := config.Config{Roles: roles.RoleSet{
 		{Name: "keep", Enabled: true, Handler: "/h", SurvivesShutdown: true},
 		{Name: "drop", Enabled: true, Handler: "/h"},
@@ -100,17 +84,16 @@ func permutations(rs []roles.Role) [][]roles.Role {
 	return out
 }
 
-// Mixed old-path and new-path roles, in every order: the old shared handler
-// still receives preShutdown ONCE (pg2-asr8z) and postStartup per old role as
-// today, and every distinct adapter named by an enabled role with handler
-// receives preShutdown once and postStartup per role. Nothing is left out.
-func TestLifecycleRouting_mixedOldAndNewPathInAnyOrder(t *testing.T) {
+// Roles of several adapters, in every order: every distinct adapter named by an
+// enabled role receives preShutdown once (pg2-asr8z), carried by the first
+// enabled role naming it, and postStartup is sent per enabled role. A disabled
+// role's adapter is left out; nothing else is.
+func TestLifecycleRouting_severalAdaptersInAnyOrder(t *testing.T) {
 	base := []roles.Role{
-		{Name: "old1", Enabled: true},
-		{Name: "old2", Enabled: true},
-		{Name: "newA1", Enabled: true, Handler: "/opt/a"},
-		{Name: "newA2", Enabled: true, Handler: "/opt/a"},
-		{Name: "newB", Enabled: true, Handler: "/opt/b"},
+		{Name: "a1", Enabled: true, Handler: "/opt/a"},
+		{Name: "a2", Enabled: true, Handler: "/opt/a"},
+		{Name: "b1", Enabled: true, Handler: "/opt/b"},
+		{Name: "b2", Enabled: true, Handler: "/opt/b"},
 		{Name: "off", Enabled: false, Handler: "/opt/c"},
 	}
 	for _, order := range permutations(base) {
@@ -131,17 +114,12 @@ func TestLifecycleRouting_mixedOldAndNewPathInAnyOrder(t *testing.T) {
 			t.Fatalf("order %v: postStartup = %v, want %v", names(order), got, wantPost)
 		}
 
-		// preShutdown: first enabled old role once; first enabled role of each
-		// distinct handler once; in config order of those carriers.
+		// preShutdown: first enabled role of each distinct handler once, in
+		// config order of those carriers.
 		var wantPre []string
-		oldSeen, seen := false, map[string]bool{}
+		seen := map[string]bool{}
 		for _, r := range order {
-			switch {
-			case !r.Enabled:
-			case r.Handler == "" && !oldSeen:
-				oldSeen = true
-				wantPre = append(wantPre, r.Name)
-			case r.Handler != "" && !seen[r.Handler]:
+			if r.Enabled && !seen[r.Handler] {
 				seen[r.Handler] = true
 				wantPre = append(wantPre, r.Name)
 			}
@@ -149,8 +127,8 @@ func TestLifecycleRouting_mixedOldAndNewPathInAnyOrder(t *testing.T) {
 		if got := fh.preShutdownCalls(); !reflect.DeepEqual(got, wantPre) {
 			t.Fatalf("order %v: preShutdown = %v, want %v", names(order), got, wantPre)
 		}
-		if len(wantPre) != 3 {
-			t.Fatalf("test setup: want 3 carriers (old, /opt/a, /opt/b), got %v", wantPre)
+		if len(wantPre) != 2 {
+			t.Fatalf("test setup: want 2 carriers (/opt/a, /opt/b), got %v", wantPre)
 		}
 	}
 }

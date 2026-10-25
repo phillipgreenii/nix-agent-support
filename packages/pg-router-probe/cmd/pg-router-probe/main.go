@@ -8,7 +8,7 @@
 // pg-connector, exit-code signaling).
 //
 // Unlike its sibling adapters (pg-router-source-pg-connector,
-// pg-router-ccpool-handler), this binary needs a distinct exit-code scheme
+// pg-router-handler-ccpool), this binary needs a distinct exit-code scheme
 // (0 clean / 2 usage error / 3 total failure / 4 partial), not the generic
 // 0/1 cobra-failure split those two use — see exitcode.go's exitCodeError
 // and this file's run().

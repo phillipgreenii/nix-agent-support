@@ -29,7 +29,7 @@ const (
 
 func releaseRole(cfg config.Config) roles.Role {
 	return roles.Role{
-		Name: "drain", Type: "ccpool",
+		Name: "drain",
 		CCPool: &roles.CCPoolConfig{
 			Actor:      relActor,
 			Completion: roles.CloseOrRelease, OnFailure: roles.AddHuman, OnDispatchFail: roles.DispatchLeave,

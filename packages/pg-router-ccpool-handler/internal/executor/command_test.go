@@ -38,7 +38,7 @@ func fabricateExitError(t *testing.T, code int) *exec.ExitError {
 }
 
 func commandRole() roles.Role {
-	return roles.Role{Name: "cmdrole", Type: "command", Command: &roles.CommandConfig{Argv: []string{"noop"}}}
+	return roles.Role{Name: "cmdrole", Command: &roles.CommandConfig{Argv: []string{"noop"}}}
 }
 
 // TestCommandDispatch_ExitCode9MapsToErrBusy is Task 2.3's required RED test
@@ -85,7 +85,7 @@ func TestCommandDispatch_OtherExitCodeDoesNotMapToErrBusy(t *testing.T) {
 // the test exercises the REAL default Commander (query.OSCommander) and the
 // real *exec.ExitError.Stderr population, not a fabricated error.
 func shCommandRole(script string) roles.Role {
-	return roles.Role{Name: "cmdrole", Type: "command", Command: &roles.CommandConfig{Argv: []string{"/bin/sh", "-c", script}}}
+	return roles.Role{Name: "cmdrole", Command: &roles.CommandConfig{Argv: []string{"/bin/sh", "-c", script}}}
 }
 
 // TestCommandDispatch_FailureIncludesStderrTail is pg2-rzcfr's acceptance: a

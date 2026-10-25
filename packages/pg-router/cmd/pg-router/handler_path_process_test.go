@@ -21,8 +21,7 @@ import (
 // path's wiring. A real router process (the TestHelperRouterProcess re-exec of
 // shutdown_reoffer_process_test.go, so signal handling, the durable queue, the
 // unix-socket core and the real wireclient exec are the production ones) is
-// started with TWO roles that each set handler to their own stub script, and NO
-// global PG_ROUTER_HANDLER_COMMAND-based role. Each stub records its own argv and
+// started with TWO roles that each set handler to their own stub script. Each stub records its own argv and
 // the stdin it was handed, so the assertions are made from the stub's own
 // recording, not from core's. The two roles differ only in survives_shutdown:
 //
@@ -143,13 +142,10 @@ handler = "` + killStub + `"
 		return h.markerLines("beat-"+keepRole) >= 2 && h.markerLines("beat-"+killRole) >= 2
 	})
 
-	// (1) argv is [stub, dispatch], with no --role-config; the global handler
-	// (h.script, PG_ROUTER_HANDLER_COMMAND) was never invoked for either role.
+	// (1) argv is [stub, dispatch] and nothing after it; the harness's own
+	// handler (h.script) is named by no role and was never invoked.
 	for _, role := range []string{keepRole, killRole} {
 		for _, line := range strings.Split(strings.TrimSpace(readMarker(t, h, "argv-"+role)), "\n") {
-			if strings.Contains(line, "--role-config") {
-				t.Errorf("%s: stub was invoked with --role-config: %q", role, line)
-			}
 			if !strings.HasPrefix(line, "argc=1 ") {
 				t.Errorf("%s: stub invoked with extra arguments: %q", role, line)
 			}
@@ -159,7 +155,7 @@ handler = "` + killStub + `"
 		}
 	}
 	if n := h.markerLines(reofferStartedMarker); n != 0 {
-		t.Errorf("the global PG_ROUTER_HANDLER_COMMAND handler ran %d time(s) for a role with its own handler", n)
+		t.Errorf("a handler named by no role ran %d time(s)", n)
 	}
 
 	// (2) stdin carries the role object with the configured [role.config].

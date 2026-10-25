@@ -87,23 +87,15 @@ func seedDurableQueue(t *testing.T, logDir string, evts ...eventqueue.Event) {
 	}
 }
 
-// The per-role file the deployment renders for the one role these tests run: a
-// ccpool-backed role declares that its dispatch survives a daemon shutdown, a
-// command role does not.
-const (
-	survivingRoleJSON = `{"name":"r1","type":"ccpool","survivesShutdown":true}`
-	commandRoleJSON   = `{"name":"r1","type":"command"}`
-)
-
 // restartDaemon is one daemon of a restart test: runLongRunningBody over logDir
 // with the one role r1, bound to t1, whose handler is runner.
 type restartDaemon struct {
-	logDir  string
-	runner  wireclient.Runner
-	roleCfg string        // the role's rendered file: survivingRoleJSON or commandRoleJSON
-	drain   time.Duration // the shutdown drain timeout of a role that does not survive
-	queries query.SourceSet
-	mp      metric.MeterProvider // nil: the daemon's own default provider
+	logDir   string
+	runner   wireclient.Runner
+	survives bool          // the role's survives_shutdown key: a ccpool-backed role sets it, a command role does not
+	drain    time.Duration // the shutdown drain timeout of a role that does not survive
+	queries  query.SourceSet
+	mp       metric.MeterProvider // nil: the daemon's own default provider
 	// eventLog opens <logDir>/events.jsonl for the daemon, as the production
 	// wiring does, so a test can read the dispatch rows it writes.
 	eventLog bool
@@ -115,11 +107,10 @@ func (d restartDaemon) run(ctx context.Context, t *testing.T) <-chan int {
 	cfg := config.Config{
 		LogDir:        d.logDir,
 		PollInterval:  20 * time.Millisecond,
-		Roles:         roles.RoleSet{{Name: "r1", Enabled: true, Binds: []string{"t1"}}},
+		Roles:         roles.RoleSet{{Name: "r1", Enabled: true, Binds: []string{"t1"}, SurvivesShutdown: d.survives}},
 		Queries:       d.queries,
 		MeterProvider: d.mp,
 	}
-	roleDirWith(t, d.roleCfg)(&cfg)
 	h := &wireclient.Client{Runner: d.runner, Command: func(_ roles.Role, sub string) ([]string, error) { return []string{"fake-handler", sub}, nil }}
 	o := &orchestrator.Orchestrator{Cfg: cfg, Handler: h, Bindings: core.NewBindings("t1")}
 	if d.eventLog {
@@ -205,7 +196,7 @@ func TestRunLongRunning_restartReoffersTheSurvivingDispatchBeforeTheFirstProduce
 	t.Cleanup(func() { close(r1.release) }) // let the old handler's goroutine end last
 	ctx1, signal1 := context.WithCancel(context.Background())
 	t.Cleanup(signal1)
-	done1 := restartDaemon{logDir: logDir, runner: r1, roleCfg: survivingRoleJSON, drain: time.Minute}.run(ctx1, t)
+	done1 := restartDaemon{logDir: logDir, runner: r1, survives: true, drain: time.Minute}.run(ctx1, t)
 	awaitClosed(t, r1.started, 20*time.Second, "daemon one never offered the queued event")
 	signal1()
 	awaitExit(t, done1, "daemon one")
@@ -218,7 +209,7 @@ func TestRunLongRunning_restartReoffersTheSurvivingDispatchBeforeTheFirstProduce
 	r2 := newShutdownRunner()
 	ctx2, signal2 := context.WithCancel(context.Background())
 	done2 := restartDaemon{
-		logDir: logDir, runner: r2, roleCfg: survivingRoleJSON, drain: time.Minute,
+		logDir: logDir, runner: r2, survives: true, drain: time.Minute,
 		queries: query.SourceSet{{Name: "slow", Query: slow}}, mp: mp,
 	}.run(ctx2, t)
 	t.Cleanup(func() {
@@ -267,7 +258,7 @@ func TestRunLongRunning_noStartupDispatchPassOnceShutdownWasRequested(t *testing
 	t.Cleanup(func() { close(r.release) })
 	ctx, signal := context.WithCancel(context.Background())
 	signal() // already requested before the daemon boots
-	done := restartDaemon{logDir: logDir, runner: r, roleCfg: commandRoleJSON, drain: 200 * time.Millisecond}.run(ctx, t)
+	done := restartDaemon{logDir: logDir, runner: r, survives: false, drain: 200 * time.Millisecond}.run(ctx, t)
 	awaitExit(t, done, "the daemon")
 	if n, steps, _ := r.snapshot(); n != 0 {
 		t.Fatalf("%d dispatch(es) offered after shutdown was requested (steps %v), want none", n, steps)
@@ -382,7 +373,7 @@ func restartOverSurvivingDispatch(t *testing.T, handlerReportsStart bool) adopti
 	t.Cleanup(func() { close(r1.release) }) // let the old handler's goroutine end last
 	ctx1, signal1 := context.WithCancel(context.Background())
 	t.Cleanup(signal1)
-	done1 := restartDaemon{logDir: logDir, runner: r1, roleCfg: survivingRoleJSON, drain: time.Minute}.run(ctx1, t)
+	done1 := restartDaemon{logDir: logDir, runner: r1, survives: true, drain: time.Minute}.run(ctx1, t)
 	awaitClosed(t, r1.started, 20*time.Second, "daemon one never offered the queued event")
 	firstStart := r1.firstDispatch()
 	signal1()
@@ -399,7 +390,7 @@ func restartOverSurvivingDispatch(t *testing.T, handlerReportsStart bool) adopti
 	ctx2, signal2 := context.WithCancel(context.Background())
 	restarted := time.Now()
 	done2 := restartDaemon{
-		logDir: logDir, runner: r2, roleCfg: survivingRoleJSON, drain: time.Minute,
+		logDir: logDir, runner: r2, survives: true, drain: time.Minute,
 		queries: query.SourceSet{{Name: "slow", Query: slow}}, mp: mp, eventLog: true,
 	}.run(ctx2, t)
 	var releaseOnce, stopOnce sync.Once

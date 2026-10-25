@@ -43,8 +43,8 @@ func TestCheckGrafanaAlertsOnePerAlert(t *testing.T) {
 
 func TestCheckBinaryHash(t *testing.T) {
 	const (
-		storeA = "/nix/store/aaaa-pg-router-ccpool-handler-1/bin/pg-router-ccpool-handler"
-		storeB = "/nix/store/bbbb-pg-router-ccpool-handler-2/bin/pg-router-ccpool-handler"
+		storeA = "/nix/store/aaaa-pg-router-handlers-1/bin/pg-router-handler-ccpool"
+		storeB = "/nix/store/bbbb-pg-router-handlers-2/bin/pg-router-handler-ccpool"
 		plain  = "/opt/handler/bin/handler"
 	)
 	cases := []struct {
@@ -60,7 +60,7 @@ func TestCheckBinaryHash(t *testing.T) {
 		{"different store path different hash is an expected update", true, binaryIdentity{"h1", storeA}, binaryIdentity{"h2", storeB}, false, false},
 		{"different store path same hash", true, binaryIdentity{"h1", storeA}, binaryIdentity{"h1", storeB}, false, false},
 		{"same store object different hash is tampering", true, binaryIdentity{"h1", storeA}, binaryIdentity{"h2", storeA}, false, true},
-		{"same store object different file different hash is tampering", true, binaryIdentity{"h1", storeA}, binaryIdentity{"h2", "/nix/store/aaaa-pg-router-ccpool-handler-1/libexec/x"}, false, true},
+		{"same store object different file different hash is tampering", true, binaryIdentity{"h1", storeA}, binaryIdentity{"h2", "/nix/store/aaaa-pg-router-handlers-1/libexec/x"}, false, true},
 		{"same store path different hash but deploy record allows", true, binaryIdentity{"h1", storeA}, binaryIdentity{"h2", storeA}, true, false},
 		{"non-store path different hash alerts", true, binaryIdentity{"h1", plain}, binaryIdentity{"h2", plain}, false, true},
 		{"non-store path different hash allowed by deploy record", true, binaryIdentity{"h1", plain}, binaryIdentity{"h2", plain}, true, false},

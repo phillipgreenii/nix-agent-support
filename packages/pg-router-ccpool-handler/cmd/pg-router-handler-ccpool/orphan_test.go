@@ -160,7 +160,7 @@ func inProgressBy(actor string) string {
 }
 
 func orphanRole(c roles.Completion, timeBudget time.Duration) roles.Role {
-	return roles.Role{Name: "worker", Type: "ccpool", CCPool: &roles.CCPoolConfig{
+	return roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{
 		Actor: orphanActor, Completion: c,
 		Budget: budget.Budget{Time: timeBudget, Thresholds: budget.Thresholds{Reminder: 0.725, Cancel: 0.90, Hard: 1.00}},
 	}}

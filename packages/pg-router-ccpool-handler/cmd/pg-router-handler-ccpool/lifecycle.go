@@ -65,7 +65,7 @@ func failLifecycle(name string, stdout io.Writer, msg string) int {
 // The request carries the role object; its config is decoded strictly, as a
 // dispatch does, because the sweeps need the role's pool, isolation and budgets.
 // --config (or PG_ROUTER_CCPOOL_HANDLER_CONFIG) names the handler-wide launch
-// config JSON; the old --role-config is not read.
+// config JSON. The role is never read from a file: it comes from stdin.
 func runPostStartup(args []string) int {
 	fs := flag.NewFlagSet("postStartup", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

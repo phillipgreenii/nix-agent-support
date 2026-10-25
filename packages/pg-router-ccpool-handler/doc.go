@@ -7,7 +7,7 @@
 // The module was scaffolded empty (Task 5.1); Task 5.2/5.3 (folded together
 // per the operator's 2026-09-11 decision recorded on docket pg2-oju6w's Task
 // 5.2 packet) then moved every participant implementation in and gave it a
-// real wire-facing CLI entrypoint (cmd/pg-router-ccpool-handler). The blank
+// real wire-facing CLI entrypoint (cmd/pg-router-handler-ccpool, now with cmd/pg-router-handler-command beside it). The blank
 // import below predates that and still exists solely to make this module's
 // one-way dependency on packages/pg-router's wire schemas a real,
 // `go mod tidy`-surviving dependency rather than a go.mod-only declaration —

@@ -405,7 +405,7 @@ func (p *realPool) meta(bead, role, eventID, head string, launched, leaseUntil t
 // (isolation none) with no budget unless the caller sets one.
 func realRole(name string) roles.Role {
 	return roles.Role{
-		Name: name, Type: "ccpool",
+		Name: name,
 		CCPool: &roles.CCPoolConfig{
 			Actor: "pgii-pool__" + name, Completion: roles.CloseOnly, OnFailure: roles.Unclaim, OnDispatchFail: roles.DispatchUnclaim,
 			PromptBody: "Work bead {{.BeadID}}.", Prompt: mustParsePrompt(name, "Work bead {{.BeadID}}."),

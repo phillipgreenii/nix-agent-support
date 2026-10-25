@@ -180,6 +180,7 @@ format = "json"
 name = "example-role"
 enabled = true
 binds = ["example.ready"]
+handler = "` + script + `"
 `
 	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o644); err != nil {
 		t.Fatalf("write config.toml: %v", err)
@@ -187,7 +188,6 @@ binds = ["example.ready"]
 
 	t.Setenv("PG_ROUTER_CONFIG", cfgPath)
 	t.Setenv("PG_ROUTER_GLOBAL_CONFIG", filepath.Join(dir, "no-such-global-config.toml"))
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", script)
 
 	eventJSON := `{"id":"try-1","type":"example.ready","payload":{"id":"item-1","type":"example.ready"}}`
 	code := runRunRole("example-role", eventJSON, false)
@@ -257,6 +257,7 @@ format = "json"
 name = "example-role"
 enabled = true
 binds = ["example.ready"]
+handler = "` + script + `"
 `
 	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o644); err != nil {
 		t.Fatalf("write config.toml: %v", err)
@@ -264,7 +265,6 @@ binds = ["example.ready"]
 
 	t.Setenv("PG_ROUTER_CONFIG", cfgPath)
 	t.Setenv("PG_ROUTER_GLOBAL_CONFIG", filepath.Join(dir, "no-such-global-config.toml"))
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", script)
 
 	eventJSON := `{"id":"try-1","type":"example.ready","payload":{"id":"item-1","type":"example.ready"}}`
 	start := time.Now()

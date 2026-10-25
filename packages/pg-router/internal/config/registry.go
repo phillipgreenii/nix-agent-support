@@ -517,17 +517,14 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if rt.Name == "" {
 		return roles.Role{}, fmt.Errorf("name is required")
 	}
-	// Charset/path-safety hardening (this bead, pg2-ymb3v), independent of
-	// HandlerCommandDir: cmd/pg-router/run.go's handlerCommandFor joins
-	// role.Name directly into a filesystem path
-	// (filepath.Join(cfg.HandlerCommandDir, role.Name+".json")), so a name
-	// containing "/" breaks that join (a role subdirectory that was never
-	// declared) and one containing ".." can path-traverse out of
-	// HandlerCommandDir entirely. Role names are TOML-authored only (no
-	// wire-level role field carries one), so this is a config footgun to
-	// reject at decode time, not an attacker-exploitable input.
+	// Charset/path-safety hardening (pg2-ymb3v): a role name is used as a
+	// filesystem path component (the per-role log and state names derive from
+	// it), so a name containing "/" names a subdirectory that was never declared
+	// and one containing ".." can path-traverse. Role names are TOML-authored
+	// only (no wire-level role field carries one), so this is a config footgun
+	// to reject at decode time, not an attacker-exploitable input.
 	if strings.Contains(rt.Name, "/") || strings.Contains(rt.Name, "..") {
-		return roles.Role{}, fmt.Errorf("name %q must not contain '/' or '..' (joined into a filesystem path under PG_ROUTER_HANDLER_COMMAND_DIR)", rt.Name)
+		return roles.Role{}, fmt.Errorf("name %q must not contain '/' or '..' (used as a filesystem path component)", rt.Name)
 	}
 	if len(rt.Binds) == 0 {
 		return roles.Role{}, fmt.Errorf("binds is required (the event type(s) this role consumes)")
@@ -557,21 +554,16 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	return role, nil
 }
 
-// applyHandlerKeys decodes the three NEW per-role keys (handler, [role.config],
-// survives_shutdown) strictly: a wrong type fails the decode (the typed TOML
-// decode already did that), handler must be a non-empty absolute path, and
-// config / survives_shutdown on a role without handler are rejected because the
-// old path never reads them, so accepting them would silently drop the value.
-// Every other unknown [[role]] key is still ignored, exactly as before.
+// applyHandlerKeys decodes the per-role keys handler, [role.config] and
+// survives_shutdown strictly: a wrong type fails the decode (the typed TOML
+// decode already did that) and handler is REQUIRED, a non-empty absolute path.
+// A [[role]] without handler is a load error naming the role (the caller
+// prefixes it): a role is invoked only through its own handler, and core has no
+// shared fallback command to run it with. Every other unknown [[role]] key is
+// still ignored, exactly as before.
 func applyHandlerKeys(role *roles.Role, rt roleTOML) error {
 	if rt.Handler == nil {
-		if rt.Config != nil {
-			return fmt.Errorf("[role.config] is set but handler is not: config is only handed to the role's own handler")
-		}
-		if rt.SurvivesShutdown != nil {
-			return fmt.Errorf("survives_shutdown is set but handler is not: a role without handler keeps the per-role JSON survivesShutdown flag")
-		}
-		return nil
+		return fmt.Errorf("handler is required: a role is invoked only through its own handler (set handler to the adapter's absolute path, e.g. pg-router-handler-ccpool or pg-router-handler-command)")
 	}
 	if !filepath.IsAbs(*rt.Handler) {
 		return fmt.Errorf("handler %q must be an absolute path", *rt.Handler)

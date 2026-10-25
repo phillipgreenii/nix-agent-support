@@ -18,9 +18,8 @@ import (
 const configPath = "role.config"
 
 // roleConfig is the shape of a command role's [role.config], this adapter's
-// own contract: the command-role fields of the former per-role JSON, names
-// unchanged (name, type and survivesShutdown are not config). Anything else is
-// an unknown key.
+// own contract (name and survives_shutdown are not config). Anything else is an
+// unknown key.
 type roleConfig struct {
 	// StrictBaseEnv (INV-CCH-32): run the argv under the minimal base env.
 	// Absent = false.
@@ -116,7 +115,7 @@ func decodeRole(ro roleObject) (roles.Role, []string) {
 		return roles.Role{}, problems
 	}
 	return roles.Role{
-		Name: ro.Name, Type: "command", StrictBaseEnv: rc.StrictBaseEnv,
+		Name: ro.Name, StrictBaseEnv: rc.StrictBaseEnv,
 		Command: &roles.CommandConfig{Argv: rc.Command.Argv},
 	}, nil
 }

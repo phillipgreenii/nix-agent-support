@@ -22,6 +22,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.command]
@@ -130,6 +131,7 @@ type = "timer"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.command]
@@ -166,6 +168,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.command]

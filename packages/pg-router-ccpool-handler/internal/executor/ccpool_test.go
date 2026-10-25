@@ -69,7 +69,7 @@ const (
 // abbreviated, since these tests never render or assert on it.
 func feedbackRole(config.Config) roles.Role {
 	return roles.Role{
-		Name: "feedback", Type: "ccpool",
+		Name: "feedback",
 		CCPool: &roles.CCPoolConfig{
 			Actor: "pgii-pool__process-feedback", SkillMD: "",
 			Completion: roles.CloseOnly, OnFailure: roles.Unclaim, OnDispatchFail: roles.DispatchUnclaim,
@@ -81,7 +81,7 @@ func feedbackRole(config.Config) roles.Role {
 
 func workerRole(cfg config.Config) roles.Role {
 	return roles.Role{
-		Name: "worker", Type: "ccpool",
+		Name: "worker",
 		CCPool: &roles.CCPoolConfig{
 			Actor: "pgii-pool__worker", SkillMD: "",
 			Completion: roles.CloseOrHandback, OnFailure: roles.AddHuman, OnDispatchFail: roles.DispatchLeave,
@@ -93,7 +93,7 @@ func workerRole(cfg config.Config) roles.Role {
 
 func reviewRole(cfg config.Config) roles.Role {
 	return roles.Role{
-		Name: "review", Type: "ccpool",
+		Name: "review",
 		CCPool: &roles.CCPoolConfig{
 			Actor: "pgii-pool__review", SkillMD: "",
 			Completion: roles.CloseOrHandback, OnFailure: roles.AddHuman, OnDispatchFail: roles.DispatchLeave,

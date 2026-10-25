@@ -1,7 +1,7 @@
 // Package handlerstate resolves the handler state directory and opens the
 // handler's event log, shared by every adapter binary of this module (bead
 // pg2-12gr4.10.3). Moved verbatim out of package main of
-// cmd/pg-router-ccpool-handler; no behavior change.
+// cmd/pg-router-handler-ccpool; no behavior change.
 package handlerstate
 
 import (

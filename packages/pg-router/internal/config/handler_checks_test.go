@@ -1,8 +1,6 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,7 +10,7 @@ import (
 )
 
 // handlerWiring is a valid wiring (one source, one enabled role) to which a test
-// adds a handler command and/or role-config directory.
+// gives a role a handler path.
 func handlerWiring() Config {
 	return wiring(
 		query.SourceSet{eventSource("s", "a.ready")},
@@ -20,102 +18,9 @@ func handlerWiring() Config {
 	)
 }
 
-func TestValidate_handlerCommandUnsetIsLegal(t *testing.T) {
-	if errs, _ := handlerWiring().diagnose(); len(errs) != 0 {
-		t.Fatalf("an unset handler command must not fail validation; got %v", errs)
-	}
-}
-
-func TestValidate_absentHandlerCommandIsAnError(t *testing.T) {
-	c := handlerWiring()
-	c.HandlerCommand = "absent-handler"
-	errs, _ := c.diagnose()
-	if !findingsContain(errs, `handler command "absent-handler"`) || !findingsContain(errs, "absent backing command") {
-		t.Fatalf("an uninvocable handler command must be named; got %v", errs)
-	}
-	c.Locator = stubLocator{present: map[string]bool{"absent-handler": true, "present-tool": true}}
-	if errs, _ := c.diagnose(); len(errs) != 0 {
-		t.Fatalf("an invocable handler command is valid; got %v", errs)
-	}
-}
-
-func writeRoleConfig(t *testing.T, dir, role, body string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, role+".json"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestValidate_roleConfigFile(t *testing.T) {
-	dir := t.TempDir()
-	c := handlerWiring()
-	c.HandlerCommandDir = dir
-
-	errs, _ := c.diagnose()
-	if !findingsContain(errs, `role "r" role-config file`) || !findingsContain(errs, filepath.Join(dir, "r.json")) {
-		t.Fatalf("a missing role-config file must be named; got %v", errs)
-	}
-
-	writeRoleConfig(t, dir, "r", `{ not json`)
-	errs, _ = c.diagnose()
-	if !findingsContain(errs, "not well-formed JSON") {
-		t.Fatalf("a malformed role-config file must be reported; got %v", errs)
-	}
-
-	// Well-formed JSON is enough: core does not interpret the handler's fields.
-	writeRoleConfig(t, dir, "r", `{"anything":["goes",1,null]}`)
-	if errs, _ := c.diagnose(); len(errs) != 0 {
-		t.Fatalf("a well-formed role-config file is valid; got %v", errs)
-	}
-}
-
-func TestValidate_roleConfigSkipsDisabledRolesAndUnsetDir(t *testing.T) {
-	c := handlerWiring()
-	// No dir: nothing to check.
-	if errs, _ := c.diagnose(); len(errs) != 0 {
-		t.Fatalf("no dir, no role-config check; got %v", errs)
-	}
-	c.HandlerCommandDir = t.TempDir()
-	c.Roles = roles.RoleSet{{Name: "r", Enabled: false, Binds: []string{"a.ready"}}}
-	if errs, _ := c.diagnose(); len(errs) != 0 {
-		t.Fatalf("a disabled role has no role-config check; got %v", errs)
-	}
-}
-
-// The two new checks refuse Load, aggregated with the existing ones.
-func TestLoad_handlerChecksRefuseStartAggregated(t *testing.T) {
-	absentGlobalConfig(t)
-	dir := t.TempDir()
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", "absent-handler")
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND_DIR", dir)
-	writeRoleConfig(t, dir, "r", `{`)
-	writeCfg(t, `
-[[query]]
-name = "s"
-emits = ["a.ready"]
-type = "command"
-[query.command]
-argv = ["absent-lister"]
-format = "jsonl"
-
-[[role]]
-name = "r"
-binds = ["a.ready"]
-`)
-	_, err := Load()
-	if err == nil {
-		t.Fatal("Load must refuse a config whose handler command and role-config are bad")
-	}
-	for _, want := range []string{`handler command "absent-handler"`, "not well-formed JSON", `source "s" backing command "absent-lister"`} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("Load error %q does not contain %q (the checks aggregate)", err, want)
-		}
-	}
-}
-
-// A role that sets handler has its handler path checked in the same run as the
-// other findings (the new path's counterpart of the shared-command check), but
-// only while the role is enabled; a role on today's path is untouched.
+// Every enabled role has its handler path checked in the same run as the other
+// findings, so a missing handler shows in one config check run; a disabled role
+// is not started, so it is not checked.
 func TestValidate_roleHandlerPathIsChecked(t *testing.T) {
 	c := handlerWiring()
 	c.Roles = roles.RoleSet{{Name: "r", Enabled: true, Binds: []string{"a.ready"}, Handler: "/abs/absent-adapter"}}
@@ -134,26 +39,26 @@ func TestValidate_roleHandlerPathIsChecked(t *testing.T) {
 	}
 }
 
-// RoleCommand is the one resolver: handler first and alone on the new path,
-// today's argv (with --role-config only when the directory is set) otherwise.
-func TestRoleCommand_choosesThePathPerRole(t *testing.T) {
-	cases := []struct {
-		name string
-		c    Config
-		r    roles.Role
-		want []string
-		err  bool
-	}{
-		{"new path needs no shared command", Config{}, roles.Role{Name: "n", Handler: "/h"}, []string{"/h", "dispatch"}, false},
-		{"new path ignores the shared command and dir", Config{HandlerCommand: "s", HandlerCommandDir: "/d"}, roles.Role{Name: "n", Handler: "/h"}, []string{"/h", "dispatch"}, false},
-		{"old path with dir", Config{HandlerCommand: "s", HandlerCommandDir: "/d"}, roles.Role{Name: "o"}, []string{"s", "dispatch", "--role-config", "/d/o.json"}, false},
-		{"old path without dir", Config{HandlerCommand: "s"}, roles.Role{Name: "o"}, []string{"s", "dispatch"}, false},
-		{"old path without a shared command", Config{}, roles.Role{Name: "o"}, nil, true},
+// An enabled role built in code without a handler is a finding naming the role:
+// there is no shared fallback command to run it with.
+func TestValidate_enabledRoleWithoutHandlerIsAnError(t *testing.T) {
+	c := handlerWiring()
+	c.Roles = roles.RoleSet{{Name: "bare", Enabled: true, Binds: []string{"a.ready"}}}
+	errs, _ := c.diagnose()
+	if !findingsContain(errs, `role "bare" has no handler`) {
+		t.Fatalf("a role without handler must be named; got %v", errs)
 	}
-	for _, tc := range cases {
-		got, err := tc.c.RoleCommand(tc.r, "dispatch")
-		if (err != nil) != tc.err || !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("%s: RoleCommand = %v, %v; want %v (err %v)", tc.name, got, err, tc.want, tc.err)
-		}
+}
+
+// RoleCommand is the one resolver: the role's own handler and the subcommand,
+// nothing else; a role without handler is an error naming the role.
+func TestRoleCommand_isTheRolesOwnHandler(t *testing.T) {
+	got, err := Config{}.RoleCommand(roles.Role{Name: "n", Handler: "/h"}, "dispatch")
+	if err != nil || !reflect.DeepEqual(got, []string{"/h", "dispatch"}) {
+		t.Errorf("RoleCommand = %v, %v; want [/h dispatch]", got, err)
+	}
+	got, err = Config{}.RoleCommand(roles.Role{Name: "bare"}, "dispatch")
+	if err == nil || got != nil || !strings.Contains(err.Error(), `role "bare" has no handler`) {
+		t.Errorf("RoleCommand without handler = %v, %v; want an error naming the role", got, err)
 	}
 }

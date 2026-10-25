@@ -21,7 +21,7 @@ const pinnedHeadPromptBody = `Checkout {{index .Item.Metadata "head_sha"}} and r
 
 func pinnedHeadReviewRole(cfg config.Config) roles.Role {
 	return roles.Role{
-		Name: "review", Type: "ccpool",
+		Name: "review",
 		CCPool: &roles.CCPoolConfig{
 			Actor: "pgii-pool__review", Completion: roles.CloseOrHandback,
 			OnFailure: roles.AddHuman, OnDispatchFail: roles.DispatchLeave,

@@ -10,7 +10,7 @@
 // zero-dependency leaf, so a byte-for-byte copy costs nothing and neither
 // side may import the other's internal/* (docket pg2-oju6w Task 5.2/5.3,
 // folded per the operator's 2026-09-11 decision; docs/adr/0065's Addendum).
-// This module's own dispatch handling (cmd/pg-router-ccpool-handler/dispatch.go)
+// This module's own dispatch handling (cmd/pg-router-handler-ccpool/dispatch.go)
 // decodes an Item from the wire event's opaque payload using the SAME field
 // names pg-router's own (now-deleted-here) discover.ItemFromPayload used —
 // Task 5.6's "same shape, different side" framing.

@@ -34,14 +34,6 @@ func SortedKeys(m map[string]any) []string {
 	return keys
 }
 
-// TopLevelExtras are role-file keys that RoleFile does not decode but that are
-// real: survivesShutdown is rendered into every ccpool role's JSON by the nix
-// module and read by pg-router core, which ignores nothing else of it. The Go
-// RoleFile ignores it, so a strict check MUST accept it (as a boolean).
-var TopLevelExtras = map[string]reflect.Type{
-	"survivesShutdown": reflect.TypeOf(false),
-}
-
 // ShapeChecker walks the generic decoded JSON against RoleFile's Go types and
 // records an unknown key or a wrong type anywhere as a problem naming the
 // field, without stopping at the first. A key matches a field the way

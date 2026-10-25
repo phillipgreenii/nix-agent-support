@@ -1,25 +1,21 @@
 package conformance
 
-// Adoption across the handler split's cutover, against REAL ccpool and REAL
-// tmux (global rule V-3: a mock of either does not count; docket pg2-12gr4,
-// ADR 0085's Addendum, docs/runbooks/handler-split-consumer-checklist.md row 7
-// and step 5 of "Moving one role").
+// Adoption across a daemon restart, against REAL ccpool and REAL tmux (global
+// rule V-3: a mock of either does not count; docket pg2-12gr4, ADR 0085's
+// Addendum).
 //
 // Sessions outlive a daemon restart (ADR 0085): when the daemon restarts, the
 // dispatch that started a session dies with it and the session keeps running.
-// When a role family moves to the new adapter (pg-router-handler-ccpool, role
-// object on stdin) the redelivered dispatch MUST find that session and launch
-// nothing beside it; and when the move is reverted, the old handler
-// (pg-router-ccpool-handler, --role-config) MUST do the same for a session the
-// new adapter started. Each test starts a session through one binary, kills that
-// dispatch the way a restart does (SIGKILL of the whole process group; the
-// session lives on in its own tmux server), redelivers the SAME event to the
-// other binary and asserts, from the pool's own listing and the handler's event
+// The redelivered dispatch of the ccpool adapter (pg-router-handler-ccpool, role
+// object on stdin) MUST find that session and launch nothing beside it. The test
+// starts a session through the adapter, kills that dispatch the way a restart
+// does (SIGKILL of the whole process group; the session lives on in its own
+// tmux server), redelivers the SAME event to a fresh dispatch and asserts, from the pool's own listing and the handler's event
 // log, that the session was adopted: still exactly one session for the bead,
 // the same external id, route "adopted" and not "launched", and a supervision
 // lease the adopting dispatch refreshed.
 //
-// No daemon runs: both binaries are driven directly with the golden-shaped
+// No daemon runs: the adapter binary is driven directly with the golden-shaped
 // dispatch request. bd is a small script first on PATH (the nix check's sandbox
 // has no bd and needs no dolt); ccpool and tmux are real, in a sandbox pool and
 // tmux socket under a scratch directory, with the fake-claude stub as claude.
@@ -130,7 +126,7 @@ type adoptSandbox struct {
 	bdDir    string // FAKE_BD_DIR: status file and call log
 	fakeBin  string // directory first on the handlers' PATH, holding bd
 	stateDir string // the handlers' state directory: events.jsonl, session locks
-	cfgPath  string // the launch config JSON both binaries read
+	cfgPath  string // the launch config JSON the dispatches read
 	cc       *ccpool.CLIRunner
 }
 
@@ -228,7 +224,7 @@ enabled = false
 	if err := os.WriteFile(filepath.Join(sb.poolDir, "config.toml"), []byte(poolCfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// The handler-wide launch config both binaries read through --config (the
+	// The handler-wide launch config the dispatches read through --config (the
 	// durations are nanosecond integers on the wire). Unset fields keep
 	// config.Default().
 	launchCfg := map[string]any{
@@ -383,8 +379,8 @@ func (sb *adoptSandbox) waitFor(what string, p *handlerProc, cond func() bool) {
 	}
 }
 
-// adoptCCPoolSettings are the ccpool role settings both shapes carry (the same
-// field names in the old per-role file and the new [role.config]); isolation
+// adoptCCPoolSettings are the ccpool role settings the adapter reads (the same
+// field names as in the role's [role.config].ccpool); isolation
 // "none" runs the session in the repo root, so no worktree is made.
 func adoptCCPoolSettings() map[string]any {
 	return map[string]any{
@@ -398,9 +394,9 @@ func adoptCCPoolSettings() map[string]any {
 }
 
 // adoptRequest is the golden handler.dispatch body with the event filled the
-// way the old dispatch reads it (the item's fields at the payload's top
-// level), for the one bead and event both dispatches use. role, when non-nil,
-// is the new shape's role object.
+// way the dispatch reads it (the item's fields at the payload's top level), for
+// the one bead and event both dispatches use. role, when non-nil, is the role
+// object.
 func adoptRequest(t *testing.T, role map[string]any) []byte {
 	t.Helper()
 	req, err := conformance.Golden("handler.dispatch")
@@ -421,30 +417,12 @@ func adoptRequest(t *testing.T, role map[string]any) []byte {
 	return b
 }
 
-// handlerShape is one of the two ways a dispatch is delivered: today's
-// pg-router-ccpool-handler with the per-role JSON named by --role-config, or the
-// session adapter pg-router-handler-ccpool with the role object on stdin.
+// handlerShape is one way a dispatch is delivered: the ccpool adapter
+// pg-router-handler-ccpool with the role object on stdin.
 type handlerShape struct {
 	name string
 	// start runs one dispatch of the test's bead, role and event.
 	start func(t *testing.T, sb *adoptSandbox) *handlerProc
-}
-
-func oldShape() handlerShape {
-	return handlerShape{name: "old handler (pg-router-ccpool-handler dispatch --role-config)", start: func(t *testing.T, sb *adoptSandbox) *handlerProc {
-		bin := buildBinary(t, oldHandlerCmd)
-		roleFile := filepath.Join(sb.root, "role.json")
-		raw, err := json.Marshal(map[string]any{
-			"name": adoptRole, "type": "ccpool", "survivesShutdown": true, "ccpool": adoptCCPoolSettings(),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(roleFile, raw, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return sb.start("old handler", bin, []string{"dispatch", "--role-config", roleFile, "--config", sb.cfgPath}, adoptRequest(t, nil))
-	}}
 }
 
 func newShape() handlerShape {
@@ -463,11 +441,10 @@ var adoptedExternalID = regexp.MustCompile(`^pg-router-` + adoptRole + `-` + ado
 // runAdoption starts a session with starter, kills that dispatch as a daemon
 // restart does, redelivers the same event to adopter, and asserts the adoption.
 func runAdoption(t *testing.T, starter, adopter handlerShape) {
-	// Build both binaries BEFORE the sandbox re-points HOME and the XDG
+	// Build the binary BEFORE the sandbox re-points HOME and the XDG
 	// directories: `go build` under the sandbox's HOME would fill a fresh
 	// GOPATH (a read-only module cache) inside the scratch directory, and
 	// refetch every module. The builds are memoized per process.
-	buildBinary(t, oldHandlerCmd)
 	buildBinary(t, ccpoolAdapterCmd)
 	sb := newAdoptSandbox(t)
 
@@ -563,16 +540,9 @@ func runAdoption(t *testing.T, starter, adopter handlerShape) {
 	}
 }
 
-// TestAdoptOldHandlerSessionByNewAdapter is the cutover case (ADR 0085's
-// Addendum): a session the old handler started is adopted, across a daemon
-// restart, by the new ccpool adapter's redelivered dispatch of the same event.
-func TestAdoptOldHandlerSessionByNewAdapter(t *testing.T) {
-	runAdoption(t, oldShape(), newShape())
-}
-
-// TestRollbackNewAdapterSessionAdoptedByOldHandler is the rollback case: after
-// a role family's move is reverted, the old handler (the only binary the
-// simulation runs for the redelivery) adopts a session the new adapter started.
-func TestRollbackNewAdapterSessionAdoptedByOldHandler(t *testing.T) {
-	runAdoption(t, newShape(), oldShape())
+// TestAdoptSessionByRedeliveredDispatch is ADR 0085's restart case: a session
+// the ccpool adapter started is adopted, across a daemon restart, by the
+// redelivered dispatch of the same event.
+func TestAdoptSessionByRedeliveredDispatch(t *testing.T) {
+	runAdoption(t, newShape(), newShape())
 }

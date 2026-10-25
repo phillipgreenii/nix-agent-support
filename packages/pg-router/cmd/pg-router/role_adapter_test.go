@@ -23,24 +23,21 @@ import (
 // The role-adapter resolver (config.Config.RoleCommand, reached through
 // handlerCommandFor) serves every surface that runs or shows a role's adapter:
 // config --show, config check, run-role, doctor and startup validate. These
-// tests drive each surface against a REAL stub handler process and a role on
-// the new path (it sets handler) beside a role on today's path, and read the
-// outcome from the stub's own recording, never from a fake.
+// tests drive each surface against REAL stub handler processes, one per role,
+// and read the outcome from the stubs' own recordings, never from a fake.
 
 const (
-	adapterNewRole = "scratch-command"
-	adapterOldRole = "legacy"
+	adapterNewRole    = "scratch-command"
+	adapterSecondRole = "second-command"
 )
 
-// adapterWorkspace is a hermetic config with one new-path role (its own stub
-// handler) and one today's-path role (the shared stub through
-// PG_ROUTER_HANDLER_COMMAND and a role-config directory).
+// adapterWorkspace is a hermetic config with two roles, each with its own stub
+// handler.
 type adapterWorkspace struct {
-	dir     string
-	rec     string // the stubs record argv and stdin here
-	stub    string // the new-path role's handler
-	shared  string // the shared (today's path) handler
-	roleDir string
+	dir    string
+	rec    string // the stubs record argv and stdin here
+	stub   string // the first role's handler
+	second string // the second role's handler
 }
 
 // writeAdapterStub writes an executable /bin/sh stub that records argv and stdin
@@ -74,22 +71,18 @@ func newAdapterWorkspace(t *testing.T, dispatchReply, validateReply string) adap
 	t.Helper()
 	dir := shortDir(t)
 	w := adapterWorkspace{
-		dir:     dir,
-		rec:     filepath.Join(dir, "rec"),
-		stub:    filepath.Join(dir, "stub-handler"),
-		shared:  filepath.Join(dir, "shared-handler"),
-		roleDir: filepath.Join(dir, "roles"),
+		dir:    dir,
+		rec:    filepath.Join(dir, "rec"),
+		stub:   filepath.Join(dir, "stub-handler"),
+		second: filepath.Join(dir, "second-handler"),
 	}
-	for _, d := range []string{w.rec, w.roleDir, filepath.Join(dir, "log")} {
+	for _, d := range []string{w.rec, filepath.Join(dir, "log")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	writeAdapterStub(t, w.stub, w.rec, "new", dispatchReply, validateReply)
-	writeAdapterStub(t, w.shared, w.rec, "old", dispatchReply, adapterValidOK)
-	if err := os.WriteFile(filepath.Join(w.roleDir, adapterOldRole+".json"), []byte(`{"survivesShutdown":true}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeAdapterStub(t, w.second, w.rec, "second", dispatchReply, adapterValidOK)
 	cfg := `[[query]]
 name = "scratch-src"
 emits = ["scratch.event"]
@@ -112,9 +105,13 @@ argv = ["/usr/bin/true"]
 SCRATCH_KEY = "scratch-value"
 
 [[role]]
-name = "` + adapterOldRole + `"
+name = "` + adapterSecondRole + `"
 enabled = true
 binds = ["scratch.event"]
+handler = "` + w.second + `"
+survives_shutdown = true
+[role.config.command]
+argv = ["/usr/bin/false"]
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
@@ -122,8 +119,6 @@ binds = ["scratch.event"]
 	t.Setenv("PG_ROUTER_CONFIG", filepath.Join(dir, "config.toml"))
 	t.Setenv("PG_ROUTER_GLOBAL_CONFIG", filepath.Join(dir, "no-global.toml"))
 	t.Setenv("PG_ROUTER_LOG_DIR", filepath.Join(dir, "log"))
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", w.shared)
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND_DIR", w.roleDir)
 	t.Setenv("PG_ROUTER_SOCKET", "")
 	t.Setenv("PG_ROUTER_TOKEN", "")
 	return w
@@ -168,10 +163,9 @@ func captureStdout(t *testing.T, fn func()) string {
 	return <-done
 }
 
-// config --show (text): each role shows the command it runs, its
-// survives_shutdown value, and (new path) the role object as sent, sessionEnv
-// included; a role on today's path shows the shared command with --role-config
-// and no role object.
+// config --show (text): each role shows the command it runs (its own handler),
+// its survives_shutdown value, and the role object as sent, sessionEnv
+// included.
 func TestConfigShow_textShowsTheResolvedCommandPerRole(t *testing.T) {
 	w := newAdapterWorkspace(t, adapterDeferredReply, adapterValidOK)
 	var b bytes.Buffer
@@ -179,7 +173,7 @@ func TestConfigShow_textShowsTheResolvedCommandPerRole(t *testing.T) {
 	out := b.String()
 	for _, want := range []string{
 		"command: " + w.stub + " dispatch\n",
-		"command: " + w.shared + " dispatch --role-config " + filepath.Join(w.roleDir, adapterOldRole+".json") + "\n",
+		"command: " + w.second + " dispatch\n",
 		`"sessionEnv":{"SCRATCH_KEY":"scratch-value"}`,
 		`role: {"name":"` + adapterNewRole + `"`,
 	} {
@@ -187,12 +181,12 @@ func TestConfigShow_textShowsTheResolvedCommandPerRole(t *testing.T) {
 			t.Errorf("config --show lacks %q:\n%s", want, out)
 		}
 	}
-	// Per-role blocks: the new-path role survives (TOML), so does the legacy one (its JSON).
+	// Per-role blocks: both roles survive (their TOML key).
 	if got := strings.Count(out, "survives_shutdown: true"); got != 2 {
 		t.Errorf("survives_shutdown: true appears %d times, want 2 (one per role):\n%s", got, out)
 	}
-	if got := strings.Count(out, "      role: "); got != 1 {
-		t.Errorf("role object printed %d times, want once (a role on today's path sends none):\n%s", got, out)
+	if got := strings.Count(out, "      role: "); got != 2 {
+		t.Errorf("role object printed %d times, want once per role:\n%s", got, out)
 	}
 }
 
@@ -220,10 +214,10 @@ func TestConfigShowJSON_roleObjectIsExactlyWhatIsSent(t *testing.T) {
 	}
 	n, o := rep.Roles[0], rep.Roles[1]
 	if n.Name != adapterNewRole || n.Command != w.stub+" dispatch" || !n.SurvivesShutdown || len(n.Role) == 0 {
-		t.Errorf("new-path role = %+v, want its own handler, survives true and a role object", n)
+		t.Errorf("first role = %+v, want its own handler, survives true and a role object", n)
 	}
-	if o.Name != adapterOldRole || !strings.HasPrefix(o.Command, w.shared+" dispatch --role-config ") || !o.SurvivesShutdown || len(o.Role) != 0 {
-		t.Errorf("today's-path role = %+v, want the shared command, JSON survives and no role object", o)
+	if o.Name != adapterSecondRole || o.Command != w.second+" dispatch" || !o.SurvivesShutdown || len(o.Role) == 0 {
+		t.Errorf("second role = %+v, want its own handler, survives true and a role object", o)
 	}
 
 	// Deliver one event through run-role and compare what the stub received.
@@ -249,27 +243,23 @@ func TestConfigShowJSON_roleObjectIsExactlyWhatIsSent(t *testing.T) {
 	}
 }
 
-// A role without handler and no shared command configured shows why it has no
-// command instead of printing an empty one.
-func TestConfigShow_oldPathWithoutSharedCommandSaysSo(t *testing.T) {
-	w := newAdapterWorkspace(t, adapterDeferredReply, adapterValidOK)
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", "")
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND_DIR", "")
-	cfg := w.load(t)
+// A role built in code without handler shows why it has no command instead of
+// printing an empty one (a loaded config never has one: decode rejects it).
+func TestConfigShow_roleWithoutHandlerSaysSo(t *testing.T) {
+	cfg := config.Config{Roles: roles.RoleSet{{Name: "bare", Enabled: true, Binds: []string{"e"}}}}
 	var text, js bytes.Buffer
 	renderConfigShow(&text, cfg)
 	renderConfigShowJSON(&js, cfg)
-	if !strings.Contains(text.String(), "command: (none: no handler command configured for role \"legacy\"") {
+	if !strings.Contains(text.String(), "command: (none: role \"bare\" has no handler") {
 		t.Errorf("text lacks the none line:\n%s", text.String())
 	}
-	if !strings.Contains(js.String(), `"commandError": "no handler command configured for role \"legacy\"`) &&
-		!strings.Contains(js.String(), `"commandError":"no handler command configured for role \"legacy\"`) {
+	if !strings.Contains(js.String(), `"commandError": "role \"bare\" has no handler`) &&
+		!strings.Contains(js.String(), `"commandError":"role \"bare\" has no handler`) {
 		t.Errorf("json lacks commandError:\n%s", js.String())
 	}
 }
 
-// run-role on a new-path role delivers the event to ITS handler, with the role
-// object, and prints that handler's outcome (here a deferral, then an outcome).
+// run-role delivers the event to the role's OWN handler, with the role object, and prints that handler's outcome (here a deferral, then an outcome).
 func TestRunRole_newPathReachesItsOwnHandlerAndPrintsItsReply(t *testing.T) {
 	for _, tc := range []struct {
 		name, reply string
@@ -298,10 +288,10 @@ func TestRunRole_newPathReachesItsOwnHandlerAndPrintsItsReply(t *testing.T) {
 					t.Errorf("--json %s = %v, want %v (full: %s)", k, got[k], v, out)
 				}
 			}
-			// The handler's own recording: argv is [dispatch] only (no --role-config),
-			// stdin carries the event and the role object; the shared handler never ran.
-			if argv := w.recorded(t, "new-argv"); !strings.HasPrefix(argv, "dispatch\n") || strings.Contains(argv, "--role-config") {
-				t.Errorf("new handler argv = %q, want [dispatch] with no --role-config", argv)
+			// The handler's own recording: argv is [dispatch] only, stdin carries
+			// the event and the role object; the other role's handler never ran.
+			if argv := w.recorded(t, "new-argv"); !strings.HasPrefix(argv, "dispatch\n") || strings.Contains(argv, " ") {
+				t.Errorf("handler argv = %q, want bare subcommands (dispatch first) with no argument after any", argv)
 			}
 			var req struct {
 				Event struct{ ID string } `json:"event"`
@@ -316,8 +306,8 @@ func TestRunRole_newPathReachesItsOwnHandlerAndPrintsItsReply(t *testing.T) {
 			if req.Event.ID != "evt-1" || req.Role.Name != adapterNewRole || req.Role.Config["sessionEnv"] == nil || req.Role.Config["command"] == nil {
 				t.Errorf("dispatch request = %+v, want the event and the role object with its config", req)
 			}
-			if _, err := os.Stat(filepath.Join(w.rec, "old-argv")); err == nil {
-				t.Error("the shared handler ran for a role that sets its own handler")
+			if _, err := os.Stat(filepath.Join(w.rec, "second-argv")); err == nil {
+				t.Error("another role's handler ran for this role")
 			}
 		})
 	}
@@ -335,35 +325,33 @@ func TestRunRole_textModeReportsADeferral(t *testing.T) {
 	}
 }
 
-// run-role on a role on today's path still goes through the shared command, with
-// the role-config file, and sends no role object (its request is unchanged).
-func TestRunRole_oldPathStillUsesTheSharedCommand(t *testing.T) {
+// run-role on the second role reaches the second handler and not the first.
+func TestRunRole_eachRoleReachesItsOwnHandler(t *testing.T) {
 	w := newAdapterWorkspace(t, adapterDeferredReply, adapterValidOK)
 	evt := `{"id":"evt-1","type":"scratch.event","payload":{"id":"item-1","type":"scratch.event"}}`
-	if code := runRunRole(adapterOldRole, evt, false); code != exitOK {
+	if code := runRunRole(adapterSecondRole, evt, false); code != exitOK {
 		t.Fatalf("exit = %d", code)
 	}
-	argv := w.recorded(t, "old-argv")
-	if !strings.Contains(argv, "dispatch --role-config "+filepath.Join(w.roleDir, adapterOldRole+".json")) {
-		t.Errorf("shared handler argv = %q, want dispatch --role-config <dir>/legacy.json", argv)
+	if argv := w.recorded(t, "second-argv"); !strings.HasPrefix(argv, "dispatch\n") || strings.Contains(argv, " ") {
+		t.Errorf("second handler argv = %q, want bare subcommands (dispatch first) with no argument after any", argv)
 	}
-	if strings.Contains(w.recorded(t, "old-dispatch.json"), `"role"`) {
-		t.Errorf("a role without handler must send no role object: %s", w.recorded(t, "old-dispatch.json"))
+	if !strings.Contains(w.recorded(t, "second-dispatch.json"), `"role":{"name":"`+adapterSecondRole+`"`) {
+		t.Errorf("second handler dispatch request lacks its role object: %s", w.recorded(t, "second-dispatch.json"))
 	}
 	if _, err := os.Stat(filepath.Join(w.rec, "new-argv")); err == nil {
-		t.Error("the new-path handler ran for a role without handler")
+		t.Error("the first role's handler ran for the second role")
 	}
 }
 
-// doctor calls each role's validate through the resolver: the new-path role's
-// own handler answers for it, the old-path role's shared handler for it.
+// doctor calls each role's validate through the resolver: each role's own
+// handler answers for it.
 func TestDoctor_validateGoesThroughTheResolverPerRole(t *testing.T) {
 	for _, tc := range []struct {
 		name, validate string
 		want           []string
 	}{
-		{"valid", adapterValidOK, []string{"ok   validate " + adapterNewRole + ": valid", "ok   validate " + adapterOldRole + ": valid"}},
-		{"problem", adapterValidBoom, []string{"FAIL validate " + adapterNewRole + ": boom", "ok   validate " + adapterOldRole + ": valid"}},
+		{"valid", adapterValidOK, []string{"ok   validate " + adapterNewRole + ": valid", "ok   validate " + adapterSecondRole + ": valid"}},
+		{"problem", adapterValidBoom, []string{"FAIL validate " + adapterNewRole + ": boom", "ok   validate " + adapterSecondRole + ": valid"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newAdapterWorkspace(t, adapterDeferredReply, tc.validate)
@@ -374,21 +362,20 @@ func TestDoctor_validateGoesThroughTheResolverPerRole(t *testing.T) {
 					t.Errorf("doctor output lacks %q:\n%s", want, out.String())
 				}
 			}
-			// Each handler saw a validate call; only the new path's carries a role object.
-			if !strings.Contains(w.recorded(t, "new-validate.json"), `"role":{"name":"`+adapterNewRole+`"`) {
-				t.Errorf("new handler validate request lacks the role object: %s", w.recorded(t, "new-validate.json"))
-			}
-			if strings.Contains(w.recorded(t, "old-validate.json"), `"role"`) {
-				t.Errorf("old handler validate request carries a role object: %s", w.recorded(t, "old-validate.json"))
+			// Each handler saw a validate call carrying its own role object.
+			for _, tag := range [][2]string{{"new", adapterNewRole}, {"second", adapterSecondRole}} {
+				if !strings.Contains(w.recorded(t, tag[0]+"-validate.json"), `"role":{"name":"`+tag[1]+`"`) {
+					t.Errorf("%s handler validate request lacks its role object: %s", tag[0], w.recorded(t, tag[0]+"-validate.json"))
+				}
 			}
 		})
 	}
 }
 
-// Startup validate goes through the same resolver: a new-path role whose own
-// handler reports a problem stays registered and is marked unavailable with the
-// stub's problem text, while the role on today's path stays available.
-func TestStartupValidate_newPathRoleUnavailableThroughItsOwnHandler(t *testing.T) {
+// Startup validate goes through the same resolver: a role whose own handler
+// reports a problem stays registered and is marked unavailable with the stub's
+// problem text, while the other role stays available.
+func TestStartupValidate_roleUnavailableThroughItsOwnHandler(t *testing.T) {
 	w := newAdapterWorkspace(t, adapterDeferredReply, adapterValidBoom)
 	cfg := w.load(t)
 	cfg.LogDir = filepath.Join(w.dir, "core-log")
@@ -412,8 +399,8 @@ func TestStartupValidate_newPathRoleUnavailableThroughItsOwnHandler(t *testing.T
 	if got.Self != core.SelfUnavailable || got.UnavailableReason != "boom" {
 		t.Errorf("%s: Self=%q reason=%q, want unavailable with the stub's problem", adapterNewRole, got.Self, got.UnavailableReason)
 	}
-	if !reg.Available(adapterOldRole) {
-		t.Errorf("%s must stay available: its shared handler validated fine", adapterOldRole)
+	if !reg.Available(adapterSecondRole) {
+		t.Errorf("%s must stay available: its own handler validated fine", adapterSecondRole)
 	}
 	if !strings.Contains(w.recorded(t, "new-validate.json"), adapterNewRole) {
 		t.Error("the new-path role's own handler was never asked to validate")
@@ -421,8 +408,7 @@ func TestStartupValidate_newPathRoleUnavailableThroughItsOwnHandler(t *testing.T
 }
 
 // config check reports a missing handler path together with a missing query
-// command in ONE run (design section 10, V-3), and a role on today's path keeps
-// being checked through the shared command.
+// command in ONE run (design section 10, V-3).
 func TestConfigCheck_reportsMissingHandlerAndMissingQueryCommandTogether(t *testing.T) {
 	w := newAdapterWorkspace(t, adapterDeferredReply, adapterValidOK)
 	cfgPath := filepath.Join(w.dir, "config2.toml")
@@ -460,13 +446,14 @@ handler = "` + filepath.Join(w.dir, "missing") + `"
 }
 
 // One resolver for every surface: handlerCommandFor, the config's RoleCommand
-// and what config --show prints agree for a role on each path.
+// and what config --show prints agree for a role with a handler and for one
+// without.
 func TestHandlerCommandFor_isTheConfigResolver(t *testing.T) {
-	cfg := config.Config{HandlerCommand: "shared", HandlerCommandDir: "/dir"}
-	for _, r := range []roles.Role{{Name: "old"}, {Name: "new", Handler: "/opt/h"}} {
+	cfg := config.Config{}
+	for _, r := range []roles.Role{{Name: "bare"}, {Name: "new", Handler: "/opt/h"}} {
 		a, errA := handlerCommandFor(cfg)(r, "validate")
 		b, errB := cfg.RoleCommand(r, "validate")
-		if errA != nil || errB != nil || !reflect.DeepEqual(a, b) {
+		if (errA == nil) != (errB == nil) || !reflect.DeepEqual(a, b) {
 			t.Errorf("%s: handlerCommandFor = %v (%v), RoleCommand = %v (%v)", r.Name, a, errA, b, errB)
 		}
 	}

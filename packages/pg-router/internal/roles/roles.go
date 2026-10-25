@@ -90,26 +90,19 @@ type Role struct {
 	// to the queue through the roleListener's eventqueue.GateExempter.
 	NonBlockingGates []string
 	// Handler is the role's own adapter command, an absolute path (docket
-	// pg2-12gr4.10, the handler split). A role that sets it is on the NEW path:
-	// core invokes [Handler, <subcommand>] with the role object on stdin, reads
-	// SurvivesShutdown from the TOML, and never passes --role-config. Empty
-	// (every role today) is the OLD path: the global PG_ROUTER_HANDLER_COMMAND,
-	// --role-config, and the per-role JSON's survivesShutdown.
+	// pg2-12gr4.10, the handler split). Required: core invokes
+	// [Handler, <subcommand>] with the role object on stdin and reads
+	// SurvivesShutdown from the TOML. A [[role]] without it is a config load
+	// error naming the role.
 	Handler string
 	// Config is the role's opaque [role.config] table, handed to the adapter as
-	// role.config on every request. Core never interprets it. Only a role with
-	// Handler may carry one (config decode rejects it otherwise).
+	// role.config on every request. Core never interprets it.
 	Config map[string]any
 	// SurvivesShutdown is the generic [[role]] survives_shutdown key: a role
 	// whose handler supervises its own work leaves its dispatch running when the
-	// daemon shuts down (bead pg2-dtigc, ADR 0085). Meaningful only for a role
-	// with Handler; a role without one reads the per-role JSON flag instead.
+	// daemon shuts down (bead pg2-dtigc, ADR 0085).
 	SurvivesShutdown bool
 }
-
-// NewPath reports whether the role is on the new handler path (it names its own
-// adapter command with Handler).
-func (r Role) NewPath() bool { return r.Handler != "" }
 
 // ExternalID builds the per-attempt ccpool external_id:
 // <prefix><name>-<beadid>-<stamp>. The stamp makes it unique per attempt (ADR 0015).

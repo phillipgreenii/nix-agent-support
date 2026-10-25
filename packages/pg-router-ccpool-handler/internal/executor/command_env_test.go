@@ -53,7 +53,7 @@ func runEnvProbe(t *testing.T, strict bool) (names []string, kv map[string]strin
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "env.txt")
 	role := roles.Role{
-		Name: "cmdrole", Type: "command", StrictBaseEnv: strict,
+		Name: "cmdrole", StrictBaseEnv: strict,
 		Command: &roles.CommandConfig{Argv: []string{"/bin/sh", "-c", `env | sort > "$1"`, "probe", out}},
 	}
 	d := DispatchContext{Role: role, Item: item.Item{ID: "b-1", Type: "task", Title: "a title"}}
@@ -174,7 +174,7 @@ func TestCommandDispatch_TemplatedArgvIsOneLiteralArgument(t *testing.T) {
 	title := "x; touch " + pwned + " $(id)"
 	// /usr/bin/env stands in for a wrapper prefix; the probe counts its args.
 	argv := []string{"/usr/bin/env", "W=1", "/bin/sh", "-c", `printf '%s\n' "$#" "$1" > "$2"`, "probe", "{{.Item.Title}}", out}
-	role := roles.Role{Name: "cmdrole", Type: "command", Command: &roles.CommandConfig{Argv: argv}}
+	role := roles.Role{Name: "cmdrole", Command: &roles.CommandConfig{Argv: argv}}
 	d := DispatchContext{Role: role, Item: item.Item{ID: "b-1", Type: "task", Title: title}}
 	if _, err := (commandExecutor{}).Dispatch(context.Background(), d, Deps{}); err != nil {
 		t.Fatalf("dispatch: %v", err)
@@ -247,7 +247,7 @@ func TestCommandDispatch_CancelKillsTheWholeGroup(t *testing.T) {
 // that is not exit 9 is an ordinary error carrying the stderr tail, and a layer
 // that exits 9 reads as busy.
 func TestCommandDispatch_FailingWrapperIsAcceptedFailure(t *testing.T) {
-	role := roles.Role{Name: "cmdrole", Type: "command", Command: &roles.CommandConfig{
+	role := roles.Role{Name: "cmdrole", Command: &roles.CommandConfig{
 		Argv: []string{"/usr/bin/env", "W=1", "/bin/sh", "-c", `echo 'pg-wrap[env]: boom' >&2; exit 2`},
 	}}
 	_, err := (commandExecutor{}).Dispatch(context.Background(), DispatchContext{Role: role, Item: item.Item{ID: "b1"}}, Deps{})

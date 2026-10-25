@@ -258,7 +258,7 @@ func ValidateEffortOverride(effort string) error {
 // --permission-mode values this module knows how to forward. Docket
 // pg2-oju6w Task 5.7: this is the real enum check pg-router's own Config used
 // to duplicate — it now lives only here, on the side that actually invokes
-// `ccpool new --permission-mode`. Callers (cmd/pg-router-ccpool-handler's
+// `ccpool new --permission-mode`. Callers (cmd/pg-router-handler-ccpool's
 // loadConfig) MUST call this after decoding so an invalid value fails at
 // config-load time rather than surfacing later as a rejected ccpool argv.
 func (c Config) Validate() error {

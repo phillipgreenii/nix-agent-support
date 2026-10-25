@@ -425,7 +425,7 @@ func eventFromWire(we wireEvent) event.Event {
 
 // itemFromWirePayload reconstructs an item.Item from a wire event's opaque
 // payload object — this package's own local twin of
-// packages/pg-router-ccpool-handler/cmd/pg-router-ccpool-handler's
+// packages/pg-router-ccpool-handler/cmd/pg-router-handler-ccpool's
 // itemFromPayload (Go's internal-package visibility rule means neither side
 // may import the other's), reading the same flat id/type/title/metadata
 // shape. A payload missing an expected field yields a zero value for it

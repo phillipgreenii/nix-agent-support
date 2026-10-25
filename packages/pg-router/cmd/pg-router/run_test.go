@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"reflect"
 	"strings"
 	"sync"
@@ -303,89 +301,39 @@ func TestBootCore_DescriptionRoundTripsToWireAndTUI(t *testing.T) {
 	}
 }
 
-// TestHandlerCommandFor_unconfiguredIsAnError proves handlerCommandFor names
-// PG_ROUTER_HANDLER_COMMAND (not a hardcoded participant) and the role that
-// needed it, when cfg.HandlerCommand is unset — GOAL-MIN-1's Floor (this
-// bead, pg2-g068j) means this seam has no baked-in default to fall back to.
-func TestHandlerCommandFor_unconfiguredIsAnError(t *testing.T) {
+// TestHandlerCommandFor_roleWithoutHandlerIsAnError proves handlerCommandFor
+// names the role that has no handler: core has no shared fallback command (a
+// role is invoked only through its own handler), so it errors rather than
+// silently resolving a command.
+func TestHandlerCommandFor_roleWithoutHandlerIsAnError(t *testing.T) {
 	commandFor := handlerCommandFor(config.Config{})
 	_, err := commandFor(roles.Role{Name: "r1"}, "dispatch")
 	if err == nil {
-		t.Fatal("commandFor with no HandlerCommand configured must error, not silently resolve a command")
+		t.Fatal("commandFor for a role with no handler must error, not silently resolve a command")
 	}
-	if !strings.Contains(err.Error(), "r1") || !strings.Contains(err.Error(), "PG_ROUTER_HANDLER_COMMAND") {
-		t.Errorf("err = %q, want it to name the role and PG_ROUTER_HANDLER_COMMAND", err)
-	}
-}
-
-// TestHandlerCommandFor_configuredReturnsArgv proves a configured
-// HandlerCommand (with no HandlerCommandDir) resolves to [command,
-// subcommand] — every enabled role shares the SAME command (DEC-WIRE-3's
-// "shared process backing multiple roles" is an accepted shape) — with
-// subcommand now placed by handlerCommandFor itself (pg2-ymb3v), not
-// appended later by wireclient.Client.Dispatch.
-func TestHandlerCommandFor_configuredReturnsArgv(t *testing.T) {
-	commandFor := handlerCommandFor(config.Config{HandlerCommand: "pg-router-ccpool-handler"})
-	got, err := commandFor(roles.Role{Name: "r1"}, "dispatch")
-	if err != nil {
-		t.Fatalf("commandFor: %v", err)
-	}
-	want := []string{"pg-router-ccpool-handler", "dispatch"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("commandFor = %v, want %v", got, want)
+	if !strings.Contains(err.Error(), "r1") || !strings.Contains(err.Error(), "no handler") {
+		t.Errorf("err = %q, want it to name the role and say it has no handler", err)
 	}
 }
 
-// TestHandlerCommandFor_dirConfiguredDifferentiatesRoles proves the core fix
-// (this bead, pg2-ymb3v, acceptance criterion a): with HandlerCommandDir
-// set, two DIFFERENT roles resolve to two DISTINCT argvs — each carrying its
-// own --role-config path — rather than the single shared command every role
-// got before this bead. subcommand lands as argv[1] (right after the
-// command, before the flags), matching pg-router-ccpool-handler's own CLI
-// (main.go parses args[0] as the subcommand).
-func TestHandlerCommandFor_dirConfiguredDifferentiatesRoles(t *testing.T) {
-	commandFor := handlerCommandFor(config.Config{
-		HandlerCommand:    "pg-router-ccpool-handler",
-		HandlerCommandDir: "/etc/pg-router/roles",
-	})
-
-	feedback, err := commandFor(roles.Role{Name: "feedback"}, "dispatch")
+// TestHandlerCommandFor_roleHandlerReturnsArgv proves two DIFFERENT roles
+// resolve to their own handlers, with subcommand placed at argv[1], right after
+// the handler, where the handler's own CLI parses its first argument.
+func TestHandlerCommandFor_roleHandlerReturnsArgv(t *testing.T) {
+	commandFor := handlerCommandFor(config.Config{})
+	feedback, err := commandFor(roles.Role{Name: "feedback", Handler: "/opt/a/ccpool"}, "dispatch")
 	if err != nil {
 		t.Fatalf("commandFor(feedback): %v", err)
 	}
-	worker, err := commandFor(roles.Role{Name: "worker"}, "dispatch")
+	worker, err := commandFor(roles.Role{Name: "worker", Handler: "/opt/a/command"}, "postStartup")
 	if err != nil {
 		t.Fatalf("commandFor(worker): %v", err)
 	}
-
-	wantFeedback := []string{"pg-router-ccpool-handler", "dispatch", "--role-config", "/etc/pg-router/roles/feedback.json"}
-	wantWorker := []string{"pg-router-ccpool-handler", "dispatch", "--role-config", "/etc/pg-router/roles/worker.json"}
-	if !reflect.DeepEqual(feedback, wantFeedback) {
-		t.Errorf("commandFor(feedback) = %v, want %v", feedback, wantFeedback)
+	if want := []string{"/opt/a/ccpool", "dispatch"}; !reflect.DeepEqual(feedback, want) {
+		t.Errorf("commandFor(feedback) = %v, want %v", feedback, want)
 	}
-	if !reflect.DeepEqual(worker, wantWorker) {
-		t.Errorf("commandFor(worker) = %v, want %v", worker, wantWorker)
-	}
-	if reflect.DeepEqual(feedback, worker) {
-		t.Fatal("feedback and worker must resolve to DISTINCT argvs when HandlerCommandDir is set")
-	}
-}
-
-// TestHandlerCommandFor_dirConfiguredPlacesSubcommandBeforeFlags proves the
-// exact reason the seam had to widen: the subcommand MUST be argv[1], never
-// pushed past the --role-config flag pair, or pg-router-ccpool-handler's own
-// CLI would reject "--role-config" as an unknown subcommand.
-func TestHandlerCommandFor_dirConfiguredPlacesSubcommandBeforeFlags(t *testing.T) {
-	commandFor := handlerCommandFor(config.Config{
-		HandlerCommand:    "pg-router-ccpool-handler",
-		HandlerCommandDir: "/etc/pg-router/roles",
-	})
-	got, err := commandFor(roles.Role{Name: "worker"}, "postStartup")
-	if err != nil {
-		t.Fatalf("commandFor: %v", err)
-	}
-	if len(got) < 2 || got[1] != "postStartup" {
-		t.Fatalf("argv = %v, want argv[1] == %q (the participant CLI's own first-argument subcommand parse)", got, "postStartup")
+	if want := []string{"/opt/a/command", "postStartup"}; !reflect.DeepEqual(worker, want) {
+		t.Errorf("commandFor(worker) = %v, want %v", worker, want)
 	}
 }
 
@@ -410,143 +358,14 @@ func TestBootCore_wiresRealHandlerWhenUnset(t *testing.T) {
 	if _, ok := o.Handler.(*wireclient.Client); !ok {
 		t.Fatalf("o.Handler = %T, want *wireclient.Client", o.Handler)
 	}
-	// cfg.HandlerCommand is unset here, so the wired client's own CommandFor
-	// errors per-call rather than resolving — proving it is a REAL
-	// wireclient.Client attempting real resolution (a different, more
-	// specific error than "no Handler configured"), not a disguised
-	// unconfiguredHandler.
+	// The role has no handler here, so the wired client's own CommandFor errors
+	// per-call rather than resolving — proving it is a REAL wireclient.Client
+	// attempting real resolution (a different, more specific error than "no
+	// Handler configured"), not a disguised unconfiguredHandler.
 	if _, err := o.Handler.Dispatch(context.Background(), roles.Role{Name: "r1"}, eventqueue.Event{}); err == nil {
-		t.Fatal("Dispatch with no HandlerCommand configured must still error")
+		t.Fatal("Dispatch for a role with no handler must still error")
 	} else if strings.Contains(err.Error(), "orchestrator: no Handler configured") {
 		t.Errorf("err = %q, want the wireclient-level CommandFor error, not orchestrator's own unconfiguredHandler message", err)
-	}
-}
-
-// --- warnHandlerCommandAmbiguity (this bead, pg2-ymb3v, acceptance criterion b) ---
-
-// TestWarnHandlerCommandAmbiguity_firesForMultiRoleSingleCommand proves the
-// boot-time WARN fires for exactly the silent-misconfiguration shape the
-// bead's design names: more than one ENABLED role, only HandlerCommand set
-// (no HandlerCommandDir).
-func TestWarnHandlerCommandAmbiguity_firesForMultiRoleSingleCommand(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	cfg := config.Config{
-		HandlerCommand: "pg-router-ccpool-handler",
-		Roles: roles.RoleSet{
-			{Name: "feedback", Enabled: true},
-			{Name: "worker", Enabled: true},
-		},
-	}
-	warnHandlerCommandAmbiguity(cfg)
-
-	if !strings.Contains(buf.String(), "PG_ROUTER_HANDLER_COMMAND_DIR") {
-		t.Fatalf("expected a WARN naming PG_ROUTER_HANDLER_COMMAND_DIR; got:\n%s", buf.String())
-	}
-}
-
-// TestWarnHandlerCommandAmbiguity_silentWhenDirSet proves the WARN does NOT
-// fire once the operator has actually configured HandlerCommandDir — the
-// same multi-role shape is no longer a misconfiguration.
-func TestWarnHandlerCommandAmbiguity_silentWhenDirSet(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	cfg := config.Config{
-		HandlerCommand:    "pg-router-ccpool-handler",
-		HandlerCommandDir: "/etc/pg-router/roles",
-		Roles: roles.RoleSet{
-			{Name: "feedback", Enabled: true},
-			{Name: "worker", Enabled: true},
-		},
-	}
-	warnHandlerCommandAmbiguity(cfg)
-
-	if buf.Len() != 0 {
-		t.Fatalf("expected no WARN once HandlerCommandDir is set; got:\n%s", buf.String())
-	}
-}
-
-// TestWarnHandlerCommandAmbiguity_silentWhenOneRoleEnabled proves a
-// single-enabled-role deployment (today's ordinary shape) is unaffected —
-// sharing one command is not a misconfiguration when there is no sibling
-// role to confuse it with, even if a second role is DECLARED but disabled.
-func TestWarnHandlerCommandAmbiguity_silentWhenOneRoleEnabled(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	cfg := config.Config{
-		HandlerCommand: "pg-router-ccpool-handler",
-		Roles: roles.RoleSet{
-			{Name: "feedback", Enabled: true},
-			{Name: "worker", Enabled: false},
-		},
-	}
-	warnHandlerCommandAmbiguity(cfg)
-
-	if buf.Len() != 0 {
-		t.Fatalf("expected no WARN with only one role enabled; got:\n%s", buf.String())
-	}
-}
-
-// TestWarnHandlerCommandAmbiguity_silentWhenHandlerCommandUnset proves an
-// unconfigured HandlerCommand is not this WARN's concern — that case
-// already errors loudly per-dispatch (handlerCommandFor's own "no handler
-// command configured" branch), so it must not ALSO warn at boot.
-func TestWarnHandlerCommandAmbiguity_silentWhenHandlerCommandUnset(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	cfg := config.Config{
-		Roles: roles.RoleSet{
-			{Name: "feedback", Enabled: true},
-			{Name: "worker", Enabled: true},
-		},
-	}
-	warnHandlerCommandAmbiguity(cfg)
-
-	if buf.Len() != 0 {
-		t.Fatalf("expected no WARN with HandlerCommand unset; got:\n%s", buf.String())
-	}
-}
-
-// TestBootCore_warnsHandlerCommandAmbiguity proves warnHandlerCommandAmbiguity
-// is actually wired into the real boot path (bootCore), not just callable in
-// isolation — alongside its per-role registration loop, per the bead's own
-// design.
-func TestBootCore_warnsHandlerCommandAmbiguity(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	cfg := config.Config{
-		LogDir:         shortDir(t),
-		HandlerCommand: "pg-router-ccpool-handler",
-		Roles: roles.RoleSet{
-			{Name: "feedback", Enabled: true, Binds: []string{"e"}},
-			{Name: "worker", Enabled: true, Binds: []string{"e"}},
-		},
-	}
-	o := &orchestrator.Orchestrator{Cfg: cfg}
-	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, nil, runExclusions{}, core.RunModeDrainAndExit)
-	if err != nil {
-		t.Fatalf("bootCore: %v", err)
-	}
-	defer func() { _ = storeClose() }()
-	defer func() { _ = svc.Close() }()
-
-	if !strings.Contains(buf.String(), "PG_ROUTER_HANDLER_COMMAND_DIR") {
-		t.Fatalf("bootCore must warn about the multi-role-single-HandlerCommand misconfiguration; log:\n%s", buf.String())
 	}
 }
 

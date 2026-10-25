@@ -8,20 +8,12 @@
 // call itself is still a Go method call, never a message crossing a wire",
 // ADR 0065's "Register" section) for real.
 //
-// A handler participant's own INVOCABLE COMMAND — which binary to run, and
-// with what launch-time arguments (--role-config/--config, matching
-// packages/pg-router-ccpool-handler/cmd/pg-router-ccpool-handler/dispatch.go's
-// own flags) — is deliberately NOT resolved here, and not carried by
-// roles.Role either (Task 5.4 deletes Type/CCPoolConfig/CommandConfig from
-// Role outright; internal/core's Registry documents that "the core reaches
-// a participant by running its configured command" but holds no transport
-// handle itself). dispatch.go's own doc comment defers that decision
-// explicitly to this task ("it depends on how docket pg2-oju6w's Task 5.4
-// wire client invokes this subcommand, which is that task's own call to
-// make"): CommandFor is the injected seam a caller (the deployment/wiring
-// layer — cmd/pg-router's bootCore and runRunRole, wired by bead pg2-g068j's
-// handlerCommandFor) supplies to answer it, so this package never has to
-// guess the answer for every possible deployment.
+// A handler participant's own INVOCABLE COMMAND — which binary to run — is
+// deliberately NOT resolved here: CommandFor is the injected seam a caller (the
+// deployment/wiring layer — cmd/pg-router's bootCore and runRunRole, wired by
+// handlerCommandFor, which hands back the role's own handler) supplies to
+// answer it, so this package never has to guess the answer for every possible
+// deployment. A role's own settings ride on stdin as the request's role object.
 package wireclient
 
 import (
@@ -192,15 +184,12 @@ func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte,
 // package's doc comment), never authored in roles.Role or resolved by this
 // package on its own initiative.
 //
-// subcommand ("dispatch"/"postStartup"/"preShutdown") is passed IN rather
-// than appended by this package's own callers (this bead, pg2-ymb3v,
-// widening the prior func(role roles.Role) signature): a participant's own
-// CLI (e.g. pg-router-ccpool-handler/cmd's main.go) expects the subcommand
-// as its FIRST argument, with any flags (e.g. --role-config) after it — so
-// a CommandFor that differentiates roles via extra trailing tokens (a
-// per-role --role-config path) needs to know where "dispatch" belongs in
-// the argv it returns, not have it appended after those tokens where the
-// participant's own arg parser would reject it as an unknown subcommand.
+// subcommand ("dispatch"/"postStartup"/"preShutdown"/"validate") is passed IN
+// rather than appended by this package's own callers: a participant's own CLI
+// expects the subcommand as its FIRST argument, with any flags after it — so a
+// CommandFor that adds trailing tokens needs to know where the subcommand
+// belongs in the argv it returns, not have it appended after those tokens where
+// the participant's own arg parser would reject it as an unknown subcommand.
 type CommandFor func(role roles.Role, subcommand string) ([]string, error)
 
 // Client is the production HandlerClient.
@@ -233,8 +222,8 @@ type dispatchRequest struct {
 	SchemaVersion string        `json:"schemaVersion"`
 	ID            string        `json:"id"`
 	Event         dispatchEvent `json:"event"`
-	// Role is present only for a role on the new handler path (it sets handler),
-	// so the old shared handler never sees the field.
+	// Role is the role object for the role's own handler (every role sets
+	// handler); omitted only for a role built in code without one.
 	Role *roleObject `json:"role,omitempty"`
 }
 
@@ -246,12 +235,9 @@ type roleObject struct {
 	Config map[string]any `json:"config"`
 }
 
-// roleFor builds the request's role object for a role on the new handler path,
-// and nil for a role without handler (whose request bodies stay byte-identical
-// to the pre-split ones).
 // SentRole is the role object core puts in every handler request for role, in
 // the JSON shape it is sent in ({"name": ..., "config": {...}}), and false for a
-// role without handler (whose requests carry no role object). `pg-router config
+// role built in code without handler (whose requests carry no role object). `pg-router config
 // --show` prints this value, so what an operator reads is exactly what is sent.
 func SentRole(role roles.Role) (json.RawMessage, bool) {
 	ro := roleFor(role)
@@ -267,6 +253,8 @@ func SentRole(role roles.Role) (json.RawMessage, bool) {
 	return b, true
 }
 
+// roleFor builds the request's role object, nil for a role built in code
+// without handler.
 func roleFor(role roles.Role) *roleObject {
 	if role.Handler == "" {
 		return nil
@@ -557,7 +545,7 @@ type validateReply struct {
 }
 
 // Validate sends handler.validate to role's handler participant:
-// `<handler> validate [--role-config <file>]`, the lifecycle request on stdin.
+// `<handler> validate`, the lifecycle request on stdin.
 // Exit 2 (usage) means the participant has no validate subcommand: Supported
 // false, nil error. Exit 0 with a well-formed reply gives Supported true and the
 // problem and warning lists (an empty problem list means valid). Anything else

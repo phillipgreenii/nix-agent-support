@@ -15,7 +15,7 @@ func TestBuildDeps_bdRunnerCarriesRoleActor(t *testing.T) {
 	// BuildDeps opens <stateDir>/events.jsonl; keep it out of the developer's
 	// real handler state directory.
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	role := roles.Role{Name: "worker", Type: "ccpool", CCPool: &roles.CCPoolConfig{Actor: "pgii-pool__worker"}}
+	role := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{Actor: "pgii-pool__worker"}}
 	deps := BuildDeps(config.Default(), role)
 	r, ok := deps.BD.(*beads.CLIRunner)
 	if !ok {
@@ -27,7 +27,7 @@ func TestBuildDeps_bdRunnerCarriesRoleActor(t *testing.T) {
 }
 
 func TestRoleActor_commandRoleHasNone(t *testing.T) {
-	if got := RoleActor(roles.Role{Name: "c", Type: "command"}); got != "" {
+	if got := RoleActor(roles.Role{Name: "c"}); got != "" {
 		t.Errorf("RoleActor(command role) = %q, want empty", got)
 	}
 }

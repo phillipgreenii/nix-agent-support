@@ -14,7 +14,7 @@ import (
 // A handler killed between isolation.Ensure and CC.Ensure leaks the per-bead
 // worktree and its pg-router/<bead> anchor branch with no session row, so
 // nothing keyed on a row can find it. The dispatch-time worktree sweep
-// (cmd/pg-router-ccpool-handler/worktreesweep.go) finds it by the worktree
+// (cmd/pg-router-handler-ccpool/worktreesweep.go) finds it by the worktree
 // instead -- and needs a way to tell a leaked worktree from one a sibling
 // dispatch is using right now, which looks identical (no row yet, or a row in
 // another role's pool). That signal is a flock: every dispatch holds the

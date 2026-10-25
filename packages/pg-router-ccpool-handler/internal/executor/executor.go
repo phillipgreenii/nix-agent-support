@@ -1,7 +1,7 @@
 // Package executor runs one (role, item) dispatch. It owns the ccpool
 // ensure→send→wait path (including the pg2-c1vp watchdog/single-terminal race)
-// and the command path. The orchestrator selects an Executor by role.Type via
-// For and hands it a Deps seam bag; Dispatch returns the failure action the
+// and the command path. Each adapter binary picks its Executor (NewCCPool or
+// NewCommand) and hands it a Deps seam bag; Dispatch returns the failure action the
 // executor itself performed on the bead (empty on success) — the orchestrator
 // merges the observed created/closed/handed-back actions around it.
 package executor
@@ -150,14 +150,13 @@ func (d Deps) waitPoll(ctx context.Context, dur time.Duration) error {
 	}
 }
 
-// For returns the concrete executor for a role type. Any non-"command" type
-// takes the ccpool path (matches today's orchestrator.workOneWithID switch).
-func For(roleType string) Executor {
-	if roleType == "command" {
-		return commandExecutor{}
-	}
-	return ccpoolExecutor{}
-}
+// NewCCPool returns the ccpool executor: the ensure -> send -> wait path the
+// ccpool adapter (cmd/pg-router-handler-ccpool) runs for its roles.
+func NewCCPool() Executor { return ccpoolExecutor{} }
+
+// NewCommand returns the command executor: the argv run the command adapter
+// (cmd/pg-router-handler-command) runs for its roles.
+func NewCommand() Executor { return commandExecutor{} }
 
 // failureAction builds a single-bead Result for one failure verb.
 func failureAction(verb report.Verb, beadID string) report.Result {

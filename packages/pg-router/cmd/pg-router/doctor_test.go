@@ -18,20 +18,18 @@ import (
 type doctorWorkspace struct {
 	dir     string
 	logDir  string
-	roleDir string
+	handler string // the role's handler path; absent until a test writes the stub
 }
 
 // newDoctorWorkspace writes a one-query, one-role config whose query command is
-// queryCmd, and points the environment at it. The role's handler command is left
-// unset; tests set PG_ROUTER_HANDLER_COMMAND themselves.
+// queryCmd, and points the environment at it. The role's handler is
+// <dir>/handler, which does not exist until a test writes it with writeStub.
 func newDoctorWorkspace(t *testing.T, queryCmd string) doctorWorkspace {
 	t.Helper()
 	dir := shortDir(t)
-	w := doctorWorkspace{dir: dir, logDir: filepath.Join(dir, "log"), roleDir: filepath.Join(dir, "roles")}
-	for _, d := range []string{w.logDir, w.roleDir} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
+	w := doctorWorkspace{dir: dir, logDir: filepath.Join(dir, "log"), handler: filepath.Join(dir, "handler")}
+	if err := os.MkdirAll(w.logDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
 	cfg := `[[query]]
 name = "k11-src"
@@ -47,6 +45,7 @@ kind = "manual"
 name = "k11-live"
 enabled = true
 binds = ["k11.live"]
+handler = "` + w.handler + `"
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
@@ -54,22 +53,13 @@ binds = ["k11.live"]
 	t.Setenv("PG_ROUTER_CONFIG", filepath.Join(dir, "config.toml"))
 	t.Setenv("PG_ROUTER_GLOBAL_CONFIG", filepath.Join(dir, "no-global.toml"))
 	t.Setenv("PG_ROUTER_LOG_DIR", w.logDir)
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", "")
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND_DIR", w.roleDir)
 	t.Setenv("PG_ROUTER_SOCKET", "")
 	t.Setenv("PG_ROUTER_TOKEN", "")
 	return w
 }
 
-// writeRoleConfig writes the role-config file the core hands the handler.
-func (w doctorWorkspace) writeRoleConfig(t *testing.T, body string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(w.roleDir, "k11-live.json"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// writeStub writes an executable /bin/sh handler stub: it reads and discards
+// writeStub writes the role's executable /bin/sh handler stub at w.handler (name
+// is the file name, "handler"): it reads and discards
 // stdin, runs onValidate when its first argument is "validate", and exits 9 for
 // any other subcommand.
 func (w doctorWorkspace) writeStub(t *testing.T, name, onValidate string) string {
@@ -101,22 +91,20 @@ func lowerValidateTimeout(t *testing.T, d time.Duration) {
 	t.Cleanup(func() { doctorValidateTimeout = old })
 }
 
-// config check reports a missing query command, a missing handler command and a
-// bad role-config in ONE run, and exits 1 (design section 10, V-3).
+// config check reports a missing query command and a missing handler in ONE
+// run, and exits 1 (design section 10, V-3).
 func TestConfigCheck_ReportsEveryProblemInOneRun(t *testing.T) {
 	w := newDoctorWorkspace(t, "/nonexistent/k11-producer")
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", "/nonexistent/handler")
-	w.writeRoleConfig(t, "{ not json")
 
 	var stdout, stderr strings.Builder
 	if code := configCheck(&stdout, &stderr); code != exitGeneric {
 		t.Fatalf("exit = %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("want exactly 3 problem lines, got %d:\n%s", len(lines), stderr.String())
+	if len(lines) != 2 {
+		t.Fatalf("want exactly 2 problem lines, got %d:\n%s", len(lines), stderr.String())
 	}
-	for _, want := range []string{"/nonexistent/k11-producer", "/nonexistent/handler", "not well-formed JSON"} {
+	for _, want := range []string{"/nonexistent/k11-producer", `role "k11-live" handler "` + w.handler + `"`} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("no problem line mentions %q:\n%s", want, stderr.String())
 		}
@@ -128,8 +116,7 @@ func TestConfigCheck_ReportsEveryProblemInOneRun(t *testing.T) {
 
 func TestConfigCheck_CleanConfigPrintsOKAndExitsZero(t *testing.T) {
 	w := newDoctorWorkspace(t, "/bin/echo")
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", w.writeStub(t, "handler", "exit 0"))
-	w.writeRoleConfig(t, "{}")
+	w.writeStub(t, "handler", "exit 0")
 
 	var stdout, stderr strings.Builder
 	if code := configCheck(&stdout, &stderr); code != exitOK {
@@ -196,8 +183,7 @@ func TestDoctor_HandlerValidateVerdicts(t *testing.T) {
 			w := newDoctorWorkspace(t, "/bin/echo")
 			pidFile := filepath.Join(w.dir, "child.pid")
 			t.Cleanup(func() { killPidFile(pidFile) })
-			t.Setenv("PG_ROUTER_HANDLER_COMMAND", w.writeStub(t, "handler", strings.ReplaceAll(tc.onValidate, "%PID%", pidFile)))
-			w.writeRoleConfig(t, "{}")
+			w.writeStub(t, "handler", strings.ReplaceAll(tc.onValidate, "%PID%", pidFile))
 
 			var out strings.Builder
 			start := time.Now()
@@ -224,8 +210,7 @@ func TestDoctor_HandlerValidateVerdicts(t *testing.T) {
 // three probes that read the daemon report info, and the state dir probe passes.
 func TestDoctor_NoDaemon(t *testing.T) {
 	w := newDoctorWorkspace(t, "/bin/echo")
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", w.writeStub(t, "handler", `echo '{"schemaVersion":"1","problems":[],"warnings":[]}'; exit 0`))
-	w.writeRoleConfig(t, "{}")
+	w.writeStub(t, "handler", `echo '{"schemaVersion":"1","problems":[],"warnings":[]}'; exit 0`)
 
 	var out strings.Builder
 	if code := doctor(&out, "", ""); code != exitGeneric {
@@ -251,8 +236,7 @@ func TestDoctor_NoDaemon(t *testing.T) {
 func TestDoctor_StateDirMissing(t *testing.T) {
 	w := newDoctorWorkspace(t, "/bin/echo")
 	t.Setenv("PG_ROUTER_LOG_DIR", filepath.Join(w.dir, "missing"))
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", w.writeStub(t, "handler", "exit 2"))
-	w.writeRoleConfig(t, "{}")
+	w.writeStub(t, "handler", "exit 2")
 
 	var out strings.Builder
 	if code := doctor(&out, "", ""); code != exitGeneric {
@@ -267,15 +251,13 @@ func TestDoctor_StateDirMissing(t *testing.T) {
 // probes that need no config, and skips the per-role validate probes, saying why.
 func TestDoctor_ConfigFailureSkipsValidate(t *testing.T) {
 	w := newDoctorWorkspace(t, "/nonexistent/k11-producer")
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", "/nonexistent/handler")
-	w.writeRoleConfig(t, "{ not json")
 
 	var out strings.Builder
 	if code := doctor(&out, "", ""); code != exitGeneric {
 		t.Fatalf("exit = %d, want 1", code)
 	}
 	for _, want := range []string{
-		"FAIL config:", "/nonexistent/k11-producer", "/nonexistent/handler", "not well-formed JSON",
+		"FAIL config:", "/nonexistent/k11-producer", w.handler,
 		"ok   state dir:", "FAIL socket:", "info validate: skipped: the config did not load",
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -287,17 +269,20 @@ func TestDoctor_ConfigFailureSkipsValidate(t *testing.T) {
 	}
 }
 
-// A role whose handler command is unset gets a FAIL naming the reason.
-func TestDoctor_HandlerCommandUnset(t *testing.T) {
+// A role whose handler is missing fails the config check, naming the role and the
+// path, and doctor skips that role's validate probe, saying why.
+func TestDoctor_HandlerMissing(t *testing.T) {
 	w := newDoctorWorkspace(t, "/bin/echo")
-	w.writeRoleConfig(t, "{}")
 
 	var out strings.Builder
 	if code := doctor(&out, "", ""); code != exitGeneric {
 		t.Fatalf("exit = %d, want 1", code)
 	}
-	if !strings.Contains(out.String(), "FAIL validate k11-live:") || !strings.Contains(out.String(), "PG_ROUTER_HANDLER_COMMAND") {
-		t.Errorf("want a validate FAIL naming PG_ROUTER_HANDLER_COMMAND:\n%s", out.String())
+	if !strings.Contains(out.String(), "FAIL config:") || !strings.Contains(out.String(), `role "k11-live" handler "`+w.handler+`"`) {
+		t.Errorf("want a config FAIL naming the role and its handler path:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "info validate: skipped: the config did not load") {
+		t.Errorf("want the validate probe skipped:\n%s", out.String())
 	}
 }
 
@@ -316,8 +301,7 @@ func TestDoctor_RunningCoreReportsGatesUnavailableRolesAndProgress(t *testing.T)
 	}
 
 	w := newDoctorWorkspace(t, "/bin/echo")
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", w.writeStub(t, "handler", "exit 2"))
-	w.writeRoleConfig(t, "{}")
+	w.writeStub(t, "handler", "exit 2")
 
 	var out strings.Builder
 	code := doctor(&out, f.svc.Ref().Socket, f.svc.Ref().Token)

@@ -1175,7 +1175,7 @@
         # pg2-p9lcg: it also runs `TestTriage_RealBD_Dispatch` (the real
         # runDispatch against a real bd for the `triage` dispatch precheck),
         # so its file filter also covers the roles package and the dispatch
-        # sources of cmd/pg-router-ccpool-handler (one more `bd init`).
+        # sources of cmd/pg-router-handler-ccpool (one more `bd init`).
         pg-router-ccpool-handler-bd-contract-test = {
           enable = true;
           name = "pg-router-ccpool-handler-bd-contract-test";
@@ -1201,7 +1201,7 @@
 
                 top="$(git rev-parse --show-toplevel)"
                 cd "$top/packages/pg-router-ccpool-handler"
-                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Terminal|Park|Triage)_RealBD_' ./internal/watchdog/ ./internal/executor/ ./cmd/pg-router-ccpool-handler/ ./cmd/pg-router-handler-command/ ./cmd/pg-router-handler-ccpool/
+                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Terminal|Park|Triage)_RealBD_' ./internal/watchdog/ ./internal/executor/ ./cmd/pg-router-handler-command/ ./cmd/pg-router-handler-ccpool/
               '';
             }
           }/bin/pg-router-ccpool-handler-bd-contract-test-hook";

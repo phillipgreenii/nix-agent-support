@@ -5,7 +5,7 @@
 // BEADS_DIR/WORKSPACE_ROOT inherited from a parent shell.
 //
 // This package is this module's own INTF-CCH-BEADS boundary crossing (docs/
-// behavior/interfaces.md): the query surface (cmd/pg-router-ccpool-handler/
+// behavior/interfaces.md): the query surface (cmd/pg-router-handler-ccpool/
 // query.go's queryBeadsReady, via Ready below) a beads-backed source queries
 // for events, and the write path (Unclaim/AddHuman/Comment/AddLabel/
 // RemoveLabel below) a handler session's completion policy

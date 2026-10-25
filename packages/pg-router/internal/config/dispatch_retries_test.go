@@ -19,15 +19,18 @@ emits = ["pr.changed", "e", "f"]
 
 [[role]]
 name = "desk-pr"
+handler = "/bin/h"
 binds = ["pr.changed"]
 max_dispatch_retries = 2
 
 [[role]]
 name = "plain"
+handler = "/bin/h"
 binds = ["e"]
 
 [[role]]
 name = "at-cap"
+handler = "/bin/h"
 binds = ["f"]
 max_dispatch_retries = 3
 `)
@@ -57,6 +60,7 @@ emits = ["pr.changed"]
 
 [[role]]
 name = "desk-pr"
+handler = "/bin/h"
 binds = ["pr.changed"]
 max_dispatch_retries = `+v+`
 `)

@@ -85,5 +85,5 @@ func warnStubQueries(cfg config.Config) {
 // of INV-WORKFLOW-1's own closed six-check set (docs/behavior/README.md's
 // former register row for INV-WORKFLOW-1), and they no longer run in
 // pg-router at all. They now live as this module's own startup pre-flight
-// in packages/pg-router-ccpool-handler/cmd/pg-router-ccpool-handler/
-// preflight.go, exercised from that module's `query` subcommand.
+// in packages/pg-router-ccpool-handler/cmd/pg-router-handler-ccpool/
+// preflight.go, exercised from that adapter's `query` subcommand.

@@ -91,7 +91,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	// failure is logged and the payload's metadata is used.
 	dctx.Item, _ = executor.RefreshItemIssue(ctx, deps.BD, dctx.Item)
 
-	result, err := executor.For(role.Type).Dispatch(ctx, dctx, deps)
+	result, err := executor.NewCommand().Dispatch(ctx, dctx, deps)
 	if decline, busy := wire.BusyDeclineFor(err); busy {
 		// Pre-accept busy decline (INV-CONC-1, DEC-WIRE-1 exit 9): the core
 		// re-offers the event with backoff. The reason (command-busy) and kind

@@ -137,7 +137,7 @@ func (e errIsolation) Ensure(context.Context, string) (string, error) { return "
 // UsesWorktreeIsolation reports whether cfg selects the "worktree" isolation
 // strategy (the default) -- the only strategy whose per-dispatch directory is a
 // git worktree this handler created and may remove. Exported for the
-// dispatch-time orphan reconcile (cmd/pg-router-ccpool-handler/orphan.go, bead
+// dispatch-time orphan reconcile (cmd/pg-router-handler-ccpool/orphan.go, bead
 // pg2-g2u9m), which removes an orphan's worktree under the same scoping as
 // cleanupWorktree.
 func UsesWorktreeIsolation(cfg roles.IsolationConfig) bool { return usesWorktreeIsolation(cfg) }

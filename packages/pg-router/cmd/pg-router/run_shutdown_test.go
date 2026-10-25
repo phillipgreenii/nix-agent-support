@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"io"
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -228,18 +226,13 @@ func TestRunOneTick_noKickAfterShutdownRequested(t *testing.T) {
 	waitInFlight(t, q)
 }
 
-// roleDirWith writes a per-role config dir holding r1.json with body, the
-// shape the deployment module renders under PG_ROUTER_HANDLER_COMMAND_DIR.
-func roleDirWith(t *testing.T, body string) func(*config.Config) {
-	t.Helper()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "r1.json"), []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return func(c *config.Config) { c.HandlerCommandDir = dir }
+// withSurvives sets the survives_shutdown key core decoded for the one role r1,
+// the generic [[role]] key the deployment renders for a ccpool-backed role.
+func withSurvives(v bool) func(*config.Config) {
+	return func(c *config.Config) { c.Roles[0].SurvivesShutdown = v }
 }
 
-// (d) A role whose config declares `survivesShutdown` keeps its dispatch
+// (d) A role whose config declares `survives_shutdown` keeps its dispatch
 // running across a daemon shutdown (bead pg2-dtigc, ADR 0085): the run does not
 // wait out the drain on it, never cancels its context, and still runs the
 // preShutdown sweep, which spares what the handler supervises.
@@ -247,7 +240,7 @@ func TestRunLongRunning_survivingRoleIsNeitherWaitedOnNorCancelled(t *testing.T)
 	r := newShutdownRunner()
 	// A one-minute drain: if the run waited on the surviving offer, it would
 	// not exit within the 10s allowed below.
-	signal, done := startShutdownRun(t, r, time.Minute, roleDirWith(t, `{"name":"r1","type":"ccpool","survivesShutdown":true}`))
+	signal, done := startShutdownRun(t, r, time.Minute, withSurvives(true))
 	signal()
 
 	select {
@@ -284,16 +277,13 @@ func TestRunLongRunning_survivingRoleIsNeitherWaitedOnNorCancelled(t *testing.T)
 // (e) Control for (d): the same run with the flag absent or false is the
 // pre-existing behavior, so (d) cannot pass by the flag being ignored.
 func TestRunLongRunning_roleWithoutSurvivalFlagIsStillCancelledAfterDrain(t *testing.T) {
-	for name, body := range map[string]string{
-		"flag false":   `{"name":"r1","type":"command","survivesShutdown":false}`,
-		"flag absent":  `{"name":"r1","type":"command"}`,
-		"malformed":    `{not json`,
-		"wrong type":   `{"survivesShutdown":"yes"}`,
-		"empty object": `{}`,
+	for name, mutate := range map[string][]func(*config.Config){
+		"key false":  {withSurvives(false)},
+		"key absent": nil,
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := newShutdownRunner()
-			signal, done := startShutdownRun(t, r, 200*time.Millisecond, roleDirWith(t, body))
+			signal, done := startShutdownRun(t, r, 200*time.Millisecond, mutate...)
 			signal()
 			select {
 			case <-done:

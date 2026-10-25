@@ -1,5 +1,5 @@
 // ccpoolexec.go: this probe's own subprocess wrapper around ccpool's
-// read-only `ccpool list` verb, scoped to pg-router-ccpool-handler's own
+// read-only `ccpool list` verb, scoped to the ccpool adapter's (pg-router-handler-ccpool) own
 // session-metadata namespace via --filter pgrouter.pool=pg-router
 // [design: Contract's "ccpool's own list CLI" bullet;
 // packages/pg-router-ccpool-handler/internal/ccpool/meta.go for the
@@ -31,7 +31,7 @@ import (
 const ccpoolBinary = "ccpool"
 
 // pgRouterPoolFilter scopes every `ccpool list` call below to sessions
-// pg-router-ccpool-handler dispatched [design: "ccpool-probe run checks"
+// the ccpool adapter (pg-router-handler-ccpool) dispatched [design: "ccpool-probe run checks"
 // item 1, its parenthetical: "no new tagging scheme is needed"].
 const pgRouterPoolFilter = "pgrouter.pool=pg-router"
 

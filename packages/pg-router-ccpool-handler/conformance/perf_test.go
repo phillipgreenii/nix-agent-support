@@ -67,24 +67,6 @@ func TestPerfBaseline_DispatchRoundTripThroughWire(t *testing.T) {
 	measureDispatchRoundTrip(t, bin, []string{"dispatch"}, reqBytes)
 }
 
-// TestPerfBaseline_DispatchRoundTripThroughWireOldPath is the same measurement
-// and budget against the old binary on today's path (--role-config), kept
-// until packet cleanup-go (pg2-12gr4.10.17) removes that binary.
-func TestPerfBaseline_DispatchRoundTripThroughWireOldPath(t *testing.T) {
-	bin := buildBinary(t, oldHandlerCmd)
-	roleConfig := writeRoleConfig(t, `{"name":"conformance-perf","type":"command","command":{"argv":["true"]}}`)
-
-	req, err := conformance.Golden("handler.dispatch")
-	if err != nil {
-		t.Fatalf("read handler.dispatch golden: %v", err)
-	}
-	reqBytes, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	measureDispatchRoundTrip(t, bin, []string{"dispatch", "--role-config", roleConfig}, reqBytes)
-}
-
 // measureDispatchRoundTrip runs `rounds` timed dispatch round trips of bin with
 // args and reqBytes on stdin (after one untimed warm-up) and fails when the
 // median exceeds dispatchRoundTripBudgetMs.

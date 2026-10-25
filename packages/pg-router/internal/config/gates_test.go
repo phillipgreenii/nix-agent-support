@@ -22,6 +22,7 @@ non_blocking_gates = ["LOW_DISK_USAGE"]
 
 [[role]]
 name = "disk-watchdog"
+handler = "/bin/h"
 binds = ["timer.5m"]
 non_blocking_gates = ["LOW_DISK_USAGE", "SYSTEM_PAUSE"]
 
@@ -35,6 +36,7 @@ format = "jsonl"
 
 [[role]]
 name = "plain-role"
+handler = "/bin/h"
 binds = ["e"]
 `)
 	c, err := Load()
@@ -67,6 +69,7 @@ type = "timer"
 emits = ["e"]
 [[role]]
 name = "r"
+handler = "/bin/h"
 binds = ["e"]
 non_blocking_gates = ["low_disk"]
 `,
@@ -78,6 +81,7 @@ emits = ["e"]
 non_blocking_gates = ["low_disk"]
 [[role]]
 name = "r"
+handler = "/bin/h"
 binds = ["e"]
 `,
 	} {
@@ -110,6 +114,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 binds = ["timer.5m", "e"]
 `)
 	c, err := Load()
@@ -136,10 +141,12 @@ emits = ["e"]
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 binds = ["e"]
 
 [[role]]
 name = "gate-listener"
+handler = "/bin/h"
 binds = ["gate.set", "gate.cleared", "gate.expired"]
 `)
 	if _, err := Load(); err != nil {
@@ -164,6 +171,7 @@ emits = ["e"]
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 binds = ["e"]
 `)
 	if _, err := Load(); err != nil {

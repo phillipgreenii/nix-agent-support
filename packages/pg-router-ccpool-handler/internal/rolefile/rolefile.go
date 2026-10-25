@@ -1,12 +1,11 @@
-// Package rolefile loads and validates a handler process's own role file and
-// launch config: the role-file decode (RoleFile, LoadRole, DecodeRole), the
+// Package rolefile decodes and validates a handler process's own ccpool role
+// settings and launch config: the ccpool role decode (RoleFile, DecodeRole), the
 // sessionEnv key rules, the handler-wide LoadConfig and
-// OverlayBudgetThresholds, the env var names that name those inputs, and the
-// strict ShapeChecker the `validate` subcommand runs over the role JSON.
+// OverlayBudgetThresholds, the env var name that names the launch config, and
+// the strict ShapeChecker the `validate` subcommand runs over a role's
+// [role.config].
 //
-// Shared by every adapter binary of this module (bead pg2-12gr4.10.3); moved
-// verbatim out of package main of cmd/pg-router-ccpool-handler (roleconfig.go
-// and validate.go); no behavior change.
+// Shared by every adapter binary of this module (bead pg2-12gr4.10.3).
 package rolefile
 
 import (
@@ -24,42 +23,31 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
 
-// EnvRoleConfig/EnvConfig name this module's OWN configuration inputs — a
-// per-process role (this handler process dispatches ONE role, registered
-// under its own `register --id`; DEC-WIRE-1's register message names the
-// participant, not a per-dispatch role selection) and the launch/prompt
-// Config. These small JSON files remain this packet's minimum viable config
-// story — a fuller one (this module's own TOML file, decoded like
-// packages/pg-router/internal/config/registry.go decodes pg-router's own
-// [[role]] table) is still not built. Docket pg2-oju6w's Task 5.7 DID land
-// here, though, narrower than that: LoadConfig below now calls
-// config.Config.Validate(), which rejects an invalid claude
-// --permission-mode value at THIS module's own config-load time (the real
-// enum check pg-router's own config used to duplicate).
-const (
-	EnvRoleConfig = "PG_ROUTER_CCPOOL_HANDLER_ROLE"
-	EnvConfig     = "PG_ROUTER_CCPOOL_HANDLER_CONFIG"
-)
+// EnvConfig names this module's OWN launch/prompt Config input: a JSON file
+// (decoded by LoadConfig) holding the handler-wide settings. A per-role setting
+// is never read from a file: it arrives as the request's role.config.
+//
+// LoadConfig calls config.Config.Validate(), which rejects an invalid claude
+// --permission-mode value at THIS module's own config-load time (the real enum
+// check pg-router's own config used to duplicate).
+const EnvConfig = "PG_ROUTER_CCPOOL_HANDLER_CONFIG"
 
 // DefaultBudgetStopEscalateAfter is the default budget_stop_escalate_after
 // (bead pg2-6akgz): stops of one bead before escalation; 0 disables.
 const DefaultBudgetStopEscalateAfter = 3
 
-// RoleFile is the on-disk JSON shape --role-config decodes. Completion/
-// FailureAction/DispatchFailAction already implement encoding.TextUnmarshaler
+// RoleFile is the JSON shape of a ccpool role's settings: the adapter's
+// [role.config] with the role's name added. Completion/FailureAction/
+// DispatchFailAction already implement encoding.TextUnmarshaler
 // (internal/roles/enums.go), so encoding/json calls those directly for the
-// matching string fields — only PromptBody/Argv need a second pass to parse
-// into internal/prompt's *template.Template form roles.CCPoolConfig/
-// CommandConfig actually carry.
+// matching string fields — only PromptBody needs a second pass to parse into
+// internal/prompt's *template.Template form roles.CCPoolConfig actually
+// carries.
 type RoleFile struct {
 	Name string `json:"name"`
-	Type string `json:"type"` // "ccpool" | "command"
-	// StrictBaseEnv (INV-CCH-32): the command-role strict switch; absent = false.
-	// Ignored at dispatch for a ccpool role.
-	StrictBaseEnv bool `json:"strictBaseEnv"`
 	// SessionEnv (INV-CCH-33): a generic string-to-string map the ccpool adapter
-	// passes through `ccpool new --env`; absent = empty. Ignored at dispatch for
-	// a command role. Keys are checked by ValidateSessionEnv at load.
+	// passes through `ccpool new --env`; absent = empty. Keys are checked by
+	// ValidateSessionEnv at load.
 	SessionEnv map[string]string `json:"sessionEnv"`
 	CCPool     *struct {
 		Actor           string                   `json:"actor"`
@@ -129,27 +117,10 @@ type RoleFile struct {
 		// or "" => the historical behavior.
 		Precheck roles.Precheck `json:"precheck"`
 	} `json:"ccpool,omitempty"`
-	Command *struct {
-		Argv []string `json:"argv"`
-	} `json:"command,omitempty"`
 }
 
-// LoadRole reads and decodes a RoleFile from path into a roles.Role, parsing
-// its prompt/argv templates. An empty path is a configuration error — every
-// dispatch invocation needs to know which role it is.
-func LoadRole(path string) (roles.Role, error) {
-	if path == "" {
-		return roles.Role{}, fmt.Errorf("no role config given (--role-config, or " + EnvRoleConfig + ")")
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return roles.Role{}, fmt.Errorf("read role config %s: %w", path, err)
-	}
-	return DecodeRole(path, data, true)
-}
-
-// DecodeRole is LoadRole after the file read: it decodes data (the content of
-// the role file at path, named only in error text) into a roles.Role. The
+// DecodeRole decodes data (a RoleFile as JSON; path names it only in error
+// text) into a ccpool roles.Role, parsing its prompt template. The
 // sessionEnv key rules (ValidateSessionEnv) are applied only when
 // checkSessionEnv is set; the validate subcommand passes false because it
 // reports every offending key itself, one problem per key, rather than the
@@ -164,116 +135,100 @@ func DecodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, err
 			return roles.Role{}, fmt.Errorf("role config %s: sessionEnv: %w", path, err)
 		}
 	}
-	r := roles.Role{Name: rf.Name, Type: rf.Type, StrictBaseEnv: rf.StrictBaseEnv}
+	r := roles.Role{Name: rf.Name}
 	if len(rf.SessionEnv) > 0 {
 		r.SessionEnv = rf.SessionEnv
 	}
-	switch rf.Type {
-	case "ccpool":
-		if rf.CCPool == nil {
-			return roles.Role{}, fmt.Errorf("role config %s: type is ccpool but no [ccpool] block", path)
-		}
-		// The actor is the bd identity this role's worker sessions claim under
-		// (exported as BEADS_ACTOR) and its handler-side bd writes carry as
-		// --actor. Empty would make bd fall back to git user.name -- the
-		// operator -- so a claim would be recorded in their name (pg2-lhi3b).
-		if strings.TrimSpace(rf.CCPool.Actor) == "" {
-			return roles.Role{}, fmt.Errorf("role config %s: ccpool.actor is required (an empty actor makes bd attribute claims to the operator)", path)
-		}
-		tmpl, err := prompt.Parse(rf.Name, rf.CCPool.PromptBody)
+	if rf.CCPool == nil {
+		return roles.Role{}, fmt.Errorf("role config %s: no [ccpool] block", path)
+	}
+	// The actor is the bd identity this role's worker sessions claim under
+	// (exported as BEADS_ACTOR) and its handler-side bd writes carry as
+	// --actor. Empty would make bd fall back to git user.name -- the
+	// operator -- so a claim would be recorded in their name (pg2-lhi3b).
+	if strings.TrimSpace(rf.CCPool.Actor) == "" {
+		return roles.Role{}, fmt.Errorf("role config %s: ccpool.actor is required (an empty actor makes bd attribute claims to the operator)", path)
+	}
+	tmpl, err := prompt.Parse(rf.Name, rf.CCPool.PromptBody)
+	if err != nil {
+		return roles.Role{}, fmt.Errorf("role config %s: parse promptBody: %w", path, err)
+	}
+	// budget.time is a "25m"-style duration string (see RoleFile's own
+	// doc comment above); "" (absent) means no time bound, matching
+	// budget.Budget's own zero value rather than erroring on
+	// time.ParseDuration("").
+	var budgetTime time.Duration
+	if rf.CCPool.Budget.Time != "" {
+		budgetTime, err = time.ParseDuration(rf.CCPool.Budget.Time)
 		if err != nil {
-			return roles.Role{}, fmt.Errorf("role config %s: parse promptBody: %w", path, err)
+			return roles.Role{}, fmt.Errorf("role config %s: parse budget.time %q: %w", path, rf.CCPool.Budget.Time, err)
 		}
-		// budget.time is a "25m"-style duration string (see RoleFile's own
-		// doc comment above); "" (absent) means no time bound, matching
-		// budget.Budget's own zero value rather than erroring on
-		// time.ParseDuration("").
-		var budgetTime time.Duration
-		if rf.CCPool.Budget.Time != "" {
-			budgetTime, err = time.ParseDuration(rf.CCPool.Budget.Time)
-			if err != nil {
-				return roles.Role{}, fmt.Errorf("role config %s: parse budget.time %q: %w", path, rf.CCPool.Budget.Time, err)
-			}
+	}
+	stopAfter := DefaultBudgetStopEscalateAfter
+	if rf.CCPool.BudgetStopEscalateAfter != nil {
+		stopAfter = *rf.CCPool.BudgetStopEscalateAfter
+	}
+	if stopAfter < 0 {
+		return roles.Role{}, fmt.Errorf("role config %s: budgetStopEscalateAfter %d must be >= 0", path, stopAfter)
+	}
+	var quietWindow time.Duration
+	if rf.CCPool.WorktreeQuietWindow != "" {
+		quietWindow, err = time.ParseDuration(rf.CCPool.WorktreeQuietWindow)
+		if err != nil {
+			return roles.Role{}, fmt.Errorf("role config %s: parse worktreeQuietWindow %q: %w", path, rf.CCPool.WorktreeQuietWindow, err)
 		}
-		stopAfter := DefaultBudgetStopEscalateAfter
-		if rf.CCPool.BudgetStopEscalateAfter != nil {
-			stopAfter = *rf.CCPool.BudgetStopEscalateAfter
+		if quietWindow <= 0 {
+			return roles.Role{}, fmt.Errorf("role config %s: worktreeQuietWindow %q must be > 0 (omit it to use the handler default)", path, rf.CCPool.WorktreeQuietWindow)
 		}
-		if stopAfter < 0 {
-			return roles.Role{}, fmt.Errorf("role config %s: budgetStopEscalateAfter %d must be >= 0", path, stopAfter)
+	}
+	var needsInputStall time.Duration
+	if rf.CCPool.NeedsInputStall != "" {
+		needsInputStall, err = time.ParseDuration(rf.CCPool.NeedsInputStall)
+		if err != nil {
+			return roles.Role{}, fmt.Errorf("role config %s: parse needsInputStall %q: %w", path, rf.CCPool.NeedsInputStall, err)
 		}
-		var quietWindow time.Duration
-		if rf.CCPool.WorktreeQuietWindow != "" {
-			quietWindow, err = time.ParseDuration(rf.CCPool.WorktreeQuietWindow)
-			if err != nil {
-				return roles.Role{}, fmt.Errorf("role config %s: parse worktreeQuietWindow %q: %w", path, rf.CCPool.WorktreeQuietWindow, err)
-			}
-			if quietWindow <= 0 {
-				return roles.Role{}, fmt.Errorf("role config %s: worktreeQuietWindow %q must be > 0 (omit it to use the handler default)", path, rf.CCPool.WorktreeQuietWindow)
-			}
+		if needsInputStall <= 0 {
+			return roles.Role{}, fmt.Errorf("role config %s: needsInputStall %q must be > 0 (omit it to use the handler default)", path, rf.CCPool.NeedsInputStall)
 		}
-		var needsInputStall time.Duration
-		if rf.CCPool.NeedsInputStall != "" {
-			needsInputStall, err = time.ParseDuration(rf.CCPool.NeedsInputStall)
-			if err != nil {
-				return roles.Role{}, fmt.Errorf("role config %s: parse needsInputStall %q: %w", path, rf.CCPool.NeedsInputStall, err)
-			}
-			if needsInputStall <= 0 {
-				return roles.Role{}, fmt.Errorf("role config %s: needsInputStall %q must be > 0 (omit it to use the handler default)", path, rf.CCPool.NeedsInputStall)
-			}
+	}
+	for i, g := range rf.CCPool.ExtraAllowedTools {
+		if strings.TrimSpace(g) == "" {
+			return roles.Role{}, fmt.Errorf("role config %s: extraAllowedTools[%d] is empty", path, i)
 		}
-		for i, g := range rf.CCPool.ExtraAllowedTools {
-			if strings.TrimSpace(g) == "" {
-				return roles.Role{}, fmt.Errorf("role config %s: extraAllowedTools[%d] is empty", path, i)
-			}
+	}
+	if err := config.ValidateEffortOverride(rf.CCPool.Effort); err != nil {
+		return roles.Role{}, fmt.Errorf("role config %s: %w", path, err)
+	}
+	// isolation.prefetch (bead pg2-hh32y) checks a commit out inside the
+	// worktree this handler created, so it is valid ONLY with the
+	// worktree strategy, and its templates must parse.
+	if pf := rf.CCPool.Isolation.Prefetch; pf != nil {
+		if t := rf.CCPool.Isolation.Type; t != "" && t != "worktree" {
+			return roles.Role{}, fmt.Errorf("role config %s: isolation.prefetch requires worktree isolation, not %q", path, t)
 		}
-		if err := config.ValidateEffortOverride(rf.CCPool.Effort); err != nil {
-			return roles.Role{}, fmt.Errorf("role config %s: %w", path, err)
+		if err := executor.ValidatePrefetch(*pf); err != nil {
+			return roles.Role{}, fmt.Errorf("role config %s: isolation.%w", path, err)
 		}
-		// isolation.prefetch (bead pg2-hh32y) checks a commit out inside the
-		// worktree this handler created, so it is valid ONLY with the
-		// worktree strategy, and its templates must parse.
-		if pf := rf.CCPool.Isolation.Prefetch; pf != nil {
-			if t := rf.CCPool.Isolation.Type; t != "" && t != "worktree" {
-				return roles.Role{}, fmt.Errorf("role config %s: isolation.prefetch requires worktree isolation, not %q", path, t)
-			}
-			if err := executor.ValidatePrefetch(*pf); err != nil {
-				return roles.Role{}, fmt.Errorf("role config %s: isolation.%w", path, err)
-			}
-		}
-		r.CCPool = &roles.CCPoolConfig{
-			Actor: rf.CCPool.Actor, SkillMD: rf.CCPool.SkillMD,
-			Completion: rf.CCPool.Completion, OnFailure: rf.CCPool.OnFailure, OnDispatchFail: rf.CCPool.OnDispatchFail,
-			AuthorshipGuard: rf.CCPool.AuthorshipGuard, PromptBody: rf.CCPool.PromptBody, Prompt: tmpl,
-			Budget: budget.Budget{
-				Tokens: budget.Limit(rf.CCPool.Budget.Tokens),
-				Cost:   budget.Limit(rf.CCPool.Budget.Cost),
-				Time:   budgetTime,
-			},
-			Isolation: rf.CCPool.Isolation,
-			PoolDir:   rf.CCPool.PoolDir,
-			BeadsDir:  rf.CCPool.BeadsDir,
+	}
+	r.CCPool = &roles.CCPoolConfig{
+		Actor: rf.CCPool.Actor, SkillMD: rf.CCPool.SkillMD,
+		Completion: rf.CCPool.Completion, OnFailure: rf.CCPool.OnFailure, OnDispatchFail: rf.CCPool.OnDispatchFail,
+		AuthorshipGuard: rf.CCPool.AuthorshipGuard, PromptBody: rf.CCPool.PromptBody, Prompt: tmpl,
+		Budget: budget.Budget{
+			Tokens: budget.Limit(rf.CCPool.Budget.Tokens),
+			Cost:   budget.Limit(rf.CCPool.Budget.Cost),
+			Time:   budgetTime,
+		},
+		Isolation: rf.CCPool.Isolation,
+		PoolDir:   rf.CCPool.PoolDir,
+		BeadsDir:  rf.CCPool.BeadsDir,
 
-			BudgetStopEscalateAfter: stopAfter,
-			WorktreeQuietWindow:     quietWindow,
-			NeedsInputStall:         needsInputStall,
-			ExtraAllowedTools:       rf.CCPool.ExtraAllowedTools,
-			Effort:                  rf.CCPool.Effort,
-			Precheck:                rf.CCPool.Precheck,
-		}
-	case "command":
-		if rf.Command == nil {
-			return roles.Role{}, fmt.Errorf("role config %s: type is command but no [command] block", path)
-		}
-		// ArgvTmpl is left nil: commandRun.renderArgv (internal/executor/
-		// command.go) re-parses each Argv element fresh via prompt.Parse at
-		// dispatch time and never reads Role.Command.ArgvTmpl — that field
-		// exists on packages/pg-router/internal/roles.CommandConfig purely
-		// for config-load-time template validation, which this module's own
-		// fuller config story (Task 5.7) may add later.
-		r.Command = &roles.CommandConfig{Argv: rf.Command.Argv}
-	default:
-		return roles.Role{}, fmt.Errorf("role config %s: unknown type %q (want ccpool or command)", path, rf.Type)
+		BudgetStopEscalateAfter: stopAfter,
+		WorktreeQuietWindow:     quietWindow,
+		NeedsInputStall:         needsInputStall,
+		ExtraAllowedTools:       rf.CCPool.ExtraAllowedTools,
+		Effort:                  rf.CCPool.Effort,
+		Precheck:                rf.CCPool.Precheck,
 	}
 	return r, nil
 }
@@ -345,7 +300,7 @@ func LoadConfig(path string) (config.Config, error) {
 // Hard fractions) are pool-wide only: RoleFile.CCPool.Budget carries no
 // thresholds field of its own (see its doc comment above), so every ccpool
 // role's watchdog escalates against the SAME percentages, while
-// Tokens/Cost/Time (LoadRole's own per-role decode) is the one per-role
+// Tokens/Cost/Time (DecodeRole's own per-role decode) is the one per-role
 // override. A no-op for a non-ccpool role (role.CCPool == nil).
 //
 // This is load-bearing, not cosmetic: without it, a role whose RoleFile sets

@@ -37,21 +37,19 @@ const exampleHeader = `# pg-router configuration — repo-local at <RepoRoot>/.p
 #               a typo and is rejected. There is no per-role capacity/concurrency
 #               key: capacity is the handler's own business (INV-CONC-1), never a
 #               number the core holds. A role names its identity, enablement,
-#               and bindings, plus (optionally) its own adapter. How the handler
+#               and bindings, plus its own adapter (handler). How the handler
 #               actually executes (actor, skill, prompt, completion policy, ...)
 #               is that adapter's own business: core hands it the role's opaque
 #               [role.config] table and never interprets it (ADR 0065's "Open
 #               question resolved" section).
 #
-# A [[role]] MAY name its own adapter with these keys; all three are decoded
-# strictly (a wrong type fails the load), and the last two are only valid on a
-# role that sets handler:
+# A [[role]] names its own adapter with handler (REQUIRED; a role without it
+# fails the load, naming the role) and MAY set the other two keys; all three
+# are decoded strictly (a wrong type fails the load):
 #   handler = "/abs/path/to/adapter"   the adapter command, an ABSOLUTE path.
 #               Core runs "<handler> dispatch|postStartup|preShutdown|validate"
 #               with the request on stdin and the role object
-#               {"name": ..., "config": {...}} inside it. A role WITHOUT handler
-#               keeps the older path: the shared PG_ROUTER_HANDLER_COMMAND plus
-#               --role-config (PG_ROUTER_HANDLER_COMMAND_DIR).
+#               {"name": ..., "config": {...}} inside it.
 #   survives_shutdown = true           leave this role's running dispatch alone
 #               when the daemon shuts down (its handler supervises its own work);
 #               default false.
@@ -123,31 +121,27 @@ func ExampleTOML() string {
 	b.WriteString("[query.command]\n")
 	fmt.Fprintf(&b, "argv = %s\n", tomlStrList([]string{"my-lister", "--json"}))
 	b.WriteString("format = \"jsonl\"\n\n")
-	emitRole(&b, roles.Role{Name: "example-role", Enabled: true, Binds: []string{"example.ready"}})
+	emitRole(&b, roles.Role{Name: "example-role", Enabled: true, Binds: []string{"example.ready"}, Handler: "/path/to/adapter"})
 	return b.String()
 }
 
 // emitRole serializes one role: identity, enablement and bindings (docket
 // pg2-oju6w's Task 5.4, ADR 0065's "Open question resolved" section: how a
-// registered handler participant executes is its own config), plus, for a role
-// on the handler path (docket pg2-12gr4.10), its handler, survives_shutdown and
-// opaque [role.config] table. A role without handler emits no such key, so the
-// example stays loadable with no adapter installed.
+// registered handler participant executes is its own config), plus its handler
+// (docket pg2-12gr4.10), survives_shutdown and opaque [role.config] table.
 func emitRole(b *strings.Builder, r roles.Role) {
 	fmt.Fprintf(b, "[[role]]\nname = %q\nenabled = %t\n", r.Name, r.Enabled)
 	fmt.Fprintf(b, "binds = %s\n", tomlStrList(r.Binds))
-	if r.NewPath() {
-		fmt.Fprintf(b, "handler = %q\n", r.Handler)
-		if r.SurvivesShutdown {
-			b.WriteString("survives_shutdown = true\n")
-		}
-		if len(r.Config) > 0 {
-			var cb bytes.Buffer
-			if err := toml.NewEncoder(&cb).Encode(map[string]any{"role": map[string]any{"config": r.Config}}); err == nil {
-				// The encoder prefixes a "[role]" header; the table belongs to the
-				// [[role]] entry just written, so drop that one line.
-				b.WriteString(strings.TrimPrefix(cb.String(), "[role]\n"))
-			}
+	fmt.Fprintf(b, "handler = %q\n", r.Handler)
+	if r.SurvivesShutdown {
+		b.WriteString("survives_shutdown = true\n")
+	}
+	if len(r.Config) > 0 {
+		var cb bytes.Buffer
+		if err := toml.NewEncoder(&cb).Encode(map[string]any{"role": map[string]any{"config": r.Config}}); err == nil {
+			// The encoder prefixes a "[role]" header; the table belongs to the
+			// [[role]] entry just written, so drop that one line.
+			b.WriteString(strings.TrimPrefix(cb.String(), "[role]\n"))
 		}
 	}
 	b.WriteString("\n")

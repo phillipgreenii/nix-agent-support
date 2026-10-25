@@ -16,7 +16,7 @@ import (
 // directly with a fake Opener instead of this default.
 //
 // Shared by every adapter binary of this module (bead pg2-12gr4.10.3); moved
-// verbatim out of cmd/pg-router-ccpool-handler's gitWorktreeOpener.
+// verbatim out of cmd/pg-router-handler-ccpool's gitWorktreeOpener.
 var GitOpener Opener = func(ctx context.Context, dir string) (gitclient.WorktreeManager, error) {
 	return gitclient.New(ctx, dir)
 }

@@ -70,6 +70,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.command]
@@ -107,6 +108,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.retry]
@@ -145,6 +147,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.retry]
@@ -173,6 +176,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.command]
@@ -220,6 +224,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.command]
@@ -260,6 +265,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.command]
@@ -289,6 +295,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.command]
@@ -318,6 +325,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.command]
@@ -334,12 +342,10 @@ argv = ["x"]
 
 // --- role-name charset/path-safety hardening (this bead, pg2-ymb3v) ---
 //
-// buildRole joins role.Name directly into a filesystem path when
-// HandlerCommandDir is configured (filepath.Join(dir, role.Name+".json")),
-// so a name containing "/" or ".." is rejected at config-DECODE time,
-// independent of whether HandlerCommandDir is ever set for this deployment
-// — the same "reject the footgun regardless of whether today's config uses
-// the feature" posture buildRole already takes for other required fields.
+// A role name is used as a filesystem path component, so a name containing
+// "/" or ".." is rejected at config-DECODE time — the same "reject the footgun
+// regardless of whether today's config uses the feature" posture buildRole
+// already takes for other required fields.
 
 // TestLoad_roleNameWithSlashIsError proves a role name containing "/" is
 // rejected at config-decode time (acceptance criterion c).
@@ -356,6 +362,7 @@ format = "jsonl"
 
 [[role]]
 name = "feedback/worker"
+handler = "/bin/h"
 binds = ["e"]
 `)
 	_, err := Load()
@@ -382,6 +389,7 @@ format = "jsonl"
 
 [[role]]
 name = "../escape"
+handler = "/bin/h"
 binds = ["e"]
 `)
 	_, err := Load()
@@ -406,6 +414,7 @@ format = "jsonl"
 
 [[role]]
 name = "feedback-worker"
+handler = "/bin/h"
 binds = ["e"]
 `)
 	c, err := Load()
@@ -428,6 +437,7 @@ func TestExpectedIntervalMsFor_ExplicitOverrideWins(t *testing.T) {
 	writeCfg(t, `
 [[role]]
 name = "worker"
+handler = "/bin/h"
 binds = ["x"]
 
 [[query]]
@@ -459,6 +469,7 @@ func TestExpectedIntervalMsFor_PeriodTriggerFallsBackToResolvedEvery(t *testing.
 	writeCfg(t, `
 [[role]]
 name = "worker"
+handler = "/bin/h"
 binds = ["x"]
 
 [[query]]
@@ -489,6 +500,7 @@ func TestExpectedIntervalMsFor_ThresholdTriggerIsUnknown(t *testing.T) {
 	writeCfg(t, `
 [[role]]
 name = "worker"
+handler = "/bin/h"
 binds = ["x"]
 
 [[query]]
@@ -527,6 +539,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 binds = ["e"]
 [role.command]

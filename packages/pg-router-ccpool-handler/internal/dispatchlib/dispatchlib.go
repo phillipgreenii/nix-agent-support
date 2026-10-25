@@ -5,7 +5,7 @@
 // its own runDispatch; there is ONE copy of the external-id stamping, whose
 // format the adoption of old sessions depends on.
 //
-// Moved verbatim out of package main of cmd/pg-router-ccpool-handler
+// Moved verbatim out of package main of cmd/pg-router-handler-ccpool
 // (dispatch.go); no behavior change.
 package dispatchlib
 

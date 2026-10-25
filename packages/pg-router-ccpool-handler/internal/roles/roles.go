@@ -24,14 +24,13 @@ import (
 // event; which role this running process IS gets decided once, at startup.
 type Role struct {
 	Name    string
-	Type    string         // "ccpool" | "command" — this module's own private enum
-	CCPool  *CCPoolConfig  // set iff Type == "ccpool"
-	Command *CommandConfig // set iff Type == "command"
-	// StrictBaseEnv is the command-role strict switch (per-role JSON key
+	CCPool  *CCPoolConfig  // set for a ccpool-adapter role
+	Command *CommandConfig // set for a command-adapter role
+	// StrictBaseEnv is the command-role strict switch ([role.config] key
 	// "strictBaseEnv", absent = false). Only the command executor reads it; a
 	// ccpool role ignores it at dispatch (its env comes from its spec).
 	StrictBaseEnv bool
-	// SessionEnv is a generic string-to-string map (per-role JSON key
+	// SessionEnv is a generic string-to-string map ([role.config] key
 	// "sessionEnv", absent = empty) the ccpool adapter passes through
 	// `ccpool new --env`, uninterpreted. A command role ignores it at dispatch.
 	// loadRole rejects a key that is empty, contains "=", or collides with an
@@ -40,7 +39,7 @@ type Role struct {
 	SessionEnv map[string]string
 }
 
-// CCPoolConfig is the ccpool role type's behavior + launch config.
+// CCPoolConfig is a ccpool-adapter role's behavior + launch config.
 type CCPoolConfig struct {
 	Actor           string
 	SkillMD         string
@@ -167,7 +166,7 @@ type PrefetchConfig struct {
 	Timeout string
 }
 
-// CommandConfig is the command role type's config.
+// CommandConfig is a command-adapter role's config.
 type CommandConfig struct {
 	Argv     []string
 	ArgvTmpl []*template.Template // parsed Argv elements

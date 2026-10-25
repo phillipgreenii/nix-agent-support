@@ -120,7 +120,7 @@ var ErrPoolAtCapacity = errors.New("ccpool: no free slot")
 // transport pre-accept busy decline (INV-CCH-6, ADR 0072's Decision item
 // 3) — the wire-level exit code and the core's retry/backoff cadence are
 // IDENTICAL for either sentinel (INV-FAIL-1: every DeclineReason re-offers
-// alike); only cmd/pg-router-ccpool-handler/dispatch.go's OPTIONAL reply
+// alike); only cmd/pg-router-handler-ccpool/dispatch.go's OPTIONAL reply
 // body, and from there pg-router core's declined metric/status breakdown,
 // tell the two apart. Unknown capacity still fails CLOSED here: launching
 // blind is the failure mode the gate exists to stop, and a re-offer costs
@@ -311,7 +311,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			// beads with `human` during the 2026-09-23 incident. Logged clearly
 			// (distinguishable from a generic exit-128 at a glance, unlike
 			// before this fix) and returned with no bead mutation at all, so the
-			// caller (cmd/pg-router-ccpool-handler/dispatch.go's
+			// caller (cmd/pg-router-handler-ccpool/dispatch.go's
 			// wire.BusyDeclineFor) can map it to a pre-accept decline instead
 			// — the core simply re-offers later with backoff, same as
 			// ErrPoolAtCapacity.
@@ -503,7 +503,7 @@ func (r *ccpoolRun) worktreePathExists(beadID string) bool {
 // Fails soft like cleanupWorktree.
 //
 // A SIGKILLed handler runs none of this; that window is covered by the
-// worktree-keyed sweep (cmd/pg-router-ccpool-handler/worktreesweep.go,
+// worktree-keyed sweep (cmd/pg-router-handler-ccpool/worktreesweep.go,
 // pg2-ganjb, INV-CCH-19), which keys on the worktree rather than a session row.
 func (r *ccpoolRun) reclaimAbandonedWorktree(ctx context.Context, cc *roles.CCPoolConfig, beadID, wt string, createdHere bool) {
 	if wt == "" || !createdHere || !usesWorktreeIsolation(cc.Isolation) {
@@ -678,7 +678,7 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 // dispatch has reached a terminal outcome (finishWait's own doc comment).
 // This is the single owner of the common-case cleanup, immediately, with no
 // new timer — replacing reliance on the once-per-process-lifetime
-// preShutdown sweep (cmd/pg-router-ccpool-handler/preshutdown.go's
+// preShutdown sweep (cmd/pg-router-handler-ccpool/preshutdown.go's
 // closeUnlessNeedsInput, pg2-a8h6c's short-term stopgap) for the case this
 // dispatch call itself can observe. preshutdown.go's own sweep is left
 // unchanged — it remains the belt-and-suspenders path for a crashed prior
@@ -962,7 +962,7 @@ func (r *ccpoolRun) needsInputAlive(ctx context.Context, externalID string) bool
 // session that finishes first must not delete the directory out from under
 // a peer that is starting, ready, working or awaiting input -- the last
 // session to detach removes it. Mirrors the reconcile path's
-// worktreeInUseByPeer (cmd/pg-router-ccpool-handler/reconcile.go), except
+// worktreeInUseByPeer (cmd/pg-router-handler-ccpool/reconcile.go), except
 // that a needs_input peer is also protected here: its own cleanup is
 // deferred until it closes, so removing its cwd now would strand it. A list
 // error is treated as "in use" (can't tell => don't delete).
@@ -1272,7 +1272,7 @@ func dispatchHeadSHA(it item.Item) string {
 // (existing.CWD) for the watchdog's guarded reset. It blocks until the turn
 // settles — the "deferred ack pointing at the same in-flight work", held open
 // the same way a normal inline dispatch already holds the call open for a
-// long-running session (cmd/pg-router-ccpool-handler/dispatch.go's own doc
+// long-running session (cmd/pg-router-handler-ccpool/dispatch.go's own doc
 // comment). Mirrors run()'s own tail (budget-gated watchdog race +
 // waitFailureResult) so the terminal verb reported here is identical to what a
 // first-time dispatch of the same work would have reported.

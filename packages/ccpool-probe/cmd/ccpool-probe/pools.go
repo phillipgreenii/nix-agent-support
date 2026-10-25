@@ -1,5 +1,5 @@
 // pools.go: enumerates every ccpool pool this probe must scan (bead
-// pg2-bkzrc). pg-router-ccpool-handler can dedicate a ccpool pool PER ROLE
+// pg2-bkzrc). The ccpool adapter (pg-router-handler-ccpool) can dedicate a ccpool pool PER ROLE
 // (bead pg2-mr0sl: e.g. ~/.local/state/pg-router-ccpool-worker,
 // ~/.local/state/pg-router-ccpool-review), and a probe that only asks the
 // ambient pool is blind to sessions stuck in any of the others (the

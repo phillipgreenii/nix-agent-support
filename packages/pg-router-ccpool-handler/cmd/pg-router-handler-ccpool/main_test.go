@@ -19,7 +19,6 @@ import (
 // "origin-unavailable" instead of the branch the test targets (bead pg2-sljo4).
 var ambientEnvInputs = []string{
 	rolefile.EnvConfig,
-	rolefile.EnvRoleConfig,
 	envQueryConfig,
 	corecall.EnvSocket,
 	corecall.EnvToken,

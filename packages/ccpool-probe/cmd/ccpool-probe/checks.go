@@ -3,7 +3,7 @@
 // checks"]:
 //
 //  1. checkNeedsInput — LIVE ccpool sessions in needs_input state that
-//     pg-router-ccpool-handler dispatched (item 1).
+//     the ccpool adapter (pg-router-handler-ccpool) dispatched (item 1).
 //  2. checkZombieDrift — "zombie" session count (state working AND not
 //     live AND no close reason) vs. a persisted baseline (item 2).
 //  3. checkNeverPrompted — live sessions parked in ccpool's "ready" state

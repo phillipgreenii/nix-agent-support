@@ -405,7 +405,7 @@ func TestSweep_disabledConfigurations(t *testing.T) {
 	t.Run("role without ccpool block", func(t *testing.T) {
 		h := newSweepHarness(t)
 		path := h.leak("zr-k")
-		h.role = roles.Role{Name: "cmd", Type: "command"}
+		h.role = roles.Role{Name: "cmd"}
 		if got := h.sweep(); got != 0 {
 			t.Errorf("removed %d", got)
 		}

@@ -167,70 +167,17 @@ func drainThenCancelDispatch(q *eventqueue.Queue, cancelDispatch context.CancelF
 // handlerCommandFor builds the wireclient.CommandFor seam bootCore and
 // runRunRole both hand to wireclient.New — the "deployment/wiring layer"
 // internal/wireclient's own package doc names as the caller who answers
-// "which command does this role's registered handler participant run" (bead
-// pg2-g068j resolves the gap both that doc and ADR 0065's Addendum
-// forward-reference: docket pg2-oju6w's Task 5.4 wired everything up to this
-// seam and deliberately left this seam itself for "a sibling task").
+// "which command does this role's registered handler participant run".
 //
-// cfg.HandlerCommand (PG_ROUTER_HANDLER_COMMAND) carries no baked-in default
-// — see its own doc comment (internal/config/config.go) for why: GOAL-MIN-1's
-// Floor forbids this binary's own contract surface from naming a concrete
-// tool.
-//
-// Per-role differentiation (this bead, pg2-ymb3v, closing the gap DEC-WIRE-3
-// already anticipated as an accepted shape — "every enabled role resolves to
-// the SAME command"): when cfg.HandlerCommandDir is also set, the resolved
-// argv threads a per-role --role-config path
-// (handlerRoleConfigPath(cfg.HandlerCommandDir, role.Name)) onto the
-// handler command, so differently-configured roles sharing one
-// HandlerCommand binary (e.g. feedback/worker/review, each with its own
-// ccpool actor/prompt) each dispatch through their OWN participant config.
-// subcommand is placed as argv[1] — RIGHT AFTER the command, before any
-// flags — because the participant's own CLI (e.g.
-// pg-router-ccpool-handler/cmd's main.go) parses its first argument as the
-// subcommand; wireclient.CommandFor's own doc comment explains why this
-// package no longer appends it itself. Falling back to today's
-// [cfg.HandlerCommand, subcommand] when HandlerCommandDir is unset keeps an
-// existing single-role deployment byte-for-byte unchanged.
-//
-// A role that sets handler (docket pg2-12gr4.10, the handler split) is on the
-// NEW path and resolves to [role.Handler, subcommand] on its own: never the
-// global command, never --role-config (its [role.config] rides on stdin as the
-// request's role object instead, internal/wireclient). That branch comes first
-// so a deployment that has migrated every role needs no PG_ROUTER_HANDLER_COMMAND
-// at all; every role without handler resolves exactly as before.
+// A role is invoked only through its own handler (docket pg2-12gr4.10, the
+// handler split): the argv is [role.Handler, subcommand], and the role's
+// [role.config] rides on stdin as the request's role object
+// (internal/wireclient). ONE resolver (config.Config.RoleCommand) serves this
+// seam, config --show, config check, run-role, doctor and startup validate. The
+// subcommand is argv[1], right after the handler, because the handler's own CLI
+// parses its first argument as the subcommand.
 func handlerCommandFor(cfg config.Config) wireclient.CommandFor {
-	// ONE resolver (config.Config.RoleCommand) serves this seam, config --show,
-	// config check, run-role, doctor and startup validate.
 	return cfg.RoleCommand
-}
-
-// warnHandlerCommandAmbiguity logs a boot-time WARN (this bead, pg2-ymb3v)
-// for the silent-misconfiguration shape its own design flagged: more than
-// one role ENABLED while only cfg.HandlerCommand (not cfg.HandlerCommandDir)
-// is set. handlerCommandFor's fallback branch then resolves every one of
-// those roles to the IDENTICAL argv, with no signal that a deployment
-// needing per-role differentiation is silently dispatching every role
-// through whichever single participant config that one shared command
-// happens to point at. A single-enabled-role deployment is unaffected
-// (sharing one command with no sibling role to confuse it with is not a
-// misconfiguration), which is why this checks countEnabledRoles, not
-// len(cfg.Roles).
-func warnHandlerCommandAmbiguity(cfg config.Config) {
-	if cfg.HandlerCommand == "" || cfg.HandlerCommandDir != "" {
-		return
-	}
-	// Only roles on the old path share the global command; a role with its own
-	// handler never resolves to it.
-	n := 0
-	for _, r := range cfg.Roles {
-		if r.Enabled && !r.NewPath() {
-			n++
-		}
-	}
-	if n > 1 {
-		slog.Warn("multiple roles enabled but only PG_ROUTER_HANDLER_COMMAND is set; every role will dispatch through the identical handler command with no per-role differentiation — set PG_ROUTER_HANDLER_COMMAND_DIR", "enabledRoles", n)
-	}
 }
 
 // bootCore loads the durable queue, registers a queue->executor Listener
@@ -532,11 +479,6 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// (a few lines down, same iteration) hasn't happened yet at the moment
 	// NewListener itself runs.
 	o.Registry = svc.Registry()
-	// warnHandlerCommandAmbiguity (this bead, pg2-ymb3v): fires alongside the
-	// per-role registration loop immediately below, the natural point this
-	// run already knows both cfg.Roles' enabled count and the
-	// HandlerCommand/HandlerCommandDir configuration it is warning about.
-	warnHandlerCommandAmbiguity(cfg)
 	// Registration happens AFTER Listen (svc must exist) but is otherwise
 	// independent of Accept: an in-process participant never dials the
 	// socket, so there is no handshake to wait on. Task 2.1: register every
@@ -560,7 +502,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		// reach, so exec.CommandContext never SIGKILLs its handler. Drain-and-exit
 		// keeps the cancellable ctx: an interactive interrupt still stops handlers.
 		listenerCtx := ctx
-		if runMode == core.RunModeLongRunning && roleSurvives(cfg, r) {
+		if runMode == core.RunModeLongRunning && roleSurvives(r) {
 			listenerCtx = context.WithoutCancel(ctx)
 			slog.Info("role dispatch survives shutdown; it is never cancelled by this daemon", "role", r.Name)
 		}
@@ -646,17 +588,15 @@ func postStartupAll(ctx context.Context, o *orchestrator.Orchestrator, cfg confi
 }
 
 // preShutdownAll dispatches handler.preShutdown ONCE per distinct handler per
-// daemon shutdown — the old shared handler through the first ENABLED role
-// without its own handler, and each adapter a role names with handler through
-// the first enabled role naming it — at the same point TeardownAll used to
-// fire (pg2-oju6w.15). With no role on the new path this is exactly the
-// pg2-asr8z behavior below: one call, to the first enabled role's handler.
+// daemon shutdown — each adapter a role names with handler, through the first
+// enabled role naming it — at the same point TeardownAll used to fire
+// (pg2-oju6w.15). With one adapter this is exactly the pg2-asr8z behavior
+// below: one call, to the first enabled role's handler.
 //
 // SUPERSEDES pg2-oju6w.15's original "dispatch once per enabled role"
 // shape (bead pg2-asr8z, 2026-09-22): that shape called this hook once per
 // enabled role, on the theory (recorded in
-// pg-router-ccpool-handler/cmd/pg-router-ccpool-handler/preshutdown.go's own
-// runPreShutdown doc, "decision #1") that N redundant sweeps were merely
+// the ccpool adapter's own preshutdown.go runPreShutdown doc, "decision #1") that N redundant sweeps were merely
 // harmless waste. Production evidence (pg2-1kq1x's verification, root-caused
 // as pg2-asr8z) proved that framing wrong: with N enabled roles, this used
 // to launch N sequential fresh "preShutdown" SUBPROCESSES, and every one of
@@ -666,8 +606,8 @@ func postStartupAll(ctx context.Context, o *orchestrator.Orchestrator, cfg confi
 // finished, let alone the rest. Calling it once is safe because that sweep
 // is GLOBAL and invariant across roles: it keys only on the handler
 // process's own launch config (PG_ROUTER_CCPOOL_HANDLER_CONFIG, inherited
-// unchanged by every subprocess spawn) and never reads the per-role
-// --role-config path at all — so every enabled role's call would have
+// unchanged by every subprocess spawn) and never reads the per-role config
+// at all — so every enabled role's call of one adapter would have
 // triggered the byte-for-byte identical sweep anyway. A hook failure is
 // logged and MUST NOT crash shutdown. See postStartupAll's doc for the
 // nil-Handler guard's own rationale — postStartupAll itself is UNCHANGED
@@ -680,33 +620,18 @@ func preShutdownAll(ctx context.Context, o *orchestrator.Orchestrator, cfg confi
 	}
 	// Routing (docket pg2-12gr4.10, the handler split): every distinct handler
 	// named by an enabled role receives preShutdown exactly ONCE, in config
-	// order, carried by the first enabled role that names it.
-	//   - Old path (no handler): the one shared global handler, once, carried by
-	//     the first enabled old-path role. This is pg2-asr8z's dedup, unchanged,
-	//     and it holds in any order of old and new roles.
-	//   - New path (handler set): once per distinct handler path. An adapter's
-	//     shutdown sweep is global to the adapter (ccpool lists and closes every
-	//     session it owns), so a second call for another role it serves would
-	//     repeat the identical, slow sweep that pg2-asr8z measured eating
-	//     launchd's ExitTimeOut; a different adapter binary still gets its own.
-	// No adapter named by an enabled role is left without its call.
-	oldDone := false
+	// order, carried by the first enabled role that names it. An adapter's
+	// shutdown sweep is global to the adapter (ccpool lists and closes every
+	// session it owns), so a second call for another role it serves would
+	// repeat the identical, slow sweep that pg2-asr8z measured eating launchd's
+	// ExitTimeOut; a different adapter binary still gets its own. No adapter
+	// named by an enabled role is left without its call.
 	seen := map[string]bool{}
 	for _, r := range cfg.Roles {
-		if !r.Enabled {
+		if !r.Enabled || seen[r.Handler] {
 			continue
 		}
-		if r.NewPath() {
-			if seen[r.Handler] {
-				continue
-			}
-			seen[r.Handler] = true
-		} else {
-			if oldDone {
-				continue
-			}
-			oldDone = true
-		}
+		seen[r.Handler] = true
 		if _, err := o.Handler.PreShutdown(ctx, r); err != nil {
 			slog.Warn("preShutdown failed", "role", r.Name, "err", err)
 		}
@@ -1186,8 +1111,8 @@ type preparedRun struct {
 //
 // bd-reachability/prefix precheck and self_login resolution no longer run
 // here (Task 5.8, ADR 0065's "Source-side boundary" section): both moved to
-// the new pg-router-ccpool-handler module's own startup pre-flight
-// (cmd/pg-router-ccpool-handler/preflight.go) — pg-router's own pre-runtime
+// the ccpool adapter's own startup pre-flight
+// (cmd/pg-router-handler-ccpool/preflight.go) — pg-router's own pre-runtime
 // validation is exactly INV-WORKFLOW-1's six determinable conditions,
 // unrelated to bd/self_login.
 //

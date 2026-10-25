@@ -31,11 +31,9 @@ func (f *fakeRunner) Run(_ context.Context, argv []string, stdin []byte) ([]byte
 }
 
 // fixedCommand returns a CommandFor test double that appends the subcommand
-// it is called with onto a fixed prefix — mirroring handlerCommandFor's own
-// fallback-branch shape ([cfg.HandlerCommand, subcommand]) so existing
-// argv-shape assertions below stay meaningful now that CommandFor resolves
-// the subcommand's POSITION itself (pg2-ymb3v) rather than having it
-// appended by wireclient's own call sites.
+// it is called with onto a fixed prefix, so the argv-shape assertions below
+// stay meaningful now that CommandFor resolves the subcommand's POSITION itself
+// (pg2-ymb3v) rather than having it appended by wireclient's own call sites.
 func fixedCommand(argv ...string) CommandFor {
 	return func(_ roles.Role, subcommand string) ([]string, error) {
 		full := make([]string, 0, len(argv)+1)
@@ -52,7 +50,7 @@ func fixedCommand(argv ...string) CommandFor {
 // fixedCommand's own doc comment above is what actually appends it now.
 func TestDispatch_sendsSchemaLegalRequestAndAppendsSubcommand(t *testing.T) {
 	run := &fakeRunner{stdout: []byte(`{"schemaVersion":"1","id":"dsp-x","outcome":"delivered"}`), exitCode: 0}
-	c := &Client{Runner: run, Command: fixedCommand("pg-router-ccpool-handler", "--role-config", "/rc.json")}
+	c := &Client{Runner: run, Command: fixedCommand("pg-router-handler-ccpool", "--extra", "/rc.json")}
 	role := roles.Role{Name: "worker", Binds: []string{"work.ready"}}
 	evt := eventqueue.Event{ID: "evt-1", Type: "work.ready", Payload: map[string]any{"item": map[string]any{"id": "zr-1"}}}
 
@@ -60,7 +58,7 @@ func TestDispatch_sendsSchemaLegalRequestAndAppendsSubcommand(t *testing.T) {
 		t.Fatalf("Dispatch: %v", err)
 	}
 
-	wantArgv := []string{"pg-router-ccpool-handler", "--role-config", "/rc.json", "dispatch"}
+	wantArgv := []string{"pg-router-handler-ccpool", "--extra", "/rc.json", "dispatch"}
 	if len(run.gotArgv) != len(wantArgv) {
 		t.Fatalf("argv = %v, want %v", run.gotArgv, wantArgv)
 	}
@@ -230,7 +228,7 @@ func TestDispatch_noCommandForIsError(t *testing.T) {
 // TestDispatch_passesSubcommandToCommandFor proves Dispatch hands "dispatch"
 // to CommandFor as a PARAMETER rather than appending it itself after the
 // call (pg2-ymb3v's widened seam) — a CommandFor implementation can
-// therefore place extra tokens (e.g. a per-role --role-config path) AFTER
+// therefore place extra tokens (e.g. a per-role flag) AFTER
 // the subcommand, which the retired append-at-the-end shape could never do
 // without landing those tokens before the subcommand and getting rejected
 // by the participant's own CLI as an unknown subcommand.
@@ -238,7 +236,7 @@ func TestDispatch_passesSubcommandToCommandFor(t *testing.T) {
 	var gotSubcommand string
 	cmd := func(role roles.Role, subcommand string) ([]string, error) {
 		gotSubcommand = subcommand
-		return []string{"h", subcommand, "--role-config", role.Name + ".json"}, nil
+		return []string{"h", subcommand, "--extra", role.Name + ".json"}, nil
 	}
 	run := &fakeRunner{stdout: []byte(`{"schemaVersion":"1","id":"dsp-x","outcome":"delivered"}`), exitCode: 0}
 	c := &Client{Runner: run, Command: cmd}
@@ -248,7 +246,7 @@ func TestDispatch_passesSubcommandToCommandFor(t *testing.T) {
 	if gotSubcommand != "dispatch" {
 		t.Errorf("subcommand passed to CommandFor = %q, want %q", gotSubcommand, "dispatch")
 	}
-	want := []string{"h", "dispatch", "--role-config", "worker.json"}
+	want := []string{"h", "dispatch", "--extra", "worker.json"}
 	if len(run.gotArgv) != len(want) {
 		t.Fatalf("argv = %v, want %v", run.gotArgv, want)
 	}

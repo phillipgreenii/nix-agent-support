@@ -808,6 +808,6 @@ func TestNewListener_structuredOutcomeRelaysHandlerVerbs(t *testing.T) {
 // teardownAll/closeUnlessNeedsInput/sessionStateByID no longer exist in this
 // package at all — that sweep logic was PORTED to
 // packages/pg-router-ccpool-handler's own preShutdown subcommand
-// (cmd/pg-router-ccpool-handler/preshutdown.go), which carries the
+// (cmd/pg-router-handler-ccpool/preshutdown.go), which carries the
 // equivalent test coverage (needs_input preservation included) in its own
 // preshutdown_test.go.

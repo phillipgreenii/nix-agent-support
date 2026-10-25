@@ -79,7 +79,7 @@ func newScriptRun(t *testing.T, g *scriptGit) *ccpoolRun {
 }
 
 func prefetchRole(pf roles.PrefetchConfig) roles.Role {
-	return roles.Role{Name: "review", Type: "ccpool", CCPool: &roles.CCPoolConfig{
+	return roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{
 		Isolation: roles.IsolationConfig{Prefetch: &pf},
 	}}
 }

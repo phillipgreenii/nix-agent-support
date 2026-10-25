@@ -8,7 +8,7 @@
 // reaping a ccpool-backed handler session's own agent session. The other
 // half — the once-per-process-lifetime preShutdown sweep across the default
 // pool's prefix-matching sessions — lives in
-// cmd/pg-router-ccpool-handler/preshutdown.go's teardownAllSessions.
+// cmd/pg-router-handler-ccpool/preshutdown.go's teardownAllSessions.
 package ccpool
 
 import (

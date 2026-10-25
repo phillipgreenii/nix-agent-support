@@ -32,12 +32,11 @@ import (
 //
 // Handler-wide settings (RepoRoot, WorktreeDir, SessionPrefix, the pool-wide
 // budget thresholds, the origin probe and the event log directory) come from the
-// launch config JSON the old binary reads: --config, or
-// PG_ROUTER_CCPOOL_HANDLER_CONFIG. The env var name is reused so one wrapper and
-// one config file serve every adapter. The old --role-config and
-// PG_ROUTER_CCPOOL_HANDLER_ROLE are NOT read: the role comes from stdin.
+// launch config JSON: --config, or PG_ROUTER_CCPOOL_HANDLER_CONFIG. The env var
+// name is shared so one wrapper and one config file serve every adapter. The role
+// is never read from a file or an env var: it comes from stdin.
 //
-// The opportunistic reconcile and sweep passes the old dispatch runs before the
+// The opportunistic reconcile and sweep passes the dispatch runs before the
 // executor (closed-bead sessions, orphans, leaked worktrees, stale locks) run
 // here too (runSweeps), after the per-attempt external id and before the
 // precheck.
@@ -127,7 +126,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, decline)
 		return conformance.ExitBusy
 	}
-	result, err := executor.For(role.Type).Dispatch(ctx, dctx, deps)
+	result, err := executor.NewCCPool().Dispatch(ctx, dctx, deps)
 	if decline, busy := wire.BusyDeclineFor(err); busy {
 		// Pre-accept busy decline (INV-CONC-1, DEC-WIRE-1 exit 9): the core re-offers
 		// the event with backoff. The reason and kind are a handler-to-alert

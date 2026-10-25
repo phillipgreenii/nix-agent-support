@@ -10,7 +10,6 @@ package config
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -107,42 +106,6 @@ type Config struct {
 	// SECURITY-SENSITIVE: the default value in Default() requires human sign-off.
 	AllowedTools  string
 	SessionPrefix string
-
-	// HandlerCommand is the argv PREFIX cmd/pg-router invokes (Task 5.4's
-	// wireclient.CommandFor seam, cmd/pg-router/run.go's handlerCommandFor)
-	// for EVERY enabled role's registered handler participant, over
-	// internal/wireclient's DEC-WIRE-1 CLI transport — the "deployment
-	// concern" wireclient's own package doc and ADR 0065's Addendum both
-	// forward-reference (bead pg2-g068j resolves it). It carries NO
-	// baked-in default: GOAL-MIN-1's Floor (ADR 0065's Register row R16)
-	// requires pg-router's own contract surface — --help, config
-	// validation, built-in defaults — to name no concrete tool, so an
-	// unconfigured deployment gets a clear per-dispatch error
-	// ("wireclient: resolve command for role ...") rather than this binary
-	// silently invoking a hardcoded participant name. Env-only
-	// (PG_ROUTER_HANDLER_COMMAND), env-only wiring —
-	// no [pool] TOML key today. Every enabled role resolves to the SAME
-	// command today (DEC-WIRE-3's "shared process backing multiple roles"
-	// is an accepted shape, not a defect this seam needs to solve).
-	HandlerCommand string
-
-	// HandlerCommandDir (PG_ROUTER_HANDLER_COMMAND_DIR), when set, is a
-	// directory of per-role JSON files (<role.Name>.json, the same roleFile
-	// shape packages/pg-router-ccpool-handler/cmd's roleconfig.go already
-	// decodes) that lets differently-configured roles sharing ONE
-	// HandlerCommand binary (e.g. feedback/worker/review, each with its own
-	// ccpool actor/prompt) each dispatch through their OWN participant
-	// config, closing the gap HandlerCommand's own doc comment above
-	// accepted as a shape ("every enabled role resolves to the SAME command
-	// today") — this bead, pg2-ymb3v. cmd/pg-router/run.go's
-	// handlerCommandFor resolves [HandlerCommand, subcommand,
-	// "--role-config", filepath.Join(HandlerCommandDir, role.Name+".json")]
-	// when this is set, and falls back to today's [HandlerCommand,
-	// subcommand] unchanged when it is not — so an existing single-role
-	// deployment setting only PG_ROUTER_HANDLER_COMMAND is unaffected.
-	// Env-only, no [pool] TOML key, mirroring HandlerCommand's own env-only
-	// wiring.
-	HandlerCommandDir string
 
 	// Autonomous, when true, passes `--autonomous` to `ccpool new` so workers'
 	// AskUserQuestion is structurally blocked (no human to answer). Default true.
@@ -334,7 +297,6 @@ func Default() Config {
 		Autonomous:         true,      // workers are human-less; AskUserQuestion is structurally blocked via ccpool --autonomous
 		PermissionMode:     "dontAsk", // deny-by-default: auto-DENY any tool outside AllowedTools, non-interactive. PG_ROUTER_PERMISSION_MODE=bypassPermissions is the opt-in escape for an attended/trusted run.
 		AllowedTools:       baseAllowedTools,
-		HandlerCommand:     "", // no baked-in handler participant name — GOAL-MIN-1's Floor; see HandlerCommand's doc comment
 		SessionPrefix:      "pg-router-",
 		BudgetTokens:       0,                // unlimited until ccpool N3
 		BudgetCost:         0,                // unlimited until ccpool N3
@@ -375,8 +337,6 @@ func Load() (Config, error) {
 	c.Autonomous = envBool("PG_ROUTER_AUTONOMOUS", c.Autonomous)
 	c.AllowedTools = envStr("PG_ROUTER_ALLOWED_TOOLS", c.AllowedTools)
 	c.SessionPrefix = envStr("PG_ROUTER_SESSION_PREFIX", c.SessionPrefix)
-	c.HandlerCommand = envStr("PG_ROUTER_HANDLER_COMMAND", c.HandlerCommand)
-	c.HandlerCommandDir = envStr("PG_ROUTER_HANDLER_COMMAND_DIR", c.HandlerCommandDir)
 	c.BudgetTokens = int64(envInt("PG_ROUTER_BUDGET_TOKENS", int(c.BudgetTokens)))
 	c.BudgetCost = int64(envInt("PG_ROUTER_BUDGET_COST", int(c.BudgetCost)))
 	c.BudgetTime = envSecs("PG_ROUTER_BUDGET_TIME", c.BudgetTime)
@@ -498,10 +458,8 @@ func noConfigWarnSuppressed() bool {
 //  2. unhandled source output    — a source emits a type no binding declares
 //  3. disconnected handler       — a handler no binding can reach
 //  4. handler with no events     — a BOUND handler whose reachable event set is empty
-//  5. absent backing command     — a source's query command or the handler command
-//     (PG_ROUTER_HANDLER_COMMAND, when set) cannot be invoked; with
-//     PG_ROUTER_HANDLER_COMMAND_DIR set, an enabled role's role-config file is
-//     also missing or not well-formed JSON
+//  5. absent backing command     — a source's query command or an enabled role's
+//     handler cannot be invoked
 //  6. non-terminating re-entry   — a cycle the declared graph shows cannot terminate
 //
 // plus each resolved query's own Validate. Errors are AGGREGATED (errors.Join),
@@ -595,7 +553,6 @@ func (c Config) diagnose() (errs []error, warns []string) {
 	errs = append(errs, c.logLimitFindings()...)
 	errs = append(errs, c.absentBackingCommands()...)
 	errs = append(errs, c.handlerCommandFindings()...)
-	errs = append(errs, c.roleConfigFindings()...)
 	cycleErrs, cycleWarns := c.reentryCycleFindings()
 	errs = append(errs, cycleErrs...)
 	warns = append(warns, cycleWarns...)
@@ -690,48 +647,30 @@ func (c Config) absentBackingCommands() []error {
 	return errs
 }
 
-// RoleConfigPath is the per-role JSON file under HandlerCommandDir that
-// RoleCommand hands a shared (old-path) handler as `--role-config`.
-func RoleConfigPath(dir, roleName string) string {
-	return filepath.Join(dir, roleName+".json")
-}
-
 // RoleCommand is the ONE resolver of a role's adapter argv (docket
 // pg2-12gr4.10, the handler split): the daemon's wire client, run-role, doctor,
 // startup validate, config --show and config check all call it, so what an
 // operator reads is what core runs. subcommand is placed as argv[1] (the
 // adapter's own CLI parses its first argument as the subcommand).
 //
-//   - A role that sets handler is on the NEW path: [role.Handler, subcommand],
-//     never the global command and never --role-config (its [role.config] rides
-//     on stdin as the request's role object). That branch comes first so a
-//     deployment that has migrated every role needs no PG_ROUTER_HANDLER_COMMAND.
-//   - A role without handler is on today's path: [HandlerCommand, subcommand]
-//     plus, when HandlerCommandDir is set, `--role-config <dir>/<role>.json`.
-//     With no HandlerCommand it is an error naming the role.
+// A role is invoked only through its own handler: the result is
+// [role.Handler, subcommand], and the role's [role.config] rides on stdin as
+// the request's role object. A role without handler is an error naming the role
+// (config decode rejects it too, so a loaded config never reaches this error;
+// it guards a role built in code).
 func (c Config) RoleCommand(role roles.Role, subcommand string) ([]string, error) {
-	if role.NewPath() {
-		return []string{role.Handler, subcommand}, nil
+	if role.Handler == "" {
+		return nil, fmt.Errorf("role %q has no handler: a role is invoked only through its own handler (set handler to the adapter's absolute path)", role.Name)
 	}
-	if c.HandlerCommand == "" {
-		return nil, fmt.Errorf("no handler command configured for role %q (set PG_ROUTER_HANDLER_COMMAND)", role.Name)
-	}
-	if c.HandlerCommandDir != "" {
-		return []string{c.HandlerCommand, subcommand, "--role-config", RoleConfigPath(c.HandlerCommandDir, role.Name)}, nil
-	}
-	return []string{c.HandlerCommand, subcommand}, nil
+	return []string{role.Handler, subcommand}, nil
 }
 
-// handlerCommandFindings is the startup check that every handler command is
-// invocable (docket pg2-12gr4.8, design section 5; register row INV-WORKFLOW-1,
-// and docket pg2-12gr4.10 for the per-role handler). Two checks, both through
-// the resolver:
-//   - the shared command, only when PG_ROUTER_HANDLER_COMMAND is set: an unset
-//     one is legal today (it gives a per-dispatch error, see HandlerCommand), so
-//     a config without it must not start failing Load;
-//   - each ENABLED role that sets handler: its handler path must resolve too, so
-//     a missing handler shows in the same config check run as a missing query
-//     command (a disabled role is not started, so it is not checked).
+// handlerCommandFindings is the startup check that every enabled role's handler
+// is invocable (docket pg2-12gr4.8, design section 5; register row
+// INV-WORKFLOW-1, and docket pg2-12gr4.10 for the per-role handler). Each
+// ENABLED role's handler path must resolve through the resolver, so a missing
+// handler shows in the same config check run as a missing query command (a
+// disabled role is not started, so it is not checked).
 //
 // "Invocable" means the command resolves through the same locator
 // absentBackingCommands uses to an executable file; the core does NOT run the
@@ -739,13 +678,8 @@ func (c Config) RoleCommand(role roles.Role, subcommand string) ([]string, error
 // startup by cmd/pg-router).
 func (c Config) handlerCommandFindings() []error {
 	var errs []error
-	if c.HandlerCommand != "" {
-		if err := c.locator().Locate(c.HandlerCommand); err != nil {
-			errs = append(errs, fmt.Errorf("handler command %q (PG_ROUTER_HANDLER_COMMAND) cannot be invoked: %w (absent backing command)", c.HandlerCommand, err))
-		}
-	}
 	for _, role := range c.Roles {
-		if !role.Enabled || !role.NewPath() {
+		if !role.Enabled {
 			continue
 		}
 		argv, err := c.RoleCommand(role, "dispatch")
@@ -755,38 +689,6 @@ func (c Config) handlerCommandFindings() []error {
 		}
 		if err := c.locator().Locate(argv[0]); err != nil {
 			errs = append(errs, fmt.Errorf("role %q handler %q cannot be invoked: %w (absent backing command)", role.Name, argv[0], err))
-		}
-	}
-	return errs
-}
-
-// roleConfigFindings is the startup check that each enabled role's --role-config
-// file exists and parses (docket pg2-12gr4.8, design section 5; register row
-// INV-WORKFLOW-1). It runs only when PG_ROUTER_HANDLER_COMMAND_DIR is set (the
-// "old-path" roles; with no dir there is no role-config file to check). The file
-// is <dir>/<role>.json, the path cmd/pg-router's handlerRoleConfigPath builds.
-// "Parses" means well-formed JSON: core does not interpret the handler's fields,
-// because pg-router never validates another tool (the handler's own validate
-// does). A disabled role is not started, so it is not checked here.
-func (c Config) roleConfigFindings() []error {
-	if c.HandlerCommandDir == "" {
-		return nil
-	}
-	var errs []error
-	for _, role := range c.Roles {
-		// A role with its own handler (the new path) carries its config in the
-		// TOML and never reads a --role-config file.
-		if !role.Enabled || role.NewPath() {
-			continue
-		}
-		path := RoleConfigPath(c.HandlerCommandDir, role.Name)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("role %q role-config file %q cannot be read: %w (PG_ROUTER_HANDLER_COMMAND_DIR)", role.Name, path, err))
-			continue
-		}
-		if !json.Valid(data) {
-			errs = append(errs, fmt.Errorf("role %q role-config file %q is not well-formed JSON (PG_ROUTER_HANDLER_COMMAND_DIR)", role.Name, path))
 		}
 	}
 	return errs

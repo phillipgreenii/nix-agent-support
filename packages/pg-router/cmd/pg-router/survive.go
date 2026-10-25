@@ -1,66 +1,17 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
-	"io/fs"
-	"log/slog"
-	"os"
-
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
 
-// handlerRoleConfigPath is the per-role file under cfg.HandlerCommandDir that
-// handlerCommandFor hands a handler as `--role-config`.
-func handlerRoleConfigPath(dir, roleName string) string {
-	return config.RoleConfigPath(dir, roleName)
-}
-
-// roleSurvivalFlag is the ONE key of a role's rendered config file this binary
-// reads: a role whose handler supervises its own work independently of this
-// daemon declares `"survivesShutdown": true` (the deployment module renders it
-// for ccpool-backed roles). The rest of the file is the handler's private
-// business and is never interpreted here (GOAL-MIN-1).
-type roleSurvivalFlag struct {
-	SurvivesShutdown bool `json:"survivesShutdown"`
-}
-
-// roleSurvivesShutdown reports whether role's dispatch MUST be left running,
-// rather than cancelled, when this daemon shuts down (bead pg2-dtigc, ADR
-// 0085). Absent config, no HandlerCommandDir, a missing role file, or an
-// unreadable/ill-formed one all mean false: the dispatch is cancelled after
-// the drain exactly as before this flag existed. A file that exists but cannot
-// be decoded is logged, since silently losing the flag would silently restore
-// the old kill-on-restart behavior.
-func roleSurvivesShutdown(cfg config.Config, roleName string) bool {
-	if cfg.HandlerCommandDir == "" {
-		return false
-	}
-	path := handlerRoleConfigPath(cfg.HandlerCommandDir, roleName)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			slog.Warn("role config unreadable; its dispatch will be cancelled at shutdown", "role", roleName, "path", path, "err", err)
-		}
-		return false
-	}
-	var f roleSurvivalFlag
-	if err := json.Unmarshal(data, &f); err != nil {
-		slog.Warn("role config undecodable; its dispatch will be cancelled at shutdown", "role", roleName, "path", path, "err", err)
-		return false
-	}
-	return f.SurvivesShutdown
-}
-
-// roleSurvives is the survival decision for one role. A role with handler (the
-// new path) reads the generic survives_shutdown key core decoded from the TOML;
-// a role without handler keeps reading the per-role JSON flag, as before.
-func roleSurvives(cfg config.Config, r roles.Role) bool {
-	if r.NewPath() {
-		return r.SurvivesShutdown
-	}
-	return roleSurvivesShutdown(cfg, r.Name)
+// roleSurvives is the survival decision for one role (bead pg2-dtigc, ADR 0085):
+// whether its dispatch MUST be left running, rather than cancelled, when this
+// daemon shuts down. It is the generic survives_shutdown key core decoded from
+// the role's own [[role]] TOML entry (default false); core never reads anything
+// the handler owns (GOAL-MIN-1).
+func roleSurvives(r roles.Role) bool {
+	return r.SurvivesShutdown
 }
 
 // survivingRoles resolves, once, which ENABLED roles survive a shutdown, as a
@@ -68,7 +19,7 @@ func roleSurvives(cfg config.Config, r roles.Role) bool {
 func survivingRoles(cfg config.Config) map[string]bool {
 	out := map[string]bool{}
 	for _, r := range cfg.Roles {
-		if r.Enabled && roleSurvives(cfg, r) {
+		if r.Enabled && roleSurvives(r) {
 			out[r.Name] = true
 		}
 	}

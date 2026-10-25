@@ -35,7 +35,7 @@ import (
 // which keeps the pg2-asr8z dedup: a repeated sweep ate launchd's ExitTimeOut).
 // The sweep is idempotent anyway, so a second call is slow but harmless.
 //
-// The old binary's --role-config flag is not read: the role comes from stdin.
+// The role is never read from a file or flag: it comes from stdin.
 // --config (or PG_ROUTER_CCPOOL_HANDLER_CONFIG) names the handler-wide launch
 // config JSON.
 func runPreShutdown(args []string) int {

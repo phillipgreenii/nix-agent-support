@@ -110,7 +110,7 @@ type grafanaAlertInstance struct {
 // grafanaClient is this binary's own Grafana alerting client. httpClient
 // MUST already carry an explicit timeout (set by its caller, run.go, via
 // context.WithTimeout on every call below) — command-type roles get no
-// watchdog at all in pg-router-ccpool-handler, so a hang here is
+// watchdog at all in pg-router-handler-command, so a hang here is
 // invisible to pg-router's own dispatch-failure tracking [Binding
 // decisions: "every external call in run MUST carry an explicit
 // timeout"].

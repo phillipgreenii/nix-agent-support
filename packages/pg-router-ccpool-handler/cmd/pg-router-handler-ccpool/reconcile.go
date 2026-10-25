@@ -48,7 +48,7 @@ import (
 // but production verification (the coordinator checking the live daemon
 // config and phillipg-nix-ziprecruiter's modules/zm/default.nix directly)
 // found this handler is never wired as a [[query]] source there at all —
-// PG_ROUTER_HANDLER_COMMAND only ever backs the `dispatch` subcommand for
+// the role's handler only ever backs the `dispatch` subcommand for
 // review/feedback/worker, and nothing sets --query-config/
 // PG_ROUTER_CCPOOL_HANDLER_QUERY — so that hook was dead code as deployed.
 // query.go's own call (since pg2-wqi3e the guarded default-pool pass) is kept

@@ -27,8 +27,7 @@ func TestMain(m *testing.M) {
 // runs `go test` (bead pg2-50k41, same class as pg2-pjqk3 in internal/config).
 // Drain and pool sessions export several of them: PG_ROUTER_REPO_ROOT names a
 // real repository and PG_ROUTER_CONFIG the live daemon's config, both of which
-// config.Load() would otherwise read, and PG_ROUTER_HANDLER_COMMAND_DIR changes
-// which code path the runRunRole tests exercise. A test that needs a variable
+// config.Load() would otherwise read. A test that needs a variable
 // sets it with t.Setenv, whose cleanup restores this unset state.
 //
 // The variables are unset, not set to "": config.Load() reads them with
@@ -48,8 +47,6 @@ const routerEnvProbeSentinel = "PGR_TEST_ROUTER_ENV_PROBE"
 // drainSessionRouterEnv lists the PG_ROUTER_* variables a drain session exports.
 var drainSessionRouterEnv = []string{
 	"PG_ROUTER_CONFIG",
-	"PG_ROUTER_HANDLER_COMMAND",
-	"PG_ROUTER_HANDLER_COMMAND_DIR",
 	"PG_ROUTER_CCPOOL_HANDLER_CONFIG",
 	"PG_ROUTER_REPO_ROOT",
 	"PG_ROUTER_BEADS_PREFIX",

@@ -160,11 +160,11 @@ func TestServePostStartup_invalidRoleOrLaunchConfigIsAnError(t *testing.T) {
 	}
 }
 
-// The CLI entry point reads --config and the request from stdin; the old
-// --role-config flag is not accepted (the role comes from stdin).
+// The CLI entry point reads --config and the request from stdin; a flag that
+// would name a role file is not accepted (the role comes from stdin).
 func TestRunPostStartup_flags(t *testing.T) {
-	if got := runPostStartup([]string{"--role-config", "/x"}); got != conformance.ExitUsage {
-		t.Errorf("--role-config: exit %d, want %d", got, conformance.ExitUsage)
+	if got := runPostStartup([]string{"--role-file", "/x"}); got != conformance.ExitUsage {
+		t.Errorf("--role-file: exit %d, want %d", got, conformance.ExitUsage)
 	}
 	if got := runPostStartup([]string{"stray"}); got != conformance.ExitUsage {
 		t.Errorf("a positional argument: exit %d, want %d", got, conformance.ExitUsage)

@@ -15,23 +15,22 @@ import (
 const configPath = "role.config"
 
 // configKeys are the only top-level keys of a ccpool role's [role.config]: the
-// ccpool-role fields of the former per-role JSON, names unchanged. name, type,
-// survivesShutdown, strictBaseEnv and command are not config (the role's name
-// is the request's role.name, survives_shutdown is a core key, and the others
-// belong to the command adapter or to no adapter); each is an unknown key
-// here. The match is case-insensitive, as encoding/json's is.
+// ccpool-role fields, names unchanged. name, type, survivesShutdown,
+// strictBaseEnv and command are not config (the role's name is the request's
+// role.name, survives_shutdown is a core key, and the others belong to the
+// command adapter or to no adapter); each is an unknown key here. The match is
+// case-insensitive, as encoding/json's is.
 var configKeys = map[string]bool{"ccpool": true, "sessionenv": true}
 
 // decodeRole strictly decodes ro.Config into a ccpool roles.Role and returns
 // EVERY problem it finds, in a stable order: the strict shape (an unknown key
 // or a wrong type anywhere, keys sorted), the sessionEnv key rules (one problem
-// per offending key), then the load rules the legacy per-role decode applied
-// (actor required, templates parse, durations, effort, prefetch, ...). The role
+// per offending key), then the load rules (actor required, templates parse,
+// durations, effort, prefetch, ...). The role
 // is meaningful only when problems is empty.
 //
 // The per-field shape and load rules are rolefile.RoleFile and
-// rolefile.DecodeRole, unchanged, so a role config means exactly what the
-// legacy role file meant; this adapter only decides which top-level keys exist.
+// rolefile.DecodeRole; this adapter only decides which top-level keys exist.
 func decodeRole(ro roleObject) (roles.Role, []string) {
 	var problems []string
 	known := map[string]any{}
@@ -71,13 +70,12 @@ func decodeRole(ro roleObject) (roles.Role, []string) {
 	// The load rules need a decoded value; a type error means the typed decode
 	// would only repeat it (or fail on the first one).
 	if !shape.TypeError && hasCCPool {
-		legacy := make(map[string]any, len(known)+2)
+		withName := make(map[string]any, len(known)+1)
 		for k, v := range known {
-			legacy[k] = v
+			withName[k] = v
 		}
-		legacy["name"] = ro.Name
-		legacy["type"] = "ccpool"
-		b, err := json.Marshal(legacy)
+		withName["name"] = ro.Name
+		b, err := json.Marshal(withName)
 		if err != nil { // unreachable: the config came out of a JSON decode
 			return roles.Role{}, append(problems, fmt.Sprintf("%s: %v", configPath, err))
 		}

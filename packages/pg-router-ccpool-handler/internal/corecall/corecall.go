@@ -1,7 +1,7 @@
 // Package corecall is the OUTBOUND client of pg-router's core socket
 // (DEC-WIRE-2): the register/self-status transport shared by every adapter
 // binary of this module (bead pg2-12gr4.10.3). Moved verbatim out of
-// package main of cmd/pg-router-ccpool-handler; no behavior change.
+// package main of cmd/pg-router-handler-ccpool; no behavior change.
 package corecall
 
 import (

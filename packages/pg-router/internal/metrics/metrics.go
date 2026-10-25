@@ -437,9 +437,9 @@ const ReasonUsageLimit = "usage-limit"
 
 // TriagerRoleMarker is the substring that marks a role name as an
 // escalation-triage role. It deliberately mirrors the handler's own
-// convention (pg-router-ccpool-handler's humanOnlyReason treats a role as
+// convention (the ccpool adapter's humanOnlyReason treats a role as
 // "triage" when its name contains "triage"), so one naming rule serves both
-// sides without a new role-config field. (pg2-u2yub)
+// sides without a new [role.config] field. (pg2-u2yub)
 const TriagerRoleMarker = "triage"
 
 // IsTriagerRole reports whether role names an escalation-triage role.

@@ -20,14 +20,10 @@
 // this suite's job is proving the WIRE ADAPTER around it, not re-proving
 // ccpool's behavior.
 //
-// Two request shapes are covered (docket pg2-12gr4, handler split). The NEW
-// shape delivers the role as the `role` object ({name, config}) in the JSON
-// request on stdin and runs against the two adapter binaries,
-// pg-router-handler-command (dispatch) and pg-router-handler-ccpool (query);
-// those tests carry no suffix. The OLD shape (today's path: the per-role JSON
-// file named by --role-config, against the pg-router-ccpool-handler binary)
-// keeps its own cases, suffixed OldPath, until the final cleanup packet
-// (pg2-12gr4.10.17) removes the old binary and these cases with it.
+// The role travels as the `role` object ({name, config}) in the JSON request on
+// stdin (docket pg2-12gr4, handler split), and the suite runs against the two
+// adapter binaries, pg-router-handler-command (dispatch) and
+// pg-router-handler-ccpool (query).
 package conformance
 
 import (
@@ -65,10 +61,9 @@ func TestStaticSchemaChecks(t *testing.T) {
 	}
 }
 
-// Names of the three binaries this suite builds, each the cmd/ directory of the
-// same name in this module.
+// Names of the binaries this suite builds, each the cmd/ directory of the same
+// name in this module.
 const (
-	oldHandlerCmd     = "pg-router-ccpool-handler" // today's path; removed by pg2-12gr4.10.17
 	commandAdapterCmd = "pg-router-handler-command"
 	ccpoolAdapterCmd  = "pg-router-handler-ccpool"
 )
@@ -261,7 +256,7 @@ func liveDispatchNewShape(t *testing.T, req map[string]any) []byte {
 // a trivial, always-succeeding real subprocess, so this proves the wire
 // adapter end to end without needing a real ccpool/claude session) and checks
 // the reply validates against handler.dispatch-reply. The role travels on
-// stdin; there is no --role-config.
+// stdin.
 func TestLiveDispatch_command(t *testing.T) {
 	if _, err := exec.LookPath("true"); err != nil {
 		t.Skip("`true` not on PATH; skipping live dispatch conformance check")
@@ -280,7 +275,8 @@ func TestLiveDispatch_command(t *testing.T) {
 // dispatch requests and checks each is reported as a genuine failure — a
 // nonzero exit with a diagnostic (an error reply on stdout or text on stderr) —
 // rather than accepted: a request
-// with no role object at all, and one whose role.config is not an object.
+// with no role object at all, one whose role.config is not an object, and one
+// with a role but no event.
 func TestLiveDispatch_negative(t *testing.T) {
 	bin := buildBinary(t, commandAdapterCmd)
 
@@ -290,6 +286,8 @@ func TestLiveDispatch_negative(t *testing.T) {
 	}
 	configNotObject := newShapeDispatchRequest("conformance-command", nil)
 	configNotObject["role"].(map[string]any)["config"] = "not-an-object"
+	noEvent := newShapeDispatchRequest("conformance-command", commandRoleConfig())
+	delete(noEvent, "event")
 
 	for _, tc := range []struct {
 		name string
@@ -297,6 +295,7 @@ func TestLiveDispatch_negative(t *testing.T) {
 	}{
 		{"no-role-object", noRole},
 		{"role-config-not-an-object", configNotObject},
+		{"missing-event", noEvent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reqBytes, err := json.Marshal(tc.req)
@@ -363,74 +362,4 @@ func liveQuery(t *testing.T, cmdName string) {
 	if err := conformance.Check("source.query-reply", v); err != nil {
 		t.Fatalf("query reply failed source.query-reply schema: %v; reply=%s", err, reply)
 	}
-}
-
-// ---- Old path (today's): pg-router-ccpool-handler + --role-config. ----------
-//
-// These cases stay until packet cleanup-go (pg2-12gr4.10.17) removes the old
-// binary; they keep proving the old path while roles still use it.
-
-// TestLiveDispatch_commandOldPath is TestLiveDispatch_command on today's path:
-// the old binary, the role in a per-role JSON file passed with --role-config.
-func TestLiveDispatch_commandOldPath(t *testing.T) {
-	if _, err := exec.LookPath("true"); err != nil {
-		t.Skip("`true` not on PATH; skipping live dispatch conformance check")
-	}
-	bin := buildBinary(t, oldHandlerCmd)
-	roleConfig := writeRoleConfig(t, `{"name":"conformance-command","type":"command","command":{"argv":["true"]}}`)
-
-	req, err := conformance.Golden("handler.dispatch")
-	if err != nil {
-		t.Fatalf("read handler.dispatch golden: %v", err)
-	}
-	reqBytes, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	reply, code, err := runBinary(t, bin, []string{"dispatch", "--role-config", roleConfig}, reqBytes)
-	if err != nil {
-		t.Fatalf("run dispatch: %v", err)
-	}
-	if code != conformance.ExitOK {
-		t.Fatalf("dispatch exit=%d, want %d; reply=%s", code, conformance.ExitOK, reply)
-	}
-	var v any
-	if err := json.Unmarshal(reply, &v); err != nil {
-		t.Fatalf("dispatch reply not JSON: %v; reply=%s", err, reply)
-	}
-	if err := conformance.Check("handler.dispatch-reply", v); err != nil {
-		t.Fatalf("dispatch reply failed handler.dispatch-reply schema: %v; reply=%s", err, reply)
-	}
-}
-
-// TestLiveDispatch_negativeOldPath invokes the old binary's `dispatch` with a
-// malformed request (the SAME "missing event" case driver.go's own
-// negativeMatrix uses for handler.dispatch) and checks it reports a genuine
-// failure — a nonzero exit — rather than accepting it.
-func TestLiveDispatch_negativeOldPath(t *testing.T) {
-	bin := buildBinary(t, oldHandlerCmd)
-	req := []byte(`{"schemaVersion":"1","id":"h"}`) // missing "event"
-	reply, code, err := runBinary(t, bin, []string{"dispatch"}, req)
-	if err != nil {
-		t.Fatalf("run dispatch: %v", err)
-	}
-	if code == conformance.ExitOK {
-		t.Fatalf("dispatch accepted a request missing \"event\"; reply=%s", reply)
-	}
-}
-
-// TestLiveQueryOldPath is TestLiveQuery against the old binary, whose `query`
-// subcommand is unchanged.
-func TestLiveQueryOldPath(t *testing.T) {
-	liveQuery(t, oldHandlerCmd)
-}
-
-// writeRoleConfig writes contents to a fresh temp file and returns its path.
-func writeRoleConfig(t *testing.T, contents string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "role.json")
-	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-		t.Fatalf("write role config: %v", err)
-	}
-	return path
 }

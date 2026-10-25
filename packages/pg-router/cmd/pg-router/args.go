@@ -68,9 +68,8 @@ Subcommands:
                           (permission-mode / allowed-tools / autonomous / budget); --json emits the
                           same information as one JSON object. --json is valid only with --show.
   config check            run the startup config checks on demand: every problem loading the config
-                          reports (a source's query command that is absent, a handler command that is
-                          not an executable file, a role-config file that is missing or not
-                          well-formed JSON, and the rest) is printed, one per line, in ONE run. Exit 0
+                          reports (a source's query command that is absent, a role's handler that is
+                          not an executable file, a role without a handler, and the rest) is printed, one per line, in ONE run. Exit 0
                           and one "config ok" line when there is none, 1 otherwise. --json is not
                           valid with check.
   doctor [--socket <path>] [--token <tok>]

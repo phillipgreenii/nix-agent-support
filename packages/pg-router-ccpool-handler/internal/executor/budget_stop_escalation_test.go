@@ -78,7 +78,7 @@ func (b *labelBD) has(prefix string) bool {
 // budgetStopEscalateAfter 1 (bead pg2-izvr8).
 func drainLikeRole(name string, cfg config.Config) roles.Role {
 	return roles.Role{
-		Name: name, Type: "ccpool",
+		Name: name,
 		CCPool: &roles.CCPoolConfig{
 			Actor: "pgii-pool__" + name, Completion: roles.CloseOrRelease,
 			OnFailure: roles.AddHuman, OnDispatchFail: roles.DispatchLeave,

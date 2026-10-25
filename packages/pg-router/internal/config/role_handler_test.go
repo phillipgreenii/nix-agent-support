@@ -1,13 +1,9 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/phillipgreenii/pg-router/internal/roles"
 )
 
 // roleHandlerCfg wraps role bodies in a valid [[query]] so Load succeeds: the
@@ -49,7 +45,7 @@ K = "v"
 		t.Fatal(err)
 	}
 	r := c.Roles[0]
-	if r.Handler != "/opt/adapters/pg-router-handler-ccpool" || !r.NewPath() {
+	if r.Handler != "/opt/adapters/pg-router-handler-ccpool" {
 		t.Errorf("Handler = %q, want the absolute adapter path", r.Handler)
 	}
 	if !r.SurvivesShutdown {
@@ -95,8 +91,9 @@ func TestLoad_roleHandlerKeysRejectBadShapes(t *testing.T) {
 		{"config wrong type", "handler = \"/bin/h\"\nconfig = 5", "config"},
 		{"config an array", "handler = \"/bin/h\"\nconfig = [1]", "config"},
 		{"survives_shutdown wrong type", "handler = \"/bin/h\"\nsurvives_shutdown = \"yes\"", "survives_shutdown"},
-		{"config without handler", "[role.config]\na = 1", "[role.config] is set but handler is not"},
-		{"survives_shutdown without handler", "survives_shutdown = true", "survives_shutdown is set but handler is not"},
+		{"no handler", "", "handler is required"},
+		{"config without handler", "[role.config]\na = 1", "handler is required"},
+		{"survives_shutdown without handler", "survives_shutdown = true", "handler is required"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,10 +108,12 @@ func TestLoad_roleHandlerKeysRejectBadShapes(t *testing.T) {
 	}
 }
 
-// A role without handler decodes exactly as before: no new fields set, and
-// other unknown [[role]] keys are still silently ignored.
-func TestLoad_roleWithoutHandlerDecodesAsBefore(t *testing.T) {
-	c, err := loadRoleCfg(t, roleHandlerCfg(`
+// A role without handler is a load error naming the role (the decision of
+// packet pg2-12gr4.10.17: there is no shared fallback command, so a role with no
+// handler of its own could never be invoked). The role still reports its name
+// when other unknown [[role]] keys are present, which stay ignored.
+func TestLoad_roleWithoutHandlerIsALoadErrorNamingTheRole(t *testing.T) {
+	_, err := loadRoleCfg(t, roleHandlerCfg(`
 [[role]]
 name = "old"
 binds = ["e"]
@@ -123,30 +122,12 @@ someFutureKey = "ignored"
 [role.command]
 argv = ["x"]
 `))
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("a [[role]] without handler must fail the load")
 	}
-	got := c.Roles[0]
-	if got.Handler != "" || got.Config != nil || got.SurvivesShutdown || got.NewPath() {
-		t.Errorf("old-path role carries new-path fields: %+v", got)
-	}
-}
-
-// With HandlerCommandDir set, only OLD-path roles need a per-role JSON file.
-func TestRoleConfigFindings_skipsRolesWithOwnHandler(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "old.json"), []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c := Config{HandlerCommandDir: dir, Roles: roles.RoleSet{
-		{Name: "old", Enabled: true},
-		{Name: "new", Enabled: true, Handler: "/bin/h"},
-	}}
-	if errs := c.roleConfigFindings(); len(errs) != 0 {
-		t.Fatalf("findings = %v, want none (the new-path role has no JSON file by design)", errs)
-	}
-	c.Roles = append(c.Roles, roles.Role{Name: "old-missing", Enabled: true})
-	if errs := c.roleConfigFindings(); len(errs) != 1 {
-		t.Fatalf("findings = %v, want exactly the old-path role with no file", errs)
+	for _, want := range []string{`"old"`, "handler is required"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to contain %q", err, want)
+		}
 	}
 }

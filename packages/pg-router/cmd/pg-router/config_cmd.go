@@ -249,20 +249,16 @@ type configShowRole struct {
 	// transiently failed dispatch (bead pg2-yu5y2); omitted when 0 (off).
 	MaxDispatchRetries int `json:"maxDispatchRetries,omitempty"`
 	// Command is what core runs for the role's dispatch, resolved by the ONE
-	// role-adapter resolver (config.Config.RoleCommand): [handler, dispatch] for
-	// a role with handler, today's shared command (plus --role-config when a
-	// directory is set) otherwise. Empty with CommandError set when a role
-	// without handler has no shared command configured.
+	// role-adapter resolver (config.Config.RoleCommand): [handler, dispatch].
+	// Empty with CommandError set for a role built in code without handler.
 	Command      string `json:"command,omitempty"`
 	CommandError string `json:"commandError,omitempty"`
-	// SurvivesShutdown is the value core acts on at shutdown: the TOML
-	// survives_shutdown key for a role with handler, the per-role JSON flag
-	// otherwise.
+	// SurvivesShutdown is the value core acts on at shutdown: the role's TOML
+	// survives_shutdown key.
 	SurvivesShutdown bool `json:"survivesShutdown"`
-	// Role is the role object core sends in every handler request for a role
-	// with handler ({"name", "config"}, including sessionEnv when the config has
-	// one), byte for byte what wireclient puts on stdin. Omitted for a role
-	// without handler, whose requests carry no role object.
+	// Role is the role object core sends in every handler request
+	// ({"name", "config"}, including sessionEnv when the config has one), byte
+	// for byte what wireclient puts on stdin.
 	Role json.RawMessage `json:"role,omitempty"`
 }
 
@@ -285,7 +281,7 @@ func roleShowFor(cfg config.Config, r roles.Role) roleShow {
 	} else {
 		out.Command = displayArgv(argv)
 	}
-	out.SurvivesShutdown = roleSurvives(cfg, r)
+	out.SurvivesShutdown = roleSurvives(r)
 	out.Role, _ = wireclient.SentRole(r)
 	return out
 }

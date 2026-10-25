@@ -148,8 +148,6 @@ func TestPackageTestsPassWithRouterEnvExported(t *testing.T) {
 		"XDG_CONFIG_HOME="+poisoned,
 		"HOME="+poisoned,
 		"PG_ROUTER_CONFIG=/nonexistent/pg2-pjqk3/config.toml",
-		"PG_ROUTER_HANDLER_COMMAND=/nonexistent/pg2-pjqk3/handler",
-		"PG_ROUTER_HANDLER_COMMAND_DIR=/nonexistent/pg2-pjqk3/roles",
 		"PG_ROUTER_CCPOOL_HANDLER_CONFIG=/nonexistent/pg2-pjqk3/launch.json",
 		"PG_ROUTER_REPO_ROOT=/nonexistent/pg2-pjqk3/repo",
 		"PG_ROUTER_BEADS_PREFIX=arbitrary",
@@ -162,12 +160,11 @@ func TestPackageTestsPassWithRouterEnvExported(t *testing.T) {
 
 // --- wiring fixtures (INV-WORKFLOW-1 / USECASE-VALIDATE-CONFIG) ---
 
-// cmdRole is a handler bound to binds. As of docket pg2-oju6w's Task 5.4 a
-// role carries no backing command of its own (that is the registered
-// handler participant's own concern, reached over the wire) — the name is
-// kept for its many existing callers' sake.
+// cmdRole is a role bound to binds whose handler ("present-tool") resolves
+// under prefixLocator, matching eventSource's own backing command — a role is
+// invoked only through its own handler, and Validate checks the path.
 func cmdRole(name string, binds ...string) roles.Role {
-	return roles.Role{Name: name, Enabled: true, Binds: binds}
+	return roles.Role{Name: name, Enabled: true, Binds: binds, Handler: "present-tool"}
 }
 
 // eventSource is a period-triggered source emitting emits, backed by a command
@@ -299,8 +296,9 @@ func TestValidate_absentBackingCommand(t *testing.T) {
 	if len(warns) != 0 {
 		t.Fatalf("an absent backing command is an error, never a warning; warns=%v", warns)
 	}
-	// A present command: the same wiring with a locator that resolves it is valid.
-	c.Locator = stubLocator{present: map[string]bool{"absent-lister": true}}
+	// A present command: the same wiring with a locator that resolves it (and the
+	// role's handler) is valid.
+	c.Locator = stubLocator{present: map[string]bool{"absent-lister": true, "present-tool": true}}
 	if errs, warns := c.diagnose(); len(errs) != 0 || len(warns) != 0 {
 		t.Fatalf("present backing commands must be valid; errs=%v warns=%v", errs, warns)
 	}
@@ -459,6 +457,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 binds = ["a.ready"]
 `)
 	_, err := Load()
@@ -625,57 +624,6 @@ func TestLoad_prToolEnvIsIgnored(t *testing.T) {
 	}
 	if strings.Contains(c.AllowedTools, "review-tool") {
 		t.Errorf("AllowedTools = %q, must not contain a grant derived from PG_ROUTER_PR_TOOL", c.AllowedTools)
-	}
-}
-
-// TestDefault_handlerCommandIsEmpty locks GOAL-MIN-1's Floor (ADR 0065's
-// Register row R16, bead pg2-g068j's own doc comment on HandlerCommand):
-// pg-router's own built-in defaults MUST name no concrete tool, so an
-// unconfigured deployment gets HandlerCommand == "" — never a hardcoded
-// participant binary name.
-func TestDefault_handlerCommandIsEmpty(t *testing.T) {
-	if got := Default().HandlerCommand; got != "" {
-		t.Errorf("Default().HandlerCommand = %q, want empty (GOAL-MIN-1's Floor: no baked-in tool name)", got)
-	}
-}
-
-// TestLoad_handlerCommandEnvOverride proves PG_ROUTER_HANDLER_COMMAND folds
-// into Config.HandlerCommand — the wireclient.CommandFor seam bootCore/
-// runRunRole (cmd/pg-router) resolve every enabled role's registered handler
-// participant command through (bead pg2-g068j).
-func TestLoad_handlerCommandEnvOverride(t *testing.T) {
-	absentConfig(t)
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND", "/usr/local/bin/pg-router-ccpool-handler")
-	c, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.HandlerCommand != "/usr/local/bin/pg-router-ccpool-handler" {
-		t.Errorf("HandlerCommand = %q, want /usr/local/bin/pg-router-ccpool-handler (PG_ROUTER_HANDLER_COMMAND overlay)", c.HandlerCommand)
-	}
-}
-
-// TestDefault_handlerCommandDirIsEmpty mirrors TestDefault_handlerCommandIsEmpty:
-// HandlerCommandDir carries no baked-in default either.
-func TestDefault_handlerCommandDirIsEmpty(t *testing.T) {
-	if got := Default().HandlerCommandDir; got != "" {
-		t.Errorf("Default().HandlerCommandDir = %q, want empty", got)
-	}
-}
-
-// TestLoad_handlerCommandDirEnvOverride proves PG_ROUTER_HANDLER_COMMAND_DIR
-// folds into Config.HandlerCommandDir (this bead, pg2-ymb3v) — the per-role
-// JSON directory cmd/pg-router/run.go's handlerCommandFor consults to
-// differentiate roles sharing one HandlerCommand.
-func TestLoad_handlerCommandDirEnvOverride(t *testing.T) {
-	absentConfig(t)
-	t.Setenv("PG_ROUTER_HANDLER_COMMAND_DIR", "/etc/pg-router/roles")
-	c, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.HandlerCommandDir != "/etc/pg-router/roles" {
-		t.Errorf("HandlerCommandDir = %q, want /etc/pg-router/roles (PG_ROUTER_HANDLER_COMMAND_DIR overlay)", c.HandlerCommandDir)
 	}
 }
 
@@ -890,6 +838,7 @@ format = "jsonl"
 
 [[role]]
 name = "solo"
+handler = "/bin/h"
 enabled = true
 binds = ["work.ready"]
 `)
@@ -913,6 +862,7 @@ func TestLoad_orphanBindIsError(t *testing.T) {
 	writeCfg(t, `
 [[role]]
 name = "lonely"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["nobody.emits.this"]
@@ -937,6 +887,7 @@ format = "jsonl"
 
 [[role]]
 name = "r"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["heard.by.none"]
@@ -971,6 +922,7 @@ format = "jsonl"
 
 [[role]]
 name = "pr-decider"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["pr.changed"]
@@ -1008,6 +960,7 @@ format = "jsonl"
 
 [[role]]
 name = "other"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["issue.changed"]
@@ -1039,6 +992,7 @@ format = "jsonl"
 
 [[role]]
 name = "issue-decider"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["issue.changed"]
@@ -1047,6 +1001,7 @@ argv = ["x"]
 
 [[role]]
 name = "pr-decider"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["pr.changed"]
@@ -1086,6 +1041,7 @@ format = "jsonl"
 
 [[role]]
 name = "ur"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["up.ready"]
@@ -1094,6 +1050,7 @@ argv = ["x"]
 
 [[role]]
 name = "dr"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["down.ready"]
@@ -1142,11 +1099,13 @@ format = "jsonl"
 
 [[role]]
 name = "ur"
+handler = "/bin/h"
 binds = ["up.ready"]
 description = "handles up.ready events"
 
 [[role]]
 name = "dr"
+handler = "/bin/h"
 binds = ["down.ready"]
 `)
 	c, err := Load()
@@ -1220,6 +1179,7 @@ func TestLoad_unknownTypeIsError(t *testing.T) {
 	writeCfg(t, `
 [[role]]
 name = "x"
+handler = "/bin/h"
 type = "weird"
 cap = 1
 binds = ["a.ready"]
@@ -1317,6 +1277,7 @@ func TestLoad_promptXorPromptFile(t *testing.T) {
 	writeCfg(t, `
 [[role]]
 name = "x"
+handler = "/bin/h"
 type = "ccpool"
 cap = 1
 binds = ["a.ready"]
@@ -1521,6 +1482,7 @@ format = "json"
 
 [[role]]
 name = "ci-health-sink"
+handler = "/bin/h"
 type = "command"
 enabled = false
 binds = ["ci.health"]
@@ -1565,6 +1527,7 @@ func minimalRoleCfg(roleName string) string {
 		"\n" +
 		"[[role]]\n" +
 		"name = \"" + roleName + "\"\n" +
+		"handler = \"/bin/h\"\n" +
 		"type = \"command\"\n" +
 		"binds = [\"e\"]\n" +
 		"[role.command]\n" +
@@ -1703,6 +1666,7 @@ format = "jsonl"
 
 [[role]]
 name = "pr-decider"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["pr.*"]
@@ -1751,6 +1715,7 @@ format = "jsonl"
 
 [[role]]
 name = "pr-decider"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["pr.changed"]
@@ -1759,6 +1724,7 @@ argv = ["pr-decider"]
 
 [[role]]
 name = "desk-issue-noop"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["issue.changed"]
@@ -1767,6 +1733,7 @@ argv = ["true"]
 
 [[role]]
 name = "desk-thread-noop"
+handler = "/bin/h"
 type = "command"
 cap = 1
 binds = ["thread.changed"]

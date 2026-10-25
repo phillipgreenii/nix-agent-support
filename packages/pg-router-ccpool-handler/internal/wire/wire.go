@@ -9,7 +9,7 @@
 // (DeclineKind*) and exit code 9 (conformance.ExitBusy) are a
 // handler-to-alert contract: they MUST stay byte for byte as they are.
 //
-// Moved verbatim out of package main of cmd/pg-router-ccpool-handler (a
+// Moved verbatim out of package main of cmd/pg-router-handler-ccpool (a
 // second main package cannot import it); no behavior change.
 package wire
 

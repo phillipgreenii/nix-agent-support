@@ -78,7 +78,7 @@ func TestCommandDispatch_writesDispatchStart_strictNamesNoValues(t *testing.T) {
 	setHandlerEnv(t)
 	log, path := newTestLog(t)
 	role := roles.Role{
-		Name: "cmdrole", Type: "command", StrictBaseEnv: true,
+		Name: "cmdrole", StrictBaseEnv: true,
 		Command: &roles.CommandConfig{Argv: []string{"/bin/sh", "-c", "exit 0", "{{.BeadID}}"}},
 	}
 	if err := dispatchCommand(t, role, log); err != nil {
