@@ -13,8 +13,13 @@
 //   - A secondary limit pauses the background classes for the stated time;
 //     classes 1 and 2 stay admitted.
 //
+// A connector with buckets of its own declares its own buckets in Config.Declared
+// (name, unit, cap, window, reserve); the governor then meters exactly those,
+// and the windows may be as short as a second. A governor with no declaration is
+// the three-bucket governor above.
+//
 // Spend is counted in a rolling window per bucket (an hour, or a minute for REST
-// search), so no interval of that length ever holds more than the cap. Readings
+// search, unless declared), so no interval of that length ever holds more than the cap. Readings
 // the origin reports (the rateLimit selection folded into a GraphQL document, the
 // X-RateLimit-* headers of a REST call) enter through Observe and Record; they
 // include other processes' spend on the token, so a falling reading tightens
@@ -50,6 +55,11 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
+
+// Buckets returns the buckets this governor meters, in declaration order: the
+// order of Config.Declared, or the order of the package-level Buckets when
+// none was declared. The caller owns the returned slice.
+func (g *Governor) Buckets() []Bucket { return append([]Bucket(nil), g.order...) }
 
 // DefaultPauseReason names a pause whose caller gave no reason.
 const DefaultPauseReason = "secondary rate limit"
@@ -92,6 +102,7 @@ func (e entry) background() bool { return e.class == 0 || e.class.Background() }
 
 type bucketState struct {
 	name  Bucket
+	unit  string // what the bucket counts, for refusal reasons
 	lim   Limits
 	bgCap int64
 
@@ -120,6 +131,7 @@ type Governor struct {
 	retention time.Duration
 
 	buckets map[Bucket]*bucketState // fixed after New
+	order   []Bucket                // the bucket names in declaration order, fixed after New
 
 	mu        sync.Mutex
 	pending   []func() // callbacks queued under mu, run after it is released
@@ -144,9 +156,10 @@ func New(cfg Config, opts Options) (*Governor, error) {
 		g.log = connectord.NopLogger
 	}
 	var longest time.Duration
-	for _, b := range Buckets() {
-		l := cfg.limits(b)
-		g.buckets[b] = &bucketState{name: b, lim: l, bgCap: backgroundCap(l.Cap, cfg.BackgroundShare)}
+	for _, sp := range cfg.specs() {
+		l := sp.Limits
+		g.buckets[sp.Bucket] = &bucketState{name: sp.Bucket, unit: sp.Unit, lim: l, bgCap: backgroundCap(l.Cap, cfg.BackgroundShare)}
+		g.order = append(g.order, sp.Bucket)
 		longest = max(longest, l.Window)
 	}
 	g.retention = cfg.Retention
@@ -158,7 +171,7 @@ func New(cfg Config, opts Options) (*Governor, error) {
 	now := g.clock.Now()
 	g.lastPrune = now
 	if g.store != nil {
-		for _, b := range Buckets() {
+		for _, b := range g.order {
 			st := g.buckets[b]
 			rows, err := g.store.BudgetSince(context.Background(), string(b), now.Add(-st.lim.Window))
 			if err != nil {
@@ -319,7 +332,7 @@ func (g *Governor) queue(f func()) { g.pending = append(g.pending, f) }
 
 // advance ages out spend and ends elapsed pauses.
 func (g *Governor) advance(now time.Time) {
-	for _, name := range Buckets() {
+	for _, name := range g.order {
 		b := g.buckets[name]
 		b.expire(now)
 		if !b.pausedUntil.IsZero() && !now.Before(b.pausedUntil) {
@@ -360,7 +373,7 @@ func (g *Governor) request(req Request) (*bucketState, Request, error) {
 // (a pause, then the background share), so a refusal names the most basic rule
 // in the way.
 func (g *Governor) check(b *bucketState, req Request, now time.Time) *Refusal {
-	name, unit, cost := string(b.name), b.name.unit(), req.Cost
+	name, unit, cost := string(b.name), b.unit, req.Cost
 	refuse := func(kind RefusalKind, limit int64, retry time.Time, format string, args ...any) *Refusal {
 		return &Refusal{
 			Kind: kind, Bucket: b.name, Class: req.Class, Cost: cost, Limit: limit,
@@ -397,6 +410,8 @@ func windowName(d time.Duration) string {
 		return "hour"
 	case time.Minute:
 		return "minute"
+	case time.Second:
+		return "second"
 	default:
 		return d.String()
 	}
@@ -624,7 +639,7 @@ func (g *Governor) Pause(bucket Bucket, d time.Duration, reason string) error {
 func (g *Governor) PauseAll(d time.Duration, reason string) {
 	now := g.enter()
 	defer g.leave()
-	for _, name := range Buckets() {
+	for _, name := range g.order {
 		g.pauseLocked(g.buckets[name], now.Add(d), reason, now)
 	}
 }
@@ -653,7 +668,7 @@ func (g *Governor) State() State {
 	now := g.enter()
 	defer g.leave()
 	st := State{At: now}
-	for _, name := range Buckets() {
+	for _, name := range g.order {
 		b := g.buckets[name]
 		bs := BucketState{
 			Bucket: name, Cap: b.lim.Cap, BackgroundCap: b.bgCap, Reserve: b.lim.Reserve, Window: b.lim.Window,

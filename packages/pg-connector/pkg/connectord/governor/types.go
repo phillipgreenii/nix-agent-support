@@ -138,11 +138,30 @@ const (
 	DefaultRetention = 24 * time.Hour
 )
 
+// DefaultUnit is the unit a declared bucket counts in when its BucketSpec
+// names none.
+const DefaultUnit = "requests"
+
+// BucketSpec declares one bucket: its name, what it counts, and its limits.
+type BucketSpec struct {
+	Bucket Bucket
+	// Unit names what the bucket counts, for refusal reasons ("requests",
+	// "points"). Empty means DefaultUnit.
+	Unit   string
+	Limits Limits
+}
+
 // Config is the governor's settings.
 type Config struct {
 	GraphQL    Limits
 	RESTCore   Limits
 	RESTSearch Limits
+	// Declared lists the buckets a connector declares for itself. When it is
+	// non-empty the governor meters exactly these buckets, in this order, and
+	// the three fixed Limits fields are ignored (and not validated); when
+	// it is nil the governor is the three-bucket governor those fields
+	// describe. A non-nil empty list is a mistake and Validate rejects it.
+	Declared []BucketSpec
 	// BackgroundShare is the fraction of each bucket's Cap that the
 	// background classes may spend; the rest stays for classes 1 and 2. It
 	// MUST be in (0, 1].
@@ -152,34 +171,65 @@ type Config struct {
 	Retention time.Duration
 }
 
-func (c Config) limits(b Bucket) Limits {
-	var l Limits
-	switch b {
-	case BucketGraphQL:
-		l = c.GraphQL
-	case BucketRESTCore:
-		l = c.RESTCore
-	case BucketRESTSearch:
-		l = c.RESTSearch
-	}
-	if l.Window <= 0 {
-		l.Window = DefaultWindow
-		if b == BucketRESTSearch {
-			l.Window = DefaultSearchWindow
+// specs returns the buckets the governor meters, in order, with the default
+// window and unit filled in.
+func (c Config) specs() []BucketSpec {
+	var out []BucketSpec
+	if c.Declared != nil {
+		out = make([]BucketSpec, len(c.Declared))
+		copy(out, c.Declared)
+		for i := range out {
+			if out[i].Unit == "" {
+				out[i].Unit = DefaultUnit
+			}
+			if out[i].Limits.Window <= 0 {
+				out[i].Limits.Window = DefaultWindow
+			}
 		}
+		return out
 	}
-	return l
+	for _, b := range Buckets() {
+		var l Limits
+		switch b {
+		case BucketGraphQL:
+			l = c.GraphQL
+		case BucketRESTCore:
+			l = c.RESTCore
+		case BucketRESTSearch:
+			l = c.RESTSearch
+		}
+		if l.Window <= 0 {
+			l.Window = DefaultWindow
+			if b == BucketRESTSearch {
+				l.Window = DefaultSearchWindow
+			}
+		}
+		out = append(out, BucketSpec{Bucket: b, Unit: b.unit(), Limits: l})
+	}
+	return out
 }
 
 // Validate reports the first thing wrong with c.
 func (c Config) Validate() error {
-	for _, b := range Buckets() {
-		l := c.limits(b)
-		if l.Cap <= 0 {
-			return fmt.Errorf("governor: %s cap must be positive, got %d", b, l.Cap)
+	if c.Declared != nil && len(c.Declared) == 0 {
+		return errors.New("governor: declared buckets must list at least one bucket")
+	}
+	seen := map[Bucket]bool{}
+	for _, s := range c.specs() {
+		if c.Declared != nil {
+			if s.Bucket == "" {
+				return errors.New("governor: declared bucket name must not be empty")
+			}
+			if seen[s.Bucket] {
+				return fmt.Errorf("governor: declared bucket %q appears more than once", s.Bucket)
+			}
+			seen[s.Bucket] = true
 		}
-		if l.Reserve < 0 {
-			return fmt.Errorf("governor: %s reserve must not be negative, got %d", b, l.Reserve)
+		if s.Limits.Cap <= 0 {
+			return fmt.Errorf("governor: %s cap must be positive, got %d", s.Bucket, s.Limits.Cap)
+		}
+		if s.Limits.Reserve < 0 {
+			return fmt.Errorf("governor: %s reserve must not be negative, got %d", s.Bucket, s.Limits.Reserve)
 		}
 	}
 	if c.BackgroundShare <= 0 || c.BackgroundShare > 1 {
