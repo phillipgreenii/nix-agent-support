@@ -20,7 +20,7 @@
 #       [<range>], and its expression contains rate(, irate( or increase(; a _bucket, _sum or
 #       _count suffix appears only on a histogram's name, and a histogram's name appears only
 #       with one of those suffixes
-#   D4  each of the eight topic phrases is a case-insensitive substring of at least one panel's
+#   D4  each of the ten topic phrases is a case-insensitive substring of at least one panel's
 #       title, with - and _ read as spaces
 #   D5  every panel whose type is not row has a non-empty description
 #   D6  every target's datasource is {"type": "prometheus", "uid": "prometheus"}
@@ -61,7 +61,7 @@ for tool in jq promtool; do
   fi
 done
 
-topics='["budget against the cap","spend by purpose and group","queue depth and oldest overdue","freshness per query","served_from ratio","detection delay","settle results and pending rows","consumer lag"]'
+topics='["budget against the cap","spend by purpose and group","queue depth and oldest overdue","freshness per query","served_from ratio","detection delay","settle results and pending rows","consumer lag","tracked and watched","governor backlog"]'
 
 # jq definitions shared by the rules.
 defs='
@@ -235,6 +235,8 @@ mutate_catalog counter-retyped D3 's/^(pg_connector_github_queue_depth) gauge/\1
 
 mutate missing-topic D4 '(.panels[] | select(.title == "Freshness per query") | .title) = "Staleness"'
 mutate topic-underscore-lost D4 '(.panels[] | select(.title == "Served-from ratio") | .title) = "Served ratio"'
+mutate missing-governor-backlog-topic D4 '(.panels[] | select(.title == "Governor backlog by class") | .title) = "Pending work"'
+mutate missing-tracked-watched-topic D4 '(.panels[] | select(.title | startswith("Tracked and watched")) | .title) |= "Set size: " + ltrimstr("Tracked and watched: ")'
 
 mutate missing-description D5 'del(.panels[] | select(.id == 2) | .description)'
 mutate empty-description D5 '(.panels[] | select(.id == 3) | .description) = ""'
