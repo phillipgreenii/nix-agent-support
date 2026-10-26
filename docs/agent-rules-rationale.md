@@ -90,8 +90,8 @@ A-3: a brief that lists relative paths without a root causes exactly this defect
   deploy-gated run against `main` is what keeps an on-demand suite from becoming that again. Existing
   rules said nothing on test cost or kind: ADR 0037 limits which commands run tests and HK-2 keeps
   `nix` out of hooks, neither classifies a test.
-- V-5 (operator rulings, Phillip: 2026-10-20 on `pg2-6oop0.8`, "typical development is not supposed
-  to do a full mutant run"; 2026-10-22, verbatim: "unless the story is about mutation testing
+- V-5 (operator rulings, Phillip: 2026-10-20 on `pg2-6oop0.8`, verbatim: "typical development it
+  not supposed to do a full mutant run because it takes so long"; 2026-10-22, verbatim: "unless the story is about mutation testing
   itself, none of the standard planned work should rely on running mutate tests"; 2026-10-26,
   verbatim: "typical development flows must not invoke mutation tests. mutation tests are something
   done outside of standard implementation flows ... each use of mutation tests should be intentional
@@ -116,7 +116,14 @@ A-3: a brief that lists relative paths without a root causes exactly this defect
   repo) and the dashboard-check mutant self-tests are ordinary fast tests; the tooling-source
   exception covers `nix-overlay`'s `gomu-engine-contract-tests`, which runs the real tool against a
   generated toy project. Enforcement is textual only: the tool-approver allowlists `pg-go-mutate`
-  as no more permissive than `go`, so nothing blocks a run mechanically.
+  as no more permissive than `go`, so nothing blocks a run mechanically. A third review pass
+  found the tooling exception worded three ways (some wordings allowed a run on a real package,
+  which would have let a gap-closing bead for a package inside the tool revive the re-run), so it
+  now reads the same everywhere: synthetic fixture only, never a workspace package, never to
+  confirm a closed gap. That pass also removed the skill's `--workers` claims (the tool ignores
+  the flag and forces one worker) and its "single-file targets are rejected" line (a `.go` file is
+  accepted), and corrected the sweep description: it only creates the triage bead, with a status
+  tally, so the operator's analysis amends it with the worklist rows.
 
 ## Timeouts (L-1..L-3) and host load (L-4)
 

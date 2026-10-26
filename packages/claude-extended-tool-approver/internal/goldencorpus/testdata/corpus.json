@@ -4784,7 +4784,7 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "approve",
-    "notes": "pg2-cjfpy.2: a command form the pg-go-mutate plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+    "notes": "pg2-cjfpy.2: a command form the pg-go-mutate plugin once instructed (the skill no longer does; kept as an ordinary approve regression; placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
   },
   {
     "case": "plugin_pg_ccaudit_pg_ccaudit_status_approve",

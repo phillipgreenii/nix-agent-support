@@ -196,7 +196,8 @@ the block.
    must exist as its acceptance criteria, and never requires a re-run (operator ruling, Phillip,
    2026-10-26: "the problem is fixed when a test is written which covers a missed path"). The
    one exception is a packet that changes the mutation tooling itself (`pg-go-mutate`,
-   `pg-go-mutate-tui`).
+   `pg-go-mutate-tui`), and it may run the tool only against a small synthetic fixture
+   project, never against a workspace package and never to confirm a closed gap.
 8. **Out of scope** — names the sibling packet holding each neighboring concern.
 9. **Lifecycle bounds + escalation pointer** — one line each: "this packet = implement +
    validate; isolation/landing/cleanup/claim hygiene are consumer-standard" (state deviations

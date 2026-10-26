@@ -74,7 +74,8 @@ otherwise.
   package, even if a packet line asks for it: it is not part of implementation (V-5). Write
   the tests the packet names for each missed path instead. If the packet cannot be satisfied
   without a tool run, say so in the what-was-missing note on the packet (step 5(c)) and
-  release it (or finish `outcome=blocked`), rather than running the tool. The exception is a
-  packet that changes the mutation tooling itself.
+  release it (or finish `outcome=blocked`), rather than running the tool. The one exception is
+  a packet that changes the mutation tooling itself, and it may run the tool only against a
+  small synthetic fixture project, never a workspace package and never to confirm a closed gap.
 - Report outcomes faithfully: failed validation is `outcome=blocked` with the failure in your
   note, never a claimed success.

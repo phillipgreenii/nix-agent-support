@@ -39,8 +39,7 @@ import (
 // strictly narrower than bare `go` (already unconditionally approved above,
 // including arbitrary `go run`): it never runs arbitrary user code, only the
 // target package's own existing test suite, and it deletes its own engine
-// report on exit (see the skill's "Establishing that a named mutant was
-// killed"). It is not read-only — it writes the Go build/test cache the
+// report on exit. It is not read-only — it writes the Go build/test cache the
 // same way `go test`/gogate already do — but that is the same cost profile
 // those two entries already carry.
 //
