@@ -168,6 +168,27 @@ func TestDispatch_TemplatedArgvIsOneLiteralArgument(t *testing.T) {
 	}
 }
 
+// TestDispatch_RetryWindowedItemKeepsTheRouterID: the command adapter does NOT
+// map a suffixed item id back to metadata.entity_id (unlike the ccpool adapter,
+// bead pg2-xbppib): a command role such as a PR-change handler keys on the
+// router's own id, so {{.BeadID}} stays the <entity>@<hex> the event carries.
+func TestDispatch_RetryWindowedItemKeepsTheRouterID(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "id.txt")
+	cfg := cmdConfig(false, "/bin/sh", "-c", `printf '%s' "$1" > "$2"`, "probe", "{{.BeadID}}", out)
+	payload := map[string]any{"id": "b-1@46d60fca149d", "metadata": map[string]any{"entity_id": "b-1"}}
+	req := request(t, eventWith(payload), "cmdrole", cfg, true)
+	if exit, reply := dispatch(context.Background(), t, req); exit != conformance.ExitOK {
+		t.Fatalf("dispatch exit %d, reply %s", exit, reply)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(b), "b-1@46d60fca149d"; got != want {
+		t.Fatalf("command saw BeadID %q, want the router's id %q", got, want)
+	}
+}
+
 // waitPid reads the pid the payload's script wrote, killing it at cleanup.
 func waitPid(t *testing.T, pidFile string) int {
 	t.Helper()

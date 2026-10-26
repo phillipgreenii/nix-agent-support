@@ -91,10 +91,15 @@ flowchart LR
   each row carries its own `version` and `head_sha`: a row that is redelivered keeps its id even
   after a newer change to the same entity, and two rows for one entity in one poll get two ids.
 
-  The suffix exists only on `changes` items. Every other query, and every consumer that uses
-  `Item.ID` as a bead or entity id (the escalation and triager roles, `RefreshItem`, the ccpool
-  handler), keeps bare ids; a handler that needs the real entity id behind a suffixed event reads
-  `metadata.entity_id`. A negative window is a usage error.
+  The suffix exists only on `changes` items. Every other query keeps bare ids. A consumer that
+  uses `Item.ID` as a bead or entity id does NOT get a bare id from a retry-windowed `changes`
+  call, including a ccpool role fed by `changes issue escalated-work`: the adapter always prints
+  the suffixed id there, and the real entity id stays in `metadata.entity_id`. The ccpool handler
+  (`pg-router-handler-ccpool`) therefore maps every dispatched item back to `metadata.entity_id`
+  before it renders `{{.BeadID}}`, refreshes the bead or stamps the session's external id (bead
+  `pg2-xbppib`), so a ccpool role, such as the escalation triager, sees the bare bead id; the
+  command handler (`pg-router-handler-command`) deliberately does not, and a command role sees
+  the router's own `<entity id>@<12 hex>` id. A negative window is a usage error.
 
   Known trade-offs of the digest, accepted with the retry window (bead `pg2-1ldvy`); they hold only
   for backends that do not own their changes:

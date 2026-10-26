@@ -475,3 +475,23 @@ func TestDispatch_failureAfterReadyStaysAccepted(t *testing.T) {
 		t.Errorf("the prompt delivery was never attempted:\n%s", calls)
 	}
 }
+
+// A retry-windowed source suffixes the event's item id (<bead>@<12 hex>) and
+// keeps the bead id in metadata.entity_id. The ccpool dispatch works on the
+// bead: the session it launches is named for the bare id, with no suffix.
+func TestDispatch_retryWindowedEventLaunchesWithTheBareBeadID(t *testing.T) {
+	cfgPath, callLog := readyLaunchStubs(t, 0)
+	name, cfg := workerRole("", "")
+	event := `{"id":"e-1","type":"dispatch","payload":{"id":"zr-w@46d60fca149d","metadata":{"entity_id":"zr-w"}}}`
+	code, got := dispatchWith(t, name, cfg, cfgPath, event)
+	if code != conformance.ExitOK {
+		t.Fatalf("exit = %d, want %d; stdout=%q", code, conformance.ExitOK, got)
+	}
+	calls, _ := os.ReadFile(callLog)
+	if !strings.Contains(string(calls), "new pg-router-worker-zr-w-") {
+		t.Errorf("ccpool new must name the session for the bare bead id:\n%s", calls)
+	}
+	if strings.Contains(string(calls), "@") {
+		t.Errorf("the retry-window suffix must not reach ccpool:\n%s", calls)
+	}
+}

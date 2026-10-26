@@ -327,6 +327,44 @@ SHIM
   [[ $stderr == *"bd ready failed"* ]]
 }
 
+# bd_warn_shim: a `bd` first on PATH that prints a warning on stderr, then execs
+# the REAL bd (so stdout is the real bd's), as bd does in a tracker without
+# beads.role configured.
+bd_warn_shim() {
+  local real_bd shim_dir
+  real_bd="$(command -v bd)"
+  shim_dir="$(mktemp -d)"
+  cat >"$shim_dir/bd" <<SHIM
+#!/usr/bin/env bash
+echo "warning: beads.role not configured" >&2
+exec "$real_bd" "\$@"
+SHIM
+  chmod +x "$shim_dir/bd"
+  PATH="$shim_dir:$PATH"
+  export PATH
+}
+
+@test "a bd stderr warning on a successful call does not break the tick: stdout alone is parsed" {
+  id="$(new_bead escalated)"
+  t0="$(escalated_at "$id")"
+  bd_warn_shim
+  run_wd $((t0 + 13 * 3600)) --stale-after 12h
+  [ "$status" -eq 0 ]
+  [[ $output == *"handed-off $id"* ]]
+  [[ $stderr != *"could not parse"* ]]
+  [ "$(labels_of "$id")" = $'attention\nhuman\nstale-escalation' ]
+}
+
+@test "a failing bd ready still reports bd's stderr, exit 4" {
+  empty="$(mktemp -d)"
+  bd_warn_shim
+  ESCALATION_WATCHDOG_NOW=1800000000 run --separate-stderr "$W" --bd-dir "$empty" --stale-after 12h
+  rm -rf "$empty"
+  [ "$status" -eq 4 ]
+  [[ $stderr == *"bd ready failed"* ]]
+  [[ $stderr == *"beads.role not configured"* ]]
+}
+
 @test "ESCALATION_WATCHDOG_NOW accepts epoch seconds or an RFC 3339 timestamp" {
   id="$(new_bead escalated)"
   t0="$(escalated_at "$id")"

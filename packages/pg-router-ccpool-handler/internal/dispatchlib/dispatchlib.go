@@ -51,6 +51,25 @@ func ItemFromPayload(payload map[string]any) item.Item {
 	return it
 }
 
+// BareEntityItem maps a dispatch item back to the entity it is about: when the
+// item carries a non-empty string metadata.entity_id, the returned item's ID is
+// that bare entity id. A source adapter that gives the router a retry window
+// (pg-router-source-pg-connector `changes --retry-window`, bead pg2-1ldvy)
+// rewrites every item id to <entity id>@<12 hex> so the router can de-duplicate
+// per change, and keeps the real id in metadata.entity_id. A ccpool role treats
+// Item.ID as a bead id (the bd refresh and precheck, the per-attempt external
+// id, the {{.BeadID}} template variable), so it MUST see the bare id (bead
+// pg2-xbppib). An item without the key, or with a non-string or empty one (every
+// item from a source that gives no retry window carries a bare id already), is
+// returned unchanged. Only the ccpool adapter calls this: the command handler
+// deliberately keeps the router's own (possibly suffixed) id.
+func BareEntityItem(it item.Item) item.Item {
+	if v, ok := it.Metadata["entity_id"].(string); ok && v != "" {
+		it.ID = v
+	}
+	return it
+}
+
 // externalIDStampLayout is the per-attempt ccpool ExternalID's timestamp
 // layout. This module's own internal/dtest.TestStamp fixture
 // ("20260616T010203") already reserves the second-precision "20060102T150405"

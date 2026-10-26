@@ -5,6 +5,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
 
@@ -41,5 +42,38 @@ func TestItemFromPayload_readsTheFlatFields(t *testing.T) {
 	}
 	if zero := ItemFromPayload(nil); zero.ID != "" || zero.Metadata != nil {
 		t.Errorf("ItemFromPayload(nil) = %+v, want zero", zero)
+	}
+}
+
+func TestBareEntityItem_mapsASuffixedIDBackToTheEntity(t *testing.T) {
+	in := ItemFromPayload(map[string]any{
+		"id": "pg2-9et@46d60fca149d", "type": "issue", "title": "t",
+		"metadata": map[string]any{"entity_id": "pg2-9et", "k": "v"},
+	})
+	got := BareEntityItem(in)
+	if got.ID != "pg2-9et" {
+		t.Errorf("ID = %q, want the bare entity id pg2-9et", got.ID)
+	}
+	if got.Type != "issue" || got.Title != "t" || got.Metadata["k"] != "v" || got.Metadata["entity_id"] != "pg2-9et" {
+		t.Errorf("every other field must be preserved: %+v", got)
+	}
+}
+
+func TestBareEntityItem_leavesOtherItemsUnchanged(t *testing.T) {
+	cases := map[string]item.Item{
+		"no metadata":     {ID: "b-1"},
+		"no entity_id":    {ID: "b-1@abc", Metadata: map[string]any{"k": "v"}},
+		"empty entity_id": {ID: "b-1@abc", Metadata: map[string]any{"entity_id": ""}},
+		"non-string":      {ID: "b-1@abc", Metadata: map[string]any{"entity_id": 7.0}},
+		"bare id, same":   {ID: "b-1", Metadata: map[string]any{"entity_id": "b-1"}},
+		"zero item":       {},
+		"nil entity_id":   {ID: "b-1@abc", Metadata: map[string]any{"entity_id": nil}},
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := BareEntityItem(in); got.ID != in.ID {
+				t.Errorf("ID = %q, want %q unchanged", got.ID, in.ID)
+			}
+		})
 	}
 }

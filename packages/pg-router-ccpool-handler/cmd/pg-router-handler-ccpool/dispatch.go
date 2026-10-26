@@ -83,7 +83,10 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 		return failDispatch(stdout, err.Error())
 	}
 
-	dctx := executor.DispatchContext{Role: role, Item: dispatchlib.ItemFromPayload(req.Event.Payload), EventID: req.Event.ID}
+	// A retry-windowed source suffixes the item id (<bead>@<hex>); a ccpool role
+	// works on the bead, so map back to metadata.entity_id (pg2-xbppib). The
+	// command adapter keeps the router's id on purpose.
+	dctx := executor.DispatchContext{Role: role, Item: dispatchlib.BareEntityItem(dispatchlib.ItemFromPayload(req.Event.Payload)), EventID: req.Event.ID}
 	// Origin availability gate (INV-CCH-10, bead pg2-4gi2c): decline BEFORE
 	// building deps, refreshing the bead or any executor step, so a decline makes
 	// no bd or ccpool call and mutates no bead. Every decline below writes one

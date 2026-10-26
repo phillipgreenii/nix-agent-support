@@ -127,10 +127,18 @@ command -v hand-to-human >/dev/null 2>&1 || die "hand-to-human is not on PATH" 1
 ENVELOPE='(if type=="object" and has("data") then .data else . end)'
 HUMAN_JSON="$(printf '%s\n' "${EW_HUMAN_LABELS[@]}" | jq -R . | jq -sc .)"
 
-if ! READY_RAW="$(bd -C "$BD_DIR" ready --label "$EW_ESCALATED_LABEL" --unassigned --limit 0 --json 2>&1)"; then
-  echo "escalation-watchdog: bd ready failed: $READY_RAW" >&2
+# Read bd's stdout ONLY: a stderr warning (for example "beads.role not
+# configured") on a successful call must not land in the JSON and break the
+# parse below (bead pg2-xbppib). stderr goes to a scratch file, shown only when
+# the call fails.
+READY_ERR_FILE="$(mktemp)"
+if ! READY_RAW="$(bd -C "$BD_DIR" ready --label "$EW_ESCALATED_LABEL" --unassigned --limit 0 --json 2>"$READY_ERR_FILE")"; then
+  READY_ERR="$(cat "$READY_ERR_FILE")"
+  rm -f "$READY_ERR_FILE"
+  echo "escalation-watchdog: bd ready failed: $READY_ERR$READY_RAW" >&2
   exit 4
 fi
+rm -f "$READY_ERR_FILE"
 if ! CANDIDATES="$(jq -c --argjson human "$HUMAN_JSON" "$ENVELOPE"'
     | map(select(
         (.status == "open")
