@@ -25,6 +25,10 @@
 //     sends changes_ack {consumer, query?, next_seq} per source that answered
 //     (commitForwardedAcks); a backend that did not answer is never
 //     acknowledged.
+//     With --no-ack (INTF-WIRE-ACK-1) this step is skipped for every source and the
+//     caller acknowledges each source's next_seq with the changes-ack verb
+//     (changes_ack.go); a source that is not forwarded is then answered as
+//     disabled by noAckNotOwningResult (ci_changes.go) and its ledger is untouched.
 //
 // Choices the design left open, each pinned by a test in
 // changes_forward_test.go:

@@ -705,14 +705,14 @@ shapes gain the fields named below, and the `changes` result's `schemaVersion` i
   A caller that must not meet a non-owning backend SHOULD pin `--backend`.
 - **`INTF-WIRE-ACK-2`** <!-- uuid: 11ebd164-3c10-4d90-8c40-05624cbe07d0 --> **The `changes-ack`
   verb.** The call
-  `pg-connector <type> changes-ack --consumer <id> --query <name> --next-seq <N> [--backend <binary>]`
+  `pg-connector <type> changes-ack --consumer <id> [--query <name>] --next-seq <N> [--backend <binary>]`
   sends `changes_ack {consumer, query, next_seq}` to the backend and prints the backend's own
-  answer, `{consumer, query, acked_seq}`, where `acked_seq` is the position the backend recorded
+  answer, `{consumer, query, acked_seq, store_identity}`, unchanged, where `acked_seq` is the position the backend recorded
   (which MAY be later than `N`, so a caller MUST NOT assume it equals `N`). The acknowledged position
   is the **scanned `next_seq`** of a `sources[]` row, not the `seq` of the last change returned: it
   can be past that change, because changes to entities outside the query are skipped, so a caller
   MUST acknowledge the `next_seq` it was given, and MUST do so even when the poll returned no change
-  at all, so that a quiet query's position keeps moving. `changes-ack` is an id-less write on one
+  at all, so that a quiet query's position keeps moving. `--query` is optional, exactly as on `changes` for a backend that owns its changes (the daemon keeps one cursor per consumer): when omitted no query argument is sent in `changes_ack`. `changes-ack` is an id-less write on one
   backend: with more than one backend registered for the type and no `--backend` it fails
   `invalid_argument` with no wire call (`INV-REG-2`); against a backend that does not declare
   `owns_changes` it fails `invalid_argument` naming the instance and touches no ledger. Its outcome

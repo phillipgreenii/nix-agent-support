@@ -210,7 +210,7 @@ func TestFanOutChanges_CrashBetweenFlushAndAdvance_ReproducesDuplicateDelivery(t
 	// (hypothetically) written and flushed, but commitAdvances is
 	// deliberately never called — simulating the crash window design
 	// section 5.3 describes.
-	crashed := fanOutChanges(ctx, reg, "pr", []string{"backend-changes-crash"}, "mine", "c1", false, false)
+	crashed := fanOutChanges(ctx, reg, "pr", []string{"backend-changes-crash"}, "mine", "c1", false, false, false)
 	if len(crashed) != 1 || len(crashed[0].entries) != 1 || string(crashed[0].entries[0].Change) != "added" {
 		t.Fatalf("crashed call results = %+v, want exactly one added entry", crashed)
 	}
@@ -218,7 +218,7 @@ func TestFanOutChanges_CrashBetweenFlushAndAdvance_ReproducesDuplicateDelivery(t
 	// The real next call: since the crash never advanced/persisted the
 	// consumer's cursor, this must reproduce the exact same "added"
 	// entry again (a duplicate delivery, never a loss).
-	real := fanOutChanges(ctx, reg, "pr", []string{"backend-changes-crash"}, "mine", "c1", false, false)
+	real := fanOutChanges(ctx, reg, "pr", []string{"backend-changes-crash"}, "mine", "c1", false, false, false)
 	if len(real) != 1 || len(real[0].entries) != 1 {
 		t.Fatalf("real call results = %+v, want exactly one entry (the duplicate)", real)
 	}

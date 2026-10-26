@@ -106,3 +106,29 @@ func ciNotOwningErr(results []changesBackendResult) error {
 	}
 	return scriptout.WrapError(scriptout.ErrInvalidArgument, strings.Join(reasons, "; "))
 }
+
+// noAckNotOwningResult is the umbrella's own answer, under --no-ack, for a
+// backend whose position lives in the umbrella's ledger (it does not declare
+// owns_changes): the flag is never applied to it and its ledger is never read,
+// refreshed or written (INTF-WIRE-ACK-1). Its sources[] row is "disabled", with
+// a reason that names the instance and says manual acknowledgement exists only
+// for a backend that owns its changes; when its capabilities call itself failed
+// the row is "degraded" instead, so an outage stays visible. Like every
+// non-owning row it counts toward the whole-call invalid_argument when every
+// queried backend is one (allNotOwningChanges, ciNotOwningErr).
+func noAckNotOwningResult(entityType, backend, query string, capsErr error) changesBackendResult {
+	res := changesBackendResult{
+		backend:     backend,
+		key:         LedgerKey{Type: entityType, Backend: backend, Query: query, Instance: ledgerInstanceDiscriminator(entityType)},
+		skipAdvance: true,
+		notOwning:   true,
+		status:      SourceDisabled,
+	}
+	detail := "its capabilities do not declare owns_changes"
+	if capsErr != nil {
+		detail = fmt.Sprintf("its capabilities call failed: %v", capsErr)
+		res.status = SourceDegraded
+	}
+	res.reason = fmt.Sprintf("%s instance %q does not own changes (%s): manual acknowledgement (--no-ack) exists only for a backend that owns its changes", entityType, backend, detail)
+	return res
+}

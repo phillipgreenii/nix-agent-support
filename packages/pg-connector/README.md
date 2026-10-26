@@ -639,8 +639,12 @@ that changes documented behavior.
    waits for the operator. Fix: also retry once for a reason that carries `unavailable` (the umbrella writes
    `scriptout: unavailable: ...`), with a test against the real fan-out document shape.
 
-The `pg-desk` feed consumer that phase 3 of the Jira daemon program adds (`--no-ack`, `changes-ack`) is not built yet;
-it MUST retry on `unavailable` and MUST NOT acknowledge a poll that failed (the design's "Daemon down" paragraph).
+The manual acknowledgement a feed consumer uses is built: `<type> changes --no-ack` forwards and writes the answer
+but sends no `changes_ack` (a source whose position lives in the umbrella's own ledger is reported `disabled`, and the call
+fails `invalid_argument` when every queried backend is such a source), and `<type> changes-ack --consumer C [--query Q]
+--next-seq N [--backend B]` sends the acknowledgement and prints the backend's own answer unchanged (`pr`, `ci`, `issue` and
+`calendar`; behavior: `INTF-WIRE-ACK-1`, `INTF-WIRE-ACK-2`). The `pg-desk` feed consumer that uses them
+is not built yet; it MUST retry on `unavailable` and MUST NOT acknowledge a poll that failed (the design's "Daemon down" paragraph).
 
 ## Profiling (pg-connector-github)
 

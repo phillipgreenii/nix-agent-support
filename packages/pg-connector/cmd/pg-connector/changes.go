@@ -285,7 +285,7 @@ type changesBackendResult struct {
 // entity-type-agnostic per this file's own header comment.
 func newChangesCmd(entityType string) *cobra.Command {
 	var query, consumer string
-	var cached, reset bool
+	var cached, reset, noAck bool
 	cmd := &cobra.Command{
 		Use:   "changes",
 		Short: fmt.Sprintf("Report %s entities changed since a consumer's last call, via the delta ledger", entityType),
@@ -296,6 +296,7 @@ func newChangesCmd(entityType string) *cobra.Command {
 	cmd.Flags().StringVar(&consumer, "consumer", "", "consumer id whose cursor this call reads and advances (required)")
 	cmd.Flags().BoolVar(&cached, "cached", false, "skip the backend refresh entirely; return only what the ledger already knows past the cursor")
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset this consumer's cursor to zero before computing changes, so the next call replays every live entity as added")
+	cmd.Flags().BoolVar(&noAck, "no-ack", false, "forward and write the answer as usual but send no acknowledgement for any source: the caller acknowledges each source's next_seq itself with the changes-ack verb (only for a backend that owns its changes)")
 	// Hidden refusal flags (bead pg2-ttk9t, WT-D18): changes NEVER passes a
 	// range, so --since/--before are rejected as invalid_argument rather than
 	// falling through to cobra's generic unknown-flag error. See
@@ -328,7 +329,7 @@ func newChangesCmd(entityType string) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		results := fanOutChanges(cmd.Context(), reg, entityType, backends, query, consumer, cached, reset)
+		results := fanOutChanges(cmd.Context(), reg, entityType, backends, query, consumer, cached, reset, noAck)
 		outcomeSources := changesOutcomeSources(results)
 		if allNotOwningChanges(results) {
 			return writeTargetedResult(cmd, nil, ciNotOwningErr(results), func(json.RawMessage) (string, error) { return "", nil })
@@ -343,8 +344,10 @@ func newChangesCmd(entityType string) *cobra.Command {
 		// written and flushed (INV-CACHE-9): an exit-code error means the
 		// output was written; any other error means it may not have been,
 		// so nothing is acknowledged and the next poll redelivers.
+		// With --no-ack nothing is acknowledged at all: the caller does it with
+		// the changes-ack verb (INTF-WIRE-ACK-1).
 		var wroteExit *exitError
-		if werr == nil || errors.As(werr, &wroteExit) {
+		if !noAck && (werr == nil || errors.As(werr, &wroteExit)) {
 			commitForwardedAcks(cmd.Context(), reg, results, consumer, query, cmd.ErrOrStderr())
 		}
 		reportForwardNotes(results, cmd.ErrOrStderr())
@@ -405,7 +408,7 @@ func ledgerInstanceDiscriminator(entityType string) string {
 // fanOutChanges runs this packet's per-backend changes algorithm (this
 // file's own header comment, steps 1-3) across every backend in
 // backends, one independent Ledger per backend.
-func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backends []string, query, consumerID string, cached, reset bool) []changesBackendResult {
+func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backends []string, query, consumerID string, cached, reset, noAck bool) []changesBackendResult {
 	pruneAfter := resolveConsumerPruneAfter(reg)
 	instance := ledgerInstanceDiscriminator(entityType)
 	// Backends run in parallel (fanout.go). Each owns a distinct ledger file
@@ -414,7 +417,7 @@ func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backen
 	// in registration order and every cross-backend commit (cache writes,
 	// tombstones, the response) happens serially in the caller afterwards.
 	slots := fanOutEach(ctx, reg, backends, func(ctx context.Context, b string) changesBackendResult {
-		return fanOutChangesOne(ctx, reg, entityType, b, query, consumerID, cached, reset, pruneAfter, instance)
+		return fanOutChangesOne(ctx, reg, entityType, b, query, consumerID, cached, reset, noAck, pruneAfter, instance)
 	})
 	results := make([]changesBackendResult, len(slots))
 	for i, s := range slots {
@@ -437,7 +440,7 @@ func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backen
 
 // fanOutChangesOne is one backend's share of fanOutChanges: the per-backend
 // ledger refresh and merge (this file's header comment, steps 1-3).
-func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, consumerID string, cached, reset bool, pruneAfter time.Duration, instance string) changesBackendResult {
+func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, consumerID string, cached, reset, noAck bool, pruneAfter time.Duration, instance string) changesBackendResult {
 	// A backend that declares owns_changes keeps its own change log: forward
 	// the call and never fall back to the ledger diff. A backend whose
 	// capabilities call fails has declared nothing and keeps the ledger path
@@ -445,6 +448,12 @@ func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, 
 	owns, ownsErr := backendOwnsChanges(ctx, reg, b)
 	if ownsErr == nil && owns {
 		return forwardChangesOne(ctx, reg, entityType, b, query, consumerID, cached, reset)
+	}
+	// --no-ack applies only to a forwarded source: a source whose position lives
+	// in the umbrella's own ledger is answered here, never refreshed, so its
+	// ledger is not touched (INTF-WIRE-ACK-1).
+	if noAck {
+		return noAckNotOwningResult(entityType, b, query, ownsErr)
 	}
 	// ci has no list op, so there is no ledger path for it, and the ledger path
 	// of every other type keys on the query: a ci backend, or a call that names
