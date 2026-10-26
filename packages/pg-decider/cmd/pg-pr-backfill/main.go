@@ -32,6 +32,9 @@ var Version = "dev"
 const (
 	exitEnumerateFailed = 30
 	exitMarkerFailed    = 31
+	exitSnapshotFailed  = 32
+	exitRollbackRefused = 33
+	exitRollbackFailed  = 34
 	exitCommentFailed   = 14
 	exitNothingToList   = 20
 )
@@ -53,6 +56,9 @@ The PR lane backfill driver (docs/behavior/pg-decider/backfill.md).
                check (--mode apply) from the run record
   flip-marker  write the flip marker into the run record and comment on the epic bead
   writes       list every write since the flip marker, by timestamp
+  snapshot     record the tracker's before-image (BEFORE the flip), for the rollback
+  rollback     list every write since the flip marker as the tracker's audit comments
+               show them, by timestamp, and revert each (a dry run unless --apply)
 
 Common flags: --config FILE (env ` + backfill.ConfigEnv + `), --run-record FILE, --set FILE.
 "run" and "mark-watched" end with one last line starting DONE, FLOOR or FAILED; exit
@@ -144,6 +150,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return cmdFlipMarker(ctx, rest, stdout, stderr)
 	case "writes":
 		return cmdWrites(rest, stdout, stderr)
+	case "snapshot":
+		return cmdSnapshot(ctx, rest, stdout, stderr)
+	case "rollback":
+		return cmdRollback(ctx, rest, stdout, stderr)
 	}
 	return usageErr(stderr, "", fmt.Errorf("unknown command %q", cmd))
 }
@@ -484,6 +494,117 @@ func cmdWrites(args []string, stdout, stderr io.Writer) int {
 	if _, ok := backfill.PrintWrites(stdout, lg); !ok {
 		return exitNothingToList
 	}
+	return 0
+}
+
+func (c *common) tracker(cfg *backfill.Config) backfill.Tracker {
+	return backfill.Tracker{Bd: cfg.Bd, Dir: cfg.BeadsDir}
+}
+
+func cmdSnapshot(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	var c common
+	fs := newFlags("snapshot", &c)
+	file := fs.String("snapshot", "", "")
+	force := fs.Bool("force", false, "")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return usageErr(stderr, "snapshot", flagErr(err, fs))
+	}
+	cfg, err := c.load()
+	if err != nil {
+		return usageErr(stderr, "snapshot", err)
+	}
+	if *file != "" {
+		cfg.TrackerSnapshot = *file
+	}
+	if cfg.BeadsDir == "" {
+		return usageErr(stderr, "snapshot", fmt.Errorf("no tracker directory: set beads_dir in the configuration or in PG_DECIDER_CONFIG"))
+	}
+	// A snapshot taken after the flip holds the writes it is meant to undo.
+	lg, err := backfill.ReadLog(cfg.RunRecord)
+	if err != nil {
+		fmt.Fprintf(stderr, "pg-pr-backfill snapshot: %v\n", err)
+		return exitSnapshotFailed
+	}
+	if bound, ok := backfill.FlipBound(lg); ok && !*force {
+		fmt.Fprintf(stderr, "pg-pr-backfill snapshot: refused: the run record already has a flip marker or an apply-mode record (bound %s), so a snapshot taken now is no before-image; after a rollback and before a second flip run it again with --force\n", bound.Format(time.RFC3339))
+		return exitRollbackRefused
+	}
+	s, err := c.tracker(cfg).TakeSnapshot(ctx, nil)
+	if err != nil {
+		fmt.Fprintf(stderr, "pg-pr-backfill snapshot: %v\n", err)
+		return exitSnapshotFailed
+	}
+	if err := backfill.WriteSnapshot(cfg.TrackerSnapshot, s); err != nil {
+		fmt.Fprintf(stderr, "pg-pr-backfill snapshot: %v\n", err)
+		return exitSnapshotFailed
+	}
+	backfill.PrintSnapshot(stdout, s, cfg.TrackerSnapshot)
+	return 0
+}
+
+func cmdRollback(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	var c common
+	fs := newFlags("rollback", &c)
+	file := fs.String("snapshot", "", "")
+	apply := fs.Bool("apply", false, "")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return usageErr(stderr, "rollback", flagErr(err, fs))
+	}
+	cfg, err := c.load()
+	if err != nil {
+		return usageErr(stderr, "rollback", err)
+	}
+	if *file != "" {
+		cfg.TrackerSnapshot = *file
+	}
+	if cfg.BeadsDir == "" {
+		return usageErr(stderr, "rollback", fmt.Errorf("no tracker directory: set beads_dir in the configuration or in PG_DECIDER_CONFIG"))
+	}
+	lg, err := backfill.ReadLog(cfg.RunRecord)
+	if err != nil {
+		fmt.Fprintf(stderr, "pg-pr-backfill rollback: %v\n", err)
+		return exitRollbackFailed
+	}
+	bound, ok := backfill.FlipBound(lg)
+	if !ok {
+		fmt.Fprintln(stderr, "pg-pr-backfill rollback: refused: no flip marker and no apply-mode run record: nothing to roll back (the marker bounds the listing)")
+		return exitRollbackRefused
+	}
+	snap, err := backfill.LoadSnapshot(cfg.TrackerSnapshot)
+	if err != nil {
+		fmt.Fprintf(stderr, "pg-pr-backfill rollback: refused: %v\n", err)
+		return exitRollbackRefused
+	}
+	tr := c.tracker(cfg)
+	items, err := tr.ListItems(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "pg-pr-backfill rollback: %v\n", err)
+		return exitRollbackFailed
+	}
+	writes, err := tr.ListAuditWrites(ctx, items, bound)
+	if err != nil {
+		fmt.Fprintf(stderr, "pg-pr-backfill rollback: %v\n", err)
+		return exitRollbackFailed
+	}
+	plan, err := backfill.PlanRollback(snap, bound, items, writes)
+	if err != nil {
+		fmt.Fprintf(stderr, "pg-pr-backfill rollback: refused: %v\n", err)
+		return exitRollbackRefused
+	}
+	backfill.PrintRollback(stdout, plan)
+	if !*apply {
+		fmt.Fprintf(stdout, "ROLLBACK PLANNED steps=%d (a dry run: nothing was written; add --apply)\n", plan.Planned())
+		return 0
+	}
+	done, problems := plan.Apply(ctx, tr)
+	for _, p := range problems {
+		fmt.Fprintf(stdout, "problem: %s\n", p)
+	}
+	if len(problems) > 0 {
+		fmt.Fprintf(stdout, "ROLLBACK FAILED reverted=%d problems=%d\n", done, len(problems))
+		return exitRollbackFailed
+	}
+	fmt.Fprintf(stdout, "ROLLBACK DONE reverted=%d\n", done)
 	return 0
 }
 

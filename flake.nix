@@ -6103,6 +6103,7 @@
                     PG_PR_CHANGE_PG_DESK_BIN = "${pkgs.pg-desk}/bin/pg-desk";
                     PG_PR_CHANGE_PG_DECIDER_BIN = "${pkgs.pg-decider}/bin/pg-decider";
                     PG_PR_CHANGE_BIN = "${pkgs.pg-decider}/bin/pg-pr-change";
+                    PG_LANE_E2E_PG_PR_BACKFILL_BIN = "${pkgs.pg-decider}/bin/pg-pr-backfill";
                     PG_PR_CHANGE_SQLITE3_BIN = "${lib.getBin pkgs.sqlite}/bin/sqlite3";
                     PG_LANE_E2E_PG_CONNECTOR_BIN = "${pkgs.pg-connector}/bin/pg-connector";
                     PG_LANE_E2E_PG_CONNECTOR_ISSUE_BEADS_BIN = "${pkgs.pg-connector-issue-beads}/bin/pg-connector-issue-beads";

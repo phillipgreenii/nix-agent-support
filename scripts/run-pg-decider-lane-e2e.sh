@@ -15,7 +15,9 @@
 # labels against the decider's lists, then the review rule against the real
 # tracker, two concurrent composed runs with and without the lock, a duplicate
 # delivery, a kill between a create and its audit comment, and a decider run that
-# exits 2 through a failing passthrough over bd).
+# exits 2 through a failing passthrough over bd), and the rollback drill of the first
+# apply (the real backfill driver lists every write since the flip marker by
+# timestamp, from the audit comments in the real tracker, and reverts each).
 #
 # What it asserts about the run (a real-binary gate that could pass by running
 # nothing guards nothing): the test's own PASS line, NO SKIP line, a PASS line for
@@ -28,7 +30,8 @@
 #   --module-dir  the pg-decider module directory (default: <root>/packages/pg-decider)
 #   --prebuilt    use the binaries named by the environment instead of building them:
 #                 PG_PR_CHANGE_PG_DESK_BIN, PG_PR_CHANGE_PG_DECIDER_BIN,
-#                 PG_PR_CHANGE_BIN, PG_LANE_E2E_PG_CONNECTOR_BIN,
+#                 PG_PR_CHANGE_BIN, PG_LANE_E2E_PG_PR_BACKFILL_BIN,
+#                 PG_LANE_E2E_PG_CONNECTOR_BIN,
 #                 PG_LANE_E2E_PG_CONNECTOR_ISSUE_BEADS_BIN (and
 #                 PG_PR_CHANGE_SQLITE3_BIN)
 #
@@ -39,7 +42,7 @@ set -euo pipefail
 
 # Keep equal to minLaneE2EScenarios in internal/prchange/lane_e2e_test.go and to
 # minScenarios of the nix check.
-MIN_SCENARIOS=24
+MIN_SCENARIOS=25
 
 root=""
 module_dir=""
@@ -106,11 +109,13 @@ if [ "${prebuilt}" -eq 0 ]; then
   build pg-desk pg-desk ./cmd/pg-desk
   build pg-decider pg-decider ./cmd/pg-decider
   build pg-decider pg-pr-change ./cmd/pg-pr-change
+  build pg-decider pg-pr-backfill ./cmd/pg-pr-backfill
   build pg-connector pg-connector ./cmd/pg-connector
   build pg-connector pg-connector-issue-beads ./cmd/pg-connector-issue-beads
   export PG_PR_CHANGE_PG_DESK_BIN="${scratch}/bin/pg-desk"
   export PG_PR_CHANGE_PG_DECIDER_BIN="${scratch}/bin/pg-decider"
   export PG_PR_CHANGE_BIN="${scratch}/bin/pg-pr-change"
+  export PG_LANE_E2E_PG_PR_BACKFILL_BIN="${scratch}/bin/pg-pr-backfill"
   export PG_LANE_E2E_PG_CONNECTOR_BIN="${scratch}/bin/pg-connector"
   export PG_LANE_E2E_PG_CONNECTOR_ISSUE_BEADS_BIN="${scratch}/bin/pg-connector-issue-beads"
 fi

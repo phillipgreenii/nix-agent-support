@@ -63,7 +63,8 @@ is the cutover's marking step (read each open-anchor PR with the watch option, r
 check the daemon's watched count against the open-anchor count), `run --mode
 plan|apply` runs `pg-pr-change` over it, paced, under a floor on the GraphQL budget, with resume and
 the operator's create limits, `summary` prints the plan summary or the apply residual check from the
-run record, `flip-marker` writes the flip marker and `writes` lists every write since it. It ships in
+run record, `flip-marker` writes the flip marker, `writes` lists every write since it, and `snapshot` and
+`rollback` take the tracker's before-image and revert every write since the flip. It ships in
 this package's output beside `pg-pr-change`, with `pg-connector` and the sibling `pg-pr-change` on its
 `PATH`. Behavior is in `docs/behavior/pg-decider/backfill.md`; the operator's page is
 `docs/runbooks/pg-pr-backfill.md`.
@@ -72,6 +73,10 @@ this package's output beside `pg-pr-change`, with `pg-connector` and the sibling
   `remaining` control): `nix build .#checks.<system>.pg-pr-backfill-real-tools -L`. `enumerate` against a
   real tracker is a `contract`-tagged test (`TestPRChangeRealBD_BackfillEnumerate...`) that runs from the
   same `pg-pr-change-contract-test` hook.
+- Rollback drill: the scenario `a-rollback-drill-lists-every-write-since-the-flip-marker-by-timestamp-and-reverts-each`
+  of `pg-decider-lane-e2e` (the real driver over the real composed command and a real tracker); the
+  operator's procedure is `docs/runbooks/pg-pr-first-apply.md`. The runbook's driver commands and its
+  plan-age bound are checked by `cmd/pg-pr-backfill/runbook_test.go`.
 
 ## Parity gate
 

@@ -15,6 +15,8 @@ pg-pr-backfill run --mode plan|apply [--max-creates KIND=N,... | --limits-file F
 pg-pr-backfill summary [--mode plan|apply] [--max-plan-age DURATION]
 pg-pr-backfill flip-marker [--time RFC3339] [--epic-bead ID]
 pg-pr-backfill writes
+pg-pr-backfill snapshot [--snapshot FILE] [--force]
+pg-pr-backfill rollback [--apply] [--snapshot FILE]
 ```
 
 ```mermaid
@@ -28,6 +30,10 @@ flowchart LR
     A -->|"pg-pr-change apply, per PR"| L
     L --> V["summary --mode apply: residual per PR"]
     L --> W["writes: every write since the flip"]
+    T[("tracker")] -->|"snapshot, before the flip"| B[("before-image")]
+    T -->|"audit comments since the flip"| R["rollback: list by timestamp, revert each"]
+    B --> R
+    L -->|"the flip bound"| R
 ```
 
 ## The set
@@ -156,6 +162,42 @@ first apply-mode run record, so the writes live `pr-change` apply runs made betw
 apply and the marker are not missed. It does not start at the lane-level flip time pg-desk persists,
 which is a display value.
 
+## The rollback
+
+The first apply is undone from the tracker, not from a store backup. The run record says which writes
+the lane made but not on which work item, and an audit comment names the rule, the operation and the
+time of a write but not the value an update replaced. The rollback therefore needs two things the
+operator provides at the flip: the flip bound (above) and a before-image of the tracker.
+
+`snapshot` records the before-image: every work item of the tracker in every status, with its title,
+priority, description, labels and metadata. It is taken just BEFORE the flip marker. It refuses (exit
+`33`) once the run record holds a flip marker or an apply-mode record, because a snapshot taken then
+holds the writes it is meant to undo, unless `--force` says a rollback has happened and a second flip
+is being prepared. It fails closed on a tracker that lists no item.
+
+`rollback` lists every write since the flip bound, by timestamp, read from the decider's audit
+comments on the work items, and then reverts each one by its inverse:
+
+| Write    | Revert                                                                                             |
+| -------- | -------------------------------------------------------------------------------------------------- |
+| `create` | close the created item (a tracker has no delete)                                                   |
+| `close`  | reopen the item, unless it is no longer closed                                                     |
+| `reopen` | close the item, unless it is no longer open                                                        |
+| `update` | put back the title, priority, description, labels and metadata of the before-image; not the status |
+
+The revert is by write and newest first, so a change a person made since the flip is not undone: once
+a write's result is not what the tracker shows now, that write and every older status write of the
+item are left as they are and the listing says so. Without `--apply` it is a dry run that writes
+nothing and ends `ROLLBACK PLANNED`. With `--apply` it makes the steps, goes on past a step that
+fails, leaves one comment on each item it changed (so a second rollback lists nothing for it), reads
+the tracker again and ends `ROLLBACK DONE` (exit `0`) or `ROLLBACK FAILED` (exit `34`). It refuses
+(exit `33`, nothing written) when there is no flip bound, when the snapshot is missing or was taken
+after the bound, and when the snapshot disagrees with the audit comments: an item updated but not in
+the snapshot, or created but already in it.
+
+The `bd` command line is the tracker access of these two commands (the connector reads no comments);
+its name and the tracker directory are the configuration keys `bd` and `beads_dir`.
+
 ## Invariants
 
 - **INV-BACKFILL-1.** <!-- uuid: 026451a2-cc69-472e-9a2f-38cfec301fc3 --> `enumerate` MUST list the tracker's open anchors plus the open PRs of the deployment's PR queries, MUST
@@ -192,7 +234,7 @@ which is a display value.
 - **INV-BACKFILL-13.** <!-- uuid: 0be88afd-8459-422b-a59c-6b95bfea570c --> The apply summary MUST print each enumerated PR's persisted residual and MUST fail when any is not
   zero or when an enumerated PR has no usable apply-mode record.
 - **INV-BACKFILL-14.** <!-- uuid: 095acc61-4ef3-4a0c-8e6c-a4e5c79f5700 --> The driver MUST NOT keep a clock of its own: it MUST NOT retry inside one run, and its only wait
-  MUST be the pace between two PRs.
+  MUST be the pace between two PRs.<<<<<<< ours
 - **INV-BACKFILL-15.** <!-- uuid: 5c1e8a3d-7b94-4f2a-9d60-e3a17c4b52f8 --> `mark-watched` MUST read every PR that has an open anchor and whose PR is not merged or closed
   with the watch option, MUST then refresh those PRs with the hydrate-only `pg-desk pr refresh`, and
   MUST NOT run the decider, apply anything, write to the tracker or reset a consumer cursor.
@@ -205,3 +247,17 @@ which is a display value.
 - **INV-BACKFILL-18.** <!-- uuid: 3f08d6b2-a5e1-4690-8c7d-14b9e2f7a6c0 --> `mark-watched` MUST read the newest GraphQL points left before each call and MUST NOT call below
   the floor, MUST stop at once on an `unauthenticated` read or an unreadable rate signal, and MUST be
   idempotent: running it again marks and refreshes the same PRs and changes nothing else.
+||||||| original
+
+=======
+- **INV-BACKFILL-13.** <!-- uuid: 27149d06-6cd3-413f-a218-a0c5ea00df36 --> `snapshot` MUST record every work item of the tracker in every status, MUST fail closed on an empty
+  tracker, and MUST refuse once a flip marker or an apply-mode run record exists unless told it is
+  being re-taken after a rollback.
+- **INV-BACKFILL-14.** <!-- uuid: 62071cad-15e6-422a-b7d4-3e2822563c04 --> `rollback` MUST list every write since the flip bound, by timestamp, from the audit comments, MUST
+  revert each by its inverse (a create by closing, a close by reopening, a reopen by closing, an
+  update by restoring the before-image), MUST NOT undo a status a person changed since, and MUST
+  verify the tracker afterwards.
+- **INV-BACKFILL-15.** <!-- uuid: dbd123e1-bf9c-4333-bf83-2772cb20d612 --> `rollback` MUST be a dry run unless told `--apply`, MUST refuse and write nothing when the flip
+  bound is unknown or the snapshot is missing, newer than the bound or inconsistent with the audit
+  comments, and a second `rollback --apply` MUST write nothing.
+>>>>>>> theirs

@@ -43,6 +43,7 @@ import (
 //
 //	PG_PR_CHANGE_PG_DESK_BIN, PG_PR_CHANGE_PG_DECIDER_BIN, PG_PR_CHANGE_BIN
 //	PG_PR_CHANGE_SQLITE3_BIN                          (optional; PATH otherwise)
+//	PG_LANE_E2E_PG_PR_BACKFILL_BIN                    (the rollback drill's driver)
 //	PG_LANE_E2E_PG_CONNECTOR_BIN, PG_LANE_E2E_PG_CONNECTOR_ISSUE_BEADS_BIN
 //	PG_PR_CHANGE_REQUIRE_BINARIES                     (set: a missing tool FAILS)
 //
@@ -53,6 +54,7 @@ import (
 const (
 	envLaneConnectorBin      = "PG_LANE_E2E_PG_CONNECTOR_BIN"
 	envLaneConnectorBeadsBin = "PG_LANE_E2E_PG_CONNECTOR_ISSUE_BEADS_BIN"
+	envLaneBackfillBin       = "PG_LANE_E2E_PG_PR_BACKFILL_BIN"
 )
 
 // laneE2EScenariosFile lists, one name per line, every scenario TestLaneE2E
@@ -62,7 +64,7 @@ const laneE2EScenariosFile = "testdata/lane-e2e-scenarios.txt"
 
 // minLaneE2EScenarios is the number of scenarios the gate must run; keep it
 // equal to the minScenarios of the nix check and of the script.
-const minLaneE2EScenarios = 24
+const minLaneE2EScenarios = 25
 
 // e2eSeeded is N, the number of PRs whose keyless anchors the adoption
 // scenarios seed.
@@ -71,6 +73,7 @@ const e2eSeeded = 3
 type e2eTools struct {
 	bins      binaries
 	connector string // the real pg-connector
+	backfill  string // the real pg-pr-backfill (the rollback drill)
 	beads     string // the real pg-connector-issue-beads
 	bd        string
 	git       string
@@ -94,7 +97,7 @@ func laneE2ETools(t *testing.T) e2eTools {
 	for _, e := range []struct {
 		env string
 		dst *string
-	}{{envLaneConnectorBin, &tools.connector}, {envLaneConnectorBeadsBin, &tools.beads}} {
+	}{{envLaneConnectorBin, &tools.connector}, {envLaneConnectorBeadsBin, &tools.beads}, {envLaneBackfillBin, &tools.backfill}} {
 		p := os.Getenv(e.env)
 		switch {
 		case p == "":
@@ -1043,6 +1046,7 @@ func TestLaneE2E(t *testing.T) {
 	// failure-injection ones, each in a tracker of its own.
 	reviewScenarios(tools, run)
 	failureScenarios(tools, run)
+	rollbackScenarios(tools, run)
 
 	run("the-scenario-list-is-the-list-the-gate-asserts", func(t *testing.T) {
 		want := readScenarioNames(t)

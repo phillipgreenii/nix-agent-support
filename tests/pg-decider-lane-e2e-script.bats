@@ -100,10 +100,10 @@ run_gate() { run --separate-stderr env PATH="$SHIM" "$BASH" "$SCRIPT" --prebuilt
   [[ $args == *"./internal/prchange/"* ]]
   [ "$(cat "$BATS_TEST_TMPDIR/go-pwd")" = "$(cd "$MODULE" && pwd -P)" ]
   [ "$(cat "$BATS_TEST_TMPDIR/go-require")" = 1 ]
-  [[ $output == *"24 scenarios, each with a PASS line, none skipped"* ]]
+  [[ $output == *"25 scenarios, each with a PASS line, none skipped"* ]]
 }
 
-@test "without --prebuilt it builds the five binaries before the run" {
+@test "without --prebuilt it builds the six binaries before the run" {
   shim_tools
   passing_output
   # a go that logs every build
@@ -112,9 +112,10 @@ cat "'"$BATS_TEST_TMPDIR"'/go-output"'
   mkdir -p "$BATS_TEST_TMPDIR/pkgs/pg-desk" "$BATS_TEST_TMPDIR/pkgs/pg-connector"
   run --separate-stderr env PATH="$SHIM" "$BASH" "$SCRIPT" --module-dir "$MODULE"
   [ "$status" -eq 0 ]
-  [ "$(grep -c . "$BATS_TEST_TMPDIR/builds")" -eq 5 ]
+  [ "$(grep -c . "$BATS_TEST_TMPDIR/builds")" -eq 6 ]
   grep -q '^pg-desk build .* ./cmd/pg-desk$' "$BATS_TEST_TMPDIR/builds"
   grep -q '^pg-decider build .* ./cmd/pg-pr-change$' "$BATS_TEST_TMPDIR/builds"
+  grep -q '^pg-decider build .* ./cmd/pg-pr-backfill$' "$BATS_TEST_TMPDIR/builds"
   grep -q '^pg-connector build .* ./cmd/pg-connector-issue-beads$' "$BATS_TEST_TMPDIR/builds"
 }
 

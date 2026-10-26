@@ -8,8 +8,9 @@ these commands in its own runbook.
 
 ## Prerequisites
 
-- `pg-pr-backfill`, `pg-pr-change` and `pg-connector` on `PATH` (the package puts the last two, and
-  `pg-desk` for `mark-watched`, on the driver's own `PATH`). `PG_DECIDER_CONFIG` set as for the `pr-change` role: the driver takes the
+- `pg-pr-backfill`, `pg-pr-change` and `pg-connector` on `PATH`, and `bd` for `snapshot` and `rollback`
+  (the package puts the last two, and `pg-desk` for `mark-watched`, on the driver's own `PATH`).
+  `PG_DECIDER_CONFIG` set as for the `pr-change` role: the driver takes the
   tracker backend and directory (`agent_tracker_backend`, `beads_dir`) from it unless its own
   configuration names them.
 - The deployment's query-name file and the driver configuration file (below).
@@ -38,6 +39,8 @@ decide). A flag of the same name overrides a key.
 | `set_file`                     | Where `enumerate` persists the set                                      | `$XDG_STATE_HOME/pg-pr-backfill/set.json`                                           |
 | `pr_backend`                   | The PR backend instance `mark-watched` reads and inspects through       | none (the umbrella resolves it)                                                     |
 | `desk_cmd`                     | The pg-desk command `mark-watched` refreshes with                       | `pg-desk`                                                                           |
+| `bd`                           | The tracker's command line, run in `beads_dir` by `snapshot`/`rollback` | `bd`                                                                                |
+| `tracker_snapshot`             | Where `snapshot` writes the tracker's before-image                      | `$XDG_STATE_HOME/pg-pr-backfill/tracker-snapshot.json`                              |
 
 The daemon cutover changes ONE key: `rate_source` from `old-backend-log` to `daemon-metrics`. Until it
 is changed, the driver reads a log that stops being written once the old backend is gone, and a log
@@ -63,6 +66,11 @@ pg-pr-backfill run --mode apply --max-creates anchor=12,review-pr=9
 pg-pr-backfill summary --mode apply
 pg-pr-backfill run --mode apply --new-pass --max-creates anchor=0
 pg-pr-backfill writes                       # every write since the flip, by timestamp
+
+# The rollback (the first-apply runbook, step 8): the before-image is taken before the flip marker.
+pg-pr-backfill snapshot
+pg-pr-backfill rollback                     # dry run: the by-timestamp listing and the reverts
+pg-pr-backfill rollback --apply
 ```
 
 ## Marking the open-anchor PRs watched (the cutover's verify step)

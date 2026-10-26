@@ -59,6 +59,14 @@ type Config struct {
 	// (default pg-desk).
 	PRBackend string `json:"pr_backend,omitempty"`
 	DeskCmd   string `json:"desk_cmd,omitempty"`
+
+	// Bd names the tracker's own command line (default bd), which `snapshot` and
+	// `rollback` run in BeadsDir: the connector reads no comments, and the rollback
+	// needs the decider's audit comments. TrackerSnapshot is where `snapshot` writes
+	// the tracker's before-image and `rollback` reads it (default
+	// $XDG_STATE_HOME/pg-pr-backfill/tracker-snapshot.json).
+	Bd              string `json:"bd,omitempty"`
+	TrackerSnapshot string `json:"tracker_snapshot,omitempty"`
 }
 
 // StateHome is $XDG_STATE_HOME, else ~/.local/state, else the temporary directory.
@@ -154,6 +162,12 @@ func (c *Config) WithDefaults() {
 	}
 	if c.SetFile == "" {
 		c.SetFile = filepath.Join(StateHome(), "pg-pr-backfill", "set.json")
+	}
+	if c.TrackerSnapshot == "" {
+		c.TrackerSnapshot = filepath.Join(StateHome(), "pg-pr-backfill", "tracker-snapshot.json")
+	}
+	if c.Bd == "" {
+		c.Bd = "bd"
 	}
 }
 
