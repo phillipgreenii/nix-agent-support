@@ -52,6 +52,12 @@ var Exempt = map[string]bool{
 	// on linux at all); its evidence is `darwin-rebuild --help` / the script
 	// source, cited per fact in embeddedspecs/data/darwin-rebuild.json.
 	"darwin-rebuild": true,
+	// pg2-02knr: uuidgen is BSD (macOS /usr/bin) on darwin and util-linux on
+	// linux, with unrelated --help text and option sets, and util-linux is not
+	// put on the check sandbox PATH; like launchctl/man there is no ONE pinned
+	// help text to hash. The spec models only -h/--help (see
+	// cmddesc.uuidgenSchema).
+	"uuidgen": true,
 }
 
 // ScriptSuffix marks a spec whose command is a plugin HELPER SCRIPT resolved

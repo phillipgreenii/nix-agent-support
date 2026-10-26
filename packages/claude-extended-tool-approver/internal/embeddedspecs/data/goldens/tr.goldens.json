@@ -1,0 +1,66 @@
+{
+  "version": "v1",
+  "command": "tr",
+  "generatedAt": "2026-10-25",
+  "flags": {
+    "-c": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node's only effect is the stdin EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "-C": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "same as -c: literal flag, only the stdin EffectStdio (effectpolicy.StdioIsLocal, always Permitted)"
+    },
+    "--complement": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "same as -c: literal flag, only the stdin EffectStdio (effectpolicy.StdioIsLocal, always Permitted)"
+    },
+    "-d": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "same as -c: literal flag, only the stdin EffectStdio (effectpolicy.StdioIsLocal, always Permitted)"
+    },
+    "--delete": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "same as -c: literal flag, only the stdin EffectStdio (effectpolicy.StdioIsLocal, always Permitted)"
+    },
+    "-s": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "same as -c: literal flag, only the stdin EffectStdio (effectpolicy.StdioIsLocal, always Permitted)"
+    },
+    "--squeeze-repeats": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "same as -c: literal flag, only the stdin EffectStdio (effectpolicy.StdioIsLocal, always Permitted)"
+    },
+    "-t": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "same as -c: literal flag, only the stdin EffectStdio (effectpolicy.StdioIsLocal, always Permitted)"
+    },
+    "--truncate-set1": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "same as -c: literal flag, only the stdin EffectStdio (effectpolicy.StdioIsLocal, always Permitted)"
+    },
+    "--help": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "same as -c: literal flag, only the stdin EffectStdio (effectpolicy.StdioIsLocal, always Permitted)"
+    },
+    "--version": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "same as -c: literal flag, only the stdin EffectStdio (effectpolicy.StdioIsLocal, always Permitted)"
+    }
+  },
+  "positionals": {
+    "verdict": "approve",
+    "policyBasis": "literal character-set operands produce no path effect (tr never opens a file operand), so no PathAccessPolicy judgment applies; a `< FILE` redirect is a separate PathRead effect judged by effectpolicy.PathAccessPolicy and abstains outside the read-allowed zones (corpus row id_filters_pin_tr_stdin_redirect_outside_allowed_paths)"
+  }
+}

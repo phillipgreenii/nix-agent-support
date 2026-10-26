@@ -1,0 +1,21 @@
+{
+  "version": "v1",
+  "command": "uuidgen",
+  "generatedAt": "2026-10-25",
+  "flags": {
+    "-h": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag and stdin is never read (StdinNever), so no EffectPolicy has anything to judge"
+    },
+    "--help": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "same as -h: literal flag, no effect produced"
+    }
+  },
+  "positionals": {
+    "verdict": "not-approve",
+    "policyBasis": "uuidgen takes no operands (empty PositionalSpec): any operand is a stray positional that makes the node insufficient (fail-closed abstain); no EffectPolicy judges it"
+  }
+}

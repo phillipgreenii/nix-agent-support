@@ -372,6 +372,7 @@ func TestPluginToolSpotChecks(t *testing.T) {
 		"pn workspace workforest list", "pn workspace workforest prune",
 		"claude-extended-tool-approver evaluate --misses-only --format=json", "claude-extended-tool-approver show 1 2 --format=json",
 		"claude-extended-tool-approver lint --embedded", "claude-extended-tool-approver spec-drift-check --embedded",
+		"uuidgen", "uuidgen -h", "tr A-Z a-z", "tr -d -", "tr -cs '[:alnum:]' -",
 		"rg -uu -in x -g '*y*' /repo", "fd -HI artifact", "du -sh dir", "lsof -nP -iTCP:25252", "launchctl list org.x", "man jq",
 		"nix build .#checks.aarch64-darwin.x", "nix flake check", "nix flake update nixpkgs", "nix flake lock",
 		"create-packet.sh --parent p --title t --body-file b --acceptance a", "chunk-for-bd-field.sh in out",
@@ -400,6 +401,7 @@ func TestPluginToolSpotChecks(t *testing.T) {
 		"fd -x rm", "session-mode hook session-end", "session-mode hook post-compact", "claude-extended-tool-approver archive",
 		"claude-extended-tool-approver spec-drift-check --embedded --record", "git stash pop", "git stash -u",
 		"git checkout main", "git rebase -i main", "git rebase --exec x main", "git merge origin/main", "git fetch --upload-pack=x origin",
+		"uuidgen -hdr", "uuidgen -r", "tr -u a b",
 		"git branch -Df f", "git branch -D -f f", "git branch f", "git apply p.diff", "man -P less jq",
 		"assemble-packet.sh --design d.md --in draft.md --out body.md --force",
 		"update-packet.sh --id pg2-abc --body-file b.md --metadata {}", "update-packet.sh --id pg2-abc --body-file b.md --label x",
@@ -408,5 +410,23 @@ func TestPluginToolSpotChecks(t *testing.T) {
 		if got := interpretDefault(t, c); got.Sufficient {
 			t.Errorf("%q: sufficient, want insufficient (abstain)", c)
 		}
+	}
+}
+
+// TestTrOperandsAreCharacterSetsNotFiles (pg2-02knr): tr reads only stdin, so
+// its operands are literal character sets and never path effects; a
+// path-shaped operand therefore adds no PathRead.
+func TestTrOperandsAreCharacterSetsNotFiles(t *testing.T) {
+	for _, c := range []string{"tr a-z A-Z /etc/shadow", "tr -d /home/nobody/secret"} {
+		in := interpretDefault(t, c)
+		if !in.Sufficient {
+			t.Errorf("%q: insufficient (%s), want sufficient", c, in.Insufficiency)
+		}
+		if got := effectPaths(in.Effects, AccessRead); len(got) != 0 {
+			t.Errorf("%q: path reads %v, want none (operands are character sets)", c, got)
+		}
+	}
+	if in := interpretDefault(t, "uuidgen /etc/shadow"); in.Sufficient {
+		t.Errorf("uuidgen takes no operands; an operand must make it insufficient")
 	}
 }

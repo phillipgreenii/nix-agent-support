@@ -1134,6 +1134,7 @@ func pluginToolSchemas() []CommandSchema {
 		handoffCreateSchema, sessionModeSchema, pgGoMutateSchema, pgCcauditSchema,
 		pgWiFlowSchema, pgHooksSchema, prekSchema, batsSchema, ghSchema,
 		cetaSchema, rgSchema, fdSchema, duSchema, lsofSchema, launchctlSchema, manSchema,
+		uuidgenSchema, trSchema,
 	}
 	return append(out, pluginScriptSchemas()...)
 }

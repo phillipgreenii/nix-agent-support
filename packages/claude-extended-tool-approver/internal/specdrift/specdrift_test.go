@@ -206,6 +206,12 @@ func TestIsExemptByPlatform(t *testing.T) {
 		{"linux", "create-packet.sh", true},
 		{"darwin", "impl-traces.sh", true},
 		{"linux", "launchctl", true},
+		// pg2-02knr: uuidgen differs per platform (BSD vs util-linux), tr is
+		// GNU coreutils everywhere the check runs and is hashed.
+		{"linux", "uuidgen", true},
+		{"darwin", "uuidgen", true},
+		{"linux", "tr", false},
+		{"darwin", "tr", false},
 		{"darwin", "man", true},
 		// pg2-slsc0: `command` is a shell builtin (exempt everywhere); readlink/date
 		// (coreutils) and diff (diffutils) are real binaries hashed on every platform.

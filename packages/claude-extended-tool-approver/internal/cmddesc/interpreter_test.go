@@ -299,6 +299,8 @@ func TestRegistryNames(t *testing.T) {
 	want = append(want, "darwin-rebuild", "pa-monitor")
 	// tc-o14i5.3.5: sqlite3 (-init config source, -cmd exec program).
 	want = append(want, "sqlite3")
+	// pg2-02knr: the session/actor id idiom's pure filters.
+	want = append(want, "tr", "uuidgen")
 	sort.Strings(want)
 	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, want) {
 		t.Errorf("names = %v, want %v", got, want)

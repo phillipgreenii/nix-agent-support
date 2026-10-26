@@ -1,0 +1,66 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "uuidgen",
+  "command": {
+    "name": "uuidgen",
+    "provenance": "uuidgen --help (macOS /usr/bin/uuidgen, usage: uuidgen [-hdr]) and man uuidgen(1), this host 2026-10-25",
+    "citations": {
+      "provenance": {
+        "source": "macOS /usr/bin/uuidgen (the only uuidgen on this host PATH), uuidgen --help: \"generate a universally unique identifier / usage: uuidgen [-hdr]\"; man uuidgen(1) SYNOPSIS \"uuidgen [-hdr]\", 2026-10-25"
+      },
+      "stdin": {
+        "source": "man uuidgen(1) (macOS), SYNOPSIS \"uuidgen [-hdr]\": no operands and no input; DESCRIPTION: \"generates a Universally Unique IDentifier (UUID)\""
+      },
+      "stdout": {
+        "source": "man uuidgen(1) (macOS), RETURN VALUE: \"The UUID is printed to standard output as a hyphen-punctuated ASCII string\"; a generated id, no file content, so metadata"
+      },
+      "unknownFlag": {
+        "source": "uuidgen --help (macOS): any unrecognized option prints the usage line \"usage: uuidgen [-hdr]\" and exits 1, and util-linux uuidgen has a different option set (-r, -t, -x, -N ...); no documented behavior for an unmodeled flag, so the fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uuidgen --help (macOS) prints \"generate a universally unique identifier / usage: uuidgen [-hdr]\" and exits 1 (verified 2026-10-25); util-linux uuidgen documents --help as display help and exit"
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uuidgen --help (macOS): \"usage: uuidgen [-hdr]\"; man uuidgen(1) SYNOPSIS lists -h; it prints the usage and exits"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "man uuidgen(1) (macOS) SYNOPSIS: \"uuidgen [-hdr]\" - no positional operands"
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

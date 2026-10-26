@@ -1,0 +1,174 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "tr",
+  "command": {
+    "name": "tr",
+    "provenance": "tr (GNU coreutils) 9.11, tr --help; man tr(1) (macOS)",
+    "citations": {
+      "provenance": {
+        "source": "tr --version: \"tr (GNU coreutils) 9.11\" (the binary first on this host PATH, the same coreutils family the spec-help-drift check pins); tr --help synopsis \"Usage: tr [OPTION]... STRING1 [STRING2]\"; macOS /usr/bin/tr man tr(1) SYNOPSIS cross-checked 2026-10-25"
+      },
+      "stdin": {
+        "source": "tr --help: \"Translate, squeeze, and/or delete characters from standard input, writing to standard output.\"; man tr(1) (macOS), DESCRIPTION: \"The tr utility copies the standard input to the standard output with substitution or deletion of selected characters.\" Neither synopsis has a FILE operand, so stdin is always the input"
+      },
+      "stdout": {
+        "source": "tr --help: \"...writing to standard output.\" The stream is the (filtered) input content, so stdout carries content"
+      },
+      "unknownFlag": {
+        "source": "tr --help lists exactly -c/-C/--complement, -d/--delete, -s/--squeeze-repeats, -t/--truncate-set1, --help, --version; man tr(1) (macOS) adds -u. No documented behavior for an unlisted flag, so the fail-closed default (\"insufficient\") applies; -u (BSD only) is deliberately unmodeled"
+      }
+    },
+    "flags": {
+      "--complement": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "tr --help: \"-c, -C, --complement  use the complement of ARRAY1\"; man tr(1) (macOS) OPTIONS: \"-c  Same as -C\""
+        }
+      },
+      "--delete": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "tr --help: \"-d, --delete  delete characters in ARRAY1, do not translate\"; man tr(1) (macOS) OPTIONS: \"-d  Delete characters in string1 from the input.\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "tr --help: \"--help  display this help and exit\""
+        }
+      },
+      "--squeeze-repeats": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "tr --help: \"-s, --squeeze-repeats  replace each sequence of a repeated character that is listed in the last specified ARRAY, with a single occurrence of that character\"; man tr(1) (macOS) OPTIONS: \"-s  Squeeze multiple occurrences...\""
+        }
+      },
+      "--truncate-set1": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "tr --help: \"-t, --truncate-set1  first truncate ARRAY1 to length of ARRAY2\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "tr --help: \"--version  output version information and exit\""
+        }
+      },
+      "-C": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "tr --help: \"-c, -C, --complement  use the complement of ARRAY1\"; man tr(1) (macOS) OPTIONS: \"-c  Same as -C\""
+        }
+      },
+      "-c": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "tr --help: \"-c, -C, --complement  use the complement of ARRAY1\"; man tr(1) (macOS) OPTIONS: \"-c  Same as -C\""
+        }
+      },
+      "-d": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "tr --help: \"-d, --delete  delete characters in ARRAY1, do not translate\"; man tr(1) (macOS) OPTIONS: \"-d  Delete characters in string1 from the input.\""
+        }
+      },
+      "-s": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "tr --help: \"-s, --squeeze-repeats  replace each sequence of a repeated character that is listed in the last specified ARRAY, with a single occurrence of that character\"; man tr(1) (macOS) OPTIONS: \"-s  Squeeze multiple occurrences...\""
+        }
+      },
+      "-t": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "tr --help: \"-t, --truncate-set1  first truncate ARRAY1 to length of ARRAY2\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "tr --help: \"Usage: tr [OPTION]... STRING1 [STRING2]\"; \"STRING1 and STRING2 specify arrays of characters ARRAY1 and ARRAY2\" - the operands are character sets, never files, so they are literals"
+      }
+    },
+    "stdin": "always",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

@@ -8091,6 +8091,94 @@
     "notes": "Pin: a pb form no pb skill/command instructs (or one the engine cannot dispatch) stays unmodeled; must not approve."
   },
   {
+    "case": "id_filters_uuidgen_tr_drain_id_substitution",
+    "tags": ["id-filters", "pg2-02knr"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "echo \"$(uuidgen | tr A-Z a-z)-drain\"" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Operator ruling (Phillip, 2026-10-25): uuidgen and tr MUST be allowed. The session/actor id idiom is approved through recursive review of the substitution."
+  },
+  {
+    "case": "id_filters_uuidgen_tr_quoted_sets",
+    "tags": ["id-filters", "pg2-02knr"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo \"ID=$(uuidgen | tr 'A-Z' 'a-z')-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Operator ruling (Phillip, 2026-10-25): quoted character sets inside the substitution."
+  },
+  {
+    "case": "id_filters_uuidgen_pipe_tr",
+    "tags": ["id-filters", "pg2-02knr"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "uuidgen | tr A-Z a-z" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Operator ruling (Phillip, 2026-10-25): pure id generator piped through a stdin-only character filter."
+  },
+  {
+    "case": "id_filters_pin_uuidgen_unmodeled_flag",
+    "tags": ["id-filters", "pg2-02knr", "pin"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "uuidgen -r" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Pin: only -h/--help are modeled (the option sets differ per platform); any other flag stays insufficient."
+  },
+  {
+    "case": "id_filters_pin_tr_stdin_redirect_outside_allowed_paths",
+    "tags": ["id-filters", "pg2-02knr", "pin"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "tr a-z A-Z < /home/nobody/secret.txt" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Pin: tr takes no file operand (it reads stdin); a redirect from a path outside the read-allowed zones is judged as its own read and still abstains."
+  },
+  {
+    "case": "id_filters_pin_unsafe_inner_command_in_substitution",
+    "tags": ["id-filters", "pg2-02knr", "pin"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo \"$(uuidgen | tr A-Z a-z; rm -rf /home/nobody/x)-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Pin: an unsafe inner command in the same substitution is still reviewed and keeps the whole command from approving."
+  },
+  {
     "case": "pb_plugin_bd_ready_C",
     "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
     "tool_input": {

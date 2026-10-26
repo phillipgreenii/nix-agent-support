@@ -412,7 +412,8 @@ var pluginForms = []pluginForm{
 	{"integrate-branch", `X=$(rm -rf <ROOT>/.worktrees/wt)`, evalcontract.Abstain, "inner command is graded like a top-level one: rm of a writable path needs consent"},
 	{"integrate-branch", `X=$(rm -rf <ROOT>/.worktrees/wt) echo hi`, evalcontract.Abstain, "a prefix assignment's substitution is graded too (it used to ride on echo's verdict)"},
 	{"integrate-branch", `D="$(date +%F)"`, evalcontract.Approve, ""},
-	{"integrate-branch", `T=$(echo x | tr a b)`, evalcontract.Abstain, "tr has no schema (needs a recorded --help hash from the nix sandbox)"},
+	// pg2-02knr: tr now has a schema (stdin-only character filter), so this approves.
+	{"integrate-branch", `T=$(echo x | tr a b)`, evalcontract.Approve, ""},
 	{"integrate-branch", `REPO=$(pg-connector scm branch detect | jq -r '.result.repo')`, evalcontract.Abstain, "pg-connector scm is an unmodeled subcommand (ZR plugin schema, separate bead)"},
 	{"integrate-branch", `CC="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"`, evalcontract.Abstain, "cd to a runtime path: the directory is not statically known"},
 	{"integrate-branch", `N=$((1+2))`, evalcontract.Abstain, "arithmetic expansion evaluates variable text, which can run a command substitution"},
@@ -589,6 +590,22 @@ var pluginForms = []pluginForm{
 	// the instructed ${XDG_STATE_HOME:-...} spelling is a runtime expansion.
 	{"pn-workspace-rules", "tail -F ${XDG_STATE_HOME:-$HOME/.local/state}/pn/events.jsonl", evalcontract.Abstain, "path is a runtime expansion; type the literal path"},
 	{"pn-workspace-rules", "tail -F /home/nobody/.local/state/pn/events.jsonl", evalcontract.Abstain, "a state dir outside every known zone; opt in with CETA_EXTRA_READONLY_ROOTS"},
+	// pg2-02knr (operator ruling, Phillip, 2026-10-25: uuidgen and tr MUST be
+	// allowed on read/write-allowed paths): the session/actor id idiom. uuidgen
+	// takes no operands and tr takes character-set operands and reads only
+	// stdin, so both are pure filters; the $(...) form approves because
+	// recursion can now verify every inner command.
+	{"pb", `echo "$(uuidgen | tr A-Z a-z)-drain"`, evalcontract.Approve, ""},
+	{"pb", `echo "ID=$(uuidgen | tr 'A-Z' 'a-z')-drain"`, evalcontract.Approve, ""},
+	{"pb", "uuidgen | tr A-Z a-z", evalcontract.Approve, ""},
+	{"pb", "uuidgen | tr -d - | tr '[:upper:]' '[:lower:]'", evalcontract.Approve, ""},
+	{"pb", "uuidgen --bogus", evalcontract.Abstain, "an unmodeled flag stays insufficient (UnknownFlagInsufficient)"},
+	{"pb", "uuidgen | tr -u a-z A-Z", evalcontract.Abstain, "-u is BSD-only and unmodeled; an unmodeled flag stays insufficient"},
+	// tr never opens a file operand; a redirected stdin is judged as the
+	// redirect's own read, so a non-allowed source still abstains.
+	{"pb", "tr a-z A-Z < /home/nobody/secret.txt", evalcontract.Abstain, "the stdin redirect reads a path outside every known zone"},
+	// An unsafe inner command in the same substitution must still deny.
+	{"pb", `echo "$(uuidgen | tr A-Z a-z; rm -rf /home/nobody/x)-drain"`, evalcontract.Abstain, "rm of a path outside every known zone is not approved, so the whole substitution is not"},
 }
 
 // TestPluginInstructedForms runs every inventoried form through the full
