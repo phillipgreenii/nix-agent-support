@@ -117,7 +117,11 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
    - **no mutation testing.** The subagent MUST NOT run `pg-go-mutate` or the
      `go-test-gaps` skill, and a brief MUST NOT ask for it (V-5). A bead that
      closes gaps a past analysis found is ordinary test-writing: the brief points
-     at the bead's named paths and tests, never at a mutation re-run.
+     at the bead's named paths and tests, never at a mutation re-run. A triage
+     bead is analysis of its recorded results, not a run. The one allowance is a
+     bead that changes the mutation tooling itself: its brief MAY run the tool
+     against a small synthetic fixture project only, never a workspace package
+     and never to confirm a closed gap.
    - **waiting on a background job: wait ONCE with `bgwait`, never poll.** A
      command expected to outlive a single call is launched with
      `bgrun NAME -- CMD` and awaited with `bgwait NAME --timeout 540` (a

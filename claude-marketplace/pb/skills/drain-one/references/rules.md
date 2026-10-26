@@ -113,9 +113,11 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   whose acceptance criterion requires a mutation run is not drainable as written: strike the
   criterion in the bead (S-1/S-2) unless the bead is work on the mutation tooling itself, and
   even then the tool runs only against a small synthetic fixture project, never a workspace
-  package and never to confirm a closed gap. A `go-test-gaps` triage bead's gaps are closed by
-  writing tests (the bead's acceptance criteria name each missed path and the tests that must
-  exist), never by re-running the tool, even when the package sits inside the tool's own source.
+  package and never to confirm a closed gap. A `go-test-gaps` triage bead is worked by analyzing
+  the results it records into `discovered-from` fix beads (its body carries the steps), never by
+  re-running the tool; a fix bead's gaps are closed by writing tests (its acceptance criteria name
+  each missed path and the tests that must exist), even when the package sits inside the tool's
+  own source.
   A report that says a subagent ran it is a brief violation to flag.
 - Landing MUST go through the `integrate-branch:integrate-branch` dispatcher with NO
   handler named, so every repo lands by the strategy IT declares in

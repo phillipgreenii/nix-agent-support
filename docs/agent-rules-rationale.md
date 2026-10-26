@@ -122,8 +122,14 @@ A-3: a brief that lists relative paths without a root causes exactly this defect
   now reads the same everywhere: synthetic fixture only, never a workspace package, never to
   confirm a closed gap. That pass also removed the skill's `--workers` claims (the tool ignores
   the flag and forces one worker) and its "single-file targets are rejected" line (a `.go` file is
-  accepted), and corrected the sweep description: it only creates the triage bead, with a status
-  tally, so the operator's analysis amends it with the worklist rows.
+  accepted). A fourth review pass (2026-10-26) found that the sweep files no triage bead at all
+  (`FileTriageBead` has no caller), so the "analysis amends the sweep's tally bead" text described
+  nothing. The operator then ruled the intended flow (recorded verbatim on `pg2-tkm9g0`): when a
+  package's run completes, one triage bead carries the results; an agent analyzes them without
+  re-running the tool, files `discovered-from` fix beads, and closes the triage bead listing them or
+  saying why none are needed. The same pass settled one framing for tooling self-tests: a run of the
+  real tool against a synthetic fixture is not mutation testing, which is what keeps nix-overlay's
+  `gomu-engine-contract-tests` legitimate as a check.
 
 ## Timeouts (L-1..L-3) and host load (L-4)
 

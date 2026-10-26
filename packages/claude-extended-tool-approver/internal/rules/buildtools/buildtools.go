@@ -31,10 +31,11 @@ import (
 // pg-go-mutate (bead pg2-xu4aq, follow-up to pg2-amzvw's plugin-conformance-
 // check flagging it unrecognized) belongs here for the same "no more
 // permissive than bare `go`" reason as gogate immediately above. It is
-// prescribed by claude-marketplace/pg-go-mutate's go-test-gaps skill,
-// applies uniformly to every consumer (it takes no consumer-specific
-// config), and its surface is `pg-go-mutate <package-path> [--workers N]
-// [--json]` — a mutation-testing driver that repeatedly mutates a package's
+// invoked by claude-marketplace/pg-go-mutate's go-test-gaps skill (only on
+// an operator-requested analysis; V-5), applies uniformly to every consumer
+// (it takes no consumer-specific config), and its surface is
+// `pg-go-mutate [<package-dir>|<file.go>] [--tags L] [--json]` — a
+// mutation-testing driver that repeatedly mutates a package's
 // AST and re-runs `go test` against it, reporting surviving mutants. That is
 // strictly narrower than bare `go` (already unconditionally approved above,
 // including arbitrary `go run`): it never runs arbitrary user code, only the
