@@ -9,12 +9,18 @@ let
 in
 {
   options.phillipgreenii.programs.escalation-watchdog = {
-    enable = lib.mkEnableOption ''
-      the escalation-watchdog CLI: one tick hands beads that stayed `escalated` longer than
-      `--stale-after` to the operator with `hand-to-human --also-add stale-escalation --note ...`
-      (docs/guides/bead-label-vocabulary.md and ADR 0105). This module only installs the command;
-      the timer or router role that runs it, and the durations, belong to the deployment flake.
-      Needs `bd` and `hand-to-human` on the PATH it runs with'';
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        Install the escalation-watchdog CLI: one tick hands beads that stayed `escalated` longer
+        than `--stale-after` to the operator with `hand-to-human --also-add stale-escalation
+        --note ...` (docs/guides/bead-label-vocabulary.md and ADR 0105). This module only installs
+        the command; the timer or router role that runs it, and the durations, belong to the
+        deployment flake. The command needs `bd` and `hand-to-human` on the PATH it runs with.
+      '';
+    };
     package = lib.mkPackageOption pkgs "escalation-watchdog" { };
   };
 
