@@ -730,7 +730,7 @@ func TestLaneE2E(t *testing.T) {
 
 		start = w.callCount()
 		for _, id := range w.ids {
-			res := w.r.change("apply", id)
+			res := w.applyRetrying("apply", id)
 			if res.code != 0 {
 				t.Fatalf("apply %s exit %d:\n%s", id, res.code, res.stderr)
 			}
@@ -766,7 +766,7 @@ func TestLaneE2E(t *testing.T) {
 		w := world.use(t)
 		start := w.callCount()
 		for _, id := range w.ids {
-			res := w.r.change("apply", id)
+			res := w.applyRetrying("apply", id)
 			if res.code != 0 {
 				t.Fatalf("second apply %s exit %d:\n%s", id, res.code, res.stderr)
 			}

@@ -266,10 +266,10 @@ func (w *e2eWorld) setHead(id, head string) {
 	w.setPR(id, func(p *parity.PRFixture) { p.HeadSHA = head })
 }
 
-// apply runs the composed command in apply mode and requires success.
-func (w *e2eWorld) apply(id string, extra ...string) result {
+// applyRetrying runs the composed command in apply mode and returns the result,
+// running it once more when the busy host made the tracker listing overrun.
+func (w *e2eWorld) applyRetrying(args ...string) result {
 	w.t.Helper()
-	args := append([]string{"apply", id}, extra...)
 	res := w.r.change(args...)
 	// The connector gives one backend listing 40 s; on a host that is busy the
 	// real bd can overrun it, and the run then fails closed having written
@@ -278,9 +278,16 @@ func (w *e2eWorld) apply(id string, extra ...string) result {
 	// would re-run the delivery), which is what a retry here stands for.
 	if (res.code == ExitDecideFailed && strings.Contains(res.stderr, "work-item lookup is not reachable")) ||
 		(res.code == ExitDecideUnavailable && strings.Contains(res.stderr, "work-item lookup could not be read")) {
-		w.t.Logf("apply %s: the tracker listing overran the connector's deadline, running it once more:\n%s", id, res.stderr)
+		w.t.Logf("%v: the tracker listing overran the connector's deadline, running it once more:\n%s", args, res.stderr)
 		res = w.r.change(args...)
 	}
+	return res
+}
+
+// apply runs the composed command in apply mode and requires success.
+func (w *e2eWorld) apply(id string, extra ...string) result {
+	w.t.Helper()
+	res := w.applyRetrying(append([]string{"apply", id}, extra...)...)
 	if res.code != 0 {
 		w.t.Fatalf("apply %s exited %d:\n%s%s", id, res.code, res.stdout, res.stderr)
 	}
