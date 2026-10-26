@@ -3,7 +3,7 @@
     "call": "{\"args\":{\"consumer\":\"example-consumer\",\"query\":\"mine\"},\"op\":\"changes\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "result": {
         "sources": [
           {
@@ -33,7 +33,7 @@
     "call": "{\"args\":{\"consumer\":\"example-reset\",\"query\":\"mine\",\"reset\":true},\"op\":\"changes\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "result": {
         "sources": [
           {
@@ -106,7 +106,7 @@
     "call": "{\"args\":{\"consumer\":\"example-consumer\",\"query\":\"mine\"},\"op\":\"changes\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "result": {
         "sources": [
           {
@@ -170,7 +170,7 @@
     "call": "{\"args\":{\"consumer\":\"example-consumer\",\"query\":\"mine\"},\"op\":\"changes\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "result": {
         "sources": [
           {

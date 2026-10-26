@@ -81,6 +81,7 @@ func (h *handlers) list(ctx context.Context, raw json.RawMessage) (any, error) {
 			iss.AsOf = s.row.FetchedAt.UTC().Format(time.RFC3339)
 			iss.Stale = srv.stale
 			iss.Version = s.version
+			iss.EntityMeta = s.meta
 			entities = append(entities, iss)
 			res.PresentIDs = append(res.PresentIDs, s.id)
 		}
@@ -182,6 +183,8 @@ type storedSummary struct {
 	content groups.SummaryContent
 	row     store.GroupRow
 	version int64
+	// meta is the entity's metadata beside its content (the watched flag).
+	meta *schema.EntityMeta
 }
 
 // summaries reads the stored summary of every id, in the order of ids. An id
@@ -192,11 +195,11 @@ func (h *handlers) summaries(ctx context.Context, ids []string) ([]storedSummary
 	out := make([]storedSummary, 0, len(ids))
 	for _, id := range ids {
 		fold := groups.FoldRef(id)
-		ent, ok, err := h.deps.Store.GetEntity(ctx, groups.EntityKind, fold)
+		ent, entFound, err := h.deps.Store.GetEntity(ctx, groups.EntityKind, fold)
 		if err != nil {
 			return nil, unavailable("read the entity row of %s: %v", id, err)
 		}
-		if ok && !ent.TombstonedAt.IsZero() {
+		if entFound && !ent.TombstonedAt.IsZero() {
 			continue
 		}
 		g, ok, err := h.deps.Store.GetGroup(ctx, groups.EntityKind, fold, groups.Summary)
@@ -213,7 +216,7 @@ func (h *handlers) summaries(ctx context.Context, ids []string) ([]storedSummary
 		if c.Gone {
 			continue
 		}
-		out = append(out, storedSummary{id: id, content: c, row: g, version: ent.Version})
+		out = append(out, storedSummary{id: id, content: c, row: g, version: ent.Version, meta: feedop.EntityMetaOf(ent, entFound)})
 	}
 	return out, nil
 }

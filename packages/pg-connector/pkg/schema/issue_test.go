@@ -159,14 +159,15 @@ func TestIssueDepsResult_IDsPopulatedRegardlessOfFull_EntitiesOmittedWhenEmpty(t
 	}
 }
 
-// TestIssueSchemaVersion_PinnedAtElevenAndRegistered pins the issue
-// capability's schema version at 11 (bead pg2-2qyyh.2.1 bumped 10 -> 11 for
-// the Version, comment-summary and read-annotation fields; pg2-2j5ac.44.2's
-// earlier 9 -> 10 added CreatedAt) and that CurrentSchemaVersions derives
-// from the constant rather than carrying its own copy.
-func TestIssueSchemaVersion_PinnedAtElevenAndRegistered(t *testing.T) {
-	if IssueSchemaVersion != 11 {
-		t.Fatalf("IssueSchemaVersion = %d, want 11 (10 -> 11 by bead pg2-2qyyh.2.1)", IssueSchemaVersion)
+// TestIssueSchemaVersion_PinnedAtTwelveAndRegistered pins the issue
+// capability's schema version at 12 (bead pg2-0o693 bumped 11 -> 12 for
+// EntityMeta; pg2-2qyyh.2.1's 10 -> 11 added the Version, comment-summary and
+// read-annotation fields; pg2-2j5ac.44.2's earlier 9 -> 10 added CreatedAt) and
+// that CurrentSchemaVersions derives from the constant rather than carrying its
+// own copy.
+func TestIssueSchemaVersion_PinnedAtTwelveAndRegistered(t *testing.T) {
+	if IssueSchemaVersion != 12 {
+		t.Fatalf("IssueSchemaVersion = %d, want 12 (11 -> 12 by bead pg2-0o693)", IssueSchemaVersion)
 	}
 	if got := CurrentSchemaVersions["issue"]; got != IssueSchemaVersion {
 		t.Fatalf(`CurrentSchemaVersions["issue"] = %d, want %d`, got, IssueSchemaVersion)

@@ -117,6 +117,10 @@ func (h *handlers) show(ctx context.Context, raw json.RawMessage) (any, error) {
 		if found {
 			out.Version = ent.Version
 		}
+		// The stored watched flag rides beside the content, never in it: it is read
+		// here AFTER a one-off watch of this call was applied, and reading it
+		// changes nothing (no version, no row, no event).
+		out.EntityMeta = feedop.EntityMetaOf(ent, found)
 	}
 	prov.applyIssue(&out)
 	prov.record(ctx)

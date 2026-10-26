@@ -467,17 +467,17 @@ beginning `migrating:`. A caller MUST treat `unavailable` as retryable.
 
 The daemon registers these ops under the router instance `issue`:
 
-| Op                                    | What it does                                                                                                                                                                                       |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `show`                                | One issue from the store with read-through freshness. Args `{id, fresh?, watch?}`; `watch: true` watches the issue as a one-off. Annotated with `served_from`, `stale`, `age_seconds`, `groups[]`. |
-| `list`                                | A configured query's stored members (`{query, cursor?, ids_only?}`); the name must be one the daemon's own config defines, else `query_not_recognized`.                                            |
-| `children`, `search`, `list_activity` | Live pass-through reads through the governor; nothing they return is stored.                                                                                                                       |
-| `deps`                                | The old backend's existence check followed by an empty result. Registered although the behavior docs' op catalog does not list it, because pg-desk's hydration calls it.                           |
-| `auth_status`                         | The origin tool's authentication state.                                                                                                                                                            |
-| `changes`, `changes_ack`              | The change feed (view `issue`): `{consumer, query?, next_seq}`; one cursor per consumer, delivery by the watched flag, `cursor_expired:` when a position is outside retention.                     |
-| `write_begin`, `invalidate`           | The write notices (`{id}` or `{instance}`): a per-entity hold bounded by `write_lease`, so no refresh begun before or during a write can store older content.                                      |
-| `explain`                             | Why one issue is stale or silent, from the store and scheduler alone (no origin call).                                                                                                             |
-| `status`                              | The health report (the same document the status mode prints).                                                                                                                                      |
+| Op                                    | What it does                                                                                                                                                                                                         |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `show`                                | One issue from the store with read-through freshness. Args `{id, fresh?, watch?}`; `watch: true` watches the issue as a one-off. Annotated with `served_from`, `stale`, `age_seconds`, `groups[]` and `entity_meta`. |
+| `list`                                | A configured query's stored members (`{query, cursor?, ids_only?}`); the name must be one the daemon's own config defines, else `query_not_recognized`.                                                              |
+| `children`, `search`, `list_activity` | Live pass-through reads through the governor; nothing they return is stored.                                                                                                                                         |
+| `deps`                                | The old backend's existence check followed by an empty result. Registered although the behavior docs' op catalog does not list it, because pg-desk's hydration calls it.                                             |
+| `auth_status`                         | The origin tool's authentication state.                                                                                                                                                                              |
+| `changes`, `changes_ack`              | The change feed (view `issue`): `{consumer, query?, next_seq}`; one cursor per consumer, delivery by the watched flag, `cursor_expired:` when a position is outside retention.                                       |
+| `write_begin`, `invalidate`           | The write notices (`{id}` or `{instance}`): a per-entity hold bounded by `write_lease`, so no refresh begun before or during a write can store older content.                                                        |
+| `explain`                             | Why one issue is stale or silent, from the store and scheduler alone (no origin call).                                                                                                                               |
+| `status`                              | The health report (the same document the status mode prints).                                                                                                                                                        |
 
 The five writes and `capabilities` are the client's own.
 
@@ -488,6 +488,28 @@ stored now, with `version` set to the row's OWN version), a `seq`, the `kinds` a
 catch-all, which names its fields) and the first-observation kind `added`; `entered_query` and `left_query` are
 membership words, never stored rows. Every `changes` and `changes_ack` answer carries `store_identity`, which differs
 after the store is replaced, so a consumer MUST key its redelivery marker on it as well as on `seq`.
+
+**The watched flag on a read (`entity_meta`).** Every entity a `show` or `list` answer returns carries
+`entity_meta: {"watched": <bool>}`, the daemon's stored watched flag for that entity, so a consumer reads whether an
+entity is watched from the connector instead of keeping its own copy. (The flag belongs to the ENTITY, not to a query:
+a consumer does not need to know which query an entity came from.) It is metadata BESIDE the entity, never part of its
+normalised content, and the rules are:
+
+- `true` for a member of a watched query and for an entity a read of that one entity watched (`show` with `watch: true`;
+  the answer states the flag AFTER that watch was applied); `false` for an entity that was only read or is tracked only.
+  The flag is sticky after the entity leaves every query and is cleared only when the daemon evicts the entity (the row
+  is deleted), after which a read states `false` until the entity is watched again.
+- Exposing the flag only READS it: a read without `watch` never sets it, and stating it changes nothing that is watched.
+  A change of the flag never bumps `version`, never appends a change row and never produces an event; a consumer that
+  compares an entity for change MUST drop the whole `entity_meta` key, as it drops `as_of`, `stale`, `served_from` and
+  `age_seconds`. (A one-off `watch` of an entity the daemon already holds does append the one `added` row the late watch
+  is specified to append; that row is the watch's, not the exposure's.)
+- The shape is additive (issue schema version 12). `watched` is stated whenever the daemon consulted its store; an
+  answer from a daemon that predates the field, or one that could not consult its store, omits `entity_meta` (or
+  `watched` in it), and a reader MUST read an absent `watched` as "not stated", NEVER as `false`
+  (`schema.EntityMeta.WatchedState` returns `stated`). `ids_only` list answers carry no entities and so no flag.
+- The shared library builds it once (`feedop.EntityMetaOf` over the store's entity row), so another daemon on the hoisted
+  store states the flag the same way; the GitHub daemon's `pr` wiring is a separate follow-up.
 
 **Where a consumer learns a query's baseline time.** The feed wire's `sources_freshness[]` carries only `query`,
 `last_success_at` and `last_error`; the baseline marker time is NOT on it. A consumer that must know whether a query's

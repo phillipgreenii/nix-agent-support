@@ -94,7 +94,12 @@ import "encoding/json"
 // capability's own 10 -> 11 and 11 -> 12 additions) - same "any field-shape
 // change bumps the version" precedent as every earlier bump on this
 // constant.
-const IssueSchemaVersion = 11
+//
+// Bumped 11 -> 12 by bead pg2-0o693, which added Issue.EntityMeta (the
+// per-entity metadata the connector keeps BESIDE the normalised content; today
+// the watched flag) - same "any field-shape change bumps the version"
+// precedent as every earlier bump on this constant.
+const IssueSchemaVersion = 12
 
 // Issue is the issue capability's shared JSON wire shape, returned by the
 // issue capability's "show" and "create" ops and carried by
@@ -297,6 +302,13 @@ type Issue struct {
 	ServedFrom string      `json:"served_from,omitempty"`
 	AgeSeconds *int64      `json:"age_seconds,omitempty"`
 	Groups     []GroupInfo `json:"groups,omitempty"`
+
+	// EntityMeta is what the daemon knows ABOUT the entity rather than what the
+	// tracker says of it (IssueSchemaVersion 12; see EntityMeta). It is an
+	// annotation like ServedFrom: never stored with the summary content, never
+	// compared, and a change in it is no content change. Omitted when the answer
+	// states nothing, which a reader MUST read as "not stated".
+	EntityMeta *EntityMeta `json:"entity_meta,omitempty"`
 }
 
 // IssueDependency is one edge in Issue.Deps: another issue's id, plus this
