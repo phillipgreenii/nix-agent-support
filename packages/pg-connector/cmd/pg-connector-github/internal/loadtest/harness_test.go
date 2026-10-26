@@ -116,6 +116,13 @@ type scenarioOpts struct {
 
 const defaultDuration = 19 * time.Minute
 
+// stallLimit is the real time the pump waits for the scheduler's one worker to finish or
+// reach the origin before it calls the run stalled. One batch is CPU-bound (about 15 to 20
+// CPU-seconds for the whole tracked-set run), so on a host at a load average of 30 or more
+// a batch can take minutes of wall time; the limit stays far above that and below the go
+// test timeout, so a real deadlock still fails the run instead of timing the package out.
+const stallLimit = 5 * time.Minute
+
 // ---- the latency gate --------------------------------------------------------
 
 // latencyGate models the origin's round trip on the manual clock. A fake origin
@@ -857,8 +864,8 @@ func (h *harness) pump() {
 					h.quiesce(c)
 				}
 			case <-h.gate.arrived:
-			case <-time.After(60 * time.Second):
-				h.t.Fatal("loadtest: the scheduler's worker neither finished nor reached the origin within 60 s of real time")
+			case <-time.After(stallLimit):
+				h.t.Fatal("loadtest: the scheduler's worker neither finished nor reached the origin within " + stallLimit.String() + " of real time")
 			}
 			continue
 		}
