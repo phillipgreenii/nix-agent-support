@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os/exec"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -31,9 +30,9 @@ var decideFn = func(v *view.View, entityType string, cfg *config.Config) action.
 	return decide.DecideWith(v, entityType, cfg)
 }
 
-// applyCommand is the factory every pg-connector and pg-desk write goes
-// through; tests swap it. The view read has its own seam (view.ExecCommand).
-var applyCommand apply.CmdFactory = exec.CommandContext
+// applyRunner is the runner every pg-connector and pg-desk write goes
+// through; tests swap it. The view read has its own seam (view.Exec).
+var applyRunner apply.Runner = apply.ExecRunner
 
 // applyHooks returns the per-action hooks of an apply run, in call order: the
 // audit comment, then the failure counter and escalation, then the run
@@ -90,7 +89,7 @@ var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, i
 	plan := arealabels.Apply(lk.DedupePlan(workitem.EntityRefFrom(vd), decideFn(vd, typ, cfg)), vd, cfg)
 	res := apply.Run(ctx, apply.Input{
 		Type: typ, ID: id, View: v, Actions: plan.Actions, Item: it, Hooks: applyHooks(v, typ, id, it, plan.Skipped, lk),
-		Env:    apply.Env{Command: applyCommand, Config: cfg, Clock: time.Now, Stderr: errOut},
+		Env:    apply.Env{Runner: applyRunner, Config: cfg, Clock: time.Now, Stderr: errOut},
 		Lookup: lk,
 	})
 	for _, ev := range res.Events {

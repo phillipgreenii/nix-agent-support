@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"os/exec"
 	"time"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
@@ -13,30 +12,25 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
-// CmdFactory constructs the *exec.Cmd used to invoke pg-connector or pg-desk.
-// Production code uses exec.CommandContext; tests swap in a factory spawning a
-// reentrant test-helper process.
-type CmdFactory func(ctx context.Context, name string, args ...string) *exec.Cmd
-
 // Env is everything an apply run (and the hook packets built on it) needs to
 // reach the tracker and pg-desk.
 type Env struct {
-	Command CmdFactory
-	Config  *config.Config
-	Clock   func() time.Time // injectable; production time.Now
+	// Runner runs pg-connector and pg-desk. nil means ExecRunner; tests hand
+	// in an in-process double.
+	Runner Runner
+	Config *config.Config
+	Clock  func() time.Time // injectable; production time.Now
 	// Stderr receives diagnostics that do not change an outcome (a failed
 	// refresh, a hook error). nil means os.Stderr. Added after the pinned
 	// shape; additive.
 	Stderr io.Writer
 }
 
-func (e Env) command() CmdFactory {
-	if e.Command == nil {
-		return func(ctx context.Context, name string, args ...string) *exec.Cmd {
-			return exec.CommandContext(ctx, name, args...)
-		}
+func (e Env) runner() Runner {
+	if e.Runner == nil {
+		return ExecRunner
 	}
-	return e.Command
+	return e.Runner
 }
 
 func (e Env) stderr() io.Writer {

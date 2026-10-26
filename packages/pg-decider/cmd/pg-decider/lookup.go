@@ -35,7 +35,7 @@ func readRunLookup(ctx context.Context, errOut io.Writer, cfg *config.Config, ve
 	if typ != lookupEntityType {
 		return nil, true
 	}
-	lk, err := lookupRead(ctx, apply.Env{Command: applyCommand, Config: cfg, Clock: time.Now, Stderr: errOut})
+	lk, err := lookupRead(ctx, apply.Env{Runner: applyRunner, Config: cfg, Clock: time.Now, Stderr: errOut})
 	if err == nil {
 		return lk, true
 	}

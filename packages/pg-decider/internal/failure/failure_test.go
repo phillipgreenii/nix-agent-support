@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,29 +19,27 @@ import (
 const entity = "acme/widgets#42"
 
 // fake stands in for pg-connector and pg-desk: it records every exec and
-// answers from Go through a tiny shell child.
+// answers from Go in process (an apply.Runner), so no test spawns a child.
 type fake struct {
 	execs   []string
 	respond func(line string) (stdout string, exit int)
 }
 
-func (f *fake) factory() apply.CmdFactory {
-	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		line := name + " " + strings.Join(args, " ")
+func (f *fake) runner() apply.Runner {
+	return func(_ context.Context, c apply.Call) apply.CallResult {
+		line := c.Name + " " + strings.Join(c.Args, " ")
 		f.execs = append(f.execs, line)
 		out, code := "{\"result\":{\"id\":\"wb-esc\"}}", 0
 		if f.respond != nil {
 			out, code = f.respond(line)
 		}
-		cmd := exec.CommandContext(ctx, "sh", "-c", `printf '%s' "$OUT"; exit "$CODE"`)
-		cmd.Env = append(os.Environ(), "OUT="+out, fmt.Sprintf("CODE=%d", code))
-		return cmd
+		return apply.CallResult{Stdout: out, Code: code}
 	}
 }
 
 func (f *fake) env(k *int) apply.Env {
 	cfg := &config.Config{EscalateAfter: k}
-	return apply.Env{Command: f.factory(), Config: cfg, Clock: time.Now, Stderr: &bytes.Buffer{}}
+	return apply.Env{Runner: f.runner(), Config: cfg, Clock: time.Now, Stderr: &bytes.Buffer{}}
 }
 
 func viewWith(state map[string]string, links ...view.Link) *view.View {

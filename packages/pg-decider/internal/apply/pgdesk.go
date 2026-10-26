@@ -1,11 +1,8 @@
 package apply
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -23,19 +20,16 @@ func origin(typ string) string { return "decider:" + deciderName(typ) }
 
 // desk runs pg-desk and returns an error carrying its stderr on failure.
 func desk(ctx context.Context, env Env, args ...string) error {
-	cmd := env.command()(ctx, deskBinary, args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			detail := strings.TrimSpace(stderr.String())
-			if detail == "" {
-				detail = "no diagnostic on stderr"
-			}
-			return fmt.Errorf("pg-desk %s: exit %d: %s", strings.Join(args, " "), exitErr.ExitCode(), detail)
+	res := env.runner()(ctx, Call{Name: deskBinary, Args: args})
+	if res.StartErr != nil {
+		return fmt.Errorf("exec pg-desk %s: %w", strings.Join(args, " "), res.StartErr)
+	}
+	if res.Code != 0 {
+		detail := strings.TrimSpace(res.Stderr)
+		if detail == "" {
+			detail = "no diagnostic on stderr"
 		}
-		return fmt.Errorf("exec pg-desk %s: %w", strings.Join(args, " "), err)
+		return fmt.Errorf("pg-desk %s: exit %d: %s", strings.Join(args, " "), res.Code, detail)
 	}
 	return nil
 }

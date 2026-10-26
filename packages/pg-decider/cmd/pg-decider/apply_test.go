@@ -2,41 +2,39 @@ package main
 
 import (
 	"context"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
+	"github.com/phillipgreenii/pg-decider/internal/apply"
 	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
 // These tests exercise the real applyFn: the view comes from the pg-desk
-// double (view.ExecCommand, see testmain_test.go) and the writes go to a
-// recording command factory standing in for pg-connector and pg-desk.
+// double (view.Exec, see testmain_test.go) and the writes go to a
+// in-process recording runner standing in for pg-connector and pg-desk.
 
 type execRec struct{ name, args string }
 
-// recordWrites swaps decideFn for one returning actions and applyCommand for a
-// factory that records every exec and answers through the helper process.
+// recordWrites swaps decideFn for one returning actions and applyRunner for an
+// in-process runner that records every exec and answers stdout and exit.
 func recordWrites(t *testing.T, actions []action.Action, stdout string, exit string) *[]execRec {
 	t.Helper()
 	var recs []execRec
-	origDecide, origCmd := decideFn, applyCommand
-	t.Cleanup(func() { decideFn, applyCommand = origDecide, origCmd })
+	origDecide, origRun := decideFn, applyRunner
+	t.Cleanup(func() { decideFn, applyRunner = origDecide, origRun })
 	decideFn = func(_ *view.View, _ string, _ *config.Config) action.PlanResult {
 		return action.PlanResult{Actions: actions, Skipped: []action.Skip{}}
 	}
-	applyCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		recs = append(recs, execRec{name, strings.Join(args, " ")})
-		cs := append([]string{"-test.run=^TestHelperProcess$", "--", name}, args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "GO_HELPER_STDOUT="+stdout, "GO_HELPER_EXIT="+exit)
-		return cmd
+	code, _ := strconv.Atoi(exit)
+	applyRunner = func(_ context.Context, c apply.Call) apply.CallResult {
+		recs = append(recs, execRec{c.Name, strings.Join(c.Args, " ")})
+		return apply.CallResult{Stdout: stdout, Code: code}
 	}
 	return &recs
 }
@@ -94,10 +92,10 @@ func TestApplyExits2WhenAnActionFails(t *testing.T) {
 func TestApplyFromItemReadsTheViewExactlyOnceAndNeverDecidesFromTheKind(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
 	reads := 0
-	inner := view.ExecCommand
-	view.ExecCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+	inner := view.Exec
+	view.Exec = func(ctx context.Context, c view.Call) view.CallResult {
 		reads++
-		return inner(ctx, name, args...)
+		return inner(ctx, c)
 	}
 	decides := 0
 	recordWrites(t, nil, `{"result":{}}`, "0")

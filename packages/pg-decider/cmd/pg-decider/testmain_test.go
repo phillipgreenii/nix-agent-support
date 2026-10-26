@@ -1,12 +1,12 @@
-// testmain_test.go: reentrant test-helper-process double for pg-desk (see
-// internal/view/testmain_test.go for the protocol).
+// testmain_test.go: in-process double for pg-desk (see
+// internal/view/testmain_test.go for the settings it understands). No test
+// here spawns a child: under -race every child costs a flat second at exit.
 package main
 
 import (
 	"bytes"
 	"context"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,58 +15,35 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	defer os.Exit(0)
-	helperMain()
-}
-
-func childArgs() []string {
-	for i, a := range os.Args {
-		if a == "--" {
-			if i+2 <= len(os.Args) {
-				return os.Args[i+2:]
-			}
-			return nil
-		}
-	}
-	return nil
-}
-
-func helperMain() {
-	if f := os.Getenv("GO_HELPER_ARGS_FILE"); f != "" {
-		_ = os.WriteFile(f, []byte(strings.Join(childArgs(), "\n")), 0o600)
-	}
-	if f := os.Getenv("GO_HELPER_STDOUT_FILE"); f != "" {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			_, _ = os.Stderr.WriteString("helper: " + err.Error())
-			os.Exit(99)
-		}
-		_, _ = os.Stdout.Write(b)
-	}
-	if s := os.Getenv("GO_HELPER_STDOUT"); s != "" {
-		_, _ = os.Stdout.WriteString(s)
-	}
-	if s := os.Getenv("GO_HELPER_STDERR"); s != "" {
-		_, _ = os.Stderr.WriteString(s)
-	}
-	code, _ := strconv.Atoi(os.Getenv("GO_HELPER_EXIT"))
-	os.Exit(code)
-}
-
+// withHelper swaps view.Exec for an in-process double configured by env
+// (GO_HELPER_ARGS_FILE, GO_HELPER_STDOUT_FILE, GO_HELPER_STDOUT,
+// GO_HELPER_STDERR, GO_HELPER_EXIT).
 func withHelper(t *testing.T, env ...string) {
 	t.Helper()
-	orig := view.ExecCommand
-	view.ExecCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cs := append([]string{"-test.run=^TestHelperProcess$", "--", name}, args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(append(os.Environ(), "GO_WANT_HELPER_PROCESS=1"), env...)
-		return cmd
+	set := map[string]string{}
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		set[k] = v
 	}
-	t.Cleanup(func() { view.ExecCommand = orig })
+	orig := view.Exec
+	view.Exec = func(_ context.Context, c view.Call) view.CallResult {
+		if f := set["GO_HELPER_ARGS_FILE"]; f != "" {
+			_ = os.WriteFile(f, []byte(strings.Join(c.Args, "\n")), 0o600)
+		}
+		var res view.CallResult
+		if f := set["GO_HELPER_STDOUT_FILE"]; f != "" {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				return view.CallResult{Stderr: "helper: " + err.Error(), Code: 99}
+			}
+			res.Stdout = string(b)
+		}
+		res.Stdout += set["GO_HELPER_STDOUT"]
+		res.Stderr = set["GO_HELPER_STDERR"]
+		res.Code, _ = strconv.Atoi(set["GO_HELPER_EXIT"])
+		return res
+	}
+	t.Cleanup(func() { view.Exec = orig })
 }
 
 func runCLI(t *testing.T, args ...string) (stdout, stderr string, exitCode int) {

@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
-	"os"
-	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
+	"github.com/phillipgreenii/pg-decider/internal/apply"
 	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/view"
@@ -18,24 +18,22 @@ import (
 
 const anchorKey = "pr:acme/widgets#42:anchor"
 
-// scriptedWrites swaps decideFn for one returning actions and applyCommand for
-// a factory that records every exec and answers through respond.
+// scriptedWrites swaps decideFn for one returning actions and applyRunner for
+// an in-process runner that records every exec and answers through respond.
 func scriptedWrites(t *testing.T, decide func(v *view.View) []action.Action, respond func(name, args string) (stdout string, exit string)) *[]execRec {
 	t.Helper()
 	var recs []execRec
-	origDecide, origCmd := decideFn, applyCommand
-	t.Cleanup(func() { decideFn, applyCommand = origDecide, origCmd })
+	origDecide, origRun := decideFn, applyRunner
+	t.Cleanup(func() { decideFn, applyRunner = origDecide, origRun })
 	decideFn = func(v *view.View, _ string, _ *config.Config) action.PlanResult {
 		return action.PlanResult{Actions: decide(v), Skipped: []action.Skip{}}
 	}
-	applyCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		a := strings.Join(args, " ")
-		recs = append(recs, execRec{name, a})
-		out, code := respond(name, a)
-		cs := append([]string{"-test.run=^TestHelperProcess$", "--", name}, args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "GO_HELPER_STDOUT="+out, "GO_HELPER_EXIT="+code)
-		return cmd
+	applyRunner = func(_ context.Context, c apply.Call) apply.CallResult {
+		a := strings.Join(c.Args, " ")
+		recs = append(recs, execRec{c.Name, a})
+		out, code := respond(c.Name, a)
+		n, _ := strconv.Atoi(code)
+		return apply.CallResult{Stdout: out, Code: n}
 	}
 	return &recs
 }

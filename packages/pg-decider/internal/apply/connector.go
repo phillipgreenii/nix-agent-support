@@ -1,13 +1,9 @@
 package apply
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"sort"
 	"strings"
 
@@ -91,33 +87,26 @@ func sortedCopy(in []string) []string {
 // configured. It returns stdout on exit 0; every other outcome is an error
 // (exit 4 is not_found).
 func call(ctx context.Context, env Env, args []string) ([]byte, error) {
-	cmd := env.command()(ctx, connectorBinary, args...)
+	c := Call{Name: connectorBinary, Args: args}
 	if env.Config != nil && env.Config.BeadsDir != "" {
-		base := cmd.Env
-		if base == nil {
-			base = os.Environ()
-		}
-		cmd.Env = append(append([]string{}, base...), beadsDirEnv+"="+env.Config.BeadsDir)
+		c.Env = []string{beadsDirEnv + "=" + env.Config.BeadsDir}
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("exec pg-connector %s: %w", strings.Join(args, " "), err)
-		}
-		detail := strings.TrimSpace(stdout.String())
+	res := env.runner()(ctx, c)
+	if res.StartErr != nil {
+		return nil, fmt.Errorf("exec pg-connector %s: %w", strings.Join(args, " "), res.StartErr)
+	}
+	if res.Code != 0 {
+		detail := strings.TrimSpace(res.Stdout)
 		var w wireEnvelope
-		if json.Unmarshal(stdout.Bytes(), &w) == nil && w.Error != nil {
+		if json.Unmarshal([]byte(res.Stdout), &w) == nil && w.Error != nil {
 			detail = w.Error.Code + ": " + w.Error.Message
 		}
-		if s := strings.TrimSpace(stderr.String()); s != "" && detail == "" {
+		if s := strings.TrimSpace(res.Stderr); s != "" && detail == "" {
 			detail = s
 		}
-		return nil, &connectorError{args: args, exitCode: exitErr.ExitCode(), detail: detail}
+		return nil, &connectorError{args: args, exitCode: res.Code, detail: detail}
 	}
-	return stdout.Bytes(), nil
+	return []byte(res.Stdout), nil
 }
 
 // resultID decodes a targeted call's {"result":{"id":...}} envelope.

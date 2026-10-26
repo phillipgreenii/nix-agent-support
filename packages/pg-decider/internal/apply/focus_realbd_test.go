@@ -229,18 +229,20 @@ func (w *focusRealWorld) bd(args ...string) string {
 	return out.String()
 }
 
-// factory execs the real pg-connector for "pg-connector" and the named pg-desk
-// for "pg-desk", under the disposable environment, and records every call.
-func (w *focusRealWorld) factory() CmdFactory {
-	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		bin := map[string]string{"pg-connector": w.bins.connector, "pg-desk": w.bins.desk}[name]
+// runner execs the real pg-connector for "pg-connector" and the named pg-desk
+// for "pg-desk", under the disposable environment (plus whatever the call
+// adds, the beads dir), and records every call.
+func (w *focusRealWorld) runner() Runner {
+	return func(ctx context.Context, c Call) CallResult {
+		bin := map[string]string{"pg-connector": w.bins.connector, "pg-desk": w.bins.desk}[c.Name]
 		if bin == "" {
-			w.t.Fatalf("the apply layer exec'd %q, which this test does not provide", name)
+			w.t.Fatalf("the apply layer exec'd %q, which this test does not provide", c.Name)
 		}
-		w.calls = append(w.calls, name+" "+strings.Join(args, " "))
-		cmd := exec.CommandContext(ctx, bin, args...)
-		cmd.Dir, cmd.Env = w.dir, w.env
-		return cmd
+		w.calls = append(w.calls, c.Name+" "+strings.Join(c.Args, " "))
+		cmd := exec.CommandContext(ctx, bin, c.Args...)
+		cmd.Dir = w.dir
+		cmd.Env = append(append([]string{}, w.env...), c.Env...)
+		return runCmd(ctx, cmd)
 	}
 }
 
@@ -332,7 +334,7 @@ func TestFocusHoldReleaseCycleRealBD(t *testing.T) {
 
 	var stderr bytes.Buffer
 	env := Env{
-		Command: w.factory(), Config: w.cfg(), Stderr: &stderr,
+		Runner: w.runner(), Config: w.cfg(), Stderr: &stderr,
 		Clock: func() time.Time { return time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC) },
 	}
 	// applyOne plans the single focus.item action of v and applies it through

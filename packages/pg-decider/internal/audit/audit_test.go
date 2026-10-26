@@ -3,9 +3,7 @@ package audit
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -24,30 +22,34 @@ var fixedNow = time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 func str(s string) *string { return &s }
 
 // fake stands in for pg-connector and pg-desk. It records every exec in order
-// and answers from Go; the child process is a tiny shell script that prints
-// the canned stdout and exit code and reports the beads-dir variable it saw.
+// and answers from Go in process (an apply.Runner, so no test spawns a child),
+// returning the canned stdout and exit code and noting the beads-dir variable
+// the call carried.
 type fake struct {
 	t       *testing.T
-	dir     string
 	execs   []string // "<binary> <args...>"
+	seen    []string // per exec: "set:<dir>" or "unset"
 	respond func(line string) (stdout string, exit int)
 }
 
 func newFake(t *testing.T, respond func(line string) (string, int)) *fake {
 	t.Helper()
-	return &fake{t: t, dir: t.TempDir(), respond: respond}
+	return &fake{t: t, respond: respond}
 }
 
-func (f *fake) factory() apply.CmdFactory {
-	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		line := name + " " + strings.Join(args, " ")
+func (f *fake) runner() apply.Runner {
+	return func(_ context.Context, c apply.Call) apply.CallResult {
+		line := c.Name + " " + strings.Join(c.Args, " ")
 		f.execs = append(f.execs, line)
-		seen := filepath.Join(f.dir, fmt.Sprintf("env.%d", len(f.execs)))
+		seen := "unset"
+		for _, kv := range c.Env {
+			if v, ok := strings.CutPrefix(kv, "PG_CONNECTOR_ISSUE_BEADS_DIR="); ok {
+				seen = "set:" + v
+			}
+		}
+		f.seen = append(f.seen, seen)
 		stdout, exit := f.respond(line)
-		script := `if [ "${PG_CONNECTOR_ISSUE_BEADS_DIR+x}" = x ]; then printf 'set:%s' "$PG_CONNECTOR_ISSUE_BEADS_DIR" > "$SEEN"; else printf unset > "$SEEN"; fi; printf '%s' "$OUT"; exit "$CODE"`
-		cmd := exec.CommandContext(ctx, "sh", "-c", script)
-		cmd.Env = append(os.Environ(), "SEEN="+seen, "OUT="+stdout, fmt.Sprintf("CODE=%d", exit))
-		return cmd
+		return apply.CallResult{Stdout: stdout, Code: exit}
 	}
 }
 
@@ -68,11 +70,7 @@ func (f *fake) beadsDirFor(prefix string) string {
 	f.t.Helper()
 	for i, l := range f.execs {
 		if strings.HasPrefix(l, prefix) {
-			b, err := os.ReadFile(filepath.Join(f.dir, fmt.Sprintf("env.%d", i+1)))
-			if err != nil {
-				f.t.Fatal(err)
-			}
-			return string(b)
+			return f.seen[i]
 		}
 	}
 	f.t.Fatalf("no exec with prefix %q in %q", prefix, f.execs)
@@ -84,7 +82,7 @@ func envFor(f *fake, cfg *config.Config) apply.Env {
 		cfg = &config.Config{}
 	}
 	var stderr bytes.Buffer
-	return apply.Env{Command: f.factory(), Config: cfg, Clock: func() time.Time { return fixedNow }, Stderr: &stderr}
+	return apply.Env{Runner: f.runner(), Config: cfg, Clock: func() time.Time { return fixedNow }, Stderr: &stderr}
 }
 
 func TestBodyMatchesTheGoldenFile(t *testing.T) {

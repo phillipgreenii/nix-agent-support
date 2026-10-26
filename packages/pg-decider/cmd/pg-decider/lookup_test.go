@@ -8,7 +8,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -42,17 +41,18 @@ func lookupConfig(t *testing.T, members string) {
 
 type connectorDouble struct{ calls []execRec }
 
-// trackerDouble swaps applyCommand for a connector double: `issue list` answers
-// listJSON and exits listExit; every other call answers a created id and
-// succeeds. It records every call.
+// trackerDouble swaps applyRunner for an in-process connector double: `issue
+// list` answers listJSON and exits listExit; every other call answers a
+// created id and succeeds. It records every call.
 func trackerDouble(t *testing.T, listJSON string, listExit int) *connectorDouble {
 	t.Helper()
 	d := &connectorDouble{}
-	orig := applyCommand
-	t.Cleanup(func() { applyCommand = orig })
+	orig := applyRunner
+	t.Cleanup(func() { applyRunner = orig })
 	n := 0
-	applyCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		joined := strings.Join(args, " ")
+	applyRunner = func(_ context.Context, c apply.Call) apply.CallResult {
+		name := c.Name
+		joined := strings.Join(c.Args, " ")
 		d.calls = append(d.calls, execRec{name, joined})
 		out, code := `{"result":{}}`, 0
 		switch {
@@ -62,7 +62,7 @@ func trackerDouble(t *testing.T, listJSON string, listExit int) *connectorDouble
 			n++
 			out = `{"result":{"id":"wb-new-` + strconv.Itoa(n) + `"}}`
 		}
-		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf '%s\n' "$1"; exit "$2"`, "sh", out, strconv.Itoa(code))
+		return apply.CallResult{Stdout: out + "\n", Code: code}
 	}
 	return d
 }
