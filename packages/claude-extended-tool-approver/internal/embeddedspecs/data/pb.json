@@ -87,6 +87,91 @@
     "unknownFlag": "insufficient",
     "endOfOptions": true,
     "subcommands": {
+      "actor": {
+        "name": "actor",
+        "provenance": "pb actor --help (pb built from packages/pb at pg2-28vjm, 2026-10-26)",
+        "citations": {
+          "provenance": {
+            "source": "pb actor --help: \"Print this session's actor id for a role (<session-id>-<role>)\""
+          },
+          "stdin": {
+            "source": "pb actor --help: usage \"Usage: pb actor [flags]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pb actor --help: usage \"Usage: pb actor [flags]\" and \"Output: the actor id and a newline on stdout\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pb actor --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pb actor --help: \"-h, --help   help for actor\""
+            }
+          },
+          "--role": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pb actor --help: \"--role string   actor role suffix: drain, unblock, unstick (required)\""
+            }
+          },
+          "--scratchpad": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pb actor --help: \"--scratchpad string   the session's own private (scratchpad) path; its UUID is the fallback session id\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pb actor --help: \"-h, --help   help for actor\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pb actor --help: usage \"Usage: pb actor [flags]\" takes no operands (cobra.NoArgs); any operand is left unmodeled so it abstains"
+          }
+        },
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
       "drain": {
         "name": "drain",
         "provenance": "pb drain --help (pb 0.0.0-b674b6b9, this host 2026-10-05)",

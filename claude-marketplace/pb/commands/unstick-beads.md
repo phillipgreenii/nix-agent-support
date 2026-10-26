@@ -60,8 +60,8 @@ CLI.)
 
 ## Actor id and workspace root (do this ONCE)
 
-- **ACTOR:** prefer `${CLAUDE_SESSION_ID}-unstick`. If `$CLAUDE_SESSION_ID` is unset, use the
-  UUID from this session's own scratchpad path with an `-unstick` suffix.
+- **ACTOR:** run `pb actor --role unstick --scratchpad <this session's own scratchpad dir>` and use
+  what it prints; keep it for the whole sweep (a freshly generated id is not persisted).
 - **ROOT:** `$PN_WORKSPACE_ROOT` if set, otherwise the nearest ancestor of the cwd containing
   `pn-workspace.toml`. Run every bd command as `bd -C ROOT ...`.
 - **WORKDIR:** allocated by `pb unstick prepare` (Stage 1), never by hand: a FRESH

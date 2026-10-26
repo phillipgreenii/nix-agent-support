@@ -385,6 +385,11 @@ var pluginForms = []pluginForm{
 	{"pb", "bgwait -t 120 -n 40 flake-check", evalcontract.Approve, ""},
 	{"pb", "bgwait --dir <ROOT>/.bg flake-check", evalcontract.Approve, ""},
 	{"pb", "bgwait --bogus flake-check", evalcontract.Abstain, "an unmodeled flag stays insufficient (UnknownFlagInsufficient)"},
+	// pg2-28vjm: pb actor, instructed by /drain-beads, /unblock-human-beads, /unstick-beads and pb:drain-one.
+	{"pb", "pb actor --role drain", evalcontract.Approve, ""},
+	{"pb", "pb actor --role unblock", evalcontract.Approve, ""},
+	{"pb", "pb actor --role unstick --scratchpad /tmp/claude-1/-proj/11111111-2222-4333-8444-555555555555/scratchpad", evalcontract.Approve, ""},
+	{"pb", "pb actor --role drain --force", evalcontract.Abstain, "an unmodeled flag stays insufficient (UnknownFlagInsufficient)"},
 	// pg2-qeod7: pb drain reclaim, instructed by pb:drain-stuck / pb:drain-one (pg2-v3hsj).
 	{"pb", "pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-1-drain", evalcontract.Approve, ""},
 	{"pb", "pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-1-drain --branch drain/pg2-abc12 --json", evalcontract.Approve, ""},

@@ -18,6 +18,11 @@ func TestPbInterpretation(t *testing.T) {
 		"pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-drain --json",
 		"pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-drain --branch drain/pg2-abc12 --git-timeout 2m",
 		"pb drain reclaim --help",
+		// pg2-28vjm: the session actor id the pb commands and skills instruct.
+		"pb actor --role drain",
+		"pb actor --role unblock",
+		"pb actor --role unstick --scratchpad /tmp/claude-1/-proj/11111111-2222-4333-8444-555555555555/scratchpad",
+		"pb actor --help",
 		// pg2-7z71z: a group invoked with only its help/version flag.
 		"pb --help",
 		"pb -h",
@@ -61,6 +66,9 @@ func TestPbInterpretation(t *testing.T) {
 		"pb gate check --strict",
 		"pb drain isolate --bead pg2-abc12 --repo /ws/repo --force",
 		"pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-drain --force",
+		// pg2-28vjm: unmodeled flag and stray operand on pb actor.
+		"pb actor --role drain --force",
+		"pb actor --role drain extra",
 		// A stray operand is Unmodeled.
 		"pb drain reclaim --bead pg2-abc12 --repo /ws/repo --actor sess-drain extra",
 		"pb gate check extra",

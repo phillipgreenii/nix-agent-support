@@ -6,7 +6,8 @@ import "strings"
 // /unblock-human-beads and /unstick-beads commands and its drain-one,
 // drain-stuck and pb-gate-lifecycle skills) instructs an agent to run -- `pb drain isolate`,
 // `pb drain reclaim` (pg2-qeod7), `pb gate create`, `pb gate check` and
-// `pb gate attach-verified-child`.
+// `pb gate attach-verified-child`, plus `pb actor --role <r> [--scratchpad <path>]`
+// (pg2-28vjm), which prints the session's actor id.
 //
 // Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy, verbatim): "for
 // pb *, any command which is supposed to work as part of a skill should be
@@ -49,6 +50,10 @@ import "strings"
 //     is a scratch file the orchestrator wrote moments earlier (often outside
 //     the project root), so a path-read fact would abstain on every real
 //     invocation of the documented form. The read is stated here, not hidden.
+//   - `pb actor` reads $CLAUDE_SESSION_ID / $CLAUDE_CODE_SESSION_ID and, with
+//     `--scratchpad`, PARSES the given path string for a UUID (it never touches the
+//     path on disk); it prints one line and writes nothing. Both flags are inert
+//     literals.
 //   - `pb gate check` resolves (closes) or converts `pn:applied` gate beads
 //     whose change has been applied; with `--dry-run` it changes nothing.
 //
@@ -108,6 +113,16 @@ func pbGroup(name string, subs map[string]CommandSchema) CommandSchema {
 	}
 }
 
+// pbActor is `pb actor` (pg2-28vjm). Like drain reclaim it post-dates the
+// 0.0.0-b674b6b9 host binary, so its provenance names the source build.
+func pbActor() CommandSchema {
+	s := pbLeaf("actor", map[string]FlagSpec{
+		"--role": literal1, "--scratchpad": literal1,
+	})
+	s.Provenance = "pb actor --help (pb built from packages/pb at pg2-28vjm, 2026-10-26)"
+	return s
+}
+
 var pbSchema = CommandSchema{
 	Name:         "pb",
 	Provenance:   "pb --help (pb 0.0.0-b674b6b9, this host 2026-10-05)",
@@ -115,6 +130,7 @@ var pbSchema = CommandSchema{
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 	Subcommands: map[string]CommandSchema{
+		"actor": pbActor(),
 		"drain": pbGroup("drain", map[string]CommandSchema{
 			"isolate": pbLeaf("drain isolate", map[string]FlagSpec{
 				"--bead": literal1, "--repo": literal1, "--json": inert,

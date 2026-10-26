@@ -7419,6 +7419,38 @@
     "notes": "Instructed by claude-marketplace/pb (pb:drain-stuck, pb:drain-one: reclaim the bead's worktree before releasing the claim; pg2-v3hsj)."
   },
   {
+    "case": "pb_plugin_pb_actor_drain",
+    "tags": ["pb-plugin-instructed", "pg2-28vjm"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb actor --role drain"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md, drain-one SKILL.md: the orchestrator's actor id)."
+  },
+  {
+    "case": "pb_plugin_pb_actor_unblock_scratchpad",
+    "tags": ["pb-plugin-instructed", "pg2-28vjm"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb actor --role unblock --scratchpad /tmp/claude-1/-proj/11111111-2222-4333-8444-555555555555/scratchpad"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md: actor id, scratchpad fallback)."
+  },
+  {
     "case": "pb_plugin_pb_drain_isolate_chain",
     "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
     "tool_input": {
@@ -8177,6 +8209,22 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "Pin: an unsafe inner command in the same substitution is still reviewed and keeps the whole command from approving."
+  },
+  {
+    "case": "pb_plugin_pin_pb_actor_unmodeled_flag",
+    "tags": ["pb-plugin-instructed", "pg2-28vjm", "pin"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb actor --role drain --force"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Pin: a pb form no pb skill/command instructs (or one the engine cannot dispatch) stays unmodeled; must not approve."
   },
   {
     "case": "pb_plugin_bd_ready_C",

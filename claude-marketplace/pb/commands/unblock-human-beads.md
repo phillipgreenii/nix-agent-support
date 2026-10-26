@@ -38,9 +38,8 @@ done. Completing it is `/drain-beads`' job.
 
 Pick a STABLE, UNIQUE id, and make it **distinct from any `/drain-beads` actor**:
 
-- Prefer `${CLAUDE_SESSION_ID}-unblock`. If `$CLAUDE_SESSION_ID` is unset, use the UUID
-  from your session's OWN private path (e.g. your per-session scratchpad dir) with an
-  `-unblock` suffix; last resort, generate a random UUID and remember it.
+- Run `pb actor --role unblock --scratchpad <your session's own scratchpad dir>` and use what it
+  prints. A freshly generated id is NOT persisted, so keep the printed value for the whole session.
 
 The `-unblock` suffix is load-bearing: `/drain-beads`' resume query is
 `bd list --status in_progress --assignee ID` with **no** label filter, so if this command

@@ -284,6 +284,37 @@ flowchart TD
 pb drain reclaim --bead pg2-1qcro.7 --repo "$PN_WORKSPACE_ROOT/nix-repo-base" --actor "$CLAUDE_SESSION_ID-drain"
 ```
 
+## `pb actor`
+
+Prints the actor id a session passes as `--actor` on every `bd` claim, unclaim, comment, gate and
+close: the session identifier plus a role suffix. It replaces the per-command prose that each of
+`/drain-beads`, `/unblock-human-beads`, `/unstick-beads` and `pb:drain-one` used to carry, and the
+improvised `uuidgen` shell that prose produced. Run it once per session and keep the printed value.
+
+```
+pb actor --role <drain|unblock|unstick> [--scratchpad <path>]
+```
+
+The session identifier, first match wins:
+
+1. `$CLAUDE_SESSION_ID`, else `$CLAUDE_CODE_SESSION_ID` (the name the Claude Code Bash tool exports).
+   An id with anything outside letters, digits, `.`, `-`, `_` is an error.
+2. The UUID among the components of `--scratchpad` (the last one when several; lowercased). The path
+   is only parsed, never read, and MUST be the session's OWN private path (never a shared one). A path
+   with no UUID falls through.
+3. A fresh random UUID (version 4). It cannot be persisted, so the caller MUST remember the printed
+   id for the whole session; a note on stderr says so.
+
+Then `-<role>` is appended. The suffix is load-bearing: `drain`, `unblock` and `unstick` give three
+different actors for one session, so `/drain-beads`' resume query (`bd list --status in_progress
+--assignee ID`, no label filter) never recovers another command's claims, and a dispatched subagent
+never derives its orchestrator's actor id (operator ruling `pg2-mcp1j`). An unknown or missing
+`--role` exits non-zero and names the valid roles. Output: the id and a newline on stdout.
+
+```bash
+pb actor --role drain --scratchpad "<this session's scratchpad dir>"
+```
+
 ## `pb unstick`
 
 The deterministic stages of the `/pb:unstick-beads` sweep (inventory, triage, clustering,

@@ -19,8 +19,8 @@ or you cannot quote the step you need, Read this file's path in full (and the
 The caller states these in prose when it applies the skill. Anything it does not
 state takes the default, which is exactly what /drain-beads does.
 
-- **actor** (default `<session-id>-drain`): the actor id passed as `--actor` on
-  every `bd` write. This skill and its references call it `ID`. A caller that
+- **actor** (default: the output of `pb actor --role drain`, i.e. `<session-id>-drain`): the
+  actor id passed as `--actor` on every `bd` write. This skill and its references call it `ID`. A caller that
   passes a literal actor overrides the `-drain` suffix rule (ruling `pg2-mcp1j`),
   which makes the subagent-ownership check a no-op, so only the brief ban in
   `references/delegate.md` protects subagent claims.

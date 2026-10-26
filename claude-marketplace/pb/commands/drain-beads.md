@@ -30,12 +30,13 @@ This is what lets you loop for a long time without exhausting context.
 Pick a STABLE, UNIQUE id and pass it as `--actor` on EVERY `bd`
 claim/unclaim/gate/close so your ownership never collides with another session:
 
-- Prefer `$CLAUDE_SESSION_ID` (stable across compaction), else the UUID from
-  your session's OWN private path (e.g. your scratchpad dir — never the shared
-  workspace root, or two sessions collide), else a fresh random UUID.
-  **Append a `-drain` suffix to whichever id you derive** (operator ruling,
-  `pg2-mcp1j`) — without it a dispatched subagent would derive its
-  ORCHESTRATOR'S OWN actor id, making ownership checks a no-op.
+- Run `pb actor --role drain --scratchpad <your session's own scratchpad dir>` and use
+  what it prints as ID. (Its fallback chain is stated once, in `pb actor --help`; the
+  scratchpad MUST be your session's OWN private path, never the shared workspace root,
+  or two sessions collide. A freshly generated id is NOT persisted, so keep the printed
+  value for the whole session.) The `-drain` suffix is load-bearing (operator ruling,
+  `pg2-mcp1j`): without it a dispatched subagent would derive its ORCHESTRATOR'S OWN
+  actor id, making ownership checks a no-op.
 
 Refer to it below as ID. (Across a full process restart your id may change; the
 resume step then won't find an earlier-claimed bead.)

@@ -26,6 +26,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newGateCmd())
 	root.AddCommand(newDrainCmd())
 	root.AddCommand(newUnstickCmd())
+	root.AddCommand(newActorCmd())
 	return root
 }
 
