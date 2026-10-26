@@ -35,6 +35,33 @@ branch on it), it MUST be a distinct value >= 2, with 1 reserved for generic/une
 MUST be isolated; if they modify files directly, the test MUST generate the scenario in a temp
 directory.
 
+### Speed And Scope: What Counts As A Unit Test
+
+A unit test MUST need minimal setup and fixtures, MUST pass in any order, and MUST NOT depend on
+another test having run. The expected cost (operator ruling, Phillip, 2026-10-25):
+
+- a single test takes milliseconds;
+- a package's tests take seconds;
+- the unit tests of a whole app MAY take a minute or two, and there is no hard limit on that total.
+
+A test that cannot meet this is NOT a unit test, whatever its file is called. Two kinds are the
+usual offenders and MUST NOT run in the unit gate (`go test ./...`, a `*-go-tests` check, the
+`run-unit-tests` hook, `pg-hooks run pre-commit` or `pre-land`), and MUST NOT block a commit or a
+land:
+
+- a load, soak or scale test, including any simulation of elapsed time or of many entities;
+- an integration or end-to-end test that spans several processes or runs a whole daemon.
+
+A fast, single-process test that runs the real tool against a hermetic fixture (the V-3 case, such
+as a real `git` in `x/gittest`) stays a unit test.
+
+Such a test MAY stay in the repo. It MUST sit behind a build tag or an opt-in switch AND have its
+own check that runs it (`phillipg-nix-repo-base` ADR 0024: a suite that nothing runs cannot fail,
+so it is not a gate). When a change warrants running it, the agent MUST file a bead gated on that
+change being deployed (`pb:pb-gate-lifecycle`), whose work is to run the suite against `main`. An
+agent MUST NOT raise a package test timeout (`-timeout 30m`) to make a slow test fit the unit gate:
+the timeout is the sign the test is in the wrong place.
+
 ### Tests That Need Git
 
 A test that needs a git repository MUST get it from the shared hermetic fixture library for its

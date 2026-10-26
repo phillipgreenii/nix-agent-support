@@ -73,6 +73,23 @@ A-3: a brief that lists relative paths without a root causes exactly this defect
   database to close "verify after apply" beads. The landed guard is
   `packages/pg-wi-flow/pg-wi-flow/tests/test-pg-wi-flow-integration.bats` (real `bd`, throwaway
   embedded Dolt database).
+- V-4 (operator ruling, Phillip, 2026-10-25, verbatim: "unit tests should run with minimual
+  setup/fixtures. the expectation is a single test should be millisconds, packages of tets should be
+  measured in seconds. unit tests for a full app, could take a minute or two, there isn't a hard
+  limit on that. but unit tests should be very fast and can be run in any order"; and "load tests
+  and integration tests are not unit tests and should not run as unit tests and should not be used
+  to block commits or lands. if there is a concern, then a bead gated on the code being deployed
+  should be created and it can run the integartion/load tests based upon main"). Provenance: the
+  pg-connector-github `internal/loadtest` package (150 simulated PRs over 19 minutes of fake time,
+  run twice plus three mutation runs) sat inside `checks.<system>.pg-connector-go-tests`, so every
+  build and land paid for it; on 2026-10-25 a build ran the package 1800.891s and died with
+  `panic: test timed out after 30m0s` (bead `pg2-7r19vr` moves it out, `pg2-4u5i2h` diagnoses and
+  speeds it up). Its `-timeout 30m` flag in `flake.nix` was the earlier symptom: the fix then was to
+  raise the ceiling instead of moving the test. The "own check" half is `phillipg-nix-repo-base`
+  ADR 0024 (a tagged-out suite that nothing runs rotted in `modules/pn`, bead `pg2-nuacd`); the
+  deploy-gated run against `main` is what keeps an on-demand suite from becoming that again. Existing
+  rules said nothing on test cost or kind: ADR 0037 limits which commands run tests and HK-2 keeps
+  `nix` out of hooks, neither classifies a test.
 
 ## Timeouts (L-1..L-3) and host load (L-4)
 
