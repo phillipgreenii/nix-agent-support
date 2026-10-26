@@ -20,7 +20,9 @@ import (
 //	                    (no argument a test passes carries a tab or a newline)
 //	argv0.log           appended to: the path the script was run as, one line per call
 //	env.<pid>.log       written when record_env exists: the call's whole
-//	                    environment, sorted, one file per call
+//	                    environment, sorted, one file per call; written to
+//	                    env.<pid>.tmp and renamed, so a reader never sees a
+//	                    half-written one (pg2-tqgth3)
 //	issue.<KEY>.json    the issue document `issue -- KEY` prints and a search
 //	                    carries as one item (one line)
 //	query.<q>.keys      the keys (one per line) a search of the JQL <q> answers,
@@ -59,7 +61,7 @@ printf '%s\n' "$line" >>"$dir/calls.log"
 printf '%s\n' "$0" >>"$dir/argv0.log"
 
 if [ -f "$dir/record_env" ]; then
-  env | sort >"$dir/env.$$.log"
+  env | sort >"$dir/env.$$.tmp" && mv "$dir/env.$$.tmp" "$dir/env.$$.log"
 fi
 
 if [ -f "$dir/hold" ]; then

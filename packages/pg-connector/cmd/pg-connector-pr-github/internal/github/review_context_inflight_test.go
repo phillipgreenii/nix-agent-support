@@ -139,9 +139,15 @@ func TestListCommentsReport_StalledFirstIssueCommentPageIsReportedTruncated(t *t
 // the threads read so far are returned as a truncated connection and the issue
 // comments, whose time was not eaten, are read complete.
 func TestListCommentsReport_SlowThreadPageIsCutAtItsShare(t *testing.T) {
+	// The stalled page waits out half the budget in real time, and the pages
+	// before it (20 threads) and the issue-comment pages after it (5) must fit in
+	// the first half and the 30 percent of the budget left behind it. A 2 s budget
+	// left them 1 s and 0.6 s, which a loaded host overran (pg2-tqgth3); 6 s gives
+	// three times the room for a 3 s stall.
+	const budget = 6 * time.Second
 	r := newStallRunner(t, func(kind string, idx int) bool { return kind == "threads" && idx >= 2 })
 	p := NewWithRunner(r)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 
 	res, err := p.ListCommentsReport(ctx, "foo/bar", 1)

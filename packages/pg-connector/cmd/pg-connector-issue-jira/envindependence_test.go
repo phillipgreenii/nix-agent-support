@@ -68,19 +68,22 @@ func TestEnvIndependenceServeUnderEnvDashI(t *testing.T) {
 	})
 
 	// It starts and answers a client: poll until the gate is open and the query
-	// has been answered through the configured pjira.
+	// has been answered through the configured pjira. The wait is on the
+	// observable condition (an answer, or the daemon exiting) with generous bounds
+	// that only a hung daemon reaches, not a fixed few seconds a loaded host can
+	// overrun (pg2-tqgth3).
 	listReq := servetest.Op("list", `{"query":"`+servetest.QueryMine+`"}`)
 	var res struct {
 		PresentIDs []string `json:"present_ids"`
 	}
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(envAnswerWait)
 	for {
 		select {
 		case <-exited:
 			t.Fatalf("the daemon exited before it answered (%v); output: %s", waitErr, out.String())
 		default:
 		}
-		resp, err := d.Call(listReq, 20*time.Second)
+		resp, err := d.Call(listReq, envCallWait)
 		if err == nil && resp.Error == nil {
 			if err := json.Unmarshal(resp.Result, &res); err != nil {
 				t.Fatalf("decode the list result %s: %v", resp.Result, err)
@@ -111,7 +114,20 @@ func TestEnvIndependenceServeUnderEnvDashI(t *testing.T) {
 	}
 	// And every call got the configured pjira_env and nothing else: the shell
 	// that runs the shim adds only PWD, SHLVL, OLDPWD and _.
-	envs := d.Shim.Env()
+	// The daemon may still have a call in flight (the shim logs a call's argv0
+	// first and its environment a moment later, and a loaded host stretches the
+	// gap), so wait until every call seen has recorded its environment before
+	// comparing the two counts (pg2-tqgth3).
+	var envs [][]string
+	settle := time.Now().Add(envAnswerWait)
+	for {
+		argv0 = d.Shim.Argv0()
+		envs = d.Shim.Env()
+		if len(envs) == len(argv0) || time.Now().After(settle) {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 	if len(envs) != len(argv0) {
 		t.Errorf("recorded %d environments for %d calls", len(envs), len(argv0))
 	}
@@ -169,4 +185,13 @@ func (l *lockedBuf) String() string {
 var (
 	envIssueA = servetest.Open("EXA-1")
 	envIssueB = servetest.Open("EXA-2")
+)
+
+const (
+	// envAnswerWait bounds the whole wait for the daemon's first answer and
+	// envCallWait one attempt at it. Both are far above what an idle host needs
+	// (well under a second): a load-average-50 host overran the earlier 30 s and
+	// 20 s (pg2-tqgth3), and only a hung daemon should ever reach these.
+	envAnswerWait = 3 * time.Minute
+	envCallWait   = 90 * time.Second
 )

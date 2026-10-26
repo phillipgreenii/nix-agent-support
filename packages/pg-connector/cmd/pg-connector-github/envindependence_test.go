@@ -78,17 +78,21 @@ func TestEnvIndependenceServeUnderEnvDashI(t *testing.T) {
 		}
 	})
 
-	// It starts and answers a client: poll until the gate is open.
+	// It starts and answers a client: poll until the gate is open. A loaded host
+	// can take far longer than a fixed few seconds to start the daemon and fetch
+	// the summaries behind a list, so the wait is on the observable condition (an
+	// answer, or the daemon exiting) with generous bounds that only a hung daemon
+	// reaches (pg2-tqgth3).
 	listArgs := json.RawMessage(`{"query":"` + servetest.QueryMine + `"}`)
 	var resp scriptout.Response
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(envAnswerWait)
 	for {
 		select {
 		case <-exited:
 			t.Fatalf("the daemon exited before it answered (%v); output: %s", waitErr, out.String())
 		default:
 		}
-		resp, err = d.Call("pr", scriptout.Request{Op: scriptout.OpList, Args: listArgs}, 20*time.Second)
+		resp, err = d.Call("pr", scriptout.Request{Op: scriptout.OpList, Args: listArgs}, envCallWait)
 		if err == nil && resp.Error == nil {
 			break
 		}
@@ -167,4 +171,13 @@ func (l *lockedBuf) String() string {
 var (
 	envPRA = servetest.PR{NodeID: "PR_env_a", Repo: "example-org/widget", Number: 3}
 	envPRB = servetest.PR{NodeID: "PR_env_b", Repo: "example-org/gadget", Number: 7}
+)
+
+const (
+	// envAnswerWait bounds the whole wait for the daemon's first answer and
+	// envCallWait one attempt at it. Both are far above what an idle host needs
+	// (well under a second): a load-average-50 host overran the earlier 30 s and
+	// 20 s (pg2-tqgth3), and only a hung daemon should ever reach these.
+	envAnswerWait = 3 * time.Minute
+	envCallWait   = 90 * time.Second
 )
