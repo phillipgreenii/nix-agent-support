@@ -5413,6 +5413,11 @@
                       pkgs.wtdone
                       pkgs.handoff-create
                       pkgs.session-mode
+                      # pg2-niyyq: the plugin support tools specced in
+                      # cmddesc/registry_plugin_support_tools.go.
+                      pkgs.hand-to-human
+                      pkgs.wtnew
+                      pkgs.pg-router
                       pkgs.pg-wi-flow
                       pkgs.pg-ccaudit
                       pkgs.claude-extended-tool-approver

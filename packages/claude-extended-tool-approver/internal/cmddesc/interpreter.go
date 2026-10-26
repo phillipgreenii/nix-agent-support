@@ -14,6 +14,14 @@ import (
 type Context struct {
 	CWD string
 	Env map[string]string
+	// Vars is the in-command shell variables the leaf being interpreted can rely
+	// on, as literal values (cmdparse.StraightLineVars; bead pg2-niyyq): the plain,
+	// unconditional assignments that precede it in the SAME expression. nil — the
+	// ordinary case — means "none", and a live expansion then stays unresolved. The
+	// only reader is program(): the outer shell expands `$NAME` inside a
+	// double-quoted `bash -c "cd $WT && ..."` script BEFORE bash starts, so the
+	// program the child runs is the expanded text.
+	Vars map[string]string
 }
 
 // ChildInvocation is a nested command an interpreter found inside an operand
@@ -702,8 +710,14 @@ func (st *interpState) envAssign(op pendingOp, source string, live bool) {
 // labelled by the flag or operand that carried the program.
 func (st *interpState) program(dialect string, op pendingOp, source string) {
 	tok := op.tok
+	live := st.leaf.ArgIsLiveExpansion(op.idx)
+	if live && dialect == "shell" {
+		if expanded, ok := st.resolveStraightLine(tok); ok {
+			tok, live = expanded, false
+		}
+	}
 	st.effects = append(st.effects, Effect{Kind: EffectProgram, Program: tok, Dialect: dialect, Source: source})
-	if st.leaf.ArgIsLiveExpansion(op.idx) {
+	if live {
 		st.fail("program operand at %s is a runtime expansion", source)
 		return
 	}
@@ -1036,4 +1050,34 @@ func expandTagShorthand(refs []string) []string {
 		out = append(out, refs[i])
 	}
 	return out
+}
+
+// resolveStraightLine expands the in-command variable references of a shell
+// program text (the operand of `bash -c`) and reports whether the result is the
+// exact text the child shell will receive (bead pg2-niyyq). It is all-or-nothing
+// and fails closed; every one of these MUST hold:
+//
+//   - the leaf carries Vars (cmdparse.StraightLineVars: unconditional literal
+//     assignments earlier in the same expression, nothing else before the leaf);
+//   - the leaf's source holds no single quote and no backslash. Words arrive
+//     post-unquote, so `"cd $WT"' $WT'` and `"\$WT $WT"` are indistinguishable
+//     from a plain double-quoted reference to the shell variable, yet the child
+//     shell would see a literal `$WT` it resolves from ITS environment (the
+//     variable is not exported, so empty). Refusing both quote forms makes every
+//     `$` in the program text a reference the OUTER shell expands;
+//   - every referenced name is bound to a path-ish value (StraightLineSafeValue),
+//     so unquoted splitting and globbing cannot change the text;
+//   - the whole token resolves (cmdparse.ExpandInCommand): an unknown name, a
+//     `${NAME:-x}`, `$(...)`, `$1` or a glob leaves the operand a live expansion.
+func (st *interpState) resolveStraightLine(tok string) (string, bool) {
+	if len(st.ctx.Vars) == 0 || strings.ContainsAny(st.leaf.Raw, "'\\") {
+		return "", false
+	}
+	safe := make(map[string]string, len(st.ctx.Vars))
+	for name, value := range st.ctx.Vars {
+		if cmdparse.StraightLineSafeValue(value) {
+			safe[name] = value
+		}
+	}
+	return cmdparse.ExpandInCommand(tok, safe)
 }

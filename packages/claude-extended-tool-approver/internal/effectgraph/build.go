@@ -381,6 +381,18 @@ func (b *builder) interpretRange(start, end int, reg cmddesc.Registry, ctx cmdde
 			stages[n.Scope+"\x00"+fmt.Sprint(n.Leaf.PipelineID)]++
 		}
 	}
+	// scopeLeaves groups the range's leaves by scope, in node (= parse) order, so a
+	// leaf's in-command variables are read from ITS OWN scope's leaves only
+	// (cmdparse.StraightLineVars; bead pg2-niyyq). A child `bash -c` or a
+	// substitution is a different shell: it never inherits the parent's Vars.
+	scopeLeaves := map[string][]cmdparse.ParsedCommand{}
+	leafIndex := map[int]int{}
+	for i := start; i < end; i++ {
+		if n := b.g.Nodes[i]; n.Kind == NodeCommand && n.Leaf != nil {
+			leafIndex[i] = len(scopeLeaves[n.Scope])
+			scopeLeaves[n.Scope] = append(scopeLeaves[n.Scope], *n.Leaf)
+		}
+	}
 	for i := start; i < end; i++ {
 		n := b.g.Nodes[i]
 		if n.Kind != NodeCommand {
@@ -390,6 +402,7 @@ func (b *builder) interpretRange(start, end int, reg cmddesc.Registry, ctx cmdde
 		state := lookupCWD(states, n.Scope, n.Leaf.SubshellScope, ctx.CWD)
 		nodeCtx := ctx
 		nodeCtx.CWD = state.cwd
+		nodeCtx.Vars = cmdparse.StraightLineVars(scopeLeaves[n.Scope], leafIndex[i])
 		state.exec = tracker.at(i)
 		chdir := b.interpret(i, reg, nodeCtx, chain, state)
 		if chdir == nil {

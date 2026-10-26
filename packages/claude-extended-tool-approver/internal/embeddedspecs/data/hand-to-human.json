@@ -1,0 +1,203 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "hand-to-human",
+  "command": {
+    "name": "hand-to-human",
+    "provenance": "hand-to-human --help ('Hand a bead to the operator (human + attention, escalated removed, one update)'), packages/hand-to-human show_help at this commit (the host's installed copy predates --also-add, --note and --if-*)",
+    "citations": {
+      "provenance": {
+        "source": "hand-to-human --help, first line: \"hand-to-human: Hand a bead to the operator (human + attention, escalated removed, one update)\"; packages/hand-to-human/hand-to-human/hand-to-human.sh show_help"
+      },
+      "stdin": {
+        "source": "hand-to-human --help: no input is read from stdin; every input is an argument (usage line \"hand-to-human ID [--backend NAME | --bd-dir DIR] [--also-remove LABEL]... [--actor ID]\")"
+      },
+      "stdout": {
+        "source": "hand-to-human --help, Output: \"the bead id on stdout; what the read-back verified on stderr\" (one id, metadata)"
+      },
+      "unknownFlag": {
+        "source": "hand-to-human --help lists exactly: --backend, --bd-dir, --also-remove, --actor, -h/--help, -v/--version; any other flag is unmodeled and insufficient (usage error, exit 2)"
+      }
+    },
+    "flags": {
+      "--actor": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help: \"--actor ID  Actor for the audit trail (bd only; default: bd's own resolution from BEADS_ACTOR).\" an inert identity string"
+        }
+      },
+      "--also-add": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help (packages/hand-to-human/hand-to-human/hand-to-human.sh show_help): \"--also-add L  Add one more label in the same call (repeatable) ... `escalated`, `human` and `attention` are refused.\" a label name, inert"
+        }
+      },
+      "--also-remove": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help: \"--also-remove L  Remove one more label in the same call (repeatable), for example needs-split-review.\" a label name, inert"
+        }
+      },
+      "--backend": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help: \"--backend NAME  Reach the tracker through `pg-connector issue update --backend NAME` instead of bd\" a backend name, inert"
+        }
+      },
+      "--bd-dir": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help: \"--bd-dir DIR  Tracker root to run bd against (bd -C DIR). Default: the caller's current directory.\" a directory the tool reads through bd -C"
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help: \"-h, --help  Show this help message\""
+        }
+      },
+      "--if-assignee": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help: \"--if-assignee V  Claim guard (bd only): write only when the bead's assignee is V now (an empty V means unassigned)\" a compare value, inert"
+        }
+      },
+      "--if-status": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help: \"--if-status V  Claim guard (bd only): write only when the bead's status is V now (for example open). Needs --note.\" a compare value, inert"
+        }
+      },
+      "--note": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help: \"--note TEXT  Append TEXT to the bead's notes in the same call (bd only: `bd update --append-notes`).\" free text handed to bd as data, inert"
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help: \"-v, --version  Show version information\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help: \"-h, --help  Show this help message\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "hand-to-human --help: \"-v, --version  Show version information\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "literal"
+        }
+      ],
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "hand-to-human --help, Usage: \"hand-to-human ID [--backend NAME | --bd-dir DIR] ...\": ID is the one positional, a bead id (inert)"
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "tracker-write"
+        },
+        "target": "beads",
+        "citation": {
+          "source": "hand-to-human --help: \"Adds the labels `human` and `attention` to bead ID and removes `escalated`, all in ONE update call\" followed by a read-back (`bd show`): a beads tracker write, the same effect as handoff-create's bd create"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

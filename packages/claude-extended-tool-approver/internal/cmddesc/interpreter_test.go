@@ -290,6 +290,9 @@ func TestRegistryNames(t *testing.T) {
 	)
 	// pg2-19hdz: the class D publish script that needed a new policy judgment.
 	want = append(want, "rc-publish")
+	// pg2-niyyq: the plugin support tools whose schema was missing
+	// (registry_plugin_support_tools.go).
+	want = append(want, "hand-to-human", "pg-router", "wtnew")
 	// pg2-dbrsg: the shell builtins skills' control-flow statements use.
 	want = append(want, "exit", "pwd", "read", "shift")
 	// pg2-slsc0: the read-only probes the pb plugin instructs

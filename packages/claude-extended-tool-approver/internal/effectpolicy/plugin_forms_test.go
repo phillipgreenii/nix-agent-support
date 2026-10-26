@@ -49,7 +49,11 @@ type pluginForm struct {
 //     into the effect engine is a separate piece of work, not done here), so
 //     even `WT=/abs && git -C "$WT" status` abstains. Approval applies to the
 //     LITERAL-path form agents can type (`git -C /abs/path status`). Skill
-//     templates that say `"$WT"` should instruct a literal absolute path.
+//     templates that say `"$WT"` should instruct a literal absolute path. The one
+//     exception (pg2-niyyq) is the double-quoted program of a `bash -c`, which the
+//     OUTER shell expands before bash starts: `WT=/abs` on its own statement
+//     followed by `bgrun x -- bash -c "cd $WT && ..."` is judged as the expanded
+//     text (cmdparse.StraightLineVars; TestPluginSupportToolDecisions).
 //   - A LIVE EXPANSION AS A POSITIONAL (`bd show "$ID"`, `git log $X`;
 //     pg2-5ctay) is a runtime value that may start with `-` and be parsed as an
 //     option the schema never modeled (X=--output=/tmp/pwn), so it abstains
@@ -483,7 +487,7 @@ var pluginForms = []pluginForm{
 	// Quoted-variable path forms stay non-approvable; the literal-path form
 	// approves (see the SHELL STATEMENT FORMS note above).
 	{"integrate-branch", `git -C "$WT" status`, evalcontract.Abstain, "quoted variable as a path: a runtime value, approvable only as a literal path"},
-	{"integrate-branch", `WT=<ROOT> && git -C "$WT" status`, evalcontract.Abstain, "even a literal in-command assignment is not resolved by this engine (the old engine's InCommandVars seam is not threaded in); type the literal path"},
+	{"integrate-branch", `WT=<ROOT> && git -C "$WT" status`, evalcontract.Abstain, "a literal in-command assignment is resolved ONLY inside a `bash -c` program operand (pg2-niyyq, cmdparse.StraightLineVars); a path operand such as `git -C \"$WT\"` is not, so type the literal path"},
 	{"integrate-branch", `WT="$(pwd)"; git -C "$WT" status`, evalcontract.Abstain, "the variable holds a runtime value, not a literal"},
 	{"integrate-branch", `git -C <ROOT> status`, evalcontract.Approve, ""},
 
@@ -606,6 +610,16 @@ var pluginForms = []pluginForm{
 	{"pb", "tr a-z A-Z < /home/nobody/secret.txt", evalcontract.Abstain, "the stdin redirect reads a path outside every known zone"},
 	// An unsafe inner command in the same substitution must still deny.
 	{"pb", `echo "$(uuidgen | tr A-Z a-z; rm -rf /home/nobody/x)-drain"`, evalcontract.Abstain, "rm of a path outside every known zone is not approved, so the whole substitution is not"},
+	// pg2-niyyq (operator ruling, Phillip, 2026-10-25: all custom plugin support
+	// tools MUST be auto-approved): hand-to-human, wtnew and the read-only pg-router
+	// subcommands. The full per-tool decision table, the wrapper-laundering rows and
+	// the in-command variable rows are TestPluginSupportToolDecisions.
+	{"pb", `hand-to-human pg2-abc12 --actor sess-1`, evalcontract.Approve, ""},
+	{"pb", `hand-to-human pg2-abc12 --also-add stale-escalation --note "Automation timed out." --if-assignee "" --if-status open`, evalcontract.Approve, ""},
+	{"pb", `pg-router gate list`, evalcontract.Approve, ""},
+	{"pb", `pg-router pause`, evalcontract.Abstain, "sets the pool-wide SYSTEM_PAUSE gate: a mutating subcommand, not blanket-approved"},
+	{"integrate-branch", `wtnew pg2-abc12`, evalcontract.Approve, ""},
+	{"integrate-branch", "WT=<ROOT>\nbgrun preland-x -- bash -c \"cd $WT && integrate-branch-support --prek-branch-diff\"", evalcontract.Approve, ""},
 }
 
 // TestPluginInstructedForms runs every inventoried form through the full

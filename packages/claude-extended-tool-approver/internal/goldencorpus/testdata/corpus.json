@@ -12903,5 +12903,338 @@
     "rules_config": {},
     "expected_verdict": "approve",
     "notes": "pg2-xj975: an Exec fact is judged against the cd-tracked directory, not the request cwd. A cd to the same trusted directory keeps the approval."
+  },
+  {
+    "case": "support_tool_prek_branch_diff_compound_var_newline_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "WT={{WORKSPACE_SET}}\nbgrun preland-x -- bash -c \"cd $WT && integrate-branch-support --prek-branch-diff\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-niyyq: the pre-land compound the 119 logged rows carry. The worktree is assigned on its own statement and the double-quoted script is expanded by the outer shell, so the child program is `cd <dir> && integrate-branch-support --prek-branch-diff`, approved because every inner command is."
+  },
+  {
+    "case": "support_tool_prek_branch_diff_compound_var_semicolon_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "WT={{WORKSPACE_SET}}; bgrun preland-x -- bash -c \"cd $WT && integrate-branch-support --prek-branch-diff\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-niyyq: same as the newline spelling."
+  },
+  {
+    "case": "support_tool_prek_branch_diff_compound_literal_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bgrun preland-x -- bash -c \"cd {{WORKSPACE_SET}} && integrate-branch-support --prek-branch-diff\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-niyyq: the literal-path spelling of the same compound."
+  },
+  {
+    "case": "support_tool_hand_to_human_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "hand-to-human pg2-abc12 --actor sess-1 --also-remove needs-split-review"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-niyyq (operator ruling, Phillip, 2026-10-25: all custom plugin support tools MUST be auto-approved): hand-to-human is one bd update of labels plus a read-back, the beads bookkeeping write bd update already is."
+  },
+  {
+    "case": "support_tool_wtnew_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "wtnew pg2-abc12 --base origin/main" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-niyyq: wtnew creates one worktree under .worktrees and prints read-only integrate-branch-support facts; git worktree add already approves."
+  },
+  {
+    "case": "support_tool_pg_router_gate_list_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-router gate list --json" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-niyyq: read-only inspection of the running core."
+  },
+  {
+    "case": "support_tool_pg_router_config_check_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-router config check" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-niyyq: stats the configured handler files, runs none."
+  },
+  {
+    "case": "support_tool_pg_router_pause_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-router pause" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq: sets the pool-wide SYSTEM_PAUSE gate; a mutating subcommand a blanket approval would hand to any session, so it abstains."
+  },
+  {
+    "case": "support_tool_pg_router_resume_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-router resume --all" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq: clears every gate on the running core; abstains."
+  },
+  {
+    "case": "support_tool_pg_router_gate_set_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-router gate set LOW_DISK_USAGE" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq: sets a gate; abstains."
+  },
+  {
+    "case": "support_tool_pg_router_doctor_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-router doctor" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq: runs every enabled handler's validate (configured executables); abstains."
+  },
+  {
+    "case": "support_tool_pg_router_status_socket_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-router status --socket /tmp/other.sock" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq: a caller-chosen socket is unmodeled."
+  },
+  {
+    "case": "support_tool_bgkill_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bgkill flake-check" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq: ADR 0104 approves bgkill only for a job THIS session launched, session state a spec cannot express; abstains in the spec engine."
+  },
+  {
+    "case": "support_tool_hand_to_human_unknown_flag_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "hand-to-human pg2-abc12 --bogus" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq: an unmodeled flag stays insufficient."
+  },
+  {
+    "case": "support_tool_bgrun_launders_rm_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bgrun x -- rm -rf /home/nobody/x" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq wrapper-laundering fixture: bgrun approves exactly when the wrapped command does; rm of a path outside every write zone is not approved."
+  },
+  {
+    "case": "support_tool_bash_c_launders_rm_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bgrun x -- bash -c \"cd /repo && rm -rf /home/nobody/x\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq wrapper-laundering fixture: the bash -c payload is judged command by command."
+  },
+  {
+    "case": "support_tool_var_compound_launders_rm_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "WT={{WORKSPACE_SET}}\nbgrun x -- bash -c \"cd $WT && rm -rf /home/nobody/x\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq wrapper-laundering fixture: the resolved variable does not launder the unsafe inner command."
+  },
+  {
+    "case": "support_tool_var_compound_prefix_assignment_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "WT={{WORKSPACE_SET}} bgrun x -- bash -c \"cd $WT && integrate-branch-support --prek-branch-diff\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq: a PREFIX assignment is applied after the outer shell expands $WT, so the script really reads an empty value; never resolved."
+  },
+  {
+    "case": "support_tool_var_compound_single_quoted_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "WT={{WORKSPACE_SET}}\nbgrun x -- bash -c 'cd $WT && integrate-branch-support --prek-branch-diff'"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq: single-quoted, so the child shell reads $WT from its own environment, where it is not exported."
+  },
+  {
+    "case": "support_tool_var_compound_conditional_assignment_not_approve",
+    "tags": ["plugin-support-tool", "pg2-niyyq"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "true || WT={{WORKSPACE_SET}}\nbgrun x -- bash -c \"cd $WT && integrate-branch-support --prek-branch-diff\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["go.mod"],
+      "workspace_cwd": "set"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-niyyq: the assignment may not have run."
   }
 ]

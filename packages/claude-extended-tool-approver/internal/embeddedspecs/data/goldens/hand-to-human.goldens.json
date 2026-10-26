@@ -1,0 +1,71 @@
+{
+  "version": "v1",
+  "command": "hand-to-human",
+  "generatedAt": "2026-10-26",
+  "flags": {
+    "--actor": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--also-add": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--also-remove": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--backend": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--bd-dir": {
+      "role": "path-read",
+      "verdict": "context-dependent",
+      "policyBasis": "effectpolicy.PathAccessPolicy: a tracker root inside a read zone of the project approves; outside every known zone it abstains (depends on the request cwd and zones)"
+    },
+    "--help": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--if-assignee": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--if-status": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--note": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--version": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "-h": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "-v": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    }
+  },
+  "positionals": {
+    "verdict": "approve",
+    "policyBasis": "the bead id is a Literal operand (inert); the node's implicit beads tracker-write is judged by effectpolicy.RemoteMutation (the same effect bd update already carries, approved)"
+  }
+}

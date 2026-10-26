@@ -1136,5 +1136,6 @@ func pluginToolSchemas() []CommandSchema {
 		cetaSchema, rgSchema, fdSchema, duSchema, lsofSchema, launchctlSchema, manSchema,
 		uuidgenSchema, trSchema,
 	}
+	out = append(out, pluginSupportToolSchemas()...)
 	return append(out, pluginScriptSchemas()...)
 }

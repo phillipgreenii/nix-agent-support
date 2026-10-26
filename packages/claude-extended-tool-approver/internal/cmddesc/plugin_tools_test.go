@@ -430,3 +430,57 @@ func TestTrOperandsAreCharacterSetsNotFiles(t *testing.T) {
 		t.Errorf("uuidgen takes no operands; an operand must make it insufficient")
 	}
 }
+
+// TestShellProgramResolvesStraightLineVars (bead pg2-niyyq): the operand of
+// `bash -c "cd $WT && ..."` is expanded by the OUTER shell, so the program the
+// child runs is the text with the straight-line value spliced in. It resolves only
+// when the leaf carries Vars AND its source holds no quote or backslash that could
+// make some `$` something other than the outer shell's reference, AND every value
+// is path-ish.
+func TestShellProgramResolvesStraightLineVars(t *testing.T) {
+	bash, ok := DefaultRegistry().Lookup("bash")
+	if !ok {
+		t.Fatal("bash not registered")
+	}
+	in := GenericInterpreter{}
+	programOf := func(res Interpretation) string {
+		for _, e := range res.Effects {
+			if e.Kind == EffectProgram {
+				return e.Program
+			}
+		}
+		return ""
+	}
+	cases := []struct {
+		name    string
+		command string
+		vars    map[string]string
+		want    string // expanded program, "" = must stay insufficient
+	}{
+		{"resolves", `bash -c "cd $WT && true"`, map[string]string{"WT": "/x/y"}, "cd /x/y && true"},
+		{"braced", `bash -c "cd ${WT} && true"`, map[string]string{"WT": "/x/y"}, "cd /x/y && true"},
+		{"no vars", `bash -c "cd $WT && true"`, nil, ""},
+		{"unknown name", `bash -c "cd $OTHER && true"`, map[string]string{"WT": "/x/y"}, ""},
+		{"value with a space", `bash -c "cd $WT && true"`, map[string]string{"WT": "/x y"}, ""},
+		{"value with an operator", `bash -c "cd $WT && true"`, map[string]string{"WT": "/x;rm"}, ""},
+		{"empty value", `bash -c "cd $WT && true"`, map[string]string{"WT": ""}, ""},
+		{"single quote anywhere in the leaf", `bash -c "cd $WT"' $WT'`, map[string]string{"WT": "/x/y"}, ""},
+		{"escaped dollar in the leaf", `bash -c "cd $WT && echo \$WT"`, map[string]string{"WT": "/x/y"}, ""},
+		{"default-value form", `bash -c "cd ${WT:-/etc}"`, map[string]string{"WT": "/x/y"}, ""},
+		{"command substitution beside it", `bash -c "cd $WT && $(pwd)"`, map[string]string{"WT": "/x/y"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res := in.Interpret(leaf(t, c.command), bash, Context{Vars: c.vars})
+			if c.want == "" {
+				if res.Sufficient {
+					t.Fatalf("resolved to %q, want insufficient", programOf(res))
+				}
+				return
+			}
+			if !res.Sufficient || programOf(res) != c.want {
+				t.Fatalf("sufficient=%v program=%q (%s), want %q", res.Sufficient, programOf(res), res.Insufficiency, c.want)
+			}
+		})
+	}
+}

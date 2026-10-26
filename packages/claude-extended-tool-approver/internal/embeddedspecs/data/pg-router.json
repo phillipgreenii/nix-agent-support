@@ -1,0 +1,358 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pg-router",
+  "command": {
+    "name": "pg-router",
+    "provenance": "pg-router --help ('pg-router routes typed events from configured sources through a durable queue'), this host 2026-10-26 (help hash identical to the source build at this commit)",
+    "citations": {
+      "provenance": {
+        "source": "pg-router --help, first line: \"usage: pg-router [--version | --help] [run ... | status [--json] ...]\" and \"pg-router routes typed events from configured sources through a durable queue to configured handler roles\""
+      },
+      "stdin": {
+        "source": "pg-router --help: no modeled subcommand reads stdin (ingest-event and self-status, the callbacks that do, are not modeled)"
+      },
+      "stdout": {
+        "source": "pg-router --help: operator subcommands print text, or JSON with --json; status and gate list report the running core's state (content)"
+      },
+      "unknownFlag": {
+        "source": "pg-router --help: top level takes only [--version | --help]; --socket, --token and the run-scoped selectors belong to subcommands this spec does not model"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-router --help usage line: \"pg-router [--version | --help] ...\" and \"help  print this help and exit\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-router --help usage line: \"pg-router [--version | --help] ...\" and \"version  print the version and exit\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-router --help: `-h` is accepted as the short form of --help by the usage line's [--version | --help] group"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pg-router --help: the dispatch verbs are the subcommands below; the top level takes no operand of its own (bare \"pg-router\" prints usage and exits non-zero)"
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "config": {
+        "name": "config",
+        "provenance": "pg-router --help, config (--print-defaults | --show [--json] | check)",
+        "citations": {
+          "provenance": {
+            "source": "pg-router --help: \"config --print-defaults | config --show [--json] | config check\""
+          },
+          "stdin": {
+            "source": "pg-router --help: config reads no stdin"
+          },
+          "stdout": {
+            "source": "pg-router --help: \"config --print-defaults  print the built-in default config.toml\"; \"config --show [--json]  print the resolved config path, role set, and worker dispatch scalars\"; \"config check ... printed, one per line\" (content)"
+          },
+          "unknownFlag": {
+            "source": "pg-router --help lists config --print-defaults, --show, --json (valid only with --show) and the word check; any other flag is unmodeled and insufficient"
+          }
+        },
+        "flags": {
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-router --help: \"config --show [--json] ... --json is valid only with --show\""
+            }
+          },
+          "--print-defaults": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-router --help: \"config --print-defaults  print the built-in default config.toml (copy-paste starting point)\""
+            }
+          },
+          "--show": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-router --help: \"config --show [--json]  print the resolved config path, role set, and worker dispatch scalars\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-router --help: \"config check  run the startup config checks on demand: every problem loading the config ... is printed ... Exit 0 and one config ok line when there is none\" (the word check; it stats handler files, it runs none)"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "gate": {
+        "name": "gate",
+        "provenance": "pg-router --help, gate (set | clear | list [--json])",
+        "citations": {
+          "provenance": {
+            "source": "pg-router --help, Subcommands: \"gate (set <TYPE> ... | clear (<TYPE> | --all) ... | list [--json])\"; only `list` is modeled, set and clear change gate state"
+          },
+          "stdin": {
+            "source": "pg-router --help: gate takes no stdin"
+          },
+          "stdout": {
+            "source": "pg-router --help: gate prints text; the modeled verb (list) is read-only"
+          },
+          "unknownFlag": {
+            "source": "pg-router --help: gate has no flag of its own before its verb (--socket and --token come after it and are not modeled)"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-router --help: \"gate (set ... | clear ... | list [--json])\": the verb is the subcommand word"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "list": {
+            "name": "list",
+            "provenance": "pg-router --help, gate list [--json]: list the active gates",
+            "citations": {
+              "provenance": {
+                "source": "pg-router --help: \"gate list [--json]  list the active gates (TYPE, owner, set-at, TTL remaining, description)\""
+              },
+              "stdin": {
+                "source": "pg-router --help: gate list reads no stdin"
+              },
+              "stdout": {
+                "source": "pg-router --help: \"gate list [--json]  list the active gates\" (content)"
+              },
+              "unknownFlag": {
+                "source": "pg-router --help: gate list takes [--json] only here; --socket and --token are not modeled"
+              }
+            },
+            "flags": {
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-router --help: \"gate list [--json]\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pg-router --help: \"gate list [--json]\" takes no operand"
+              }
+            },
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      },
+      "help": {
+        "name": "help",
+        "provenance": "pg-router --help, help: print this help and exit",
+        "citations": {
+          "provenance": {
+            "source": "pg-router --help, Subcommands: \"help  print this help and exit\""
+          },
+          "stdin": {
+            "source": "pg-router --help: this subcommand reads no stdin (only the manager-to-core callbacks ingest-event and self-status take a request on stdin)"
+          },
+          "stdout": {
+            "source": "pg-router --help: \"help  print this help and exit\" (metadata)"
+          },
+          "unknownFlag": {
+            "source": "pg-router --help lists the flags of help exactly as modeled; any other flag (including --socket and --token) is unmodeled and insufficient"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-router --help: \"help  print this help and exit\" takes no operand of its own"
+          }
+        },
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "status": {
+        "name": "status",
+        "provenance": "pg-router --help, status [--json]: inspect the RUNNING core",
+        "citations": {
+          "provenance": {
+            "source": "pg-router --help, Subcommands: \"status  inspect the RUNNING core\""
+          },
+          "stdin": {
+            "source": "pg-router --help: this subcommand reads no stdin (only the manager-to-core callbacks ingest-event and self-status take a request on stdin)"
+          },
+          "stdout": {
+            "source": "pg-router --help: \"status  inspect the RUNNING core: resolved configuration, live deliveries, and per-type queue depths ... Text by default, JSON with --json\" (content)"
+          },
+          "unknownFlag": {
+            "source": "pg-router --help lists the flags of status exactly as modeled; any other flag (including --socket and --token) is unmodeled and insufficient"
+          }
+        },
+        "flags": {
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-router --help: \"status [--json]\" and \"Text by default, JSON with --json\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-router --help: \"status  inspect the RUNNING core\" takes no operand of its own"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "version": {
+        "name": "version",
+        "provenance": "pg-router --help, version: print the version and exit",
+        "citations": {
+          "provenance": {
+            "source": "pg-router --help, Subcommands: \"version  print the version and exit\""
+          },
+          "stdin": {
+            "source": "pg-router --help: this subcommand reads no stdin (only the manager-to-core callbacks ingest-event and self-status take a request on stdin)"
+          },
+          "stdout": {
+            "source": "pg-router --help: \"version  print the version and exit\" (metadata)"
+          },
+          "unknownFlag": {
+            "source": "pg-router --help lists the flags of version exactly as modeled; any other flag (including --socket and --token) is unmodeled and insufficient"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-router --help: \"version  print the version and exit\" takes no operand of its own"
+          }
+        },
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

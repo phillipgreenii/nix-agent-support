@@ -1123,3 +1123,79 @@ func safeSubstitutionSkeleton(ev EnvAssignment) (string, bool) {
 	}
 	return value[:idx] + value[idx+len(wrapped):], true
 }
+
+// StraightLineVars returns the shell variables that leaf `at` of `leaves` can rely
+// on, mapped to LITERAL values — the strict sibling of InCommandVars (bead
+// pg2-niyyq), for a caller that REWRITES text with the value rather than judging a
+// path against it, where "probably this value" is not good enough: nil is returned
+// unless the whole expression BEFORE the leaf is plain, unconditional assignments.
+//
+// InCommandVars is deliberately tolerant: it reads a literal assignment wherever it
+// sits, whether or not the control flow guarantees it ran, and it does not model
+// `unset`, `read`, a loop variable, or an array-element write. A path-judging rule
+// can live with that. A rewrite cannot — approving the text `cd /a && x` on the
+// strength of `WT=/a` when bash would really run `cd && x` (WT unset, or reassigned
+// by a construct this seam cannot see) approves a command that was never judged.
+//
+// So every one of these MUST hold, else nil:
+//
+//   - the leaf is OnSpine (a top-level `&&`/`||`-list call, in the main shell's own
+//     scope: no subshell, pipeline stage, compound body, function or substitution);
+//   - no leaf of the expression is a DATA leaf (a `for` word list, `((` `))`, `[[`
+//     `]]`, an array-element assignment, a `case` subject): each can write a
+//     variable by a path this seam does not model, and data leaves are appended to
+//     the END of the leaf list, so an earlier-position scan would miss them;
+//   - every leaf BEFORE it is AlwaysRuns and a bare assignment statement (no
+//     executable, argument, redirection, heredoc or substitution), so no earlier
+//     command can have written, unset or reread a variable, and no assignment is
+//     conditional.
+//
+// The map then holds only the literal assignments (literalAssignedValue); a later
+// non-literal write to a name drops it, exactly as in InCommandVars. A PREFIX
+// assignment (`WT=/x bgrun ...`) is a leaf with an executable, so it never binds —
+// and bash expands the command's own words BEFORE applying it, so that is correct.
+func StraightLineVars(leaves []ParsedCommand, at int) map[string]string {
+	if at < 0 || at >= len(leaves) || !leaves[at].OnSpine {
+		return nil
+	}
+	for _, l := range leaves {
+		if l.Data != DataNone {
+			return nil
+		}
+	}
+	for i := 0; i < at; i++ {
+		l := leaves[i]
+		if !l.AlwaysRuns || l.Executable != "" || len(l.Args) > 0 || len(l.Redirections) > 0 ||
+			l.HasHeredoc || len(l.Heredocs) > 0 || len(l.ProcessSubstitutions) > 0 ||
+			len(l.Substitutions) > 0 || len(l.EnvVars) == 0 {
+			return nil
+		}
+	}
+	vars := InCommandVars(leaves, at)
+	if len(vars) == 0 {
+		return nil
+	}
+	return vars
+}
+
+// StraightLineSafeValue reports whether a variable value may be spliced into a word
+// text by StraightLineVars' caller: a non-empty run of path-ish characters only.
+// Such a value cannot contain whitespace, a glob metacharacter, a quote, a shell
+// operator or an expansion marker, so substituting it yields the same text whether
+// the surrounding word was quoted or not (no word splitting, no pathname
+// expansion), and bash's own expansion of the word is the plain concatenation.
+func StraightLineSafeValue(v string) bool {
+	if v == "" {
+		return false
+	}
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '_', c == '.', c == '/', c == ':', c == '@', c == '%', c == '+', c == ',', c == '=', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}

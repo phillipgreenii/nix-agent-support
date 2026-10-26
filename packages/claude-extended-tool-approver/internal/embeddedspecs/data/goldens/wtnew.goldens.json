@@ -1,0 +1,41 @@
+{
+  "version": "v1",
+  "command": "wtnew",
+  "generatedAt": "2026-10-26",
+  "flags": {
+    "--base": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--branch": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--help": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--version": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "-h": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "-v": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    }
+  },
+  "positionals": {
+    "verdict": "context-dependent",
+    "policyBasis": "the worktree name is a Literal operand (inert); the implicit PathCreate of .worktrees is judged by effectpolicy.PathAccessPolicy (create access): approved inside the project read-write zone, abstains elsewhere, and the implicit PathRead of . is a read of the project"
+  }
+}

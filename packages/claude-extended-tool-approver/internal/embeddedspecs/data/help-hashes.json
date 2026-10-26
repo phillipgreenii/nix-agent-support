@@ -115,5 +115,8 @@
   "readlink": "27f5b21bcf83c4378d39bd7dd19d6a3f958190dabdbf6a7946d7b277a3c0db45",
   "date": "967b28b6bff64efeca599b70ea9e6d444c0b99855554cebf6035baa00246ae39",
   "diff": "e21811284fd4f831df800a4627e715dcebefc462fdf51e2b9e7476c49f3ca04d",
-  "command": null
+  "command": null,
+  "hand-to-human": "c5b9b281a9fc9c01f845b5749c61065a7c65b616b92e8000a34b2cad32e4743b",
+  "wtnew": "c87f92a17f06f2f8ba3ce86d10c5c5a7c39f00a1fb6cb49560887d8966a86700",
+  "pg-router": "55b7bc09e75d92fcdc581b0abc9743b12000cc33185b8cf49ba2b6154d6ed381"
 }

@@ -1,0 +1,51 @@
+{
+  "version": "v1",
+  "command": "pg-router",
+  "generatedAt": "2026-10-26",
+  "flags": {
+    "--help": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "--version": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "-h": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "config --json": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "config --print-defaults": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "config --show": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "gate list --json": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    },
+    "status --json": {
+      "role": "literal",
+      "verdict": "approve",
+      "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
+    }
+  },
+  "positionals": {
+    "verdict": "approve",
+    "policyBasis": "every modeled subcommand takes no operand of its own (config check is a Literal word); the node has no path, remote, exec or env effect, only its stdout EffectStdio (effectpolicy.StdioIsLocal, always Permitted); every state-changing subcommand is absent from the spec and so abstains (unmodeled subcommand)"
+  }
+}

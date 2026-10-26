@@ -144,6 +144,7 @@ func ParseShell(command string) ShellParse {
 		return unparseable(err)
 	}
 	lw := &lowering{src: command, pipeSeq: -1}
+	lw.markSpine(file.Stmts)
 	lw.lowerStmtsFresh(file.Stmts)
 	// Word-list and other DATA leaves are appended LAST, mirroring Parse: the
 	// heredoc leftover net there attaches an unclaimed extent to the LAST leaf, and
@@ -400,6 +401,45 @@ type lowering struct {
 	// the walk is inside right now; appendLeaf stamps ParsedCommand.InLoop from
 	// it (bead pg2-xj975).
 	loopDepth int
+	// spine and always are the call expressions markSpine found on the `&&`/`||`
+	// spine of a top-level statement, and the subset that is the leftmost operand
+	// of that statement (bead pg2-niyyq). lowerCall stamps ParsedCommand.OnSpine /
+	// AlwaysRuns from them. Both are nil for a lowering that did not run markSpine
+	// (a substitution body, the coverage walk), which stamps false everywhere.
+	spine  map[*syntax.CallExpr]bool
+	always map[*syntax.CallExpr]bool
+}
+
+// markSpine records, for each top-level statement of stmts that is neither
+// backgrounded nor a coprocess, the calls on its `&&`/`||` spine and the one
+// leftmost call that always runs (ParsedCommand.OnSpine / AlwaysRuns, bead
+// pg2-niyyq). Anything else — a pipeline, a subshell, a compound body, a function
+// declaration — contributes nothing, so a call inside one is never marked: it may
+// run in another variable scope, or not at all.
+func (lw *lowering) markSpine(stmts []*syntax.Stmt) {
+	lw.spine = map[*syntax.CallExpr]bool{}
+	lw.always = map[*syntax.CallExpr]bool{}
+	var walk func(st *syntax.Stmt, always bool)
+	walk = func(st *syntax.Stmt, always bool) {
+		switch cmd := st.Cmd.(type) {
+		case *syntax.CallExpr:
+			lw.spine[cmd] = true
+			if always {
+				lw.always[cmd] = true
+			}
+		case *syntax.BinaryCmd:
+			if cmd.Op == syntax.AndStmt || cmd.Op == syntax.OrStmt {
+				walk(cmd.X, always)
+				walk(cmd.Y, false)
+			}
+		}
+	}
+	for _, st := range stmts {
+		if st == nil || st.Background || st.Coprocess || st.Negated {
+			continue
+		}
+		walk(st, true)
+	}
 }
 
 // sourceSpan is a half-open byte range [lo, hi) into the lowering's source.
@@ -1096,6 +1136,8 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx, c
 		PipelineID:    pid,
 		PipelineIndex: idx,
 		AndChainID:    chain,
+		OnSpine:       lw.spine[cmd],
+		AlwaysRuns:    lw.always[cmd],
 	}
 	// LEADING ASSIGNMENTS land in CallExpr.Assigns; the `env FOO=1 cmd` form lands
 	// in Args and is consumed by unwrapExecPrefix below. The lowering MUST NOT

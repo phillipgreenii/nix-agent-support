@@ -2427,6 +2427,27 @@ type ParsedCommand struct {
 	// re-applies it), which the effective-cwd tracking treats as unknown.
 	InLoop bool
 
+	// OnSpine and AlwaysRuns (bead pg2-niyyq) are the two facts a consumer needs to
+	// read an in-command variable out of the TEXT of one expression with no
+	// control-flow doubt. Both are false for every leaf except a plain `CallExpr` a
+	// top-level statement is made of; both are stamped ONCE, by the pre-pass
+	// markSpine that ParseShell runs over the file's own statement list, so a leaf
+	// lowered through any other path (a substitution body, a hand-built test leaf)
+	// reads false, which is the safe direction.
+	//
+	// OnSpine: the leaf is a call on the `&&`/`||` SPINE of a top-level statement
+	// that is neither backgrounded nor a coprocess. It sits in no compound body
+	// (`if`/`while`/`for`/`case`/`{ }`/`( )`/function), no pipeline stage, and no
+	// substitution, so it runs in the main shell's own variable scope.
+	//
+	// AlwaysRuns: OnSpine, and the LEFTMOST operand of its statement's `&&`/`||`
+	// tree. The leftmost operand of an and-or list is the one operand that always
+	// executes (the right operand runs only when the left one's status allows it),
+	// so an assignment-only leaf with AlwaysRuns has certainly written its variable
+	// by the time any LATER leaf runs.
+	OnSpine    bool
+	AlwaysRuns bool
+
 	// Data classifies a command-less DATA leaf (pg2-dbrsg): which construct the
 	// lowering reduced to "Raw text that may hold a substitution, but no command".
 	// DataNone (the zero value) means this is NOT a data leaf — it is a command
