@@ -712,3 +712,20 @@ go test ./...
 `nix build .#checks.<system>.pg-connector-go-tests` (or the full `nix flake check`) is the
 whole-module test gate — `nix build .#pg-connector` alone only compiles `cmd/pg-connector` and
 does not exercise every backend's own tests.
+
+The scheduler/governor/change-engine load test
+(`cmd/pg-connector-github/internal/loadtest`) is NOT part of that run. It simulates nineteen
+minutes of fake time over 150 pull requests and takes tens of minutes under `-race`, so it is an
+on-demand load test, not a unit test (operator ruling 2026-10-25): the package's `TestMain` skips
+every test in it unless `PG_CONNECTOR_LOAD_TEST=1`, so `go test ./...`, `go test -short`, the hooks
+and `pg-connector-go-tests` leave it out. Run it by hand when the scheduler, governor or change
+engine changes:
+
+```bash
+nix build .#checks.<system>.pg-connector-load-test     # fails if a scenario fails; not part of any hook or land gate
+# or, from packages/pg-connector:
+PG_CONNECTOR_LOAD_TEST=1 nice -n 10 go test -p 4 -count=1 -race -timeout 60m ./cmd/pg-connector-github/internal/loadtest/
+```
+
+`nix build .#checks.<system>.pg-connector-load-test-gating` is the cheap regression guard that the
+opt-in gate still skips by default and runs when opted in.

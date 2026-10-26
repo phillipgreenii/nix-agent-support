@@ -71,7 +71,19 @@
 //
 // # Running it
 //
-//	nice -n 10 go test -p 4 -count=1 -race ./cmd/pg-connector-github/internal/loadtest/
+// The package is OPT-IN: main_test.go's TestMain skips every test in it unless
+// PG_CONNECTOR_LOAD_TEST=1, so `go test ./...`, `go test -short`, the commit
+// and pre-land hooks and checks.<system>.pg-connector-go-tests do not run the
+// scenarios (under -race they take tens of minutes; operator ruling
+// 2026-10-25: a load test is called as needed, not as a blocker every time).
+// Run it by hand when the scheduler, governor or change engine changes:
+//
+//	nix build .#checks.<system>.pg-connector-load-test
+//
+// or directly, from packages/pg-connector:
+//
+//	PG_CONNECTOR_LOAD_TEST=1 nice -n 10 go test -p 4 -count=1 -race -timeout 60m \
+//	    ./cmd/pg-connector-github/internal/loadtest/
 //
 // TestLoad runs the scenario twice side by side and requires the appended rows
 // and the totals to be identical. TestLoadMutationsAreCaught weakens the

@@ -63,3 +63,12 @@ plus `go test -c` for every package, so a `_linux.go` file or `_linux_test.go` t
 fails the gate on a darwin host; Linux-only tests are only compiled there, pg2-opk5g first runs them)
 and the `env -i` independence test (`cmd/pg-connector-github/envindependence_test.go`). The gate adds
 minutes to the check's run; `go test -short` skips the whole-module half.
+
+**pg-connector load test (on demand, not a gate)**: `cmd/pg-connector-github/internal/loadtest` is
+excluded from `go test ./...` and from `pg-connector-go-tests` (operator ruling 2026-10-25, bead
+`pg2-7r19vr`): its `TestMain` skips the whole package unless `PG_CONNECTOR_LOAD_TEST=1`, so a test
+file added to it later is covered automatically. Run it by hand when the scheduler, governor or
+change engine changes: `nix build .#checks.<system>.pg-connector-load-test` (sets the variable, runs
+only that package under `-race` with a 60m timeout, fails if a scenario fails). That check MUST NOT be
+wired into any hook, `run-unit-tests` or pre-land gate. `pg-connector-load-test-gating` is its cheap
+regression guard.

@@ -6928,17 +6928,19 @@
                 # the module's ONLY nix-side test gate.
                 src = ./packages/pg-connector;
                 gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
-                # The scheduler/governor load test (cmd/pg-connector-github/
-                # internal/loadtest) is deterministic but CPU-bound: ~26s for
-                # TestLoad and ~24s for TestLoadMutationsAreCaught without
-                # -race, but the race detector (always on here) slows it ~15x
-                # (TestLoad alone measured 404s on 4 cores), so that package
-                # needs more than go's default 10m per-package test timeout.
-                # A measured need, not a blanket bump; every other package
-                # finishes in minutes and is unaffected by a higher ceiling.
+                # -timeout 20m: three packages approach go's default 10m per-package
+                # ceiling under -race on a loaded host (measured 2026-10-26, bead
+                # pg2-7r19vr): cmd/pg-connector (TestCrossCompileLinuxWholeModule, which
+                # carries its own 20m internal deadline) took 461s on a calm host and
+                # timed out at 600s three times under host load 28-50; serve took
+                # 536-552s and activity-git/internal 454-462s. This is NOT for the
+                # scheduler/governor load test: cmd/pg-connector-github/internal/loadtest
+                # skips itself (TestMain) unless PG_CONNECTOR_LOAD_TEST=1, which this
+                # check never sets, and runs on demand as
+                # checks.<system>.pg-connector-load-test below.
                 testFlags = [
                   "-timeout"
-                  "30m"
+                  "20m"
                 ];
                 testDeps = [
                   pkgs.bash
@@ -6956,6 +6958,104 @@
                   pkgs.pg-router-source-pg-connector
                 ];
               };
+
+              # pg-connector-github load test (bead pg2-7r19vr). ON DEMAND ONLY: build it
+              # by hand when the scheduler, governor or change engine changes
+              # (`nix build .#checks.<system>.pg-connector-load-test`). It MUST NOT be
+              # wired into any hook, run-unit-tests, pre-land or land gate (operator
+              # ruling, Phillip, 2026-10-25: "it can stay, but not as unit test. it
+              # should be called as needed, not all of the time."). The package
+              # cmd/pg-connector-github/internal/loadtest skips itself (TestMain)
+              # unless PG_CONNECTOR_LOAD_TEST=1, which this check sets. Under -race it
+              # takes tens of minutes, so the timeout is 60m. The buildPhase fails when
+              # any scenario fails, and ALSO when a test the package lists did not
+              # report PASS or any test was skipped, so a package that silently ran
+              # nothing cannot pass vacuously. Only the buildPhase is replaced.
+              pg-connector-load-test =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-connector-load-test";
+                  src = ./packages/pg-connector;
+                  gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    PG_CONNECTOR_LOAD_TEST = "1";
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      pkg=./cmd/pg-connector-github/internal/loadtest/
+                      log="$TMPDIR/load-test.log"
+                      names=$(go test -list '.*' "$pkg" | grep '^Test' || true)
+                      if [ -z "$names" ]; then
+                        echo "pg-connector-load-test: the package lists no tests" >&2
+                        exit 1
+                      fi
+                      if ! go test -count=1 -race -v -timeout 60m "$pkg" > "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-connector-load-test: a load scenario FAILED" >&2
+                        exit 1
+                      fi
+                      cat "$log"
+                      for t in $names; do
+                        if ! grep -q -- "^--- PASS: $t " "$log"; then
+                          echo "pg-connector-load-test: $t did not report PASS (skipped or not run)" >&2
+                          exit 1
+                        fi
+                      done
+                      if grep -q -- '--- SKIP\|loadtest: skipped' "$log"; then
+                        echo "pg-connector-load-test: a test or the package was SKIPPED" >&2
+                        exit 1
+                      fi
+                      echo "pg-connector-load-test: $(echo "$names" | wc -l) tests, each with a PASS line, none skipped"
+                      runHook postBuild
+                    '';
+                  });
+
+              # Regression guard for the load test's opt-in gate (bead pg2-7r19vr, V-3):
+              # proves against the REAL go tool that the loadtest package runs NOTHING by
+              # default (env unset, `PG_CONNECTOR_LOAD_TEST=0`, plain `go test -short`),
+              # and that it does run when PG_CONNECTOR_LOAD_TEST=1 (the fast seed test is
+              # selected, so no scenario runs; the listing must be non-empty). Its cost is
+              # the race-enabled compiles only; the full scenarios are
+              # pg-connector-load-test's job.
+              pg-connector-load-test-gating =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-connector-load-test-gating";
+                  src = ./packages/pg-connector;
+                  gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      pkg=./cmd/pg-connector-github/internal/loadtest/
+                      unset PG_CONNECTOR_LOAD_TEST
+                      fail() { echo "pg-connector-load-test-gating: $*" >&2; exit 1; }
+
+                      # Default (unset), explicit 0, and -short: nothing runs.
+                      for mode in unset zero short; do
+                        case "$mode" in
+                          unset) res=$(go test -count=1 -race -v "$pkg" 2>&1) || fail "default run failed: $res" ;;
+                          zero) res=$(PG_CONNECTOR_LOAD_TEST=0 go test -count=1 -race -v "$pkg" 2>&1) || fail "=0 run failed: $res" ;;
+                          short) res=$(go test -count=1 -race -short -v "$pkg" 2>&1) || fail "-short run failed: $res" ;;
+                        esac
+                        echo "$res" | grep -q 'loadtest: skipped' || fail "$mode: no skip notice in: $res"
+                        if echo "$res" | grep -q -- '=== RUN\|--- PASS\|--- FAIL'; then
+                          fail "$mode: a scenario ran: $res"
+                        fi
+                      done
+
+                      # Opted in: the package lists tests and a selected one runs and passes.
+                      names=$(PG_CONNECTOR_LOAD_TEST=1 go test -list '.*' "$pkg" | grep '^Test' || true)
+                      [ -n "$names" ] || fail "opted in, the package lists no tests"
+                      echo "$names" | grep -q '^TestLoadSeedDecidesTheBurst$' || fail "TestLoadSeedDecidesTheBurst is not listed: $names"
+                      res=$(PG_CONNECTOR_LOAD_TEST=1 go test -count=1 -race -v -run '^TestLoadSeedDecidesTheBurst$' "$pkg" 2>&1) || fail "opted-in run failed: $res"
+                      echo "$res" | grep -q -- '^--- PASS: TestLoadSeedDecidesTheBurst ' || fail "opted-in run did not run the test: $res"
+                      echo "pg-connector-load-test-gating: skipped by default, =0 and -short; runs when opted in"
+                      runHook postBuild
+                    '';
+                  });
 
               # Build-forcing guard for pg-connector's own Tier-1 umbrella
               # binary (bead pg2-z28y9): `nix flake check` only realizes
