@@ -13,7 +13,7 @@
 // (roles.BuiltinRoleSet/BuiltinQuerySet) moved OUT of this module entirely
 // (docket pg2-oju6w's Task 5.8, ADR 0065's "Source-side boundary" section):
 // they now live as a registered kind:"source" participant in
-// packages/pg-router-ccpool-handler. ParticipantQuery below is this
+// packages/pg-router-handlers. ParticipantQuery below is this
 // package's replacement seam for reaching such a participant — a real
 // INTF-SOURCE wire client, mirroring internal/wireclient.Client's
 // handler-side Dispatch (Task 5.3/5.4) — rather than an in-process call.
@@ -425,7 +425,7 @@ func eventFromWire(we wireEvent) event.Event {
 
 // itemFromWirePayload reconstructs an item.Item from a wire event's opaque
 // payload object — this package's own local twin of
-// packages/pg-router-ccpool-handler/cmd/pg-router-handler-ccpool's
+// packages/pg-router-handlers/cmd/pg-router-handler-ccpool's
 // itemFromPayload (Go's internal-package visibility rule means neither side
 // may import the other's), reading the same flat id/type/title/metadata
 // shape. A payload missing an expected field yields a zero value for it

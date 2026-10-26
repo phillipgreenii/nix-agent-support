@@ -580,7 +580,7 @@ let
           continue
         fi
         # branch derives from wt's own basename: internal/worktree's Ensure
-        # (packages/pg-router-ccpool-handler/internal/worktree/worktree.go)
+        # (packages/pg-router-handlers/internal/worktree/worktree.go)
         # names the worktree dir <worktreeDir>/<beadID> and its anchor branch
         # pg-router/<beadID> deterministically from the SAME beadID, so the
         # dir's basename recovers it here without needing beads/ccpool state.
@@ -1089,7 +1089,7 @@ let
   # internal/config.Default() sets its AllowedTools field to that constant.
   #
   # pg-connector issue */ccpool * (bead pg2-s9zh5): widened alongside
-  # packages/pg-router-ccpool-handler/internal/config.go's own
+  # packages/pg-router-handlers/internal/config.go's own
   # baseAllowedTools (see that constant's doc comment for the full
   # rationale) -- every dispatched role shares this ONE process-wide
   # allowlist (a per-role extraAllowedTools has existed since pg2-nk6th.5, but

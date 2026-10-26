@@ -607,7 +607,7 @@ func TestNewListener_perHandlerSerialFIFO_onePerDispatchCall(t *testing.T) {
 // replacement: workOne no longer runs any in-process ccpool/command
 // mechanics at all (that business — Ensure/Send/wait, the budget watchdog,
 // stuck-bead escalation labeling — moved entirely to the registered
-// handler participant, packages/pg-router-ccpool-handler, which now owns
+// handler participant, packages/pg-router-handlers, which now owns
 // its own equivalent test coverage) — it just sends the event to
 // o.Handler.Dispatch for d.Role and returns its error unmodified.
 func TestWorkOne_dispatchesToWireClientForRole(t *testing.T) {
@@ -807,7 +807,7 @@ func TestNewListener_structuredOutcomeRelaysHandlerVerbs(t *testing.T) {
 // TestRunOne_preservesNeedsInputSession were DELETED here (pg2-oju6w.15):
 // teardownAll/closeUnlessNeedsInput/sessionStateByID no longer exist in this
 // package at all — that sweep logic was PORTED to
-// packages/pg-router-ccpool-handler's own preShutdown subcommand
+// packages/pg-router-handlers's own preShutdown subcommand
 // (cmd/pg-router-handler-ccpool/preshutdown.go), which carries the
 // equivalent test coverage (needs_input preservation included) in its own
 // preshutdown_test.go.

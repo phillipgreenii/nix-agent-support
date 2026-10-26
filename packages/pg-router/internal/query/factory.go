@@ -35,7 +35,7 @@ func NewQueryFactories() *Factories {
 	// BuiltinQuerySet) is DELETED outright as of docket pg2-oju6w's Task 5.8
 	// — that built-in default no longer exists at all, and the beads-backed
 	// query it constructed moved to a registered kind:"source" participant
-	// in packages/pg-router-ccpool-handler. ParticipantQuery (query.go) is
+	// in packages/pg-router-handlers. ParticipantQuery (query.go) is
 	// this package's own wire client to such a participant; like BeadsReady
 	// before it, it is NOT TOML-configurable and never goes through this
 	// factory.

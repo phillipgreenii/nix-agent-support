@@ -1,0 +1,350 @@
+package watchdog
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-handlers/internal/usage"
+	"github.com/phillipgreenii/x/gitclient"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
+)
+
+// wedgeSleepDuration matches the fixed sleep inside the wrapper script
+// writeWedgedGit generates below: how long the fake wedged git process
+// blocks when invoked with the wedged verb.
+const wedgeSleepDuration = 30 * time.Second
+
+// boundedCallMargin is subtracted from wedgeSleepDuration to build
+// boundedCallElapsedCeiling below. It is derived from gitCallTimeout (the
+// actual bound under test, defined in terminal.go) rather than a bare
+// literal, so the ceiling tracks gitCallTimeout instead of silently
+// diverging from it if that constant ever changes.
+const boundedCallMargin = gitCallTimeout / 3
+
+// boundedCallElapsedCeiling is the ceiling TestSafeToReset_boundsWedgedToplevelProbe
+// and TestTerminal_boundsWedgedReset assert elapsed time against: any value
+// under it (and therefore comfortably under wedgeSleepDuration) proves the
+// call was actually bounded by gitCallTimeout rather than merely fast, while
+// leaving enough headroom to absorb machine load (pg2-rz5ud: a genuinely
+// 10s-bounded call once measured over twenty seconds under load, which a
+// prior literal wall-clock-speed ceiling -- pinned to speed rather than the
+// wedge -- wrongly failed).
+const boundedCallElapsedCeiling = wedgeSleepDuration - boundedCallMargin
+
+// recGit records reset/clean calls without touching disk.
+type recGit struct{ ran [][]string }
+
+func (g *recGit) Run(_ context.Context, dir string, args ...string) error {
+	g.ran = append(g.ran, append([]string{dir}, args...))
+	return nil
+}
+
+func TestSafeToReset_guard(t *testing.T) {
+	ctx := context.Background()
+	repo := t.TempDir()
+	// path == repoRoot -> never
+	if safeToReset(ctx, repo, repo, repo) {
+		t.Error("must refuse to reset repoRoot")
+	}
+	// outside worktreeDir -> never
+	if safeToReset(ctx, "/somewhere/else", repo, filepath.Join(repo, "wt")) {
+		t.Error("must refuse a path outside WorktreeDir")
+	}
+	// non-existent / not-a-worktree -> never (safe no-op)
+	if safeToReset(ctx, filepath.Join(repo, "wt", "ghost"), repo, filepath.Join(repo, "wt")) {
+		t.Error("must refuse a non-worktree path")
+	}
+}
+
+// TestTerminal_closesSession: the hard stop MUST close the session (pg2-vwb4c),
+// else a same-named dispatch re-attaches to the dead session and re-times-out
+// (28x for zr-6hrfd.2), and the close MUST precede the unclaim so the bead is
+// not re-dispatched while the session is still findable. purge=false keeps the
+// transcript for forensics.
+func TestTerminal_closesSession(t *testing.T) {
+	cc := &fakeCC{}
+	bd := &recBD{}
+	wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, cc, bd, tokBudget(1000))
+	wd.terminal(context.Background(), "s", "zr-1", &BudgetError{})
+	if len(cc.closed) != 1 || cc.closed[0] != "s" {
+		t.Fatalf("hard stop must close session s exactly once; closed=%v", cc.closed)
+	}
+}
+
+// TestTerminal_closesWithoutAnOutcomeMark: the hard stop's only session write is
+// the close. A settled row is never absorbed by a later dispatch (INV-CCH-30,
+// ADR 0094), so the incomplete mark the hard stop used to stamp first (bead
+// pg2-tc9c3) is gone (bead pg2-qaeb8).
+func TestTerminal_closesWithoutAnOutcomeMark(t *testing.T) {
+	cc := &fakeCC{}
+	wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, cc, &recBD{}, tokBudget(1000))
+	wd.terminal(context.Background(), "s", "zr-1", &BudgetError{})
+	if want := []string{"close"}; !slices.Equal(cc.ops, want) {
+		t.Errorf("hard stop must close the row and write nothing else to it; ops=%v want %v", cc.ops, want)
+	}
+}
+
+func TestTerminal_unclaimsNotesNoHuman(t *testing.T) {
+	cc := &fakeCC{}
+	bd := &recBD{}
+	wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, cc, bd, tokBudget(1000))
+	wd.Git = &recGit{}
+	// session cwd == repoRoot -> reset is a guarded no-op (the v1 reality)
+	cc.list = []ccpool.Session{{ExternalID: "s", CWD: "/repo"}}
+	wd.terminal(context.Background(), "s", "zr-1", &BudgetError{})
+	if !bd.has("update zr-1 --status=open --assignee=") {
+		t.Errorf("must unclaim; calls=%v", bd.calls)
+	}
+	for _, c := range bd.calls {
+		if c == "update zr-1 --add-label human" {
+			t.Error("must NOT add human")
+		}
+	}
+}
+
+// initFixtureRepo creates a hermetic fixture repository from x/gittest
+// (temp root, fixture HOME, environment rebuilt from an allowlist, so a leaked
+// ambient GIT_DIR/GIT_WORK_TREE -- including the ones the tests below set via
+// t.Setenv to simulate the leak -- can never redirect fixture setup or
+// inspection), checked out on branch with one empty commit so HEAD resolves.
+// The repository lives at the returned Repo's Dir (symlink-resolved).
+func initFixtureRepo(t *testing.T, branch string) *gitfixture.Repo {
+	t.Helper()
+	fx := gittest.New(t, gitfixture.RepoOptions{Suite: "watchdog-terminal", InitialBranch: branch})
+	if _, err := fx.Commit(context.Background(), "init", nil); err != nil {
+		t.Fatal(err)
+	}
+	return fx
+}
+
+// fixtureConfigGet reads a --local git config key from the fixture repository,
+// returning "" if unset.
+func fixtureConfigGet(t *testing.T, fx *gitfixture.Repo, key string) string {
+	t.Helper()
+	out, err := fx.Client.Run(context.Background(), "config", "--local", "--get", key)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestGitClientToplevel_ignoresLeakedGitDir is a regression pin for
+// pg2-bh09g, now exercised through the x/gitclient migration (pg2-ljyaj):
+// safeToReset's worktree-root backstop opens a client via openGit and calls
+// its Locator.Toplevel, which MUST resolve the directory it is explicitly
+// anchored at, not a repository named by an ambient leaked
+// GIT_DIR/GIT_WORK_TREE -- exactly what a `git commit` from a linked
+// worktree exports into every descendant process (mechanism write-up:
+// pg2-67h4y). gitclient's hermetic, ALLOWLIST-built child environment
+// (design doc §4.4) drops the entire GIT_* family by default (only PATH,
+// HOME, SSH_AUTH_SOCK are carried over), so this passes by construction
+// rather than by a hand-rolled scrub list the way the retired execGit/
+// gitToplevel helpers needed to.
+func TestGitClientToplevel_ignoresLeakedGitDir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	targetFx := initFixtureRepo(t, "target-branch")
+	leakedFx := initFixtureRepo(t, "leaked-branch")
+	target, leaked := targetFx.Dir, leakedFx.Dir
+
+	t.Setenv("GIT_DIR", filepath.Join(leaked, ".git"))
+	t.Setenv("GIT_WORK_TREE", leaked)
+
+	ctx := context.Background()
+	client, err := openGit(ctx, target)
+	if err != nil {
+		t.Fatalf("openGit(%s): %v", target, err)
+	}
+	tl, err := client.Toplevel(ctx)
+	if err != nil {
+		t.Fatalf("Toplevel(%s): %v", target, err)
+	}
+	if resolved, evalErr := filepath.EvalSymlinks(tl); evalErr == nil {
+		tl = resolved
+	}
+	if tl != target {
+		t.Fatalf("Toplevel() = %q, want %q -- a leaked GIT_DIR/GIT_WORK_TREE silently overrode the anchor", tl, target)
+	}
+}
+
+// TestOSGitRun_ignoresLeakedGitDir is the acceptance regression test named on
+// pg2-bh09g: OSGit.Run is the MUTATING half of this package's git calls.
+// It no longer backs terminal's `reset --hard` / `clean -fd` (those migrated
+// onto x/gitclient's Cleaner role, bead pg2-ljyaj, verified by the bounded-
+// probe tests below); OSGit.Run is retained -- and this regression pin with
+// it -- because internal/executor still injects it as the shared worktree-
+// CREATION git seam (see terminal.go's OSGit doc comment), which is a
+// separate, not-yet-landed migration (pg2-mj9n0). Under a leaked ambient
+// GIT_DIR/GIT_WORK_TREE it must act on the directory it was explicitly
+// given, not the leaked repository -- exactly the pg2-12795/pg2-5ek6b
+// incident mechanism, where a `git config` write under a leaked GIT_DIR
+// landed in the wrong repo's shared config. Verified to FAIL against the
+// pre-fix code (a bare exec.CommandContext with no cmd.Env): it then writes
+// the marker into the LEAKED repo's config instead of target's.
+func TestOSGitRun_ignoresLeakedGitDir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	targetFx := initFixtureRepo(t, "target-branch")
+	leakedFx := initFixtureRepo(t, "leaked-branch")
+	target, leaked := targetFx.Dir, leakedFx.Dir
+
+	// Simulate the leak vector: GIT_DIR/GIT_WORK_TREE set in the ambient
+	// environment pointing at a DIFFERENT repository than the one OSGit.Run
+	// is told to act on.
+	t.Setenv("GIT_DIR", filepath.Join(leaked, ".git"))
+	t.Setenv("GIT_WORK_TREE", leaked)
+
+	g := OSGit{}
+	if err := g.Run(context.Background(), target, "config", "--local", "pgbh09g.marker", "target-value"); err != nil {
+		t.Fatalf("OSGit.Run config: %v", err)
+	}
+
+	if got := fixtureConfigGet(t, targetFx, "pgbh09g.marker"); got != "target-value" {
+		t.Fatalf("target repo's config is missing the value OSGit.Run wrote (got %q) -- a leaked GIT_DIR/GIT_WORK_TREE may have redirected the write elsewhere", got)
+	}
+	if got := fixtureConfigGet(t, leakedFx, "pgbh09g.marker"); got != "" {
+		t.Fatalf("leaked repo's config carries the marker (%q); OSGit.Run wrote into the LEAKED repository instead of the directory it was explicitly given (%s)", got, target)
+	}
+}
+
+// wedgeCompletionMarker returns the path writeWedgedGit's wrapper script
+// touches ONLY if its sleep runs for the full wedgeSleepDuration (i.e. the
+// process was never killed). A caller checks this marker's ABSENCE after a
+// bounded call returns to prove the wedged process was actually killed by
+// gitCallTimeout, not merely outrun by coincidence -- without this, an
+// elapsed-time bound alone cannot distinguish "bounded" from "happened to
+// be fast" (pg2-rz5ud).
+func wedgeCompletionMarker(wedgedGitPath string) string {
+	return filepath.Join(filepath.Dir(wedgedGitPath), "wedge-completed")
+}
+
+// writeWedgedGit writes a `git` wrapper script at a fresh temp dir that
+// sleeps wedgeSleepDuration -- far longer than any bound asserted below --
+// when invoked with exactly verb as its first two arguments (e.g. "reset
+// --hard" or "rev-parse --show-toplevel"), and execs the REAL git (resolved
+// via exec.LookPath before this helper runs) for every other invocation --
+// notably a client's own construction-time validation probe (`rev-parse
+// --path-format=absolute --git-common-dir`), which must stay fast so the
+// client this wrapper backs can still be constructed. If the sleep ever
+// runs to completion (the process was NOT killed), the script touches
+// wedgeCompletionMarker(<returned path>) before exec'ing the real git.
+// Returns the wrapper's absolute path, for gitclient.WithGit.
+func writeWedgedGit(t *testing.T, verb string) string {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "git")
+	marker := wedgeCompletionMarker(script)
+	content := fmt.Sprintf(
+		"#!/bin/sh\nif [ \"$1 $2\" = \"%s\" ]; then sleep %d; touch \"%s\"; fi\nexec \"%s\" \"$@\"\n",
+		verb, int(wedgeSleepDuration.Seconds()), marker, realGit,
+	)
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatalf("writing wedged git wrapper: %v", err)
+	}
+	return script
+}
+
+// TestSafeToReset_boundsWedgedToplevelProbe verifies pg2-yy42's bounded-
+// probe requirement survives the x/gitclient migration (pg2-ljyaj) for the
+// Locator role: safeToReset's worktree-root backstop calls
+// Locator.Toplevel through openGit, bounded by gitCallTimeout. A git
+// invocation still genuinely running when that bound fires must be killed
+// PROMPTLY -- bounded by gitclient's own WaitDelay ceiling on top of the
+// timeout, not left to run to completion (here, 30s) -- and safeToReset
+// must fall back to its safe default (false) rather than hang the hard-stop
+// sequence.
+func TestSafeToReset_boundsWedgedToplevelProbe(t *testing.T) {
+	wedged := writeWedgedGit(t, "rev-parse --show-toplevel")
+
+	restore := openGit
+	openGit = func(ctx context.Context, dir string) (gitLocatorCleaner, error) {
+		return gitclient.New(ctx, dir, gitclient.WithGit(wedged))
+	}
+	defer func() { openGit = restore }()
+
+	target := initFixtureRepo(t, "target-branch").Dir
+
+	start := time.Now()
+	got := safeToReset(context.Background(), target, "/does/not/exist", filepath.Dir(target))
+	elapsed := time.Since(start)
+
+	if got {
+		t.Error("safeToReset must return false when the toplevel probe cannot complete within gitCallTimeout")
+	}
+	// Bound: comfortably under wedgeSleepDuration (boundedCallElapsedCeiling,
+	// derived from gitCallTimeout) rather than a wall-clock-speed literal --
+	// any elapsed time under the wedge proves the probe was actually killed
+	// by gitCallTimeout, and the margin absorbs machine load that a tighter
+	// bound cannot (pg2-rz5ud).
+	if elapsed > boundedCallElapsedCeiling {
+		t.Errorf("safeToReset did not bound the wedged toplevel probe: took %s (want well under the %s wedge)", elapsed, wedgeSleepDuration)
+	}
+	// Outcome: the wedge must have been KILLED mid-sleep, not merely
+	// outrun -- see wedgeCompletionMarker's doc comment.
+	if _, err := os.Stat(wedgeCompletionMarker(wedged)); err == nil {
+		t.Error("safeToReset: wedged toplevel probe ran to completion instead of being killed by gitCallTimeout")
+	}
+}
+
+// TestTerminal_boundsWedgedReset is TestSafeToReset_boundsWedgedToplevelProbe's
+// counterpart for the Cleaner role: terminal's guarded hard-stop reset calls
+// Cleaner.ResetHard through openGit, now bounded by gitCallTimeout -- a
+// bound this call site did NOT have before this migration (it previously
+// relied solely on the caller's ambient ctx). A wedged `reset --hard` must
+// be killed promptly and terminal must still reach its bead
+// comment/unclaim steps, rather than hang the hard-stop sequence
+// indefinitely (pg2-yy42).
+func TestTerminal_boundsWedgedReset(t *testing.T) {
+	wedged := writeWedgedGit(t, "reset --hard")
+
+	restore := openGit
+	openGit = func(ctx context.Context, dir string) (gitLocatorCleaner, error) {
+		return gitclient.New(ctx, dir, gitclient.WithGit(wedged))
+	}
+	defer func() { openGit = restore }()
+
+	repo := initFixtureRepo(t, "wt-branch").Dir
+
+	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", CWD: repo}}}
+	bd := &recBD{}
+	wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, cc, bd, tokBudget(1000))
+	wd.RepoRoot = "/does/not/exist"
+	wd.WorktreeDir = filepath.Dir(repo)
+
+	start := time.Now()
+	wd.terminal(context.Background(), "s", "zr-1", &BudgetError{})
+	elapsed := time.Since(start)
+
+	// Bound: see TestSafeToReset_boundsWedgedToplevelProbe's identical
+	// comment above -- boundedCallElapsedCeiling is derived from
+	// gitCallTimeout rather than a wall-clock-speed literal, so it survives
+	// machine load (pg2-rz5ud).
+	if elapsed > boundedCallElapsedCeiling {
+		t.Errorf("terminal did not bound a wedged reset --hard: took %s (want well under the %s wedge)", elapsed, wedgeSleepDuration)
+	}
+	// Outcome: the wedged reset --hard must have been KILLED mid-sleep, not
+	// merely outrun -- see wedgeCompletionMarker's doc comment.
+	if _, err := os.Stat(wedgeCompletionMarker(wedged)); err == nil {
+		t.Error("terminal: wedged reset --hard ran to completion instead of being killed by gitCallTimeout")
+	}
+	if !bd.has("update zr-1 --status=open --assignee=") {
+		t.Errorf("terminal must still reach bd unclaim despite a wedged reset --hard: calls=%v", bd.calls)
+	}
+}

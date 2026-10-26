@@ -563,9 +563,9 @@ groups:
       # class=declined,reason=at-capacity is EXCLUDED from the condition
       # (pg2-v3qn6, operator decision 2026-09-25): reason=at-capacity is
       # internal/metrics/metrics.go's OnDeclined recording pg-router-ccpool-
-      # handler's busyReasonAtCapacity (cmd/pg-router-ccpool-handler/
+      # handler's busyReasonAtCapacity (cmd/pg-router-handler-ccpool/
       # dispatch.go, fed from executor.ErrPoolAtCapacity at
-      # packages/pg-router-ccpool-handler/internal/executor/ccpool.go:97-101)
+      # packages/pg-router-handlers/internal/executor/ccpool.go:97-101)
       # -- routine backpressure from the review role's max_sessions=1 cap
       # (pg2-mr0sl, an INTENTIONAL throughput-for-reliability tradeoff after
       # the pg2-5sirm zombie-session incident), not a real failure. Both
@@ -579,7 +579,7 @@ groups:
       # (e.g. capacity-unknown): those keep paging unchanged.
       #
       # reason=usage-limit is EXCLUDED too (pg2-e0imq, operator ruling 2026-10-14):
-      # pg-router-ccpool-handler's drain role ended a session without claiming its
+      # pg-router-handler-ccpool's drain role ended a session without claiming its
       # bead because the session died on the account's usage or spend limit or an
       # API outage, and the handler's error carries the documented "session ended
       # on a usage limit or API outage" substring (docs/behavior/interfaces.md,
@@ -592,7 +592,7 @@ groups:
       # budget-exceeded, and ranks below triager-failure, budget-exceeded and
       # upstream-killed.
       #
-      # reason=skipped-* is EXCLUDED too (pg2-5x29j): pg-router-ccpool-handler's
+      # reason=skipped-* is EXCLUDED too (pg2-5x29j): pg-router-handler-ccpool's
       # review precheck declines a dispatch it has proven moot at zero
       # model cost -- skipped-bead-closed, skipped-pr-merged, skipped-pending-review.
       # They are re-offered until the event expires, so a sustained nonzero rate is
@@ -624,7 +624,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router failure rate for class {{ $labels.class }} role {{ $labels.role }} has been non-zero"
-          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|launch-failed|session-in-flight|skipped-.+"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is set for every class as of pg2-nimab, DEC-OBS-5) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the seven causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops), reason=origin-unavailable (its own rule, pg-router-origin-unavailable), reason=triager-failure (escalation-triage roles, bulkheaded by pg2-u2yub so they cannot fire this alert; their own rule, pg-router-triager-failures) and reason=upstream-killed (a gh call killed by the pg-connector 30s scriptout timeout, transient GitHub slowness healed by the 30-minute pr-sweep; pages only on a sustained burst via pg-router-upstream-killed, pg2-fy2pm) and reason=usage-limit (a session that ended without claiming its bead because it died on an account usage or spend limit or an API outage, an external limit and not a defect of this system, operator ruling 2026-10-14, pg2-e0imq; it has no page of its own and stays visible as pg_router_failures_total{reason="usage-limit"}) and reason=launch-failed (a ccpool session that failed before it was ready, declined with kind fault; a role that keeps failing this way is paged by the progress rule pg-router-role-stalled instead, which counts the decline as unsuccessful, so this rule need not page it a second time; its count stays visible as pg_router_failures_total{class="declined",reason="launch-failed"}). Routine backpressure declines are excluded as well: reason=session-in-flight (pg-router-ccpool-handler declining while an earlier attempt of the same bead and role is in flight, pg2-qaeb8) and the review precheck''s skipped-* reasons. See pg2-97539 for the failure-class catalog''s provenance.'
+          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|launch-failed|session-in-flight|skipped-.+"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is set for every class as of pg2-nimab, DEC-OBS-5) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the seven causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops), reason=origin-unavailable (its own rule, pg-router-origin-unavailable), reason=triager-failure (escalation-triage roles, bulkheaded by pg2-u2yub so they cannot fire this alert; their own rule, pg-router-triager-failures) and reason=upstream-killed (a gh call killed by the pg-connector 30s scriptout timeout, transient GitHub slowness healed by the 30-minute pr-sweep; pages only on a sustained burst via pg-router-upstream-killed, pg2-fy2pm) and reason=usage-limit (a session that ended without claiming its bead because it died on an account usage or spend limit or an API outage, an external limit and not a defect of this system, operator ruling 2026-10-14, pg2-e0imq; it has no page of its own and stays visible as pg_router_failures_total{reason="usage-limit"}) and reason=launch-failed (a ccpool session that failed before it was ready, declined with kind fault; a role that keeps failing this way is paged by the progress rule pg-router-role-stalled instead, which counts the decline as unsuccessful, so this rule need not page it a second time; its count stays visible as pg_router_failures_total{class="declined",reason="launch-failed"}). Routine backpressure declines are excluded as well: reason=session-in-flight (pg-router-handler-ccpool declining while an earlier attempt of the same bead and role is in flight, pg2-qaeb8) and the review precheck''s skipped-* reasons. See pg2-97539 for the failure-class catalog''s provenance.'
         data:
           - refId: A
             relativeTimeRange:
@@ -846,14 +846,14 @@ groups:
                     type: gt
                     params: [0]
 
-      # Origin unavailable (bead pg2-x7euu, per-origin probe gate from pg2-4gi2c; see packages/pg-router-ccpool-handler/docs/behavior):
+      # Origin unavailable (bead pg2-x7euu, per-origin probe gate from pg2-4gi2c; see packages/pg-router-handlers/docs/behavior):
       # the ccpool handler declines dispatches into a repo whose git origin
       # probe is failing, surfacing as
       # pg_router_failures_total{class="declined",reason="origin-unavailable"}.
       # The alert carries NO per-origin or per-error detail: annotations are a
       # STATIC per-class remediation map only (no stderr / user-supplied
       # strings, which can leak URLs). Which origin and which class is looked
-      # up from handler logs / `pg-router-ccpool-handler origin status`
+      # up from handler logs / `pg-router-handler-ccpool origin status`
       # (docs/runbooks/dispatched-session-git-origin-auth.md).
       - uid: pg-router-origin-unavailable
         title: pg-router dispatch origin is unavailable (dispatches declined)
@@ -869,7 +869,7 @@ groups:
           escalation: human
         annotations:
           summary: "pg-router is declining dispatches because a watched git origin is unavailable"
-          description: 'rate(pg_router_failures_total{reason="origin-unavailable"}[10m]) has stayed above 0 for over 15 minutes. Find the origin and its class with `pg-router-ccpool-handler origin status` or the handler logs, then apply the matching remediation. mount-missing: check that the checkout volume is mounted. auth-unavailable: renew the step cert in an interactive shell. network: check network/VPN connectivity to the git host. timeout: if the handler log shows the step-CA prompt "browser has been opened to visit ... auth", renew the step cert in an interactive shell (same as auth-unavailable); otherwise check network and git host health, then retry. unknown: inspect the handler log for the origin. To stop gating an origin deliberately, use `pg-router-ccpool-handler origin ignore`. Runbook: docs/runbooks/dispatched-session-git-origin-auth.md.'
+          description: 'rate(pg_router_failures_total{reason="origin-unavailable"}[10m]) has stayed above 0 for over 15 minutes. Find the origin and its class with `pg-router-handler-ccpool origin status` or the handler logs, then apply the matching remediation. mount-missing: check that the checkout volume is mounted. auth-unavailable: renew the step cert in an interactive shell. network: check network/VPN connectivity to the git host. timeout: if the handler log shows the step-CA prompt "browser has been opened to visit ... auth", renew the step cert in an interactive shell (same as auth-unavailable); otherwise check network and git host health, then retry. unknown: inspect the handler log for the origin. To stop gating an origin deliberately, use `pg-router-handler-ccpool origin ignore`. Runbook: docs/runbooks/dispatched-session-git-origin-auth.md.'
         data:
           - refId: A
             relativeTimeRange:
@@ -1128,7 +1128,7 @@ groups:
       #     the instance carries `role`): at-capacity declines in the last 15m,
       #     carrying `role` as of pg2-nimab;
       #   - the pool has no free slot (ccpool_pool_capacity dim=free, emitted about
-      #     every 60s by the pg-router-ccpool-handler pool-metrics agent);
+      #     every 60s by the handler pool-metrics agent);
       #   - the pool is genuinely FULL: dim=counted >= dim=max_sessions. ccpool
       #     reports free = 0 for the hours an account usage window (five_hour) is at
       #     its limit, whatever the occupancy (session.Capacity.WithUsageLimit), and

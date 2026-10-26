@@ -50,7 +50,7 @@ func (r Result) Fields() map[string]any {
 // opaque wire `outcome` string (bead pg2-tq9q5). Two shapes are understood:
 //
 //   - A JSON object with an "actions" array — exactly what
-//     packages/pg-router-ccpool-handler JSON-encodes from its own
+//     packages/pg-router-handlers JSON-encodes from its own
 //     Result.Fields(): {"actions":[{"verb":"closed","refs":[{"type":"bead",
 //     "id":"X"}]}]}. Each entry becomes an Action with the handler's verb and
 //     refs (an entry carrying no refs falls back to defaultRefs), and an

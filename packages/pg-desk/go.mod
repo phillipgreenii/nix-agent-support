@@ -59,6 +59,6 @@ require (
 // real wire-envelope schema checker rather than hand-rolling a parallel
 // one (docket pg2-2j5ac.32, packet 4's own Files instruction) — resolved
 // natively via a local replace, the same "local replace => ../sibling"
-// pattern packages/pg-router-ccpool-handler's go.mod already uses for its
+// pattern packages/pg-router-handlers's go.mod already uses for its
 // own sibling-module dependencies (phillipg-nix-repo-base ADR 0008).
 replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector => ../pg-connector

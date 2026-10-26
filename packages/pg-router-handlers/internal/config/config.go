@@ -1,0 +1,494 @@
+// Package config is this module's OWN, minimal runtime configuration for the
+// ccpool/command executors it hosts. It is NOT a copy of
+// packages/pg-router/internal/config: that package is pg-router's full
+// pool-level configuration (roles, queries, gates, pool scalars) and stays
+// in-core, unreachable from here (Go's internal-package visibility rule —
+// see docs/adr/0065's Addendum). This Config instead carries exactly the
+// narrow subset of fields the moved ccpool/command executor logic reads at
+// dispatch time — the launch/prompt/isolation knobs, not pg-router's own
+// pool-wide scalars (MaxFeedback/MaxWorker/gates/roles/queries), which have
+// no meaning on this side of the wire boundary.
+//
+// Default() below is deliberately a plain Go literal, mirroring
+// packages/pg-router/internal/config.Default()'s own values for the fields
+// this module shares with it, so today's behavior is unchanged for a
+// deployment that never overrides them.
+//
+// Validate's real claude --permission-mode enum check (docket pg2-oju6w Task
+// 5.7) lives HERE, not on pg-router's own Config: this module is the side
+// that actually invokes `ccpool new --permission-mode`, so it is the side
+// that needs the real values. pg-router itself now carries PermissionMode as
+// an opaque, un-validated string (kept only to display it).
+package config
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/phillipgreenii/pg-router-handlers/internal/budget"
+)
+
+// CCPoolCommand is the ccpool binary a ccpool-backed handler runs through.
+// Mirrors packages/pg-router/internal/config.CCPoolCommand (same value, same
+// rationale — the binary name is not configurable today on either side).
+const CCPoolCommand = "ccpool"
+
+// Config is the launch/prompt/isolation configuration one dispatched ccpool
+// or command session reads.
+type Config struct {
+	// RepoRoot is the repo a dispatched session's WORKSPACE_ROOT derives
+	// from (worktree/none isolation) or runs directly against.
+	RepoRoot string
+	// BeadsPrefix is the expected bd issue-store prefix, checked by this
+	// module's own precheck (docket pg2-oju6w's Task 5.8, ADR 0065's
+	// "Source-side boundary" section, closing register row R14 / bead
+	// pg2-d4gvb): a guard against a `query` invocation resolving the wrong
+	// beads store. Mirrors packages/pg-router/internal/config.Config's
+	// same-named field.
+	BeadsPrefix string
+	// WorktreeDir is the parent directory fresh per-item git worktrees are
+	// created under (worktree isolation, the default).
+	WorktreeDir string
+	// MaxWait bounds how long a ccpool session may run before it is
+	// considered stuck (waitDone's deadline). It is the FLOOR of that
+	// deadline: a role with a time budget waits max(MaxWait, budget.time +
+	// 10m) (executor.effectiveMaxWait, INV-CCH-27).
+	MaxWait time.Duration
+	// WorktreeQuietWindow is how long a finished dispatch's session (its
+	// transcript plus every subagents/*.jsonl beside it) must have shown no
+	// write activity before cleanupWorktree may remove its worktree
+	// (pg2-9fwft: Agent-tool child subagents are invisible to the pool but
+	// keep writing their transcripts). <= 0 disables the check (legacy
+	// remove-immediately behavior). This is the handler-wide default; a role may
+	// override it for its own dispatches (roles.CCPoolConfig.WorktreeQuietWindow,
+	// INV-CCH-23), except that <= 0 here stays an operator disable no role undoes.
+	WorktreeQuietWindow time.Duration
+	// WorktreeQuietMax bounds how long cleanupWorktree waits for the quiet
+	// window; on expiry the worktree is LEFT in place (fail soft, for a later
+	// sweep) rather than removed under a still-active subagent.
+	WorktreeQuietMax time.Duration
+	// PollInterval is how often waitDone re-checks ccpool's session list.
+	PollInterval time.Duration
+	// LeaseTTL is the supervision-lease TTL (bead pg2-g2u9m, INV-CCH-18): the
+	// handler stamps pgrouter.lease_until = now + LeaseTTL on its session every
+	// PollInterval, and an expired lease means nobody is supervising the session
+	// (the handler died). Default 2m; validated at load to be at least
+	// LeaseTTLMinPolls x PollInterval so a few missed refreshes never expire a
+	// live handler's lease.
+	LeaseTTL time.Duration
+	// NeedsInputStall is the stall bound for an unattended drain session (a ccpool
+	// role whose completion is close-or-release, INV-CCH-29, bead pg2-zybju): how
+	// long the session may sit in needs_input before the handler clears it without
+	// a person (Escape, then close and release the claim). Default 15m; 0 disables
+	// the bound everywhere (the kill switch). A non-zero value is validated at load
+	// to be at least NeedsInputStallMinPolls x PollInterval. A role may override it
+	// for its own dispatches (roles.CCPoolConfig.NeedsInputStall). Every other role
+	// keeps ADR 0037's rule: a needs_input session is spared for a human.
+	NeedsInputStall time.Duration
+	// Effort/Model/PermissionMode/AllowedTools/Autonomous are forwarded
+	// verbatim to `ccpool new` (NewCLIRunner).
+	Effort         string
+	Model          string
+	PermissionMode string
+	AllowedTools   string
+	Autonomous     bool
+	// SessionPrefix names the ccpool --name label prefix (Role.DisplayName).
+	SessionPrefix string
+	// SelfLogin is the GitHub login the worker safety preamble asserts
+	// authorship against. Empty until a deployment sets it explicitly —
+	// resolving it automatically is not built.
+	SelfLogin string
+	// ReminderMsg/WrapUpMsg are the budget-escalation nudge templates
+	// (text/template, {{.BeadID}}).
+	ReminderMsg string
+	WrapUpMsg   string
+	// ConfirmIngest is the worker's initial-nudge ingestion-guard window.
+	ConfirmIngest time.Duration
+	// BudgetTokens/BudgetCost/BudgetTime/*Pct feed WorkerBudget() below —
+	// mirrors packages/pg-router/internal/config.Config's same-named fields
+	// and its WorkerBudget() method.
+	BudgetTokens int64
+	BudgetCost   int64 // cents
+	BudgetTime   time.Duration
+	ReminderPct  float64
+	CancelPct    float64
+	HardPct      float64
+	// OriginProbe configures the per-origin availability probe and decline
+	// gate (bead pg2-4gi2c, INV-CCH-10). The zero-origin default watches
+	// nothing, so a deployment that never sets it is unchanged.
+	OriginProbe OriginProbe
+	// ConnectorBinary is the pg-connector executable the review precheck
+	// (INV-CCH-22, bead pg2-5x29j) reads PR merged state and pending-review
+	// state through. Empty means "pg-connector" resolved on PATH. A binary that
+	// cannot be run only disables the precheck's PR reads (it fails open).
+	ConnectorBinary string
+}
+
+// WatchedOrigin is one git origin the handler probes before accepting a
+// dispatch that runs in its repository.
+type WatchedOrigin struct {
+	// Key is the normalized repo key <host>/<org>/<repo>. It names the origin
+	// in state files, logs, and the `origin` subcommands.
+	Key string `json:"key"`
+	// RepoRoot is the checkout the probe runs `git -C` in. A dispatch whose
+	// repo root equals it (after path cleaning) is gated by this origin.
+	RepoRoot string `json:"repoRoot"`
+	// Remote is the remote name or URL passed to `git ls-remote`. Empty means
+	// "origin".
+	Remote string `json:"remote,omitempty"`
+}
+
+// OriginProbe is the origin probe's configuration. All durations are
+// nanosecond integers on the wire, like the rest of Config.
+type OriginProbe struct {
+	// Origins is the watched set. Empty disables the feature.
+	Origins []WatchedOrigin `json:"origins"`
+	// FailureThreshold is K: an origin is gated only after K consecutive
+	// failed probes.
+	FailureThreshold int `json:"failureThreshold"`
+	// TTL is how long a probe result is reused before the next dispatch
+	// re-probes. A result showing 0 < failures < K is never reused, so the
+	// confirming probe is not delayed by a TTL.
+	TTL time.Duration `json:"ttl"`
+	// Timeout is the hard bound on one `git ls-remote`.
+	Timeout time.Duration `json:"timeout"`
+	// StateDir is the handler state directory; the per-origin state files live
+	// in its origin-state/ subdirectory. Empty resolves to
+	// $XDG_STATE_HOME/pg-router-ccpool-handler, else
+	// ~/.local/state/pg-router-ccpool-handler.
+	StateDir string `json:"stateDir"`
+}
+
+// DefaultOriginProbe is OriginProbe's baseline: no origins, K=2, 60s TTL, 20s
+// probe timeout.
+func DefaultOriginProbe() OriginProbe {
+	return OriginProbe{FailureThreshold: 2, TTL: 60 * time.Second, Timeout: 20 * time.Second}
+}
+
+// Validate rejects a malformed OriginProbe.
+func (o OriginProbe) Validate() error {
+	if o.FailureThreshold < 1 {
+		return fmt.Errorf("originProbe.failureThreshold %d: must be >= 1", o.FailureThreshold)
+	}
+	if o.TTL < 0 {
+		return fmt.Errorf("originProbe.ttl %v: must be >= 0", o.TTL)
+	}
+	if o.Timeout <= 0 {
+		return fmt.Errorf("originProbe.timeout %v: must be > 0", o.Timeout)
+	}
+	seen := map[string]bool{}
+	for i, w := range o.Origins {
+		if !validOriginKey(w.Key) {
+			return fmt.Errorf("originProbe.origins[%d].key %q: want <host>/<org>/<repo>", i, w.Key)
+		}
+		if seen[w.Key] {
+			return fmt.Errorf("originProbe.origins[%d].key %q: duplicate", i, w.Key)
+		}
+		seen[w.Key] = true
+		if w.RepoRoot == "" {
+			return fmt.Errorf("originProbe.origins[%d] (%s): repoRoot is required", i, w.Key)
+		}
+	}
+	return nil
+}
+
+// validOriginKey reports whether k has exactly three non-empty segments of
+// [A-Za-z0-9._-] separated by "/". That charset keeps the key safe to embed in
+// a file name once the separators are replaced.
+func validOriginKey(k string) bool {
+	parts := strings.Split(k, "/")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" || p == "." || p == ".." {
+			return false
+		}
+		for _, r := range p {
+			ok := r == '.' || r == '_' || r == '-' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+			if !ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// validPermissionModes is the set of claude --permission-mode values this
+// module may pass through to `ccpool new` (mirrors ccpool's own
+// launch.PermissionMode enum; duplicated here rather than imported because
+// this module does not depend on the ccpool module's internal packages). The
+// empty string is valid: it means "omit the flag" (NewCLIRunner.Ensure only
+// appends --permission-mode when PermissionMode is non-empty — see
+// internal/ccpool/cli.go).
+var validPermissionModes = map[string]bool{
+	"":                  true,
+	"default":           true,
+	"acceptEdits":       true,
+	"plan":              true,
+	"auto":              true,
+	"dontAsk":           true,
+	"bypassPermissions": true,
+}
+
+// ValidEfforts lists the claude --effort levels a role's per-role effort
+// override (roles.CCPoolConfig.Effort, bead pg2-svkob) may carry; they are the
+// values `claude --help` lists for --effort. Duplicated here, like
+// validPermissionModes, because this module does not import claude's or
+// ccpool's own enums.
+var ValidEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+// ValidateEffortOverride checks a role's effort override: "" (no override, the
+// handler-wide Effort applies) or one of ValidEfforts. An invalid value would
+// otherwise surface only when claude starts, as a failed launch.
+func ValidateEffortOverride(effort string) error {
+	if effort == "" {
+		return nil
+	}
+	for _, v := range ValidEfforts {
+		if effort == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("effort %q: not one of %s (omit it to use the handler default)", effort, strings.Join(ValidEfforts, ", "))
+}
+
+// Validate rejects a Config whose PermissionMode is not one of the claude
+// --permission-mode values this module knows how to forward. Docket
+// pg2-oju6w Task 5.7: this is the real enum check pg-router's own Config used
+// to duplicate — it now lives only here, on the side that actually invokes
+// `ccpool new --permission-mode`. Callers (cmd/pg-router-handler-ccpool's
+// loadConfig) MUST call this after decoding so an invalid value fails at
+// config-load time rather than surfacing later as a rejected ccpool argv.
+func (c Config) Validate() error {
+	if !validPermissionModes[c.PermissionMode] {
+		return fmt.Errorf("invalid permissionMode %q (valid: default, acceptEdits, plan, auto, dontAsk, bypassPermissions)", c.PermissionMode)
+	}
+	if err := c.validateLease(); err != nil {
+		return err
+	}
+	if err := c.ValidateNeedsInputStall(c.NeedsInputStall); err != nil {
+		return fmt.Errorf("needsInputStall: %w", err)
+	}
+	return c.OriginProbe.Validate()
+}
+
+// WorkerBudget builds the budget.Budget a worker/review role's CCPoolConfig
+// carries, from this Config's BudgetTokens/BudgetCost/BudgetTime/*Pct
+// fields. Mirrors packages/pg-router/internal/config.Config.WorkerBudget()
+// exactly.
+func (c Config) WorkerBudget() budget.Budget {
+	return budget.Budget{
+		Tokens:     budget.Limit(c.BudgetTokens),
+		Cost:       budget.Limit(c.BudgetCost),
+		Time:       c.BudgetTime,
+		Thresholds: budget.Thresholds{Reminder: c.ReminderPct, Cancel: c.CancelPct, Hard: c.HardPct},
+	}
+}
+
+// baseAllowedTools is the built-in claude --allowed-tools allowlist granted
+// to every autonomous worker regardless of configuration. Historically
+// mirrored packages/pg-router/internal/config.baseAllowedTools byte-for-byte
+// (same rationale — see that package's own doc comment); the two have
+// deliberately DIVERGED as of bead pg2-s9zh5 below, since
+// packages/pg-router/internal/config.baseAllowedTools is not on this
+// module's own live dispatch path (this package's Config, not pg-router
+// core's, is what `ccpool new --allowed-tools` actually receives —
+// internal/ccpool/cli.go's NewCLIRunnerForPool) and that other constant
+// carries its own "HUMAN SIGN-OFF REQUIRED" gate this bugfix does not
+// touch.
+//
+// pg-connector issue */ccpool * (bead pg2-s9zh5): every dispatched role
+// shares this ONE process-wide allowlist, so a triager-shaped role's own
+// dispatch prompt instructing it to read/mutate the escalated bead
+// (`pg-connector issue show/comment/update/close`) and inspect/reply to
+// stuck sessions (`ccpool list/state/reply/tail`) had no path to those verbs
+// under PermissionMode=dontAsk (auto-deny, no prompt possible). Widening the
+// shared base list was the deliberately narrower fix at the time.
+//
+// Code-executing toolchain grants are NOT in this list (bead pg2-cwn44,
+// operator ruling on pg2-mh0kd, 2026-10-14): `go build|test|vet|mod`, `gofmt`
+// and `gofumpt` run attacker-controlled code (`_test.go`, `//go:generate`)
+// when pointed at an untrusted PR checkout (agent-support ADR 0035), so only a
+// role that declares the nix-defined "go" tool set gets them. A role's own
+// grants ride in its role file's extraAllowedTools (RoleConfig.ExtraAllowedTools,
+// bead pg2-nk6th.5, merged by buildDeps via MergeAllowedTools); the named tool
+// sets are defined in the nix module (home/programs/pg-router-ccpool-handler,
+// option toolSets) and render into that field, so this package carries no tool
+// set of its own. `prek` and `pre-commit` are the same exposure class (they run
+// the repo-defined hook code) and are held back the same way (bead pg2-bg9qq):
+// they live in the nix-defined "hooks" tool set, declared only by the roles that
+// run hooks directly.
+const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)"
+
+// SplitAllowedTools splits an --allowed-tools value into its individual
+// grants. The separator is a comma, but only a comma OUTSIDE parentheses
+// separates grants: a grant such as `Bash(echo a,b:*)` keeps its inner comma.
+// Each grant is whitespace-trimmed and empty pieces are dropped.
+func SplitAllowedTools(list string) []string {
+	var out []string
+	depth, start := 0, 0
+	flush := func(end int) {
+		if g := strings.TrimSpace(list[start:end]); g != "" {
+			out = append(out, g)
+		}
+	}
+	for i, r := range list {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				flush(i)
+				start = i + 1
+			}
+		}
+	}
+	flush(len(list))
+	return out
+}
+
+// MergeAllowedTools merges a role's own extra grants onto the handler-wide
+// allowedTools value (bead pg2-nk6th.5): the handler-wide grants come first in
+// their original order, then each extra grant in the order given, comma-joined.
+// A grant that is already present (in base or earlier in extra) is dropped, so
+// the first occurrence wins and the result never repeats a grant. With no
+// extra grants the base value is returned verbatim (byte-for-byte), so a role
+// that sets none is unchanged.
+func MergeAllowedTools(base string, extra []string) string {
+	if len(extra) == 0 {
+		return base
+	}
+	seen := map[string]bool{}
+	var merged []string
+	add := func(g string) {
+		if g = strings.TrimSpace(g); g != "" && !seen[g] {
+			seen[g] = true
+			merged = append(merged, g)
+		}
+	}
+	for _, g := range SplitAllowedTools(base) {
+		add(g)
+	}
+	for _, e := range extra {
+		for _, g := range SplitAllowedTools(e) {
+			add(g)
+		}
+	}
+	return strings.Join(merged, ",")
+}
+
+// Default returns this module's own baseline Config. Values mirror
+// packages/pg-router/internal/config.Default()'s corresponding fields as of
+// the 2026-09-11 move, so a deployment that supplies no overrides observes
+// unchanged behavior.
+func Default() Config {
+	return Config{
+		WorktreeDir:         "",
+		BeadsPrefix:         "zr",
+		MaxWait:             1800 * time.Second,
+		PollInterval:        10 * time.Second,
+		LeaseTTL:            2 * time.Minute,
+		NeedsInputStall:     DefaultNeedsInputStall,
+		WorktreeQuietWindow: 2 * time.Minute,
+		WorktreeQuietMax:    10 * time.Minute,
+		Effort:              "max",
+		Model:               "",
+		Autonomous:          true,
+		PermissionMode:      "dontAsk",
+		AllowedTools:        baseAllowedTools,
+		SessionPrefix:       "pg-router-",
+		ReminderMsg:         "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
+		WrapUpMsg:           "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
+		ConfirmIngest:       90 * time.Second,
+		BudgetTokens:        0,                // unlimited until ccpool N3
+		BudgetCost:          0,                // unlimited until ccpool N3
+		BudgetTime:          25 * time.Minute, // strictly < MaxWait (30m); the effective wait is 35m
+		ReminderPct:         0.725,
+		CancelPct:           0.90,
+		HardPct:             1.00,
+		OriginProbe:         DefaultOriginProbe(),
+	}
+}
+
+// LeaseTTLMinPolls is the smallest LeaseTTL, in PollInterval units, Validate
+// accepts: the lease is refreshed once per poll, so a TTL below this many polls
+// could expire on a live handler after a couple of slow or failed refreshes.
+const LeaseTTLMinPolls = 10
+
+// DefaultNeedsInputStall is the default stall bound for an unattended drain
+// session parked in needs_input (operator ruling, Phillip, 2026-10-12, bead
+// pg2-zybju decision item 3: "N = 15 minutes unless the implementer finds reason
+// to differ"; none found: the six stalls seen so far lasted from 2.5 to about 80
+// minutes, and a person who is going to answer a dialog does so well inside 15).
+const DefaultNeedsInputStall = 15 * time.Minute
+
+// NeedsInputStallMinPolls is the smallest NeedsInputStall, in PollInterval
+// units, ValidateNeedsInputStall accepts. The stall check runs once per poll, so
+// a bound under a few polls could clear a session in the instant a hook edge is
+// late; six polls (one minute at the 10s default) is the floor.
+const NeedsInputStallMinPolls = 6
+
+// ValidateNeedsInputStall checks a needs_input stall bound (the handler-wide
+// Config.NeedsInputStall or a role's own override, INV-CCH-29) against this
+// Config. 0 is valid and means "disabled" (handler-wide) or "no override"
+// (per role). A negative value is an error, and so is a positive one under
+// NeedsInputStallMinPolls x PollInterval.
+func (c Config) ValidateNeedsInputStall(stall time.Duration) error {
+	if stall == 0 {
+		return nil
+	}
+	if stall < 0 {
+		return fmt.Errorf("%v: must be >= 0 (0 disables the bound)", stall)
+	}
+	if min := NeedsInputStallMinPolls * c.PollInterval; stall < min {
+		return fmt.Errorf("%v: must be >= %d x pollInterval (%v)", stall, NeedsInputStallMinPolls, min)
+	}
+	return nil
+}
+
+// QuietWindowOverrideMinPolls is the smallest per-role worktree quiet-window
+// override, in PollInterval units, ValidateQuietWindowOverride accepts. The
+// check polls once per PollInterval, so a window under two polls could pass on
+// a single sample taken between two writes of a subagent that is merely
+// between tool calls. Two polls (20s at the 10s default) is the floor for the
+// lowest-risk case, a role with few subagents.
+const QuietWindowOverrideMinPolls = 2
+
+// ValidateQuietWindowOverride checks a role's WorktreeQuietWindow override
+// (bead pg2-uyahp, INV-CCH-23) against this Config. 0 means "no override" and
+// is always valid. A non-zero value MUST be positive, at least
+// QuietWindowOverrideMinPolls x PollInterval, and no more than
+// WorktreeQuietMax (a longer window could never be satisfied before the wait
+// gives up and leaves the worktree in place).
+func (c Config) ValidateQuietWindowOverride(window time.Duration) error {
+	if window == 0 {
+		return nil
+	}
+	if window < 0 {
+		return fmt.Errorf("worktreeQuietWindow %v: must be > 0 (omit it to use the handler default %v)", window, c.WorktreeQuietWindow)
+	}
+	if min := QuietWindowOverrideMinPolls * c.PollInterval; window < min {
+		return fmt.Errorf("worktreeQuietWindow %v: must be >= %d x pollInterval (%v)", window, QuietWindowOverrideMinPolls, min)
+	}
+	if c.WorktreeQuietMax > 0 && window > c.WorktreeQuietMax {
+		return fmt.Errorf("worktreeQuietWindow %v: must be <= worktreeQuietMax (%v)", window, c.WorktreeQuietMax)
+	}
+	return nil
+}
+
+// validateLease enforces LeaseTTL >= LeaseTTLMinPolls x PollInterval (bead
+// pg2-g2u9m). A zero PollInterval is not this check's concern (it is not a
+// valid runtime value either way); only a positive one bounds the TTL.
+func (c Config) validateLease() error {
+	min := LeaseTTLMinPolls * c.PollInterval
+	if c.LeaseTTL <= 0 || c.LeaseTTL < min {
+		return fmt.Errorf("invalid leaseTTL %v: must be >= %d x pollInterval (%v)", c.LeaseTTL, LeaseTTLMinPolls, min)
+	}
+	return nil
+}

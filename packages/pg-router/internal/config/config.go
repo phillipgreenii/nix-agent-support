@@ -95,7 +95,7 @@ type Config struct {
 	// boundary (docket pg2-oju6w Task 5.7): pg-router forwards it verbatim to
 	// the new module's own dispatch config and displays it in `config --show`,
 	// but no longer checks it against the claude --permission-mode enum — that
-	// check now lives in packages/pg-router-ccpool-handler/internal/config,
+	// check now lives in packages/pg-router-handlers/internal/config,
 	// the side that actually invokes `ccpool new --permission-mode`.
 	PermissionMode string
 	// AllowedTools is the claude --allowed-tools allowlist forwarded verbatim to
@@ -265,7 +265,7 @@ func (c Config) locator() CommandLocator {
 // attacker-controlled code on an untrusted PR checkout (ADR 0035), so a role
 // gets them only by declaring the "go" / "hooks" tool set, which the
 // ccpool-handler's nix module renders into that role's own extraAllowedTools.
-// Keep this list in step with packages/pg-router-ccpool-handler/internal/config
+// Keep this list in step with packages/pg-router-handlers/internal/config
 // baseAllowedTools (which has since gained its own pg-connector/ccpool verbs).
 const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*)"
 
@@ -394,7 +394,7 @@ func Load() (Config, error) {
 	// and c.Queries left at their zero value (nil) — zero roles, zero
 	// queries, doing nothing until configured. The beads-shaped role/query
 	// pairing this fallback used to provide now lives as a registered
-	// kind:"source" participant in packages/pg-router-ccpool-handler, wired
+	// kind:"source" participant in packages/pg-router-handlers, wired
 	// through pg-router's own [[query]]/[[role]] TOML (query.ParticipantQuery),
 	// never as an automatic built-in.
 	if err := c.Validate(); err != nil {
@@ -470,7 +470,7 @@ func noConfigWarnSuppressed() bool {
 // pg-router treats it as an opaque, un-validated string, kept only to display
 // in `config --show`/`config --show --json`. The real claude --permission-mode
 // enum check now lives in the new module's own config validation
-// (packages/pg-router-ccpool-handler/internal/config), which is the side that
+// (packages/pg-router-handlers/internal/config), which is the side that
 // actually invokes `ccpool new --permission-mode` and therefore needs the real
 // values.
 //

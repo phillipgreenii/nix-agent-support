@@ -515,66 +515,47 @@ binds = ["feedback.requested"]
 
 The kind-specific configuration (the role's kind, and the `actor`/`completion`/
 `on_failure`/`on_dispatch_fail`/`authorship_guard`/`prompt`/`budget`/`isolation` fields) moves to
-the handler module's own role-config JSON file (`--role-config`, or the handler's own environment
-variable for it) — see that module's role-config source for the exact JSON shape. There is no
-automatic TOML-to-JSON converter shipped for this move;
+the handler module's own per-role file (see that module's role source for the exact JSON shape).
+There is no automatic TOML-to-JSON converter shipped for this move;
 translate each `[[role]]` block's kind and per-kind fields into the
 equivalent JSON file by hand (field names are unchanged, only the container format is). The
-handler split below replaces this file with the role's own `[role.config]` table.
+handler split below replaces this file with the role's own `[role.config]` table, and the
+per-role file no longer exists.
 
-### Multi-role dispatch differentiation: `PG_ROUTER_HANDLER_COMMAND_DIR` + the nix `roles` option
+### Multi-role dispatch differentiation (history, superseded by the handler split)
 
-Bead `pg2-ymb3v` closed a gap left open by the move above: with only `PG_ROUTER_HANDLER_COMMAND`
-set, every enabled role resolved to the byte-for-byte identical handler argv — a deployment with
-more than one differently-configured role (e.g. `feedback`/`worker`/`review`, each with its own
-actor/prompt/completion policy) had no way to tell them apart, silently. Setting
-`PG_ROUTER_HANDLER_COMMAND_DIR` to a directory of `<role.Name>.json` files (this package's own
-`roleFile` shape — see the section above) fixes this: the resolved argv threads
-`--role-config <dir>/<role.Name>.json` onto the handler command, so each role dispatches through
-its own participant config. `PG_ROUTER_HANDLER_COMMAND` alone is unaffected — a single-role
-deployment that never sets `PG_ROUTER_HANDLER_COMMAND_DIR` keeps its existing behavior unchanged.
-
-For a nix-managed deployment (bead `pg2-pteab`), hand-authoring these JSON files is unnecessary:
-the handler module's new `roles` option (attrset keyed by role name,
-shaped like `roleFile`) renders one `pkgs.writeText` per role and joins them into one directory,
-exposed as that module's own `handlerCommandDir` output. Point
-`home/programs/pg-router`'s `daemon`/`periodicDrain.handlerCommandDir` option at it (interpolated
-to a string, e.g. `"${config.phillipgreenii.programs.<handler module>.handlerCommandDir}"`)
-to wire the two modules together — `handlerCommand`/`handlerCommandDir` are otherwise independent
-plain-string options on `pg-router`'s own module, not auto-derived from the handler module.
-The darwin LaunchAgent mirrors (`darwin/modules/pg-router` and the handler module's own darwin
-module) follow the same shape. This is the **earlier path** of the handler split below, which a role
-leaves by setting its own `handler`.
+Bead `pg2-ymb3v` closed a gap left open by the move above: with one shared handler command for
+every role, every enabled role resolved to the byte-for-byte identical handler argv, so a deployment
+with more than one differently-configured role (e.g. `feedback`/`worker`/`review`, each with its own
+actor/prompt/completion policy) could not tell them apart. A shared command and a directory of
+per-role JSON files, rendered by the handler module's `roles` option, fixed this for a while. The
+handler split below removed that mechanism: each role names its own handler and carries its own
+`[role.config]`, so there is no shared command, no per-role file directory and no extra argument.
 
 ### The handler split: a role names its own handler (the compat window)
 
 Bead `pg2-12gr4.5` records the decisions of the handler split (`docs/adr/0065`'s Addendum, handler
-split; `DEC-ROLE-1`, `DEC-WIRE-3`). This is **additive and per role**: nothing changes for a role
-until it sets `handler`, and the core chooses between the two dispatch paths role by role.
+split; `DEC-ROLE-1`, `DEC-WIRE-3`). The split was **additive and per role** while it lasted: a role
+moved to the per-role path by setting `handler`, and the core chose between the two dispatch paths
+role by role. The window is over: every role names its own handler, and the earlier path (a shared
+handler command from the environment, a per-role JSON file and its extra argument, and the JSON
+`survivesShutdown` flag) is gone. A role without `handler` is now a configuration error naming the
+role.
 
-| A role that...                    | is on the...  | reaches its handler through                                                                                      | has its own configuration in                     |
-| --------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| does not set `handler`            | earlier path  | `PG_ROUTER_HANDLER_COMMAND`, plus `--role-config <dir>/<role>.json` when `PG_ROUTER_HANDLER_COMMAND_DIR` is set  | the per-role JSON file                           |
-| sets `handler` (an absolute path) | per-role path | that command, with the **role object** (`{ name, config }`) in the JSON on stdin of every request (`DEC-WIRE-3`) | the role's own `[role.config]` table in the TOML |
+Today a role is one `[[role]]` entry:
 
-To move one role to the per-role path:
+- `handler`, an absolute path to the adapter command. The core sends the **role object**
+  (`{ name, config }`) in the JSON on stdin of every request (`DEC-WIRE-3`).
+- `[role.config]`, the role's own opaque settings (the adapter's behavior docs name its keys; it
+  rejects an unknown one).
+- `survives_shutdown = true` for a role whose dispatch must outlive a restart of the core
+  (`docs/adr/0085`'s Decision).
 
-1. Declare the role once, in `[[role]]`: set `handler` to the adapter command, move the role's
-   own settings from its JSON file into `[role.config]` (the adapter's behavior docs name its keys;
-   it rejects an unknown one), and set `survives_shutdown = true` for a role whose dispatch must
-   outlive a restart of the core (`docs/adr/0085`'s Decision).
-2. Build. The adapter's `validate` runs over the role's rendered table during the build, so
-   a mistake fails before apply.
-3. Exercise the role once with `pg-router run-role <role> '<json>'` against a realistic event, and
-   read an actual outcome, not just an exit code (the repo's config-testing rule).
-4. Apply. A session the earlier handler left running at the cutover is adopted by the new adapter
-   (`docs/adr/0085`), so no running dispatch is dropped.
-
-To roll one role back, revert the change that set its `handler`: the role is on the earlier path
-again, with no other state to undo. The window ends when **no** role is left on the earlier path;
-one cleanup then removes `PG_ROUTER_HANDLER_COMMAND`, `PG_ROUTER_HANDLER_COMMAND_DIR` and the
-per-role JSON files. The new keys decode strictly: a wrong-typed value, or a `handler` that is not an
-absolute path, fails the load with exit `3` before anything runs.
+The adapter's `validate` runs over the role's rendered table during the build, so a mistake fails
+before apply. Exercise a new or changed role once with `pg-router run-role <role> '<json>'` against
+a realistic event and read an actual outcome, not just an exit code (the repo's config-testing
+rule). The keys decode strictly: a wrong-typed value, or a `handler` that is not an absolute path,
+fails the load with exit `3` before anything runs.
 
 ### Breaking: the core ships with no built-in role/query set
 

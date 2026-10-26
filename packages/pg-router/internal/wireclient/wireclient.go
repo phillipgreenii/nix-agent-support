@@ -3,7 +3,7 @@
 // carrying JSON, with coarse exit codes). It replaces the in-process
 // executor.For(roleType).Dispatch(...) call docket pg2-oju6w's Task 5.2/5.3
 // moved out of this module (that logic now lives in the registered handler
-// participant, e.g. packages/pg-router-ccpool-handler) with a real message
+// participant, e.g. packages/pg-router-handlers) with a real message
 // crossing the wire — resolving register row INTF-HANDLER's residual ("the
 // call itself is still a Go method call, never a message crossing a wire",
 // ADR 0065's "Register" section) for real.

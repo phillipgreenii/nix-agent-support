@@ -95,7 +95,7 @@ const envBeadsDir = "BEADS_DIR"
 
 // envBDJSONEnvelope is the flag this backend's own bd.go/decodeBDEnvelope
 // strictly requires: unlike the sibling bd-shelling clients in this repo
-// (packages/pg-router-ccpool-handler/internal/beads and
+// (packages/pg-router-handlers/internal/beads and
 // the retired PR tool's pkg/beads, both deliberately tolerant of the legacy bare
 // array/object shape too), decodeBDEnvelope here has NO bare-shape
 // fallback — a bare `bd --json` response fails to unmarshal into its

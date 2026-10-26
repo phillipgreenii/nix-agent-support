@@ -509,12 +509,12 @@ past the reviewed SHA, the bead is reopened at the new head.
 > below record this journey's DESIGNED behavior as last documented (`pg2-ynhr.12`) —
 > they are **not verified against current code**. The implementation they cite
 > (`internal/pgrouteracl`) migrated from `packages/pg-router` into
-> `packages/pg-router-ccpool-handler` (ADR 0065's "Move list") and, by that package's
+> `packages/pg-router-handlers` (ADR 0065's "Move list") and, by that package's
 > own doc comment, was never actually wired into a `pg-router-ccpool-handler`
 > subcommand after the move — "this crossing does not fire in production today." It
 > was then deleted outright as dead code (`pg2-gidpd`). The lower-level mutation it
 > would have called, `ReopenReview`
-> (`packages/pg-router-ccpool-handler/internal/beads/issue.go`), still exists in this
+> (`packages/pg-router-handlers/internal/beads/issue.go`), still exists in this
 > repo but has **no production caller here** — grepped 2026-09-22, only test files
 > reference it. The sibling `phillipg-nix-ziprecruiter` repo was also checked
 > (2026-09-22): it carries only Nix module config and prompt text for the pre-built
@@ -564,10 +564,10 @@ flowchart TD
     (never review an unknown commit).
 - **Code paths (historical — the cited package was deleted from this repo,
   `pg2-gidpd`; unresolvable by grep today):**
-  `packages/pg-router-ccpool-handler/internal/pgrouteracl/acl.go`
+  `packages/pg-router-handlers/internal/pgrouteracl/acl.go`
   (`ensureReview` — its closed-`review-pr` head-advance branch, deleted); the
   one piece that survives the deletion is the mutation helper
-  `packages/pg-router-ccpool-handler/internal/beads/issue.go` (`ReopenReview`),
+  `packages/pg-router-handlers/internal/beads/issue.go` (`ReopenReview`),
   which as of this note has no caller left in this repo.
 - **Coverage (historical — deleted together with the package above):** `acl_test.go`
   (`TestReconcile_HeadAdvancedReopensClosedReview`,
@@ -594,11 +594,11 @@ from `pg-pr` facts and never strands the following drain.
 > for JR4 above), because nothing had wired it into a `pg-router-ccpool-handler`
 > subcommand after ADR 0065's move. The lower-level pieces it called —
 > `CreateGate`/`ResolveGate`
-> (`packages/pg-router-ccpool-handler/internal/beads/gate.go`),
+> (`packages/pg-router-handlers/internal/beads/gate.go`),
 > `waitFailureResult`/`escalateLaunchFailure`
-> (`packages/pg-router-ccpool-handler/internal/executor/ccpool.go`), and the
+> (`packages/pg-router-handlers/internal/executor/ccpool.go`), and the
 > `AddHuman` failure action
-> (`packages/pg-router-ccpool-handler/internal/roles/enums.go`, consulted from
+> (`packages/pg-router-handlers/internal/roles/enums.go`, consulted from
 > `internal/complete/complete.go`'s `OnFailure`) — all still exist, but the
 > reconcile-specific glue that called them (`BuiltinRoleSet`'s `review` role
 > entry, `reconcileACL`) does not. Whatever performs reconcile-shaped bead
@@ -638,9 +638,9 @@ from `pg-pr` facts and never strands the following drain.
   `review` entry — `OnFailure: AddHuman`) — file deleted (docket
   `pg2-oju6w`'s Task 5.8). The lower-level helpers survive under a different
   module (see accuracy note above): `CreateGate`/`ResolveGate`
-  (`packages/pg-router-ccpool-handler/internal/beads/gate.go`) and
+  (`packages/pg-router-handlers/internal/beads/gate.go`) and
   `waitFailureResult`/`escalateLaunchFailure`
-  (`packages/pg-router-ccpool-handler/internal/executor/ccpool.go`).
+  (`packages/pg-router-handlers/internal/executor/ccpool.go`).
 - **Coverage (historical — deleted together with the code above):**
   `reconcile_acl_test.go`
   (`TestReconcileACL_PgPrUnreachableExitsZero`, `_EmptyExitsZero`),
@@ -805,7 +805,7 @@ post-back is now unblocked — `pg-pr` is allow-listed (`pg2-vmbn7` resolved).
 | JR1     | Historical, deleted, unresolvable by grep (see JR1's accuracy note): `acl_test` (`TestReconcile_DraftSelectionMatrix`, `TestReconcile_EnsuresReviewChildGateAndResolves`), `roles_test` (`TestReviewPrompt_MineOwnershipFilesProcessFeedbackNotGitHub`, `TestReviewPrompt_TeamOwnershipStillPostsToGitHub`), `pgrouteracl`'s `TestIntegration_MineReviewRelocation_FeedbackToWorkerFlowsEndToEnd` (build-tag `integration`) | — (a real LLM executing the review role's prompt is deploy-gated, see below) |
 | JR2     | `pending_test`, `review_test`                                                                                                                                                                                                                                                                                                                                                                                               | — (submit-path skip-if-present and the `pg-pr` allowlist both resolved)      |
 | JR3     | `broaden_test`, `reviewrequested_test`, `pr_list_test` are historical, deleted, unresolvable by grep (see JR3's `pg2-vpg0k` accuracy note); `builder_test` and `fingerprint_test` still exist (`packages/pg-pr/internal/snapshot/builder_test.go`, `packages/pg-pr/pkg/provider/vcs/github/fingerprint_test.go`)                                                                                                            | —                                                                            |
-| JR4     | `acl_test` (head-advance suite, incl. the `ownership` refresh) is historical, deleted, unresolvable by grep (see JR4's accuracy note); `reopen_test` still exists (`packages/pg-router-ccpool-handler/internal/beads/reopen_test.go`)                                                                                                                                                                                       | —                                                                            |
+| JR4     | `acl_test` (head-advance suite, incl. the `ownership` refresh) is historical, deleted, unresolvable by grep (see JR4's accuracy note); `reopen_test` still exists (`packages/pg-router-handlers/internal/beads/reopen_test.go`)                                                                                                                                                                                             | —                                                                            |
 | JR5     | Historical, deleted, unresolvable by grep (see JR5's accuracy note): `reconcile_acl_test`, `reconcile_cmd_test`, `reconcile_test`, `acl_test`                                                                                                                                                                                                                                                                               | —                                                                            |
 | JR6     | `unaddressed_feedback_test`, `ingest_selffeed_test`, `process_feedback_dedup_test`, `duplicate_test`, `sync_duplicates_test`                                                                                                                                                                                                                                                                                                | Live open-count == distinct-PR-count measurement (deploy-gated)              |
 

@@ -1,0 +1,1153 @@
+# Invariants — pg-router-ccpool-handler
+
+Rules this module's implementation MUST hold (see [README](README.md)'s Realization gaps for the
+residual the build has not yet caught up to). A rule pg-router's own core
+already states (event shape, at-least-once delivery, the offer/decline machinery) is not restated
+here — see `packages/pg-router/docs/behavior/invariants.md`. These are the rules specific to this
+module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
+
+- **`INV-CCH-1`** — this module's Go module MUST import `packages/pg-router` (its wire schemas and
+  the `conformance` package, the suite `INV-INTF-2` requires of every implementer) and
+  `packages/pg-router` MUST NOT import this module back. The dependency
+  is one-way (`phillipgreenii-nix-agent-support` ADR 0065's "New module" decision); a reverse
+  import would put concrete participant behavior back inside the generic core it was extracted
+  out of, against `GOAL-MIN-1`.
+- **`INV-CCH-2`** <!-- uuid: af2237aa-da29-47c2-922e-95a3c7cea2c9 --> — a handler session MUST tolerate a duplicate event and MUST support the
+  deferred-ack reply form, matching `INTF-HANDLER`'s obligations on every implementer; this module
+  states no exception of its own. The core's own de-duplication by event id (`INV-EVT-3`) is bounded
+  by its retention and does not lift the obligation. Tolerating a duplicate never means adopting a finished session:
+  only the same event's turn still in progress is absorbed, and every other dispatch either runs
+  in a fresh session of its own or, while another attempt is in flight, declines (`INV-CCH-30`).
+- **`INV-CCH-3`** — a handler session's post-accept outcome (`retryable`, `resource-limit`,
+  `critical`) MUST be surfaced only on this module's own logs/metrics or turned into a new event —
+  never reported back to the core as anything but the opaque completion-outcome string
+  `INTF-HANDLER` already grants (`packages/pg-router/docs/behavior/interfaces.md`'s `INTF-HANDLER`
+  section, "A handler's run status is not part of this contract").
+- **`INV-CCH-4`** — this module's own coverage-thresholds file
+  (`packages/pg-router-handlers/tests/coverage-thresholds.txt`) is never merged with, or copied
+  into, `packages/pg-router/tests/coverage-thresholds.txt`. The module boundary is also the
+  coverage-gate boundary: a bar activated on one side never silently moves the other side's ratchet
+  (`phillipgreenii-nix-agent-support` ADR 0065's "New module" decision).
+- **`INV-CCH-5`** — this module MUST NOT name a concrete backing tool (`ccpool`, `bd`, or
+  any operator-configured command) anywhere in `packages/pg-router`'s own contract surface (its
+  `--help` text, config schema, or wire messages). Naming a backing tool is this module's own
+  business, per the Floor stated in both this set's and pg-router's own `## Scope`.
+- **`INV-CCH-6`** <!-- uuid: e610349b-f6eb-4273-a87a-952bf2821108 --> — a handler MUST query pool capacity before preparing isolation or
+  launching a session and MUST NOT launch when the pool reports no free slot or cannot be
+  read; capacity is the handler's own to enforce (`INV-CONC-1`). It signals this ONLY through the
+  transport's pre-accept busy decline (`conformance.ExitBusy`, exit `9` on the default CLI
+  transport of `DEC-WIRE-1`), so the core re-offers the event with backoff, at one cadence
+  whatever the decline reason (`INV-FAIL-1`); it mutates no bead
+  and creates no worktree. This is consistent with `INV-CCH-3`: busy is a pre-accept signal,
+  not a post-accept outcome. A pool that reports its account usage window at its limit
+  (`packages/ccpool/docs/behavior · INV-POOL-4`) has no free slot by construction, so it takes this
+  same path under the same decline reason, and a launch that ccpool refuses for that reason after
+  the capacity read is the same decline: the handler MUST NOT stamp or escalate the bead for it.
+  - **A command-backed role.** A command-backed role whose configured argv exits `9` is the same
+    signal: the handler MUST report it as the pre-accept busy decline (reason `command-busy`, kind
+    `busy`, `INV-CCH-37`), not as a handler failure, and MUST NOT carry the command's stderr into
+    that decline. The mapping is unconditional: the handler cannot tell which layer of the argv
+    ended with `9`, so a prefix tool in the argv that exits `9` reads as `command-busy` too, a risk
+    this module accepts (`INV-CCH-34`).
+- **`INV-CCH-7`** — when a session ends before its bead completes, the handler MUST read
+  ccpool's recorded close reason. An external close (`idle_ttl`, `cap_eviction`, `operator`)
+  MUST release the bead (status open, assignee cleared) with a comment naming the reason,
+  regardless of the role's `on_failure`, and MUST escalate to `human` on the second
+  consecutive external close of the same bead. Only an unexplained death, or a close the
+  handler itself requested (`handler`), applies `on_failure`. That death also MUST release the
+  claim (status open, assignee cleared) whichever `on_failure` the role has, in the SAME single
+  update that applies it (so `add-human` adds `human` and releases in one write), and the dispatch
+  MUST report the unclaim verb (alongside the escalation verb for `add-human`): a bead is never
+  left `in_progress` under a session that no longer exists. The `human` label policy is unchanged.
+  Bead `pg2-0fsuu`. Every write that parks a bead as `human` this way (this death under `add-human`,
+  and the second consecutive stall of `INV-CCH-29`) MUST first write one park comment on the bead
+  through the same bd runner: the trigger (with the close reason and exit facts the handler holds,
+  or the stall bound), the session and role, the bead's drain worktree and branch with whether it
+  has commits ahead of the primary branch (discovery is best effort and bounded; it MUST NOT block
+  or fail the park), and a statement that no person-question was identified, so the bead is
+  resume-or-land work and not a decision. A failed comment write MUST NOT stop the label-and-release
+  update. Bead `pg2-78mxs`. The death release MUST be guarded by the claim it observed
+  (`--if-assignee <observed holder> --if-status in_progress`), because the dead session usually held
+  the claim under another actor and bd's claim guard refuses an unguarded cross-actor release; it
+  MUST NOT be a bare `bd reclaim` (a lapsed lease does not prove the session is gone). A release that
+  fails (including a guard that went stale because the claim changed hands) MUST NOT be discarded: it
+  MUST be logged, MUST be counted as one `death_release_failed` eventlog record, and the dispatch MUST
+  report no unclaim/escalation verb for it. Bead `pg2-qyc3h`.
+- **`INV-CCH-8`** — when preparing per-bead isolation (`git worktree add`) fails because the
+  filesystem has run out of room, the handler MUST NOT treat it as a failure of that bead — a full
+  disk is a transient, system-wide condition that would hit whichever bead happened to dispatch
+  next, not a defect in the one that hit it first. It MUST signal this ONLY through the
+  transport's pre-accept busy decline (`conformance.ExitBusy`, reason `low-disk`, kind `fault`,
+  `INV-CCH-37`), mutating no bead, so the core simply re-offers the event later with backoff. This
+  is consistent with `INV-CCH-3`/`INV-CCH-6`: a system-wide resource shortage is a pre-accept
+  signal, not a post-accept or per-bead outcome.
+  - **Any other isolation failure.** A non-low-disk failure to prepare per-bead isolation (a
+    per-bead worktree defect, before any session exists) is NOT a decline. It is an accepted failure
+    (exit `1`) that adds no label to the bead and sets no `human`, and it counts as unsuccessful in
+    the role's progress (`INV-OBS-3`). The pre-ready decline of `INV-CCH-34` does not cover it.
+- **`INV-CCH-9`** <!-- uuid: 07323b67-c77c-417c-8f24-684ca5eabaa9 --> — whenever this module records why a handler session failed, or why a check
+  it runs before launching one failed, it MUST name the cause as exactly one failure signature
+  from a closed set: `git-auth`, `git-network`, `mount-or-path`, `budget`, `index-lock`,
+  `api-transient`, `api-rate-limit`, `api-auth`, `context-limit`, `session-errored`,
+  `session-idle`, `session-gone`, `launch-failed`, or `unknown`. It MUST NOT use a free-form or empty label. The
+  signature MUST come from one classification that every caller in this module shares, applied in a fixed precedence order,
+  so two callers never label the same failure text differently. Text that matches no rule is
+  `unknown`. That includes text that shows success even though the process exited non-zero, and
+  a word such as "oauth" in unrelated prose. Any evidence recorded beside the signature MUST be
+  the matched context with credentials masked (URL userinfo, bearer tokens, provider-prefixed
+  tokens, long hex/base64 runs, private-key blocks). The masking MUST happen BEFORE the evidence
+  is cut to at most 300 characters, so a credential that straddles the cut cannot leave a
+  fragment behind. The raw failure text MUST never be logged or returned. Naming a cause is a
+  judgment about the work, not an observed session fact, so this classification lives on the
+  handler side and never in ccpool (`phillipgreenii-nix-agent-support` ADR 0015's "Decision").
+  - **Dispatch result.** `dispatch_result` is the FAILURE outcome record of `INV-CCH-35`: it is
+    written for a failure only, never for a success (the success outcome is that invariant's
+    `dispatch_end`), so every row of it carries a `failure_signature`. When a dispatched session
+    fails, exits without completing its bead, or is hard-stopped by the budget watchdog, the handler
+    MUST record one `dispatch_result` event-log
+    entry (and a log line) carrying `failure_signature`, `signature_evidence` (redacted, at most
+    300 characters, and never empty for a dispatched session), `role`, `pool`, `bead`, and
+    `session`. The signature MUST be classified from the last 64 KB of the session transcript
+    (its `tool_result` and text content, with a truncated first line dropped) together with the
+    ccpool session facts last observed for the session (its state, whether it was live, whether
+    it was still listed, and its close reason), and MUST be captured BEFORE any step that closes
+    or purges the session, because teardown can make the transcript unreadable. An empty or
+    unreadable transcript path is classified on the session facts alone. A transcript match
+    always outranks the session facts: `api-transient` (a 5xx or `529 Overloaded` API error, a
+    dropped socket or idle stream), `api-rate-limit`, `api-auth`, and `context-limit` name an
+    error Claude Code wrote into the transcript. When no transcript text explains the exit, the
+    facts decide: `session-errored` (state `errored`), `session-idle` (the turn ended and the
+    bead is not complete), `session-gone` (the pane is dead or the row vanished). When the
+    signature is `unknown` or one of the `session-*` signatures, the evidence MUST be the
+    session facts followed by the last three non-empty transcript lines, so it is never empty.
+    `api-rate-limit` covers every wording of an account limit Claude Code writes, including the
+    spend-limit status line (`You've hit your individual spend limit`, with a straight or curly
+    apostrophe, or `You have hit your individual spend limit`) as well as `You've hit your limit`
+    and a 429; a session that errored for any other reason stays `session-errored`.
+  - **Unclaimed end.** The `unclaimed_end` event-log record of `INV-CCH-28` MUST carry the same
+    `failure_signature` and `signature_evidence`, classified by this same shared classification and
+    captured before the session is closed or purged. It keeps its kind and its other fields, and an
+    unclaimed end still writes NO `dispatch_result` record; its one outcome record is the
+    `dispatch_end` of `INV-CCH-35` with outcome `unclaimed-end`.
+    ccpool reports no process exit status or signal (`ADR 0015`: observed state only), so none is
+    recorded. `budget` MUST be set only for a watchdog hard stop and reuses its `limit`, `used`,
+    and `cap` fields; there MUST be no second budget
+    counter. The raw transcript MUST never be logged. There is no new metric or store: "first
+    seen" and "how often" are answered from the event log's own timestamps (see
+    `docs/runbooks/dispatched-session-failure-signatures.md` in the repo root).
+  - **Launch-failed.** `launch-failed` names the pre-ready decline of `INV-CCH-34`: the session
+    never became ready, because the launch through the session tool failed or timed out, the
+    session's own payload failed in its pane, or the agent died or stalled before ready. It is decided
+    by the point of failure, never by matching text, and it outranks every other signature, because
+    nothing a session did can explain an end that happened before the session was ready. An end after
+    the session was ready is classified as before. The evidence MUST be the redacted, bounded tail the
+    failed launch returned (the dead pane's exit status or signal and its output tail, or on a timeout
+    the pane's tail), never empty (an unreadable or empty source is stated in words). It rides on the
+    `dispatch_decline` record of `INV-CCH-35` as the decline's `detail` and evidence, not on a
+    `dispatch_result`, because no dispatch was accepted.
+- **`INV-CCH-10`** <!-- uuid: b9cc174c-4c9f-43e0-bc9a-8d36fadbd36e --> — before accepting a dispatch, the handler MUST decline it when the git
+  origin the dispatch needs is unavailable, and MUST NOT decline a dispatch for any other
+  reason of origin state. Availability is per origin, keyed by a normalized repo key
+  `<host>/<org>/<repo>`; a dispatch whose repo root is not a watched origin's repo root has no
+  origin and MUST NEVER be gated, and a gated origin MUST NOT decline a dispatch into a different
+  origin. The decline is the transport's pre-accept busy decline (`conformance.ExitBusy`) with the
+  fixed reason `origin-unavailable`, kind `neutral` (`INV-CCH-37`): it MUST mutate no bead, make no beads or
+  ccpool call and set no `human`, and the core re-offers the event as for `INV-CCH-6`/`INV-CCH-8`. The origin key MUST appear only in the handler's own log and event
+  records, never in the reason, so the reason stays a bounded label. The gate lives here, at the
+  handler boundary, because only the handler knows which repo a dispatch runs in; the core's
+  global gate over its fixed named set (`INV-LIFE-2`) is not changed by it.
+  - The probe MUST check that the repo root exists and holds a git checkout, then MUST ask the
+    origin for its HEAD under a hard timeout, in the same hermetic git environment every other git
+    child of this module gets (repository-naming variables dropped; credential delivery such as
+    the ssh agent socket kept) with terminal prompts disabled. It MUST name the outcome as one of
+    `ok`, `mount-missing`, `auth-unavailable`, `network`, `timeout`, or `unknown`, deriving all but
+    `ok`, `timeout`, and a missing repo root from the shared failure-signature classification of
+    `INV-CCH-9` rather than any table of its own. Anything it records or logs about a failure MUST
+    be that classifier's redacted output; raw probe output MUST NOT be logged or persisted.
+  - An origin MUST be gated only after K consecutive failed probes (default 2), so one transient
+    failure does not gate; the first ok probe MUST clear it. A result MAY be reused for a TTL
+    (default 60 seconds), except that a result showing fewer than K consecutive failures MUST NOT
+    be reused, so a confirming probe is not delayed. While gated, each dispatch attempt MUST
+    re-probe subject to the TTL, so recovery is noticed without a timer.
+  - An operator MUST be able to list watched origins with their class, since, and last error, and
+    to switch a single origin's probe off (a kill switch under which the probe is a no-op and the
+    origin never declines). An operator MUST NOT be offered a hand-set "pause this origin": the
+    automatic clear would fight it, and the existing global pg-router pause is the tool for that.
+  - **Trade-off.** A declined event is re-offered only until it expires (`INV-EVT-4`). An outage
+    longer than the event lifetime therefore lets events expire. That is accepted: events
+    re-derive from their source on discovery once the origin returns.
+  - **Telemetry.** The handler has no metrics emitter. The decline reaches
+    `pg_router_failures{class=declined,reason=origin-unavailable}` through the core's existing
+    handling of a busy decline's reason. Gated and cleared transitions are structured log and
+    event-log records carrying the origin key, class, duration, and redacted stderr tail. An alert
+    on them is separate work.
+- **`INV-CCH-11`** — when the budget watchdog hard-stops a session it owns the terminal outcome
+  of (it won the single-terminal claim against the bead-poll), the handler MUST record that stop
+  on the bead BEFORE returning it to the pool, and MUST NOT change any budget. The record is one
+  label `budget-stop:<session-id>` per stopped session; the per-bead count is the number of
+  DISTINCT such labels, so writing the same session id again is a no-op and two racing writers
+  cannot lose an increment. It is written through the same bd runner (and tracker) the handler
+  already uses for that bead. On any bd failure the handler MUST log it and fall back to today's
+  plain unclaim (the safe direction). Each recorded stop adds the bead comment
+  `budget stop <n> of <threshold> (session <id>)` and the `hard_stop` event-log record gains
+  `budget_stops=<n>`. The record is cleared only when the bead is CLOSED; a reopened bead keeps
+  its history. The threshold is the role setting `budget_stop_escalate_after` (default 3, `0`
+  disables all of the above). This invariant only counts; acting on the count is `INV-CCH-12`.
+  The handler has no metrics emitter, so it emits no metric for this.
+- **`INV-CCH-12`** — when a hard stop (any budget limit: time, tokens or cost) brings a bead's
+  recorded stop count (`INV-CCH-11`) to the threshold or above, the handler MUST, BEFORE the
+  unclaim, put the bead on the escalated path (operator ruling, Phillip, 2026-10-14, bead
+  `pg2-cty80`: "a session which fails due to time should immediatly go to escalated", read as the
+  existing `*-escalated-work` path): (a) a bead dispatched to a triage role (role name containing
+  `triage`) is the one exception and MUST go to a human — in ONE update add `human` and
+  `attention` and remove `escalated` (the strict operator pair, bead `pg2-ikkpk`; vocabulary in
+  nix-agent-support `docs/guides/bead-label-vocabulary.md`), remove `needs-split-review`
+  (bead `pg2-47rsh`) and comment `budget stops reached threshold <t>; escalated to human (triage
+role; not escalated again). stop sessions: <ids>. last stop: session=<id> limit=<kind> used=<n>
+cap=<n>`, because a triager MUST NOT escalate its own bead back to itself; (b) every other bead,
+  whatever its role (implementation, `review`, already `was-split` or a `split-from:*` child),
+  MUST get the label `escalated` (the same constant the escalation triager's completion reads) and
+  the comment `budget stops reached threshold <t>; labelled escalated for the escalation triager
+[(<reason>; not eligible for split review)]. stop sessions: <ids>. last stop: session=<id>
+limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `review`, `was-split`
+  and `split-from:*` beads and tells the triager the bead MUST NOT be sent to split review. The
+  handler no longer writes `needs-split-review` itself: sending an escalated bead to split review is
+  the escalation triager's decision. The claim is still released (status open, assignee cleared) —
+  the label, not the claim, keeps the bead out of the pool, so the deployment's discovery queries
+  for roles that can hit a budget stop MUST exclude `escalated` as well as `human` (the drain, worker,
+  feedback and review queries do; the handler additionally force-excludes `needs-split-review` from
+  every beads-ready discovery it runs, whatever the query config says). The hard-stop event-log
+  record gains `escalation=<escalated|human>` and a `budget_escalation` record carries role, pool,
+  outcome, reason, `budget_stops`, `threshold`. The count is never reset, so an operator or the
+  triager removing `escalated` or `human` makes the NEXT stop re-evaluate and re-escalate; a
+  reopened bead likewise keeps its history. A bead found closed at escalation time gets no
+  escalation write and is NOT unclaimed (that would reopen it). A failed escalation write is
+  logged and falls back to the plain unclaim. Threshold `0` disables escalation (and counting).
+  Budgets are never changed. The handler has no metrics emitter, so
+  `pg_router_budget_escalations_total` is NOT emitted; the event log and bead comments are the
+  record until a metric transport exists.
+- **`INV-CCH-13`** — the split-triage role (bead pg2-47rsh) works a bead labelled
+  `needs-split-review` (`INV-CCH-12`) and MUST record exactly one outcome through the handler's own
+  `split` subcommand, never by hand-built `bd` calls. Its completion is `close-or-split-triage`: the
+  dispatch is done when the bead is closed or the `needs-split-review` label is gone (a hand-back
+  and a new comment are NOT outcomes). (a) `split apply <id>` (JSON plan on stdin; at least 2
+  children, each with title, description and acceptance criteria) creates each child labelled with
+  the parent's labels MINUS every `budget-stop:*`, `needs-split-review`, `was-split`, `human`,
+  `escalated` and `split-from:*` label PLUS `split-from:<id>` (so a child inherits no stop count),
+  wires the parent BLOCKED-BY each child (`bd dep add <parent> <child>`, blocked id first, default
+  `blocks` type) and verifies the edges with `bd dep list <parent>`, adds `was-split`, comments the
+  decomposition, releases a held claim (status open + assignee cleared in one update), and removes
+  `needs-split-review` LAST. It refuses a closed, `was-split` or `split-from:*` parent, writing
+  nothing. (b) `split unsplittable <id>` (reason on stdin) hands the bead to the operator (one update adds `human`
+  and `attention` and removes `escalated`, bead `pg2-ikkpk`), comments the reason plus
+  the stop history, releases a held claim, and removes `needs-split-review` last. If a split fails
+  after children exist, the parent fails safe to `human` + `attention` (label removed, claim released) rather than
+  being retried. A triage session that hits its own budget is the one stop routed to `human` by `INV-CCH-12`
+  and, additionally, has `needs-split-review` removed; it never re-enters the split path. No part
+  of this role changes any budget. All bead text reaches `bd` as discrete argv elements from stdin
+  JSON, never via a shell. The reference prompt is `docs/roles/split-triager-prompt.txt`; the
+  role, its discovery query (`ready --label needs-split-review --exclude-label human`) and the
+  `allowedTools` grant for the `split` subcommand are wired in the deployment config.
+- **`INV-CCH-14`** <!-- uuid: 9f2a7d86-926a-41ac-8c26-851e459c40b0 --> — when the daemon shuts down (this module's `preShutdown` hook), the handler
+  MUST SPARE every session that is actively working: a session in `starting`, `ready`, or
+  `working` is left alive, and its worktree and anchor branch are left untouched, even if its bead
+  has already closed. Only a session closable for another reason is purged (with its worktree and
+  anchor branch): one whose turn has ended (`idle`, `errored`), or one in `needs_input` whose bead
+  is already closed. A `needs_input` session whose bead is still open, or whose bead status cannot
+  be determined, is also preserved (so a person can still attach). A purged session's worktree
+  MUST be kept when a spared session still uses the same directory (a per-bead worktree is shared
+  by every role's session for that bead). The sweep MUST also spare an OPEN session whose
+  supervision lease (`INV-CCH-18`) has not expired, whatever its state, because its handler is still
+  running (a dispatch of a ccpool-backed role outlives a daemon restart, see below), so closing the
+  session would pull it out from under that handler; a session with no lease, an expired lease, or
+  a close reason set is not spared by this rule, and a spared session's worktree is kept like any
+  other spared session's. A session mid-launch is spared by its state, not by a lease: it is
+  `starting` from the moment its row is created (and a resumed one is flipped to `starting` before
+  it launches), `ready` once launched, and both are spared whether or not it carries a lease, so
+  the sweep cannot purge a launch in progress (bead `pg2-7139f`). The shutdown sweep lists only the daemon's default
+  `ccpool` pool: a session in a role's own dedicated pool is outside it, neither purged nor spared
+  by shutdown, and is bounded only by the mechanisms below. Operator ruling (Phillip, 2026-09-30,
+  bead `pg2-hwt7v`), superseding the earlier behavior of closing working sessions and
+  force-removing their worktrees.
+  - **What bounds a spared session after the daemon exits.** Sparing leaves a deliberate, bounded
+    leak. (a) The dispatch-time reconcile of the next dispatch, run against the dispatching role's
+    own pool, purges it, worktree included, once its turn has ended (`idle` or `needs_input`) and
+    its bead is closed; the next shutdown sweep does too, but only for a session in the default
+    pool. This is the only bound for a session parked in `needs_input` with an open bead, which
+    waits for a person by design (a drain session, supervised, is also bounded by `INV-CCH-29`). (b) `ccpool`'s own reaper closes any live session that is not in
+    `needs_input` once its last activity is older than `idle_ttl`, and evicts `idle`/`errored`
+    sessions over `max_sessions` (never `starting`/`ready`/`working`); both stamp a close reason
+    (`phillipgreenii-nix-agent-support` ADR 0072). (c) Spared sessions still count toward
+    `max_sessions`, so `INV-CCH-6` stops the next daemon from launching past the cap while they
+    run. (d) A daemon restart MUST NOT kill the dispatch of a ccpool-backed role: the daemon does
+    not cancel it and does not wait for it, so the handler keeps supervising its session (and
+    refreshing the lease) across the restart. The unsettled offer is re-offered by the next
+    daemon. While the session's turn is still in progress, that redelivered dispatch absorbs the
+    session (`INV-EVT-2`, `INV-CCH-2`, `INV-CCH-30`) rather than launching a second one; two
+    handlers then watch one session, both finish idempotently, and the daemon that is running
+    accounts the outcome once. What a redelivered dispatch does in every other case, including a
+    session whose turn has already ended, is `INV-CCH-30`'s rule. A handler whose
+    daemon is gone cannot deliver its reply; that is not a failure, and it MUST exit normally.
+    Only if a handler dies anyway (a crash, a kill) does its lease expire, and the next dispatch
+    of the same role reclaims the session: an idle one is closed and its bead claim released, a
+    working one has its time budget enforced from its launch time. Until then the session runs
+    unsupervised. (e) A worktree left with no session row at all
+    is reclaimed by the worktree-keyed sweep of `INV-CCH-19`.
+- **`INV-CCH-15`** — a dispatch-time worktree cleanup (after a session reaches a terminal outcome)
+  MUST NOT remove a per-bead worktree while another live session in `starting`, `ready`, `working`
+  or `needs_input` still uses the same directory; the last session to detach removes it. A
+  per-bead worktree is shared by every role's session for that bead, so closing the first one
+  (or its bead) must not delete the working directory out from under a peer. If the session list
+  cannot be read the worktree is left in place. This extends the same sharing rule that
+  `INV-CCH-14` and the dispatch-time reconcile apply to their own purges (bead `pg2-aqpqx`).
+- **`INV-CCH-16`** — when a ccpool-backed handler session runs under `permissionMode=dontAsk`, the
+  prompt the handler sends it MUST carry, ahead of the role's task text, a code-owned notice (not
+  editable through any role's prompt file) that writes to the agent runtime's protected paths --
+  the `.claude/` directory, except `.claude/worktrees` -- are denied automatically in that mode and
+  cannot be granted by any allow-list entry. The notice MUST instruct the session that, if the task
+  requires such a write, it MUST NOT attempt or retry the write, MUST stop at once, and MUST hand
+  the task back through the role's normal hand-back path stating the reason and carrying the exact
+  intended change (unified diff, or full content for a new file). The notice MUST NOT be sent when
+  the session runs under any other permission mode. This invariant does not choose the permission
+  mode; that remains a deployment decision.
+- **`INV-CCH-17`** <!-- uuid: 63bd1585-4262-45c5-b8fe-46f1ffa22d7d --> — once a dispatch reaches a terminal outcome (success, an applied failure
+  action, or a budget stop), the handler MUST close, without purging, the settled session it
+  launched or absorbed, so a finished session does not hold a counted slot of the pool until
+  `ccpool`'s idle timeout. The close applies to that session only, never to another row, and only
+  when ALL of the following hold at the moment of closing: the session is quiet (neither it nor
+  its Agent-tool subagents have written for the quiet window; for every isolation type, not only
+  worktrees); a fresh read shows the row present, not yet closed by anyone, and `idle` or
+  `errored`. A `needs_input` session (`phillipgreenii-nix-agent-support` ADR 0037), a session still starting, ready or working, a session already closed (the budget-stop
+  watchdog, an external idle-timeout, eviction or operator close), and any dispatch ended by daemon
+  shutdown are exempt; the shutdown sweep owns that teardown. A session that is not yet quiet is
+  left open and the deferral is logged. A failed close MUST NOT change the dispatch's outcome; it
+  is logged and the session is left to `ccpool`'s idle timeout. A settled session's row, whether
+  this close reached it or not, MUST NOT be absorbed by a later dispatch, whatever its event id,
+  head or outcome, and whoever closed it: while its handler still holds its lease a later dispatch
+  declines, and after that the later dispatch runs in a fresh session of its own (`INV-CCH-30`).
+  Operator ruling (Phillip, 2026-10-05, bead `pg2-58edz`), narrowing
+  the purge-on-teardown of `phillipgreenii-nix-agent-support` ADR 0015 to a non-purge close; see
+  ADR 0082. The earlier rule that a handler-closed settled row stayed a duplicate for a
+  redelivery of the same event, narrowed in turn by the event id (`pg2-uprw5`), the item's pinned
+  head (`pg2-afre3`) and the outcome of the dispatch (`pg2-tc9c3`), is superseded by `INV-CCH-30`
+  (operator ruling, Phillip, 2026-10-12, bead `pg2-yunrp`; ADR 0094).
+  A session is closed once: a step that finds the session's row already closed and the session
+  gone (the budget hard stop or the wait's unexplained-death branch, when another close got there
+  first) MUST NOT close it again, because a second close re-stamps the row and appends another
+  close event for the same session (`pg2-92rfu`: 268 close events for one session). A row that
+  carries a close reason but whose session is still live is a failed teardown, and is closed
+  again. A worktree that an earlier dispatch already removed is reported once as already removed,
+  not as a failed cleanup left for the sweep.
+- **`INV-CCH-18`** <!-- uuid: ac18ca7c-745d-476c-b9a0-f568e673fda6 --> — a session the handler launched MUST NOT stay unsupervised once its handler is
+  gone. While a handler is alive it MUST keep a supervision lease on its session: the lease is
+  stamped when the session's row is created, before the launch wait (`ccpool new --meta` writes the
+  dispatch's metadata at row insert, not once the session is ready; the initial lease covers the
+  whole launch wait plus one TTL, so a session still starting, or what a failed launch leaves
+  behind, is never mistaken for an orphan and carries its dispatch tags), refreshed on every poll for as long as the dispatch
+  runs, and covers the wait, the budget watchdog, the worktree cleanup and the close of the settled
+  session. A failure to refresh the lease MUST NOT fail the dispatch; it is logged, and repeated
+  consecutive failures are logged at error level so a live handler whose lease is lapsing is
+  visible. The lease TTL is configurable and MUST be at least ten poll intervals. A session of a
+  role's own pool that carries that role's tags and an expired lease is an **orphan**; a session
+  with no lease at all (launched before leases existed or before `ccpool` applied `--meta` at row
+  insert, or by a handler whose lease TTL is not positive) is never an orphan, and neither is a
+  closed one. Such a live `starting` or `ready` session may still be inside its launch, so a
+  dispatch treats it as in flight for one launch window (the launch wait plus one lease TTL) from
+  its last activity and, after that, as a leftover (`INV-CCH-30`). Before checking capacity, a dispatch MUST handle every orphan of its own role, one
+  at a time, while holding an exclusive per-session lock (an orphan whose lock is held is skipped)
+  and only after re-reading the session to confirm the lease is still expired:
+  - **`idle` or `errored`, and quiet** (neither it nor its subagents wrote within the quiet
+    window): apply the role's completion rule to its bead. A role that claims its beads
+    (close-only, close-or-handback, close-or-release) MUST release the claim, with a comment naming the session,
+    only when the bead is still in progress AND claimed by that role's own actor; a bead that is
+    open, closed, or claimed by someone else is not written, and a role that never claims its
+    bead (the triage roles) writes nothing. If the bead cannot be read, nothing is done this
+    time. Then the session MUST be closed without purging, and its worktree and anchor branch
+    removed under the guards of `INV-CCH-15` (kept when a live or `needs_input` session still uses
+    the directory, and kept, with the reason logged, when git refuses because the tree is dirty).
+  - **`starting`, `ready` or `working`**: enforce the role's time budget, measured from the
+    session's recorded launch time. Over budget, the handler MUST apply the same hard stop a
+    supervised session gets (`INV-CCH-11`) and then remove the worktree under the same guards;
+    under budget it MUST leave the session alone. A role with no time budget leaves such an
+    orphan alone, and an over-budget orphan whose bead is already closed is left alone rather than
+    reopened. A `starting` or `ready` orphan left alone here has no turn in progress, so the
+    dispatch then closes and replaces it as a leftover (`INV-CCH-30`).
+  - **`needs_input`**: left alone (`phillipgreenii-nix-agent-support` ADR 0037); a SUPERVISED drain
+    session is bounded by `INV-CCH-29`, an orphan is not.
+    A dispatch that absorbs a session whose turn is still in progress (`INV-CCH-30`, `INV-EVT-2`)
+    MUST take the same per-session lock and refresh the lease before it starts waiting, and MUST
+    measure that session's budget from its original launch time, so absorbing an orphan still at
+    work within its budget never grants it a fresh budget. A session reclaimed as an orphan is
+    closed, so it is never absorbed: a redelivery of the same dispatch launches a fresh session
+    (`INV-CCH-30`). Every reclaim and every orphan hard stop is
+    recorded as an event naming the session, bead, role, pool, state, lease expiry and launch time.
+    Not covered, accepted: an orphan is handled only when its OWN role next dispatches (until then
+    only `ccpool`'s idle timeout bounds it); a role with no time budget leaves a `working` orphan
+    alone; and only the time budget is enforced for an orphan, not tokens or cost. Operator ruling
+    (Phillip, 2026-10-05, bead `pg2-g2u9m`); see ADR 0083.
+- **`INV-CCH-19`** — a per-bead worktree, and its `pg-router/<bead>` anchor branch, MUST NOT stay
+  behind once nothing can be using it, even when no session row leads to it: a handler killed or
+  crashed after it created the worktree but before the session existed, or a session closed
+  (`idle_ttl`, eviction, the operator) before anyone reclaimed its worktree, leaves one. Before
+  checking capacity, a dispatch of a role with worktree isolation MUST therefore scan the worktree
+  directory itself (after the orphan reconcile of `INV-CCH-18`, and bounded to a handful of removals
+  per dispatch) and remove a worktree and its anchor branch only when ALL of the following hold,
+  each re-checked while holding an exclusive per-bead lock:
+  - it is a linked worktree directly under the worktree directory whose checked-out branch is
+    exactly its own anchor branch, and git does not hold it locked;
+  - it is older than a grace window (the launch wait plus the lease TTL);
+  - no open or live session row of the role's pool names it, by working directory or by bead; a row
+    that is closed and no longer live does not protect it;
+  - no live process on the machine has it, or a directory inside it, as its working directory,
+    whichever role, pool or handler owns that process; a process listing that cannot be read keeps
+    every worktree;
+  - its working tree is clean, and its branch holds no commit the canonical clone's `HEAD` lacks;
+    an unreadable status or commit count keeps it, and so does a git refusal (the removal is never
+    forced);
+  - no live dispatch holds the per-bead worktree lock. Every dispatch of a role with worktree
+    isolation MUST hold that lock, shared, from before it creates the worktree until it returns;
+    the operating system drops it when its holder dies, so a killed handler stops protecting its
+    worktree at the moment it dies.
+
+  A session list that cannot be read, a lock that cannot be taken, or a missing lock directory
+  means no action. Each removal is logged and recorded as an event naming the bead, role, worktree
+  and age. A worktree that is kept for any reason is left for a later dispatch or for
+  `pg-disk-reclaimer`. This closes the gap `INV-CCH-15` and the session-keyed reconciles leave: each
+  of them keys on a session row. The live-process guard exists because only the dispatching role's
+  own pool is visible to the row guard, and a per-bead worktree is shared by every role's session
+  for the bead: a session of another role whose handler is gone (spared at a daemon restart) shows
+  in no visible row and holds no lock, yet its agent process is still running in the worktree, and
+  reclaiming it leaves that process in a deleted directory (bead `pg2-e5yw3`). Not covered,
+  accepted: a worktree is reclaimed only when SOME worktree-isolation role next dispatches (until
+  then it only costs disk); a clean, commit-free worktree whose session in another role's pool has
+  no running process is removable (the same blind spot `INV-CCH-15` has, now bounded to sessions
+  that are not running); and a session row
+  left in `starting`, `ready`, `working` or `errored` by a killed handler is bounded by
+  `INV-CCH-18`'s lease, not by this invariant (a lease-bearing row is reclaimed or budget-stopped
+  there, and its worktree follows it; a leaseless one is bounded by `ccpool`'s idle timeout, after
+  which this invariant reclaims its worktree). Follow-up to bead `pg2-w3usi`; bead `pg2-ganjb`;
+  see ADR 0084.
+
+- **`INV-CCH-20`** — a session's pool record MUST NOT be deleted until its per-bead worktree has
+  been removed or confirmed gone; an interrupted removal MUST be retried by the next reconcile of
+  the same pool; until then the record is being torn down and MUST NOT be absorbed
+  (`INV-CCH-30`). The handler
+  therefore tears a session in a per-bead linked worktree down in two phases: it closes the record
+  without purging, removes the worktree (from the repository root) and its anchor branch, and only
+  then purges the record. A worktree directory that no longer exists, or one under the worktree
+  directory that git no longer knows as a worktree, counts as gone (the husk is deleted and git's
+  stale registrations pruned). A session whose working directory is not such a worktree (no
+  isolation, or an unrelated path) is purged in one step, as is a session whose worktree another
+  live session of the pool still uses (`INV-CCH-15`; any state, since a redispatch for the bead
+  reuses the directory). A failed or interrupted removal leaves the record in place. Each
+  dispatch-time reconcile of the pool MUST first retry at most one such record, whether or not its
+  session is still live (a live one that is not `starting`, `ready` or `working` is closed again
+  first), and that record MUST be neither closed again as a closed-bead session (`INV-CCH-14`'s
+  dispatch-time reconcile) nor reclaimed as an orphan (`INV-CCH-18`) in the same pass. The
+  default pool's record is also retried by the next shutdown sweep. Bound: the next same-pool
+  dispatch, or for the default pool also the next shutdown; a record with no transcript can be
+  pruned by the pool's own reaper first. Not covered, accepted: the retry removes one worktree
+  per dispatch, so a backlog drains over several dispatches. Bead `pg2-kqegi`; closes the gap in
+  which a purge-first teardown left a half-removed worktree no record led to (`pg2-me0t1`).
+
+- **`INV-CCH-21`** — a role with worktree isolation MAY be configured to pre-fetch. When it is,
+  the handler MUST, after the per-bead worktree exists and BEFORE the session is launched (so no
+  pool slot is held while it runs): (a) resolve the item's commit locally and fetch the configured
+  ref from the configured remote only if it does not resolve; (b) check the worktree out DETACHED
+  at that commit; (c) when a diff base is configured, write `git diff --numstat <base>...<commit>`
+  and `git diff <base>...<commit>` to files inside the worktree, never leaving a partial file; and
+  (d) tell the prompt the outcome (whether it succeeded, the commit, and the two file paths when
+  they exist). The commit MUST render to a 7 to 64 digit hexadecimal object id, and the fetch ref,
+  remote and base MUST NOT begin with `-` or contain whitespace, because item metadata is
+  externally sourced; a value that fails either check is a pre-fetch failure, not a git call.
+  The pre-fetch is BEST EFFORT: any failure, including a fetch that needs a credential the
+  handler's environment lacks (`docs/runbooks/dispatched-session-git-origin-auth.md`), MUST be
+  logged and MUST NOT fail or decline the dispatch; the prompt is told it did not succeed and does
+  the steps itself. The files MUST live in a directory the repository ignores (the handler adds it
+  to the repository's `info/exclude` BEFORE creating it, and creates nothing if that fails),
+  because every non-force worktree removal in this module (`INV-CCH-15`, `INV-CCH-19`,
+  `INV-CCH-20`) refuses a worktree holding untracked files. The outcome is also recorded in the
+  worktree, so a prompt rendered for that worktree reports the outcome of the pre-fetch that
+  prepared it. Pre-fetch is invalid with any isolation other than the worktree strategy, and a role
+  config that says otherwise MUST be rejected at load time, since the checkout would otherwise
+  land in a directory this module does not own. Not covered, accepted: the fetch uses the
+  daemon's own credentials and so fails wherever the daemon cannot fetch; a commit already local
+  is trusted as is. Bead `pg2-hh32y`.
+
+- **`INV-CCH-22`** <!-- uuid: 347d82ef-4149-4a35-945b-754ba35a8e6a --> — before a dispatch preflights anything that costs a session (capacity,
+  isolation, launch), a role that opts in MUST have the handler check, read-only and at zero model
+  cost, that the dispatch is still worth running, and MUST decline it, launching no session and
+  writing nothing, when the check says no. The check is chosen by the role's `precheck` setting:
+  `review` (also the default for the role named `review`, so that role is unchanged), `ready` or
+  `triage`; a role with none of them is never prechecked. The decline is the pre-accept busy decline of
+  `INV-CCH-6`, carrying one reason per case; every reason starts with `skipped-`, so the failure-rate
+  alert can exclude them as routine; each decline is logged with a message distinct per case and
+  written to the event log as a `precheck_skip` record carrying role, bead, PR (review only) and
+  reason. Every check MUST fail OPEN: an unreadable bead, an item that names no well-formed PR, or
+  any connector failure (binary missing, timeout, error answer, malformed answer) is logged and the
+  dispatch proceeds exactly as without this invariant, with ONE exception: a connector answer of
+  error class `unavailable` (the `review` check only, below) declines the dispatch retryably.
+  - **`review`.** Decline when ANY of these holds, in this order: (a) the review bead is already
+    closed (its status as just re-read at dispatch, no further bead call); (b) the pull request the
+    item names (`<repo>#<number>` from the item's metadata) is merged; (c) the acting identity
+    already has a pending review on that pull request that holds content for the PR's live head
+    (the connector's own `stale` verdict is false: a comment anchored to the head, a body section
+    for it, or a review of the identity at it). A pending review that holds content only for an
+    older head is stale and does NOT skip. The handler cannot tell a human-edited pending review
+    from one it wrote (the connector's pending record carries no authorship marker, because
+    create-or-append deletes nothing), so (c) is "a pending review already covers the head", not
+    "a human edited it". Reasons: `skipped-bead-closed`, `skipped-pr-merged`,
+    `skipped-pending-review`. Every PR read goes through the connector's read-only verbs; a PR
+    merged-state read MAY be served from the connector's cache, which is safe because a cached
+    "open" only means the dispatch proceeds. Where the connector's backend keeps its own store
+    and daemon (ADR 0090), the pending-review read (c) is unchanged in kind and is served from
+    that backend's pending group, which has a two-minute freshness window. An `unavailable`
+    answer, which the connector classes as retryable (a daemon that is briefly down, a reserved
+    rate budget), is the one connector failure that does NOT fail open: the check declines the
+    dispatch with the pre-accept busy decline of `INV-CCH-6`, reason `connector-unavailable`, kind
+    `busy`, so the router re-offers the event once the connector is back, and it stops reading
+    (a launch against a connector that cannot answer would act on an unchecked dispatch). The
+    reason deliberately does NOT start `skipped-`: the dispatch is not proven moot, and a
+    sustained outage stays visible to the failure-rate alert. The class is read from the
+    connector's error envelope even when its process exits non-zero, which is how the connector
+    reports an error answer. Every OTHER connector failure (a missing binary, a call that
+    outlives its bound, another error class such as `not_found` or `unauthenticated`, a
+    malformed answer) still fails open and launches.
+  - **`ready`** (a role that works a bead it claims itself, such as a drain worker). The check
+    reads only the bead as just re-read at dispatch (its status, assignee, labels, deferral date
+    and dependencies; no further bead call) and declines when ANY of these holds, in this order:
+    (a) the bead is not `open` (`skipped-bead-not-open`; a `deferred` or `blocked` status gets
+    `skipped-bead-deferred` or `skipped-bead-blocked` instead); (b) an actor other than the role's
+    own actor holds or is assigned the bead (`skipped-bead-claimed`); (c) the bead now carries
+    `human`, `human-focus-required`, `needs-split-review` or `escalated` (`skipped-bead-human`);
+    (d) the bead no longer carries `has-acceptance-criteria` (`skipped-bead-not-groomed`); (e) the
+    bead's deferral date is in the future (`skipped-bead-deferred`; a worker that parks a bead
+    until an event leaves exactly `open` plus a future deferral date); (f) the bead has an open
+    `blocks` dependency (`skipped-bead-blocked`; a worker that converts a bead into a prerequisite
+    leaves exactly `open` plus a blocker edge). A bead that is `in_progress` and assigned to the
+    role's own actor MUST NOT be declined, whatever else it carries: it is the live session of an
+    earlier dispatch, and the dispatch that follows a daemon restart absorbs it while its turn is
+    still in progress (`INV-CCH-2`, `INV-CCH-14`, `INV-CCH-30`). An unreadable bead (no bead came
+    back) proceeds, and so does a deferral date
+    that does not parse as a timestamp. A dependency counts only when it was read from the single-bead
+    read; the list reads a source query uses carry a different dependency shape and are never used
+    for this check.
+
+  - **`triage`** (a `close-or-triage` role, such as the escalation triager, which works a bead it
+    does not claim). The check reads only the bead as just re-read at dispatch and declines unless
+    the bead still matches the role's own discovery query (open, undeferred, unblocked, carrying
+    `escalated`, not carrying `human`). It declines when ANY of these holds, in this order: (a)
+    the bead is not `open` (`skipped-bead-not-open`; a `deferred` or `blocked` status gets
+    `skipped-bead-deferred` or `skipped-bead-blocked` instead); (b) the bead carries `human`
+    (`skipped-bead-human`); (c) the bead no longer carries `escalated`, because it was
+    de-escalated after the event was queued (`skipped-bead-not-escalated`); (d) the bead's
+    deferral date is in the future (`skipped-bead-deferred`); (e) the bead has an open `blocks`
+    dependency (`skipped-bead-blocked`). Who holds the bead is NOT checked: the discovery query
+    lists an open bead whatever its assignee, and this role never claims its bead. An unreadable
+    bead (no bead came back) proceeds, and so does a deferral date that does not parse as a
+    timestamp. **Why.** An event for such a role queues behind a running session and can arrive
+    after the bead closed or was handled, and a removed change from the source re-enters as a
+    fresh event for a bead that is already closed; completion counts a closed bead as done on its
+    first poll, but only after the session has launched and spent its turn. Bead `pg2-p9lcg`. A
+    role config that names this value is read only by a handler that knows it (an unknown
+    precheck value is rejected at load), so the handler MUST be deployed before a role config
+    names `triage`.
+
+  A role with `ready` prechecking narrows, but cannot close, the window in which a bead is taken
+  or parked between the check and the worker's own claim; a peer winning that claim is handled by
+  the completion mode of `INV-CCH-28`, not here. **Telemetry.** The handler has no metrics emitter;
+  the declines reach `pg_router_failures{class=declined,reason=skipped-*}` through the core's
+  existing handling of a busy decline's reason, and the failure-rate alert excludes the `skipped-`
+  reasons. **Trade-off.** A declined event costs one bead re-read (and, for `review`, up to two
+  connector reads). What happens next depends on the event: a review event is re-offered until
+  the source stops listing the bead or the event expires (`INV-EVT-4`), so a sustained rate of
+  declines is expected there, and (c) also skips a same-head re-dispatch after a session that died
+  mid-review, leaving its pending review for the human; a drain event is born expired, so the core
+  offers it once and drops it, and there is no retry. Bead `pg2-5x29j` (review); the `ready`
+  check and the generalisation are bead `pg2-nk6th.3` (the `triage` check: `pg2-p9lcg`), plan `2026-10-08-drain-worker-roles`
+  section A2; found by the 2026-10-07 router health review (about 11 of 50 review sessions in 72
+  hours had nothing worth reviewing).
+
+- **`INV-CCH-23`** — the quiet window `INV-CCH-15` and `INV-CCH-17` wait for (neither the session
+  nor its Agent-tool subagents have written for that long, before the worktree is removed and the
+  settled session closed) is a handler-wide default of 2 minutes, and a role MAY override it for
+  its own dispatches only. A role that does not set the override MUST behave exactly as before. The
+  override MUST be a positive duration, MUST be at least two poll intervals (20 seconds at the
+  default 10 second poll, because the check samples once per poll and a window under two samples
+  can pass between two writes of a subagent that is merely between tool calls), and MUST NOT
+  exceed the handler's bound on how long it waits for quiet (a longer window could never be
+  satisfied before the wait gives up and leaves the worktree in place); a role config that says
+  otherwise MUST be rejected at dispatch, before any session is launched. An explicit zero or
+  negative override is rejected, not read as "disable the check". A handler-wide window of zero or
+  less (the check disabled) is an operator switch no role override re-enables. The override
+  applies to the dispatch-time cleanup and close of that role's own dispatches; the closed-bead
+  reconcile and the default-pool stale-session pass act on sessions of every role and keep the
+  handler-wide window. **Why.** While a finished session sits idle and unclosed it still counts
+  against the pool's `max_sessions`, because capacity counts every live session that is not
+  `needs_input`; the handler closes the session only after the quiet window and the worktree
+  removal. Measured 2026-10-07 over 23 review dispatches (handler log against the pool event
+  log): last `working` to `idle` until the session was closed took a median of 206 seconds
+  (minimum 150, maximum 614), about 23 percent of the session's slot hold, of which the 120 second
+  window is the bulk and the worktree removal most of the rest (a full monorepo worktree takes
+  about 30 to 65 seconds to remove; the close itself follows within a median of 2 seconds). In a
+  `max_sessions = 1` pool no other review can start in that span. **Trade-off (straggler
+  subagents).** The window is a heuristic, not a proof: a transcript is written when a message or
+  tool call completes, so a subagent inside one long generation or one long tool call (a
+  multi-minute test run) writes nothing for that span and looks quiet once the window passes. A
+  shorter window shortens the span a silent subagent is tolerated, so it raises the chance of
+  removing a worktree, or closing the session, under a subagent that is still working. The
+  consequence is bounded only AFTER the role's own bead has completed: removal is non-force (git
+  refuses a dirty tree), the close does not purge, and a removed worktree only strands a subagent
+  that was still running once the bead was done. That statement does NOT hold for the
+  close-or-release END test (`INV-CCH-28`), which asks the same question BEFORE the bead
+  completes, where a wrong "quiet" kills the running call, releases the claim, parks the bead and
+  counts a failure; that test therefore also treats an unanswered tool call as activity (bead
+  `pg2-r4ig2`, see `INV-CCH-28`), while the window itself, and so the post-completion cleanup and
+  settled-session close (`INV-CCH-15`, `INV-CCH-17`) and the review role's override, are
+  unchanged and never wait for an unanswered call. The default stays at 2
+  minutes for a role that fans out subagents (code review fan-out); a role that finishes in one
+  flat pass with few or no subagents, such as review, MAY shorten it (20 to 30 seconds is the
+  intended range). The window is not shortened by default because the risk is invisible until a
+  worktree is removed under a live subagent. Not covered, accepted: the worktree removal time
+  still holds the slot after the window (a handler could close the session before removing the
+  worktree, which this invariant does not change). Bead `pg2-uyahp`, follow-up of `pg2-hh32y`
+  item 3 and `pg2-vlk1f`; see ADR 0082.
+
+- **`INV-CCH-24`** — the handler's lock directory MUST NOT grow without bound. Every session and
+  every per-bead worktree leaves one empty lock file there (`INV-CCH-18`, `INV-CCH-19`), so a
+  dispatch of a role with worktree isolation MUST also remove a lock file, and only one for which
+  ALL of the following hold: its name ends in `.lock`; nothing has acquired it for more than seven
+  days (each acquisition refreshes its modification time); and the lock can be taken exclusively
+  without waiting, so one held by any live dispatch or reclaimer, shared or exclusive, is never
+  removed. Removal MUST NOT weaken the lock's mutual exclusion: a taker that had the file open
+  when it was removed MUST retry on the file that now exists rather than report a lock it does not
+  hold. A removal that fails is logged-and-ignored, never a dispatch failure. Bead `pg2-bjhoq`.
+
+- **`INV-CCH-25`** — the tool grants a dispatched session starts with are the handler-wide list
+  plus, for a role that sets them, that role's own extra grants, and no other role sees them. The
+  merged list MUST be the handler-wide grants first in their original order, then the role's grants
+  in the order given, with a grant that already appears (in the handler-wide list or earlier in the
+  role's) dropped, so no grant repeats. A role that sets none MUST get the handler-wide list
+  unchanged. A blank grant in a role config MUST be rejected when the role is loaded. A grant only
+  one role needs, `git push` above all, MUST be given to that role and MUST NOT be added to the
+  handler-wide list, which would widen every role. **Why.** The session runs deny-by-default
+  (`dontAsk`, no prompt), so a role whose protocol needs a tool the handler-wide list lacks would
+  have it denied, and widening the one handler-wide list widens every role. **Accepted limitation.**
+  A grant is a prefix match: `Bash(git -C:*)` also permits `git -C <path> push`, and `Bash(gh pr:*)`
+  also permits `gh pr merge`, so a rule such as "no push" or "no merge" behind a prefix grant is
+  enforced by the role's prompt only; give a narrow grant (`Bash(gh pr create:*)`) where one
+  exists. Bead `pg2-nk6th.5`, plan `2026-10-08-drain-worker-roles` section A4.
+
+- **`INV-CCH-26`** — when a session dies unexplained (the death branch of `INV-CCH-7` that applies
+  `on_failure`, not an external or handler close), the handler MUST log the pool's usage-limit
+  reading once, at that moment: whether an account usage window was at its limit and, if so, which
+  window, its used percentage and when it resets. The reading is observe-only evidence for an
+  operator deciding how such deaths should be classified: it MUST NOT change the failure text, the
+  failure class, any mark on the session's row, any metric or the return value, and the death path MUST NOT
+  wait on it beyond a short fixed bound. A reading that fails or times out is logged and dropped.
+  The explained branches (clean completion, budget hard stop, external or handler close) MUST NOT
+  log it. **Why.** Review sessions sometimes die mid-run while usage-limit windows are reached, and
+  nothing recorded whether the two line up. Bead `pg2-n3ila`.
+
+- **`INV-CCH-27`** — how long a dispatch waits for its session's bead to complete before giving up
+  and applying the role's `on_failure` MUST NOT be shorter than the role's time budget plus ten
+  minutes. The wait is the longer of the handler-wide maximum wait (30 minutes unless the
+  deployment changes it) and the role's time budget plus ten minutes; a role with no time budget
+  waits the handler-wide maximum, unchanged. The wait is derived only: there is no per-role setting
+  for it. The failure recorded when the wait runs out MUST name the wait actually applied, not the
+  handler-wide maximum. **Why.** A role whose time budget outlasts the handler-wide maximum
+  (a long-running worker) would otherwise be failed, and its bead flagged for a person, while a
+  live session still held the bead and the budget watchdog had not yet stopped it. The ten minutes
+  let the budget's hard stop and the session's wrap-up land first, so the wait expiring is the
+  fallback for a session the budget did not stop, not the usual end. The default roles' waits are
+  therefore 35 minutes for a 25-minute budget and 40 minutes for a 30-minute budget. Bead
+  `pg2-nk6th.2`, plan `2026-10-08-drain-worker-roles` section A1.
+
+- **`INV-CCH-28`** <!-- uuid: dea93749-b558-4331-9b46-5ac4c4d399ae --> — a role whose session claims its bead and MAY legitimately give it back
+  unfinished (a drain worker that escalates, parks, defers, converts or refuses a bead) MUST be able to use the
+  completion mode `close-or-release`, alongside `close-only`, `close-or-handback`,
+  `close-or-triage` and `close-or-split-triage`; the other modes are unchanged. A dispatch under
+  it is done when the bead is closed, or when the session has ENDED and the bead has been handed
+  back: `open` or `deferred` and unassigned.
+  - **Session ended.** A session counts as ended only when ccpool no longer reports it active AND
+    the transcript and subagent quiet check of `INV-CCH-15`/`INV-CCH-23` holds. A bare `idle`
+    MUST NOT count: ccpool maps a stop to `idle` and nothing moves it back, so an orchestrator
+    session that ends its turn while an asynchronous subagent still runs looks dead, and treating
+    that as an end would act on a bead the session still works. While the session is not yet
+    quiet, the handler keeps waiting under the same time bound as every other mode. The
+    release test runs only once the session has ended, and again after the one bounded re-read
+    that `INV-CCH-7`'s death branch already makes.
+  - **An unanswered tool call is activity** (bead `pg2-r4ig2`). The transcript-write heuristic
+    cannot see a subagent inside ONE long Bash call (a `git commit` running the pre-commit hooks,
+    a pre-land hook run): it writes nothing until the call returns, and closing the pane then
+    kills the call, releases the claim, parks the bead human and counts a handler-error. A
+    session is therefore NOT ended, whatever its transcripts' age, while its own transcript or any
+    subagent transcript holds a Bash tool call with no result yet AND the time since that
+    transcript's last write is still inside the call's declared timeout (120 seconds when it
+    declares none, never more than 600 seconds) plus a grace of 30 seconds. Once that time has
+    elapsed with still no result, or when the newest entry is a finished result, the plain quiet
+    test decides as before, so a genuinely dead session is still detected and handled as today
+    (`session-idle`, the bead parked human). Limit: a call started in the background returns at
+    once, so it is not seen. This applies to the end test ONLY: the post-completion cleanup and
+    settled-session close (`INV-CCH-15`, `INV-CCH-17`) keep the plain `INV-CCH-23` window, so a
+    finished dispatch never holds its pool slot for an unanswered call. **Why not a longer
+    window.** The same window gates the post-completion work, so lengthening it would hold every
+    successful dispatch's slot longer, and a role override cannot exceed the quiet bound of
+    `INV-CCH-23` while one call may run to 600 seconds. **Why not the process tree.** ccpool does
+    not expose the session's process id to the handler.
+  - **Claim latch.** The handler latches that the session claimed its bead the first time it
+    reads the bead `in_progress` AND assigned to the role's own actor. A bead held by anyone else
+    MUST NOT set the latch (a peer can win the claim between the precheck and the worker's own
+    claim, and the handler must not then treat the peer's bead as its worker's). This is a
+    property of this mode only: `close-or-handback` and `close-or-triage` keep latching on any
+    `in_progress` read.
+  - **Classification at the end of a session.** In this order:
+
+    | Bead when the session has ended                                                                             | Result                                                                           |
+    | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+    | `closed`                                                                                                    | done                                                                             |
+    | `deferred`, unassigned (a worker's refusal of a stamp)                                                      | done                                                                             |
+    | `open`, unassigned, latch set                                                                               | done (a hand-back)                                                               |
+    | `open`, unassigned, no latch, and `escalated`, `human`, a future deferral date or an open `blocks` edge     | done (the latch was lost to a restart or a missed poll, but the worker released) |
+    | held by an actor other than the role's own, or `in_progress` with no assignee                               | peer end: NO bead write, NO strike, no verb                                      |
+    | `open`, unassigned, no latch, no `escalated`, no `human`, not deferred, no future deferral, no open blocker | unclaimed end                                                                    |
+    | assigned to the role's own actor (still `in_progress`, or `open`/`deferred` but not unassigned)             | failure: the role's `on_failure`, as in every other mode                         |
+    | any other status                                                                                            | failure: the role's `on_failure`                                                 |
+
+    A deferral date or an open blocker is read from the single-bead read only, and an unreadable
+    bead (twice in a row) is a failure.
+
+  - **Unclaimed end.** A session that ended without ever claiming its bead (it refused on a
+    check, or lost a race, or died first) earns two strikes: the first leaves the bead `open` and
+    does NOT add `human`; the second adds `human` (the role's drain query excludes it from then
+    on). The strike is carried by a plain label `drain-unclaimed-end` (never the `budget-stop:`
+    prefix, which `INV-CCH-11` owns), added on the first strike and read on the second, removed on
+    any end where the session did claim its bead and on close. The first strike reports the
+    dispatch as unclaimed, the second as escalated; neither is a session failure, so neither
+    writes a `dispatch_result` failure record. Each end writes one `unclaimed_end` record carrying
+    `failure_signature` and `signature_evidence` (`INV-CCH-9`), which is how an end is told apart
+    from a limit death below. A claim made and released inside one poll interval
+    can miss the latch; the guard that the bead is `open`, neither `escalated` nor `human`, not
+    deferred and without blocker keeps a worker's own escalation, park, deferral or conversion in
+    that window from being struck (a drain worker that cannot finish a bead escalates it with the
+    `escalated` label, `pb:drain-stuck`'s ESCALATE exit, bead `pg2-zpj6z`).
+    Not covered, accepted: a bead that cannot take a label because it is a read-only template
+    earns the strikes but cannot be given `human`, so it would be re-offered without bound; the
+    role's query is expected to exclude templates, and the worker's own check ends without
+    claiming one.
+  - **Limit and outage exemption.** An unclaimed end whose session died on a usage or spend limit
+    or an API outage is NOT a strike (operator ruling, Phillip, 2026-10-14, bead `pg2-e0imq`,
+    superseding `pg2-0fsuu`'s "policy MUST NOT change" for this class only). The class is read from
+    the failure signature of `INV-CCH-9` alone: `api-rate-limit` (a usage or spend limit, a 429) and
+    `api-transient` (a 5xx, `529 Overloaded`, a dropped socket, an unreachable API). Such an end
+    MUST NOT add `drain-unclaimed-end`, MUST NOT add `human`, and MUST leave an existing
+    `drain-unclaimed-end` exactly as it was (neither added to nor cleared, so the count of
+    consecutive ends for other causes is preserved); it writes nothing to the bead and reports no
+    verb. The decision MUST NOT depend on the capacity usage-limit reading that `INV-CCH-26` logs
+    at a death: that reading was `false` inside a blocked window, so it cannot be the key. Every
+    other signature (`api-auth`, `context-limit`, `git-*`, `session-*`, `unknown`, and so on) keeps
+    the two-strike policy above exactly. The error the dispatch returns for an exempt end MUST
+    contain the stable substring `session ended on a usage limit or API outage`
+    (`packages/pg-router/docs/behavior/interfaces.md`, "Usage-limit sentinel"), so the router can count it under its own reason
+    instead of as an unexplained handler failure.
+  - **Limit and outage death of any role.** The same class is exempt from the role's `on_failure`
+    when the session dies on the death path of `INV-CCH-7` (the bead was claimed, or the role is a
+    triager that works a bead it never claims) instead of ending unclaimed (operator ruling,
+    Phillip, 2026-10-14, `pg2-e0imq`, applied to this path by `pg2-jzttp` after a triager session
+    that hit a spend limit left its bead `human`). A death whose failure signature (`INV-CCH-9`) is
+    `api-rate-limit` or `api-transient` MUST be handled as `on_failure = unclaim` whatever the role
+    declares: the dead session's claim is released with the same guarded update, and the bead MUST
+    NOT get `human`, MUST NOT get a park note, and the result MUST NOT report an `escalated` verb.
+    The decision keys on the signature alone, never on the capacity usage-limit reading of
+    `INV-CCH-26`. The dispatch is still a failure: it writes its `dispatch_result` with the
+    signature, and the error it returns contains the same stable substring, so the router counts it
+    as `usage-limit` (below `triager-failure` for a triage role, which keeps its own bulkhead
+    reason). Every other signature keeps the role's `on_failure` exactly.
+  - **Absorption.** A dispatch under this mode that ends with its bead still open leaves a settled
+    session like any other, and a settled session is never absorbed (`INV-CCH-17`, `INV-CCH-30`):
+    a same-event re-request after a hand-back runs in a fresh session.
+  - **Orphans.** `INV-CCH-18`'s orphan reconcile treats this mode as one that claims its bead (it
+    releases a claim only when the bead is `in_progress` and held by the role's own actor). The
+    release leaves the bead `open` and ready for any worker; that is accepted as the outcome of a
+    lost handler.
+
+  **Why.** `close-or-handback` reads every `open` bead after a claim as a hand-back and has no
+  notion of a bead that was never claimed, so a drain worker that could not claim its bead looked
+  like a success to it; and its latch would have made the handler add `human` to a bead a peer
+  holds. Bead `pg2-nk6th.3`, plan `2026-10-08-drain-worker-roles` section A2.
+
+- **`INV-CCH-29`** — a drain session MUST NOT stay parked in `needs_input` without a person
+  indefinitely. A drain role is a ccpool role whose completion is `close-or-release`
+  (`INV-CCH-28`); every other role is outside this invariant, and its `needs_input` session stays
+  preserved for a human (`phillipgreenii-nix-agent-support` ADR 0037, `INV-CCH-14`). The dispatch
+  that supervises a drain session MUST clear it, without a person, once it has sat in QUIET
+  `needs_input` for the stall bound: 15 minutes by default, the handler config key `needsInputStall`
+  (`0` disables it), which a role MAY override with its own `needsInputStall`.
+  - **Quiet.** The clock starts when the session is first seen in `needs_input` (or at its
+    `last_activity_at` when that is older and its transcript can be observed, so absorbing the
+    session after a handler restart (`INV-CCH-30`) does not grant a fresh bound) and restarts at the newest write
+    to its transcript or its subagents' transcripts. A poll that sees any other state resets it.
+    ccpool leaves `needs_input` only at the next stop, so a session whose dialog was answered still
+    reads `needs_input` while it works; the write test is what keeps a healthy session from being
+    cleared. A transcript that cannot be observed does not delay the bound.
+  - **Escape, then close.** At the bound the handler MUST send Escape (`ccpool cancel`). If the
+    transcript then stays quiet for one worktree quiet window (`INV-CCH-23`, never under two polls)
+    it MUST close the session (not purged, reason `handler`) and release the claim; a write after
+    the Escape ends the episode and nothing is closed. The whole clear is bounded by the stall
+    bound plus one quiet window plus one poll (17 minutes 10 seconds by default).
+  - **The release** is ONE bd call, `bd update <id> --status=open --assignee=`, and only for a bead
+    that is `in_progress` under the role's own actor, read first: an unreadable bead changes nothing
+    and is retried on the next poll. The session is closed before the claim is released. A bead that
+    is closed, held by anyone else, or already open and unassigned is never written to (the session
+    is still closed, and a peer-held bead ends the dispatch with no verb, as in `INV-CCH-28`).
+  - **Two strikes.** The first stall of a bead adds the label `drain-needs-input-stall` and a
+    comment; the second consecutive one adds `human` in the same call as the release; a completed
+    dispatch removes the label. The dispatch reports unclaimed on the first strike and escalated on
+    the second, and writes no `dispatch_result` failure record: the event below is its record.
+  - **Surfacing.** The event log records `needs_input_escape` and `needs_input_cleared`, one each per
+    clear, beside the `needs_input` alert. The handler files no escalation bead for a stuck session.
+  - **The budget watchdog** MUST NOT paste its reminder into a session that is in `needs_input`, or
+    whose state cannot be read: the Enter after a paste accepts a pending permission dialog. The
+    reminder is not latched, so it is sent after the session leaves `needs_input`; the hold is
+    logged once (`reminder-suppressed`, reason `needs_input`). The wrap-up that follows the 90%
+    cancel is held the same way when the cancel left the session in `needs_input`.
+  - **Not covered, accepted.** An orphan in `needs_input` (`INV-CCH-18`) is still left alone: its
+    handler is gone, and the orphan reconcile runs only when its role next dispatches.
+
+  **Why.** Six sessions (five of them drain sessions) stalled on a permission dialog nobody could
+  answer between 2026-10-10 and 2026-10-13, the longest for about 80 minutes, each holding its bead's
+  claim and its pool's slot. The bound is the one remedy that covers every trigger. It lives in the supervising
+  dispatch because that dispatch is the one holding the lane: no later dispatch runs while it is
+  blocked. Bead `pg2-zybju`, `phillipgreenii-nix-agent-support` ADR 0083's Amendment of 2026-10-13
+  (which amends ADR 0037).
+
+- **`INV-CCH-30`** <!-- uuid: 7c2e9f4a-31d8-4b6e-9a05-d2f8e61c4b73 --> — every dispatch of a
+  ccpool-backed role MUST run in a **fresh session**: one it launches itself, with its own launch
+  time, budget clock and supervision lease (`INV-CCH-18`). It MUST NOT adopt a session an earlier
+  dispatch launched, except in the one case below, whatever the role's pool already holds for the
+  same bead and role. Once no earlier attempt of the same bead and role is in flight, a fresh
+  session is therefore launched for a new event; for a re-dispatch of the same event at a new head
+  (a re-review after the pull request's head advanced); for a re-request after a hand-back, a
+  release, a budget stop or a failure left the bead open; for a reopened bead; and whenever the
+  earlier session has **settled** (its turn has ended, or it is no longer live), whoever closed its
+  row and whether or not anyone did. Reuse is the rare, enumerated exception, never a default
+  narrowed by bounds. Operator ruling (Phillip, 2026-10-12, recorded while unblocking bead
+  `pg2-pq2ej`), verbatim: "in docs, i think we need to update them such that re-using a ccpool
+  session should not be the default, for this very reason. so if there is new review, then there
+  should be a new session. re-using a session should be rare." Bead `pg2-yunrp`; see ADR 0094.
+  - **In flight.** An earlier session of the same bead and role is **in flight** while its **turn
+    is in progress** (the session is live and `working` or `needs_input`: a turn under way, or one
+    paused for a person), or while a handler still holds its supervision lease, whatever its state
+    and whether or not it is still live: launching it, waiting on it, settling it (the quiet wait,
+    worktree removal and close of `INV-CCH-15` and `INV-CCH-17`) or handling its death. One bead and
+    role have at most one attempt in flight: while one is, a dispatch MUST NOT launch a session
+    beside it. Every session the pool holds for the bead and role counts, not only the first one
+    found, and a pool whose sessions cannot be read is treated as holding one in flight.
+  - **The one exception: absorb the same event's turn in progress.** A dispatch MUST **absorb** an
+    earlier session (wait on it as its own instead of launching one) when ALL of the following
+    hold: its turn is in progress; it records this dispatch's own event id; nobody has closed it or
+    begun to tear it down (`INV-CCH-20`); and its bead, as read at dispatch, is not already closed.
+    That is the redelivery of an event whose turn is still running: the re-offer after a daemon
+    restart that left the dispatch running (`INV-CCH-14`), a crash-window redelivery
+    (`INV-EVT-2`), or a redelivery that finds the session of a dead handler still at work
+    (`INV-CCH-18`). The head is deliberately not compared: a dispatch re-reads its bead's head when
+    it starts, so a redelivery after a head advance carries the new head while the turn it
+    duplicates still works on the old one, and the source asks again for the new head once that
+    attempt ends. The absorbing dispatch takes the session's lock and lease (`INV-CCH-18`), sends
+    it nothing, measures its budget from its original launch, and settles it like a session of its
+    own (`INV-CCH-17`). It MUST also report that launch time to the core, as the optional
+    `startedAt` of its dispatch reply (`INTF-HANDLER`, `DEC-EVENT-5`), so that the dispatch's queue
+    wait and run are timed from its real start and not from the re-offer. A dispatch that launches
+    its own session, and an absorbed session that recorded no launch time (one an older build
+    launched), MUST reply with no `startedAt`.
+  - **Any other attempt in flight: decline.** A dispatch that finds an attempt in flight it may not
+    absorb (one still being launched; one whose turn has ended, or whose session has died, while its
+    handler still holds the lease; one for another event, or for an event it cannot compare because
+    either side records no event id; one that someone has closed while it still runs; one whose
+    bead is already closed) MUST NOT absorb it and MUST NOT launch a session beside it. It declines
+    with the pre-accept busy decline (`INV-CCH-6`), reason `session-in-flight`, mutating nothing.
+    Like a full pool, this decline is routine backpressure, not a failure, so the failure-rate
+    alert MUST NOT count it. The core re-offers the event later, and the first dispatch that finds
+    no attempt in flight launches a fresh session.
+  - **A pool it cannot read: decline, loudly.** A pool whose sessions cannot be read is treated as
+    holding an attempt in flight: the dispatch MUST NOT launch, and declines with the same
+    pre-accept busy decline, mutating nothing. Unlike an attempt in flight this is not routine
+    backpressure, so the decline carries its own reason, `pool-unreadable`, which the failure-rate
+    alert MUST count: a pool that stays unreadable pages instead of only logging a warning (bead
+    `pg2-s3pjt`).
+  - **A leftover nobody supervises.** A live session still `starting` or `ready` (no turn in
+    progress) whose supervision lease has expired has no handler and no turn: a launch whose handler
+    gave up or died before its prompt was taken, or a session a cancel left `ready` after its
+    handler had gone. It is not in flight and MUST NOT be handed this dispatch's prompt. The
+    dispatch closes it, without purging and under the same per-session lock an absorb takes
+    (`INV-CCH-18`), and then launches its own session, so the leftover neither holds the pool's slot
+    nor hands the new attempt a budget clock that started at the earlier launch, in a worktree
+    prepared for an earlier item. This close is the dispatch's own, apart from the settled-session
+    close of `INV-CCH-17`.
+  - **Redelivered finished work.** A redelivery of an event whose attempt has already settled (the
+    narrow crash window, or a daemon restart that lands just as the attempt settles) is a dispatch
+    like any other. A role with a pre-launch check (`INV-CCH-22`) declines it at zero model cost
+    when its bead is already done, and the dispatch-time reconcile (`INV-CCH-14`) usually purges
+    the settled session of a closed bead before the dispatch looks for one.
+
+  **Not covered, accepted.**
+  - A role without a pre-launch check launches one fresh session for a dispatch whose bead is
+    already closed: a redelivered event, or an event that was declined while an earlier attempt ran
+    and closed the bead. That was already the outcome whenever the dispatch-time reconcile purged
+    the settled session first, which is the usual case.
+  - A declined event is re-offered only until it expires (`INV-EVT-4`): a born-expired event is
+    dropped at once and re-derived on its source's next query, and an event of another type can
+    expire while an attempt of the same bead and role stays in flight.
+  - A lease outlives a handler that returned early by whatever is left of it (for a launch that
+    failed, up to one launch wait plus one lease TTL), so a later dispatch declines for that long
+    before it closes and replaces the leftover.
+  - A session whose handler has gone while its subagents still write has settled and is not in
+    flight, so in a pool with a free slot a fresh session can start in the shared per-bead worktree
+    before they stop (a one-slot pool declines at capacity instead, `INV-CCH-6`).
+  - A redelivery that arrives while the earlier dispatch is still creating its session, before the
+    pool lists it, cannot see it; a pool with a free slot can then run two sessions for the bead and
+    role (ADR 0085).
+
+  **Why.** A second session beside a running attempt would put two agents on one bead in one
+  shared per-bead worktree, race the first for the claim, and take a second pool slot, so an
+  attempt in flight is waited on or declined, never duplicated. Absorbing is kept to a turn in
+  progress because only then is the budget it measures honest: the time measured is the attempt's
+  real running time, so a stop it triggers is the stop the attempt's own watchdog would have made.
+  Neither reason holds for a settled session. Its turn is over, so a fresh session duplicates no
+  work in progress, and absorbing it starts the absorbing dispatch's budget at the original launch:
+  that is how a re-review after a head advance was hard-stopped at once (`pg2-afre3`: 4065 seconds
+  measured against a 1500 second cap) and how a handed-back bead looped (`pg2-tc9c3`; `pg2-92rfu`:
+  one row closed 268 times). Nor can a dispatch tell a redelivery of a settled attempt
+  from a new request for the same bead: the event id is the same for every event of one type and
+  bead, so each bound added to that path (the event id, `pg2-uprw5`; the item's pinned head,
+  `pg2-afre3`; the outcome of the dispatch, `pg2-tc9c3`) left another case open. The ruling flips
+  the default instead of adding a fourth bound. Considered and rejected: keeping a settled session
+  absorbable when it served the same event at the same head and its dispatch completed the bead.
+  The dispatch-time reconcile already purges such a session first in the usual case, a pre-launch
+  check answers the redelivery at zero model cost, and keeping it would keep alive the one path
+  behind every false budget stop so far, here on a bead that is already done.
+
+- **`INV-CCH-31`** <!-- uuid: 3b342787-b7d7-48f3-81f6-1a80c3130958 --> — a role MAY override the claude `--effort` level its own
+  launched sessions run at, and a role that does not set the override MUST behave exactly as
+  before: the handler-wide launch-config effort (`max` by default) applies. The override MUST be
+  empty (no override) or one of the levels `claude --help` lists for `--effort` (`low`,
+  `medium`, `high`, `xhigh`, `max`); a role config that says otherwise MUST be rejected at
+  load, before any session is launched. The override replaces only the effort of that role's own
+  dispatches; it MUST NOT change the model or any other role's effort, and the handler-wide value
+  stays the default for every other role. A change takes effect for sessions launched after the
+  handler has restarted: a running session keeps the effort it started with. **Why.** Effort was a
+  single handler-wide value, so every role launched at `max`, and a role that needs less (the
+  drain roles, measured 2026-10-14 at about 23 percent of drain spend in output tokens) could be
+  lowered only by lowering every role. **Not decided here.** Whether a subagent a session starts
+  follows the session's effort: nothing in this module or the roles' configuration sets a subagent
+  effort, so a subagent most likely follows the session flag, but that is a property of claude and
+  is confirmed from a subagent transcript after a change, not assumed.
+
+## Payload environment (item context, session environment, pre-ready failure)
+
+A role, or a query, is a command plus the minimal base environment and the item context, and
+pg-router declares nothing else about how the command is run (`INV-ROLE-4`). This module realizes
+that for both backing kinds: a command-backed role runs the argv it is given, and a ccpool-backed
+role starts a session through `ccpool`. Whatever a command begins with, a prefix tool such as
+`pg-wrap`, which applies an ordered chain of command prefixes around the payload, is part of the
+command: this module and pg-router neither know nor check it, and the tool owns its own
+configuration. The rules below state the names this module sets, how it starts a payload, how it tells
+a failure before a session is ready from the payload's own failure, and what it records. Nothing here
+changes a core gate or `INV-LIFE-2`.
+
+- **`INV-CCH-32`** <!-- uuid: 38febdc2-f642-4817-9104-c4bbc9029df7 --> — the environment a payload
+  starts in is the item context, plus, for a command-backed role, the base environment, and the
+  handler MUST give the payload nothing else of an item.
+  - **Item context.** For every payload of both backing kinds the handler MUST set exactly three
+    variables: `PG_ROUTER_ROLE` (the role's name), `PG_ROUTER_ITEM_ID` and `PG_ROUTER_ITEM_TYPE`.
+    The item's id and type come from the dispatched item. Its **title is not passed**: a title is
+    untrusted free text, and a command-backed role that needs it templates it into an element of its
+    argv, which is never shell-parsed. For a ccpool-backed role these three travel with the session
+    environment of `INV-CCH-33`.
+  - **The base keep-list of a command-backed role, by explicit name.** The base environment of
+    `INV-ENV-2` is, for the processes this module starts itself, the system variables (`HOME`,
+    `USER`, `LOGNAME`, `TMPDIR`, `LANG`, and `PATH` fixed to `/usr/bin:/bin:/usr/sbin:/sbin`); the
+    terminal variables (`TERM`, and `COLORTERM` where set); the markers this module's participants
+    inject, `BEADS_ACTOR`, `BEADS_DIR`, `WORKSPACE_ROOT` and `PG_ROUTER_TEST_MODE` (the last set by
+    the core's smoke-test command); and the three item-context variables. The list is revisable by
+    decision. A prefix match (every `BEADS_` variable) is forbidden: it would keep names that are not
+    markers. A payload that needs more names it in its own command, or in the spec of the prefix tool
+    its command starts with.
+  - **The switch.** A command-backed role's `strictBaseEnv` (a boolean, **off by default**, the
+    strict-env switch of `INV-ENV-2`) is carried in the role's own `[role.config]` table. While it is off the
+    payload keeps the ambient environment it has, with the item context added; once on, it sees only
+    the keep-list. The handler's own work (the origin probe, the review prefetch) keeps its ambient
+    environment, because that work still needs it.
+  - **A ccpool-backed session is not started by this module.** The terminal multiplexer starts the
+    agent with its own environment plus what `ccpool new` passes, so the handler cannot narrow it. A
+    prefix tool in front of the agent narrows it, from its own spec, and the markers that spec keeps are
+    the participant's markers, the item context and the markers the session tool injects; the
+    variables the session tool blanks so that a session does not believe it is a child session
+    **MUST NOT** be among them. The deployment renders that spec.
+  - **Cancellation.** The handler MUST start every command-backed payload in its own process group
+    and cancel by `SIGTERM` to the group, escalating to `SIGKILL` after a grace period, because
+    cancelling only the direct child would orphan a payload behind a prefix tool that does not
+    replace itself (`INV-ENV-4`).
+  - **A caveat for operators.** The core's `run-role` smoke command runs under the operator's own
+    shell environment, not the daemon's, so while a role's `strictBaseEnv` is off a `run-role` is not
+    representative of the payload's environment.
+
+- **`INV-CCH-33`** <!-- uuid: e2cb7026-8b23-4812-858d-76969c96cbc5 --> — a ccpool-backed role MAY
+  carry `sessionEnv`, and the handler MUST pass it through to the session without interpreting it.
+  - **What it is.** `sessionEnv` is a generic string-to-string map in the role's `[role.config]` table. The
+    handler passes every entry to the session tool's `new --env`, as it passes `BEADS_ACTOR`, and
+    never reads, orders or acts on one. A deployment uses it to hand the agent's launch whatever its
+    prefix tool needs, for example the one entry that names the prefix tool's spec file (`pg-wrap`'s
+    `PG_WRAP_SPEC`).
+  - **Load errors.** The role's configuration is in error, and the handler MUST refuse it, when a key
+    collides with a marker the handler sets (`BEADS_ACTOR`, `BEADS_DIR`, `WORKSPACE_ROOT`, or any name
+    beginning `PG_ROUTER_`), when a key is empty, or when a key contains `=`.
+  - **No secrets.** `sessionEnv` MUST NOT carry a secret: it is visible in the session's environment
+    and in the event records of `INV-CCH-35`. A secret belongs inside the prefix tool, in its own spec,
+    where it is fetched and applied to the payload alone. `validate` (`INV-CCH-36`) warns on a key
+    whose name matches `TOKEN`, `SECRET`, `KEY` or `PASSWORD`.
+  - **Every launch.** Every start of a ccpool-backed session passes `sessionEnv`, the markers
+    `BEADS_ACTOR`, `BEADS_DIR` and `WORKSPACE_ROOT`, and the item context of `INV-CCH-32` again,
+    because the session tool keeps none of them (`INV-CCH-38`).
+
+- **`INV-CCH-34`** <!-- uuid: 0864dce3-0619-4b24-a86e-8b58072bd3a6 --> — a failure BEFORE a
+  ccpool-backed session is ready is a pre-accept decline, never a handler failure, and the handler
+  MUST NOT escalate the bead for it.
+  - **What it covers.** A failed or timed-out launch through the session tool; the session's own
+    payload failing in its pane before ready, a prefix tool in front of the agent included; and the agent
+    dying or stalling before ready.
+  - **The decline.** The handler MUST reply with the transport's pre-accept busy decline
+    (`conformance.ExitBusy`, exit `9` on the default CLI transport of `DEC-WIRE-1`), reason
+    `launch-failed`, kind `fault` (`INV-CCH-37`), with the redacted evidence as `detail`. It never
+    counts as delivered, and the core re-offers the event while it is unexpired, at the one cadence
+    of `INV-FAIL-1`; an event born expired is dropped and comes back on the source's next poll if it
+    is still eligible (`INV-EVT-4`). The failure signature `launch-failed` (`INV-CCH-9`) names it.
+  - **Cleanup and no bead write.** The decline reuses the purge and worktree reclaim of an abandoned
+    launch, as the usage-limit refusal at launch of `INV-CCH-6` does. It mutates NO bead: this module
+    never claims a bead, the session does.
+  - **Shutdown is not a decline.** When the handler's own context is cancelled the handler MUST NOT
+    reply with this decline, because the core checks busy before shutdown and the shutdown would be
+    counted as a fault.
+  - **Not covered.** A non-low-disk isolation failure happens before any session exists and is not
+    this decline (`INV-CCH-8`).
+  - **No per-bead brake.** The handler MUST NOT stamp a bead `pool-launch-fail`, MUST NOT add `human`
+    on a second failed launch, and MUST NOT remove a `pool-launch-fail` label after a good launch;
+    that escalation is retired. A `pool-launch-fail` label an earlier handler left on a bead is
+    harmless and ignored. The brake against a role that keeps failing to launch is the core's
+    per-role progress gauges and the alerts that read them (`INV-OBS-3`), not a mark on a bead.
+  - **A command-backed role.** A failing command, a failing prefix tool in its argv included, is NOT
+    a decline: it is an accepted dispatch that ends in a handler error (exit `1`). It is re-offered
+    only if the role opted into dispatch retries with a transient class, and it counts as
+    unsuccessful in the role's progress (`INV-OBS-3`). The outcome carries the redacted stderr tail,
+    where a `pg-wrap[<stage>]:` line names the failing layer. A layer that exits `9` reads as
+    `command-busy` (`INV-CCH-6`), a risk this module accepts.
+
+- **`INV-CCH-35`** <!-- uuid: dafefee7-edda-40ef-af3c-de3a08b40a1f --> — the handler MUST be able to
+  tell an operator what a dispatch ran, how it ended and why a dispatch declined, without recording a
+  secret. Its event log follows one rule (operator ruling 33, 2026-10-22: "dispatch_start before
+  command run sounds correct, the next event of error or declined or success or ... would show up
+  based upon the result"): `dispatch_start` when the payload starts, then exactly one outcome record.
+  - **`dispatch_start`.** For every accepted dispatch the handler MUST write one `dispatch_start`
+    event-log record carrying the role, the item's id and type, and, for a command-backed role, the
+    argv as rendered, whether `strictBaseEnv` is on, and the **names** of the base-environment
+    variables the payload received (never their values, and never the item-context values); for a
+    ccpool-backed role, the route the session was launched by and the `sessionEnv` entries, values
+    included, since they are non-secret by `INV-CCH-33`. The agent's own environment is the prefix tool's: an operator follows the `sessionEnv` entry that names its spec to that tool's
+    own `show` command. For a command-backed role the record MUST be written BEFORE the payload
+    starts, so a payload that hangs or is killed still has it; because that role's busy exit `9` is
+    only known after the command ran, an exit `9` leaves a `dispatch_start` followed by a
+    `dispatch_decline`. For a ccpool-backed role the record is written once the dispatch is past
+    every pre-accept decline (`ccpool new` returned ready, or a live session was adopted), so a
+    declined launch writes none.
+  - **The outcome record.** Every accepted dispatch, command-backed or ccpool-backed, MUST write
+    exactly one outcome record after its `dispatch_start`, success included, and no accepted dispatch
+    writes two. It is the `dispatch_result` failure record of `INV-CCH-9` when the dispatch FAILED,
+    and a `dispatch_end` record for every other end. The operator's `dispatch_failed` is that
+    existing `dispatch_result` kind, not a new kind, and `dispatch_result` is NOT written for a
+    success, because its readers (the failure-signature queries and alerts) select on the kind and
+    read `failure_signature` from every row. A command-backed dispatch fails when its payload exits
+    non-zero (any code but `9`) or cannot start; a ccpool-backed one fails as `INV-CCH-9` says, and
+    also when the send of its nudge fails. The `dispatch_end` outcomes are `completed` (the payload
+    exited `0`, or the session completed its work), `unclaimed-end` (`INV-CCH-28`), `peer-held`
+    (`INV-CCH-28`), `needs-input-stalled` (`INV-CCH-29`) and `interrupted` (the dispatch's context
+    ended, as at shutdown or when a hung payload was cancelled, so the end is not a session failure).
+    A pre-accept decline, including a command-backed busy exit `9`, writes `dispatch_decline` as its
+    one record and no outcome record.
+  - **`dispatch_decline`.** For every pre-accept decline the handler MUST write one
+    `dispatch_decline` record carrying the role, the item's id, the reason, the kind (`INV-CCH-37`),
+    the role's `sessionEnv`, the redacted evidence tail and the failure signature (`INV-CCH-9`),
+    each of the last two where the decline has one.
+  - **What the records never hold.** No record holds an item-context value, a prompt, an item's
+    content or an unredacted failure text.
+  - **The fields as implemented.** All go to the handler's event log, `events.jsonl` in the handler
+    state directory, as one JSON object per line with the log's own `time`, `level`, `kind` and `msg`.
+    `dispatch_start` adds `role`, `item_id` and `item_type`, then for a command-backed role `argv`
+    (as rendered), `strict_base_env` (boolean) and `base_env_names` (sorted; empty when the switch is
+    off), and for a ccpool-backed role `route`, `session` (the session's external id) and
+    `session_env` (the role's entries, values included). `route` is `launched` when this dispatch
+    launched a fresh session through `ccpool new` and it returned ready, and `adopted` when it took
+    over a live session of the same event's turn (`INV-CCH-30`): ccpool does not report its own
+    internal route to its caller, so the record names the route the handler took. A command-backed
+    `dispatch_start` is written before the payload starts, so one exists for a payload that exits
+    `9` (then followed by the cmd layer's `dispatch_decline`), cannot start, hangs or is killed. A
+    ccpool-backed one is written once `ccpool new` returned ready or the adoption took over, before
+    the nudge is sent. `dispatch_end` adds `role`, `item_id`, `item_type`, `outcome` (one of the
+    values above) and, for a ccpool-backed role, `session` (the session's external id); it is logged
+    at `info`. The failure `dispatch_result` keeps the fields of `INV-CCH-9` for both role types:
+    `role`, `pool` (`default` or the role's pool directory; `""` for a command-backed role), `bead`,
+    `session` (`""` for a command-backed role), `failure_signature` and `signature_evidence`. A
+    command-backed failure is classified by the same shared classifier from the payload's standard
+    error, else from the error that stopped it, redacted and bounded, with the evidence never empty.
+    `dispatch_decline` adds `role`, `item_id`,
+    `reason`, `decline_kind` (the kind of `INV-CCH-37`: the record's own `kind` field names the
+    record), `session_env` (the role's entries; an empty object for a command-backed role),
+    `evidence` (the redacted, bounded tail of the `ccpool new` error, `""` unless the reason is
+    `launch-failed`) and `failure_signature` (`launch-failed` for that reason, else `""`). A decline
+    of kind `fault` is logged at `warn`, the others at `info`; `dispatch_start` at `info`.
+
+- **`INV-CCH-36`** <!-- uuid: aa67ccb6-b7ca-4d1d-b111-726493428b0a --> — the handler MUST provide
+  `validate`, the adapter's one validation entry point, and `validate` MUST NOT run a payload.
+  - **The subcommand.** It is the optional, generic `validate` of `DEC-WIRE-1`: the role object as
+    JSON in, a list of problems out, empty when the role is valid. The build that renders a role, the
+    core at startup (`INV-ROLE-5`) and the core's `doctor` all call it, so no check has a second home.
+  - **What it checks.** It checks the role's `[role.config]` table strictly, so an unknown field or a field
+    of the wrong type is a problem naming the field; the `sessionEnv` keys against the load errors of
+    `INV-CCH-33`; and that each pool directory the role references exists. It warns, without failing,
+    on a `sessionEnv` key matching `TOKEN`, `SECRET`, `KEY` or `PASSWORD`.
+  - **What it does not do.** It never runs `pg-wrap` or any other prefix tool, whose own check is the tool's, and it
+    verifies nothing about pg-router.
+  - **A caveat for operators.** `run-role` runs under the operator's shell, so a clean `validate`
+    and a successful `run-role` say nothing about the environment of the daemon's payload
+    (`INV-CCH-32`).
+
+- **`INV-CCH-37`** <!-- uuid: a4dc6e2a-97a2-4570-8d29-86ba87c361a9 --> — every pre-accept decline
+  the handler gives MUST carry a `kind`, mapped from its reason by this module and never by the core,
+  and an optional bounded, redacted `detail`.
+  - **The kinds.** The kind is one of `busy`, `fault` or `neutral` (`DEC-WIRE-1`). The core counts
+    the role's progress by kind alone (`INV-OBS-3`); it never reads the reason (`GOAL-MIN-1`).
+  - **The mapping.**
+
+    | kind      | reasons                                                                                                                                                                            |
+    | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | `busy`    | `at-capacity` (a usage-limit refusal maps here, so a usage window never pages), `session-in-flight`, `command-busy`, `connector-unavailable` (the `review` precheck, `INV-CCH-22`) |
+    | `fault`   | `capacity-unknown`, `pool-unreadable`, `low-disk`, `launch-failed`                                                                                                                 |
+    | `neutral` | `origin-unavailable` (the origin gate has its own rule, `INV-CCH-10`) and every `skipped-*` reason (a dispatch proven moot, `INV-CCH-22`)                                          |
+
+  - **The detail.** `detail` says why, for a reader. It is bounded, and redacted with the masking of
+    `INV-CCH-9`, and the core never parses it. It MUST NOT carry an item's content, a prompt or the
+    origin key of `INV-CCH-10`.
+
+- **`INV-CCH-38`** <!-- uuid: 356cc628-ea43-4068-9423-ab520efbcfb0 --> — the handler MUST start or
+  resume a ccpool-backed session through one path only, and every send MUST first check that the
+  session is live.
+  - **One launch path.** The handler starts or resumes a session only through the ensure that
+    launches it through the session tool with the full environment of `INV-CCH-33`.
+  - **A send resumes with nothing.** Every send goes through the session tool's reply, which resumes a
+    session that has gone cold with an EMPTY environment, so a resumed session would lose `BEADS_ACTOR`,
+    `BEADS_DIR` and `WORKSPACE_ROOT`. The callers of a send are the watchdog's reminder and its
+    wrap-up, and the nudge right after ensure.
+  - **The rule.** Each caller MUST first check that the session is live, and treat "not live" as ended,
+    by the dead-session path this module already has, never resume it.
+  - **Accepted race.** Between the check and the send the session can die. That race is accepted, and
+    its outcome is bounded: a resume into a session that has just died fails at once, rather than
+    waiting for a launch that cannot happen.

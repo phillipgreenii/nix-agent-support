@@ -2,7 +2,7 @@
 // read-only `ccpool list` verb, scoped to the ccpool adapter's (pg-router-handler-ccpool) own
 // session-metadata namespace via --filter pgrouter.pool=pg-router
 // [design: Contract's "ccpool's own list CLI" bullet;
-// packages/pg-router-ccpool-handler/internal/ccpool/meta.go for the
+// packages/pg-router-handlers/internal/ccpool/meta.go for the
 // pgrouter.pool key/PoolName value]. Never a compile-time import of
 // packages/ccpool — this binary execs the ambient-$PATH `ccpool` binary,
 // same "one-shot exec, capture stdout/stderr separately, classify by exit

@@ -1,7 +1,7 @@
 // Package pgconnector approves the read/write `pg-connector issue
 // show/comment/update/close` verb family — exactly the four grants
 // PG_ROUTER_CCPOOL_HANDLER_CONFIG's allowedTools already lists (bead
-// pg2-s9zh5's widening: packages/pg-router-ccpool-handler/internal/config/
+// pg2-s9zh5's widening: packages/pg-router-handlers/internal/config/
 // config.go's baseAllowedTools, mirrored in
 // home/programs/pg-router-ccpool-handler/default.nix's defaultAllowedTools) —
 // for `permissionMode=dontAsk` dispatch (bead pg2-r848s).

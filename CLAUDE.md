@@ -411,36 +411,22 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
   its `handler` and carries a `[role.config.ccpool]` table with `actor` AND `promptBody` (or
   `skillMD`) AND `completion` AND `onFailure` AND `onDispatchFail` (enums: `completion` =
   close-only|close-or-handback|close-or-triage|close-or-split-triage|close-or-release; the failure
-  fields = unclaim|add-human); an old-path ccpool role (no `handler`) instead needs `actor` AND
-  (`prompt` XOR `prompt_file`) AND `completion` AND `on_failure` AND `on_dispatch_fail`. Either way,
-  `pg-router doctor` calls the adapter's real `validate`, so run it on the hand-rolled config.
+  fields = unclaim|add-human). `pg-router doctor` calls the adapter's real `validate`, so run it on
+  the hand-rolled config.
   To prove the backing-command check actually RAN, run the same config against the unwrapped
   binary `bin/.pg-router-wrapped` under `env -i PATH=/usr/bin:/bin` — it must exit 1 with
   `backing command "<cmd>" cannot be invoked`; without that negative control, an exit 0 through
   the nix wrapper is vacuous (the wrapper injects the tools onto PATH).
 
-- **A role's real invocation lives in a separate rendered file, not `config.toml`, only while the
-  role is on the old path** (the handler split's compat window, bead `pg2-12gr4.10.10`; a role is on
-  exactly ONE path, and the window ends when no role is left on the old one). Reading
-  `config.toml`/`config --show` alone is therefore NOT always enough: first find the role's `handler`.
-  - **New path** (the role's `[[role]]` table has a `handler`, an absolute path to
-    `pg-router-handler-ccpool` or `pg-router-handler-command`): the whole invocation is IN
-    `config.toml`, under the role's own `[role.config]` table (`pg-router config --show --json` prints
-    it) plus the `survives_shutdown` key. The role is declared once: the handler module's
-    `phillipgreenii.programs.pg-router-ccpool-handler.roles.<name>` (its `handler`, `ccpool`/`command`
-    settings, `sessionEnv`, `strictBaseEnv`, `spec`) joins, by name, the pg-router module's
-    `phillipgreenii.programs.pg-router.roles.<name>` (`binds`, `enabled`, and what the join fills in:
-    `handler`, `config`, `survivesShutdown`). No per-role JSON is rendered for it. The adapter's own
-    `validate` runs over the rendered config during the build (`roleValidation`), and `pg-router doctor`
-    runs it again.
-  - **Old path** (no `handler` on the `[[role]]` table; the handler module's role sets `type`): the
-    `[[role]]` entry in `.pg-router/config.toml` carries ONLY `name`/`binds`/`enabled` -- never the
-    command argv (command-type) or actor/prompt/completion policy (ccpool-type). Those render into one
-    JSON file per role under `pg-router-ccpool-handler`'s `handlerCommandDir` (a directory of symlinks,
-    built only after every role file passes `validate` and every spec passes `pg-wrap check`; consumed
-    via `pg-router-ccpool-handler dispatch --role-config <dir>/<role>.json`; find the live dir from a
-    running handler process's argv, e.g. `ps aux | grep pg-router-ccpool-handler`). Cat the role's own
-    `<role>.json` to see what it executes.
+- **A role's whole invocation is in `config.toml`**, under its `[[role]]` table: `handler` (an absolute
+  path to `pg-router-handler-ccpool` or `pg-router-handler-command`), the role's own `[role.config]`
+  table and the `survives_shutdown` key. `pg-router config --show --json` prints it, so reading
+  `config.toml`/`config --show` is enough; no per-role file is rendered. The role is declared once:
+  the handler module's `phillipgreenii.programs.pg-router-ccpool-handler.roles.<name>` (its
+  `handler`, `ccpool`/`command` settings, `sessionEnv`, `strictBaseEnv`, `spec`) joins, by name, the
+  pg-router module's `phillipgreenii.programs.pg-router.roles.<name>` (`binds`, `enabled`, and what
+  the join fills in: `handler`, `config`, `survivesShutdown`). The adapter's own `validate` runs over
+  the rendered config during the build (`roleValidation`), and `pg-router doctor` runs it again.
 
 - **`nix build`/`nix flake check` passing proves the config EVALUATES, not that a wired
   dispatch produces its intended effect when actually triggered** (verified 2026-09-23,

@@ -1,11 +1,11 @@
 # Runbook: dispatched-session failure signatures (first seen, how often)
 
 Bead: `pg2-8rgnl`. Contract: `INV-CCH-9`'s "Dispatch result" bullet in
-`packages/pg-router-ccpool-handler/docs/behavior/invariants.md`.
+`packages/pg-router-handlers/docs/behavior/invariants.md`.
 
 ## What is recorded
 
-When a session dispatched by `pg-router-ccpool-handler` fails, exits without completing its bead,
+When a session dispatched by `pg-router-handler-ccpool` or `pg-router-handler-command` fails, exits without completing its bead,
 or is hard-stopped by the budget watchdog, the handler appends one `dispatch_result` record to its
 event log, `<stateDir>/events.jsonl` (the state directory is `originProbe.stateDir`, else the
 handler's default state directory). Each record carries `time`, `failure_signature`,
@@ -32,7 +32,7 @@ flowchart LR
 ## Recipes
 
 Set `LOG` to the event log path. The recipes were verified against the fixture
-`packages/pg-router-ccpool-handler/internal/executor/testdata/dispatch-results.jsonl`, which a Go
+`packages/pg-router-handlers/internal/executor/testdata/dispatch-results.jsonl`, which a Go
 test (`TestRunbookRecipes`) runs when `jq` is on `PATH`.
 
 First occurrence of signature `git-auth` (change the signature to look at another):

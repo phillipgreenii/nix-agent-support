@@ -1,0 +1,288 @@
+// Package watchdog meters a running worker session against a Budget and escalates.
+package watchdog
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"text/template"
+	"time"
+
+	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
+	"github.com/phillipgreenii/pg-router-handlers/internal/budget"
+	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-handlers/internal/eventlog"
+	"github.com/phillipgreenii/pg-router-handlers/internal/usage"
+)
+
+// ErrBudgetExceeded is returned by Run when the session hit 100% of its budget.
+var ErrBudgetExceeded = errors.New("session budget exceeded")
+
+// BudgetError is the concrete error Run returns on a hard stop (pg2-irowq). It
+// satisfies errors.Is(err, ErrBudgetExceeded) handler-side. Its text STARTS with
+// the stable sentinel "session budget exceeded" (the documented contract the
+// core matches on, docs/behavior/interfaces.md) followed by key=value context.
+// It carries no prompt or bead content. Units: tokens = count, cost = USD,
+// time = seconds.
+type BudgetError struct {
+	Role, Pool, Bead, Session string
+	Limit                     budget.LimitKind
+	Used, Cap                 float64
+	Elapsed                   time.Duration
+}
+
+func (e *BudgetError) Error() string {
+	return fmt.Sprintf("%s: role=%s pool=%s bead=%s session=%s limit=%s used=%s cap=%s elapsed=%ss",
+		ErrBudgetExceeded.Error(), e.Role, e.Pool, e.Bead, e.Session, e.Limit,
+		strconv.FormatFloat(e.Used, 'f', -1, 64), strconv.FormatFloat(e.Cap, 'f', -1, 64),
+		strconv.FormatFloat(e.Elapsed.Seconds(), 'f', -1, 64))
+}
+
+// Unwrap makes errors.Is(err, ErrBudgetExceeded) hold.
+func (e *BudgetError) Unwrap() error { return ErrBudgetExceeded }
+
+// GitRunner runs `git -C <dir> <args...>` (injectable for tests).
+type GitRunner interface {
+	Run(ctx context.Context, dir string, args ...string) error
+}
+
+// Watchdog meters a session against a Budget and fires escalation actions.
+type Watchdog struct {
+	Reader usage.Reader
+	CC     ccpool.Runner
+	BD     beads.Runner
+	Log    *eventlog.Writer // may be nil (no-op)
+	Budget budget.Budget
+	// Role and Pool label the hard-stop error/eventlog (pg2-irowq); Pool "" prints as "default".
+	Role, Pool string
+	// BudgetStopEscalateAfter is the per-bead budget-stop escalation threshold
+	// (bead pg2-6akgz, part 1/3). > 0 makes every hard stop record a per-session
+	// budget-stop label on the bead (before the unclaim) and comment
+	// "budget stop <n> of <threshold> (session <id>)"; <= 0 (the zero value)
+	// records nothing. It never alters Budget: budgets stay fixed. When the count
+	// reaches the threshold escalate labels the bead escalated (a triage role's
+	// own stop goes to human instead), bead pg2-cty80.
+	BudgetStopEscalateAfter int
+	RepoRoot, WorktreeDir   string
+	ReminderMsg, WrapUpMsg  string
+	// Git is no longer read by this package's own hard-stop sequence
+	// (terminal/safeToReset migrated onto x/gitclient's Cleaner+Locator
+	// roles, bead pg2-ljyaj -- see terminal.go's openGit). The field stays
+	// here because internal/executor/orchestrator still populate it as part
+	// of the shared worktree-creation git seam (executor.Deps.git), and
+	// removing it would require editing those out-of-scope packages;
+	// retire it once pg2-mj9n0 migrates that seam too.
+	Git  GitRunner
+	Now  func() time.Time
+	Poll time.Duration
+
+	// Start is the instant the budget's elapsed time is measured from. The zero
+	// value means "now" (Run begins its clock when it starts), which is right for
+	// a dispatch that just launched its session. An absorbing dispatch sets it to
+	// the session's recorded launch time (pgrouter.launched_at) so absorbing an
+	// under-budget orphan does not grant it a fresh budget (bead pg2-g2u9m,
+	// INV-CCH-18; pg2-3j76b's case).
+	Start time.Time
+
+	// FirstTurnStarted reports whether the model has taken at least one turn in the
+	// session transcript. The reminder/wrap-up NUDGES are gated on this: a
+	// context-less model that never ingested its task must not be prompted, or it
+	// guesses a target and mutates an unrelated bead (pg2-yukh). nil ⇒ always true
+	// (standalone/tests that do not exercise the gate). The hard STOP is NOT gated —
+	// it unclaims the bead, it does not nudge the model.
+	FirstTurnStarted func(transcriptPath string) bool
+
+	// ClaimTerminal, if set, is called once the hard stop fires, BEFORE the
+	// terminal bead mutations. It must return true to exactly one racer across
+	// all parties competing for the single terminal outcome (here: this watchdog
+	// vs the orchestrator's bead-poll). A false return means the bead-poll
+	// already owns the outcome, so Run skips its mutations and waits for ctx
+	// cancellation. nil ⇒ no racer ⇒ always own (standalone use / tests). (pg2-c1vp)
+	ClaimTerminal func() bool
+}
+
+func (w *Watchdog) now() time.Time {
+	if w.Now != nil {
+		return w.Now()
+	}
+	return time.Now()
+}
+
+// firstTurnStarted reports whether the model has taken a turn yet. A nil
+// FirstTurnStarted predicate (standalone use / tests) means "always started", so
+// the gate is a no-op unless a caller wires the real transcript predicate.
+func (w *Watchdog) firstTurnStarted(ctx context.Context, sessionName string) bool {
+	if w.FirstTurnStarted == nil {
+		return true
+	}
+	return w.FirstTurnStarted(w.transcriptPath(ctx, sessionName))
+}
+
+// renderMsg substitutes {{.BeadID}} in a budget message. A message with no
+// template action is returned unchanged. A malformed template falls back to the
+// raw string (the reminder still fires; it just may carry the literal token) —
+// never blocks the hard-stop path.
+func renderMsg(tmpl, beadID string) string {
+	t, err := template.New("budget").Parse(tmpl)
+	if err != nil {
+		return tmpl
+	}
+	var sb strings.Builder
+	if err := t.Execute(&sb, struct{ BeadID string }{beadID}); err != nil {
+		return tmpl
+	}
+	return sb.String()
+}
+
+func (w *Watchdog) emit(level, kind, msg string, fields map[string]any) {
+	if w.Log != nil {
+		_ = w.Log.Emit(level, kind, msg, fields)
+	}
+}
+
+// Run meters the session until ctx is cancelled (the bead-poll won the race) or
+// the budget hard stop fires. Returns ctx.Err() on cancellation (no action), or
+// ErrBudgetExceeded after running the terminal sequence at 100%.
+//
+// The escalation levels below are this module's own INV-CCH-3 half (docs/
+// behavior/invariants.md): each is surfaced only on this module's own
+// logs/metrics — w.emit below, into eventlog — never reported to the core
+// except through the opaque completion-outcome string
+// internal/wire's WriteReply produces.
+func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
+	start := w.Start
+	if start.IsZero() {
+		start = w.now()
+	}
+	highest := budget.None
+	// heldForDialog is set while a budget message is being held back because the
+	// session is in needs_input (so the suppression is logged once, not per poll).
+	heldForDialog := false
+	for {
+		snap, _ := w.Reader.Read(ctx, w.transcriptPath(ctx, sessionName))
+		elapsed := w.now().Sub(start)
+		_, level := w.Budget.Evaluate(snap, elapsed)
+		if level == budget.Reminder && level > highest && w.sessionNeedsInput(ctx, sessionName) {
+			// A budget message is a pasted prompt followed by Enter. Into a session
+			// parked on a permission dialog that Enter ACCEPTS the dialog, an approval
+			// nobody read (observed 2026-10-13: a queued reminder approved a pending
+			// tool call 0.66 s after it was pasted; bead pg2-zybju, INV-CCH-29). So the
+			// reminder is never sent while the session is in needs_input: the level is
+			// not latched, and the next poll tries again once the session has left it
+			// (a person answered, or the stall bound cleared it). Skip rather than
+			// Escape-first: dismissing the dialog is the stall bound's decision, made
+			// once and only for a drain role (ADR 0083's Amendment), while a role that
+			// is not a drain role keeps its needs_input session for a human (ADR 0037).
+			if !heldForDialog {
+				heldForDialog = true
+				w.emit("warn", "reminder-suppressed",
+					"budget reminder held back: the session is in needs_input and a pasted prompt would approve its dialog",
+					map[string]any{"session": sessionName, "bead": beadID, "reason": "needs_input"})
+			}
+		} else if level > highest {
+			heldForDialog = false
+			highest = level
+			switch level {
+			case budget.Reminder:
+				if w.firstTurnStarted(ctx, sessionName) {
+					if w.sendIfLive(ctx, sessionName, beadID, renderMsg(w.ReminderMsg, beadID)) {
+						w.emit("info", "reminder", "budget reminder threshold reached",
+							map[string]any{"session": sessionName, "bead": beadID})
+					}
+				} else {
+					w.emit("warn", "reminder-suppressed", "budget reminder suppressed: no model turn yet",
+						map[string]any{"session": sessionName, "bead": beadID})
+				}
+			case budget.Cancel:
+				_ = w.CC.Cancel(ctx, sessionName)
+				// Cancel is an Escape burst: it dismisses the dialog and ccpool resets
+				// the row to ready. When it did not (still needs_input), the wrap-up
+				// message is held back for the same reason as the reminder above.
+				if w.firstTurnStarted(ctx, sessionName) && !w.sessionNeedsInput(ctx, sessionName) {
+					w.sendIfLive(ctx, sessionName, beadID, renderMsg(w.WrapUpMsg, beadID))
+				}
+				w.emit("warn", "cancel", "budget cancel threshold reached",
+					map[string]any{"session": sessionName, "bead": beadID})
+			case budget.Hard:
+				if w.ClaimTerminal == nil || w.ClaimTerminal() {
+					be := w.budgetError(snap, elapsed, sessionName, beadID)
+					w.terminal(ctx, sessionName, beadID, be)
+					return be
+				}
+				// Lost the terminal race: the bead-poll owns the outcome. Touch
+				// nothing; wait for the orchestrator to cancel, then exit. (pg2-c1vp)
+				<-ctx.Done()
+				return ctx.Err()
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(w.Poll):
+		}
+	}
+}
+
+// sendIfLive sends msg to the session through ccpool reply, but only when the
+// session is live (INV-CCH-38): reply resumes a cold session with an empty
+// environment, so a session that is not live is treated as ended. The send is
+// skipped, and the wait loop's dead-session handling classifies the end. It
+// reports whether the send was attempted. The check-then-send race is accepted,
+// and a failed send is ignored, as it always was.
+func (w *Watchdog) sendIfLive(ctx context.Context, sessionName, beadID, msg string) bool {
+	if !ccpool.SessionLive(ctx, w.CC, sessionName) {
+		w.emit("warn", "send-skipped", "budget message not sent: the session is not live",
+			map[string]any{"session": sessionName, "bead": beadID})
+		return false
+	}
+	_ = w.CC.Send(ctx, sessionName, msg, ccpool.ModeQueue)
+	return true
+}
+
+// transcriptPath looks up the session's transcript path from ccpool.List. The
+// session is addressed by external_id (ADR 0015), matching how the orchestrator
+// hands the watchdog its session handle.
+func (w *Watchdog) transcriptPath(ctx context.Context, externalID string) string {
+	sessions, err := w.CC.List(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, s := range sessions {
+		if s.ExternalID == externalID {
+			return s.TranscriptPath
+		}
+	}
+	return ""
+}
+
+// sessionNeedsInput reports whether the session is parked in needs_input, so a
+// pasted prompt would land on a permission dialog. A list that cannot be read
+// counts as needs_input: holding a reminder back for a poll costs nothing (the
+// level is not latched), while pasting into an unknown state can approve a
+// dialog nobody read. An absent session is not needs_input.
+func (w *Watchdog) sessionNeedsInput(ctx context.Context, externalID string) bool {
+	sessions, err := w.CC.List(ctx)
+	if err != nil {
+		return true
+	}
+	for _, s := range sessions {
+		if s.ExternalID == externalID {
+			return s.State == ccpool.StateNeedsInput
+		}
+	}
+	return false
+}
+
+func (w *Watchdog) budgetError(snap usage.Snapshot, elapsed time.Duration, sessionName, beadID string) *BudgetError {
+	trip := w.Budget.Binding(snap, elapsed)
+	pool := w.Pool
+	if pool == "" {
+		pool = "default"
+	}
+	return &BudgetError{
+		Role: w.Role, Pool: pool, Bead: beadID, Session: sessionName,
+		Limit: trip.Limit, Used: trip.Used, Cap: trip.Cap, Elapsed: elapsed,
+	}
+}

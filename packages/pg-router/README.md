@@ -183,9 +183,8 @@ A query is a tagged union discriminated by a `type` field; a role is not:
   dispatch; the error (and so the `dispatch result` WARN line) ends with
   `: stderr tail: <text>` — the handler's last ~2 KiB of stderr, redacted,
   collapsed to one line (lines joined by `|`), and prefixed `...` when cut.
-  A successful run's stderr is never logged. A role that does not set `handler` is on the
-  **earlier path** while the migration lasts (`PG_ROUTER_HANDLER_COMMAND`, below); see
-  `MIGRATION.md`'s section on the handler split.
+  A successful run's stderr is never logged. A role MUST set `handler`: a role without it is an
+  error naming the role (`DEC-ROLE-1`); see `MIGRATION.md`'s section on the handler split.
 - **query `type`**: `command` (run an executable that emits items as
   JSON/JSONL — an opaque token pg-router just invokes and never interprets, so
   this is how you wire pg-router to an issue-tracker CLI, a code-host CLI, or anything else) or
@@ -245,20 +244,6 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PG_ROUTER_PERMISSION_MODE` — permission mode forwarded to the session runner for workers (default `dontAsk`: deny-by-default; `bypassPermissions` is the opt-in escape)
 - `PG_ROUTER_ALLOWED_TOOLS` — tool allowlist forwarded to the session runner for workers (default: a conservative set; `git push` excluded. Empty clears the flag)
 - `PG_ROUTER_AUTONOMOUS` — block AskUserQuestion so human-less workers never stall on the picker (default `true`)
-- `PG_ROUTER_HANDLER_COMMAND` — the **earlier path**: the argv prefix invoked, over the wire
-  (DEC-WIRE-1), for every enabled role that does **not** set `handler` (a role that sets it needs
-  neither this variable nor the next; `DEC-ROLE-1`). No default —
-  GOAL-MIN-1's Floor keeps this binary's own contract surface from naming a concrete tool; an
-  unconfigured deployment gets a clear per-dispatch error instead of a hardcoded participant name.
-- `PG_ROUTER_HANDLER_COMMAND_DIR` — the earlier path's per-role files: a directory of per-role JSON
-  files (`<role.Name>.json`) that
-  lets differently-configured roles sharing one `PG_ROUTER_HANDLER_COMMAND` binary (e.g.
-  `feedback`/`worker`/`review`, each with its own actor and prompt) dispatch through their own
-  participant config instead of all sharing the same one. When set, the resolved argv threads
-  `--role-config <dir>/<role.Name>.json` onto the handler command; unset (the default), every
-  enabled role resolves to the plain `PG_ROUTER_HANDLER_COMMAND` argv, unchanged from before this
-  variable existed. A deployment with more than one role ENABLED and only
-  `PG_ROUTER_HANDLER_COMMAND` set logs a boot-time WARN naming the ambiguity.
 - `PG_ROUTER_LOG_DIR` — override the event-log directory (default: the standard path below)
 - `PG_ROUTER_ACTIVITY_RING` — dispatch-outcome activity ring buffer capacity (`internal/activity.Ring`, Task 3.4); default 512
 - `PG_ROUTER_LOG_DIR` — override the event-log/state directory: `queue.jsonl` (events and gates), `events.jsonl`, the discovery record (default: the standard path below)
@@ -503,26 +488,18 @@ turnkey deployment modes on top of the `package`/`enable` options — enabling b
 assertion failure, since they are independent pg-router cores that would race on the same
 `PG_ROUTER_LOG_DIR` (`events.jsonl`, the discovery record, the push-ingest socket):
 
-| Submodule       | systemd unit(s)                           | Runs                                                                        | Shape                                                                                                |
-| --------------- | ----------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `periodicDrain` | `pg-router-drain` service + timer         | `pg-router run-until-idle` on a fixed `interval` (default `5m`), then exits | `enable`, `interval`, `repoRoot`, `beadsPrefix`, `configText`, `handlerCommand`, `handlerCommandDir` |
-| `daemon`        | `pg-router-daemon` service (long-running) | `pg-router run`, until SIGINT/SIGTERM                                       | `enable`, `repoRoot`, `beadsPrefix`, `configText`, `handlerCommand`, `handlerCommandDir`             |
+| Submodule       | systemd unit(s)                           | Runs                                                                        | Shape                                                         |
+| --------------- | ----------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `periodicDrain` | `pg-router-drain` service + timer         | `pg-router run-until-idle` on a fixed `interval` (default `5m`), then exits | `enable`, `interval`, `repoRoot`, `beadsPrefix`, `configText` |
+| `daemon`        | `pg-router-daemon` service (long-running) | `pg-router run`, until SIGINT/SIGTERM                                       | `enable`, `repoRoot`, `beadsPrefix`, `configText`             |
 
 Both submodules render `configText` into the Nix store and point `PG_ROUTER_CONFIG` at it — fully
 declarative, no machine-local `.pg-router/config.toml` bootstrap step. (The `daemon.gates.*` options
 that used to set the gate-file paths were removed with the file-backed gates — gates are runtime
 records now; see `MIGRATION.md`.)
 
-`handlerCommand`/`handlerCommandDir` (plain strings, both `null` by default) set
-`PG_ROUTER_HANDLER_COMMAND`/`PG_ROUTER_HANDLER_COMMAND_DIR` for that unit — see this file's own
-env-var table above for their runtime contract. `handlerCommandDir` is typically pointed at
-the handler participant's own home-manager module's `handlerCommandDir` output (that sibling
-module's `roles` option — keyed by role name — renders one JSON file per role and
-joins them into that directory); interpolate it to a string
-(`"${config.phillipgreenii.programs.<handler module>.handlerCommandDir}"`), since this
-option takes a plain string, not a package. Both options serve the **earlier path** only
-(`DEC-ROLE-1`): a role that sets `handler` is configured in the pg-router module's own role entry. See `MIGRATION.md`'s "Multi-role dispatch
-differentiation" section for the full worked contract.
+Each role names its own adapter in the role entry (`handler`), so the units carry no handler command or
+per-role file directory (`DEC-ROLE-1`).
 
 `systemd.user.services`/`systemd.user.timers` are a **darwin no-op** (darwin has no systemd), so
 `darwin/modules/pg-router/default.nix` mirrors any home-manager user's `daemon.enable` into a

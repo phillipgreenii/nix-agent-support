@@ -471,9 +471,9 @@
           # pg-router rename landed, pg2-myc6y) by the operator's 2026-09-11
           # decision recorded on the Task 5.2 packet; now carries every moved
           # participant implementation plus its own wire-facing CLI entrypoint
-          # (Task 5.2/5.3, folded together — see packages/pg-router-ccpool-handler/doc.go
+          # (Task 5.2/5.3, folded together — see packages/pg-router-handlers/doc.go
           # and its docs/behavior/README.md Realization gaps).
-          pg-router-ccpool-handler = final.callPackage ./packages/pg-router-ccpool-handler {
+          pg-router-ccpool-handler = final.callPackage ./packages/pg-router-handlers {
             inherit (goBuilders) mkGoApp;
           };
           # pg-desk: docket pg2-2j5ac.32 (Phase 9)'s operator triage desk,
@@ -1170,7 +1170,7 @@
         # property of a REAL tool, so the regression guard runs against a real
         # bd in a throwaway embedded store (global rule V-3): the
         # `contract`-tagged `TestTerminal_RealBD_*` tests in
-        # packages/pg-router-ccpool-handler/internal/watchdog. Like
+        # packages/pg-router-handlers/internal/watchdog. Like
         # `pg-desk-closure-contract-test` above: no default check runs the
         # `contract` tag and the nix sandbox has no bd, so this path-scoped
         # hook is what puts the suite under the commit-time and
@@ -1214,13 +1214,13 @@
                 done
 
                 top="$(git rev-parse --show-toplevel)"
-                cd "$top/packages/pg-router-ccpool-handler"
+                cd "$top/packages/pg-router-handlers"
                 exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Terminal|Park|Triage)_RealBD_' ./internal/watchdog/ ./internal/executor/ ./cmd/pg-router-handler-command/ ./cmd/pg-router-handler-ccpool/
               '';
             }
           }/bin/pg-router-ccpool-handler-bd-contract-test-hook";
           language = "system";
-          files = "^packages/pg-router-ccpool-handler/(internal/(watchdog|beads|executor|complete|parknote|dtest|roles|wire|dispatchlib|handlerstate|rolefile)/|cmd/(pg-router-ccpool-handler|pg-router-handler-command|pg-router-handler-ccpool)/dispatch[^/]*\\.go$|go\\.(mod|sum)$)";
+          files = "^packages/pg-router-handlers/(internal/(watchdog|beads|executor|complete|parknote|dtest|roles|wire|dispatchlib|handlerstate|rolefile)/|cmd/(pg-router-handler-command|pg-router-handler-ccpool)/dispatch[^/]*\\.go$|go\\.(mod|sum)$)";
           pass_filenames = false;
           require_serial = true;
         };
@@ -5251,14 +5251,14 @@
                   src = lib.fileset.toSource {
                     root = ./packages;
                     fileset = lib.fileset.unions [
-                      (lib.fileset.difference ./packages/pg-router-ccpool-handler ./packages/pg-router-ccpool-handler/docs)
+                      (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
                       ./packages/pg-router
                       ./packages/ccpool
                       ./packages/claude-transcript
                     ];
                   };
-                  modRoot = "pg-router-ccpool-handler";
-                  gomod2nixToml = ./packages/pg-router-ccpool-handler/gomod2nix.toml;
+                  modRoot = "pg-router-handlers";
+                  gomod2nixToml = ./packages/pg-router-handlers/gomod2nix.toml;
                   testFlags = [
                     "-coverprofile=cover.out"
                     "-covermode=atomic"

@@ -24,7 +24,7 @@ import (
 // stop (watchdog.ErrBudgetExceeded, internal/watchdog) racing a ccpool
 // role's wait in-process (executor's workerWaitWithWatchdog); Task 5.2/5.3
 // moved that entire mechanism out to the registered handler participant
-// (packages/pg-router-ccpool-handler), so this hook currently has NO
+// (packages/pg-router-handlers), so this hook currently has NO
 // producer left to fire it at all — the wire protocol has no equivalent
 // signal yet (docs/decisions/wire.md names no resource-limit exit code or
 // reply field). This is not a NEW gap Task 5.4 introduces: it widens the

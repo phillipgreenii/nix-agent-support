@@ -66,7 +66,7 @@ const e2eMarkerContent = "dispatched"
 //
 // Shells out to `bd` directly (rather than through beads.NewCLIRunnerForRepo)
 // because internal/beads no longer exists in this module (docket pg2-oju6w's
-// Tasks 5.2/5.3 moved it to packages/pg-router-ccpool-handler) — this is a
+// Tasks 5.2/5.3 moved it to packages/pg-router-handlers) — this is a
 // local re-implementation of the one `bd init --prefix` call this helper
 // ever needed, not an import.
 func e2eBeadsRepo(t *testing.T) string {

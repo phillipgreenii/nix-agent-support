@@ -8,7 +8,7 @@ live check listed at the end).
 
 ## Symptom
 
-Dispatched sessions (pg-router -> `pg-router-ccpool-handler` -> `ccpool` ->
+Dispatched sessions (pg-router -> `pg-router-handler-ccpool` -> `ccpool` ->
 tmux) fail `git fetch` / `git ls-remote` on
 the enterprise SSH remote (a `Match` block on the enterprise git user) with
 `oauth command timed out` / `error generating OIDC token: exec "step oauth"
@@ -39,13 +39,13 @@ flowchart TD
 
 ## Environment comparison [static]
 
-| Item                             | Operator interactive shell                                                                                                                                      | Dispatched session (launchd -> pg-router -> handler -> ccpool -> tmux)                                                                                                                                                                                          |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SSH_AUTH_SOCK`                  | Points at a per-login agent socket under `~/.ssh/agent/` (observed value of `$SSH_AUTH_SOCK` in the interactive shell; path only, not contents)                 | Not set anywhere in the chain. `launchctl getenv SSH_AUTH_SOCK` returns launchd's own `/var/run/com.apple.launchd.*/Listeners` socket (the Apple system agent), a DIFFERENT agent from the shell's.                                                             |
-| How the shell gets its agent     | `programs.keychain` (`--eval` in shell init; `phillipgreenii-nix-personal/home/programs/ssh/default.nix`): the agent + keys exist only after a login-shell init | Never runs shell init. The LaunchAgent script (`darwin/modules/pg-router/default.nix`) exports only `PATH`, `PG_ROUTER_*`, `CCPOOL_POOL`; `EnvironmentVariables` carries only the OTLP emitter env.                                                             |
-| Env passthrough in Go code       | n/a                                                                                                                                                             | Not the cause. `pg-router-ccpool-handler/internal/gitenv` deliberately passes everything outside `GIT_*` (incl. `SSH_AUTH_SOCK`, `HOME`, `PATH`, XDG) and allowlists `GIT_SSH*`; `ccpool` `tmux new-session` adds only markers (`CCPOOL_*`); it strips nothing. |
-| `HOME` / `~/.step` / `~/.ssh`    | operator's                                                                                                                                                      | Same user, same `HOME` [static: nothing overrides it]; step config is not per-session.                                                                                                                                                                          |
-| `ssh` match rule / `step` binary | as above                                                                                                                                                        | Same `~/.ssh/config`; `step` resolvable via profile bin (`pg2-en0f`).                                                                                                                                                                                           |
+| Item                             | Operator interactive shell                                                                                                                                      | Dispatched session (launchd -> pg-router -> handler -> ccpool -> tmux)                                                                                                                                                                                    |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SSH_AUTH_SOCK`                  | Points at a per-login agent socket under `~/.ssh/agent/` (observed value of `$SSH_AUTH_SOCK` in the interactive shell; path only, not contents)                 | Not set anywhere in the chain. `launchctl getenv SSH_AUTH_SOCK` returns launchd's own `/var/run/com.apple.launchd.*/Listeners` socket (the Apple system agent), a DIFFERENT agent from the shell's.                                                       |
+| How the shell gets its agent     | `programs.keychain` (`--eval` in shell init; `phillipgreenii-nix-personal/home/programs/ssh/default.nix`): the agent + keys exist only after a login-shell init | Never runs shell init. The LaunchAgent script (`darwin/modules/pg-router/default.nix`) exports only `PATH`, `PG_ROUTER_*`, `CCPOOL_POOL`; `EnvironmentVariables` carries only the OTLP emitter env.                                                       |
+| Env passthrough in Go code       | n/a                                                                                                                                                             | Not the cause. `pg-router-handlers/internal/gitenv` deliberately passes everything outside `GIT_*` (incl. `SSH_AUTH_SOCK`, `HOME`, `PATH`, XDG) and allowlists `GIT_SSH*`; `ccpool` `tmux new-session` adds only markers (`CCPOOL_*`); it strips nothing. |
+| `HOME` / `~/.step` / `~/.ssh`    | operator's                                                                                                                                                      | Same user, same `HOME` [static: nothing overrides it]; step config is not per-session.                                                                                                                                                                    |
+| `ssh` match rule / `step` binary | as above                                                                                                                                                        | Same `~/.ssh/config`; `step` resolvable via profile bin (`pg2-en0f`).                                                                                                                                                                                     |
 
 The ccpool tmux server (`tmux -L <socket>`) is started by whichever process
 first creates a session, so panes inherit THAT process's environment
@@ -137,7 +137,7 @@ flowchart LR
    `rate(pg_router_failures_total{reason="origin-unavailable"}[10m]) > 0` holds
    for 15m. Its annotation is a static per-class remediation map only; it never
    names the origin or carries error text.
-2. **Find the origin and class**: run `pg-router-ccpool-handler origin status`
+2. **Find the origin and class**: run `pg-router-handler-ccpool origin status`
    (reads state files only; prints key, class, gated, ignored, since,
    consecutive failures, last error tail) or read the handler logs.
 3. **Remediate by class**:
@@ -150,6 +150,6 @@ flowchart LR
 | timeout          | Check network and git host health, then retry.  |
 | unknown          | Inspect the handler log for the origin.         |
 
-4. **Deliberately stop gating**: `pg-router-ccpool-handler origin ignore <key>`
+4. **Deliberately stop gating**: `pg-router-handler-ccpool origin ignore <key>`
    disables the gate for that origin; `origin unignore <key>` undoes it.
    The gate MUST NOT be left ignored once the origin is healthy again.

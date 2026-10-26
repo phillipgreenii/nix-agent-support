@@ -1,6 +1,6 @@
 # Per-package STATEMENT-coverage thresholds enforced by the `pg-wrap-go-tests`
 # flake check, by the same enforcer as packages/pg-router/tests/coverage-gate.sh
-# (copied verbatim, as packages/pg-router-ccpool-handler/tests/ does). Format:
+# (copied verbatim, as packages/pg-router-handlers/tests/ does). Format:
 #
 #   <package-import-suffix> <min-statement-percent>
 #

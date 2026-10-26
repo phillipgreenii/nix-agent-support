@@ -18,7 +18,7 @@ flowchart TD
 
 ## Prerequisites
 
-- `pg-router`, `pg-router-ccpool-handler` and `ccpool` are on `PATH` (home-manager installs them).
+- `pg-router`, `pg-router-handler-ccpool` and `ccpool` are on `PATH` (home-manager installs them).
 - `jq` is on `PATH`.
 - You can read the handler's state directory (Step 3 names it) and the pool directories under
   `~/.local/state/pg-router-ccpool*`.
@@ -209,7 +209,7 @@ After applying, run `pg-router doctor` (Step 1) to confirm every probe is `ok`.
 
 ## Related
 
-- Handler behavior docs: [pg-router-ccpool-handler](../../packages/pg-router-ccpool-handler/docs/behavior/README.md)
+- Handler behavior docs: [pg-router-handlers](../../packages/pg-router-handlers/docs/behavior/README.md)
 - Core behavior docs: [pg-router](../../packages/pg-router/docs/behavior/README.md)
 - ADR: [0103 wrapping is a standalone tool and a pre-ready failure is a decline](../adr/0103-wrapping-is-a-standalone-tool-and-a-pre-ready-failure-is-a-decline.md)
 - Failure signatures of `dispatch_result`: [dispatched-session-failure-signatures](dispatched-session-failure-signatures.md)

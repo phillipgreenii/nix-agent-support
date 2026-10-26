@@ -76,7 +76,7 @@ mkset() {
     packages/pa-monitor/docs/behavior \
     packages/pg-router/docs/behavior \
     packages/pg-connector/docs/behavior \
-    packages/pg-router-ccpool-handler/docs/behavior \
+    packages/pg-router-handlers/docs/behavior \
     packages/pg-router-source-pg-connector/docs/behavior \
     packages/work-report/docs/behavior \
     docs/behavior/pg-decider \

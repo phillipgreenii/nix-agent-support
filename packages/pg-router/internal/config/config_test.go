@@ -583,7 +583,7 @@ func TestDefault_allowedToolsIsBaseAndNamesNoPRTool(t *testing.T) {
 // prek and pre-commit): pg-router's own compiled-in default carries no
 // code-executing Go toolchain or hook runner grant (they ride
 // in a role's own extraAllowedTools via the nix "go" tool set), keeping this
-// mirror in step with packages/pg-router-ccpool-handler/internal/config.
+// mirror in step with packages/pg-router-handlers/internal/config.
 func TestBaseAllowedTools_deniesGoToolchain(t *testing.T) {
 	for _, list := range []string{baseAllowedTools, Default().AllowedTools} {
 		for _, bad := range []string{"Bash(go ", "Bash(gofmt", "Bash(gofumpt", "Bash(prek", "Bash(pre-commit"} {
@@ -628,7 +628,7 @@ func TestLoad_prToolEnvIsIgnored(t *testing.T) {
 }
 
 // PermissionMode validation MOVED to the new module's own config validation
-// (packages/pg-router-ccpool-handler/internal/config), docket pg2-oju6w Task
+// (packages/pg-router-handlers/internal/config), docket pg2-oju6w Task
 // 5.7 — pg-router itself no longer rejects an invalid PermissionMode value at
 // its own config-load time; see that package's TestValidate_permissionMode.
 

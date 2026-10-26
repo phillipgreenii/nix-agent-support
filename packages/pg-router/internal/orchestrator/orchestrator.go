@@ -14,7 +14,7 @@
 // ensure→send→wait ccpool path, the budget watchdog, and a bare-command
 // executable are entirely that participant's own private business now
 // (Task 5.2/5.3 moved the underlying mechanics to
-// packages/pg-router-ccpool-handler). Task 5.4 deliberately left buildResult's
+// packages/pg-router-handlers). Task 5.4 deliberately left buildResult's
 // own remaining created-bead-snapshot detection and bead-status-based
 // closed/handed-back branching alone; Task 5.5 (this change) finishes that
 // cleanup — snapshotIDs and createdByActor are deleted, and buildResult

@@ -16,7 +16,7 @@ import (
 
 // TestReadBeadsPrefix_*/TestPrecheckPrefix_*/TestPrecheck_*
 // (and their shared fakeBR fixture) moved to
-// packages/pg-router-ccpool-handler/cmd/pg-router-handler-ccpool/
+// packages/pg-router-handlers/cmd/pg-router-handler-ccpool/
 // preflight_test.go along with the precheck/precheckPrefix/
 // readBeadsPrefix functions they exercised (docket
 // pg2-oju6w's Task 5.8 — see drain.go's own doc comment on that move).

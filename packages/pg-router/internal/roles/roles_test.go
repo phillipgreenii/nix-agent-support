@@ -19,7 +19,7 @@ func TestExternalID_andDisplayName(t *testing.T) {
 // reviewPromptBody) moved out of this package entirely (docket pg2-oju6w's
 // Task 5.8, ADR 0065's "Source-side boundary" section): the beads-shaped
 // role/query pairing now lives as a registered kind:"source" participant in
-// packages/pg-router-ccpool-handler (see that module's own query config
+// packages/pg-router-handlers (see that module's own query config
 // tests); an unconfigured pg-router core runs with zero roles and zero
 // queries (internal/config.Load, TestLoad_noFile_zeroRolesAndQueries). The
 // prompt bodies were already unwired reference text as of Task 5.4 (their
