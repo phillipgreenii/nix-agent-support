@@ -19,6 +19,14 @@ HTH_HUMAN_LABEL=human
 HTH_ATTENTION_LABEL=attention
 HTH_ESCALATED_LABEL=escalated
 
+# Optional extras of the ONE update call, set by hand-to-human.sh (bead
+# pg2-8num0): HTH_ALSO_ADD is the extra labels added next to human + attention
+# (--also-add; already validated and de-duplicated); HTH_NOTE is the text
+# appended to the bead's notes (--note, bd path only). Both empty means the plain
+# form, whose argv is unchanged.
+HTH_ALSO_ADD=()
+HTH_NOTE=""
+
 # J-1 envelope prelude (beads-lifecycle skill): `bd ... --json` returns
 # {"data":[..]} only when BD_JSON_ENVELOPE=1 and a bare array otherwise.
 HTH_ENVELOPE_PRELUDE='(if type=="object" and has("data") then .data else . end) | (if type=="array" then .[0] else . end)'
@@ -54,14 +62,20 @@ hth_remove_labels() {
 
 # hth_update_args <actor> <remove-label...>: print the argv (one element per
 # line, WITHOUT the `bd`/`pg-connector issue` prefix and WITHOUT the id) of the
-# single update call. The adds come first and are in the SAME call as the
-# removes: a bead carrying neither the escalated nor the human labels is visible
-# to the normal work queues, so the human labels MUST be on the bead no later
-# than the escalated removal (LV-4; beads-lifecycle D-5 reasoning).
+# single update call. The adds (human, attention, then each HTH_ALSO_ADD label)
+# come first and are in the SAME call as the removes. The note (HTH_NOTE) is NOT
+# printed here: it can span lines, which this one-element-per-line format cannot
+# carry, so hth_run_bd appends `--append-notes` itself. The adds precede the
+# removes because a bead carrying neither the escalated nor the human labels is
+# visible to the normal work queues, so the human labels MUST be on the bead no
+# later than the escalated removal (LV-4; beads-lifecycle D-5 reasoning).
 hth_update_args() {
   local actor="$1" l
   shift
   printf '%s\n' --add-label "$HTH_HUMAN_LABEL" --add-label "$HTH_ATTENTION_LABEL"
+  for l in ${HTH_ALSO_ADD[@]+"${HTH_ALSO_ADD[@]}"}; do
+    printf '%s\n' --add-label "$l"
+  done
   for l in "$@"; do
     printf '%s\n' --remove-label "$l"
   done
@@ -78,6 +92,9 @@ hth_run_bd() {
   shift 2
   local -a args=()
   mapfile -t args < <(hth_update_args "$actor" "$@")
+  if [[ -n $HTH_NOTE ]]; then
+    args+=(--append-notes "$HTH_NOTE")
+  fi
   out_file="$(mktemp)"
   err_file="$(mktemp)"
   if hth_bd update "${args[@]}" -- "$id" >"$out_file" 2>"$err_file"; then
@@ -103,6 +120,9 @@ hth_run_connector() {
   local backend="$1" id="$2" rc out_file err_file l
   shift 2
   local -a args=(issue update "$id" --backend "$backend" --add-label "$HTH_HUMAN_LABEL" --add-label "$HTH_ATTENTION_LABEL")
+  for l in ${HTH_ALSO_ADD[@]+"${HTH_ALSO_ADD[@]}"}; do
+    args+=(--add-label "$l")
+  done
   for l in "$@"; do
     args+=(--remove-label "$l")
   done
@@ -122,11 +142,12 @@ hth_run_connector() {
 }
 
 # hth_readback <id> <remove-label...> (BF-4): `bd show` the bead and check that
-# human and attention are present and every removed label is absent. Prints one
+# human, attention and every HTH_ALSO_ADD label are present, every removed label
+# is absent, and (when HTH_NOTE is set) the note text is in the bead's notes. Prints one
 # `ok:`/`MISMATCH:` line per check on stderr. Returns 0 when every check holds,
 # 4 otherwise.
 hth_readback() {
-  local id="$1" show labels l bad=0
+  local id="$1" show labels l bad=0 notes
   shift
   if ! show="$(hth_bd show "$id" --json 2>&1)"; then
     echo "hand-to-human: MISMATCH: bd show $id failed: $show" >&2
@@ -136,7 +157,7 @@ hth_readback() {
     echo "hand-to-human: MISMATCH: could not parse bd show $id --json: $labels" >&2
     return 4
   fi
-  for l in "$HTH_HUMAN_LABEL" "$HTH_ATTENTION_LABEL"; do
+  for l in "$HTH_HUMAN_LABEL" "$HTH_ATTENTION_LABEL" ${HTH_ALSO_ADD[@]+"${HTH_ALSO_ADD[@]}"}; do
     if jq -e --arg l "$l" 'index($l) != null' <<<"$labels" >/dev/null; then
       echo "hand-to-human: ok: label $l present" >&2
     else
@@ -152,5 +173,17 @@ hth_readback() {
       bad=1
     fi
   done
+  if [[ -n $HTH_NOTE ]]; then
+    if ! notes="$(printf '%s' "$show" | jq -r "$HTH_ENVELOPE_PRELUDE"' | (.notes // "")' 2>&1)"; then
+      echo "hand-to-human: MISMATCH: could not read notes of bd show $id --json: $notes" >&2
+      return 4
+    fi
+    if [[ $notes == *"$HTH_NOTE"* ]]; then
+      echo "hand-to-human: ok: note present" >&2
+    else
+      echo "hand-to-human: MISMATCH: note missing from the bead's notes" >&2
+      bad=1
+    fi
+  fi
   [[ $bad -eq 0 ]] || return 4
 }

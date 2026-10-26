@@ -196,3 +196,92 @@ assert_no_pgc_call() { [ ! -s "$PGC_CALL_LOG" ]; }
   [[ $stderr == *"backend unavailable"* ]]
   [ "$(grep -c . "$PGC_CALL_LOG")" -eq 1 ]
 }
+
+# --also-add / --note (bead pg2-8num0)
+
+show_json_notes() { # labels-json notes
+  jq -cn --argjson l "$1" --arg n "$2" '{id:"shim-1", labels:$l, notes:$n}'
+}
+
+@test "--also-add / --note validation failures are usage errors and nothing is called" {
+  for bad in escalated human attention; do
+    run --separate-stderr "$H" shim-1 --also-add "$bad"
+    [ "$status" -eq 2 ]
+    [[ $stderr == *"--also-add $bad is refused"* ]]
+  done
+  run --separate-stderr "$H" shim-1 --also-add 'a,b'
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"invalid --also-add"* ]]
+  run --separate-stderr "$H" shim-1 --also-add
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"--also-add requires a value"* ]]
+  run --separate-stderr "$H" shim-1 --note
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"--note requires a value"* ]]
+  run --separate-stderr "$H" shim-1 --note ""
+  [ "$status" -eq 2 ]
+  run --separate-stderr "$H" shim-1 --also-add x --also-remove x
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"conflicts with --also-remove"* ]]
+  assert_no_bd_call
+  assert_no_pgc_call
+}
+
+@test "--note with --backend is refused (exit 2), never silently dropped; nothing is called" {
+  run --separate-stderr "$H" shim-1 --backend b1 --note "why"
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"--note is not supported with --backend"* ]]
+  run --separate-stderr "$H" shim-1 --backend b1 --also-add m1 --note "why"
+  [ "$status" -eq 2 ]
+  assert_no_bd_call
+  assert_no_pgc_call
+}
+
+@test "bd mode with --also-add and --note: ONE update, adds before the removal, note appended" {
+  export BD_SHIM_SHOW_JSON
+  BD_SHIM_SHOW_JSON="$(show_json_notes '["human","attention","stale-escalation"]' 'older
+Automation timed out.')"
+  run --separate-stderr "$H" shim-1 --also-add stale-escalation --also-add stale-escalation --note "Automation timed out." --actor sess-1
+  [ "$status" -eq 0 ]
+  [ "$output" = "shim-1" ]
+  [ "$(grep -c 'update' "$BD_CALL_LOG")" -eq 1 ]
+  grep -qx 'update --add-label human --add-label attention --add-label stale-escalation --remove-label escalated --actor sess-1 --append-notes Automation timed out. -- shim-1' "$BD_CALL_LOG"
+  [[ $stderr == *"ok: label stale-escalation present"* ]]
+  [[ $stderr == *"ok: note present"* ]]
+}
+
+@test "read-back mismatch: an --also-add label that did not land is exit 4" {
+  export BD_SHIM_SHOW_JSON
+  BD_SHIM_SHOW_JSON="$(show_json '["human","attention"]')"
+  run --separate-stderr "$H" shim-1 --also-add stale-escalation
+  [ "$status" -eq 4 ]
+  [[ $stderr == *"MISMATCH: label stale-escalation missing"* ]]
+}
+
+@test "read-back mismatch: a --note that did not land is exit 4" {
+  export BD_SHIM_SHOW_JSON
+  BD_SHIM_SHOW_JSON="$(show_json_notes '["human","attention"]' 'something else')"
+  run --separate-stderr "$H" shim-1 --note "Automation timed out."
+  [ "$status" -eq 4 ]
+  [[ $stderr == *"MISMATCH: note missing"* ]]
+  BD_SHIM_SHOW_JSON="$(show_json '["human","attention"]')"
+  run --separate-stderr "$H" shim-1 --note "Automation timed out."
+  [ "$status" -eq 4 ]
+}
+
+@test "backend mode with --also-add: the extra add rides in the same pg-connector call" {
+  run --separate-stderr "$H" shim-1 --backend b1 --also-add stale-escalation --also-remove needs-split-review
+  [ "$status" -eq 0 ]
+  [ "$(grep -c . "$PGC_CALL_LOG")" -eq 1 ]
+  grep -qx 'issue update shim-1 --backend b1 --add-label human --add-label attention --add-label stale-escalation --remove-label escalated --remove-label needs-split-review' "$PGC_CALL_LOG"
+  assert_no_bd_call
+}
+
+@test "plain form is unchanged: no extra add, no note" {
+  export BD_SHIM_SHOW_JSON
+  BD_SHIM_SHOW_JSON="$(show_json '["human","attention"]')"
+  run --separate-stderr "$H" shim-1
+  [ "$status" -eq 0 ]
+  grep -qx 'update --add-label human --add-label attention --remove-label escalated -- shim-1' "$BD_CALL_LOG"
+  [[ $stderr != *"note"* ]]
+}

@@ -34,3 +34,18 @@ setup() {
   run hth_update_args "" escalated
   [ "$output" = $'--add-label\nhuman\n--add-label\nattention\n--remove-label\nescalated' ]
 }
+
+@test "hth_update_args: --also-add labels follow the human pair and precede every removal" {
+  # shellcheck disable=SC2034  # read by hth_update_args
+  HTH_ALSO_ADD=(stale-escalation other)
+  run hth_update_args sess-1 escalated x
+  [ "$status" -eq 0 ]
+  [ "$output" = $'--add-label\nhuman\n--add-label\nattention\n--add-label\nstale-escalation\n--add-label\nother\n--remove-label\nescalated\n--remove-label\nx\n--actor\nsess-1' ]
+}
+
+@test "hth_update_args: a note is never printed (it can span lines; hth_run_bd appends it)" {
+  # shellcheck disable=SC2034  # read by hth_update_args
+  HTH_NOTE=$'two\nlines'
+  run hth_update_args "" escalated
+  [ "$output" = $'--add-label\nhuman\n--add-label\nattention\n--remove-label\nescalated' ]
+}

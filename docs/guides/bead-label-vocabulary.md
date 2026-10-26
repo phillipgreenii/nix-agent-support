@@ -115,12 +115,14 @@ remove second. The same reasoning is beads-lifecycle `D-5`.
 
 ## The `hand-to-human` command
 
-| Form                                   | Effect                                                                                                                                                          |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hand-to-human ID [--actor ID]`        | `bd update --add-label human --add-label attention --remove-label escalated`, then a `bd show` read-back.                                                       |
-| `hand-to-human ID --bd-dir DIR`        | The same against the tracker root `DIR` (`bd -C DIR`).                                                                                                          |
-| `hand-to-human ID --backend NAME`      | The same through `pg-connector issue update --backend NAME`, for a session that has no direct bd access to its tracker (the escalation-triager). Not read back. |
-| `hand-to-human ID --also-remove LABEL` | More labels removed in the SAME call, for example `needs-split-review`.                                                                                         |
+| Form                                   | Effect                                                                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hand-to-human ID [--actor ID]`        | `bd update --add-label human --add-label attention --remove-label escalated`, then a `bd show` read-back.                                                           |
+| `hand-to-human ID --bd-dir DIR`        | The same against the tracker root `DIR` (`bd -C DIR`).                                                                                                              |
+| `hand-to-human ID --backend NAME`      | The same through `pg-connector issue update --backend NAME`, for a session that has no direct bd access to its tracker (the escalation-triager). Not read back.     |
+| `hand-to-human ID --also-remove LABEL` | More labels removed in the SAME call, for example `needs-split-review`.                                                                                             |
+| `hand-to-human ID --also-add LABEL`    | More labels added in the SAME call (repeatable, both paths), for example a marker such as `stale-escalation`. `escalated`, `human` and `attention` are refused.     |
+| `hand-to-human ID --note TEXT`         | Appends `TEXT` to the bead's notes in the SAME `bd update` (`--append-notes`), and the read-back checks it landed. bd path only: refused with `--backend` (exit 2). |
 
 Code that writes beads through the `bd` CLI from Go (the ccpool handler) uses
 `beads.HandToHuman`, which issues the same single `bd update`. The two MUST stay equivalent; each

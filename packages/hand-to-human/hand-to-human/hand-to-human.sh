@@ -24,7 +24,7 @@ show_help() {
 hand-to-human: Hand a bead to the operator (human + attention, escalated removed, one update)
 
 Usage: hand-to-human ID [--backend NAME | --bd-dir DIR] [--also-remove LABEL]...
-                        [--actor ID]
+                        [--also-add LABEL]... [--note TEXT] [--actor ID]
 
 Adds the labels `human` and `attention` to bead ID and removes `escalated`, all
 in ONE update call (the adds are in the same call as the removal, so the bead
@@ -34,7 +34,8 @@ resolve it. Do NOT use it for planned operator work (verify, checkpoint,
 decision and handoff beads), which carries `human` only.
 
 By default the tool runs `bd update` and then reads the bead back (`bd show`),
-checking that both labels are present and every removed label is absent.
+checking that both labels (and every --also-add label) are present, every removed
+label is absent, and any --note landed in the bead's notes.
 
 Options:
   --backend NAME      Reach the tracker through `pg-connector issue update
@@ -45,6 +46,12 @@ Options:
   --also-remove L     Remove one more label in the same call (repeatable), for
                       example needs-split-review. `human` and `attention`
                       cannot be removed.
+  --also-add L        Add one more label in the same call (repeatable), for example
+                      a marker such as stale-escalation. Works with bd and with
+                      --backend. `escalated`, `human` and `attention` are refused.
+  --note TEXT         Append TEXT to the bead's notes in the same call (bd only:
+                      `bd update --append-notes`). Refused with --backend, which
+                      has no notes flag (exit 2, nothing written).
   --actor ID          Actor for the audit trail (bd only; default: bd's own
                       resolution from BEADS_ACTOR).
   -h, --help          Show this help message
@@ -62,6 +69,7 @@ Exit status:
 Examples:
   hand-to-human pg2-abc12 --actor "$SID"
   hand-to-human pg2-abc12 --also-remove needs-split-review
+  hand-to-human pg2-abc12 --also-add stale-escalation --note "Automation timed out."
   hand-to-human pg2-abc12 --backend pg-connector-issue-beads-pg2
 
 Report bugs to: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support/issues>
@@ -72,7 +80,9 @@ BEAD_ID=""
 BACKEND=""
 ACTOR=""
 HTH_BD_DIR=""
+NOTE=""
 EXTRA_REMOVE=()
+EXTRA_ADD=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -80,12 +90,14 @@ while [[ $# -gt 0 ]]; do
     show_help
     exit 0
     ;;
-  --backend | --bd-dir | --also-remove | --actor)
+  --backend | --bd-dir | --also-remove | --also-add | --note | --actor)
     [[ $# -ge 2 && -n $2 ]] || die "$1 requires a value"
     case "$1" in
     --backend) BACKEND="$2" ;;
     --bd-dir) HTH_BD_DIR="$2" ;;
     --also-remove) EXTRA_REMOVE+=("$2") ;;
+    --also-add) EXTRA_ADD+=("$2") ;;
+    --note) NOTE="$2" ;;
     --actor) ACTOR="$2" ;;
     esac
     shift 2
@@ -107,6 +119,7 @@ if [[ -n $BACKEND ]]; then
   [[ -z $HTH_BD_DIR ]] || die "--bd-dir and --backend are mutually exclusive"
   [[ -z $ACTOR ]] || die "--actor is not supported with --backend (pg-connector carries no actor flag)"
   [[ $BACKEND =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid --backend '$BACKEND'"
+  [[ -z $NOTE ]] || die "--note is not supported with --backend (pg-connector issue update has no notes flag)"
 fi
 if [[ -n $HTH_BD_DIR && ! -d $HTH_BD_DIR ]]; then
   die "--bd-dir is not a directory: $HTH_BD_DIR"
@@ -117,6 +130,24 @@ for label in ${EXTRA_REMOVE[@]+"${EXTRA_REMOVE[@]}"}; do
     die "--also-remove $label is refused: the call adds $HTH_HUMAN_LABEL and $HTH_ATTENTION_LABEL"
   fi
 done
+
+HTH_ALSO_ADD=()
+for label in ${EXTRA_ADD[@]+"${EXTRA_ADD[@]}"}; do
+  [[ $label =~ ^[A-Za-z0-9][A-Za-z0-9._:/-]*$ ]] || die "invalid --also-add '$label' (letters, digits, and . _ : / - only)"
+  if [[ $label == "$HTH_HUMAN_LABEL" || $label == "$HTH_ATTENTION_LABEL" || $label == "$HTH_ESCALATED_LABEL" ]]; then
+    die "--also-add $label is refused: the call adds $HTH_HUMAN_LABEL and $HTH_ATTENTION_LABEL and removes $HTH_ESCALATED_LABEL itself"
+  fi
+  for removed in ${EXTRA_REMOVE[@]+"${EXTRA_REMOVE[@]}"}; do
+    [[ $label != "$removed" ]] || die "--also-add $label conflicts with --also-remove $label"
+  done
+  dup=0
+  for added in ${HTH_ALSO_ADD[@]+"${HTH_ALSO_ADD[@]}"}; do
+    [[ $label != "$added" ]] || dup=1
+  done
+  [[ $dup -eq 1 ]] || HTH_ALSO_ADD+=("$label")
+done
+# shellcheck disable=SC2034  # read by hth_run_bd / hth_readback in hand-to-human.bash
+HTH_NOTE="$NOTE"
 
 REMOVE=()
 mapfile -t REMOVE < <(hth_remove_labels ${EXTRA_REMOVE[@]+"${EXTRA_REMOVE[@]}"})

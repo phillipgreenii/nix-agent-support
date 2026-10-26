@@ -6,5 +6,7 @@ _arguments \
   '(--bd-dir)--backend[Reach the tracker through this pg-connector backend]:backend:' \
   '(--backend)--bd-dir[Tracker root to run bd against]:directory:_files -/' \
   '*--also-remove[Remove one more label in the same call]:label:' \
+  '*--also-add[Add one more label in the same call]:label:' \
+  '(--backend)--note[Append text to the bead notes (bd only)]:note text:' \
   '--actor[Actor for the audit trail (bd only)]:actor:' \
   '1:bead id:'

@@ -9,13 +9,13 @@ _hand_to_human() {
     _filedir -d
     return
     ;;
-  --backend | --also-remove | --actor)
+  --backend | --also-remove | --also-add | --note | --actor)
     return
     ;;
   esac
 
   if [[ $cur == -* ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "--backend --bd-dir --also-remove --actor --help -h --version -v" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "--backend --bd-dir --also-remove --also-add --note --actor --help -h --version -v" -- "$cur")
   fi
 }
 

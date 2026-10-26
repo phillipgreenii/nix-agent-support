@@ -11,6 +11,10 @@
 
 `hand-to-human {{pg2-abc12}} --also-remove {{needs-split-review}}`
 
+- Also add a marker label and append an explanatory note to the bead's notes in the same call (a watchdog hand-off):
+
+`hand-to-human {{pg2-abc12}} --also-add {{stale-escalation}} --note "{{Automation timed out; check infrastructure first.}}"`
+
 - Run it against a specific tracker root instead of the current directory's:
 
 `hand-to-human {{pg2-abc12}} --bd-dir {{/path/to/tracker/root}}`

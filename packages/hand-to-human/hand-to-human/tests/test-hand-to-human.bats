@@ -140,3 +140,75 @@ labels_of() { # id -> sorted labels, one per line
   [ "$status" -eq 3 ]
   [ "$(bd_fixture_count)" -eq "$before" ]
 }
+
+# --also-add / --note against real bd (bead pg2-8num0)
+
+notes_of() { bd_fixture_show_json "$1" | jq -r '.notes // ""'; }
+
+@test "--also-add + --note: one update lands the marker label, the note, and the hand-off pair" {
+  id="$(new_bead escalated keep-me)"
+  : >"$BD_CALL_LOG"
+  run --separate-stderr "$H" "$id" --also-add stale-escalation --note "Automation timed out." --actor test-actor
+  [ "$status" -eq 0 ]
+  [ "$output" = "$id" ]
+  [ "$(grep -c '^update ' "$BD_CALL_LOG")" -eq 1 ]
+  [ "$(labels_of "$id")" = $'attention\nhuman\nkeep-me\nstale-escalation' ]
+  [ "$(notes_of "$id")" = "Automation timed out." ]
+  [[ $stderr == *"ok: label stale-escalation present"* ]]
+  [[ $stderr == *"ok: note present"* ]]
+}
+
+@test "--note is appended to existing notes, multi-line text intact" {
+  id="$(new_bead escalated)"
+  bd update --notes "earlier note" -- "$id" >/dev/null 2>&1
+  run --separate-stderr "$H" "$id" --note $'line one\nline two'
+  [ "$status" -eq 0 ]
+  [ "$(notes_of "$id")" = $'earlier note\nline one\nline two' ]
+}
+
+@test "--also-add alone (no note) works and leaves notes untouched" {
+  id="$(new_bead escalated)"
+  run --separate-stderr "$H" "$id" --also-add stale-escalation
+  [ "$status" -eq 0 ]
+  [ "$(labels_of "$id")" = $'attention\nhuman\nstale-escalation' ]
+  [ "$(notes_of "$id")" = "" ]
+}
+
+@test "--note against an unknown bead: exit 3, nothing created" {
+  before="$(bd_fixture_count)"
+  run --separate-stderr "$H" tst-nope99 --also-add stale-escalation --note "x"
+  [ "$status" -eq 3 ]
+  [ "$(bd_fixture_count)" -eq "$before" ]
+}
+
+# What packet 2 (the escalation watchdog) needs to know about bd's own guards:
+# does `bd update --if-assignee/--if-status` combine with --add-label and
+# --append-notes? Recorded against the real bd, not through hand-to-human.
+
+@test "bd guard: --if-assignee '' --if-status open combine with --add-label and --append-notes (match writes both)" {
+  id="$(new_bead escalated)"
+  run --separate-stderr bd update --if-assignee "" --if-status open --add-label guarded --remove-label escalated --append-notes "note" -- "$id"
+  [ "$status" -eq 0 ]
+  [ "$(labels_of "$id")" = "guarded" ]
+  [ "$(notes_of "$id")" = "note" ]
+}
+
+@test "bd guard: a mismatch exits 13 and writes NOTHING (labels and notes untouched)" {
+  id="$(new_bead escalated)"
+  bd update -a someone -- "$id" >/dev/null 2>&1
+  run --separate-stderr bd update --if-assignee "" --if-status open --add-label guarded --append-notes "note" -- "$id"
+  [ "$status" -eq 13 ]
+  [ "$(labels_of "$id")" = "escalated" ]
+  [ "$(notes_of "$id")" = "" ]
+  run --separate-stderr bd update --if-status closed --add-label guarded --append-notes "note" -- "$id"
+  [ "$status" -eq 13 ]
+  [ "$(labels_of "$id")" = "escalated" ]
+}
+
+@test "bd guard: with ONLY label edits the guard is refused (exit 1); a field update such as --append-notes is required" {
+  id="$(new_bead escalated)"
+  run --separate-stderr bd update --if-assignee "" --if-status open --add-label guarded -- "$id"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"require at least one field update"* ]]
+  [ "$(labels_of "$id")" = "escalated" ]
+}
