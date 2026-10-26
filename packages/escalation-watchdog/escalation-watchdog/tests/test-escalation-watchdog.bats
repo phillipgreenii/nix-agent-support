@@ -327,16 +327,18 @@ SHIM
   [[ $stderr == *"bd ready failed"* ]]
 }
 
-# bd_warn_shim: a `bd` first on PATH that prints a warning on stderr, then execs
-# the REAL bd (so stdout is the real bd's), as bd does in a tracker without
-# beads.role configured.
+# bd_warn_shim: a `bd` first on PATH that prints a warning on stderr for the
+# `ready` call only, then execs the REAL bd (so stdout is the real bd's), as bd
+# does in a tracker without beads.role configured. Scoped to `ready` because this
+# test pins the watchdog's own read (hand-to-human reads its own bd calls with 2>&1,
+# a separate matter outside this suite).
 bd_warn_shim() {
   local real_bd shim_dir
   real_bd="$(command -v bd)"
   shim_dir="$(mktemp -d)"
   cat >"$shim_dir/bd" <<SHIM
 #!/usr/bin/env bash
-echo "warning: beads.role not configured" >&2
+case " \$* " in *" ready "*) echo "warning: beads.role not configured" >&2 ;; esac
 exec "$real_bd" "\$@"
 SHIM
   chmod +x "$shim_dir/bd"
