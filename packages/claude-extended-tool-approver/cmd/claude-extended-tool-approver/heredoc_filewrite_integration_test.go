@@ -41,7 +41,8 @@ func TestEvaluate_HeredocFileWriteReplay(t *testing.T) {
 		{4, "cat >> " + plan + " <<EOF\nstamp: $(echo a)\nEOF", "allow", "", ""},
 		{5, "cat >> " + plan + " <<EOF\nstamp: $(rm -rf /)\nEOF", "deny", "", "command substitution denied"},
 		{6, "cat >> " + outside + " <<'EOF'\nx\nEOF", "", "", ""}, // asserted below: never allow
-		{7, "cat >> " + plan + " <<EOF\n${x@P}\nEOF", "abstain", "engine", "heredoc body is not evaluable as a command"},
+		{7, "cat >> " + plan + " <<EOF\n${x:-y}\nEOF", "abstain", "engine", "heredoc body is not evaluable as a command"},
+		{8, "cat >> " + plan + " <<EOF\n${x@P}\nEOF", "deny", "engine", "command substitution denied"},
 	}
 
 	store, err := asklog.NewStore(filepath.Join(dir, "claude-extended-tool-approver", "asks.db"))

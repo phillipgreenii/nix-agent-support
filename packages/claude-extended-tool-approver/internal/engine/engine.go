@@ -621,6 +621,7 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 				// own earlier siblings for a body that is, textually, still part of THIS leaf.
 				leafResult = hookio.MostRestrictive(leafResult,
 					e.foldSubstitutionScan(pc.UnquotedHeredocSubstitutions(), normalized, stack, origin, inCommandVars, inCommandTempDirVars))
+				leafResult = hookio.MostRestrictive(leafResult, evaluatingExpansionFloor(pc.UnquotedHeredocEvaluatingExpansions()))
 				judgedLeaf = true
 			}
 			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, expr, parsed, inCommandVars, inCommandTempDirVars, origin); judged {
@@ -657,6 +658,7 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 			// inherit exactly what this leaf's own overlay computed, not the raw outer value.
 			leafResult = mostRestrictiveAttributed(leafResult,
 				e.foldSubstitutionScan(pc.Substitutions, normalized, stack, origin, inCommandVars, inCommandTempDirVars))
+			leafResult = hookio.MostRestrictive(leafResult, evaluatingExpansionFloor(pc.EvaluatingExpansions))
 			// mostRestrictiveAttributed here too: this is the fold that used to be a
 			// raw `leafResult.Decision > mostRestrictive.Decision` strict compare, which
 			// never revisits an exact tie — silently keeping mostRestrictive's engine
@@ -732,6 +734,7 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 		// memory that an earlier `SP=<literal>` leaf had ever run).
 		cmdResult = hookio.MostRestrictive(cmdResult,
 			e.foldSubstitutionScan(pc.Substitutions, normalized, stack, origin, inCommandVars, inCommandTempDirVars))
+		cmdResult = hookio.MostRestrictive(cmdResult, evaluatingExpansionFloor(pc.EvaluatingExpansions))
 
 		// A heredoc BODY is opaque to the rule chain, so a heredoc-bearing leaf is
 		// FLOORED at NoOpinion — but the body's own substitutions are still recursed when
@@ -746,6 +749,7 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 			cmdResult = hookio.MostRestrictive(cmdResult, heredocFloor(expr, stack, pc, parsed))
 			cmdResult = hookio.MostRestrictive(cmdResult,
 				e.foldSubstitutionScan(pc.UnquotedHeredocSubstitutions(), normalized, stack, origin, inCommandVars, inCommandTempDirVars))
+			cmdResult = hookio.MostRestrictive(cmdResult, evaluatingExpansionFloor(pc.UnquotedHeredocEvaluatingExpansions()))
 		}
 
 		// Track most restrictive. mostRestrictiveAttributed, not a plain fold: this is
@@ -1519,6 +1523,24 @@ func commandSubstitutionFloor(body string) hookio.RuleResult {
 			"needed and move on to other work rather than retrying variations: " + body,
 		Module: "engine",
 	}
+}
+
+// evaluatingExpansionFloor is the verdict for parameter expansions that EVALUATE their
+// operand (`${x@P}`, `${!x}`, a non-literal subscript or slice; bead pg2-ftneaj,
+// cmdparse.ParsedCommand.EvaluatingExpansions). Evaluating a variable's value runs any
+// command substitution that value holds, yet the source carries no `$(...)` node for
+// foldSubstitutionScan to recurse, so a safe-commands leaf such as `echo` approved
+// `x='$(rm -rf /)'; echo "${x@P}"`. The value is unknowable here, so each such expansion
+// is treated as a command substitution that could not be cleared: it takes
+// commandSubstitutionFloor's Reject, folded most-restrictive-wins (no new rule under
+// internal/rules, frozen-rules ruling R1). Plain `${x}` and `${x:-default}` never
+// reach this floor.
+func evaluatingExpansionFloor(exprs []string) hookio.RuleResult {
+	result := hookio.RuleResult{Decision: hookio.Approve, Reason: "no evaluating expansions", Module: "engine"}
+	for _, ex := range exprs {
+		result = hookio.MostRestrictive(result, commandSubstitutionFloor("parameter expansion "+ex+" evaluates its value, which can run a command substitution"))
+	}
+	return result
 }
 
 // foldSubstitutionScan folds a leaf's OR a heredoc body's OWN top-level

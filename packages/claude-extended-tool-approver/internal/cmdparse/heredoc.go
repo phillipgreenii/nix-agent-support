@@ -63,6 +63,9 @@ type Heredoc struct {
 	// Always empty when Quoted: a quoted delimiter's body never expands, so
 	// bash never evaluates a `$( )` inside it (pg2-wguam).
 	Substitutions []Substitution
+	// EvaluatingExpansions are the evaluating parameter expansions of this body (see
+	// ParsedCommand.EvaluatingExpansions); always empty when Quoted.
+	EvaluatingExpansions []string
 }
 
 // DELETED, and the deletion is a coverage claim: `isHeredocWordEnd`, `atWordStart`,

@@ -69,9 +69,10 @@ func TestIntegration_HeredocFileWriteCarveOut(t *testing.T) {
 		{"unquoted backtick echo", "cat > /tmp/zr-x/plan.md <<EOF\nhi `echo a`\nEOF", hookio.Approve, ""},
 		{"unquoted plain variables", "cat > /tmp/zr-x/plan.md <<EOF\nhi $HOME ${HOME}\nEOF", hookio.Approve, ""},
 
-		// --- evaluating expansions are not modeled: they stay on the floor ---
+		// --- evaluating expansions: arithmetic and operator forms stay on the floor; an
+		// evaluating parameter expansion (`${x@P}`) is denied outright (pg2-ftneaj) ---
 		{"unquoted arithmetic", "cat > /tmp/zr-x/plan.md <<EOF\n$((X))\nEOF", hookio.NoOpinion, ""},
-		{"unquoted prompt transform", "cat > /tmp/zr-x/plan.md <<EOF\n${x@P}\nEOF", hookio.NoOpinion, ""},
+		{"unquoted prompt transform", "cat > /tmp/zr-x/plan.md <<EOF\n${x@P}\nEOF", hookio.Reject, "command substitution denied"},
 		{"unquoted default-value form", "cat > /tmp/zr-x/plan.md <<EOF\n${x:-y}\nEOF", hookio.NoOpinion, ""},
 
 		// --- neighbours that must stay on the heredoc floor ---

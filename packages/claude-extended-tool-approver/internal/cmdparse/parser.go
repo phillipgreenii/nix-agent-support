@@ -2361,6 +2361,13 @@ type ParsedCommand struct {
 	// after step 4) would fall back to cmdparse.ScanSubstitutions(Raw), the
 	// permanent text entry point I7 describes.
 	Substitutions []Substitution
+	// EvaluatingExpansions holds the source text of each parameter expansion in this
+	// leaf's arguments and redirection targets that EVALUATES its operand (`${x@P}`,
+	// `${!x}`, a non-literal index or slice; see paramExpEvaluates), pre-lowered by the
+	// same walk as Substitutions (bead pg2-ftneaj). Such an expansion can run a command
+	// substitution held in a variable's VALUE without any `$(...)` node in the source,
+	// so the engine treats each one like a command substitution it cannot clear.
+	EvaluatingExpansions []string
 	// AndChainID exposes the "&&"-ONLY SEQUENCING relation between leaves (pg2-70g51)
 	// — the one compound-operator DISTINCTION splitCompound/the pre-ADR-0039 front end
 	// never tracked at all: a `;`/newline boundary and an "&&" boundary both simply

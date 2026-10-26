@@ -29,6 +29,7 @@ package cmdparse
 // would newly clear the very predicate I4 exists to fence.
 
 import (
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1104,6 +1105,7 @@ func (lw *lowering) lowerDecl(st *syntax.Stmt, cmd *syntax.DeclClause, pid, idx,
 	}
 	nodes = append(nodes, redirNodes(st.Redirs)...)
 	leaf.Substitutions = lw.substitutionsOf(nodes, true)
+	leaf.EvaluatingExpansions = lw.evaluatingExpansionsOf(nodes, true)
 	lw.appendLeaf(unwrapCommand(leaf), sourceSpan{lo: int(st.Pos().Offset()), hi: lw.stmtEndOffset(st)})
 }
 
@@ -1176,6 +1178,7 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx, c
 	}
 	lw.attachRedirs(st, &leaf)
 	leaf.Substitutions = lw.callSubstitutions(cmd, st.Redirs)
+	leaf.EvaluatingExpansions = lw.callEvaluatingExpansions(cmd, st.Redirs)
 	if leaf.Executable == "" {
 		// Assignment-only statement (`LD_PRELOAD=/evil.so && cmd`, or a whole command
 		// that is nothing but assignments), or a redirection-only one. Keep it as a
@@ -1244,6 +1247,7 @@ func (lw *lowering) emitRedirOnly(st *syntax.Stmt, pid, idx, chain int) {
 	leaf := ParsedCommand{Raw: lw.stmtRaw(st), PipelineID: pid, PipelineIndex: idx, AndChainID: chain}
 	lw.attachRedirs(st, &leaf)
 	leaf.Substitutions = lw.substitutionsOf(redirNodes(st.Redirs), true)
+	leaf.EvaluatingExpansions = lw.evaluatingExpansionsOf(redirNodes(st.Redirs), true)
 	// `len(leaf.Args) > 0` is the fd-prefixed INPUT redirection parity path (see
 	// attachRedir): `0<f` on its own records no Redirection by design, but the operator
 	// and its target become ARGS, and the leaf must still be emitted or the node reaches
@@ -1288,6 +1292,7 @@ func (lw *lowering) emitCompoundRedirs(st *syntax.Stmt, pid, idx, chain int) {
 	}
 	lw.attachRedirs(st, &leaf)
 	leaf.Substitutions = lw.substitutionsOf(redirNodes(st.Redirs), true)
+	leaf.EvaluatingExpansions = lw.evaluatingExpansionsOf(redirNodes(st.Redirs), true)
 	// `len(leaf.Args) > 0` is the fd-prefixed INPUT redirection parity path, exactly as
 	// in emitRedirOnly: `(cmd)0<f` records no Redirection by design, but the operator
 	// and its target become ARGS and the leaf must still be emitted or the node reaches
@@ -1349,9 +1354,10 @@ func (lw *lowering) emitDataSpan(from, to syntax.Pos, subNodes []syntax.Node, ki
 	// than stamped like PipelineID's -1, because 0 (not -1) is that sentinel here.
 	lw.dataLeaves = append(lw.dataLeaves, ParsedCommand{
 		Raw: raw, PipelineID: -1, PipelineIndex: -1,
-		SubshellScope: append([]int(nil), lw.scopePath...),
-		Substitutions: lw.substitutionsOf(subNodes, true),
-		Data:          kind,
+		SubshellScope:        append([]int(nil), lw.scopePath...),
+		Substitutions:        lw.substitutionsOf(subNodes, true),
+		EvaluatingExpansions: lw.evaluatingExpansionsOf(subNodes, true),
+		Data:                 kind,
 	})
 	lw.dataSpans = append(lw.dataSpans, span)
 }
@@ -1742,6 +1748,7 @@ func (lw *lowering) heredoc(r *syntax.Redirect) Heredoc {
 		// matches ScanSubstitutionsInHeredocBody's BODY expansion model
 		// (quotes are data) rather than the command-position one.
 		hd.Substitutions = lw.substitutionsOf([]syntax.Node{r.Hdoc}, false)
+		hd.EvaluatingExpansions = lw.evaluatingExpansionsOf([]syntax.Node{r.Hdoc}, false)
 	}
 	return hd
 }
@@ -3730,4 +3737,175 @@ func unmodeledParamExp(v *syntax.ParamExp) string {
 		return "assignment value holds a transforming parameter expansion (${X@op})"
 	}
 	return ""
+}
+
+// EVALUATING PARAMETER EXPANSIONS (bead pg2-ftneaj).
+//
+// A parameter expansion normally SUBSTITUTES a variable's value as inert text. A few
+// forms instead EVALUATE the value, and evaluating text that holds a command
+// substitution RUNS that command:
+//
+//   - `${x@P}` expands the value as a prompt string, and bash performs command
+//     substitution on the result (x='$(rm -rf /)'; echo "${x@P}" runs rm);
+//   - `${!x}` is indirection: x's value is taken as a variable NAME, and a name of the
+//     form `a[$(cmd)]` evaluates its subscript;
+//   - `${a[i]}`, `${#a[i]}` and `${x:off:len}` evaluate their index / offset / length as
+//     an ARITHMETIC expression, and arithmetic evaluation of a variable name evaluates
+//     that variable's value in turn.
+//
+// None of these hold a `$(`...`)` node the substitution finder could see, so
+// substitutionsOf never recursed them and a safe-commands leaf such as `echo` approved
+// them. The lowering records each one's source text in ParsedCommand.
+// EvaluatingExpansions (and Heredoc.EvaluatingExpansions for an unquoted body) so the
+// engine can fail closed exactly as it does for a command substitution it cannot clear.
+//
+// Plain `${x}`, `$x`, `${x:-default}`, `${x#pat}`, `${x/a/b}`, `${#x}`, a slice or index
+// made only of numeric literals, and the inert `@` transforms are NOT recorded.
+
+// inertTransformOps are the `${x@OP}` operators that only reformat the value (quote,
+// escape-expand, case-convert, describe attributes or the declare form). Any other
+// operator, notably `P`, is treated as evaluating, so an operator added to a future
+// bash fails closed.
+var inertTransformOps = map[string]bool{
+	"Q": true, "E": true, "A": true, "a": true, "K": true, "k": true,
+	"L": true, "U": true, "u": true,
+}
+
+var digitsOnly = regexp.MustCompile(`^[0-9]+$`)
+
+// paramExpEvaluates reports whether v evaluates its operand rather than substituting it.
+func paramExpEvaluates(v *syntax.ParamExp) bool {
+	if v.Param == nil || v.NestedParam != nil || v.Flags != nil {
+		return true // a zsh-only / unmodeled shape: fail closed
+	}
+	if v.Excl && !isAllElementsIndex(v.Index) {
+		return true // indirection; `${!a[@]}` (key listing) is the one inert Excl form
+	}
+	if v.Index != nil && !isAllElementsIndex(v.Index) && !isLiteralArith(v.Index) {
+		return true
+	}
+	if v.Slice != nil && (!isLiteralArith(v.Slice.Offset) || !isLiteralArith(v.Slice.Length)) {
+		return true
+	}
+	if v.Exp != nil && v.Exp.Op == syntax.OtherParamOps {
+		return v.Exp.Word == nil || !inertTransformOps[v.Exp.Word.Lit()]
+	}
+	return false
+}
+
+// isAllElementsIndex reports whether idx is the literal `@` or `*` subscript.
+func isAllElementsIndex(idx syntax.ArithmExpr) bool {
+	w, ok := idx.(*syntax.Word)
+	if !ok || w == nil {
+		return false
+	}
+	l := w.Lit()
+	return l == "@" || l == "*"
+}
+
+// isLiteralArith reports whether e is absent or an arithmetic expression built only
+// from decimal literals and operators, so evaluating it cannot reach a variable's value.
+func isLiteralArith(e syntax.ArithmExpr) bool {
+	if e == nil {
+		return true
+	}
+	literal := true
+	syntax.Walk(e, func(n syntax.Node) bool {
+		switch v := n.(type) {
+		case nil:
+			return false
+		case *syntax.Word:
+			for _, p := range v.Parts {
+				lit, ok := p.(*syntax.Lit)
+				if !ok || !digitsOnly.MatchString(lit.Value) {
+					literal = false
+				}
+			}
+			return false
+		case *syntax.BinaryArithm, *syntax.UnaryArithm, *syntax.ParenArithm:
+			return true
+		default:
+			literal = false
+			return false
+		}
+	})
+	return literal
+}
+
+// evaluatingExpansionVisitor collects the source text of every evaluating parameter
+// expansion reachable from the nodes it is walked over. It mirrors substFinder's
+// descent: a command or process substitution is NOT entered (its body is lowered to
+// leaves of its own, which record their own expansions), and with skipHeredocBodies a
+// sibling redirection's Hdoc is skipped (collected on that Heredoc instead).
+type evaluatingExpansionVisitor struct {
+	src               string
+	skipHeredocBodies bool
+	found             []string
+}
+
+func (f *evaluatingExpansionVisitor) visit(n syntax.Node) bool {
+	switch v := n.(type) {
+	case nil:
+		return false
+	case *syntax.CmdSubst, *syntax.ProcSubst:
+		return false
+	case *syntax.ParamExp:
+		if paramExpEvaluates(v) {
+			lo, hi := int(v.Pos().Offset()), int(v.End().Offset())
+			if lo >= 0 && hi > lo && hi <= len(f.src) {
+				f.found = append(f.found, f.src[lo:hi])
+			} else {
+				f.found = append(f.found, "${...}") // extent unknown: still record it
+			}
+		}
+	case *syntax.Redirect:
+		if f.skipHeredocBodies {
+			if v.N != nil {
+				syntax.Walk(v.N, f.visit)
+			}
+			if v.Word != nil {
+				syntax.Walk(v.Word, f.visit)
+			}
+			return false
+		}
+	}
+	return true
+}
+
+// evaluatingExpansionsOf returns the source text of each evaluating parameter
+// expansion reachable from nodes, in source order.
+func (lw *lowering) evaluatingExpansionsOf(nodes []syntax.Node, skipHeredocBodies bool) []string {
+	f := &evaluatingExpansionVisitor{src: lw.src, skipHeredocBodies: skipHeredocBodies}
+	for _, n := range nodes {
+		if n != nil {
+			syntax.Walk(n, f.visit)
+		}
+	}
+	return f.found
+}
+
+// callEvaluatingExpansions is callSubstitutions' counterpart: a CallExpr's args and
+// redirections, excluding leading assignments (judged by the env-var rule).
+func (lw *lowering) callEvaluatingExpansions(cmd *syntax.CallExpr, redirs []*syntax.Redirect) []string {
+	if len(cmd.Assigns) > 0 && len(cmd.Args) == 0 {
+		return nil
+	}
+	nodes := make([]syntax.Node, 0, len(cmd.Args)+len(redirs))
+	for _, w := range cmd.Args {
+		nodes = append(nodes, w)
+	}
+	nodes = append(nodes, redirNodes(redirs)...)
+	return lw.evaluatingExpansionsOf(nodes, true)
+}
+
+// UnquotedHeredocEvaluatingExpansions returns the evaluating parameter expansions of
+// every UNQUOTED heredoc body on this leaf (a quoted body never expands).
+func (pc ParsedCommand) UnquotedHeredocEvaluatingExpansions() []string {
+	var out []string
+	for _, hd := range pc.Heredocs {
+		if !hd.Quoted {
+			out = append(out, hd.EvaluatingExpansions...)
+		}
+	}
+	return out
 }
