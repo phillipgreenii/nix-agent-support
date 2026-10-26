@@ -27,26 +27,6 @@ let
     else
       null;
 
-  # handlerCommandDir (this bead, pg2-pteab): re-exposes the HM module's own
-  # `roles`-derived `handlerCommandDir` output at darwin scope, the same way
-  # daemonCfg above re-reads socket/id/self/token -- but keyed on `.enable`,
-  # not `.daemon.enable`: handlerCommandDir has nothing to do with the
-  # register-LaunchAgent flow above (it is populated whenever the HM module
-  # is enabled at all, independent of periodicDrain/daemon), so scoping it to
-  # daemon-enabled users only would wrongly hide it from a deployment that
-  # enables this module purely for its `roles`/`handlerCommandDir` output.
-  # Lets a sibling darwin module (darwin/modules/pg-router) wire it into its
-  # own PG_ROUTER_HANDLER_COMMAND_DIR export without reaching back into
-  # `home-manager.users.<name>` itself.
-  enabledUsers = lib.filter (u: u.phillipgreenii.programs.pg-router-ccpool-handler.enable or false) (
-    lib.attrValues hmUsers
-  );
-  handlerCommandDir =
-    if enabledUsers != [ ] then
-      (lib.head enabledUsers).phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir
-    else
-      null;
-
   # poolMetrics (bead pg2-mr0sl): the ONE HM option group in this module
   # that gets a REAL darwin mirror (unlike periodicDrain/daemon's own
   # freeform systemd-string intervals, "no darwin-side equivalent yet")
@@ -54,7 +34,7 @@ let
   # own doc comment for why. `script` is the SAME rendered
   # mkPoolMetricsScript derivation the HM module's own systemd timer runs
   # (re-exposed via the HM module's own readOnly `poolMetrics.script`
-  # output, mirroring how `handlerCommandDir` is re-exposed just below),
+  # output),
   # so darwin never re-derives the `--pool <name>=<dir>` argv independently.
   poolMetricsUsers = lib.filter (
     u: u.phillipgreenii.programs.pg-router-ccpool-handler.poolMetrics.enable or false
@@ -113,33 +93,7 @@ let
       { };
 in
 {
-  options.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir = lib.mkOption {
-    type = lib.types.nullOr lib.types.package;
-    readOnly = true;
-    # Deliberately NO `default` here: a readOnly option's own `default` (if
-    # any) counts as one of its `evalOptionValue` definitions
-    # (nixpkgs `lib/modules.nix`), so combining `default` with an
-    # UNCONDITIONAL `config`-set value below (this module always sets it,
-    # never behind an `mkIf`) trips "read-only, but it's set multiple
-    # times" even though there is only one real assignment. `config` always
-    # provides a value (`null` or the real derivation) below, so no default
-    # is needed — matches the HM module's own `handlerCommandDir` option,
-    # which has no `default` for the same reason.
-    description = ''
-      Darwin-scope mirror of the HM module's own
-      `phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir`
-      output (the joined directory of per-role JSON files rendered from
-      `roles`) -- re-exposed here the same way this module already re-reads
-      `daemonCfg.{socket,id,self,token}` above, so a sibling darwin module
-      (e.g. `darwin/modules/pg-router`) can wire it into its own
-      `PG_ROUTER_HANDLER_COMMAND_DIR` export without reaching back into
-      `home-manager.users.<name>` itself. `null` when no HM user has this
-      module enabled.
-    '';
-  };
-
   config = lib.mkMerge [
-    { phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir = handlerCommandDir; }
     (lib.mkIf daemonEnabledByAnyUser {
       # LaunchAgent registration via the canonical helper (ADR 0049, amended by
       # 0051), mirroring darwin/modules/pg-router/default.nix's own daemon
@@ -151,7 +105,7 @@ in
       phillipgreenii.system.launchdServices.userAgents.pg-router-ccpool-handler-daemon = {
         label = "com.phillipg.pg-router-ccpool-handler-daemon";
         script = ''
-          exec ${pkg}/bin/pg-router-ccpool-handler register \
+          exec ${pkg}/bin/pg-router-handler-ccpool register \
             --socket ${lib.escapeShellArg daemonCfg.socket} \
             --id ${lib.escapeShellArg daemonCfg.id} \
             --self ${lib.escapeShellArg daemonCfg.self} \

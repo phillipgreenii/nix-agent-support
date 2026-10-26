@@ -95,8 +95,6 @@ let
       beadsPrefix,
       configText,
       configFileName,
-      handlerCommand ? null,
-      handlerCommandDir ? null,
       handlerConfig ? null,
       handlerCcpoolPool ? null,
       metricsAddr ? null,
@@ -108,21 +106,15 @@ let
     ++ [
       "PG_ROUTER_CONFIG=${pkgs.writeText configFileName configText}"
     ]
-    # handlerCommand/handlerCommandDir (this bead, pg2-pteab): threads the
-    # now-landed Go-level PG_ROUTER_HANDLER_COMMAND[_DIR] support
-    # (internal/config/config.go, bead pg2-ymb3v) into this systemd unit's
-    # own Environment, following the same optional-var pattern as the other
-    # optional variables below. (The gate-file path variables that used to
-    # lead this list are gone: gates are generic records in the event log,
-    # set with `pg-router gate set|clear`, pg2-h63eu.)
-    ++ lib.optional (handlerCommand != null) "PG_ROUTER_HANDLER_COMMAND=${handlerCommand}"
-    ++ lib.optional (handlerCommandDir != null) "PG_ROUTER_HANDLER_COMMAND_DIR=${handlerCommandDir}"
+    # (The gate-file path variables that used to lead this list are gone: gates
+    # are generic records in the event log, set with `pg-router gate set|clear`,
+    # pg2-h63eu. The shared handler command variables are gone too: every role
+    # names its own handler in `[[role]]`, pg2-12gr4.10.18.)
     # handlerConfig: threads PG_ROUTER_CCPOOL_HANDLER_CONFIG, the handler
     # participant's OWN launch/isolation config (RepoRoot/WorktreeDir/
     # BeadsPrefix, --config/PG_ROUTER_CCPOOL_HANDLER_CONFIG in
     # pg-router-ccpool-handler's own internal/config), into this systemd
-    # unit's Environment — same optional-var pattern as handlerCommand[Dir]
-    # above. Without this, the handler process falls back to its own
+    # unit's Environment, like the other optional variables. Without this, the handler process falls back to its own
     # Default() (WorktreeDir: ""), and every dispatch fails at worktree
     # creation (`mkdir : no such file or directory`) before any real work
     # starts.
@@ -185,7 +177,6 @@ in
         store file holding just those `[[role]]` tables, for inspection and
         tests). Pass `existingRoleNames` to have a duplicate name between
         `roles` and the consumer's own `[[role]]` list fail evaluation.
-        The old `handlerCommand` / `handlerCommandDir` options are untouched.
       '';
     };
 
@@ -259,34 +250,6 @@ in
           bootstrap step is needed.
         '';
       };
-      handlerCommand = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = ''
-          PG_ROUTER_HANDLER_COMMAND override: the argv prefix invoked, over
-          the wire, for every enabled role's registered handler participant
-          (e.g. `pg-router-ccpool-handler`). `null` leaves it unset — an
-          unconfigured deployment gets a clear per-dispatch error instead of
-          a hardcoded participant name (GOAL-MIN-1's Floor).
-        '';
-      };
-      handlerCommandDir = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = ''
-          PG_ROUTER_HANDLER_COMMAND_DIR override: a directory of per-role
-          JSON files (`<role.Name>.json`) letting differently-configured
-          roles sharing one `handlerCommand` binary (e.g.
-          feedback/worker/review) dispatch through their own participant
-          config — typically
-          `phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir`
-          (interpolated to a string, e.g. `"${cfg.handlerCommandDir}"`, since
-          this option is a plain string like `handlerCommand` above, not a
-          package). `null` leaves it unset — every enabled role then resolves
-          to the plain `handlerCommand` argv, unchanged from before this
-          option existed.
-        '';
-      };
       handlerConfig = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
@@ -296,7 +259,7 @@ in
           BeadsPrefix/etc — `pg-router-ccpool-handler`'s own
           `--config`/`PG_ROUTER_CCPOOL_HANDLER_CONFIG`), typically
           `phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile`
-          (interpolated to a string, like `handlerCommandDir` above). `null`
+          (interpolated to a string, since this option is a plain string, not a package). `null`
           leaves it unset — the handler process falls back to its own
           Default() (an empty WorktreeDir), so every dispatch needing
           isolation fails at worktree creation.
@@ -348,16 +311,6 @@ in
       configText = lib.mkOption {
         type = lib.types.lines;
         description = "The pg-router `config.toml` content — see `periodicDrain.configText`.";
-      };
-      handlerCommand = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = "PG_ROUTER_HANDLER_COMMAND override for the daemon core — see `periodicDrain.handlerCommand`.";
-      };
-      handlerCommandDir = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = "PG_ROUTER_HANDLER_COMMAND_DIR override for the daemon core — see `periodicDrain.handlerCommandDir`.";
       };
       handlerConfig = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -482,8 +435,6 @@ in
                 beadsPrefix = cfg.periodicDrain.beadsPrefix;
                 configText = cfg.periodicDrain.configText;
                 configFileName = "pg-router-drain-config.toml";
-                handlerCommand = cfg.periodicDrain.handlerCommand;
-                handlerCommandDir = cfg.periodicDrain.handlerCommandDir;
                 handlerConfig = cfg.periodicDrain.handlerConfig;
                 handlerCcpoolPool = cfg.periodicDrain.handlerCcpoolPool;
               };
@@ -501,8 +452,6 @@ in
                 beadsPrefix = cfg.daemon.beadsPrefix;
                 configText = cfg.daemon.configText;
                 configFileName = "pg-router-daemon-config.toml";
-                handlerCommand = cfg.daemon.handlerCommand;
-                handlerCommandDir = cfg.daemon.handlerCommandDir;
                 handlerConfig = cfg.daemon.handlerConfig;
                 handlerCcpoolPool = cfg.daemon.handlerCcpoolPool;
                 metricsAddr = cfg.daemon.metricsAddr;

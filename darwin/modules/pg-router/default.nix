@@ -132,12 +132,6 @@ in
           ) "export PG_ROUTER_BEADS_PREFIX=${lib.escapeShellArg daemonCfg.beadsPrefix}"}
           export PG_ROUTER_CONFIG=${pkgs.writeText "pg-router-daemon-config.toml" daemonCfg.configText}
           ${lib.optionalString (
-            daemonCfg.handlerCommand != null
-          ) "export PG_ROUTER_HANDLER_COMMAND=${lib.escapeShellArg daemonCfg.handlerCommand}"}
-          ${lib.optionalString (
-            daemonCfg.handlerCommandDir != null
-          ) "export PG_ROUTER_HANDLER_COMMAND_DIR=${lib.escapeShellArg daemonCfg.handlerCommandDir}"}
-          ${lib.optionalString (
             daemonCfg.handlerConfig != null
           ) "export PG_ROUTER_CCPOOL_HANDLER_CONFIG=${lib.escapeShellArg daemonCfg.handlerConfig}"}
           ${lib.optionalString (
@@ -225,8 +219,7 @@ in
           # sessions"), not just a drain bugfix. The daemon no longer
           # cancels a session-backed role's dispatch at shutdown (the role's
           # survives-shutdown setting: the `survives_shutdown` key of its
-          # [[role]] table, or `survivesShutdown` in a per-role JSON file on
-          # the old path; both rendered by
+          # [[role]] table, rendered by
           # home/programs/pg-router-ccpool-handler), so such a role's adapter
           # and its sessions are EXPECTED to outlive the daemon and must not
           # be group-killed, whichever adapter binary the role names. They

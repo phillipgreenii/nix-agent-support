@@ -4968,7 +4968,7 @@
                     promptBody = "p";
                   };
                   mkRole = baseline: extra: {
-                    type = "ccpool";
+                    handler = "/nix/store/fake-handler/bin/pg-router-handler-ccpool";
                     ccpool = roleBase // extra;
                     spec = {
                       inherit (baseline) wrap keep;
@@ -7744,24 +7744,12 @@
                                         type = lib.types.lines;
                                         default = "";
                                       };
-                                      # handlerCommand/handlerCommandDir stubs
-                                      # (this bead, pg2-pteab): non-null
-                                      # defaults, unlike the mkIf'd options
-                                      # above, so darwinWithDaemon's script
-                                      # exercises the threading below without
-                                      # evalDarwin needing a third parameter.
-                                      handlerCommand = lib.mkOption {
-                                        type = lib.types.nullOr lib.types.str;
-                                        default = "pg-router-ccpool-handler";
-                                      };
-                                      handlerCommandDir = lib.mkOption {
-                                        type = lib.types.nullOr lib.types.str;
-                                        default = "/nix/store/fake-roles-dir";
-                                      };
-                                      # handlerConfig stub (pg2-6e5h6): same
-                                      # non-null-default convention as
-                                      # handlerCommand/handlerCommandDir just
-                                      # above. This field's OMISSION here is
+                                      # handlerConfig stub (pg2-6e5h6): a
+                                      # non-null default, unlike the mkIf'd
+                                      # options above, so darwinWithDaemon's
+                                      # script exercises the threading below
+                                      # without evalDarwin needing a third
+                                      # parameter. This field's OMISSION here is
                                       # exactly the failure the comment below
                                       # warns about, and is what broke `nix
                                       # eval`/`nix flake check` on main after
@@ -7782,7 +7770,6 @@
                                       };
                                       # metricsAddr stub (pg2-ui2i3): same
                                       # non-null-default convention as
-                                      # handlerCommand/handlerCommandDir/
                                       # handlerConfig just above — this
                                       # hand-rolled submodule is a PARALLEL
                                       # schema to the real
@@ -7801,7 +7788,6 @@
                                       };
                                       # handlerCcpoolPool stub (pg2-1p4yp):
                                       # same non-null-default convention as
-                                      # handlerCommand/handlerCommandDir/
                                       # handlerConfig/metricsAddr just above
                                       # -- see those fields' own doc comments
                                       # for why a new field on the real
@@ -7867,8 +7853,6 @@
                       enable = true;
                       repoRoot = "/repo";
                       configText = baseConfigText;
-                      handlerCommand = "pg-router-ccpool-handler";
-                      handlerCommandDir = "/nix/store/fake-roles-dir";
                       handlerCcpoolPool = "/state/pg-router-ccpool";
                     };
                   };
@@ -7968,12 +7952,10 @@
                   !(lib.any (
                     v: lib.hasPrefix "PG_ROUTER_OPERATOR_PAUSED" v || lib.hasPrefix "PG_ROUTER_CICD_DOWN" v
                   ) daemonService.Environment);
-                # handlerCommand/handlerCommandDir (this bead, pg2-pteab):
-                # present on the daemon unit when configured, absent from
-                # the drain unit (drainOnly's own periodicDrain never sets
-                # them, so they stay at their `null` default).
-                assert lib.elem "PG_ROUTER_HANDLER_COMMAND=pg-router-ccpool-handler" daemonService.Environment;
-                assert lib.elem "PG_ROUTER_HANDLER_COMMAND_DIR=/nix/store/fake-roles-dir" daemonService.Environment;
+                # The shared handler command variables are GONE (pg2-12gr4.10.18):
+                # every role names its own handler in its [[role]] table, so
+                # neither unit carries PG_ROUTER_HANDLER_COMMAND[_DIR].
+                assert !(lib.any (v: lib.hasPrefix "PG_ROUTER_HANDLER_COMMAND" v) daemonService.Environment);
                 assert !(lib.any (v: lib.hasPrefix "PG_ROUTER_HANDLER_COMMAND" v) drainService.Environment);
                 # handlerCcpoolPool (pg2-1p4yp): CCPOOL_POOL (not a PG_ROUTER_*
                 # var) present on the daemon unit when configured, absent from
@@ -7988,32 +7970,26 @@
                 assert darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents ? pg-router-daemon;
                 assert lib.hasInfix "pg-router run"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
-                # handlerCommand/handlerCommandDir mirror into the darwin
-                # LaunchAgent script too (this bead, pg2-pteab) — sourced
-                # from the stub submodule's own non-null defaults above.
-                assert lib.hasInfix "PG_ROUTER_HANDLER_COMMAND=pg-router-ccpool-handler"
-                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
-                assert lib.hasInfix "PG_ROUTER_HANDLER_COMMAND_DIR=/nix/store/fake-roles-dir"
-                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
+                # The darwin LaunchAgent script exports neither handler command
+                # variable either (pg2-12gr4.10.18).
+                assert
+                  !lib.hasInfix "PG_ROUTER_HANDLER_COMMAND" darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 # handlerConfig mirrors into the darwin LaunchAgent script
                 # too (pg2-6e5h6 regression fix): sourced from the stub
-                # submodule's own non-null default above — same pattern as
-                # handlerCommand/handlerCommandDir just above. This is the
+                # submodule's own non-null default above. This is the
                 # assertion that would have caught the missing stub field
                 # before it broke `nix eval`/`nix flake check`.
                 assert lib.hasInfix "PG_ROUTER_CCPOOL_HANDLER_CONFIG=/nix/store/fake-handler-config.toml"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 # metricsAddr mirrors into the darwin LaunchAgent script too
                 # (pg2-ui2i3), sourced from the stub submodule's own
-                # non-null default above — same pattern as
-                # handlerCommand/handlerCommandDir just above.
+                # non-null default above, same pattern as handlerConfig.
                 assert lib.hasInfix "PG_ROUTER_METRICS_ADDR=127.0.0.1:9820"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 # handlerCcpoolPool mirrors into the darwin LaunchAgent
                 # script too (pg2-1p4yp) — sourced from the stub submodule's
                 # own non-null default above, same pattern as
-                # handlerCommand/handlerCommandDir/handlerConfig/metricsAddr
-                # just above.
+                # handlerConfig/metricsAddr just above.
                 assert lib.hasInfix "export CCPOOL_POOL=/tmp/fake-ccpool-pool"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 # pg2-e5u06: the plist MUST NOT let launchd group-kill a
@@ -8160,44 +8136,30 @@
                     touch $out
                   '';
 
-              # test-pg-router-ccpool-handler-module (this bead, pg2-pteab):
-              # eval-level coverage for the NEW nix-layer wiring of the
-              # Go-level PG_ROUTER_HANDLER_COMMAND_DIR support bead pg2-ymb3v
-              # landed — before this bead, neither
-              # home/programs/pg-router-ccpool-handler/default.nix's `roles`
-              # option nor `handlerCommandDir` output existed at all. Proves
-              # (acceptance criterion 1): `roles` populated for 2
-              # differently-configured roles (a "ccpool" one and a "command"
-              # one -- deliberately different `type`s, not just different
-              # field values, so a wrong-block-entirely bug is caught too)
-              # renders 2 distinct `<role.Name>.json` files under one
-              # `handlerCommandDir`, matching
-              # internal/rolefile/rolefile.go's `RoleFile`
+              # test-pg-router-ccpool-handler-module (beads pg2-pteab, pg2-12gr4.10.10,
+              # pg2-12gr4.10.18): eval-level coverage of
+              # home/programs/pg-router-ccpool-handler/default.nix. Every role names its
+              # adapter as `handler` and joins the pg-router module's role of the same
+              # name; there is no `type` and no per-role JSON. Proves `roles` populated
+              # for 2 differently-configured roles (a ccpool one and a command one --
+              # different adapters, not just different field values, so a
+              # wrong-block-entirely bug is caught too) renders two `[[role]]` tables
+              # whose `[role.config]` matches internal/rolefile/rolefile.go's `RoleFile`
               # shape exactly (including its untagged, Go-field-cased
-              # `Isolation.{Type,Path}` -- roles.IsolationConfig carries no
-              # json tags, see roleFileFor's own doc comment in that
-              # default.nix). Also proves (pg2-r8al1) that the "feedback"
-              # role's `ccpool.budget.{tokens,cost,time}` renders into the
-              # same `roleFile.CCPool.Budget` shape
-              # internal/rolefile/rolefile.go's `LoadRole` now
-              # decodes — before pg2-r8al1, neither the Go `roleFile.CCPool`
-              # struct nor this nix option carried a `budget` field at all,
-              # so a role's watchdog budget could never be populated from
-              # `--role-config`/this nix module. Also proves an empty
-              # `roles` attrset still resolves to a harmless empty directory,
-              # and that
-              # darwin/modules/pg-router-ccpool-handler/default.nix re-
-              # exposes the HM module's own `handlerCommandDir` output
-              # verbatim at darwin scope. Extended for pg2-qsred (home-
-              # manager module had no launch-config surface at all --
-              # real dispatch failed on empty WorktreeDir): also proves the
-              # new `launchConfig`/`launchConfigFile` option renders a real
-              # repoRoot/worktreeDir plus a couple of overridden scalars
+              # `Isolation.{Type,Path}` -- roles.IsolationConfig carries no json tags,
+              # see roleBodyFor's own doc comment in that default.nix). The assertions
+              # read each role's table back from the real rendered TOML (`rolesFile`),
+              # flattened per role by `rolesJsonDir`. Also proves (pg2-r8al1) that the
+              # "feedback" role's `ccpool.budget.{tokens,cost,time}` renders into the
+              # same `roleFile.CCPool.Budget` shape the handler decodes, that an empty
+              # `roles` attrset still resolves to a harmless empty result, and, extended
+              # for pg2-qsred, that the `launchConfig`/`launchConfigFile` option renders
+              # a real repoRoot/worktreeDir plus a couple of overridden scalars
               # correctly, that every other field matches
-              # `internal/config.Default()`'s own values when left
-              # untouched, and that `launchConfigFile` resolves to `null`
-              # (never throws "used but not defined") when the module is
-              # disabled, since `repoRoot`/`worktreeDir` carry no default.
+              # `internal/config.Default()`'s own values when left untouched, and that
+              # `launchConfigFile` resolves to `null` (never throws "used but not
+              # defined") when the module is disabled, since `repoRoot`/`worktreeDir`
+              # carry no default.
               test-pg-router-ccpool-handler-module =
                 let
                   inherit (import ./tests/pg-router-ccpool-handler-eval-hm.nix { inherit lib pkgs llm-agents; })
@@ -8206,6 +8168,46 @@
                     claudeBin
                     ;
 
+                  # The adapter a role names as its `handler`. Only the base name
+                  # selects the kind; the build-time validation runs the module's own
+                  # `package` adapters whatever path a role carries.
+                  ccpoolHandler = "/nix/store/fake-handler/bin/pg-router-handler-ccpool";
+                  commandHandler = "/nix/store/fake-handler/bin/pg-router-handler-command";
+
+                  # rolesJsonDir (pg2-12gr4.10.18): one `<role>.json` per role, read
+                  # back from the REAL rendered `[[role]]` tables (`rolesFile`, TOML)
+                  # and flattened to the shape the per-role JSON files had before the
+                  # old path ended: the role's `[role.config]` keys at the top, plus
+                  # `name`, `type` (the kind of the adapter in `handler`) and, only
+                  # when the role sets it, `survivesShutdown`. So an assertion reads
+                  # what the pg-router core would read. The per-adapter build-time
+                  # validation (`roleValidation`) is an input, so a spec that fails
+                  # `pg-wrap check` or a config the adapter rejects fails this build.
+                  rolesJsonDir =
+                    eval:
+                    pkgs.runCommand "pg-router-ccpool-handler-roles-json"
+                      {
+                        nativeBuildInputs = [
+                          pkgs.jq
+                          pkgs.python3
+                        ];
+                        rolesFile = eval.phillipgreenii.programs.pg-router.rolesFile;
+                        validateCcpool = eval.phillipgreenii.programs.pg-router-ccpool-handler.roleValidation.ccpool;
+                        validateCommand = eval.phillipgreenii.programs.pg-router-ccpool-handler.roleValidation.command;
+                      }
+                      ''
+                        set -euo pipefail
+                        mkdir -p "$out"
+                        python3 -I -c 'import json, sys, tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))))' "$rolesFile" > roles.json
+                        for n in $(jq -r '(.role // [])[].name' roles.json); do
+                          jq --arg n "$n" '
+                            .role[] | select(.name == $n)
+                            | {name: .name, type: (.handler | split("/")[-1] | sub("^pg-router-handler-"; ""))}
+                              + (if has("survives_shutdown") then {survivesShutdown: .survives_shutdown} else {} end)
+                              + .config' roles.json > "$out/$n.json"
+                        done
+                      '';
+
                   # Two differently-configured roles (acceptance criterion
                   # 1): "feedback" is a ccpool role, "worker" is a command
                   # role.
@@ -8213,7 +8215,7 @@
                     enable = true;
                     roles = {
                       feedback = {
-                        type = "ccpool";
+                        handler = ccpoolHandler;
                         ccpool = {
                           actor = "feedback-actor";
                           completion = "close-only";
@@ -8237,7 +8239,7 @@
                         };
                       };
                       worker = {
-                        type = "command";
+                        handler = commandHandler;
                         command = {
                           argv = [
                             "worker-bin"
@@ -8247,15 +8249,15 @@
                       };
                     };
                   };
-                  handlerCommandDir = twoRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir;
+                  twoRolesJson = rolesJsonDir twoRoles;
 
-                  # Zero roles: handlerCommandDir must still resolve (an
+                  # Zero roles: the rendered result must still resolve (an
                   # empty directory), never throw.
                   noRoles = evalHM {
                     enable = true;
                     roles = { };
                   };
-                  emptyHandlerCommandDir = noRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir;
+                  noRolesJson = rolesJsonDir noRoles;
 
                   # pool (pg2-1p4yp): disabled by default -- no
                   # home.activation entry at all (an existing deployment
@@ -8301,13 +8303,13 @@
                       pool.enable = true;
                     }).phillipgreenii.programs.pg-router-ccpool-handler.pool.dir;
 
-                  # unknownToolSetHandlerDir (bead pg2-cwn44): a role declaring a tool set
-                  # the module does not define; forcing its rendered dir must fail.
-                  unknownToolSetHandlerDir =
+                  # unknownToolSetRolesFile (bead pg2-cwn44): a role declaring a tool set
+                  # the module does not define; forcing its rendered roles file must fail.
+                  unknownToolSetRolesFile =
                     (evalHM {
                       enable = true;
                       roles.typo = {
-                        type = "ccpool";
+                        handler = ccpoolHandler;
                         ccpool = {
                           actor = "typo-actor";
                           completion = "close-only";
@@ -8317,12 +8319,12 @@
                           toolSets = [ "gp" ];
                         };
                       };
-                    }).phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir;
+                    }).phillipgreenii.programs.pg-router.rolesFile;
 
                   # roleWithOwnPool (bead pg2-mr0sl): a ccpool role opting
                   # into its OWN dedicated pool, plus poolMetrics enabled --
-                  # proves (a) roleFileFor renders `poolDir` into that
-                  # role's own JSON (unlike a role that never opts in, see
+                  # proves (a) roleBodyFor renders `poolDir` into that
+                  # role's own config (unlike a role that never opts in, see
                   # `feedback` in `twoRoles`'s renderCheck assertion above,
                   # which must NOT carry a poolDir key at all), (b)
                   # home.activation gets a per-role bootstrap entry mirroring
@@ -8335,7 +8337,7 @@
                     enable = true;
                     roles = {
                       review = {
-                        type = "ccpool";
+                        handler = ccpoolHandler;
                         ccpool = {
                           actor = "review-actor";
                           completion = "close-only";
@@ -8343,7 +8345,7 @@
                           onDispatchFail = "leave";
                           promptBody = "review prompt";
                           # extraAllowedTools (bead pg2-nk6th.5): a per-role list
-                          # renders into this role's own JSON only.
+                          # renders into this role's own config only.
                           extraAllowedTools = [
                             "Skill"
                             "Bash(gh pr create:*)"
@@ -8360,7 +8362,7 @@
                       # only; no pool of its own, so the pool-metrics wiring
                       # asserted below is unchanged.
                       drain = {
-                        type = "ccpool";
+                        handler = ccpoolHandler;
                         ccpool = {
                           actor = "drain-actor";
                           completion = "close-or-release";
@@ -8391,7 +8393,7 @@
                       # and the `triage` precheck render into this role's own JSON
                       # only.
                       triage = {
-                        type = "ccpool";
+                        handler = ccpoolHandler;
                         ccpool = {
                           actor = "triage-actor";
                           completion = "close-or-triage";
@@ -8443,8 +8445,7 @@
                   ) null handlerPoolOnlyMetrics.assertions;
                   handlerPoolOnlyScript =
                     handlerPoolOnlyMetrics.phillipgreenii.programs.pg-router-ccpool-handler.poolMetrics.script;
-                  roleWithOwnPoolHandlerDir =
-                    roleWithOwnPool.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir;
+                  ownPoolRolesJson = rolesJsonDir roleWithOwnPool;
                   reviewPoolActivation = roleWithOwnPool.home.activation.pgRouterCcpoolHandlerPool_review;
                   reviewPoolDirQuoted = lib.escapeShellArg "/tmp/pg2-mr0sl-review-pool";
                   poolMetricsService = roleWithOwnPool.systemd.user.services."pg-router-ccpool-handler-pool-metrics";
@@ -8466,7 +8467,7 @@
                   roleOwnPoolMissingDir = evalHM {
                     enable = true;
                     roles.review = {
-                      type = "ccpool";
+                      handler = ccpoolHandler;
                       ccpool = {
                         actor = "review-actor";
                         completion = "close-only";
@@ -8556,7 +8557,7 @@
                   # darwin/modules/pg-router-ccpool-handler/default.nix
                   # reads/writes -- phillipgreenii.system.launchdServices.
                   # userAgents (real option) and a minimal home-manager.users
-                  # stub carrying the module's own `enable`/`handlerCommandDir`/
+                  # stub carrying the module's own `enable`/
                   # `daemon.{enable,socket,id,self,token}` fields it actually
                   # reads.
                   userAgentSubmodule = lib.types.submodule {
@@ -8644,10 +8645,6 @@
                                         type = lib.types.bool;
                                         default = false;
                                       };
-                                      handlerCommandDir = lib.mkOption {
-                                        type = lib.types.nullOr lib.types.package;
-                                        default = null;
-                                      };
                                       daemon = {
                                         enable = lib.mkOption {
                                           type = lib.types.bool;
@@ -8710,10 +8707,6 @@
                       ];
                     }).config;
 
-                  darwinWithHandlerDir = evalDarwin {
-                    enable = true;
-                    inherit handlerCommandDir;
-                  };
                   darwinWithoutRoles = evalDarwin { enable = false; };
 
                   # poolMetrics darwin mirror (bead pg2-mr0sl): unlike
@@ -8762,7 +8755,7 @@
                   };
                   pgWrapExecPath = "${pkgs.pg-wrap}/bin/pg-wrap-exec";
                   wrapClaudeBin = claudeBin;
-                  # Real executables for the specs that handlerCommandDir builds: the
+                  # Real executables for the specs the per-adapter validation builds: the
                   # build-time `pg-wrap check` (bead pg2-12gr4.8.32) needs every
                   # referenced path to exist, so a fake store path no longer builds.
                   wrapFakePrefix = "${pkgs.coreutils}/bin/env";
@@ -8777,7 +8770,7 @@
                     enable = true;
                     roles = {
                       wrapped = {
-                        type = "ccpool";
+                        handler = ccpoolHandler;
                         ccpool = wrapRoleBase // {
                           pool = {
                             enable = true;
@@ -8795,7 +8788,7 @@
                         };
                       };
                       plain = {
-                        type = "ccpool";
+                        handler = ccpoolHandler;
                         ccpool = wrapRoleBase // {
                           pool = {
                             enable = true;
@@ -8805,13 +8798,13 @@
                         };
                       };
                       cmd = {
-                        type = "command";
+                        handler = commandHandler;
                         command.argv = [ "cmd-bin" ];
                         strictBaseEnv = true;
                       };
                       # A command role with a pg-wrap spec (bead pg2-8puhw).
                       cmd-wrapped = {
-                        type = "command";
+                        handler = commandHandler;
                         command = {
                           argv = [
                             "cmd-bin"
@@ -8831,7 +8824,7 @@
                     };
                   };
                   wrapOwnPoolFired = wrapFired wrapOwnPool;
-                  wrapOwnPoolDir = (wrapMod wrapOwnPool).handlerCommandDir;
+                  wrapOwnPoolJson = rolesJsonDir wrapOwnPool;
                   wrapOwnPoolSpec = (wrapMod wrapOwnPool).specFiles.wrapped;
                   wrapOwnPoolCmdSpec = (wrapMod wrapOwnPool).commandSpecFiles.cmd-wrapped;
                   wrapPgWrapBin = "${pkgs.pg-wrap}/bin/pg-wrap";
@@ -8849,7 +8842,7 @@
                     };
                     roles = {
                       triage-a = {
-                        type = "ccpool";
+                        handler = ccpoolHandler;
                         ccpool = wrapRoleBase;
                         spec = {
                           exec = [ "${pkgs.coreutils}/bin/true" ];
@@ -8863,14 +8856,14 @@
                         };
                       };
                       triage-b = {
-                        type = "ccpool";
+                        handler = ccpoolHandler;
                         ccpool = wrapRoleBase;
                         spec.exec = [ "${pkgs.coreutils}/bin/true" ];
                       };
                     };
                   };
                   wrapHandlerPoolFired = wrapFired wrapHandlerPool;
-                  wrapHandlerPoolDir = (wrapMod wrapHandlerPool).handlerCommandDir;
+                  wrapHandlerPoolJson = rolesJsonDir wrapHandlerPool;
                   wrapHandlerPoolSpecA = (wrapMod wrapHandlerPool).specFiles.triage-a;
                   wrapHandlerPoolConfig = (wrapMod wrapHandlerPool).poolConfigFiles.handler;
 
@@ -8887,7 +8880,7 @@
                       dir = "/tmp/pg2-k31-pool";
                     };
                     roles.k31-baseline = {
-                      type = "ccpool";
+                      handler = ccpoolHandler;
                       ccpool = wrapRoleBase;
                       spec = {
                         inherit (k31Baseline) wrap keep;
@@ -8904,78 +8897,11 @@
                     touch $out
                   '';
 
-                  # checkRenderedScript (bead pg2-12gr4.8.32): the build-time check
-                  # `handlerCommandDir` runs over every rendered spec and role file.
-                  # Expected-failure idiom (as test-claude-plugin-binary-default-parity):
-                  # the files are written inside this runCommand and the script must
-                  # FAIL on the bad ones, naming the file, and pass on the clean ones.
-                  # (builtins.tryEval cannot do this: it catches an evaluation error,
-                  # never a failed build.)
-                  checkRenderedScript =
-                    twoRoles.phillipgreenii.programs.pg-router-ccpool-handler.lib.checkRenderedScript;
-                  checkRenderedCheck =
-                    pkgs.runCommand "test-pg-router-ccpool-handler-check-rendered"
-                      {
-                        inherit checkRenderedScript;
-                      }
-                      ''
-                        set -euo pipefail
-                        mkdir fx
-                        cat > fx/clean.toml <<'EOF'
-                        schema_version = 1
-                        wrap = []
-                        exec = ["${pkgs.coreutils}/bin/true"]
-                        EOF
-                        cat > fx/relative.toml <<'EOF'
-                        schema_version = 1
-                        wrap = ["relative/env K=1"]
-                        exec = ["${pkgs.coreutils}/bin/true"]
-                        EOF
-                        echo '{"name":"clean","type":"command","command":{"argv":["/bin/true"]}}' > fx/clean.json
-                        echo '{"name":"neg","type":"command","command":{"argv":["/bin/true"]},"bogusKey":1}' > fx/bogus.json
-
-                        # Clean spec + clean role file: exit 0.
-                        "$checkRenderedScript" --spec fx/clean.toml --role fx/clean.json
-                        "$checkRenderedScript"
-
-                        # Spec with a relative first word: exit non-zero, naming the file.
-                        if "$checkRenderedScript" --spec fx/relative.toml 2>neg-spec.log; then
-                          echo "FAIL: a spec with a relative first word passed" >&2
-                          exit 1
-                        fi
-                        grep -q "fx/relative.toml" neg-spec.log
-
-                        # Role file with an unknown top-level key: exit non-zero, naming the file.
-                        if "$checkRenderedScript" --role fx/bogus.json 2>neg-role.log; then
-                          echo "FAIL: a role file with an unknown key passed" >&2
-                          exit 1
-                        fi
-                        grep -q "fx/bogus.json" neg-role.log
-                        grep -q "bogusKey" neg-role.log
-
-                        # One bad file among clean ones still fails, and the clean ones are not blamed.
-                        if "$checkRenderedScript" --spec fx/clean.toml --role fx/bogus.json --role fx/clean.json 2>neg-mixed.log; then
-                          echo "FAIL: a mixed run with a bad role file passed" >&2
-                          exit 1
-                        fi
-                        grep -q "fx/bogus.json" neg-mixed.log
-                        if grep -q "fx/clean" neg-mixed.log; then
-                          echo "FAIL: a clean file was blamed" >&2
-                          exit 1
-                        fi
-
-                        # An unknown argument is a usage error (exit 2), never a pass.
-                        rc=0
-                        "$checkRenderedScript" --bogus x 2>/dev/null || rc=$?
-                        [ "$rc" -eq 2 ]
-                        touch $out
-                      '';
-
                   # Case 1: a spec role whose pool's `settings.claude.bin` is overridden.
                   wrapOverriddenFired = wrapFired (evalHM {
                     enable = true;
                     roles.overridden = {
-                      type = "ccpool";
+                      handler = ccpoolHandler;
                       ccpool = wrapRoleBase // {
                         pool = {
                           enable = true;
@@ -8990,7 +8916,7 @@
                   wrapDefaultPoolFired = wrapFired (evalHM {
                     enable = true;
                     roles.stray = {
-                      type = "ccpool";
+                      handler = ccpoolHandler;
                       ccpool = wrapRoleBase;
                       spec.exec = [ "/nix/store/fake/bin/claude" ];
                     };
@@ -9005,12 +8931,12 @@
                     };
                     roles = {
                       with-spec = {
-                        type = "ccpool";
+                        handler = ccpoolHandler;
                         ccpool = wrapRoleBase;
                         spec.exec = [ "/nix/store/fake/bin/claude" ];
                       };
                       without-spec = {
-                        type = "ccpool";
+                        handler = ccpoolHandler;
                         ccpool = wrapRoleBase;
                       };
                     };
@@ -9019,7 +8945,7 @@
                   wrapUserBinFired = wrapFired (evalHM {
                     enable = true;
                     roles.user-bin = {
-                      type = "ccpool";
+                      handler = ccpoolHandler;
                       ccpool = wrapRoleBase // {
                         pool = {
                           enable = true;
@@ -9034,7 +8960,7 @@
                   wrapUnmanagedFired = wrapFired (evalHM {
                     enable = true;
                     roles.unmanaged = {
-                      type = "ccpool";
+                      handler = ccpoolHandler;
                       ccpool = wrapRoleBase;
                     };
                   });
@@ -9042,7 +8968,7 @@
                   wrapCommandSpecFired = wrapFired (evalHM {
                     enable = true;
                     roles.cmd-spec = {
-                      type = "command";
+                      handler = commandHandler;
                       command.argv = [ "cmd-bin" ];
                       spec.exec = [ "/nix/store/fake/bin/claude" ];
                     };
@@ -9051,7 +8977,7 @@
                   wrapCcpoolCommandSpecFired = wrapFired (evalHM {
                     enable = true;
                     roles.ccpool-cmd-spec = {
-                      type = "ccpool";
+                      handler = ccpoolHandler;
                       ccpool = wrapRoleBase // {
                         pool = {
                           enable = true;
@@ -9068,7 +8994,7 @@
                   wrapEnvClashFired = wrapFired (evalHM {
                     enable = true;
                     roles.clash = {
-                      type = "ccpool";
+                      handler = ccpoolHandler;
                       ccpool = wrapRoleBase // {
                         pool = {
                           enable = true;
@@ -9083,13 +9009,10 @@
                     fired: role: dir:
                     fired != null && lib.hasInfix role fired.message && lib.hasInfix dir fired.message;
 
-                  # The NEW path (bead pg2-12gr4.10.10): a role that sets `handler`
-                  # (an adapter binary) instead of `type` joins the pg-router
-                  # module's `roles.<name>` by name. Each new-path role has an
-                  # OLD-path twin (same settings, `type` instead of `handler`) so a
-                  # build-time check can prove the [role.config] table equals the
-                  # per-role JSON field for field (a field the shared renderer
-                  # dropped would differ).
+                  # The join (beads pg2-12gr4.10.10, pg2-12gr4.10.18): a role names its
+                  # adapter in `handler` (an absolute path to an adapter binary) and
+                  # joins the pg-router module's `roles.<name>` by name, real adapter
+                  # paths here.
                   npPkg = (evalHM { }).phillipgreenii.programs.pg-router-ccpool-handler.package;
                   npCcpoolAdapter = "${npPkg}/bin/pg-router-handler-ccpool";
                   npCommandAdapter = "${npPkg}/bin/pg-router-handler-command";
@@ -9146,18 +9069,6 @@
                       command = npCommandSettings;
                       strictBaseEnv = true;
                     };
-                    # The old-path twins.
-                    old-ccpool = {
-                      type = "ccpool";
-                      ccpool = npCcpoolSettings;
-                      spec = npCcpoolSpec;
-                      sessionEnv.NP_EXTRA = "extra";
-                    };
-                    old-cmd = {
-                      type = "command";
-                      command = npCommandSettings;
-                      strictBaseEnv = true;
-                    };
                   };
                   npBinds = {
                     np-ccpool.binds = [ "np.ccpool" ];
@@ -9192,20 +9103,31 @@
                       roles.np-cmd = npRoles.np-cmd;
                     };
                   });
-                  # Both type and handler; neither.
-                  npBothFired = wrapFired (evalHMWith {
-                    handler = {
-                      enable = true;
-                      roles.np-both = npRoles.np-cmd // {
-                        type = "command";
-                      };
-                    };
-                    pgRouter.roles.np-both.binds = [ "np.both" ];
-                  });
-                  npNeitherFired = wrapFired (evalHM {
-                    enable = true;
-                    roles.np-neither.command.argv = [ "x" ];
-                  });
+                  # `type` is gone and `handler` is required (pg2-12gr4.10.18): a role
+                  # that still sets `type`, and one that names no adapter, both fail
+                  # evaluation (forcing the role's rendered config throws).
+                  npTypeGone =
+                    !(builtins.tryEval
+                      (evalHMWith {
+                        handler = {
+                          enable = true;
+                          roles.np-typed = {
+                            # The old selector, which no longer exists.
+                            type = "command";
+                            handler = npCommandAdapter;
+                            command.argv = [ "x" ];
+                          };
+                        };
+                        pgRouter.roles.np-typed.binds = [ "np.typed" ];
+                      }).phillipgreenii.programs.pg-router.rolesFile.outPath
+                    ).success;
+                  npNeitherFails =
+                    !(builtins.tryEval
+                      (evalHM {
+                        enable = true;
+                        roles.np-neither.command.argv = [ "x" ];
+                      }).phillipgreenii.programs.pg-router.rolesFile.outPath
+                    ).success;
                   # A handler that is not one of the adapters.
                   npBadHandlerFired = wrapFired (evalHMWith {
                     handler = {
@@ -9230,7 +9152,7 @@
                     };
                     pgRouter.roles.np-stray.binds = [ "np.stray" ];
                   });
-                  # A no-spec new-path role on the handler-wide pg-wrap-exec pool fails.
+                  # A no-spec role on the handler-wide pg-wrap-exec pool fails.
                   npSharedPoolFired = wrapFired (evalHMWith {
                     handler = {
                       enable = true;
@@ -9256,7 +9178,6 @@
                     };
                   });
                   npFired = wrapFired npEval;
-                  npNoJsonDir = npMod.handlerCommandDir;
                   npValidateCcpool = npMod.roleValidation.ccpool;
                   npValidateCommand = npMod.roleValidation.command;
                   # The validate derivations carry pg-wrap check over the spec files.
@@ -9267,7 +9188,8 @@
                   # carrying a key the adapter's decoder rejects (the field-drop
                   # negative: the adapter's validate is the ONE entry point), and to
                   # pass a clean one. Expected-failure idiom as
-                  # test-pg-router-ccpool-handler-check-rendered above.
+                  # test-claude-plugin-binary-default-parity: the files are written
+                  # inside this runCommand and the script must FAIL on the bad ones.
                   checkAdapterRolesScript = npMod.lib.checkAdapterRolesScript;
                   checkAdapterRolesCheck =
                     pkgs.runCommand "test-pg-router-ccpool-handler-check-adapter-roles"
@@ -9342,67 +9264,65 @@
                           wrapClaudeBin
                           wrapFakePrefix
                           wrapFakeOther
-                          wrapOwnPoolDir
+                          wrapOwnPoolJson
                           wrapOwnPoolSpec
                           wrapOwnPoolCmdSpec
                           wrapPgWrapBin
                           wrapOwnPoolConfig
                           wrapPlainPoolConfig
-                          wrapHandlerPoolDir
+                          wrapHandlerPoolJson
                           wrapHandlerPoolSpecA
                           wrapHandlerPoolConfig
                           k31SpecFile
                           k31SpecCheck
-                          checkRenderedCheck
                           checkAdapterRolesCheck
                           npRolesFile
-                          npNoJsonDir
                           npValidateCcpool
                           npValidateCommand
                           npCcpoolAdapter
                           npCommandAdapter
                           k31WrapJson
-                          handlerCommandDir
-                          emptyHandlerCommandDir
+                          twoRolesJson
+                          noRolesJson
                           launchConfigFile
                           defaultLaunchConfigFile
-                          roleWithOwnPoolHandlerDir
+                          ownPoolRolesJson
                           poolMetricsScript
                           handlerPoolOnlyScript
                           ;
                       }
                       ''
                         set -euo pipefail
-                        test -f "$handlerCommandDir/feedback.json"
-                        test -f "$handlerCommandDir/worker.json"
-                        [ "$(jq -r .name "$handlerCommandDir/feedback.json")" = feedback ]
-                        [ "$(jq -r .type "$handlerCommandDir/feedback.json")" = ccpool ]
-                        [ "$(jq -r .ccpool.actor "$handlerCommandDir/feedback.json")" = feedback-actor ]
-                        [ "$(jq -r .ccpool.completion "$handlerCommandDir/feedback.json")" = close-only ]
+                        test -f "$twoRolesJson/feedback.json"
+                        test -f "$twoRolesJson/worker.json"
+                        [ "$(jq -r .name "$twoRolesJson/feedback.json")" = feedback ]
+                        [ "$(jq -r .type "$twoRolesJson/feedback.json")" = ccpool ]
+                        [ "$(jq -r .ccpool.actor "$twoRolesJson/feedback.json")" = feedback-actor ]
+                        [ "$(jq -r .ccpool.completion "$twoRolesJson/feedback.json")" = close-only ]
                         # survivesShutdown (pg2-dtigc, ADR 0085): rendered for a
                         # ccpool-type role, never for a command-type one.
-                        [ "$(jq -r .survivesShutdown "$handlerCommandDir/feedback.json")" = true ]
+                        [ "$(jq -r .survivesShutdown "$twoRolesJson/feedback.json")" = true ]
                         # budget.{tokens,cost,time} renders into the same
                         # roleFile.CCPool.Budget shape loadRole decodes
                         # (pg2-r8al1 acceptance criterion 2).
-                        [ "$(jq -r .ccpool.budget.tokens "$handlerCommandDir/feedback.json")" = 5000 ]
-                        [ "$(jq -r .ccpool.budget.cost "$handlerCommandDir/feedback.json")" = 250 ]
-                        [ "$(jq -r .ccpool.budget.time "$handlerCommandDir/feedback.json")" = 25m ]
+                        [ "$(jq -r .ccpool.budget.tokens "$twoRolesJson/feedback.json")" = 5000 ]
+                        [ "$(jq -r .ccpool.budget.cost "$twoRolesJson/feedback.json")" = 250 ]
+                        [ "$(jq -r .ccpool.budget.time "$twoRolesJson/feedback.json")" = 25m ]
                         # Untouched isolation default renders as "" (the Go
                         # side's own "worktree" fallback for an empty Type),
                         # via the untagged, Go-field-cased Isolation.Type key.
-                        [ "$(jq -r .ccpool.isolation.Type "$handlerCommandDir/feedback.json")" = "" ]
-                        jq -e 'has("command") | not' "$handlerCommandDir/feedback.json" >/dev/null
+                        [ "$(jq -r .ccpool.isolation.Type "$twoRolesJson/feedback.json")" = "" ]
+                        jq -e 'has("command") | not' "$twoRolesJson/feedback.json" >/dev/null
                         # pg2-hh32y: isolation.prefetch renders under the Go field names.
-                        [ "$(jq -r .ccpool.isolation.Prefetch.DiffBase "$handlerCommandDir/feedback.json")" = origin/main ]
-                        [ "$(jq -r .ccpool.isolation.Prefetch.Timeout "$handlerCommandDir/feedback.json")" = 3m ]
-                        [ "$(jq -r .ccpool.isolation.Prefetch.Rev "$handlerCommandDir/feedback.json")" = '{{index .Item.Metadata "head_sha"}}' ]
-                        [ "$(jq -r .name "$handlerCommandDir/worker.json")" = worker ]
-                        [ "$(jq -r .type "$handlerCommandDir/worker.json")" = command ]
-                        [ "$(jq -c .command.argv "$handlerCommandDir/worker.json")" = '["worker-bin","--flag"]' ]
-                        jq -e 'has("ccpool") | not' "$handlerCommandDir/worker.json" >/dev/null
-                        jq -e 'has("survivesShutdown") | not' "$handlerCommandDir/worker.json" >/dev/null
-                        [ "$(ls -1 "$emptyHandlerCommandDir" | wc -l)" -eq 0 ]
+                        [ "$(jq -r .ccpool.isolation.Prefetch.DiffBase "$twoRolesJson/feedback.json")" = origin/main ]
+                        [ "$(jq -r .ccpool.isolation.Prefetch.Timeout "$twoRolesJson/feedback.json")" = 3m ]
+                        [ "$(jq -r .ccpool.isolation.Prefetch.Rev "$twoRolesJson/feedback.json")" = '{{index .Item.Metadata "head_sha"}}' ]
+                        [ "$(jq -r .name "$twoRolesJson/worker.json")" = worker ]
+                        [ "$(jq -r .type "$twoRolesJson/worker.json")" = command ]
+                        [ "$(jq -c .command.argv "$twoRolesJson/worker.json")" = '["worker-bin","--flag"]' ]
+                        jq -e 'has("ccpool") | not' "$twoRolesJson/worker.json" >/dev/null
+                        jq -e 'has("survivesShutdown") | not' "$twoRolesJson/worker.json" >/dev/null
+                        [ "$(ls -1 "$noRolesJson" | wc -l)" -eq 0 ]
 
                         # launchConfigFile (this bead, pg2-qsred): the
                         # overrides render, and everything left untouched
@@ -9460,14 +9380,14 @@
                         # its own dedicated pool renders it into that
                         # role's own JSON; "feedback" above (which never
                         # opted in) must carry no such key at all.
-                        [ "$(jq -r .ccpool.poolDir "$roleWithOwnPoolHandlerDir/review.json")" = /tmp/pg2-mr0sl-review-pool ]
-                        jq -e '.ccpool | has("poolDir") | not' "$handlerCommandDir/feedback.json" >/dev/null
+                        [ "$(jq -r .ccpool.poolDir "$ownPoolRolesJson/review.json")" = /tmp/pg2-mr0sl-review-pool ]
+                        jq -e '.ccpool | has("poolDir") | not' "$twoRolesJson/feedback.json" >/dev/null
 
                         # extraAllowedTools (bead pg2-nk6th.5): a role that sets
                         # it renders the list in order under that role's own
                         # JSON; a role that never sets it carries no such key.
-                        [ "$(jq -c .ccpool.extraAllowedTools "$roleWithOwnPoolHandlerDir/review.json")" = '["Skill","Bash(gh pr create:*)"]' ]
-                        jq -e '.ccpool | has("extraAllowedTools") | not' "$handlerCommandDir/feedback.json" >/dev/null
+                        [ "$(jq -c .ccpool.extraAllowedTools "$ownPoolRolesJson/review.json")" = '["Skill","Bash(gh pr create:*)"]' ]
+                        jq -e '.ccpool | has("extraAllowedTools") | not' "$twoRolesJson/feedback.json" >/dev/null
 
                         # toolSets (bead pg2-cwn44): a role that declares the "go" set
                         # gets its grants (and a consumer-defined set's) rendered
@@ -9476,8 +9396,8 @@
                         # carries no go grant anywhere in its role file, and the
                         # handler-wide launch-config allowlist carries none either:
                         # this is the negative that keeps go test off every other role.
-                        [ "$(jq -c .ccpool.extraAllowedTools "$roleWithOwnPoolHandlerDir/drain.json")" = '["Skill","Bash(gofumpt:*)","Bash(go build:*)","Bash(go test:*)","Bash(go vet:*)","Bash(go mod:*)","Bash(gofmt:*)","Bash(prek:*)","Bash(pre-commit:*)","Bash(pg-hooks:*)"]' ]
-                        for f in "$roleWithOwnPoolHandlerDir/review.json" "$roleWithOwnPoolHandlerDir/triage.json" "$handlerCommandDir/feedback.json" "$handlerCommandDir/worker.json"; do
+                        [ "$(jq -c .ccpool.extraAllowedTools "$ownPoolRolesJson/drain.json")" = '["Skill","Bash(gofumpt:*)","Bash(go build:*)","Bash(go test:*)","Bash(go vet:*)","Bash(go mod:*)","Bash(gofmt:*)","Bash(prek:*)","Bash(pre-commit:*)","Bash(pg-hooks:*)"]' ]
+                        for f in "$ownPoolRolesJson/review.json" "$ownPoolRolesJson/triage.json" "$twoRolesJson/feedback.json" "$twoRolesJson/worker.json"; do
                           if jq -r '(.ccpool.extraAllowedTools // [])[]' "$f" | grep -Eq '^Bash\(go (build|test|vet|mod):|^Bash\(gofmt:|^Bash\(gofumpt:'; then
                             echo "role file $f carries a go grant but declares no go tool set" >&2
                             exit 1
@@ -9494,8 +9414,8 @@
                         # drain (above) carries them; triage declares ONLY hooks (so
                         # hooks is separable from go); review, feedback and worker
                         # declare no set and carry neither, nor does any launch config.
-                        [ "$(jq -c .ccpool.extraAllowedTools "$roleWithOwnPoolHandlerDir/triage.json")" = '["Bash(prek:*)","Bash(pre-commit:*)"]' ]
-                        for f in "$roleWithOwnPoolHandlerDir/review.json" "$handlerCommandDir/feedback.json" "$handlerCommandDir/worker.json"; do
+                        [ "$(jq -c .ccpool.extraAllowedTools "$ownPoolRolesJson/triage.json")" = '["Bash(prek:*)","Bash(pre-commit:*)"]' ]
+                        for f in "$ownPoolRolesJson/review.json" "$twoRolesJson/feedback.json" "$twoRolesJson/worker.json"; do
                           if jq -r '(.ccpool.extraAllowedTools // [])[]' "$f" | grep -Eq '^Bash\((prek|pre-commit):'; then
                             echo "role file $f carries a prek/pre-commit grant but declares no hooks tool set" >&2
                             exit 1
@@ -9512,21 +9432,21 @@
                         # renders it into its own JSON; a role that never sets it
                         # carries no such key, and the launch config's effort is
                         # unchanged.
-                        [ "$(jq -r .ccpool.effort "$roleWithOwnPoolHandlerDir/drain.json")" = high ]
-                        jq -e '.ccpool | has("effort") | not' "$roleWithOwnPoolHandlerDir/review.json" >/dev/null
-                        jq -e '.ccpool | has("effort") | not' "$handlerCommandDir/feedback.json" >/dev/null
+                        [ "$(jq -r .ccpool.effort "$ownPoolRolesJson/drain.json")" = high ]
+                        jq -e '.ccpool | has("effort") | not' "$ownPoolRolesJson/review.json" >/dev/null
+                        jq -e '.ccpool | has("effort") | not' "$twoRolesJson/feedback.json" >/dev/null
                         [ "$(jq -r .effort "$defaultLaunchConfigFile")" = max ]
 
                         # close-or-release + precheck (bead pg2-nk6th.3): the role file
                         # is rendered from an explicit field list, so an option not
                         # added there is silently dropped; a role that never sets
                         # precheck carries no such key.
-                        [ "$(jq -r .ccpool.completion "$roleWithOwnPoolHandlerDir/drain.json")" = close-or-release ]
-                        [ "$(jq -r .ccpool.precheck "$roleWithOwnPoolHandlerDir/drain.json")" = ready ]
-                        [ "$(jq -r .ccpool.completion "$roleWithOwnPoolHandlerDir/triage.json")" = close-or-triage ]
-                        [ "$(jq -r .ccpool.precheck "$roleWithOwnPoolHandlerDir/triage.json")" = triage ]
-                        jq -e '.ccpool | has("precheck") | not' "$handlerCommandDir/feedback.json" >/dev/null
-                        jq -e '.ccpool | has("precheck") | not' "$roleWithOwnPoolHandlerDir/review.json" >/dev/null
+                        [ "$(jq -r .ccpool.completion "$ownPoolRolesJson/drain.json")" = close-or-release ]
+                        [ "$(jq -r .ccpool.precheck "$ownPoolRolesJson/drain.json")" = ready ]
+                        [ "$(jq -r .ccpool.completion "$ownPoolRolesJson/triage.json")" = close-or-triage ]
+                        [ "$(jq -r .ccpool.precheck "$ownPoolRolesJson/triage.json")" = triage ]
+                        jq -e '.ccpool | has("precheck") | not' "$twoRolesJson/feedback.json" >/dev/null
+                        jq -e '.ccpool | has("precheck") | not' "$ownPoolRolesJson/review.json" >/dev/null
 
                         # poolMetrics script argv (bead pg2-h5vno): the
                         # per-role pool AND the handler-wide pool (whose dir
@@ -9544,22 +9464,22 @@
                         # A spec role's JSON: sessionEnv carries PG_WRAP_SPEC (the
                         # specFiles entry) plus the role's own entries, and no
                         # strictBaseEnv; a no-spec ccpool role's sessionEnv is empty.
-                        [ "$(jq -r .sessionEnv.PG_WRAP_SPEC "$wrapOwnPoolDir/wrapped.json")" = "$wrapOwnPoolSpec" ]
-                        [ "$(jq -r .sessionEnv.EXTRA_VAR "$wrapOwnPoolDir/wrapped.json")" = extra ]
-                        jq -e 'has("strictBaseEnv") | not' "$wrapOwnPoolDir/wrapped.json" >/dev/null
-                        [ "$(jq -c .sessionEnv "$wrapOwnPoolDir/plain.json")" = '{}' ]
+                        [ "$(jq -r .sessionEnv.PG_WRAP_SPEC "$wrapOwnPoolJson/wrapped.json")" = "$wrapOwnPoolSpec" ]
+                        [ "$(jq -r .sessionEnv.EXTRA_VAR "$wrapOwnPoolJson/wrapped.json")" = extra ]
+                        jq -e 'has("strictBaseEnv") | not' "$wrapOwnPoolJson/wrapped.json" >/dev/null
+                        [ "$(jq -c .sessionEnv "$wrapOwnPoolJson/plain.json")" = '{}' ]
                         # A command role: strictBaseEnv renders, sessionEnv and spec never do.
-                        [ "$(jq -r .strictBaseEnv "$wrapOwnPoolDir/cmd.json")" = true ]
-                        jq -e 'has("sessionEnv") | not' "$wrapOwnPoolDir/cmd.json" >/dev/null
-                        jq -e 'has("spec") | not' "$wrapOwnPoolDir/cmd.json" >/dev/null
+                        [ "$(jq -r .strictBaseEnv "$wrapOwnPoolJson/cmd.json")" = true ]
+                        jq -e 'has("sessionEnv") | not' "$wrapOwnPoolJson/cmd.json" >/dev/null
+                        jq -e 'has("spec") | not' "$wrapOwnPoolJson/cmd.json" >/dev/null
                         # A command role WITHOUT command.spec keeps its argv verbatim.
-                        [ "$(jq -c .command.argv "$wrapOwnPoolDir/cmd.json")" = '["cmd-bin"]' ]
+                        [ "$(jq -c .command.argv "$wrapOwnPoolJson/cmd.json")" = '["cmd-bin"]' ]
                         # A command role WITH command.spec (bead pg2-8puhw): the argv is
                         # pg-wrap run --spec <commandSpecFiles entry> -- <argv>, the role
                         # file carries no spec or sessionEnv key, and the spec has an empty
                         # exec, the wrap entry, the keep names and strict_env = false.
-                        [ "$(jq -c .command.argv "$wrapOwnPoolDir/cmd-wrapped.json")" = "$(jq -cn --arg b "$wrapPgWrapBin" --arg s "$wrapOwnPoolCmdSpec" '[$b,"run","--spec",$s,"--","cmd-bin","--flag"]')" ]
-                        jq -e 'has("sessionEnv") or has("spec") | not' "$wrapOwnPoolDir/cmd-wrapped.json" >/dev/null
+                        [ "$(jq -c .command.argv "$wrapOwnPoolJson/cmd-wrapped.json")" = "$(jq -cn --arg b "$wrapPgWrapBin" --arg s "$wrapOwnPoolCmdSpec" '[$b,"run","--spec",$s,"--","cmd-bin","--flag"]')" ]
+                        jq -e 'has("sessionEnv") or has("spec") | not' "$wrapOwnPoolJson/cmd-wrapped.json" >/dev/null
                         cmd_spec_json="$(toml2json "$wrapOwnPoolCmdSpec")"
                         [ "$(jq -c .exec <<<"$cmd_spec_json")" = '[]' ]
                         [ "$(jq -r .strict_env <<<"$cmd_spec_json")" = false ]
@@ -9586,7 +9506,7 @@
                         spec_a_json="$(toml2json "$wrapHandlerPoolSpecA")"
                         [ "$(jq -c .wrap <<<"$spec_a_json")" = "[\"$wrapFakePrefix --flag\",[\"$wrapFakeOther\",\"arg one\"]]" ]
                         [ "$(jq -r .strict_env <<<"$spec_a_json")" = false ]
-                        [ "$(jq -r .sessionEnv.PG_WRAP_SPEC "$wrapHandlerPoolDir/triage-a.json")" = "$wrapHandlerPoolSpecA" ]
+                        [ "$(jq -r .sessionEnv.PG_WRAP_SPEC "$wrapHandlerPoolJson/triage-a.json")" = "$wrapHandlerPoolSpecA" ]
                         # Pools: claude.bin = pg-wrap-exec exactly where a spec role runs
                         # (own pool, handler-wide pool); the user's other settings still
                         # merge; a no-spec pool carries no claude.bin.
@@ -9595,13 +9515,7 @@
                         [ "$(toml2json "$wrapHandlerPoolConfig" | jq -r .claude.bin)" = "$pgWrapExecPath" ]
                         toml2json "$wrapPlainPoolConfig" | jq -e '(.claude // {}) | has("bin") | not' >/dev/null
 
-                        # The NEW path (bead pg2-12gr4.10.10). No per-role JSON for a
-                        # role that sets `handler`; the old-path twins still render.
-                        test -f "$npNoJsonDir/old-ccpool.json"
-                        test -f "$npNoJsonDir/old-cmd.json"
-                        test ! -e "$npNoJsonDir/np-ccpool.json"
-                        test ! -e "$npNoJsonDir/np-cmd.json"
-                        [ "$(ls -1 "$npNoJsonDir" | wc -l)" -eq 2 ]
+                        # The join (beads pg2-12gr4.10.10, pg2-12gr4.10.18).
                         # Keys reach the TOML: handler, binds (the consumer's own),
                         # survives_shutdown only for the ccpool adapter's role.
                         np_json="$(toml2json "$npRolesFile")"
@@ -9611,22 +9525,7 @@
                         [ "$(jq -c '.role[] | select(.name=="np-ccpool") | .binds' <<<"$np_json")" = '["np.ccpool"]' ]
                         [ "$(jq -r '.role[] | select(.name=="np-ccpool") | .survives_shutdown' <<<"$np_json")" = true ]
                         jq -e '.role[] | select(.name=="np-cmd") | has("survives_shutdown") | not' <<<"$np_json" >/dev/null
-                        # [role.config] equals the old per-role JSON minus name, type and
-                        # survivesShutdown: the two renderers share one field list, so a
-                        # dropped field would show here.
-                        for pair in np-ccpool:old-ccpool np-cmd:old-cmd; do
-                          newr="''${pair%%:*}"
-                          oldr="''${pair##*:}"
-                          want="$(jq -S 'del(.name, .type, .survivesShutdown)' "$npNoJsonDir/$oldr.json")"
-                          got="$(jq -S --arg n "$newr" '.role[] | select(.name==$n) | .config' <<<"$np_json")"
-                          if [ "$want" != "$got" ]; then
-                            echo "FAIL: $newr [role.config] differs from $oldr.json" >&2
-                            diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") >&2 || true
-                            exit 1
-                          fi
-                        done
-                        # The ccpool role's config carries the fields the renderer lists
-                        # (a spot check that the comparison above is not vacuous).
+                        # The ccpool role's config carries the fields the renderer lists.
                         jq -e '.role[] | select(.name=="np-ccpool") | .config
                           | .ccpool.precheck == "ready" and .ccpool.effort == "high"
                             and .ccpool.beadsDir == "/tmp/pg2-12gr4-10-beads"
@@ -9635,7 +9534,7 @@
                             and (.ccpool.extraAllowedTools | index("Skill") != null and index("Bash(go test:*)") != null)
                             and (.sessionEnv.PG_WRAP_SPEC | endswith("pg-wrap-spec.toml"))' <<<"$np_json" >/dev/null
                         # Each adapter's validate RAN over its roles (the replies are the
-                        # evidence), with no problems, and never over an old-path role.
+                        # evidence), with no problems.
                         jq -e '.problems == []' "$npValidateCcpool"/replies/*-np-ccpool.request.json.reply.json >/dev/null
                         jq -e '.problems == []' "$npValidateCommand"/replies/*-np-cmd.request.json.reply.json >/dev/null
                         [ "$(ls -1 "$npValidateCcpool/replies" | wc -l)" -eq 1 ]
@@ -9650,10 +9549,6 @@
                         # sets OTEL_SERVICE_NAME; keep carries TMUX, TMUX_PANE and the
                         # markers; the baseline wrap is ONE env PATH=... entry.
                         test -f "$k31SpecCheck"
-                        # checkRenderedScript (bead pg2-12gr4.8.32): its expected-failure cases ran
-                        # as the build of checkRenderedCheck; handlerCommandDir itself was built
-                        # through the same script, over every fixture role above.
-                        test -f "$checkRenderedCheck"
                         jq -e '. | length == 1 and (.[0] | type == "array" and (.[0] | endswith("/bin/env")) and (.[1] | startswith("PATH=/nix/store/")))' <<<"$k31WrapJson" >/dev/null
                         k31_json="$(toml2json "$k31SpecFile")"
                         jq -e '[.wrap[] | (if type == "array" then .[0] else (split(" ")[0]) end) | startswith("/nix/store/")] | all' <<<"$k31_json" >/dev/null
@@ -9662,13 +9557,13 @@
                         touch $out
                       '';
                 in
-                # darwin scope re-exposes the HM module's own
-                # handlerCommandDir output verbatim.
+                # The darwin module no longer re-exposes a roles directory
+                # (pg2-12gr4.10.18): the register LaunchAgent runs the ccpool adapter.
+                assert lib.hasInfix "/bin/pg-router-handler-ccpool register"
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents."pg-router-ccpool-handler-daemon".script;
                 assert
-                  darwinWithHandlerDir.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir
-                  == handlerCommandDir;
-                assert
-                  darwinWithoutRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir == null;
+                  !lib.hasInfix "pg-router-ccpool-handler register"
+                    darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents."pg-router-ccpool-handler-daemon".script;
                 # poolMetrics darwin mirror (bead pg2-mr0sl): a real
                 # LaunchAgent, running the SAME script this HM module's own
                 # systemd timer would run, with StartInterval set from
@@ -9737,7 +9632,7 @@
                 assert poolDefaultDir == "/home/tester/.local/state/pg-router-ccpool";
                 # toolSets (bead pg2-cwn44): a role declaring a set the module does
                 # not define fails at eval time (never a silent empty grant).
-                assert !(builtins.tryEval unknownToolSetHandlerDir.outPath).success;
+                assert !(builtins.tryEval unknownToolSetRolesFile.outPath).success;
                 # roleWithOwnPool (bead pg2-mr0sl): the per-role bootstrap
                 # activation entry exists, keyed by role name, and mirrors
                 # the whole-process pool.enable activation's own ordering
@@ -9792,34 +9687,22 @@
                 assert wrapMessageNames wrapCommandSpecFired "cmd-spec" "command role";
                 assert wrapMessageNames wrapCcpoolCommandSpecFired "ccpool-cmd-spec" "command.spec";
                 assert wrapMessageNames wrapEnvClashFired "clash" "PG_WRAP_SPEC";
-                # The new path (bead pg2-12gr4.10.10): the join evaluates clean;
-                # pool setup (own pool, bootstrap entry, spec files, wrap-pool
+                # The join (beads pg2-12gr4.10.10, pg2-12gr4.10.18): it evaluates
+                # clean; pool setup (own pool, bootstrap entry, spec files, wrap-pool
                 # assertions) keys on the adapter a role names; each selection and
                 # join assertion fires on its misconfiguration.
                 assert npFired == null;
-                assert
-                  lib.attrNames npMod.poolConfigFiles == [
-                    "np-ccpool"
-                    "old-ccpool"
-                  ];
+                assert lib.attrNames npMod.poolConfigFiles == [ "np-ccpool" ];
                 assert npEval.home.activation ? "pgRouterCcpoolHandlerPool_np-ccpool";
-                assert
-                  lib.attrNames npMod.specFiles == [
-                    "np-ccpool"
-                    "old-ccpool"
-                  ];
-                assert
-                  lib.attrNames npMod.commandSpecFiles == [
-                    "np-cmd"
-                    "old-cmd"
-                  ];
+                assert lib.attrNames npMod.specFiles == [ "np-ccpool" ];
+                assert lib.attrNames npMod.commandSpecFiles == [ "np-cmd" ];
                 assert npEval.phillipgreenii.programs.pg-router.roles.np-ccpool.survivesShutdown;
                 assert !npEval.phillipgreenii.programs.pg-router.roles.np-cmd.survivesShutdown;
                 assert npValidateSpecArgs;
                 assert wrapMessageNames npNoSurviveFired "np-ccpool" "survivesShutdown";
                 assert wrapMessageNames npNoCounterpartFired "np-cmd" "binds no event";
-                assert wrapMessageNames npBothFired "np-both" "exactly one";
-                assert wrapMessageNames npNeitherFired "np-neither" "exactly one";
+                assert npTypeGone;
+                assert npNeitherFails;
                 assert wrapMessageNames npBadHandlerFired "np-bad" "absolute path";
                 assert wrapMessageNames npDefaultPoolFired "np-stray" "default pool";
                 assert wrapMessageNames npSharedPoolFired "np-without-spec" "/tmp/pg2-12gr4-10-shared";
@@ -9887,10 +9770,13 @@
 
               # pg-router-ccpool-handler-spec-fixtures (bead pg2-12gr4.8.12): the module
               # evaluated as test-pg-router-ccpool-handler-module does, with its rendered
-              # role JSON, pg-wrap specs and pool config.toml files laid out for a LIVE
-              # run (the packet's `pg-router run-role` trigger) and for the packets that
-              # extend it. Output layout (pinned; later packets add roles here):
-              #   $out/roles/<role>.json
+              # `[[role]]` tables, pg-wrap specs and pool config.toml files laid out for
+              # a LIVE run (the packet's `pg-router run-role` trigger) and for the packets
+              # that extend it. The real-ccpool Go tests read `specs/` and `pools/`; the
+              # roles file is the same module's new rendering (pg2-12gr4.10.18), so what
+              # they exercise is derived from it. Output layout (pinned; later packets
+              # add roles here):
+              #   $out/roles/roles.toml              (the pg-router module's `rolesFile`)
               #   $out/specs/<role>.toml            (the module's `specFiles`)
               #   $out/pools/<pool-name>/config.toml (the role name for a per-role
               #                                      pool, `handler` for the
@@ -9929,8 +9815,10 @@
                     done
                     exec ${pkgs.bash}/bin/bash ${./packages/ccpool/cmd/ccpool/testdata/fake-claude} "''${args[@]}"
                   '';
+                  fxCcpoolAdapter = "${npFixturePkg}/bin/pg-router-handler-ccpool";
+                  fxCommandAdapter = "${npFixturePkg}/bin/pg-router-handler-command";
                   k20Role = tag: {
-                    type = "ccpool";
+                    handler = fxCcpoolAdapter;
                     ccpool = {
                       actor = "k20-${tag}";
                       completion = "close-only";
@@ -9979,7 +9867,7 @@
                         };
                       };
                       k17-live = {
-                        type = "ccpool";
+                        handler = fxCcpoolAdapter;
                         ccpool = {
                           actor = "k17-actor";
                           completion = "close-only";
@@ -10012,13 +9900,13 @@
                   };
                   m = fixture.phillipgreenii.programs.pg-router-ccpool-handler;
 
-                  # new-path/roles.toml (bead pg2-12gr4.10.10): the [[role]] tables the
-                  # pg-router module renders for one NEW-path command role and one
-                  # NEW-path ccpool role (each names its adapter as `handler`), for a
-                  # live `pg-router config check|doctor|run-role` run. The ccpool role
+                  # live/roles.toml (beads pg2-12gr4.10.10, pg2-12gr4.10.18): the [[role]]
+                  # tables the pg-router module renders for one command role and one
+                  # ccpool role (each names its adapter as `handler`), for a live
+                  # `pg-router config check|doctor|run-role` run. The ccpool role
                   # has no spec and no own pool: it runs on the handler-wide pool, whose
                   # directory the live run supplies as CCPOOL_POOL.
-                  newPathFixture = evalHMWith {
+                  liveFixture = evalHMWith {
                     handler = {
                       enable = true;
                       pool = {
@@ -10027,18 +9915,11 @@
                       };
                       roles = {
                         np-live-cmd = {
-                          handler = "${npFixturePkg}/bin/pg-router-handler-command";
-                          command.argv = [ "/usr/bin/true" ];
-                        };
-                        # An OLD-path role next to them (type, no handler): it renders
-                        # its per-role JSON under handlerCommandDir, which the live run
-                        # feeds to the old binary through PG_ROUTER_HANDLER_COMMAND_DIR.
-                        np-old-cmd = {
-                          type = "command";
+                          handler = fxCommandAdapter;
                           command.argv = [ "/usr/bin/true" ];
                         };
                         np-live-cc = {
-                          handler = "${npFixturePkg}/bin/pg-router-handler-ccpool";
+                          handler = fxCcpoolAdapter;
                           ccpool = {
                             actor = "np-live-actor";
                             completion = "close-only";
@@ -10059,26 +9940,22 @@
                 pkgs.linkFarm "pg-router-ccpool-handler-spec-fixtures" (
                   [
                     {
-                      name = "new-path/roles.toml";
-                      path = newPathFixture.phillipgreenii.programs.pg-router.rolesFile;
+                      name = "live/roles.toml";
+                      path = liveFixture.phillipgreenii.programs.pg-router.rolesFile;
                     }
                     {
-                      name = "new-path/old-roles/np-old-cmd.json";
-                      path = "${newPathFixture.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir}/np-old-cmd.json";
+                      name = "live/validate-ccpool";
+                      path = liveFixture.phillipgreenii.programs.pg-router-ccpool-handler.roleValidation.ccpool;
                     }
                     {
-                      name = "new-path/validate-ccpool";
-                      path = newPathFixture.phillipgreenii.programs.pg-router-ccpool-handler.roleValidation.ccpool;
+                      name = "live/validate-command";
+                      path = liveFixture.phillipgreenii.programs.pg-router-ccpool-handler.roleValidation.command;
                     }
                     {
-                      name = "new-path/validate-command";
-                      path = newPathFixture.phillipgreenii.programs.pg-router-ccpool-handler.roleValidation.command;
+                      name = "roles/roles.toml";
+                      path = fixture.phillipgreenii.programs.pg-router.rolesFile;
                     }
                   ]
-                  ++ (lib.mapAttrsToList (name: _: {
-                    name = "roles/${name}.json";
-                    path = "${m.handlerCommandDir}/${name}.json";
-                  }) m.roles)
                   ++ (lib.mapAttrsToList (name: file: {
                     name = "specs/${name}.toml";
                     path = file;

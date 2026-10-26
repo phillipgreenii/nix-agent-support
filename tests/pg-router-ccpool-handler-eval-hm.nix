@@ -3,8 +3,12 @@
 # module with exactly the options it reads/writes stubbed. Shared by
 # checks.<system>.test-pg-router-ccpool-handler-module and
 # checks.<system>.pg-router-ccpool-handler-spec-fixtures, so both evaluate the
-# module the same way. Returns `{ evalHM }`, where
-# `evalHM <handler option attrs>` is the evaluated `config`.
+# module the same way. Returns `{ evalHM, evalHMWith }`, where
+# `evalHM <handler option attrs>` is the evaluated `config`. Every role the
+# handler module declares joins the pg-router module's role of the same name
+# (bead pg2-12gr4.10.10), which must bind an event type; `evalHM` gives each
+# handler role a binding of its own so a test about something else need not
+# declare one, and `evalHMWith` leaves the pg-router side exactly as given.
 {
   lib,
   pkgs,
@@ -79,8 +83,8 @@ let
       };
       modules = [
         ../home/programs/pg-router-ccpool-handler/default.nix
-        # The pg-router module's `roles.<name>` is what a new-path handler role
-        # joins (bead pg2-12gr4.10.10); its own options need only the stubs below.
+        # The pg-router module's `roles.<name>` is what a handler role joins
+        # (bead pg2-12gr4.10.10); its own options need only the stubs below.
         ../home/programs/pg-router/default.nix
         (
           { lib, ... }:
@@ -191,7 +195,12 @@ let
         }
       ];
     }).config;
-  evalHM = handler: evalHMWith { inherit handler; };
+  evalHM =
+    handler:
+    evalHMWith {
+      inherit handler;
+      pgRouter.roles = lib.mapAttrs (name: _: { binds = [ "test.${name}" ]; }) (handler.roles or { });
+    };
 in
 {
   inherit evalHM evalHMWith;
