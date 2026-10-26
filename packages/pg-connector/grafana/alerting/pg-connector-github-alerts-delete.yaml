@@ -2,7 +2,7 @@
 #
 # Grafana's file provisioner only adds/updates rules present in the provisioned
 # YAML: dropping pg-connector-github-alerts.yaml from alertRuleFiles (pg2-bry0w,
-# commit c6e9a742) left the seven already-provisioned rules live
+# commit c6e9a742) left the already-provisioned rules live
 # (provenance=file) and the critical "pg-connector-github daemon is down" still
 # firing. A rule is removed only by a `deleteRules:` entry for its uid, applied
 # on a provisioning reload/restart (same mechanism as
@@ -30,6 +30,8 @@ deleteRules:
   - orgId: 1
     uid: pg-conn-github-interactive-slow
   - orgId: 1
+    uid: pg-conn-github-no-watched-prs
+  - orgId: 1
     uid: pg-conn-github-query-stale
   - orgId: 1
     uid: pg-conn-github-settle-failing
@@ -37,3 +39,5 @@ deleteRules:
     uid: pg-conn-github-spend-over-cap
   - orgId: 1
     uid: pg-conn-github-store-aside
+  - orgId: 1
+    uid: pg-conn-github-tracked-set

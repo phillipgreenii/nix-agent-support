@@ -1,0 +1,113 @@
+# promtool unit tests for the pg-desk-pr-lookup-ceiling alert (PR lane refactor, P8b-1). Run by the
+# flake check test-pg-desk-alert-rules through grafana/check-alert-rules.sh, which generates rules.yml
+# next to this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0.8`, the
+# rule's `for: 30m` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: pg_desk_pr_lane_lookup_items and pg_desk_pr_lane_lookup_ceiling are unlabelled gauges,
+# one sample per 1m scrape, both 0 until a run reports them. The rule is the ratio items / ceiling,
+# guarded by `ceiling > 0`; a ratio above 0.8 that holds for 30m fires.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a listing over 0.8 of the ceiling fires after 30m, not before
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_lookup_items{job="pg-desk"}
+        values: "6000x80"
+      - series: pg_desk_pr_lane_lookup_ceiling{job="pg-desk"}
+        values: "7000x80"
+    promql_expr_test:
+      - expr: round(max(wrapped:pg_desk_pr_lookup_ceiling), 0.01)
+        eval_time: 40m
+        exp_samples:
+          - labels: "{}"
+            value: 0.86
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-pr-lookup-ceiling
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-desk-pr-lookup-ceiling
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a healthy listing well under the ceiling is quiet, and exactly 0.8 is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_lookup_items{job="pg-desk"}
+        values: "3443x40 5600x40"
+      - series: pg_desk_pr_lane_lookup_ceiling{job="pg-desk"}
+        values: "7000x80"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-desk-pr-lookup-ceiling
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: pg-desk-pr-lookup-ceiling
+        exp_alerts: []
+
+  - name: a ceiling gauge at 0 is quiet however large the item count (the ceiling greater than 0 guard)
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_lookup_items{job="pg-desk"}
+        values: "9000x80"
+      - series: pg_desk_pr_lane_lookup_ceiling{job="pg-desk"}
+        values: "0x80"
+    promql_expr_test:
+      - expr: count(wrapped:pg_desk_pr_lookup_ceiling)
+        eval_time: 40m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-desk-pr-lookup-ceiling
+        exp_alerts: []
+
+  - name: both gauges at 0 (no run has reported yet) are quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_lookup_items{job="pg-desk"}
+        values: "0x80"
+      - series: pg_desk_pr_lane_lookup_ceiling{job="pg-desk"}
+        values: "0x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-desk-pr-lookup-ceiling
+        exp_alerts: []
+
+  - name: empty input is quiet
+    interval: 1m
+    input_series:
+      - series: unrelated_metric{job="other"}
+        values: "1x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-desk-pr-lookup-ceiling
+        exp_alerts: []
+
+  - name: an item count alone, with no ceiling series, is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_lookup_items{job="pg-desk"}
+        values: "9000x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-desk-pr-lookup-ceiling
+        exp_alerts: []
+
+  - name: SYSTEM_PAUSE suppresses it
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_lane_lookup_items{job="pg-desk"}
+        values: "6000x80"
+      - series: pg_desk_pr_lane_lookup_ceiling{job="pg-desk"}
+        values: "7000x80"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-desk-pr-lookup-ceiling
+        exp_alerts: []

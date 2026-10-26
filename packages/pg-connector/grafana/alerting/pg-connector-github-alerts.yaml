@@ -1,7 +1,11 @@
 # pg-connector-github unified-alerting rules (docket pg2-z5fax.6, Phase 4a): the
 # service levels of the daemon's design spec ("Observability > Service levels
 # and alerts"), as six Prometheus rules over the daemon's own metrics and one
-# Loki rule over its structured log (daemon.log.jsonl).
+# Loki rule over its structured log (daemon.log.jsonl), plus two Prometheus rules
+# added by the PR lane refactor (P8b-1): tracked-set size and governor backlog,
+# and no watched PRs while anchors are open (the latter also reads the pg-desk
+# open-anchor gauge, pg_desk_pr_open_anchors, so it is exempt from rule S6's
+# catalogue check, which covers pg_connector_github_* names only).
 #
 # This file sits BESIDE pr-github-alerts.yaml (the old backend's rules, which
 # stay until Phase 6b) and is registered by the darwin module
@@ -338,6 +342,117 @@ groups:
               editorMode: code
               queryType: instant
               expr: 'sum(count_over_time({service_name="pg-connector-github"} | json | change=~"store_moved_aside|store_refused" [10m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Tracked-set size and governor backlog (PR lane refactor, P8b-1; the design's
+      # section 9.2 row "Tracked-set size and governor backlog"). One rule, three
+      # branches, any one of which fires it (every branch is unlabelled, so the `or`
+      # joins them on the empty label set and the value is whichever branch is true):
+      #   1. size: the tracked set (members + other_open; closed_grace is held until
+      #      its ttl and is NOT tracked) is above 0.8 of the CONFIGURED limit;
+      #   2. growth: the set grew by more than 0.1 of the limit over the last day
+      #      while it already stands above 0.5 of the limit (a runaway keep-alive set;
+      #      the backfill happens below that mark);
+      #   3. backlog: the governor holds more than 500 queued tasks that are due now
+      #      and have not gone out, summed over the five scheduler classes.
+      # The limit is the daemon's own gauge pg_connector_github_tracked_limit (the
+      # daemon setting tracked_set_limit; the deployment sets it from the live count
+      # after the cutover, ruling 15), never a number copied into this file. The
+      # daemon reports no limit gauge while none is configured, and `max(limit) > 0`
+      # drops the denominator then, so branches 1 and 2 are quiet instead of dividing
+      # by zero; branch 3 needs no limit. The 0.8, 0.1, 0.5 and 500 are PROVISIONAL
+      # and revisited with data. Ends with the SYSTEM_PAUSE guard of the pg-desk
+      # rules (a pause starves the queue on purpose). noDataState is OK: a missing
+      # daemon is the daemon-down rule's to report.
+      - uid: pg-conn-github-tracked-set
+        title: pg-connector-github tracked set or governor backlog is growing
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-github: the tracked set is near its configured limit or growing fast, or the governor backlog is high"
+          description: "For over 30 minutes at least one of: the tracked set (pg_connector_github_tracked_entities, classes members and other_open) is above 0.8 of pg_connector_github_tracked_limit; it grew by more than 0.1 of the limit in a day while above 0.5 of it; or pg_connector_github_governor_backlog (queued tasks due now that have not gone out) summed over the classes is above 500. The limit caps and evicts nothing, so a breach means keep-alive refreshes will outgrow the budget. Compare the members and other_open series (`pg-connector pr inspect <id>...` answers tracked and watched for one PR), raise tracked_set_limit only after checking why the set grew, and read pg_connector_github_governor_paused for a budget pause. Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '((sum(pg_connector_github_tracked_entities{class=~"members|other_open"}) / (max(pg_connector_github_tracked_limit) > 0) > 0.8) or (((sum(pg_connector_github_tracked_entities{class=~"members|other_open"}) - sum(pg_connector_github_tracked_entities{class=~"members|other_open"} offset 1d)) / (max(pg_connector_github_tracked_limit) > 0) > 0.1) and on() (sum(pg_connector_github_tracked_entities{class=~"members|other_open"}) / (max(pg_connector_github_tracked_limit) > 0) > 0.5)) or (sum(pg_connector_github_governor_backlog) > 500)) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # No watched PRs while anchors are open (PR lane refactor, P8b-1): the daemon's
+      # watched gauge reads 0 while pg-desk's open-anchor gauge (pg_desk_pr_open_anchors,
+      # PRs with an open anchor, hidden ones excluded) is above 0. This is a LOWER bound,
+      # two metrics in one rule: every PR with an open anchor should be watched by the
+      # marking step, so none watched at all means the marking never ran or the daemon
+      # lost its watches. The exact per-PR check is the marking step's own count
+      # (`pg-connector pr inspect`), not a standing alert. The value is the open-anchor
+      # count, so the rule's threshold is gt 0. A missing watched gauge (no daemon) or
+      # a missing anchor gauge (pg-desk cannot answer) leaves the result empty: the
+      # daemon-down rule and the pg-desk rules speak for those, hence noDataState OK.
+      # Ends with the SYSTEM_PAUSE guard.
+      - uid: pg-conn-github-no-watched-prs
+        title: pg-connector-github watches no PR while anchors are open
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-github watches no pull request although open anchors exist"
+          description: "pg_connector_github_watched_entities has been 0 for over 30 minutes while pg_desk_pr_open_anchors (PRs that have an open anchor) is above 0: the marking step has not watched any of them, so their changes are not tracked. Run `pg-connector pr inspect <id>...` over the open-anchor PRs (its counts line reports how many are watched), then rerun the marking step. Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'max(pg_desk_pr_open_anchors) > 0 and on() (max(pg_connector_github_watched_entities) == 0) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:

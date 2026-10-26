@@ -9,7 +9,7 @@
 #
 # Every failure line starts with RULE-Sn so a mutant can assert the exact rule that fired.
 #
-#   S1  exactly the seven uids, each once, each at most 40 characters
+#   S1  exactly the nine uids, each once, each at most 40 characters
 #   S2  one group pg-connector-github in folder pg-connector, no folderUid key anywhere
 #   S3  every rule has condition C, refIds A B C, annotations.summary and description, labels
 #       with exactly the one key severity; each Prometheus rule has a non-empty for
@@ -21,8 +21,12 @@
 #   S7  the Loki expression selects {service_name="pg-connector-github"}, names store_moved_aside
 #       and store_refused, and parses as LogQL offline
 #   S8  the deleteRules file (pg2-susum) is apiVersion 1, has no groups, and its deleteRules
-#       entries are exactly the seven uids of S1 (so, with S1, exactly the rule file's uids),
+#       entries are exactly the nine uids of S1 (so, with S1, exactly the rule file's uids),
 #       each once, each with orgId 1
+#   S9  the two PR lane rules of P8b-1: the tracked-set rule alerts on the ratio to the daemon's own
+#       limit gauge (guarded by `max(limit) > 0`, never a number copied into YAML) and reads the
+#       governor backlog; the no-watched-PRs rule reads the watched gauge and pg-desk's open-anchor
+#       gauge; both end with the SYSTEM_PAUSE guard
 #
 # Exit codes: 0 consistent (self-test: real inputs pass and every mutant fails with exactly
 # its own rule), 1 a rule failed, 2 usage error or unreadable input or a missing tool.
@@ -56,14 +60,19 @@ for tool in yq jq logcli; do
 done
 
 loki_uid="pg-conn-github-store-aside"
+tracked_uid="pg-conn-github-tracked-set"
+watched_uid="pg-conn-github-no-watched-prs"
+pause_guard=' unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
 down_uid="pg-conn-github-daemon-down"
 want_uids="pg-conn-github-consumer-stuck
 pg-conn-github-daemon-down
 pg-conn-github-interactive-slow
+pg-conn-github-no-watched-prs
 pg-conn-github-query-stale
 pg-conn-github-settle-failing
 pg-conn-github-spend-over-cap
-pg-conn-github-store-aside"
+pg-conn-github-store-aside
+pg-conn-github-tracked-set"
 
 # lint <alerts.yaml> <catalog> <alerts-delete.yaml>: prints RULE-Sn lines to stderr, returns 1
 # when any fired.
@@ -76,7 +85,7 @@ lint() {
   # S1
   got="$(jq -r '[.groups[]?.rules[]?.uid] | sort | .[]' <<<"$json")"
   if [ "$got" != "$want_uids" ]; then
-    echo "RULE-S1: the rule uids are not exactly the seven expected ones, each once:" \
+    echo "RULE-S1: the rule uids are not exactly the nine expected ones, each once:" \
       "$(diff <(printf '%s\n' "$want_uids") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ')" >&2
     status=1
   fi
@@ -183,6 +192,36 @@ lint() {
     ;;
   esac
 
+  # S9
+  local uid
+  for uid in "$tracked_uid" "$watched_uid"; do
+    expr="$(jq -r --arg uid "$uid" '.groups[]?.rules[]? | select(.uid == $uid) | .data[0].model.expr // empty' <<<"$json")"
+    if [ "${expr%"$pause_guard"}" = "$expr" ]; then
+      echo "RULE-S9: $uid: the expression does not end with the SYSTEM_PAUSE guard:$pause_guard" >&2
+      status=1
+    fi
+  done
+  expr="$(jq -r --arg uid "$tracked_uid" '.groups[]?.rules[]? | select(.uid == $uid) | .data[0].model.expr // empty' <<<"$json")"
+  for want in '/ (max(pg_connector_github_tracked_limit) > 0)' 'pg_connector_github_tracked_entities{class=~"members|other_open"}' 'pg_connector_github_governor_backlog'; do
+    case "$expr" in
+    *"$want"*) ;;
+    *)
+      echo "RULE-S9: $tracked_uid: the expression lacks: $want" >&2
+      status=1
+      ;;
+    esac
+  done
+  expr="$(jq -r --arg uid "$watched_uid" '.groups[]?.rules[]? | select(.uid == $uid) | .data[0].model.expr // empty' <<<"$json")"
+  for want in 'pg_connector_github_watched_entities' 'pg_desk_pr_open_anchors'; do
+    case "$expr" in
+    *"$want"*) ;;
+    *)
+      echo "RULE-S9: $watched_uid: the expression lacks: $want" >&2
+      status=1
+      ;;
+    esac
+  done
+
   # S8
   if ! jq -e '.apiVersion == 1 and (has("groups") | not)' <<<"$deljson" >/dev/null; then
     echo "RULE-S8: the deleteRules file must be apiVersion 1 with no groups key" >&2
@@ -190,7 +229,7 @@ lint() {
   fi
   got="$(jq -r '[.deleteRules[]?.uid] | sort | .[]' <<<"$deljson")"
   if [ "$got" != "$want_uids" ]; then
-    echo "RULE-S8: the deleteRules uids are not exactly the seven rule uids, each once:" \
+    echo "RULE-S8: the deleteRules uids are not exactly the nine rule uids, each once:" \
       "$(diff <(printf '%s\n' "$want_uids") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ')" >&2
     status=1
   fi
@@ -280,6 +319,18 @@ mutant S7 "a Loki expression that no longer names store_refused" \
   "($(rule_of "$loki_uid") | .data[0].model.expr) |= sub(\"store_refused\"; \"store_other\")" ""
 mutant S7 "a Loki expression that does not parse" \
   "($(rule_of "$loki_uid") | .data[0].model.expr) |= sub(\"\\[10m\\]\"; \"[10m\")" ""
+mutant S5 "the no-watched-PRs rule at noDataState Alerting" \
+  "($(rule_of "$watched_uid") | .noDataState) = \"Alerting\"" ""
+mutant S9 "the tracked-set rule without its limit guard (a ratio over a missing limit)" \
+  "($(rule_of "$tracked_uid") | .data[0].model.expr) |= sub(\" / [(]max[(]pg_connector_github_tracked_limit[)] > 0[)]\"; \" / max(pg_connector_github_tracked_limit)\")" ""
+mutant S9 "the tracked-set rule without its governor backlog branch" \
+  "($(rule_of "$tracked_uid") | .data[0].model.expr) |= sub(\"pg_connector_github_governor_backlog\"; \"pg_connector_github_queue_depth\")" ""
+mutant S9 "the no-watched-PRs rule without the pg-desk open-anchor gauge" \
+  "($(rule_of "$watched_uid") | .data[0].model.expr) |= sub(\"pg_desk_pr_open_anchors\"; \"pg_desk_pr_unhydrated\")" ""
+mutant S9 "the no-watched-PRs rule without its SYSTEM_PAUSE guard" \
+  "($(rule_of "$watched_uid") | .data[0].model.expr) |= sub(\" unless on[(][)] [(]pg_router_gates_active.*\$\"; \"\")" ""
+mutant S9 "the tracked-set rule without its SYSTEM_PAUSE guard" \
+  "($(rule_of "$tracked_uid") | .data[0].model.expr) |= sub(\" unless on[(][)] [(]pg_router_gates_active.*\$\"; \"\")" ""
 mutant S8 "a deleteRules entry dropped (a rule uid no longer deleted)" "" "" \
   'del(.deleteRules[] | select(.uid == "pg-conn-github-store-aside"))'
 mutant S8 "a deleteRules uid that is not a rule uid" "" "" \

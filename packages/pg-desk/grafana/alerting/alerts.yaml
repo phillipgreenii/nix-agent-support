@@ -1206,3 +1206,108 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+
+      # ---- PR lane remaining alerts (PR lane refactor, P8b-1) ----
+      # Two more rules of the same shape as the outcome rules above: each ends with the
+      # SYSTEM_PAUSE guard of pg-desk-sync-stale, noDataState is OK, and each has a
+      # firing, a healthy and an empty-input case under grafana/alerting/rule-tests/.
+      # The tracked-set and no-watched-PRs rules read the daemon's metrics and live in
+      # the connector's alert file (pg-connector-github-alerts.yaml). None of these
+      # uids is registered with the probe in this change (packet P8b-3 does that).
+
+      # Hidden PR with an open anchor. A hidden PR (the `hide` annotation) is skipped by
+      # every decider rule, closure included, so a hidden PR that merges keeps its anchor
+      # open for as long as it stays hidden. pg_desk_pr_open_anchors_hidden counts those
+      # PRs from the store at scrape time (it is emitted with a value, 0, when healthy,
+      # and has no series on a store that cannot answer). Low severity: it is a prompt to
+      # un-hide or close, not a failure of the lane.
+      - uid: pg-desk-pr-hidden-open-anchor
+        title: pg-desk has hidden PRs with an open anchor
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: info
+        annotations:
+          summary: "A hidden PR has an open anchor"
+          description: "pg_desk_pr_open_anchors_hidden has been above 0 for 30 minutes: at least one PR carrying the hidden annotation still has an open anchor. The decider skips a hidden PR for every rule including closure, so the anchor stays open even after the PR merges. Run `pg-desk pr unhide <id>` for a PR the lane should handle again so it can close the anchor, or close the anchor by hand if the PR is meant to stay hidden. Low severity; suppressed while a pg-router SYSTEM_PAUSE gate is active."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'max(pg_desk_pr_open_anchors_hidden) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Lookup ceiling approaching. The decider's bounded all-status work-item lookup
+      # lists every work item including closed ones, and closed items only accumulate; a
+      # listing above the configured ceiling fails the pr plan and apply runs closed. The
+      # two gauges are the lane record's lookup_items and lookup_ceiling, exported by
+      # pg-desk serve at scrape time (0 until a run reports them). This rule fires when the
+      # item count passes 0.8 of the ceiling: the warning before the lane fails closed.
+      # The ceiling-greater-than-0 guard is load-bearing: while the ceiling gauge reads 0
+      # (no run has reported, or the lookup is not configured) a ratio would divide by
+      # zero, so `max(ceiling) > 0` drops the denominator and the whole result is empty.
+      # The remedy is the runbook's: raise the configured ceiling and apply, or compact
+      # closed work items.
+      - uid: pg-desk-pr-lookup-ceiling
+        title: pg-desk PR lane work-item lookup is approaching its ceiling
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "The PR lane's work-item lookup holds over 80 percent of its ceiling"
+          description: "pg_desk_pr_lane_lookup_items divided by pg_desk_pr_lane_lookup_ceiling has been above 0.8 for 30 minutes (the rule is quiet while the ceiling gauge reads 0). Closed work items only accumulate, so the listing grows until the lane fails closed on a listing above the ceiling. Raise the configured work-items ceiling (the decider setting work_items_ceiling) and apply, or compact closed work items. Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'max(pg_desk_pr_lane_lookup_items) / (max(pg_desk_pr_lane_lookup_ceiling) > 0) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.8]

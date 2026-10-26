@@ -89,3 +89,51 @@ func TestMetricsOmitTheOpenAnchorFamiliesOnAnOldSchemaStore(t *testing.T) {
 		t.Errorf("the rest of the scrape is missing:\n%s", body)
 	}
 }
+
+// TestMetricsCountAHiddenPRWithAnOpenAnchorApartFromTheOpenOnes: a PR with the
+// hidden annotation keeps its anchor open (the decider skips every rule for a
+// hidden PR, closure included), so a real scrape of a schema-2 store counts it
+// in pg_desk_pr_open_anchors_hidden and leaves it out of pg_desk_pr_open_anchors
+// and the stale-anchor gauges, even when the PR is closed. The hidden-PR alert
+// (PR lane refactor, P8b-1) reads this gauge.
+func TestMetricsCountAHiddenPRWithAnOpenAnchorApartFromTheOpenOnes(t *testing.T) {
+	setClock(t, time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
+	s := store.OpenNewSchemaForTest(t)
+	mustUpsertInterpretation(t, s, store.Interpretation{Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-10T00:00:00Z"})
+	const at = "2026-10-10T19:00:00Z"
+	for n, facts := range []string{`{"pr_show":{"state":"open"}}`, `{"pr_show":{"state":"closed"}}`, `{"pr_show":{"state":"open"}}`} {
+		prID := fmt.Sprintf("o/r#%d", n+1)
+		anchorID := fmt.Sprintf("bd-%d", n+1)
+		if err := s.UpsertEntity(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: prID, Facts: facts, AsOf: at}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.UpsertEntity(store.Entity{
+			Repo: "o/r", EntityType: "issue", EntityID: anchorID,
+			Facts: `{"issue_show":{"issue_type":"merge-request","state":"open"}}`, AsOf: at,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.ReplaceDerivedXrefs("o/r", "issue", anchorID, []store.XrefLink{{
+			Repo: "o/r", FromType: "issue", FromID: anchorID, ToType: "pr", ToID: prID,
+			Relation: "work", Origin: "derived:work-item", FirstSeen: at, LastConfirmed: at,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// PRs 2 (closed) and 3 are hidden; PR 1 stays visible.
+	for _, id := range []string{"o/r#2", "o/r#3"} {
+		if err := s.SetAnnotation(store.KVAnnotation{
+			Repo: "o/r", EntityType: "pr", EntityID: id, Key: "hidden",
+			Value: `{"value":true,"reason":"x"}`, Origin: "pg-desk", SetBy: "test", SetAt: at,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := scrapeWithConfig(t, s, testConfig())
+	requireLines(
+		t, body,
+		`pg_desk_pr_open_anchors 1`,
+		`pg_desk_pr_open_anchors_hidden 2`,
+		`pg_desk_pr_stale_anchors 0`,
+	)
+}

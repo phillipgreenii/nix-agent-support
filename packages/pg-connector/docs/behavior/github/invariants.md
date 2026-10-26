@@ -318,8 +318,10 @@ restated.
   tracked-set limit as its own gauge, from the daemon setting `tracked_set_limit`, and MUST NOT
   report that gauge while no limit is configured, so an alert can compare the tracked count with
   the limit as a ratio. The limit MUST NOT cap, evict or refuse anything: it is read by an alert
-  only. The daemon's shipped dashboard MUST show the tracked set by class next to its limit, the
-  watched count and the backlog by class, so an operator can see the three together.
+  only (the daemon's alert file carries one rule over the ratio, its growth and the governor's backlog, and one
+  rule that fires when the watched count is 0 while pg-desk reports open anchors). The daemon's shipped
+  dashboard MUST show the tracked set by class next to its limit, the watched count and the backlog by
+  class, so an operator can see the three together.
 
 ## Errors
 

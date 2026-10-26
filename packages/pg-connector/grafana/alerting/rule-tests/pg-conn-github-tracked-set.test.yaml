@@ -1,0 +1,231 @@
+# promtool unit tests for the pg-conn-github-tracked-set alert (PR lane refactor, P8b-1). Run by the
+# flake check test-pg-connector-github-alert-rules, which generates rules.yml next to this file: the
+# Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for: 30m` and
+# labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# The rule has three branches joined by `or` over unlabelled sums: (1) the tracked set (classes
+# members and other_open; closed_grace is not tracked) above 0.8 of pg_connector_github_tracked_limit,
+# (2) growth of more than 0.1 of the limit over a day while above 0.5 of it, (3) the sum of
+# pg_connector_github_governor_backlog above 500. The limit gauge is absent while none is configured.
+# Time model: one gauge sample per 1m scrape. A firing alert carries severity only.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: branch 1, a tracked set above 0.8 of the limit fires after 30m (closed_grace is not counted)
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_tracked_entities{class="members",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "700x80"
+      - series: pg_connector_github_tracked_entities{class="other_open",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "150x80"
+      - series: pg_connector_github_tracked_entities{class="closed_grace",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0x80"
+      - series: pg_connector_github_tracked_limit{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1000x80"
+    promql_expr_test:
+      - expr: max(wrapped:pg_conn_github_tracked_set)
+        eval_time: 40m
+        exp_samples:
+          - labels: "{}"
+            value: 0.85
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: closed_grace entries do not count toward the tracked set, so a large closed_grace is quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_tracked_entities{class="members",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "500x80"
+      - series: pg_connector_github_tracked_entities{class="other_open",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "100x80"
+      - series: pg_connector_github_tracked_entities{class="closed_grace",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "900x80"
+      - series: pg_connector_github_tracked_limit{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1000x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+
+  - name: exactly 0.8 of the limit is quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_tracked_entities{class="members",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "800x80"
+      - series: pg_connector_github_tracked_limit{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1000x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+
+  - name: branch 2, growth of more than 0.1 of the limit in a day while above 0.5 fires after the for
+    interval: 1m
+    input_series:
+      # 400 for the first day (1440 samples), then 600: 0.6 of the limit, up 0.2 over the offset day.
+      - series: pg_connector_github_tracked_entities{class="members",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "400x1440 600x400"
+      - series: pg_connector_github_tracked_limit{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1000x1840"
+    alert_rule_test:
+      - eval_time: 1450m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+      - eval_time: 1500m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: growth of 0.05 of the limit in a day (slow) is quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_tracked_entities{class="members",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "550x1440 600x400"
+      - series: pg_connector_github_tracked_limit{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1000x1840"
+    alert_rule_test:
+      - eval_time: 1500m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+
+  - name: fast growth below half the limit (the backfill) is quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_tracked_entities{class="members",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "100x1440 400x400"
+      - series: pg_connector_github_tracked_limit{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1000x1840"
+    alert_rule_test:
+      - eval_time: 1500m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+
+  - name: branch 3, a governor backlog summing above 500 fires after 30m
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_governor_backlog{class="interactive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0x80"
+      - series: pg_connector_github_governor_backlog{class="invalidated",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "100x80"
+      - series: pg_connector_github_governor_backlog{class="query",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0x80"
+      - series: pg_connector_github_governor_backlog{class="keepalive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "450x80"
+      - series: pg_connector_github_governor_backlog{class="fill",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0x80"
+    promql_expr_test:
+      - expr: max(wrapped:pg_conn_github_tracked_set)
+        eval_time: 40m
+        exp_samples:
+          - labels: "{}"
+            value: 550
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a backlog summing to exactly 500 is quiet, and a backlog that clears inside the for never fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_governor_backlog{class="keepalive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "500x30 900x10 0x40"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+
+  - name: the backlog branch needs no limit, so it fires with no limit gauge, while a large set alone is quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_tracked_entities{class="members",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "9000x80"
+      - series: pg_connector_github_governor_backlog{class="keepalive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "800x40 0x40"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      - eval_time: 75m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+
+  - name: a limit gauge of 0 never divides, a large set with limit 0 is quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_tracked_entities{class="members",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "9000x80"
+      - series: pg_connector_github_tracked_limit{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0x80"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_github_tracked_set)
+        eval_time: 40m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+
+  - name: healthy, about half the limit and a small backlog, is quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_tracked_entities{class="members",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "400x80"
+      - series: pg_connector_github_tracked_entities{class="other_open",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "50x80"
+      - series: pg_connector_github_tracked_limit{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1000x80"
+      - series: pg_connector_github_governor_backlog{class="keepalive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "12x80"
+      - series: pg_connector_github_governor_backlog{class="interactive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "0x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+
+  - name: empty input is quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_daemon_up{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []
+
+  - name: SYSTEM_PAUSE suppresses every branch
+    interval: 1m
+    input_series:
+      - series: pg_connector_github_tracked_entities{class="members",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "900x80"
+      - series: pg_connector_github_tracked_limit{service_name="pg-connector-github",job="pg-connector-github"}
+        values: "1000x80"
+      - series: pg_connector_github_governor_backlog{class="keepalive",service_name="pg-connector-github",job="pg-connector-github"}
+        values: "900x80"
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-conn-github-tracked-set
+        exp_alerts: []

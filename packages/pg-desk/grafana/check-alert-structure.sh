@@ -22,11 +22,14 @@
 #       mode="apply" series of its gauge, and each stale-anchor rule is gated on
 #       pg_desk_pr_lane_mode{mode="apply"} == 1, so none of them fires while the lane plans
 #   T7  (the sweep-bound and watch-listing rules) the scope: both read issue and thread only
+#   T8  (the lookup-ceiling rule) the ratio is guarded by `ceiling > 0`, so a ceiling gauge of 0
+#       (zero-filled until the decider reports) leaves the rule quiet instead of dividing by zero
 #
 # The negative cases of --self-test: for EVERY outcome rule a rule file whose guard has been
 # removed MUST fail T3 and one whose noDataState differs MUST fail T2; the never-hydrated rule
 # with its absence branch removed MUST fail T4; each apply-gated rule with its gate removed MUST
-# fail T6; and each scoped rule with its scope removed MUST fail T7 (each firing only its own rule).
+# fail T6; and each scoped rule with its scope removed MUST fail T7, and the lookup-ceiling rule with its ceiling
+# guard removed MUST fail T8 (each firing only its own rule).
 #
 # Exit codes: 0 consistent (self-test: the real input passes and every negative case fails with
 # exactly its own rule), 1 a rule failed, 2 usage error or unreadable input or a missing tool.
@@ -66,6 +69,8 @@ outcome_uids=(
   "pg-desk-pr-lane-failure-rate"
   "pg-desk-pr-hydration-failing"
   "pg-desk-pr-hydrate-dead-man"
+  "pg-desk-pr-hidden-open-anchor"
+  "pg-desk-pr-lookup-ceiling"
 )
 # Rules that MUST be inert while the lane does not apply (T6), and what each must carry.
 residual_uid="pg-desk-pr-residual-after-apply"
@@ -75,6 +80,10 @@ stale_gate='and on() (pg_desk_pr_lane_mode{mode="apply"} == 1)'
 # Rules scoped to issue and thread (T7).
 scoped_uids=("pg-desk-sweep-bound-violated" "pg-desk-watch-listing-degraded")
 scope='type=~"issue|thread"'
+
+# The lookup-ceiling rule divides by the ceiling gauge, so it MUST drop a ceiling of 0 (T8).
+ceiling_uid="pg-desk-pr-lookup-ceiling"
+ceiling_guard='/ (max(pg_desk_pr_lane_lookup_ceiling) > 0)'
 
 guard_uid="pg-desk-sync-stale"
 absence='pg_desk_liveness == 1 unless on() pg_desk_pr_unhydrated'
@@ -180,6 +189,16 @@ lint() {
       ;;
     esac
   done
+
+  # T8
+  expr="$(expr_of "$json" "$ceiling_uid")"
+  case "$expr" in
+  *"$ceiling_guard"*) ;;
+  *)
+    echo "RULE-T8: $ceiling_uid: the expression lacks the ceiling guard: $ceiling_guard" >&2
+    status=1
+    ;;
+  esac
   return "$status"
 }
 
@@ -243,5 +262,7 @@ for uid in "${scoped_uids[@]}"; do
   negative T7 "$uid: the issue and thread scope removed" \
     "$(expr_path "$uid") |= sub(\"type=~\\\"issue\\|thread\\\",?\"; \"\")"
 done
+negative T8 "$ceiling_uid: the ceiling greater than 0 guard removed" \
+  "$(expr_path "$ceiling_uid") |= sub(\" / [(]max[(]pg_desk_pr_lane_lookup_ceiling[)] > 0[)]\"; \" / max(pg_desk_pr_lane_lookup_ceiling)\")"
 
 [ "$fail" -eq 0 ]

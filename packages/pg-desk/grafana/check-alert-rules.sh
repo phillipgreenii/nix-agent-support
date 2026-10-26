@@ -19,7 +19,8 @@
 # files with one guard deliberately broken, each of which MUST make the cases fail: the primary
 # rule without its SYSTEM_PAUSE guard, without its absence branch, the stale-anchor rule without its
 # apply gate, the residual rule reading every mode, the hard-failure rule without its first-event
-# branch, and the sweep-bound rule without its scope. A case set that passed over any of them
+# branch, the sweep-bound rule without its scope, the lookup-ceiling rule without its ceiling guard and the
+# hidden-PR rule without its SYSTEM_PAUSE guard. A case set that passed over any of them
 # would be vacuous.
 #
 # Exit codes: 0 every case passed (self-test: and every broken rule file was rejected), 1 a check
@@ -41,7 +42,7 @@ alerts="$1"
 tests_dir="$2"
 
 # Every rule uid this check wraps and tests. A rule added here extends the cases under rule-tests/.
-rule_uids='["pg-desk-pr-never-hydrated", "pg-desk-pr-residual-after-apply", "pg-desk-pr-stale-anchor", "pg-desk-pr-anchor-hydration-old", "pg-desk-pr-lane-hard-failure", "pg-desk-pr-lane-failure-rate", "pg-desk-pr-hydration-failing", "pg-desk-pr-hydrate-dead-man", "pg-desk-sweep-bound-violated", "pg-desk-watch-listing-degraded"]'
+rule_uids='["pg-desk-pr-never-hydrated", "pg-desk-pr-residual-after-apply", "pg-desk-pr-stale-anchor", "pg-desk-pr-anchor-hydration-old", "pg-desk-pr-lane-hard-failure", "pg-desk-pr-lane-failure-rate", "pg-desk-pr-hydration-failing", "pg-desk-pr-hydrate-dead-man", "pg-desk-pr-hidden-open-anchor", "pg-desk-pr-lookup-ceiling", "pg-desk-sweep-bound-violated", "pg-desk-watch-listing-degraded"]'
 
 fail() {
   echo "FAIL: $*" >&2
@@ -161,6 +162,10 @@ broken "the sweep-bound scope removed" \
   "$(expr_path pg-desk-sweep-bound-violated) |= sub(\"[{]type=.*[}]\"; \"\")"
 broken "the dead-man's role selector widened to every role" \
   "$(expr_path pg-desk-pr-hydrate-dead-man) |= sub(\"[{]role=.pr-change.[}]\"; \"\")"
+broken "the lookup-ceiling rule without its ceiling greater than 0 guard" \
+  "$(expr_path pg-desk-pr-lookup-ceiling) |= sub(\"[(]max[(]pg_desk_pr_lane_lookup_ceiling[)] > 0[)]\"; \"max(pg_desk_pr_lane_lookup_ceiling)\")"
+broken "the hidden-PR rule's SYSTEM_PAUSE guard removed" \
+  "$(expr_path pg-desk-pr-hidden-open-anchor) |= sub(\" unless on[(][)] [(]pg_router_gates_active.*\$\"; \"\")"
 
 [ "$selftest_fail" -eq 0 ]
 echo "OK: self-test passes"

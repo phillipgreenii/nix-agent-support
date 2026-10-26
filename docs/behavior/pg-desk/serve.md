@@ -375,6 +375,26 @@ file with the guard removed and one with another `noDataState` each fail). A cat
 real scrape of a schema-2 store and, for the lane-run, decisions and residual series, after a run is
 recorded the way the composed command records it.
 
+### PR lane remaining alerts
+
+Two more Grafana rules of the same file follow the outcome rules' shape (`noDataState: OK`, query A the
+instant expression below, B reducing with `last`, C a `gt` threshold, the `SYSTEM_PAUSE` guard of
+`pg-desk-sync-stale` at the end of every expression) and have a firing, a healthy and an empty-input case
+under `grafana/alerting/rule-tests/`. Neither uid is registered with the alert probe yet.
+
+| uid                             | severity  | signal                                                                                                                              | threshold | for   | meaning                                                                                                                             |
+| ------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `pg-desk-pr-hidden-open-anchor` | `info`    | `pg_desk_pr_open_anchors_hidden`, the hidden PRs with an open anchor, counted from the store at scrape time                         | `> 0`     | `30m` | a hidden PR is skipped by every decider rule including closure, so its anchor stays open even after the PR merges (low severity)    |
+| `pg-desk-pr-lookup-ceiling`     | `warning` | `pg_desk_pr_lane_lookup_items / (pg_desk_pr_lane_lookup_ceiling > 0)`, both read from the lane record the composed command persists | `> 0.8`   | `30m` | the decider's work-item lookup holds over 80 percent of its ceiling: the warning before the lane fails closed on a listing above it |
+
+The lookup gauges read 0 until a run reports them, so the ratio is guarded by `ceiling > 0`: with the
+ceiling gauge at 0 the denominator is dropped and the rule is quiet instead of dividing by zero (a rule test
+pins it). The remedy for the ceiling rule is to raise the configured work-items ceiling and apply, or to
+compact closed work items, because closed items only accumulate. The tracked-set rule and the
+no-watched-PRs rule read the connector daemon's metrics and live in the connector's alert file
+(`packages/pg-connector/grafana/alerting/pg-connector-github-alerts.yaml`); the no-watched-PRs rule reads
+`pg_desk_pr_open_anchors` from this service.
+
 ## Invariants
 
 - **INV-SERVE-1.** <!-- uuid: 49037238-ded6-4367-a15a-d4e2308dffda --> `pg_desk_pr_lane_mode` MUST be emitted with a value on every scrape (`1` on the configured mode, `0` on
