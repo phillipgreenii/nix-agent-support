@@ -458,6 +458,50 @@ tests:
           - labels: "{}"
             value: 9
 
+  # The escalation-watchdog clause (pg2-f9x7i): the timer role that hands stale escalations to the
+  # operator. Its ticks pile up while the role is idle, and a role that is busy is not stalled.
+  - name: the escalation-watchdog timer role maps to escalation-watchdog.tick (idle pages, busy does not)
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="escalation-watchdog.tick",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="escalation-watchdog",job="pg-router"}
+        values: "0x240"
+      # A neighbour under a similar name binds nothing: it excuses nothing and is not itself covered.
+      - series: pg_router_queue_depth{type="escalation-watchdog.tick.extra",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="escalation-watchdog-other",job="pg-router"}
+        values: "1x240"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 20m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: escalation-watchdog.tick
+              job: pg-router
+              severity: warning
+
+  - name: the escalation-watchdog timer role is not stalled while it is dispatching
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="escalation-watchdog.tick",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="escalation-watchdog",job="pg-router"}
+        values: "1x240"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+
   - name: a type the table does not know is not covered, and neither is a role that is not bound
     interval: 30s
     input_series:

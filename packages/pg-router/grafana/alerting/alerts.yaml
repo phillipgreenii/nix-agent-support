@@ -348,6 +348,12 @@ groups:
       # it replaced (rule uid, alertname, severity, type, instance, job,
       # otel_scope_name) and an open bead for that fingerprint keeps matching.
       #
+      # The escalation-watchdog clause (type escalation-watchdog.tick, role
+      # escalation-watchdog) covers the timer role that hands stale escalations to the
+      # operator: a backlog of its ticks with that role idle means no hand-off can happen
+      # and a stuck escalated bead stays stuck. A deployment that runs one watchdog per
+      # tracker binds one role and type per tracker and MUST add one clause per pair here.
+      #
       # Not covered, by ruling: a wedged session that still counts as in flight (the
       # ccpool session rules own it, pool-full-idle and needs_input) and a backlog that
       # grows under a consumer that IS working (pg-router-queue-slow-growth, below).
@@ -382,7 +388,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "resolve-conflict-script", "type", "resolve-conflict[.]ready"), "role", "fix-ci-script", "type", "fix-ci[.]ready"), "role", "pr-change", "type", "pr[.]changed"), "role", "issue-decider", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "disk-watchdog", "type", "disk[.]check"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2") and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)
+              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "resolve-conflict-script", "type", "resolve-conflict[.]ready"), "role", "fix-ci-script", "type", "fix-ci[.]ready"), "role", "pr-change", "type", "pr[.]changed"), "role", "issue-decider", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "disk-watchdog", "type", "disk[.]check"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2"), "role", "escalation-watchdog", "type", "escalation-watchdog[.]tick") and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)
           - refId: B
             datasourceUid: __expr__
             model:

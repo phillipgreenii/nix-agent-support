@@ -745,6 +745,20 @@
               inherit bashBuilders;
               beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
             }).hand-to-human.script;
+          # escalation-watchdog (bead pg2-f9x7i): hands beads that stayed
+          # `escalated` past a threshold to the operator through hand-to-human,
+          # marked stale-escalation. Single mkBashScript tool, so -- same
+          # rationale as hand-to-human -- it takes
+          # `result.escalation-watchdog.script` directly. `bd` and `hand-to-human`
+          # are resolved from the ambient machine PATH at runtime; the beads and
+          # hand-to-human packages are for the test check only.
+          escalation-watchdog =
+            (import ./packages/escalation-watchdog {
+              pkgs = final;
+              inherit bashBuilders;
+              beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
+              inherit (final) hand-to-human;
+            }).escalation-watchdog.script;
           # session-mode (bead pg2-gzrn2): per-session "which loop is running"
           # tracking (drain-beads / unblock-human-beads / wrap-up-session /
           # ...), consumed by the pb marketplace's commands, its SessionEnd
@@ -16237,6 +16251,15 @@
               bashBuilders = pkgs._agentSupportBashBuilders;
               beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
             }).checks
+            # test-escalation-watchdog (bead pg2-f9x7i). Same one-line idiom as
+            # hand-to-human above (real-bd throwaway-DB fixture, plus the real
+            # hand-to-human): without this the suite would run in no gate.
+            // (import ./packages/escalation-watchdog {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+              beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
+              inherit (pkgs) hand-to-human;
+            }).checks
             # test-git-branch-maintenance / test-git-branch-status /
             # test-git-choose-branch (bead pg2-ly46t). Same one-line idiom as
             # pg-disk-reclaimer above: without this the suite ran in no gate
@@ -16413,6 +16436,10 @@
             # tool) -- re-exported so `nix build .#hand-to-human` resolves via
             # flake.packages.<system>.
             inherit (pkgs) hand-to-human;
+            # escalation-watchdog is likewise an overlay-only attr (single mkBashScript
+            # tool) -- re-exported so `nix build .#escalation-watchdog` resolves via
+            # flake.packages.<system>.
+            inherit (pkgs) escalation-watchdog;
             # codeburn is a manual-bump npm package (not Go/nix-update); re-exported so
             # `nix build .#codeburn` resolves it via flake.packages.<system>.
             inherit (pkgs) codeburn;

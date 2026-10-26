@@ -1,0 +1,10 @@
+#compdef escalation-watchdog
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '--bd-dir[Tracker root to run bd against]:directory:_files -/' \
+  '--stale-after[Hand off beads escalated for longer than this (<n>h, <n>m or <n>s)]:duration:' \
+  '--max-per-tick[Hand off at most this many beads per run]:count:' \
+  '--quiet-for[Skip a bead updated within this long (<n>h, <n>m or <n>s)]:duration:' \
+  '--dry-run[Print what would be handed off; write nothing]'

@@ -47,8 +47,9 @@ const (
 var laneEnd = parseUTC("2026-10-13T00:25:00Z")
 
 // stalledRoles is the type-to-role table the rule's label_replace chain encodes:
-// one entry per role of the daemon config (17 roles after the PR lane refactor made
-// pr-change the one role that binds pr.changed and removed pr.reconcile), in the
+// one entry per role of the daemon config (18 roles: the PR lane refactor made
+// pr-change the one role that binds pr.changed and removed pr.reconcile, and the
+// escalation-watchdog timer role was added), in the
 // order of the chain. A role added to the config MUST be added here and to the rule;
 // the deployment derives the pairs it must find in the rule from its own roles.
 var stalledRoles = []struct{ typeRE, role string }{
@@ -69,28 +70,30 @@ var stalledRoles = []struct{ typeRE, role string }{
 	{"escalated[.]pg2", "pg2-escalation-triager"},
 	{"escalated[.]zr", "zr-escalation-triager"},
 	{"split-review[.]pg2", "pg2-split-triager"},
+	{"escalation-watchdog[.]tick", "escalation-watchdog"},
 }
 
 // stalledTypes is every event type the daemon config binds, with the
 // role that binds it.
 var stalledTypes = map[string]string{
-	"drain.zr":               "drain-zr",
-	"drain.pg2":              "drain-pg2",
-	"review.ready":           "review",
-	"feedback.ready":         "feedback",
-	"work.ready":             "worker",
-	"resolve-conflict.ready": "resolve-conflict-script",
-	"fix-ci.ready":           "fix-ci-script",
-	"pr.changed":             "pr-change",
-	"issue.changed":          "issue-decider",
-	"thread.changed":         "desk-thread",
-	"desk.heartbeat":         "desk-heartbeat",
-	"pg-router-probe.tick":   "pg-router-probe",
-	"ccpool-probe.tick":      "ccpool-probe",
-	"disk.check":             "disk-watchdog",
-	"escalated.pg2":          "pg2-escalation-triager",
-	"escalated.zr":           "zr-escalation-triager",
-	"split-review.pg2":       "pg2-split-triager",
+	"drain.zr":                 "drain-zr",
+	"drain.pg2":                "drain-pg2",
+	"review.ready":             "review",
+	"feedback.ready":           "feedback",
+	"work.ready":               "worker",
+	"resolve-conflict.ready":   "resolve-conflict-script",
+	"fix-ci.ready":             "fix-ci-script",
+	"pr.changed":               "pr-change",
+	"issue.changed":            "issue-decider",
+	"thread.changed":           "desk-thread",
+	"desk.heartbeat":           "desk-heartbeat",
+	"pg-router-probe.tick":     "pg-router-probe",
+	"ccpool-probe.tick":        "ccpool-probe",
+	"disk.check":               "disk-watchdog",
+	"escalated.pg2":            "pg2-escalation-triager",
+	"escalated.zr":             "zr-escalation-triager",
+	"split-review.pg2":         "pg2-split-triager",
+	"escalation-watchdog.tick": "escalation-watchdog",
 }
 
 // wantStalledExpr is the expr of rule pg-router-queue-stalled, built from the table

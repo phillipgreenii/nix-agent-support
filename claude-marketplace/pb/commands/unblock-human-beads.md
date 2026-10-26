@@ -63,6 +63,16 @@ no `attention`; a hand-off the escalation path could not resolve is written ONLY
 (`attention` is in the drain queues' exclude list, so a released bead that kept it would stay
 out of the drain pool); removing a label that is absent is a no-op.
 
+**`stale-escalation` marker.** A bead may carry `stale-escalation` next to `human` and `attention`:
+the `escalation-watchdog` command wrote it when a bead stayed `escalated` past its threshold and
+handed it to the operator (`docs/guides/bead-label-vocabulary.md`). It means "automation ran out of
+time, the cause may be infrastructure (disk, usage limit, auth) and not a decision only a person can
+make": CHECK THE CAUSE FIRST (the bead's note names how long it was escalated and the last comment),
+and when the cause was transient, release the bead back to the drain pool. It is in neither
+`ESCALATED_LABELS` nor `HUMAN_LABELS`, it does not change which queue the bead is in, and ANY RELEASE
+of a bead carrying it MUST add `stale-escalation` to the same `--remove-label` list, so the marker
+does not follow a later genuine escalation.
+
 ## Sourcing invariant (deferred-safety by construction — DO NOT REGRESS)
 
 Claim work ONLY via the preview-then-claim sequence in "Template/formula exclusion" below

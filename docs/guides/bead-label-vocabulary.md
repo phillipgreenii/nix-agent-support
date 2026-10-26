@@ -211,6 +211,26 @@ attention label, and it is in neither `ESCALATED_LABELS` nor `HUMAN_LABELS`.
 - It never replaces `worker-ready`: the item keeps `worker-ready`, and the marker only tells the
   worker role that the script rung already failed for it.
 
+## Watchdog hand-off marker: `stale-escalation`
+
+The label `stale-escalation` says "automation ran out of time on this bead; check the infrastructure
+(disk, usage limit, auth) before treating it as a decision only a person can make". It is a marker, not
+an escalation or attention label, and it is in neither `ESCALATED_LABELS` nor `HUMAN_LABELS`, like
+`script-gave-up`.
+
+- It is written by the `escalation-watchdog` command, and by nothing else, in the same update that
+  hands the bead to the operator (`hand-to-human <id> --also-add stale-escalation --note ...`): the
+  bead ends with `human`, `attention` and `stale-escalation`, `escalated` removed, and a note that
+  names how long it was escalated, which clock was used and the last comment on the bead.
+- The watchdog picks a bead that has carried `escalated` for longer than a configured threshold (the
+  clock is the latest "Added label: escalated" event in `bd history --events`, so a re-escalation
+  restarts it), that is ready, unassigned and open, and that carries none of `attention`,
+  `human-focus`, `human-focus-required` or `human`. A bead is therefore handed off once per
+  escalation.
+- The escalation-triager's own `hand-to-human` call SHOULD pass `--also-remove stale-escalation`, so a
+  marker left by an earlier cycle does not follow a later genuine escalation. The same goes for a
+  release: it removes the marker together with `human` and `attention`.
+
 ## Non-goal
 
 Prefer one label for INTENT (attention, design, implementation, ...) augmented by `escalated` or
