@@ -248,3 +248,46 @@ notes_of() { bd_fixture_show_json "$1" | jq -r '.notes // ""'; }
   run --separate-stderr "$H" tst-nope99 --note x --if-status open
   [ "$status" -eq 3 ]
 }
+
+# bd_warn_shim [show-fail]: a `bd` first on PATH that prints a warning on stderr
+# for EVERY call (as bd does in a tracker without beads.role configured), then
+# execs the real bd so stdout stays the real bd's. With `show-fail` the `show`
+# call instead prints a diagnostic on stderr and exits 1 (a failing read-back).
+# Install it AFTER creating the test bead: new_bead goes through PATH too.
+bd_warn_shim() {
+  local real_bd shim_dir
+  real_bd="$(command -v bd)"
+  shim_dir="$(mktemp -d)"
+  cat >"$shim_dir/bd" <<SHIM
+#!/usr/bin/env bash
+echo "warning: beads.role not configured" >&2
+if [ "${1:-}" = "show-fail" ]; then
+  case " \$* " in *" show "*) echo "bd: show exploded" >&2; exit 1 ;; esac
+fi
+exec "$real_bd" "\$@"
+SHIM
+  chmod +x "$shim_dir/bd"
+  PATH="$shim_dir:$PATH"
+  export PATH
+}
+
+@test "a bd stderr warning on every call does not break the read-back: stdout alone is parsed (pg2-j83ofs)" {
+  id="$(new_bead escalated keep-me)"
+  bd_warn_shim
+  run --separate-stderr "$H" "$id" --also-add stale-escalation --note "timed out"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$id" ]
+  [[ $stderr != *"MISMATCH"* ]]
+  [[ $stderr == *"ok: label human present"* ]]
+  [[ $stderr == *"ok: note present"* ]]
+  [ "$(labels_of "$id")" = $'attention\nhuman\nkeep-me\nstale-escalation' ]
+}
+
+@test "a failing bd show in the read-back still reports bd's stderr, exit 4 (pg2-j83ofs)" {
+  id="$(new_bead escalated)"
+  bd_warn_shim show-fail
+  run --separate-stderr "$H" "$id"
+  [ "$status" -eq 4 ]
+  [[ $stderr == *"MISMATCH: bd show $id failed"* ]]
+  [[ $stderr == *"bd: show exploded"* ]]
+}

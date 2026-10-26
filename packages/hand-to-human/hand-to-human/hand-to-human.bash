@@ -166,14 +166,22 @@ hth_run_connector() {
 # `ok:`/`MISMATCH:` line per check on stderr. Returns 0 when every check holds,
 # 4 otherwise.
 hth_readback() {
-  local id="$1" show labels l bad=0 notes
+  local id="$1" show labels l bad=0 notes err_file err
   shift
-  if ! show="$(hth_bd show "$id" --json 2>&1)"; then
-    echo "hand-to-human: MISMATCH: bd show $id failed: $show" >&2
+  # JSON is parsed from STDOUT alone: bd warns on stderr on successful calls
+  # (e.g. beads.role not configured), and merging it in corrupts the JSON
+  # (pg2-j83ofs). stderr goes to a file and is quoted only on a failure.
+  err_file="$(mktemp)"
+  if ! show="$(hth_bd show "$id" --json 2>"$err_file")"; then
+    err="$(<"$err_file")"
+    rm -f "$err_file"
+    echo "hand-to-human: MISMATCH: bd show $id failed: $show${err:+${show:+ }$err}" >&2
     return 4
   fi
-  if ! labels="$(printf '%s' "$show" | jq -c "$HTH_ENVELOPE_PRELUDE"' | (.labels // [])' 2>&1)"; then
-    echo "hand-to-human: MISMATCH: could not parse bd show $id --json: $labels" >&2
+  if ! labels="$(printf '%s' "$show" | jq -c "$HTH_ENVELOPE_PRELUDE"' | (.labels // [])' 2>"$err_file")"; then
+    err="$(<"$err_file")"
+    rm -f "$err_file"
+    echo "hand-to-human: MISMATCH: could not parse bd show $id --json: $labels${err:+${labels:+ }$err}" >&2
     return 4
   fi
   for l in "$HTH_HUMAN_LABEL" "$HTH_ATTENTION_LABEL" ${HTH_ALSO_ADD[@]+"${HTH_ALSO_ADD[@]}"}; do
@@ -193,8 +201,10 @@ hth_readback() {
     fi
   done
   if [[ -n $HTH_NOTE ]]; then
-    if ! notes="$(printf '%s' "$show" | jq -r "$HTH_ENVELOPE_PRELUDE"' | (.notes // "")' 2>&1)"; then
-      echo "hand-to-human: MISMATCH: could not read notes of bd show $id --json: $notes" >&2
+    if ! notes="$(printf '%s' "$show" | jq -r "$HTH_ENVELOPE_PRELUDE"' | (.notes // "")' 2>"$err_file")"; then
+      err="$(<"$err_file")"
+      rm -f "$err_file"
+      echo "hand-to-human: MISMATCH: could not read notes of bd show $id --json: $notes${err:+${notes:+ }$err}" >&2
       return 4
     fi
     if [[ $notes == *"$HTH_NOTE"* ]]; then
@@ -204,5 +214,6 @@ hth_readback() {
       bad=1
     fi
   fi
+  rm -f "$err_file"
   [[ $bad -eq 0 ]] || return 4
 }
