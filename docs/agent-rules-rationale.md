@@ -95,15 +95,28 @@ A-3: a brief that lists relative paths without a root causes exactly this defect
   itself, none of the standard planned work should rely on running mutate tests"; 2026-10-26,
   verbatim: "typical development flows must not invoke mutation tests. mutation tests are something
   done outside of standard implementation flows ... each use of mutation tests should be intentional
-  outside of implementation work. it is used to generate areas which need to be improved").
-  Provenance: the `go-test-gaps` skill description told agents to use it "after implementing a Go
-  feature and deciding what to test", so it fired in ordinary work; seven design specs and plans
-  carried "run `pg-go-mutate`" rows that `plan-decompose` copies into packet acceptance criteria
-  (struck on pg2-z5fax.4 on 2026-10-22; the rest struck 2026-10-26); and a 2026-10-20 mutation run
-  spawned an unbounded process tree (`nix-support-apps` observability README). A bare prohibition
-  has no observable in-session trigger, so it stays always-on rather than moving into the skill
-  (tripwire pattern). The hand-applied negative control is excluded because
-  `x/pprofserver/mutation-check.sh` and the dashboard-check mutant self-tests are ordinary fast tests.
+  outside of implementation work. it is used to generate areas which need to be improved"; and
+  the same day, on closing the gaps an analysis found, verbatim: "i don't think we need to re-run
+  the mutation tests at all. i think what the mutation had uncovered when it ran was the problem.
+  the problem is fixed when a test is written which covers a missed path. as long as the acceptance
+  criteria includes the path and test(s) which should exist, i think that is sufficent to fixing
+  the problem. a mutation test would run on this app/package later and it shouldn't find the same
+  issue twice"). Provenance: the `go-test-gaps` skill description told agents to use it "after
+  implementing a Go feature and deciding what to test", so it fired in ordinary work; and its
+  "Use 2" re-ran the tool to confirm a closed gap, which would have sent every drained triage bead
+  back into an hours-long run (two independent reviews of the first version of this rule found
+  that), so the confirm-by-re-run section was removed. Seven documents carried "run
+  `pg-go-mutate`" rows that `plan-decompose` copies into packet acceptance criteria and were
+  struck 2026-10-26: six design specs and plans in this repo plus one in `phillipg-nix-ziprecruiter`.
+  Earlier strikes: a bead acceptance criterion on pg2-z5fax.4 (2026-10-22) and the PR-lane and
+  connectord-hoist specs (2026-10-22). A 2026-10-20 mutation run spawned an unbounded process tree
+  (`nix-support-apps` observability README). A bare prohibition has no observable in-session
+  trigger, so it stays always-on rather than moving into the skill (tripwire pattern). The
+  hand-applied negative control is excluded because `x/pprofserver/mutation-check.sh` (in the `x`
+  repo) and the dashboard-check mutant self-tests are ordinary fast tests; the tooling-source
+  exception covers `nix-overlay`'s `gomu-engine-contract-tests`, which runs the real tool against a
+  generated toy project. Enforcement is textual only: the tool-approver allowlists `pg-go-mutate`
+  as no more permissive than `go`, so nothing blocks a run mechanically.
 
 ## Timeouts (L-1..L-3) and host load (L-4)
 

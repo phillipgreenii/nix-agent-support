@@ -71,7 +71,10 @@ otherwise.
 - Do not modify the docket, other packets, or their metadata beyond step 2's stale marking
   and step 6's metric comment.
 - Never run mutation testing (`pg-go-mutate`, the `go-test-gaps` skill), even scoped to one
-  package, even if a packet line asks for it: it is not part of implementation (V-5). Report
-  such a line as a curation defect in your closeout note instead of running it.
+  package, even if a packet line asks for it: it is not part of implementation (V-5). Write
+  the tests the packet names for each missed path instead. If the packet cannot be satisfied
+  without a tool run, say so in the what-was-missing note on the packet (step 5(c)) and
+  release it (or finish `outcome=blocked`), rather than running the tool. The exception is a
+  packet that changes the mutation tooling itself.
 - Report outcomes faithfully: failed validation is `outcome=blocked` with the failure in your
   note, never a claimed success.

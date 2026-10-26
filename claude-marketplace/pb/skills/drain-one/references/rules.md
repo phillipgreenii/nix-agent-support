@@ -111,7 +111,9 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   of a drain (V-5; operator ruling, Phillip, 2026-10-26: "typical development flows must not
   invoke mutation tests"). Neither the orchestrator nor a brief runs or asks for it, and a bead
   whose acceptance criterion requires a mutation run is not drainable as written: strike the
-  criterion in the bead (S-1/S-2) unless the bead's subject is mutation testing itself. A report
+  criterion in the bead (S-1/S-2) unless the bead is work on the mutation tooling itself. A
+  `go-test-gaps` triage bead's gaps are closed by writing tests (the bead's acceptance criteria
+  name each missed path and the tests that must exist), never by re-running the tool. A report
   that says a subagent ran it is a brief violation to flag.
 - Landing MUST go through the `integrate-branch:integrate-branch` dispatcher with NO
   handler named, so every repo lands by the strategy IT declares in

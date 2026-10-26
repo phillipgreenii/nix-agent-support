@@ -72,7 +72,7 @@
     {
       "name": "pg-go-mutate",
       "source": "./pg-go-mutate",
-      "description": "Claude skill: find missing test assertions in a Go package with pg-go-mutate (mutation testing, surfaced as a test-writing workflow)"
+      "description": "Claude skill: operator-initiated mutation analysis of one Go package with pg-go-mutate; output is a triage bead of test gaps. Never part of implementation work"
     },
     {
       "name": "plan-decompose",

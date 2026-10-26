@@ -1,6 +1,6 @@
 {
   "name": "pg-go-mutate",
-  "description": "Find missing test assertions in Go packages with pg-go-mutate",
+  "description": "Operator-initiated mutation analysis of one Go package with pg-go-mutate; output is a triage bead. Never part of implementation work",
   "version": "0.1.0",
   "defaultEnabled": true
 }

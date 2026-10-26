@@ -109,13 +109,15 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
      (SSH, HTTP/curl to internal infra, etc.) to hosts OUTSIDE the isolated
      worktree/repo on its own initiative — if verifying a live-host fact seems
      necessary, say so in the report and let the orchestrator decide whether to
-     authorize it, rather than doing it unilaterally (bead `tc-h6ty`); MUST NOT run
-     mutation testing (`pg-go-mutate`, `go-test-gaps`): it is never part of
-     implementation work (V-5), and a brief MUST NOT ask for it; report
+     authorize it, rather than doing it unilaterally (bead `tc-h6ty`); report
      fully in ONE turn (no waiting/monitoring across turns). This covers
      backgrounded shell commands; an agent that dispatches Agent children (e.g.
      the plan-decompose decomposer agents) waits for them by ending its turn,
      and a brief MUST NOT tell it otherwise.
+   - **no mutation testing.** The subagent MUST NOT run `pg-go-mutate` or the
+     `go-test-gaps` skill, and a brief MUST NOT ask for it (V-5). A bead that
+     closes gaps a past analysis found is ordinary test-writing: the brief points
+     at the bead's named paths and tests, never at a mutation re-run.
    - **waiting on a background job: wait ONCE with `bgwait`, never poll.** A
      command expected to outlive a single call is launched with
      `bgrun NAME -- CMD` and awaited with `bgwait NAME --timeout 540` (a

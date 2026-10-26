@@ -1,6 +1,6 @@
 ---
 name: go-test-gaps
-description: Use ONLY when the operator explicitly asks to run mutation testing or a test-gap analysis on a named Go package, or when working a bead whose subject is mutation testing or closing go-test-gaps survivors. It is a slow, intensive, deliberate analysis whose output is beads for improvements. Do NOT use in implementation, planning, review, validation or landing work; do NOT use when writing or strengthening tests, improving coverage, or deciding what to test; do NOT use for non-Go code or for a coverage or mutation score.
+description: Use ONLY when the operator explicitly asks to run mutation testing or a test-gap analysis on a named Go package, or when changing the mutation tooling itself (pg-go-mutate, pg-go-mutate-tui). It is a slow, intensive, deliberate analysis whose output is a triage bead of areas to improve. Do NOT use in implementation, planning, review, validation or landing work; do NOT use when writing or strengthening tests, closing the gaps a past analysis found, improving coverage, or deciding what to test; do NOT use for non-Go code or for a coverage or mutation score.
 ---
 
 # Finding Go test gaps
@@ -15,19 +15,21 @@ in production code, and you MUST NOT "fix" production code to make a mutant die.
 
 ## When this applies (operator-initiated only)
 
-A mutation run is slow and intensive (cost is roughly `mutants x the package's
-test-suite runtime`, hours for a real package), so it is NEVER a step of ordinary
-work. Operator ruling (Phillip, 2026-10-26, verbatim): "typical development flows
-must not invoke mutation tests. mutation tests are something done outside of
-standard implementation flows ... each use of mutation tests should be intentional
-outside of implementation work. it is used to generate areas which need to be
-improved." Earlier rulings: 2026-10-20 and 2026-10-22 ("unless the story is about
-mutation testing itself, none of the standard planned work should rely on running
-mutate tests").
+A mutation run is slow and intensive (cost is roughly
+`mutants x the package's test-suite runtime`, hours for a real package), so it is
+NEVER a step of ordinary work. Operator ruling (Phillip, 2026-10-26, verbatim):
+"typical development flows must not invoke mutation tests. mutation tests are
+something done outside of standard implementation flows. ie, i may decide to run
+mutation tests on an app, one package at a time to generate beads for
+improvements. each use of mutation tests should be intentional outside of
+implementation work. it is used to generate areas which need to be improved."
+Earlier rulings: 2026-10-20 and 2026-10-22 ("unless the story is about mutation
+testing itself, none of the standard planned work should rely on running mutate
+tests").
 
 - You MUST run it only when the operator asked for a mutation or gap analysis of a
-  named package, or when the bead you are working has mutation testing or closing
-  `go-test-gaps` survivors as its subject.
+  named package, or when the bead you are working changes the mutation tooling
+  itself (`pg-go-mutate`, `pg-go-mutate-tui`).
 - You MUST NOT run it, or put it in a brief, plan, packet, acceptance criterion or
   validation step, as part of implementing, fixing, reviewing, strengthening tests
   for, or landing code. "Is this test any good?" is answered by a hand-applied
@@ -48,110 +50,56 @@ missing tests in the same pass unless the operator asked you to.
    pg-go-mutate ./internal/collect --workers 1
    ```
 
-2. Read the worklist. Each entry is `file`, line, the mutation, and the operator.
-3. File ONE `P3` triage bead per package, in the tracker of the repo that holds the
-   package (`bd -C <tracker-root> ...`), labeled `go-test-gaps` plus that repo's
-   label, carrying the worklist rows (`file:line`, mutation, operator) and the
+2. Read the worklist ("Reading the worklist" below). Each entry is `file`, line,
+   the mutation, and the operator. If the tool reports that the package has no test
+   files (exit `10`), there is no worklist: the finding is "no tests", and the bead
+   in step 3 says so.
+3. File the result as ONE `P3` triage bead per package, in the tracker of the repo
+   that holds the package (`bd -C <tracker-root> ...`), titled
+   `go-test-gaps triage: <pkgPath>` and labeled `go-test-gaps` plus that repo's
+   label. First search that tracker for an existing bead with that title (the
+   background sweep files the same one) and AMEND it instead of filing a second.
+   The bead carries the worklist rows (`file:line`, mutation, operator) and the
    exact command you ran. Never an epic (an open epic never leaves `bd ready`). No
-   counts, percentages or scores go in it.
+   survivor or kill counts, percentages or scores go in it.
 
-## Use 2: closing the gaps (a bead whose subject is these survivors)
+## Closing the gaps a past analysis found (ordinary test work, not a use of this tool)
 
-1. Take the worklist from the bead.
-2. Write an assertion that would fail under each mutation.
-3. Re-run scoped to that one package and confirm **that specific mutant**, matched
-   on `file:line:type`, is now killed — the worklist reports survivors only, so
-   establish that by the procedure in "Establishing that a named mutant was killed"
-   below.
+A triage bead's gaps are closed by writing tests, as any other implementation
+bead is. Operator ruling (Phillip, 2026-10-26, verbatim): "i don't think we need
+to re-run the mutation tests at all. i think what the mutation had uncovered when
+it ran was the problem. the problem is fixed when a test is written which covers a
+missed path. as long as the acceptance criteria includes the path and test(s)
+which should exist, i think that is sufficent to fixing the problem. a mutation
+test would run on this app/package later and it shouldn't find the same issue
+twice."
 
-## Establishing that a named mutant was killed
+- The acceptance criteria of a gap-closing bead name each missed path (`file:line`
+  and the behavior) and the test(s) that must exist to cover it, for example "a
+  test asserts that `collect.go:95` returns the error when the runner is nil".
+- The work is done when those tests exist and the normal suite passes. A
+  hand-applied mutant (reintroduce the defect once, watch the new test fail) MAY
+  back that up.
+- You MUST NOT re-run `pg-go-mutate` to confirm the gap is closed, and MUST NOT
+  write "absent from a re-run's worklist" into an acceptance criterion. The next
+  analysis or sweep over the package is the check, and it should not find the same
+  gap twice.
+- A row no assertion can kill (a no-op or equivalent mutant) is noted in the bead
+  and closed without a test.
 
-The worklist — human output and `--json` alike — reports **survivors only**, and the
-wrapper deletes the engine report when it exits, so there is no positive `KILLED` row
-to read for a named mutant. **Killed is established by ABSENCE from the survivor
-worklist**, and absence is the same observable as a mutant that
+## Reading the worklist
 
-- was never **generated** — gomu type-checks candidate mutations, but a mutation that
-  would not typecheck may EITHER never be emitted at all OR be emitted and reported
-  `NOT_VIABLE`; both behaviours are measured, so neither one can be predicted,
-- lives in a file that **errored** or **timed out** during the run,
-- was judged `NOT_VIABLE` (did not compile), or
-- is a **no-op** (`original == mutated`), which the worklist drops before any count and
-  which no assertion can ever kill.
+The worklist, human output and `--json` alike, reports **survivors only**, so a
+row is a lead to judge, not a verdict.
 
-Because a non-typechecking mutation lands in the first case OR the third, **`go build` on
-the mutated line is the cheap way to settle which** — and the only thing that settles it.
-Both were measured: the ordering variants in precondition 1 below were never generated at
-all (`notViable` **0**), while 20 orphaned-binding and `%`-on-float mutations in a single
-file WERE generated and reported `NOT_VIABLE`, each independently confirmed non-compiling
-by `go build` with its own compiler error. So a `NOT_VIABLE` row MUST NOT be read as a
-tool defect — nor, per the MUST NOT below, as proof of non-compilation.
-
-So absence on its own is suggestive, not decisive. All three preconditions below MUST
-hold before absence is read as killed.
-
-1. **The mutant's identity MUST come from a worklist row, not from a prediction.** Only
-   a row some run actually printed proves the mutation exists. Measured on one module,
-   `u == nil` at `client.go:50` was given only `"==" -> "!="` and `runner == nil` at
-   `secret.go:95` only 3 mutants in total: the 8 ordering variants (`<`, `<=`, `>`,
-   `>=`) were never generated, and `notViable` was **0** at both lines. A predicted
-   mutant that no worklist ever listed is absent from every later one too, and MUST NOT
-   be called killed.
-2. **The run MUST have used `--workers 1`, and MUST report `errors` 0, `timedOut` 0, and
-   `notViable` 0.** Any of the three counts nonzero leaves absence ambiguous between
-   killed and never-compiled/never-run. Above one worker the counts are themselves
-   unreliable in BOTH directions — measured, a non-compiling mutant reported `KILLED`
-   and a viable one reported `NOT_VIABLE` — so the gate can pass on a run whose buckets
-   are wrong and can also fail spuriously. The `--workers` value is not in the `--json`
-   payload, so the check below cannot verify it for you; passing it is on you. When the
-   counts are nonzero, narrow the target to the single package holding the mutant and
-   re-run; if they are still nonzero there, the outcome is **undecided** and MUST be
-   reported as undecided, never as killed.
-3. **The mutation type MUST appear in `statistics.mutationTypes`.** If the type is
-   missing, gomu generated none of that type anywhere in the target, so the absence of
-   your row says nothing about your line.
-
-Read all three from one `--json` payload — `$file`, `$line` and `$type` are the
-worklist row you are chasing:
-
-```bash
-pg-go-mutate ./internal/collect --workers 1 --json >pgm.json
-
-jq --arg file collect.go --argjson line 95 --arg type branch_condition '
-  { runDecisive: (.statistics.errors == 0 and .statistics.timedOut == 0
-                  and .statistics.notViable == 0),
-    errors: .statistics.errors, timedOut: .statistics.timedOut,
-    notViable: .statistics.notViable,
-    typeEverGenerated: ((.statistics.mutationTypes // {}) | has($type)),
-    stillSurviving: [ .survivors[]
-                      | select(.file == $file and .line == $line and .type == $type) ] }
-' pgm.json
-```
-
-| `stillSurviving` | `runDecisive` | `typeEverGenerated` | Verdict                                                 |
-| ---------------- | ------------- | ------------------- | ------------------------------------------------------- |
-| non-empty        | —             | —                   | still a gap — the assertion is still missing            |
-| empty            | true          | true                | **killed**, given precondition 1                        |
-| empty            | —             | false               | **never generated** — report that, do not report killed |
-| empty            | false         | true                | **undecided** — narrow the target and re-run, per 2     |
-
-`runDecisive` covers only the three counters; `--workers 1` is the fourth precondition and
-is not observable in the payload, so a `true` reading from a parallel run proves nothing.
-
-`buildTagsNotRun` does not weaken a killed verdict: tag-gated tests that did not run
-can only ADD survivors, never hide one. Read these bucket counts as run-health
-preconditions and discard them — they are not a score, and the MUST NOT below still
-forbids recording one.
-
-**Phrase acceptance criteria accordingly.** "The mutants at `file:line` are reported
-killed" is not satisfiable from this tool, because nothing reports a positive verdict.
-Write "absent from the survivor worklist of a decisive run" instead, and treat "never
-generated" as a legitimate outcome rather than a failure to verify.
-
-Reaching for the pinned engine directly to read positive `KILLED` / `NOT_VIABLE` rows
-SHOULD be a last resort: it roughly doubles the cost of an already expensive run, its
-`NOT_VIABLE` verdicts are measurably unreliable (see the MUST NOT below), and the
-short-`$TMPDIR` requirement in the MUST below still applies.
+- A survivor may be a phantom: verify a suspicious row by applying that exact
+  mutation by hand and running the suite. Running above one worker manufactures
+  phantoms (see the MUST below).
+- Nonzero `errors`, `timedOut` or `notViable` counts in the run mean part of the
+  package was not decisively analyzed; say so in the bead. These counts are run
+  health, not a score, and the MUST NOT below still forbids recording them.
+- A mutation that does not typecheck may be omitted or reported `NOT_VIABLE`;
+  `go build` on the mutated line settles which.
 
 ## MUST
 
@@ -160,28 +108,26 @@ short-`$TMPDIR` requirement in the MUST below still applies.
   verdicts are not reproducible: measured on one package, two mutants that `go build`
   PROVES non-compiling were reported `KILLED`, a viable mutant was reported `NOT_VIABLE`,
   and — the dangerous direction — a non-compiling mutant printed as a **SURVIVOR**, so
-  parallelism manufactures phantom gaps for a verifier to chase. The same tree at
+  parallelism manufactures phantom gaps for a reader to chase. The same tree at
   `--workers 1` was bit-identical across repeats (the full 62-row table, twice), and
   `notViable` settled to exactly the mutations `go build` proves non-compiling.
-- **MUST** verify per-mutant, never by comparing survivor counts. Two module-wide runs
-  over an identical tree disagreed on **13 of 451** mutants (4 survived only in the
-  first run, 9 only in the second), so a count that moves by a few is indistinguishable
-  from noise. Instability MUST NOT be predicted from code shape: a package with no
-  `httptest` anywhere still disagreed run to run at the default worker count — including
-  on pure-logic arithmetic and branch mutants — with whole-package buckets moving from
-  `killed 39 / survived 18 / notViable 20` to `36 / 19 / 22`, and one `ERROR` row
-  carrying `null` output. The lever is `--workers 1`, per the MUST above, not a
-  judgement about whether a test stands up a server or races a timeout.
-- **MUST** check for the build-tag note in the output before writing assertions.
+- **MUST** judge each row on its own, never by comparing survivor counts between runs.
+  Two module-wide runs over an identical tree disagreed on **13 of 451** mutants (4
+  survived only in the first run, 9 only in the second), so a count that moves by a few
+  is indistinguishable from noise. Instability MUST NOT be predicted from code shape: a
+  package with no `httptest` anywhere still disagreed run to run at the default worker
+  count — including on pure-logic arithmetic and branch mutants — with whole-package
+  buckets moving from `killed 39 / survived 18 / notViable 20` to `36 / 19 / 22`, and one
+  `ERROR` row carrying `null` output. The lever is `--workers 1`, per the MUST above, not
+  a judgement about whether a test stands up a server or races a timeout.
+- **MUST** check for the build-tag note in the output before filing the bead.
   If a package gates tests behind custom tags (`contract`, `smoke`, `hostile`),
   mutants covered only by those tests appear as survivors. Re-run with
   `--tags contract,smoke` before treating them as real gaps.
 - **MUST** treat a non-zero exit as an operational failure, not as a finding. The
   command exits 0 whenever it completed an analysis, however many mutants
-  survived.
-- **MUST** stop and write a test first if it reports that the package has no test
-  files. Mutation testing reports missing assertions; with no tests, every mutant
-  trivially survives and the worklist is meaningless.
+  survived. The guard exit codes (`10` no test files, `11` not enumerable, `12`
+  unhealthy, `13` environment, `14` target absent) say why it never ran.
 - **MUST** run it through `pg-go-mutate` rather than invoking the pinned `gomu` engine
   directly. The engine writes its overlay to
   `$TMPDIR/gomu_overlay_<pid>_<ns>/mutant_<absolute-source-path>_<n>/overlay.json` — the
@@ -205,7 +151,9 @@ short-`$TMPDIR` requirement in the MUST below still applies.
   landing work, or on your own initiative (see "When this applies").
 - **MUST NOT** add it to CI, a pre-commit hook, a `checks.*` derivation, a work
   packet or an acceptance criterion. It is too slow, and outside a `--workers 1`
-  run its result is not even reproducible.
+  run its result is not even reproducible. (A self-test of the tooling's own
+  source against a small synthetic fixture project is not a mutation run of user
+  code and is exempt.)
 - **MUST NOT** point it at `./...`; that pattern is rejected. Pass a directory —
   it is walked recursively, so a single package works. Single-file targets are
   rejected too.

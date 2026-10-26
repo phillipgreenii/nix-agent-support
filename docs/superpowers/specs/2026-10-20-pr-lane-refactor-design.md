@@ -1284,7 +1284,7 @@ Facts that shape the tests:
   of every binary involved, with a bats case that feeds the regex one path of each input and asserts
   that every one matches (so a path dropped from the regex fails the case), and failing loudly when a
   tool is absent. This design does not rely on mutation testing (operator ruling 2026-10-22): no
-  phase or test row requires a mutation run, a mutant self-test, a survivor list or a gap analysis;
+  phase or test row requires a mutation run, a survivor list or a gap analysis;
   each guard is shown by a plain negative case, a deliberately wrong input that the check MUST
   reject, or by a run against a test double.
 - The event that broke production was an operator running `migrate --cutover` on the live store, not
@@ -1571,7 +1571,7 @@ Applied, by finding (finding, section, what changed):
 - B1 (mutation testing relied on), 6.7, 9.2, 10: the "Mutation testing" test row is deleted; the
   `Diff` mutant self-tests, the alert structure-check mutants, the bats regex mutant and the "mutant
   without the lock" case are replaced by plain negative cases or a test-double run; section 10 states
-  that no phase or row requires a mutation run, a mutant self-test, a survivor list or a gap analysis
+  that no phase or row requires a mutation run, a survivor list or a gap analysis
   (operator ruling 2026-10-22); the P3a, P2a, P3b1, P4a and P4b entries of the old row are gone.
 - B2 (P0 already applied), 4, 7, 9.1, 9.2, 9.5: section 4 restates P0 as applied 2026-10-21 02:16:36Z
   (`pg2-oli1o` closed, desk-pr 12 of 12 ok); P0b is "lands after P0"; the sentence "no apply leaves

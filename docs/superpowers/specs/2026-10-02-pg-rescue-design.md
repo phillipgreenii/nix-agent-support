@@ -1319,7 +1319,7 @@ The external binaries are faked on `PATH` (the `testdata/fake-claude` precedent 
   - a conflict in another file is declined
   - a second stop during the rebase is declined
 
-### 14.4 Integration, mutation and manual tests
+### 14.4 Integration and manual tests
 
 - **Integration**, `integration`-tagged, in its own `mkGoTest` check so it stays off the deploy
   path:
