@@ -1,0 +1,72 @@
+# promtool unit tests for the pg-conn-jira-tracked-over alert RENDERED for tracked_set_alert_size
+# 400 (bead pg2-l79uxc). The flake check test-pg-connector-issue-jira-alert-rules renders the
+# rules template at 400, copies this file over rule-tests/pg-conn-jira-tracked-over.test.yaml (which
+# tests the default size, 55) and runs promtool on the result, so the rule is shown to follow the
+# configured size: it fires above 400 and not at or below it, for a second size than the default.
+# 400 is about twice the measured watched union of 195 issues (195 x 2 = 390, rounded up), so a
+# measured set and organic growth to the bar stay quiet.
+#
+# check-alert-rules.sh generates rules.yml next to this file: the Grafana rule's refId A wrapped as
+# `alert: <uid>` with `expr: (sum(pg_connector_issue_jira_tracked_entities)) > 400`, the rule's
+# `for: 10m` and labels, plus a recording rule `wrapped:<uid with _>`. The sum is over ALL classes.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a tracked total above 400 held for the 10m for fires with severity warning only, then clears when it falls back
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_tracked_entities{class="summary",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "300x14 150x40"
+      - series: pg_connector_issue_jira_tracked_entities{class="detail",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "101x14 20x40"
+    alert_rule_test:
+      # 401 in total from 0m: pending, not yet through `for`.
+      - eval_time: 9m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+      # 170 in total from 14m on.
+      - eval_time: 25m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts: []
+
+  - name: a tracked total of exactly 400 never fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_tracked_entities{class="summary",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "300x60"
+      - series: pg_connector_issue_jira_tracked_entities{class="detail",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "100x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts: []
+
+  - name: a total of 401, just over the bar, fires after the for
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_tracked_entities{class="summary",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "401x60"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: the measured watched union of 195 issues, far above the default bar of 55, stays quiet
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_tracked_entities{class="summary",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "195x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-tracked-over
+        exp_alerts: []

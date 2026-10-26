@@ -3483,7 +3483,29 @@
                   noDaemon = evalDarwin true idleUser;
                   githubOnly = evalDarwin true githubOnlyUser;
                   otherUser = evalDarwin true { alice.home.username = "alice"; };
-                  alertsFile = ./packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml;
+                  # The rules file is a template rendered for the daemon's tracked_set_alert_size
+                  # (bead pg2-l79uxc); the unset default renders the daemon's default size.
+                  jiraAlertRender = import ./packages/pg-connector/grafana/render-jira-alerts.nix { inherit pkgs; };
+                  alertsFile = jiraAlertRender.render jiraAlertRender.defaultTrackedSetAlertSize;
+                  sizedUser = {
+                    alice.phillipgreenii.programs.pg-connector.jira = {
+                      enable = true;
+                      settings.tracked_set_alert_size = 400;
+                    };
+                  };
+                  # Two deployed users that disagree: one rule cannot follow both.
+                  conflictingUsers = {
+                    alice.phillipgreenii.programs.pg-connector.jira = {
+                      enable = true;
+                      settings.tracked_set_alert_size = 400;
+                    };
+                    bob.phillipgreenii.programs.pg-connector.jira = {
+                      enable = true;
+                      settings.tracked_set_alert_size = 100;
+                    };
+                  };
+                  sized = evalDarwin true sizedUser;
+                  conflicting = evalDarwin true conflictingUsers;
                   deleteFile = ./packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts-delete.yaml;
                   stateDir = "\${env:XDG_STATE_HOME}/pg-connector-issue-jira-daemon";
                   # The old stateless backend's directory (and its module's default
@@ -3525,6 +3547,10 @@
                 # Gate: the rules appear only while the daemon is deployed;
                 # otherwise (stack on) the deleteRules file stands in, never both.
                 assert enabled.alertRuleFiles == [ alertsFile ];
+                # The tracked-over threshold follows jira.settings.tracked_set_alert_size.
+                assert sized.alertRuleFiles == [ (jiraAlertRender.render 400) ];
+                assert sized.alertRuleFiles != enabled.alertRuleFiles;
+                assert !(builtins.tryEval (builtins.deepSeq conflicting.alertRuleFiles true)).success;
                 assert noUsers.alertRuleFiles == [ deleteFile ];
                 assert noDaemon.alertRuleFiles == [ deleteFile ];
                 assert githubOnly.alertRuleFiles == [ deleteFile ];
@@ -3542,6 +3568,9 @@
                       lib.mapAttrsToList (n: s: "${n}\t${s.serviceName}\t${s.path}") enabled.logSources
                     );
                     alerts = alertsFile;
+                    alertsSized = jiraAlertRender.render 400;
+                    alertsTemplate = jiraAlertRender.template;
+                    defaultAlertSize = toString jiraAlertRender.defaultTrackedSetAlertSize;
                     deleteRules = deleteFile;
                     configGo = ./packages/pg-connector/cmd/pg-connector-issue-jira/internal/config/defaults.go;
                     logsGo = ./packages/pg-connector/cmd/pg-connector-issue-jira/internal/logs/writer.go;
@@ -3613,6 +3642,25 @@
                     [ "$(yq '.groups[0].name' "$alerts")" = pg-connector-issue-jira-daemon ] || fail "alerts file is not the daemon's group"
                     [ "$(yq 'has("deleteRules")' "$deleteRules")" = true ] || fail "delete file has no deleteRules"
                     [ "$(yq 'has("groups")' "$deleteRules")" = false ] || fail "delete file carries groups"
+
+                    # The tracked-over threshold (bead pg2-l79uxc): the template carries
+                    # the token in exactly three places and no literal size; the nix
+                    # default equals the daemon's default; a render replaces every token
+                    # with the configured size in the summary, description and threshold.
+                    token='__TRACKED_SET_ALERT_SIZE__'
+                    [ "$(grep -c "$token" "$alertsTemplate")" -ge 3 ] || fail "template lost the size token"
+                    [ "$(yq '.groups[].rules[] | select(.uid == "pg-conn-jira-tracked-over") | .data[2].model.conditions[0].evaluator.params[0]' "$alertsTemplate")" = "$token" ] \
+                      || fail "the threshold is not the token in the template"
+                    grep -q "DefaultTrackedSetAlertSize *= *$defaultAlertSize\$" "$configGo" \
+                      || fail "render-jira-alerts.nix default $defaultAlertSize drifted from DefaultTrackedSetAlertSize"
+                    for f in "$alerts" "$alertsSized"; do
+                      ! grep -q "$token" "$f" || fail "$f still carries the token"
+                    done
+                    threshold() { yq '.groups[].rules[] | select(.uid == "pg-conn-jira-tracked-over") | .data[2].model.conditions[0].evaluator.params[0]' "$1"; }
+                    [ "$(threshold "$alerts")" = "$defaultAlertSize" ] || fail "default render threshold is $(threshold "$alerts")"
+                    [ "$(threshold "$alertsSized")" = 400 ] || fail "sized render threshold is $(threshold "$alertsSized")"
+                    grep -q 'more than 400 entities' "$alertsSized" || fail "sized render summary/description do not say 400"
+                    ! grep -q 'more than 400 entities' "$alerts" || fail "default render leaked the sized value"
 
                     # darwin/default.nix imports the module, and still the old one;
                     # the old module is not touched (it still registers its own file).
@@ -6327,6 +6375,9 @@
               # grafana/alerting/rule-tests/loki/ (promtool cannot evaluate LogQL), then the Loki
               # script's own mutant self-tests.
               test-pg-connector-issue-jira-alert-rules =
+                let
+                  jiraAlertRender = import ./packages/pg-connector/grafana/render-jira-alerts.nix { inherit pkgs; };
+                in
                 pkgs.runCommand "test-pg-connector-issue-jira-alert-rules"
                   {
                     nativeBuildInputs = [
@@ -6342,10 +6393,24 @@
                   }
                   ''
                     export HOME="$TMPDIR"
-                    alerts=${./packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml}
+                    # The rules file is a template rendered for tracked_set_alert_size (bead
+                    # pg2-l79uxc). The promtool suite runs against the daemon's default size (55)
+                    # and again against a second size (400, about twice the 195-issue watched
+                    # union), each with its own pg-conn-jira-tracked-over test file, so the rule
+                    # is shown to fire above the configured size and not at or below it for two
+                    # sizes. Every other rule's test file is shared.
+                    alerts=${jiraAlertRender.render jiraAlertRender.defaultTrackedSetAlertSize}
                     bash ${./packages/pg-connector/grafana/check-alert-rules.sh} \
                       "$alerts" \
                       ${./packages/pg-connector/grafana/alerting/rule-tests}
+                    sized_tests="$TMPDIR/rule-tests-size-400"
+                    cp -r ${./packages/pg-connector/grafana/alerting/rule-tests} "$sized_tests"
+                    chmod -R u+w "$sized_tests"
+                    cp ${./packages/pg-connector/grafana/alerting/rule-tests-size-400/pg-conn-jira-tracked-over.test.yaml} \
+                      "$sized_tests/pg-conn-jira-tracked-over.test.yaml"
+                    bash ${./packages/pg-connector/grafana/check-alert-rules.sh} \
+                      ${jiraAlertRender.render 400} \
+                      "$sized_tests"
                     loki=${./packages/pg-connector/grafana/alerting/rule-tests/loki}
                     bash ${./packages/pg-connector/grafana/check-loki-rules.sh} "$alerts" "$loki"
                     bash ${./packages/pg-connector/grafana/check-loki-rules.sh} --self-test "$alerts" "$loki"
@@ -6382,6 +6447,9 @@
               # script's own mutant self-tests. The promtool and logcli behaviour checks are the
               # separate check above.
               test-pg-connector-issue-jira-alert-structure =
+                let
+                  jiraAlertRender = import ./packages/pg-connector/grafana/render-jira-alerts.nix { inherit pkgs; };
+                in
                 pkgs.runCommand "test-pg-connector-issue-jira-alert-structure"
                   {
                     nativeBuildInputs = [
@@ -6399,7 +6467,7 @@
                   ''
                     export HOME="$TMPDIR"
                     script=${./packages/pg-connector/grafana/check-jira-alert-structure.sh}
-                    alerts=${./packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml}
+                    alerts=${jiraAlertRender.render jiraAlertRender.defaultTrackedSetAlertSize}
                     catalog=${./packages/pg-connector/grafana/pg-connector-issue-jira-metrics.txt}
                     deletes=${./packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts-delete.yaml}
                     bash "$script" "$alerts" "$catalog" "$deletes"

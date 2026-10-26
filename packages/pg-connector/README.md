@@ -549,7 +549,7 @@ have no default and MUST be absolute.
 | `query_ttl_default`       | 120s                                          | Query freshness; `query_ttl.<name>` overrides it per query.                   |
 | `terminal_ttl`            | 24h                                           | An issue is refreshed until this long after it closes.                        |
 | `expiry`                  | 168h (7 days)                                 | An issue is evicted this long after it closes.                                |
-| `tracked_set_alert_size`  | 55                                            | The tracked-set size the alert fires over.                                    |
+| `tracked_set_alert_size`  | 55                                            | The tracked-set size the alert fires over (the rule renders from it).         |
 | `settle_timeout`          | 30s                                           | How long a change waits for its groups before it is recorded anyway.          |
 | `change_log_retention`    | 336h (14 days)                                | How long change rows are kept.                                                |
 | `consumer_stale_after`    | 168h (7 days)                                 | A cursor not seen for this long is dropped.                                   |

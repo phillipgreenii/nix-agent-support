@@ -201,7 +201,11 @@ NOT replace them: it would label the client log with the daemon's name.
 (`pg-conn-jira-daemon-down`, `-query-stale`, `-consumer-stuck`, `-settle-holding`, `-tracked-over`, `-rows-no-kind`,
 `-store-aside`, `-auth-failing`, `-unavailable`, `-rate-limited`) with promtool tests under `grafana/alerting/rule-tests/`
 and logcli fixtures for the four Loki rules under `rule-tests/loki/`. Its twin
-`pg-connector-issue-jira-daemon-alerts-delete.yaml` is a `deleteRules:`-only file for exactly those ten uids. The rules
+`pg-connector-issue-jira-daemon-alerts-delete.yaml` is a `deleteRules:`-only file for exactly those ten uids. The rules file
+is a TEMPLATE: `-tracked-over` carries the token `__TRACKED_SET_ALERT_SIZE__` (summary, description, threshold), and
+`packages/pg-connector/grafana/render-jira-alerts.nix` renders it for the daemon's `tracked_set_alert_size`, which the
+darwin module reads from `jira.settings` (default 55; two deployed users that disagree fail evaluation). Every consumer
+MUST read the RENDERED file, never the template (bead `pg2-l79uxc`). The rules
 are registered ONLY while some `home-manager.users.<u>` sets `jira.enable` (the daemon-down rule alerts on no data, so a
 host without the daemon would fire forever; Grafana also keeps a file-provisioned rule live after its file is dropped, so
 the twin is registered instead). The two files MUST never be loaded together. The ten uids are in the router probe's

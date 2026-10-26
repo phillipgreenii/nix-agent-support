@@ -226,12 +226,14 @@ groups:
                     type: gt
                     params: [0]
 
-      # Tracked set over its configured size. The literal 55 STANDS FOR the
-      # default of the daemon's tracked_set_alert_size key (this static file
-      # cannot read the rendered config). A deployment that changes
-      # tracked_set_alert_size MUST change this literal, the summary and the
-      # description with it, or the rule alerts at the wrong size. The count is
-      # the sum over all classes of tracked_entities.
+      # Tracked set over its configured size. The size is the daemon's
+      # tracked_set_alert_size key, and this file is a TEMPLATE for it: the
+      # three __TRACKED_SET_ALERT_SIZE__ tokens (summary, description and the
+      # threshold) are replaced by grafana/render-jira-alerts.nix with the
+      # configured value (default 55), so the deployed rule can never differ
+      # from the daemon's setting. Every consumer MUST read the RENDERED file;
+      # the template alone is not a valid threshold. The count is the sum over
+      # all classes of tracked_entities.
       - uid: pg-conn-jira-tracked-over
         title: pg-connector-issue-jira tracked set is over its size
         condition: C
@@ -241,8 +243,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "pg-connector-issue-jira is tracking more than 55 entities"
-          description: "The daemon tracks more than 55 entities across all classes (55 is the default of tracked_set_alert_size) for over 10 minutes, so the set it keeps fresh is larger than the size it was configured and measured for and refreshes cost more Jira calls than planned. See pg_connector_issue_jira_tracked_entities by class for which class is growing."
+          summary: "pg-connector-issue-jira is tracking more than __TRACKED_SET_ALERT_SIZE__ entities"
+          description: "The daemon tracks more than __TRACKED_SET_ALERT_SIZE__ entities across all classes (its configured tracked_set_alert_size) for over 10 minutes, so the set it keeps fresh is larger than the size it was configured and measured for and refreshes cost more Jira calls than planned. See pg_connector_issue_jira_tracked_entities by class for which class is growing."
         data:
           - refId: A
             relativeTimeRange:
@@ -270,7 +272,7 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [55]
+                    params: [__TRACKED_SET_ALERT_SIZE__]
 
       # Change rows without a kind: any non-zero value. A change row the
       # detector could not classify carries no kind, so consumers cannot route

@@ -1,9 +1,14 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 let
+  alertRender = import ../../../packages/pg-connector/grafana/render-jira-alerts.nix {
+    inherit pkgs;
+  };
+
   # phillipgreenii.observability.{logSources,alertRuleFiles} are declared at
   # darwin/system scope in phillipgreenii-nix-support-apps
   # (darwin/modules/observability), so this lives in darwin, not in the
@@ -16,9 +21,27 @@ let
   # alert rules are registered here at darwin scope, so they follow that flag
   # across `home-manager.users.<u>` (same pattern as darwin/modules/pg-connector-github).
   hmUsers = config.home-manager.users or { };
-  daemonDeployed = lib.any (u: u.phillipgreenii.programs.pg-connector.jira.enable or false) (
-    lib.attrValues hmUsers
+  jiraOf = u: u.phillipgreenii.programs.pg-connector.jira or { };
+  deployedUsers = lib.filter (u: (jiraOf u).enable or false) (lib.attrValues hmUsers);
+  daemonDeployed = deployedUsers != [ ];
+
+  # The pg-conn-jira-tracked-over threshold follows the daemon's own
+  # `tracked_set_alert_size` (set through `jira.settings`; the daemon's default
+  # when unset), so there is one source of truth (bead pg2-l79uxc). There is one
+  # daemon per machine, so two deployed users that disagree are an error, not a
+  # tie to break.
+  trackedSetAlertSizes = lib.unique (
+    map (
+      u: (jiraOf u).settings.tracked_set_alert_size or alertRender.defaultTrackedSetAlertSize
+    ) deployedUsers
   );
+  trackedSetAlertSize =
+    assert lib.assertMsg (lib.length trackedSetAlertSizes <= 1)
+      "pg-connector-issue-jira-daemon: home-manager users set different jira.settings.tracked_set_alert_size values (${builtins.toJSON trackedSetAlertSizes}); the one alert rule can follow only one";
+    if trackedSetAlertSizes == [ ] then
+      alertRender.defaultTrackedSetAlertSize
+    else
+      lib.head trackedSetAlertSizes;
 in
 {
   # The Jira daemon's observability registration (docket pg2-2qyyh.2, design
@@ -88,7 +111,7 @@ in
       # (see the header comment); otherwise the deleteRules file below.
       alertRuleFiles =
         if daemonDeployed then
-          [ ../../../packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml ]
+          [ (alertRender.render trackedSetAlertSize) ]
         else
           # Grafana never drops a file-provisioned rule just because its file
           # disappeared (pg2-susum): while the daemon is not deployed, register
