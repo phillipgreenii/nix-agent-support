@@ -1,5 +1,10 @@
 package cmdparse
 
+import (
+	"regexp"
+	"strings"
+)
+
 // Heredoc extents, made FIRST-CLASS in the parser (pg2-r2rf3).
 //
 // splitCompound splits a command body on '\n', so before this pass a heredoc BODY
@@ -118,4 +123,84 @@ func (pc ParsedCommand) UnquotedHeredocSubstitutions() []Substitution {
 		out = append(out, hd.Substitutions...)
 	}
 	return out
+}
+
+// simpleParamExpansion matches the only `${...}` spelling an unquoted heredoc body
+// may carry and still clear HeredocFileWriteCleared: a bare `${NAME}`. Every other
+// brace form either evaluates (`${x@P}` runs command substitutions found in x's
+// value, `${x:1}` / `${x[$(c)]}` evaluate an arithmetic index) or hides a
+// substitution the engine's own recursion does not see as one.
+var simpleParamExpansion = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
+
+// heredocBodyExpansionsModeled reports whether every expansion this heredoc's body
+// can perform is one the engine already judges.
+//
+// A QUOTED body expands nothing, so it is always modeled. An UNQUOTED body expands
+// `$NAME`/`${NAME}` (inert: no evaluation of the value), `$(...)` and backticks
+// (recursed by the engine through Heredoc.Substitutions, so an unsafe inner command
+// still denies), and a few forms that EVALUATE variable text: arithmetic `$((...))`
+// and `$[...]`, and any `${...}` carrying an operator, index or transform. Those last
+// are NOT modeled by the heredoc recursion, so a body holding one is refused here and
+// stays on the heredoc floor. The scan is textual and deliberately over-refuses (a
+// `${x:-y}` inside a recursed `$(...)` is refused too): the failure direction is the
+// abstain floor, never an approve.
+func heredocBodyExpansionsModeled(hd Heredoc) bool {
+	if hd.Quoted {
+		return true
+	}
+	rest := simpleParamExpansion.ReplaceAllString(hd.Body, "")
+	return !strings.Contains(rest, "${") &&
+		!strings.Contains(rest, "$((") &&
+		!strings.Contains(rest, "$[")
+}
+
+// HeredocFileWriteCleared reports whether leaf is a FILE WRITE of a heredoc body:
+// `cat > FILE <<'EOF' ... EOF` and `cat >> FILE <<'EOF' ... EOF` (operator ruling,
+// Phillip, 2026-10-25, bead pg2-4godq: the pattern is fine in general). It is the
+// FILE-WRITE sibling of HeredocReaderCleared (which refuses every write redirection)
+// and is consumed by the engine's heredocFloor ("THE FOURTH NARROWING").
+//
+// SIX CONDITIONS, ALL REQUIRED:
+//
+//  1. At least one heredoc extent, and no herestring (`<<<`) anywhere on the leaf: a
+//     herestring records no extent, so its word would be an expansion nobody screened.
+//  2. The leaf's executable is on heredocReaderAllowlist (`cat`, `/bin/cat`): a
+//     program that merely copies stdin to stdout and cannot execute the body.
+//  3. EVERY extent's expansions are modeled (heredocBodyExpansionsModeled): a quoted
+//     body is literal; an unquoted one may expand only what the engine recurses.
+//  4. No write flag, and argv carries bare flags only (readerArgsClearance must be
+//     SubstitutionCleared): a positional file operand on the SAME leaf makes `cat`
+//     emit that FILE instead of the body, an arbitrary-file-copy route.
+//  5. Every redirection is a WRITE: a `<` read could replace the heredoc as cat's
+//     stdin.
+//  6. At least one redirection captures stdout into a real file (CapturesStdout). A
+//     leaf that writes no file is `cat <<'EOF'` to the terminal, a shape this
+//     function deliberately does NOT admit: it stays on the heredoc floor.
+//
+// WHAT THIS DOES NOT DECIDE: whether the target FILE may be written. That verdict is
+// the engine's evaluateRedirections, folded most-restrictive-wins with whatever this
+// admission earns, so a target outside the write allowlist (or a dynamically
+// expanded one) still abstains or denies. Admitting the leaf here only stops the
+// heredoc floor from masking that verdict.
+func HeredocFileWriteCleared(leaf ParsedCommand) bool {
+	if len(leaf.Heredocs) == 0 || !heredocReaderAllowlist[leaf.Executable] {
+		return false
+	}
+	if strings.Contains(leaf.Raw, "<<<") {
+		return false
+	}
+	for _, hd := range leaf.Heredocs {
+		if !heredocBodyExpansionsModeled(hd) {
+			return false
+		}
+	}
+	if hasWriteFlag(leaf.Executable, leaf.Args) || readerArgsClearance(leaf.Args) != SubstitutionCleared {
+		return false
+	}
+	for _, rd := range leaf.Redirections {
+		if !rd.Kind.IsWrite() {
+			return false
+		}
+	}
+	return CapturesStdout(leaf)
 }

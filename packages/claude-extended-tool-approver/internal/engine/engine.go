@@ -1129,6 +1129,34 @@ func unparseableExpressionFloor(sp cmdparse.ShellParse) hookio.RuleResult {
 // pipe, so there is nothing here to check that the heredoc genuinely lands on the
 // reader's fd 0 or that the pipe genuinely lands on the sink's fd 0 beyond what
 // ordinary shell-pipe semantics already guarantee.
+//
+// # pg2-4godq — THE FOURTH NARROWING
+//
+// A heredoc written to a FILE: `cat > FILE <<'EOF' ... EOF` and `cat >> FILE <<'EOF'
+// ... EOF`. Operator ruling (Phillip, 2026-10-25, bead pg2-4godq): the pattern is fine
+// in general; it was the single biggest approve-candidate group (133 + 74 user-approved
+// rows) because the unconditional floor above abstained on every one of them.
+//
+// Structurally DIFFERENT from the three above: there is no sink or substitution to
+// defer to, so the carve-out is the static shape test cmdparse.HeredocFileWriteCleared
+// (allowlisted reader, bare argv, write redirections only, at least one real stdout
+// capture, body expansions modeled). It earns Approve ONLY as the neutral "nothing to
+// add" value, and both halves of the real decision are folded in by the caller exactly
+// as for any other leaf:
+//
+//   - WHICH FILE: evaluateRedirections's verdict on the target, folded
+//     most-restrictive-wins, so a target outside the write allowlist, a read-only or
+//     secret path, or a dynamically expanded target still abstains or denies.
+//   - WHAT THE BODY EXPANDS: foldSubstitutionScan over UnquotedHeredocSubstitutions
+//     (pg2-r2rf3), so an UNQUOTED body holding `$(...)` / backticks wrapping a command
+//     that cannot be approved still denies (pg2-kxmpe), while one wrapping an
+//     approvable command such as `echo` approves. A quoted body is literal and
+//     recurses nothing.
+//
+// STILL ON THE FLOOR, and pinned by tests: a plain `cat <<'EOF'` with no file write
+// (no stdout capture; not covered by the ruling), `sh`/`python` readers, a positional
+// file operand, a `<` read redirection, a herestring, and an unquoted body with an
+// evaluating expansion (`$((..))`, `${x@P}`, `${x:-..}`).
 func heredocFloor(expr string, stack []hookio.StackFrame, pc cmdparse.ParsedCommand, leaves []cmdparse.ParsedCommand) hookio.RuleResult {
 	if recursedSubstitutionHeredocCleared(expr, stack) {
 		return hookio.RuleResult{
@@ -1148,6 +1176,13 @@ func heredocFloor(expr string, stack []hookio.StackFrame, pc cmdparse.ParsedComm
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "heredoc body is relayed through an allowlisted reader into an allowlisted message-sink's --stdin, already cleared by composing the static substitution and message-sink allowlists (pg2-yxxwg)",
+			Module:   "engine",
+		}
+	}
+	if cmdparse.HeredocFileWriteCleared(pc) {
+		return hookio.RuleResult{
+			Decision: hookio.Approve,
+			Reason:   "heredoc body is written to a file by an allowlisted reader (cat > FILE / cat >> FILE); the target path is judged by the redirection check and any body expansion by the substitution recursion (pg2-4godq)",
 			Module:   "engine",
 		}
 	}
