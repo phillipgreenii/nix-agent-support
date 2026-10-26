@@ -8,7 +8,7 @@ description: Identify the 2-5 most impactful hook miss patterns from the decisio
 **Retargeted 2026-09-27 per operator ruling R1** (docket `tc-o14i5.1`): the old Go rule engine
 (`internal/rules/*`) is frozen — deletions only, no new fixes. The target architecture retires
 per-command Go policy rules in favor of DATA specs (command/path/target specs, P13/P14). This
-skill's triage mechanics (Steps 1-6, calibration tiers) are unchanged; only what Phase 2 proposes
+skill's triage mechanics (Steps 1-7, calibration tiers) are unchanged; only what Phase 2 proposes
 has changed: instead of "fix this rule in internal/rules" it now proposes "author/regenerate the
 command spec for `<command>` to cover this case."
 
@@ -204,7 +204,90 @@ jq '([.[]
     | sort_by(-.ceta_approved_count) | .[0:10]' /tmp/ceta-all.json
 ```
 
-### Step 7: Present ranked findings to user
+### Step 7: Commands called that have no spec
+
+A command with no spec abstains, and inside `$(...)` the abstain turns into a deny, so a missing spec is the structural root cause that the per-row miss counts of Steps 2-6 only hint at. This step asks the question directly: which executables were called that have no command spec? It is read-only and runs over the FULL dataset (`/tmp/ceta-all.json`), because a spec-less command that always runs unprompted never shows up as a miss.
+
+`claude-extended-tool-approver specs list` is the machine-readable answer to "does a spec exist for X?". It merges `cmddesc.DefaultRegistry()`, the embedded built-in specs, the user layer (`~/.config/claude-extended-tool-approver`) and the repo layer (`./.ceta`). It needs a build that includes the `specs` subcommand; if the installed binary treats `specs` as hook mode (it hangs on stdin or prints `decode JSON: EOF`), skip this step and say so.
+
+```bash
+# (1) Every command name that HAS a spec (one JSON array of names).
+claude-extended-tool-approver specs list --format=json | jq -c '[.[].name]' > /tmp/ceta-spec-names.json
+```
+
+```bash
+# (2) Slim the Bash rows to the fields the next query needs. --stream emits one row at a
+#     time, so memory stays flat: NEVER slurp the full export (it can be gigabytes). The
+#     export may also be narrowed up front with `evaluate --days N --format=json`.
+jq -cn --stream 'fromstream(1|truncate_stream(inputs))
+    | select(.tool_name=="Bash")
+    | {id, command_class, hook_decision, outcome, approval_source, agent_type}' \
+  /tmp/ceta-all.json > /tmp/ceta-bash-rows.jsonl
+```
+
+```bash
+# (3) Names called but absent from the spec list, ranked by call count.
+#     command_class already writes a pipeline as `a && b`, so splitting on `&&`, `||`, `;`
+#     and newlines catches every pipeline stage; `$(`, `<(`, `>(` and backticks start a new
+#     command, so a command inside a substitution counts. Leading `VAR=x` assignments and the
+#     wrappers bash/sh/zsh -c, bgrun NAME --, nice [-n N], timeout N, env, time, command, exec,
+#     nohup and pg-nix-log-wrapped are peeled off, so the WRAPPED command is the one counted.
+#     Shell keywords, shell builtins and Gas City `gc` (removed; never author specs for it)
+#     are excluded. A row counts once per command name, however often the name repeats in it.
+jq -s --slurpfile specs /tmp/ceta-spec-names.json '
+def strip:
+  if length == 0 then .
+  else .[0] as $t
+  | if ($t | test("^[A-Za-z_][A-Za-z0-9_]*=")) then .[1:] | strip
+    elif $t == "nice" and .[1] == "-n" then .[3:] | strip
+    elif $t == "timeout" then .[2:] | strip
+    elif $t == "bgrun" then .[3:] | strip
+    elif ($t | IN("bash", "sh", "zsh")) and ((.[1] // "") | test("^-[a-z]*c$")) then .[2:] | strip
+    elif ($t | IN("env", "nice", "time", "command", "exec", "nohup", "pg-nix-log-wrapped")) then .[1:] | strip
+    else . end
+  end;
+def cmdnames:
+  gsub("\\$\\(|<\\(|>\\(|`"; " ; ")
+  | split("&&|\\|\\||;|\\n"; null)
+  | map(split("\\s+"; null) | map(select(. != "")) | strip | .[0] // empty | sub("\\)+$"; "") | sub("^.*/"; ""))
+  | map(select(test("^[a-z_][A-Za-z0-9_.+-]+$")))
+  | map(select(IN("if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "in", "function",
+                  "set", "unset", "local", "declare", "typeset", "return", "break", "continue", "source", "alias", "eval", "trap", "wait",
+                  "gc") | not))
+  | unique;
+($specs[0]) as $have
+| map(. + {names: (.command_class | cmdnames)})
+| [.[] | . as $r | .names[] | select(IN($have[]) | not) | {name: ., row: $r}]
+| group_by(.name)
+| map({
+    command: .[0].name,
+    calls: length,
+    abstained: ([.[] | select(.row.hook_decision == "abstain")] | length),
+    human_tier: ([.[] | select(.row.outcome == "approved" and .row.approval_source == "user" and .row.agent_type == null)] | length),
+    weaker_tier: ([.[] | select((.row.outcome == "approved" and .row.approval_source == "user" and .row.agent_type == null) | not)] | length),
+    sample_ids: ([.[].row.id] | .[0:3]),
+    sample_class: (.[0].row.command_class | .[0:100])
+  })
+| sort_by(-.calls) | .[0:25]' /tmp/ceta-bash-rows.jsonl
+```
+
+Example output shape (one object per command; `human_tier` and `weaker_tier` use the Step 4 definitions and sum to `calls`):
+
+```json
+{
+  "command": "uuidgen",
+  "calls": 177,
+  "abstained": 148,
+  "human_tier": 100,
+  "weaker_tier": 77,
+  "sample_ids": [779891, 780362, 791979],
+  "sample_class": "uuidgen && tr A-Z a-z"
+}
+```
+
+**Read the list critically.** `command_class` drops quoting, so a few non-commands slip through when prose or a script body is passed as an unquoted argument or heredoc (typically short English words such as `the`, `no`, `a`, or `import`/`print` from a Python body). Read `sample_class` for each candidate, and confirm the survivors are real executables with one call: `command -v <name1> <name2> ...` (an absent name prints nothing). Drop names that fail either check, drop a name whose only evidence is a single call, and keep the human-tier versus weaker-tier split visible when ranking, as in Step 4 (a command the human keeps approving is the stronger case for a spec).
+
+### Step 8: Present ranked findings to user
 
 Present exactly this format:
 
@@ -239,6 +322,11 @@ Present exactly this format:
    Ran under: <auto|bypass|allow> | classifier-denied the same command elsewhere
    Sample rows: <id1>, <id2>, <id3>
 
+## Commands called with no spec (Step 7)
+
+1. **`<command>` — <N> calls** (abstained: <A>; human tier: <H>, weaker tier: <W>)
+   Sample rows: <id1>, <id2>, <id3> | sample: `<sample_class>`
+
 I recommend creating beads for the top <M> patterns across these lists.
 Which patterns should I create beads for?
 ```
@@ -264,6 +352,50 @@ Then label it:
 ```bash
 bd label add <bead-id> claude-extended-tool-approver
 bd label add <bead-id> spec-authoring
+```
+
+### Missing-spec beads (Step 7 findings)
+
+For each approved "commands called with no spec" finding, create ONE bead per command, with the same labels, and use the variant below instead of the template that follows. This is bead creation only: do not author the spec here (the `ceta-spec-gen` skill does that in the bead's own session).
+
+```bash
+bd create \
+  --title="Spec missing: <command>" \
+  --description="<see variant below>" \
+  --type=task \
+  --priority=2
+```
+
+```markdown
+## Problem
+
+`<command>` was called <N> times in the decision database but has no command spec
+(`claude-extended-tool-approver specs list --format=json` does not list it), so the hook abstains
+on it, and denies it inside `$(...)`.
+
+## Evidence
+
+- **Finding type:** missing-spec
+- **Count:** <N> calls (<A> abstained)
+- **Tier:** human <H> | weaker <W> (Step 4 definitions)
+- **Row IDs (samples):** <id1>, <id2>, <id3>
+- **Sample command_class:** `<sample_class>`
+
+## Reproduce
+
+claude-extended-tool-approver specs list --format=json | jq -r '.[].name' | grep -x '<command>' # no output = still no spec
+
+claude-extended-tool-approver show <id1> <id2> <id3> --format=json
+
+## Next step
+
+Author the spec with the `ceta-spec-gen` skill (claude-extended-tool-approver plugin), then confirm the
+name now appears in `specs list` and re-run `evaluate --format=json --baseline=<file captured in Step 1>`.
+
+## Acceptance Criteria
+
+- [ ] `<command>` is listed by `claude-extended-tool-approver specs list`
+- [ ] Sample rows <id1>, <id2>, <id3> replay without abstaining for lack of a spec
 ```
 
 ### Bead Description Template

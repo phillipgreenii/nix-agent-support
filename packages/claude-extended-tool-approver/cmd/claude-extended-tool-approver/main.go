@@ -52,6 +52,7 @@ var knownSubcommands = map[string]bool{
 	"set-correct-decision": true,
 	"show":                 true,
 	"spec-drift-check":     true,
+	"specs":                true,
 	"version":              true,
 	"completion":           true, // cobra builtin
 	"help":                 true, // cobra builtin
@@ -85,6 +86,7 @@ and analyzing the decision log.`,
 	root.AddCommand(newSetCorrectDecisionCmd())
 	root.AddCommand(newShowCmd())
 	root.AddCommand(newSpecDriftCheckCmd())
+	root.AddCommand(newSpecsCmd())
 	root.AddCommand(newVersionCmd())
 	return root
 }
