@@ -29,7 +29,11 @@ import (
 // calls and to the nix check's minScenarios).
 const minBackfillScenarios = 10
 
-// The four PRs: #7 an open PR of mine whose anchor is open (nothing to do), #8 and
+// The four PRs: #7 an open PR of mine whose anchor is open (nothing to do: the
+// anchor carries every key the decider mirrors from the PR, url and dedup_key
+// included, because a missing one makes anchor.backfill and adoption plan an
+// `issue update`, which the fake connector does not answer, so an apply pass
+// would end decide_partial), #8 and
 // #12 merged PRs with no work items, #11 an open PR of mine with an unaddressed
 // comment (the decider wants to write work items).
 const fxBackfill = `{
@@ -44,7 +48,8 @@ const fxBackfill = `{
     {"number": 12, "title": "Rename the flag", "author": "teammate", "state": "closed", "merged": true}
   ],
   "beads": [{"id": "bd-7a", "title": "acme/api#7: Add the export command",
-    "metadata": {"repo": "acme/api", "pr_number": "7", "state": "open", "branch": "feature-7", "base": "main", "author": "phillipgreenii", "draft": "false"}}]
+    "metadata": {"repo": "acme/api", "pr_number": "7", "state": "open", "branch": "feature-7", "base": "main", "author": "phillipgreenii", "draft": "false",
+      "url": "https://code.example/acme/api/pull/7", "dedup_key": "pr:acme/api#7:anchor"}}]
 }`
 
 var bfIDs = []string{"acme/api#7", "acme/api#8", "acme/api#11", "acme/api#12"}
