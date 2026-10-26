@@ -186,7 +186,12 @@ the block.
    carries an "Acceptance criteria" heading followed by a checklist, or 2 or more whole
    acceptance lines (operator ruling, Phillip, 2026-10-13: "only the aceptance field needs to
    hold the acceptance"). The body may still restate a single verbatim line, such as an AC that
-   quotes a Binding decision.
+   quotes a Binding decision. A packet's acceptance criteria and Validation commands MUST NOT
+   require a mutation run (`pg-go-mutate`, the `go-test-gaps` skill), a survivor list or a gap
+   analysis (operator ruling, Phillip, 2026-10-22: "unless the story is about mutation testing
+   itself, none of the standard planned work should rely on running mutate tests"; restated
+   2026-10-26). A design row that asks for one is dropped during curation and the drop is
+   noted in the gap report; a hand-applied negative-control mutant in a test is fine.
 8. **Out of scope** — names the sibling packet holding each neighboring concern.
 9. **Lifecycle bounds + escalation pointer** — one line each: "this packet = implement +
    validate; isolation/landing/cleanup/claim hygiene are consumer-standard" (state deviations

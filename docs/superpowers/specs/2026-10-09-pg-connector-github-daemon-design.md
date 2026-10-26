@@ -1337,7 +1337,6 @@ origin call.
   installs the binary and config, registers no service, keeps the old backends and warns; adding
   `allowUnsupervised = true` rewrites the registry; `supervisor = "launchd"` on a non-darwin system fails
   the assertion.
-- **Gap analysis**: `pg-go-mutate` over the shared library and the scheduler before the shadow run.
 - **Live**: the shadow run; after cutover, the live exercise of the pg-router sources.
 
 Test fixtures MUST stay generic: no real organisation, repository or user names (repo `CLAUDE.md`,

@@ -1792,8 +1792,7 @@ not frozen`), not a `not in plan` block. Deleted with the history model (RV-B): 
     pattern of `realbin_test.go`; it skips locally and fails when the `_REQUIRE_BINARIES` variable is set
     in the nix check, and it may need a live dolt server, so it stays opt-in) because hold and release
     were spiked by hand against bd 1.2.2 only and a fake connector proves argv shape, not bd behavior.
-  - Hygiene as acceptance items: run `pg-go-mutate` over `internal/focus`, the reply parser, the rank
-    comparator and the `focus.item` rule and close the gaps; every dry-run test snapshots EVERY table
+  - Hygiene as acceptance items: every dry-run test snapshots EVERY table
     before and after; new files under `internal/focus` and `cmd/pg-desk/focus*.go` are untracked until
     `git add`, and the commit-time hook skips untracked files, so the checklist stages them before any
     `pg-hooks run`; the public repository's identifier guard is widened to `internal/focus/testdata`,

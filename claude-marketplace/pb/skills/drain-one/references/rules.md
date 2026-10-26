@@ -107,6 +107,12 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   reaper would rob live workers and let a peer claim the same bead. A worker MAY run
   `bd heartbeat <id>` for its own claim but MUST NOT rely on it. ADR 0097, `pg2-7gtae`.
 - Never use `--no-verify`; fix hook violations instead.
+- Mutation testing (`pg-go-mutate`, `pg-go-mutate-tui`, the `go-test-gaps` skill) is NOT part
+  of a drain (V-5; operator ruling, Phillip, 2026-10-26: "typical development flows must not
+  invoke mutation tests"). Neither the orchestrator nor a brief runs or asks for it, and a bead
+  whose acceptance criterion requires a mutation run is not drainable as written: strike the
+  criterion in the bead (S-1/S-2) unless the bead's subject is mutation testing itself. A report
+  that says a subagent ran it is a brief violation to flag.
 - Landing MUST go through the `integrate-branch:integrate-branch` dispatcher with NO
   handler named, so every repo lands by the strategy IT declares in
   `pgii-integrate-branch.strategy`. Where that resolves to `ff-merge-to-main`, do NOT

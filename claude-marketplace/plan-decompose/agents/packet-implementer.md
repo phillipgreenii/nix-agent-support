@@ -70,5 +70,8 @@ otherwise.
   packet's lifecycle-bounds line says so.
 - Do not modify the docket, other packets, or their metadata beyond step 2's stale marking
   and step 6's metric comment.
+- Never run mutation testing (`pg-go-mutate`, the `go-test-gaps` skill), even scoped to one
+  package, even if a packet line asks for it: it is not part of implementation (V-5). Report
+  such a line as a curation defect in your closeout note instead of running it.
 - Report outcomes faithfully: failed validation is `outcome=blocked` with the failure in your
   note, never a claimed success.

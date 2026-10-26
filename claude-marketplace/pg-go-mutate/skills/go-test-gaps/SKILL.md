@@ -1,6 +1,6 @@
 ---
 name: go-test-gaps
-description: Use when writing, reviewing, or strengthening tests for a Go package in this workspace — including when asked to "improve test coverage", "add missing tests", "make these tests better", or after implementing a Go feature and deciding what to test. Runs pg-go-mutate to find which assertions the tests do not make, then closes those gaps. Do NOT use for non-Go code, for running the normal test suite, or to measure or track a coverage or mutation score over time.
+description: Use ONLY when the operator explicitly asks to run mutation testing or a test-gap analysis on a named Go package, or when working a bead whose subject is mutation testing or closing go-test-gaps survivors. It is a slow, intensive, deliberate analysis whose output is beads for improvements. Do NOT use in implementation, planning, review, validation or landing work; do NOT use when writing or strengthening tests, improving coverage, or deciding what to test; do NOT use for non-Go code or for a coverage or mutation score.
 ---
 
 # Finding Go test gaps
@@ -13,22 +13,56 @@ the tests fail to catch.
 **Every surviving mutant is an assertion the tests do not make.** It is not a bug
 in production code, and you MUST NOT "fix" production code to make a mutant die.
 
-## The loop
+## When this applies (operator-initiated only)
+
+A mutation run is slow and intensive (cost is roughly `mutants x the package's
+test-suite runtime`, hours for a real package), so it is NEVER a step of ordinary
+work. Operator ruling (Phillip, 2026-10-26, verbatim): "typical development flows
+must not invoke mutation tests. mutation tests are something done outside of
+standard implementation flows ... each use of mutation tests should be intentional
+outside of implementation work. it is used to generate areas which need to be
+improved." Earlier rulings: 2026-10-20 and 2026-10-22 ("unless the story is about
+mutation testing itself, none of the standard planned work should rely on running
+mutate tests").
+
+- You MUST run it only when the operator asked for a mutation or gap analysis of a
+  named package, or when the bead you are working has mutation testing or closing
+  `go-test-gaps` survivors as its subject.
+- You MUST NOT run it, or put it in a brief, plan, packet, acceptance criterion or
+  validation step, as part of implementing, fixing, reviewing, strengthening tests
+  for, or landing code. "Is this test any good?" is answered by a hand-applied
+  mutant (reintroduce the defect once, watch the test fail), never by this tool.
+- Whole-package coverage across the workspace is the job of the background sweep
+  (`pg-go-mutate-tui`), not of any work item.
+
+## Use 1: the analysis (the operator's request)
+
+Run one package at a time and turn the worklist into a bead. Do not write the
+missing tests in the same pass unless the operator asked you to.
 
 1. Run it scoped to one package, with `--workers 1` (the default is 2, which makes
-   per-mutant verdicts non-reproducible — see the MUST below). Cost is roughly
-   `mutants x the package's test-suite runtime`, so never point it at a whole large
-   module:
+   per-mutant verdicts non-reproducible — see the MUST below). Never point it at a
+   whole large module:
 
    ```bash
    pg-go-mutate ./internal/collect --workers 1
    ```
 
 2. Read the worklist. Each entry is `file`, line, the mutation, and the operator.
-3. Write an assertion that would fail under that mutation.
-4. Re-run and confirm **that specific mutant**, matched on `file:line:type`, is
-   now killed — the worklist reports survivors only, so establish that by the
-   procedure in "Establishing that a named mutant was killed" below.
+3. File ONE `P3` triage bead per package, in the tracker of the repo that holds the
+   package (`bd -C <tracker-root> ...`), labeled `go-test-gaps` plus that repo's
+   label, carrying the worklist rows (`file:line`, mutation, operator) and the
+   exact command you ran. Never an epic (an open epic never leaves `bd ready`). No
+   counts, percentages or scores go in it.
+
+## Use 2: closing the gaps (a bead whose subject is these survivors)
+
+1. Take the worklist from the bead.
+2. Write an assertion that would fail under each mutation.
+3. Re-run scoped to that one package and confirm **that specific mutant**, matched
+   on `file:line:type`, is now killed — the worklist reports survivors only, so
+   establish that by the procedure in "Establishing that a named mutant was killed"
+   below.
 
 ## Establishing that a named mutant was killed
 
@@ -163,10 +197,15 @@ short-`$TMPDIR` requirement in the MUST below still applies.
 
 ## MUST NOT
 
-- **MUST NOT** record the score anywhere — not in a file, not in a bead, not in a
-  commit message. This is a diagnostic, not a tracked metric.
-- **MUST NOT** add it to CI, a pre-commit hook, or a `checks.*` derivation. It is
-  too slow, and outside a `--workers 1` run its result is not even reproducible.
+- **MUST NOT** record a score anywhere — no survivor or kill count, no percentage, not
+  in a file, a bead or a commit message. The worklist rows are the product and may
+  go in the triage bead; a number derived from them is not. This is a diagnostic,
+  not a tracked metric.
+- **MUST NOT** invoke it from implementation, planning, review, validation or
+  landing work, or on your own initiative (see "When this applies").
+- **MUST NOT** add it to CI, a pre-commit hook, a `checks.*` derivation, a work
+  packet or an acceptance criterion. It is too slow, and outside a `--workers 1`
+  run its result is not even reproducible.
 - **MUST NOT** point it at `./...`; that pattern is rejected. Pass a directory —
   it is walked recursively, so a single package works. Single-file targets are
   rejected too.

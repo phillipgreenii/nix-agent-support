@@ -139,8 +139,7 @@ flowchart LR
 ```
 
 Dependencies MUST be wired as real `bd dep` edges between sibling tasks. Every Go
-bead MUST follow TDD (failing test first) and SHOULD be run through the
-`pg-go-mutate:go-test-gaps` skill. Every bead MUST pass `prek` on changed files.
+bead MUST follow TDD (failing test first). Every bead MUST pass `prek` on changed files.
 
 ### Bead T — delta temporality for ccpool metrics (blocking; two repos)
 

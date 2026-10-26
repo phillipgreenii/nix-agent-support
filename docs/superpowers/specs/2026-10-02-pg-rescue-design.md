@@ -1331,8 +1331,6 @@ The external binaries are faked on `PATH` (the `testdata/fake-claude` precedent 
 - **Home-manager config:** a nix check builds the generated config and runs
   `pg-rescue --config "$cfg" --handlers notify -q -- true` with `XDG_STATE_HOME=$TMPDIR`. It must
   exit `0`.
-- **Mutation:** run the `go-test-gaps` skill (pg-go-mutate) on the classifier, the chain runner, the
-  config validator and the display renderer.
 - **Manual**, `contract`-tagged and run locally only (the ccpool harness precedent): the real
   `claude`, `nix` and beads tracker, run against a scratch repo.
 - **Nix checks:** a new `pg-rescue-go-tests` `mkGoTest`, with `bash` and `git` in `testDeps`.

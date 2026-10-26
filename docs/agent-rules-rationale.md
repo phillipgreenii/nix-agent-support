@@ -90,6 +90,20 @@ A-3: a brief that lists relative paths without a root causes exactly this defect
   deploy-gated run against `main` is what keeps an on-demand suite from becoming that again. Existing
   rules said nothing on test cost or kind: ADR 0037 limits which commands run tests and HK-2 keeps
   `nix` out of hooks, neither classifies a test.
+- V-5 (operator rulings, Phillip: 2026-10-20 on `pg2-6oop0.8`, "typical development is not supposed
+  to do a full mutant run"; 2026-10-22, verbatim: "unless the story is about mutation testing
+  itself, none of the standard planned work should rely on running mutate tests"; 2026-10-26,
+  verbatim: "typical development flows must not invoke mutation tests. mutation tests are something
+  done outside of standard implementation flows ... each use of mutation tests should be intentional
+  outside of implementation work. it is used to generate areas which need to be improved").
+  Provenance: the `go-test-gaps` skill description told agents to use it "after implementing a Go
+  feature and deciding what to test", so it fired in ordinary work; seven design specs and plans
+  carried "run `pg-go-mutate`" rows that `plan-decompose` copies into packet acceptance criteria
+  (struck on pg2-z5fax.4 on 2026-10-22; the rest struck 2026-10-26); and a 2026-10-20 mutation run
+  spawned an unbounded process tree (`nix-support-apps` observability README). A bare prohibition
+  has no observable in-session trigger, so it stays always-on rather than moving into the skill
+  (tripwire pattern). The hand-applied negative control is excluded because
+  `x/pprofserver/mutation-check.sh` and the dashboard-check mutant self-tests are ordinary fast tests.
 
 ## Timeouts (L-1..L-3) and host load (L-4)
 
