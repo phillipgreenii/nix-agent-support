@@ -41,10 +41,13 @@ var t0 = time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
 
 // requestRouter is a router with the event log installed and four handlers:
 // annotated (store, stale, 12 s old), plain (attaches nothing), failing
-// (unavailable) and slow (sets its own wait).
+// (unavailable) and slow (sets its own wait). The router runs on the same fixed
+// clock as the event log: the request wait is measured from Received to the
+// handler's start, and with the real clock a scheduler hiccup between those two
+// reads made wait_ms 1 instead of 0 (pg2-0agws3).
 func requestRouter(t *testing.T, el *EventLog) *router.Router {
 	t.Helper()
-	r := router.New(router.Options{Instances: []string{"pr", "ci"}})
+	r := router.New(router.Options{Instances: []string{"pr", "ci"}, Now: fixedClock(t0)})
 	r.Use(el.Middleware())
 	reg := func(op string, h func(ctx context.Context) (any, error)) {
 		r.Register("pr", op, scriptout.OpHandler{SchemaVersion: 1, Handle: func(ctx context.Context, _ json.RawMessage) (any, error) { return h(ctx) }})
