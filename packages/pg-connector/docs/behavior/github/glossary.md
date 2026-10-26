@@ -94,6 +94,10 @@ Inheritance follows `INV-20`: where this set needs a different meaning it takes 
 - **Watched PR** — a PR whose watched flag is set: by a query that declares `watched = true`, or by a
   read with the watch option. Only a watched PR produces change rows and is delivered by the feed; the
   flag is sticky until the entity is evicted (`INV-GH-CHG-5`).
+- **Entity metadata** — what the daemon says about a PR beside its content: today the watched flag,
+  carried as `entity_meta.watched` on a `show` answer and on every entity of a `list` answer. It is
+  never stored with a group, never on a change row, and a flip of it is neither a change nor an
+  event; an answer without it states nothing (`INV-GH-FRESH-13`).
 - **Consumer position** — the log position a cursor key has acknowledged: the rows after it are the
   ones the next poll returns (`INV-GH-CHG-5`).
 - **Acknowledgement** — the explicit `changes_ack` that moves a consumer position to a `next_seq`,

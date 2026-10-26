@@ -154,6 +154,22 @@ restated.
   NOT overwrite content stored after it and MUST NOT log a change from it. A client that retries after
   `unavailable` MUST NOT create a duplicate: a posted review comment already present MUST be
   recognized as present, and a rerun of runs already re-running MUST be a no-op answer.
+- **`INV-GH-FRESH-13`** <!-- uuid: 2f0bc0e6-4dd0-43ee-9603-469cbc8a9b13 --> — A `show` answer, and every entity of a `list`
+  answer, MUST state the PR's stored **watched flag** as `entity_meta.watched`, read from the entity
+  row at answer time, so a caller learns whether a PR is watched from the daemon and not from a copy
+  of its own or from query membership: the flag belongs to the PR, not to a query. The answer to a
+  read that carried the watch option (`INTF-WIRE-WATCH-1`) MUST state the flag **after** that watch
+  was applied; a read without it MUST NOT set the flag, and stating the flag MUST NOT change what is
+  watched. It MUST be `true` for a member of a watched query and for a PR a watch read marked, and
+  `false` for a PR that was only read or is tracked only and for a PR the daemon holds no row for;
+  it is sticky after the PR leaves every query and cleared only at eviction (`INV-GH-CHG-5`). It is
+  **metadata beside the entity, not content**: it MUST NOT be stored with any group, MUST NOT be on a
+  change row's entity, and a change of the flag MUST NOT bump the entity's version, append a change
+  row or produce an event; the umbrella's list fingerprint MUST NOT include it, and a consumer that
+  compares a PR for change MUST drop the whole `entity_meta` key, as it drops `as_of` and `stale`.
+  An answer that lacks the key, or carries it without `watched` (an older daemon, or a read that did
+  not consult the store), MUST be read as **not stated**, never as `false`. An `ids_only` list answer
+  names no entity and carries no flag.
 
 ## Change delivery
 

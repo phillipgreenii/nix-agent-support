@@ -3,7 +3,7 @@
     "call": "changes_ack {\"consumer\":\"example-consumer\",\"next_seq\":7,\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 14,
+      "schemaVersion": 15,
       "result": {
         "consumer": "example-consumer",
         "query": "mine",
@@ -16,7 +16,7 @@
     "call": "changes_ack {\"consumer\":\"example-fresh\",\"next_seq\":2,\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 14,
+      "schemaVersion": 15,
       "result": {
         "consumer": "example-fresh",
         "query": "mine",
@@ -29,7 +29,7 @@
     "call": "changes_ack {\"consumer\":\"example-consumer\",\"next_seq\":57,\"query\":\"mine\"}",
     "answer": {
       "protocolVersion": 1,
-      "schemaVersion": 14,
+      "schemaVersion": 15,
       "error": {
         "code": "invalid_argument",
         "message": "scriptout: invalid argument: ack beyond the head of the change log: next_seq 57, head 7"

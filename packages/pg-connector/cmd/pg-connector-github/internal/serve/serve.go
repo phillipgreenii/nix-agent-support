@@ -597,7 +597,7 @@ func (d *daemon) start(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	for op, h := range prread.Handlers(prread.Deps{Engine: engine, Sidecar: view, Watcher: prread.NewWatcher(chg, st, ent)}) {
+	for op, h := range prread.Handlers(prread.Deps{Engine: engine, Sidecar: view, Watcher: prread.NewWatcher(chg, st, ent), Store: st}) {
 		d.rt.Register("pr", op, h)
 	}
 	d.rt.Register("pr", review.OpName, review.Handler(review.Deps{

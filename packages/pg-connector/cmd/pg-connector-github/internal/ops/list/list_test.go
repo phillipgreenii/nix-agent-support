@@ -803,8 +803,12 @@ func TestList_HasTheOldBackendsShape(t *testing.T) {
 					for _, e := range es {
 						delete(e.(map[string]any), "as_of")
 						delete(e.(map[string]any), "stale")
+						// The daemon's metadata beside the entity (pg2-xxcdow), absent
+						// from the old backend's answer.
+						delete(e.(map[string]any), "entity_meta")
 					}
 				}
+				delete(v, "fingerprint_excludes")
 				return v
 			}
 			got, want := strip(resp.Result), strip(fixture(t, tc.golden))
@@ -823,7 +827,9 @@ func TestList_EveryFieldIsAListFieldAndTheEntityIsSummaryLevel(t *testing.T) {
 	raw, _ := json.Marshal(res.Entities[0])
 	var m map[string]any
 	_ = json.Unmarshal(raw, &m)
-	allowed := map[string]bool{"branch": true, "base": true, "merged": true} // never set on the list path
+	// branch, base and merged are never set on the list path; entity_meta is the
+	// daemon's metadata beside the entity, not a field of the summary.
+	allowed := map[string]bool{"branch": true, "base": true, "merged": true, "entity_meta": true}
 	for _, f := range schema.PRListFields {
 		allowed[f] = true
 	}

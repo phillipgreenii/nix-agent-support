@@ -41,6 +41,12 @@
 // stored summaries (the carried-forward mergeable value, not the observed one);
 // truncated is true when the listing was not complete (past GitHub's 1,000-result
 // search limit) or a bound could not be judged.
+//
+// Every entity also carries entity_meta.watched, the stored watched flag of its
+// entity row (feedop.EntityMetaOf): metadata beside the summary content, never
+// part of it, and only READ here (a list never sets or clears the flag, bumps a
+// version, appends a change row or produces an event). An ids_only answer has no
+// entities and so no flag.
 package list
 
 import (
@@ -56,6 +62,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/vcs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/feedop"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
@@ -92,6 +99,7 @@ var _ Summaries = (*summary.Service)(nil)
 // Store is the part of the daemon store the handler reads.
 type Store interface {
 	GetGroup(ctx context.Context, kind, id, group string) (store.GroupRow, bool, error)
+	GetEntity(ctx context.Context, kind, id string) (store.EntityRow, bool, error)
 }
 
 var _ Store = (*store.Store)(nil)
@@ -220,9 +228,21 @@ func (h *handler) handle(ctx context.Context, raw json.RawMessage) (any, error) 
 		Truncated:  !row.Complete || imprecise,
 	}
 	if !a.IDsOnly {
+		// entity_meta is the daemon's metadata beside an entity, not part of its
+		// content: the umbrella's list fingerprint MUST NOT see it, or a flip of
+		// the watched flag would read as a change of the PR.
+		res.FingerprintExcludes = []string{"entity_meta"}
 		res.Entities = make([]schema.PR, 0, len(ids))
 		for _, id := range ids {
-			res.Entities = append(res.Entities, toPR(sums[id]))
+			pr := toPR(sums[id])
+			// The stored watched flag rides beside the content, never in it, and
+			// reading it changes nothing (no version, no row, no event).
+			meta, err := h.entityMeta(ctx, sums[id].node)
+			if err != nil {
+				return nil, err
+			}
+			pr.EntityMeta = meta
+			res.Entities = append(res.Entities, pr)
 		}
 	}
 	return res, nil
@@ -326,8 +346,21 @@ func (h *handler) classify(what string, cause error) error {
 	}
 }
 
-// loaded is one stored summary and when it was fetched.
+// entityMeta is the metadata beside one listed PR, read from its entity row. A
+// stored read is local and quick and must not fail because the deadline that
+// ended the wait for the origin has passed.
+func (h *handler) entityMeta(ctx context.Context, node string) (*schema.EntityMeta, error) {
+	ent, found, err := h.cfg.Store.GetEntity(context.WithoutCancel(ctx), entity.KindPR, node)
+	if err != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("read the entity row of %s: %v", node, err))
+	}
+	return feedop.EntityMetaOf(ent, found), nil
+}
+
+// loaded is one stored summary and when it was fetched; node is the entity key
+// of the PR it belongs to.
 type loaded struct {
+	node      string
 	sum       summary.Summary
 	fetchedAt time.Time
 	stale     bool
@@ -452,7 +485,7 @@ func decode(g store.GroupRow, stale bool) (loaded, error) {
 	if err := json.Unmarshal(g.Content, &s); err != nil {
 		return loaded{}, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("decode stored summary of %s: %v", g.ID, err))
 	}
-	return loaded{sum: s, fetchedAt: g.FetchedAt, stale: stale}, nil
+	return loaded{node: g.ID, sum: s, fetchedAt: g.FetchedAt, stale: stale}, nil
 }
 
 // inRange applies the time range to a summary's updatedAt. A PR whose timestamp

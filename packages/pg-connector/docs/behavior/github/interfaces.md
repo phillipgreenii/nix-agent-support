@@ -81,6 +81,12 @@ Every read answer carries the parent's `served_from`, `stale` and `age_seconds`,
 last_error}` (`INV-GH-FRESH-8`). `age_seconds` is the age of the oldest `fetched_at` among the groups
 served.
 
+A `show` answer and every entity of a `list` answer also carry an optional `entity_meta` object
+beside the entity's own fields: `{watched}`, the PR's stored watched flag (`INV-GH-FRESH-13`). It is
+the daemon's metadata about the PR, not part of its content; it is absent, or present without
+`watched`, when the answer states nothing, and a reader MUST then take the flag as not stated, never
+as `false`.
+
 ### Change feed fields
 
 - Each change carries `seq`, `kinds`, `fields` (each field with its before and after value) and the

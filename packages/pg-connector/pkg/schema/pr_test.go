@@ -90,13 +90,13 @@ func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 }
 
 // TestPRSchemaVersion_IsCurrent pins PRSchemaVersion at its current value
-// (PRReview.SubmittedAt bumped 8 -> 9, PRReview.CommitOID bumped 9 -> 10, read-answer annotations bumped 10 -> 11, change feed bumped 11 -> 12, show_many and list node_ids bumped 12 -> 13, store_identity bumped 13 -> 14) so
+// (PRReview.SubmittedAt bumped 8 -> 9, PRReview.CommitOID bumped 9 -> 10, read-answer annotations bumped 10 -> 11, change feed bumped 11 -> 12, show_many and list node_ids bumped 12 -> 13, store_identity bumped 13 -> 14, EntityMeta bumped 14 -> 15) so
 // an accidental future edit that
 // forgets to bump it alongside a new field-shape change is caught here
 // first.
 func TestPRSchemaVersion_IsCurrent(t *testing.T) {
-	if PRSchemaVersion != 14 {
-		t.Fatalf("PRSchemaVersion = %d, want 14", PRSchemaVersion)
+	if PRSchemaVersion != 15 {
+		t.Fatalf("PRSchemaVersion = %d, want 15", PRSchemaVersion)
 	}
 }
 
@@ -469,5 +469,44 @@ func TestPRReview_CommitOID_WireDistinguishesAbsentFromEmpty(t *testing.T) {
 				t.Fatalf("round trip = %+v, want %+v", back, tc.in)
 			}
 		})
+	}
+}
+
+// TestPR_EntityMetaWireShapeAndNotStated pins the additive entity_meta key of a
+// PR (bead pg2-xxcdow): omitted when unset, false is a statement, and an answer
+// without the field (an older daemon) reads as "not stated", never as false.
+func TestPR_EntityMetaWireShapeAndNotStated(t *testing.T) {
+	bare, err := json.Marshal(PR{ID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(bare), "entity_meta") {
+		t.Errorf("a PR with no metadata must omit entity_meta, got %s", bare)
+	}
+	for _, watched := range []bool{true, false} {
+		raw, err := json.Marshal(PR{ID: "p", EntityMeta: WatchedMeta(watched)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `"entity_meta":{"watched":true}`
+		if !watched {
+			want = `"entity_meta":{"watched":false}`
+		}
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("watched=%v: %s lacks %s", watched, raw, want)
+		}
+	}
+	for name, doc := range map[string]string{
+		"an older daemon, no entity_meta":      `{"id":"p"}`,
+		"entity_meta present, watched omitted": `{"id":"p","entity_meta":{}}`,
+		"entity_meta null":                     `{"id":"p","entity_meta":null}`,
+	} {
+		var pr PR
+		if err := json.Unmarshal([]byte(doc), &pr); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if watched, stated := pr.EntityMeta.WatchedState(); stated || watched {
+			t.Errorf("%s: WatchedState = (%v, %v), want (false, not stated)", name, watched, stated)
+		}
 	}
 }

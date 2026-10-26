@@ -48,8 +48,11 @@ var FieldTable = []FieldAssignment{
 	// Derived at read time from the groups served; the last three are the
 	// answer annotations and may not exist on the type yet. version is the
 	// entity row's per-entity version (schema.PR.Version, PRSchemaVersion 12): no
-	// group stores it, and only a change answer sets it.
-	{KindPR, Derived, []string{"as_of", "stale", "served_from", "age_seconds", "groups", "version"}},
+	// group stores it, and only a change answer sets it. entity_meta (PRSchemaVersion
+	// 15) is the daemon's metadata beside the entity, read from the entity row at
+	// answer time: no group stores it, so the change-detection normaliser never
+	// sees it.
+	{KindPR, Derived, []string{"as_of", "stale", "served_from", "age_seconds", "groups", "version", "entity_meta"}},
 	// runs: jobs come from the job table by (run id, attempt) and belong to the
 	// group.
 	{KindCI, Runs, []string{

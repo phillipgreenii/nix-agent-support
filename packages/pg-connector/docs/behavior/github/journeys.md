@@ -15,7 +15,7 @@ set.
 - **`STORY-GH-1`** <!-- uuid: 5402125f-b435-4088-826d-ad5979a60989 --> — As a **caller**, I want to read a PR or its CI and get
   a local answer that says how old it is, so that a skill or an operator never waits on the origin
   for data the backend already holds, and never mistakes old data for current. _(→
-  `USECASE-GH-READ-ENTITY`; `INV-GH-FRESH-1`, `INV-GH-FRESH-2`, `INV-GH-FRESH-8`, `INV-GH-PROC-1`.)_
+  `USECASE-GH-READ-ENTITY`; `INV-GH-FRESH-1`, `INV-GH-FRESH-2`, `INV-GH-FRESH-8`, `INV-GH-FRESH-13`, `INV-GH-PROC-1`.)_
 - **`STORY-GH-2`** <!-- uuid: 47c4855c-18e5-4a65-84ad-08f83a40539a --> — As a **caller**, I want to list the PRs of a query I
   named once in configuration, answered from what the backend already holds, and a clear signal when
   I name a query it does not know, so that a listing is cheap and a typo is never an empty result.
@@ -116,7 +116,7 @@ Extensions:
 **Intent:** read a PR, its files, its commits, its pending review or its CI runs, from the store when
 the data is fresh, and learn its age.
 _Requires:_ `INV-GH-PROC-1`, `INV-GH-FRESH-1`, `INV-GH-FRESH-2`, `INV-GH-FRESH-6`, `INV-GH-FRESH-8`,
-`INV-GH-FRESH-10`.
+`INV-GH-FRESH-10`, `INV-GH-FRESH-13`.
 _Includes:_ `USECASE-GH-FETCH-STALE`.
 
 **Main success scenario.**
@@ -126,7 +126,8 @@ _Includes:_ `USECASE-GH-FETCH-STALE`.
 3. The daemon records the access, which makes the entity tracked (`INV-GH-FRESH-3`).
 4. Every group the op needs is inside its freshness window: the daemon answers from the store, with
    no origin call.
-5. The answer carries `served_from`, `stale`, `age_seconds` and `groups[]`.
+5. The answer carries `served_from`, `stale`, `age_seconds` and `groups[]`, and, for a `show` and
+   for each entity of a `list`, the PR's watched flag as `entity_meta.watched` (`INV-GH-FRESH-13`).
 
 Extensions:
 

@@ -367,8 +367,8 @@ func TestNewDispatchTable_ListsShowMany(t *testing.T) {
 	if resp.Error != nil || len(resp.Result.Missing) != 1 || resp.Result.Missing[0] != "owner/repo#1" || len(resp.Result.Entities) != 0 {
 		t.Fatalf("response = %s, want the unresolved id in missing", out.String())
 	}
-	if resp.SchemaVersion != 14 {
-		t.Fatalf("schemaVersion = %d, want 14", resp.SchemaVersion)
+	if resp.SchemaVersion != schema.PRSchemaVersion {
+		t.Fatalf("schemaVersion = %d, want %d", resp.SchemaVersion, schema.PRSchemaVersion)
 	}
 }
 

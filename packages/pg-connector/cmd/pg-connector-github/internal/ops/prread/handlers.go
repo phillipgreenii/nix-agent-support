@@ -21,8 +21,11 @@
 // (schema.PR, schema.PRFilesResult, schema.PRCommitsResult,
 // pr.PendingReviewResult) plus the annotations of internal/answer (served_from,
 // stale, age_seconds, groups[]), which are also recorded on the router's
-// carrier. Handlers returns the op handlers as values; registering them under
-// the router is the daemon assembly's.
+// carrier. The show answer also carries entity_meta.watched, the stored watched
+// flag of the PR's entity row read AFTER a one-off watch of the call was applied
+// (metadata beside the content: reading it changes nothing). Handlers returns
+// the op handlers as values; registering them under the router is the daemon
+// assembly's.
 package prread
 
 import (
@@ -42,6 +45,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/feedop"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -66,6 +70,14 @@ type Engine interface {
 
 var _ Engine = (*groupsvc.Service)(nil)
 
+// EntityStore is the part of the daemon store show reads for the entity row's
+// watched flag. *store.Store satisfies it.
+type EntityStore interface {
+	GetEntity(ctx context.Context, kind, id string) (store.EntityRow, bool, error)
+}
+
+var _ EntityStore = (*store.Store)(nil)
+
 // Deps wires the handlers.
 type Deps struct {
 	Engine Engine
@@ -74,6 +86,10 @@ type Deps struct {
 	// Watcher applies the watch argument; nil means a read that carries it is
 	// answered unavailable.
 	Watcher Watcher
+	// Store is read for the entity row behind show's entity_meta (the stored
+	// watched flag); nil means the store was not consulted, so show states
+	// nothing about the flag and a reader takes it as "not stated".
+	Store EntityStore
 	// Clock is the time source; nil means the system clock.
 	Clock governor.Clock
 }
@@ -222,7 +238,28 @@ func (h *handlers) show(ctx context.Context, a request) (any, error) {
 	}
 	out := ToSchemaPR(a.ID, res.Summary, &d, &c, h.now())
 	answer.ApplyPR(out, h.provenance(ctx, res))
+	// The stored watched flag rides beside the content, never in it: it is read
+	// here AFTER a one-off watch of this call was applied (ensure), and reading
+	// it changes nothing (no version, no row, no event).
+	if h.deps.Store != nil {
+		meta, err := h.entityMeta(ctx, res.Summary.NodeID)
+		if err != nil {
+			return nil, err
+		}
+		out.EntityMeta = meta
+	}
 	return out, nil
+}
+
+// entityMeta is the metadata beside one PR of a show answer, read from its
+// entity row. The read is local and quick and must not fail because the
+// deadline that ended the wait for the origin has passed.
+func (h *handlers) entityMeta(ctx context.Context, node string) (*schema.EntityMeta, error) {
+	ent, found, err := h.deps.Store.GetEntity(context.WithoutCancel(ctx), entity.KindPR, node)
+	if err != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("read the entity row of %s: %v", node, err))
+	}
+	return feedop.EntityMetaOf(ent, found), nil
 }
 
 func (h *handlers) files(ctx context.Context, a request) (any, error) {

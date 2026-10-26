@@ -127,7 +127,14 @@ import "encoding/json"
 // ChangesAckResult.Query omitempty). Additive, so every version-13 consumer
 // keeps decoding unchanged; the bump follows this const's own rule that ANY
 // field-shape change bumps the version, additive or not.
-const PRSchemaVersion = 14
+//
+// Bumped 14 -> 15 by bead pg2-xxcdow, which added PR.EntityMeta (the per-entity
+// metadata the daemon keeps BESIDE the normalised content; today the watched
+// flag) to the show answer and to every entity of a list answer. Additive and
+// omitted when unset, so every version-14 consumer keeps decoding unchanged;
+// the bump follows this const's own rule that ANY field-shape change bumps the
+// version, additive or not.
+const PRSchemaVersion = 15
 
 // PRListFields is the authoritative set of schema.PR JSON field names the
 // cheap `list` populates (bead pg2-x3h8c.2). The list's batched search
@@ -213,6 +220,14 @@ type PR struct {
 	ServedFrom string      `json:"served_from,omitempty"`
 	AgeSeconds *int64      `json:"age_seconds,omitempty"`
 	Groups     []GroupInfo `json:"groups,omitempty"`
+
+	// EntityMeta is what the daemon knows ABOUT the entity rather than what
+	// GitHub says of it (PRSchemaVersion 15; see EntityMeta). It is an
+	// annotation like ServedFrom: never stored with the summary content, never
+	// compared, never on a change row's entity, and a change in it is no
+	// content change. Omitted when the answer states nothing, which a reader
+	// MUST read as "not stated".
+	EntityMeta *EntityMeta `json:"entity_meta,omitempty"`
 
 	// Comments are the PR's own top-level (non-review-thread) comments.
 	Comments []PRComment `json:"comments,omitempty"`

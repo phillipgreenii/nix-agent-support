@@ -549,7 +549,14 @@ normalised content, and the rules are:
   `watched` in it), and a reader MUST read an absent `watched` as "not stated", NEVER as `false`
   (`schema.EntityMeta.WatchedState` returns `stated`). `ids_only` list answers carry no entities and so no flag.
 - The shared library builds it once (`feedop.EntityMetaOf` over the store's entity row), so another daemon on the hoisted
-  store states the flag the same way; the GitHub daemon's `pr` wiring is a separate follow-up.
+  store states the flag the same way.
+- The GitHub daemon states it the same way (bead `pg2-xxcdow`, `PRSchemaVersion` 15): the `pr` `show` answer and every
+  entity of a `pr` `list` answer carry `entity_meta.watched`, read from the entity row with `feedop.EntityMetaOf`
+  (`show` states it AFTER a `watch: true` of that call was applied). The key is a derived field of `schema.PR` (no
+  group stores it, so the change-detection normaliser and a change row's entity never see it), and the `list` result
+  declares `fingerprint_excludes: ["entity_meta"]` so the umbrella's list fingerprint does not move when the flag does.
+  Behavior: `INV-GH-FRESH-13` in `docs/behavior/github/invariants.md`. Tests: `internal/serve/entity_meta_test.go`
+  (real daemon binary over the fake `gh`), `internal/ops/prread/entitymeta_test.go`, `internal/ops/list/entitymeta_test.go`.
 
 **Where a consumer learns a query's baseline time.** The feed wire's `sources_freshness[]` carries only `query`,
 `last_success_at` and `last_error`; the baseline marker time is NOT on it. A consumer that must know whether a query's
