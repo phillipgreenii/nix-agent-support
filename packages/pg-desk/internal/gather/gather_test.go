@@ -486,8 +486,8 @@ func TestGather_SixInputs_CalledWithRightArgsAndEnv(t *testing.T) {
 		}
 	}
 
-	if got := byVerb["pr show"].Args; strings.Join(got, " ") != "pr show PR1 --fresh" {
-		t.Fatalf("pr show args = %v, want [pr show PR1 --fresh] (a gather follows a detected change, so it bypasses the connector read-through cache)", got)
+	if got := byVerb["pr show"].Args; strings.Join(got, " ") != "pr show PR1" {
+		t.Fatalf("pr show args = %v, want [pr show PR1] (INV-GATHER-1: the daemon-backed backend keeps PR reads current, so a gather's pr read passes no --fresh)", got)
 	}
 	if got := byVerb["pr files"].Args; strings.Join(got, " ") != "pr files PR1" {
 		t.Fatalf("pr files args = %v, want [pr files PR1]", got)
@@ -967,5 +967,31 @@ func TestPRHydrationKeepsXrefScan(t *testing.T) {
 	}
 	if len(xrefs.upserts) != 3 {
 		t.Fatalf("got %d upserts, want 3", len(xrefs.upserts))
+	}
+}
+
+// TestCurrentHeadSHA_KeepsFresh pins the one `pr` read that KEEPS --fresh
+// (INV-GATHER-1): the head check is the precondition of a write, so it must
+// read its own writes and never take a cached answer, while a gather's own
+// `pr show` (TestGather_SixInputs_CalledWithRightArgsAndEnv) passes no
+// --fresh. The negative half: a plain `pr show` argv (the gather's) would
+// fail this assertion.
+func TestCurrentHeadSHA_KeepsFresh(t *testing.T) {
+	recordFile := withFactory(t, "happy")
+	g := NewGatherer(testConfig("/configured/beads"), nil)
+
+	sha, err := g.CurrentHeadSHA(context.Background(), "PR1")
+	if err != nil {
+		t.Fatalf("CurrentHeadSHA: %v", err)
+	}
+	if sha != fixtureHeadSHA {
+		t.Fatalf("CurrentHeadSHA = %q, want %q", sha, fixtureHeadSHA)
+	}
+	records := readCallRecords(t, recordFile)
+	if len(records) != 1 {
+		t.Fatalf("recorded %d calls, want exactly 1 (the head check reads nothing else): %+v", len(records), records)
+	}
+	if got := strings.Join(records[0].Args, " "); got != "pr show PR1 --fresh" {
+		t.Fatalf("head-check read = %q, want %q (a precondition of a write must not be served from a cache)", got, "pr show PR1 --fresh")
 	}
 }

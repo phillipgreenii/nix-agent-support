@@ -329,10 +329,14 @@ func (g *Gatherer) Gather(ctx context.Context, entityType, entityID string, chan
 		return Facts{}, fmt.Errorf("gather: change kind %q is not one of added/changed/removed/sweep", change)
 	}
 
-	// --fresh: a gather runs because a change was just detected, so it must
-	// see the origin's current entity, never a connector cache entry that is
-	// still within its read-through TTL.
-	prShowRaw, notFound, err := g.targetedCall(ctx, []string{"pr", "show", entityID, "--fresh"}, nil)
+	// No --fresh (INV-GATHER-1): the daemon-backed GitHub backend owns the PR
+	// cache and its change detection, so a gather that runs because that
+	// backend delivered a change reads entity state the backend already keeps
+	// current, and the backend decides how current each read is (INV-CACHE-8).
+	// Passing --fresh here would only add origin reads. The issue read
+	// (entity.go) and CurrentHeadSHA below keep it. Rolling the cutover back
+	// is a revert of this line (restore "--fresh").
+	prShowRaw, notFound, err := g.targetedCall(ctx, []string{"pr", "show", entityID}, nil)
 
 	if change == ChangeRemoved {
 		return g.removedFacts(prShowRaw, notFound, err)
