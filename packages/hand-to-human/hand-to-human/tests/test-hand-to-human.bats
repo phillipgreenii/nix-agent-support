@@ -212,3 +212,39 @@ notes_of() { bd_fixture_show_json "$1" | jq -r '.notes // ""'; }
   [[ $stderr == *"require at least one field update"* ]]
   [ "$(labels_of "$id")" = "escalated" ]
 }
+
+# hand-to-human's own claim guard against the real bd (bead pg2-f9x7i).
+
+@test "guard match (unassigned + open): handed off, one update, note and marker written" {
+  id="$(new_bead escalated)"
+  : >"$BD_CALL_LOG"
+  run --separate-stderr "$H" "$id" --also-add stale-escalation --note "timed out" --if-assignee "" --if-status open
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^update ' "$BD_CALL_LOG")" -eq 1 ]
+  [ "$(labels_of "$id")" = $'attention\nhuman\nstale-escalation' ]
+  [ "$(notes_of "$id")" = "timed out" ]
+}
+
+@test "guard mismatch (assigned): exit 5 and NOTHING written" {
+  id="$(new_bead escalated)"
+  bd update -a someone -- "$id" >/dev/null 2>&1
+  run --separate-stderr "$H" "$id" --also-add stale-escalation --note "timed out" --if-assignee "" --if-status open
+  [ "$status" -eq 5 ]
+  [[ $stderr == *"claim guard mismatch, nothing written"* ]]
+  [ "$(labels_of "$id")" = "escalated" ]
+  [ "$(notes_of "$id")" = "" ]
+}
+
+@test "guard mismatch (status): exit 5 and NOTHING written" {
+  id="$(new_bead escalated)"
+  bd update --status blocked -- "$id" >/dev/null
+  run --separate-stderr "$H" "$id" --note "timed out" --if-status open
+  [ "$status" -eq 5 ]
+  [ "$(labels_of "$id")" = "escalated" ]
+  [ "$(notes_of "$id")" = "" ]
+}
+
+@test "an unknown bead with a guard is still exit 3 (a failure, not a guard mismatch)" {
+  run --separate-stderr "$H" tst-nope99 --note x --if-status open
+  [ "$status" -eq 3 ]
+}

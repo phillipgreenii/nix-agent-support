@@ -15,6 +15,10 @@
 
 `hand-to-human {{pg2-abc12}} --also-add {{stale-escalation}} --note "{{Automation timed out; check infrastructure first.}}"`
 
+- Guard the hand-off against a concurrent claim (needs `--note`; exit 5 means the guard did not match and nothing was written):
+
+`hand-to-human {{pg2-abc12}} --note "{{why}}" --if-assignee "" --if-status {{open}}`
+
 - Run it against a specific tracker root instead of the current directory's:
 
 `hand-to-human {{pg2-abc12}} --bd-dir {{/path/to/tracker/root}}`

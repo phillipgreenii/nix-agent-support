@@ -8,5 +8,7 @@ _arguments \
   '*--also-remove[Remove one more label in the same call]:label:' \
   '*--also-add[Add one more label in the same call]:label:' \
   '(--backend)--note[Append text to the bead notes (bd only)]:note text:' \
+  '(--backend)--if-assignee[Claim guard: write only when the assignee matches (bd only; empty means unassigned)]:assignee:' \
+  '(--backend)--if-status[Claim guard: write only when the status matches (bd only)]:status:' \
   '--actor[Actor for the audit trail (bd only)]:actor:' \
   '1:bead id:'

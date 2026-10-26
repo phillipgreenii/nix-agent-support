@@ -31,7 +31,7 @@ for a in "$@"; do
   update)
     if [ -n "${BD_SHIM_UPDATE_FAIL:-}" ]; then
       echo "$BD_SHIM_UPDATE_FAIL" >&2
-      exit 1
+      exit "${BD_SHIM_UPDATE_RC:-1}"
     fi
     exit 0
     ;;
@@ -284,4 +284,54 @@ Automation timed out.')"
   [ "$status" -eq 0 ]
   grep -qx 'update --add-label human --add-label attention --remove-label escalated -- shim-1' "$BD_CALL_LOG"
   [[ $stderr != *"note"* ]]
+}
+
+# --if-assignee / --if-status claim guard and exit 5 (bead pg2-f9x7i)
+
+@test "guard flags: usage errors (needs --note, refused with --backend, missing values); nothing is called" {
+  run --separate-stderr "$H" shim-1 --if-status open
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"require --note"* ]]
+  run --separate-stderr "$H" shim-1 --if-assignee ""
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"require --note"* ]]
+  run --separate-stderr "$H" shim-1 --backend b1 --note x --if-status open
+  [ "$status" -eq 2 ]
+  run --separate-stderr "$H" shim-1 --backend b1 --if-assignee ""
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"not supported with --backend"* ]]
+  run --separate-stderr "$H" shim-1 --note x --if-status
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"--if-status requires a value"* ]]
+  run --separate-stderr "$H" shim-1 --note x --if-status ""
+  [ "$status" -eq 2 ]
+  run --separate-stderr "$H" shim-1 --note x --if-assignee
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"--if-assignee requires a value"* ]]
+  assert_no_bd_call
+  assert_no_pgc_call
+}
+
+@test "guard flags ride in the ONE update call after the note; an empty assignee is passed through" {
+  export BD_SHIM_SHOW_JSON
+  BD_SHIM_SHOW_JSON="$(show_json_notes '["human","attention"]' 'why')"
+  run --separate-stderr "$H" shim-1 --note why --if-assignee "" --if-status open
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'update' "$BD_CALL_LOG")" -eq 1 ]
+  grep -qx 'update --add-label human --add-label attention --remove-label escalated --append-notes why --if-assignee  --if-status open -- shim-1' "$BD_CALL_LOG"
+}
+
+@test "bd exit 13 with a guard is exit 5 (guard mismatch), not exit 3, and nothing is read back" {
+  BD_SHIM_UPDATE_FAIL="guard mismatch" BD_SHIM_UPDATE_RC=13 \
+    run --separate-stderr "$H" shim-1 --note why --if-status open
+  [ "$status" -eq 5 ]
+  [[ $stderr == *"claim guard mismatch, nothing written"* ]]
+  ! grep -q '^show' "$BD_CALL_LOG"
+}
+
+@test "bd exit 1 with a guard stays exit 3; bd exit 13 WITHOUT a guard stays exit 3" {
+  BD_SHIM_UPDATE_FAIL="boom" run --separate-stderr "$H" shim-1 --note why --if-status open
+  [ "$status" -eq 3 ]
+  BD_SHIM_UPDATE_FAIL="odd" BD_SHIM_UPDATE_RC=13 run --separate-stderr "$H" shim-1 --note why
+  [ "$status" -eq 3 ]
 }

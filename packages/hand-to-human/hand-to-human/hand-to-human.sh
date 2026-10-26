@@ -25,6 +25,7 @@ hand-to-human: Hand a bead to the operator (human + attention, escalated removed
 
 Usage: hand-to-human ID [--backend NAME | --bd-dir DIR] [--also-remove LABEL]...
                         [--also-add LABEL]... [--note TEXT] [--actor ID]
+                        [--if-assignee VALUE] [--if-status VALUE]
 
 Adds the labels `human` and `attention` to bead ID and removes `escalated`, all
 in ONE update call (the adds are in the same call as the removal, so the bead
@@ -54,6 +55,11 @@ Options:
                       has no notes flag (exit 2, nothing written).
   --actor ID          Actor for the audit trail (bd only; default: bd's own
                       resolution from BEADS_ACTOR).
+  --if-assignee V     Claim guard (bd only): write only when the bead's assignee
+                      is V now (an empty V means unassigned: --if-assignee "").
+                      Needs --note (bd refuses a guard on label edits alone).
+  --if-status V       Claim guard (bd only): write only when the bead's status is
+                      V now (for example open). Needs --note.
   -h, --help          Show this help message
   -v, --version       Show version information
 
@@ -65,11 +71,15 @@ Exit status:
   2  usage error; nothing was written
   3  the update call failed; nothing was written
   4  updated, but the read-back disagrees (the id is named on stderr)
+  5  claim guard mismatch: --if-assignee/--if-status did not match, so bd wrote
+     nothing (someone else got there first; not an error of this tool)
 
 Examples:
   hand-to-human pg2-abc12 --actor "$SID"
   hand-to-human pg2-abc12 --also-remove needs-split-review
   hand-to-human pg2-abc12 --also-add stale-escalation --note "Automation timed out."
+  hand-to-human pg2-abc12 --also-add stale-escalation --note "Timed out." \
+                          --if-assignee "" --if-status open
   hand-to-human pg2-abc12 --backend pg-connector-issue-beads-pg2
 
 Report bugs to: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support/issues>
@@ -81,6 +91,9 @@ BACKEND=""
 ACTOR=""
 HTH_BD_DIR=""
 NOTE=""
+IF_STATUS=""
+IF_ASSIGNEE=""
+IF_ASSIGNEE_SET=0
 EXTRA_REMOVE=()
 EXTRA_ADD=()
 
@@ -90,7 +103,14 @@ while [[ $# -gt 0 ]]; do
     show_help
     exit 0
     ;;
-  --backend | --bd-dir | --also-remove | --also-add | --note | --actor)
+  --if-assignee)
+    # An empty value is meaningful here (unassigned), so it is accepted.
+    [[ $# -ge 2 ]] || die "$1 requires a value (use \"\" for unassigned)"
+    IF_ASSIGNEE="$2"
+    IF_ASSIGNEE_SET=1
+    shift 2
+    ;;
+  --backend | --bd-dir | --also-remove | --also-add | --note | --actor | --if-status)
     [[ $# -ge 2 && -n $2 ]] || die "$1 requires a value"
     case "$1" in
     --backend) BACKEND="$2" ;;
@@ -99,6 +119,7 @@ while [[ $# -gt 0 ]]; do
     --also-add) EXTRA_ADD+=("$2") ;;
     --note) NOTE="$2" ;;
     --actor) ACTOR="$2" ;;
+    --if-status) IF_STATUS="$2" ;;
     esac
     shift 2
     ;;
@@ -120,6 +141,10 @@ if [[ -n $BACKEND ]]; then
   [[ -z $ACTOR ]] || die "--actor is not supported with --backend (pg-connector carries no actor flag)"
   [[ $BACKEND =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid --backend '$BACKEND'"
   [[ -z $NOTE ]] || die "--note is not supported with --backend (pg-connector issue update has no notes flag)"
+  [[ $IF_ASSIGNEE_SET -eq 0 && -z $IF_STATUS ]] || die "--if-assignee/--if-status are not supported with --backend (pg-connector has no claim guard)"
+fi
+if [[ ($IF_ASSIGNEE_SET -eq 1 || -n $IF_STATUS) && -z $NOTE ]]; then
+  die "--if-assignee/--if-status require --note (bd refuses a claim guard on label edits alone)"
 fi
 if [[ -n $HTH_BD_DIR && ! -d $HTH_BD_DIR ]]; then
   die "--bd-dir is not a directory: $HTH_BD_DIR"
@@ -148,6 +173,12 @@ for label in ${EXTRA_ADD[@]+"${EXTRA_ADD[@]}"}; do
 done
 # shellcheck disable=SC2034  # read by hth_run_bd / hth_readback in hand-to-human.bash
 HTH_NOTE="$NOTE"
+# shellcheck disable=SC2034  # read by hth_run_bd in hand-to-human.bash
+HTH_IF_ASSIGNEE_SET="$IF_ASSIGNEE_SET"
+# shellcheck disable=SC2034  # read by hth_run_bd in hand-to-human.bash
+HTH_IF_ASSIGNEE="$IF_ASSIGNEE"
+# shellcheck disable=SC2034  # read by hth_run_bd in hand-to-human.bash
+HTH_IF_STATUS="$IF_STATUS"
 
 REMOVE=()
 mapfile -t REMOVE < <(hth_remove_labels ${EXTRA_REMOVE[@]+"${EXTRA_REMOVE[@]}"})
@@ -176,6 +207,11 @@ if hth_run_bd "$BEAD_ID" "$ACTOR" "${REMOVE[@]}"; then
   rc=0
 else
   rc=$?
+fi
+if [[ $rc -eq $HTH_BD_GUARD_MISMATCH_RC && ($HTH_IF_ASSIGNEE_SET -eq 1 || -n $HTH_IF_STATUS) ]]; then
+  echo "hand-to-human: claim guard mismatch, nothing written: bead $BEAD_ID no longer matches --if-assignee/--if-status" >&2
+  [[ -z $HTH_ERR ]] || printf '%s\n' "$HTH_ERR" >&2
+  exit 5
 fi
 if [[ $rc -ne 0 ]]; then
   echo "hand-to-human: bd update failed with exit $rc; nothing was written and it was not retried:" >&2

@@ -14,6 +14,8 @@
 #   2  usage / validation error -- nothing was written
 #   3  the update call failed -- nothing was written
 #   4  the update succeeded, but the read-back disagrees
+#   5  the claim guard (--if-assignee / --if-status) did not match: bd exited 13
+#      and wrote nothing (someone else got there first)
 
 HTH_HUMAN_LABEL=human
 HTH_ATTENTION_LABEL=attention
@@ -26,6 +28,17 @@ HTH_ESCALATED_LABEL=escalated
 # form, whose argv is unchanged.
 HTH_ALSO_ADD=()
 HTH_NOTE=""
+
+# Optional claim guard of the ONE bd update (bead pg2-f9x7i): bd's own
+# `--if-assignee VALUE` / `--if-status VALUE` make the update a no-op that exits
+# 13 when the bead's current assignee/status differs. An empty assignee is a
+# legitimate guard value ("unassigned"), so presence is tracked separately.
+HTH_IF_ASSIGNEE_SET=0
+HTH_IF_ASSIGNEE=""
+HTH_IF_STATUS=""
+# bd's exit status for a guard mismatch (nothing written).
+# shellcheck disable=SC2034  # read by hand-to-human.sh after hth_run_bd
+HTH_BD_GUARD_MISMATCH_RC=13
 
 # J-1 envelope prelude (beads-lifecycle skill): `bd ... --json` returns
 # {"data":[..]} only when BD_JSON_ENVELOPE=1 and a bare array otherwise.
@@ -94,6 +107,12 @@ hth_run_bd() {
   mapfile -t args < <(hth_update_args "$actor" "$@")
   if [[ -n $HTH_NOTE ]]; then
     args+=(--append-notes "$HTH_NOTE")
+  fi
+  if [[ $HTH_IF_ASSIGNEE_SET -eq 1 ]]; then
+    args+=(--if-assignee "$HTH_IF_ASSIGNEE")
+  fi
+  if [[ -n $HTH_IF_STATUS ]]; then
+    args+=(--if-status "$HTH_IF_STATUS")
   fi
   out_file="$(mktemp)"
   err_file="$(mktemp)"
