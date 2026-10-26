@@ -1,7 +1,8 @@
 // pg-pr-backfill is the PR lane's backfill driver: it lists the backfill set
 // (enumerate), runs the composed command pg-pr-change over it in plan or apply mode
-// (run), prints the plan summary or the apply residual check (summary), writes the
-// flip marker (flip-marker) and lists every write since the flip (writes). The logic
+// (run), marks the open-anchor PRs watched and checks the daemon's watched count
+// (mark-watched), prints the plan summary or the apply residual check (summary),
+// writes the flip marker (flip-marker) and lists every write since the flip (writes). The logic
 // is in internal/backfill; this file is argument parsing and process wiring only.
 package main
 
@@ -42,6 +43,11 @@ The PR lane backfill driver (docs/behavior/pg-decider/backfill.md).
   enumerate    list the backfill set: the tracker's open anchors plus the open PRs
                of the deployment's queries; persist it; fail closed when the
                query-name file is absent or lists no query, or the set is empty
+  mark-watched mark every PR with an open anchor as watched in the daemon (a read
+               with --watch), refresh them (hydrate only), and check that the
+               daemon's watched count equals the tracker's open-anchor count
+               (non-zero); anchors that name no PR are listed, anchors of a merged
+               or closed PR are not marked; --from-set reads the persisted set
   run          run pg-pr-change over the set, paced; --mode plan|apply
   summary      print the plan summary (--mode plan, default) or the apply residual
                check (--mode apply) from the run record
@@ -49,9 +55,10 @@ The PR lane backfill driver (docs/behavior/pg-decider/backfill.md).
   writes       list every write since the flip marker, by timestamp
 
 Common flags: --config FILE (env ` + backfill.ConfigEnv + `), --run-record FILE, --set FILE.
-"run" ends with one last line starting DONE, FLOOR or FAILED; exit 0, 10, 11 (FAILED:
-run it again) or 12 (FAILED and stopped at once: go to the rollback). 64 is a usage
-error. None of the exit codes is 1 or 9.
+"run" and "mark-watched" end with one last line starting DONE, FLOOR or FAILED; exit
+0, 10, 11 (FAILED: run it again) or 12 (FAILED and stopped at once: for "run", go to
+the rollback). "mark-watched" also exits 20 when every PR was marked but the count
+check does not hold. 64 is a usage error. None of the exit codes is 1 or 9.
 `
 
 type common struct {
@@ -129,6 +136,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return cmdEnumerate(ctx, rest, stdout, stderr)
 	case "run":
 		return cmdRun(ctx, rest, stdout, stderr)
+	case "mark-watched":
+		return cmdMarkWatched(ctx, rest, stdout, stderr)
 	case "summary":
 		return cmdSummary(rest, stdout, stderr)
 	case "flip-marker":
@@ -289,6 +298,95 @@ func cmdRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	})
 	if err != nil {
 		return usageErr(stderr, "run", err)
+	}
+	fmt.Fprintln(stdout, res.Line)
+	return res.Code
+}
+
+// cmdMarkWatched is the marking step of the cutover (design 6.3): mark every PR
+// that has an open anchor as watched, refresh them (hydrate only), and check the
+// daemon's watched count against the tracker's open-anchor count. It enumerates
+// afresh (read-only, the persisted set is left alone) unless --from-set says to
+// read the persisted one. Its last line starts with DONE, FLOOR or FAILED; exit 0,
+// 10, 11 (run it again), 12 (stopped at once), 20 (every PR done but the count
+// check does not hold) or 30 (the enumeration failed closed).
+func cmdMarkWatched(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	var c common
+	fs := newFlags("mark-watched", &c)
+	fromSet := fs.Bool("from-set", false, "")
+	queries := fs.String("queries-file", "", "")
+	anchors := fs.String("anchors-query", "", "")
+	backend := fs.String("backend", "", "")
+	beadsDir := fs.String("beads-dir", "", "")
+	prBackend := fs.String("pr-backend", "", "")
+	deskCmd := fs.String("desk-cmd", "", "")
+	pace := fs.Duration("pace", -1, "")
+	floor := fs.Int("floor", 0, "")
+	rateSource := fs.String("rate-source", "", "")
+	rateLog := fs.String("rate-log", "", "")
+	metricsURL := fs.String("metrics-url", "", "")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return usageErr(stderr, "mark-watched", flagErr(err, fs))
+	}
+	cfg, err := c.load()
+	if err != nil {
+		return usageErr(stderr, "mark-watched", err)
+	}
+	pick := func(flagV, cfgV string) string {
+		if flagV != "" {
+			return flagV
+		}
+		return cfgV
+	}
+	if *rateSource != "" {
+		cfg.RateSource = *rateSource
+	}
+	if *rateLog != "" {
+		cfg.RateLog = *rateLog
+	}
+	if *metricsURL != "" {
+		cfg.MetricsURL = *metricsURL
+	}
+	if *floor != 0 {
+		cfg.Floor = *floor
+	}
+	p := cfg.PaceDuration()
+	if *pace >= 0 {
+		p = *pace
+	}
+	rate, err := cfg.RateSourceFor()
+	if err != nil {
+		return usageErr(stderr, "mark-watched", err)
+	}
+	var set *backfill.Set
+	if *fromSet {
+		set, err = backfill.LoadSet(cfg.SetFile)
+		if err != nil {
+			return usageErr(stderr, "mark-watched", err)
+		}
+	} else {
+		set, err = backfill.Enumerate(ctx, backfill.EnumerateOptions{
+			QueriesFile:  pick(*queries, cfg.QueriesFile),
+			AnchorsQuery: pick(*anchors, cfg.AnchorsQuery),
+			Backend:      pick(*backend, cfg.Backend),
+			BeadsDir:     pick(*beadsDir, cfg.BeadsDir),
+			Connector:    cfg.Connector,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "pg-pr-backfill mark-watched: enumeration FAILED: %v\n", err)
+			return exitEnumerateFailed
+		}
+	}
+	res, err := backfill.MarkWatched(ctx, backfill.MarkOptions{
+		Set:       set,
+		Connector: cfg.Connector,
+		Desk:      pick(*deskCmd, cfg.DeskCmd),
+		PRBackend: pick(*prBackend, cfg.PRBackend),
+		Pace:      p, Floor: cfg.Floor, Rate: rate,
+		Progress: stdout,
+	})
+	if err != nil {
+		return usageErr(stderr, "mark-watched", err)
 	}
 	fmt.Fprintln(stdout, res.Line)
 	return res.Code

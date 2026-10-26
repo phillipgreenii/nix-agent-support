@@ -57,11 +57,13 @@ mkGoApp {
       ]
     }:$out/bin"
     # pg-pr-backfill execs pg-connector (the tracker and PR listings, the epic
-    # comment) and pg-pr-change (its sibling in this output) by bare name. The
-    # unwrapped binary is `.pg-pr-backfill-wrapped`.
+    # comment, the watch reads and the inspection of mark-watched), pg-desk (the
+    # hydrate-only refresh of mark-watched) and pg-pr-change (its sibling in this
+    # output) by bare name. The unwrapped binary is `.pg-pr-backfill-wrapped`.
     wrapProgram $out/bin/pg-pr-backfill --prefix PATH : "${
       lib.makeBinPath [
         pg-connector
+        pg-desk
       ]
     }:$out/bin"
     install -Dm644 ${./share/work-item-keys.json} $out/share/pg-decider/work-item-keys.json

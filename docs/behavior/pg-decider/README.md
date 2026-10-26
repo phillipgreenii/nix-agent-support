@@ -50,13 +50,13 @@ hydrates the PR with `pg-desk pr refresh` and then decides it, under a per-PR lo
 
 ## The docs
 
-| Doc                                      | Covers                                                                                                                  |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| [`work-items.md`](work-items.md)         | The work-item contract: the kinds, the bead shapes, the dedup key, the same-context rule, the rule conditions           |
-| [`plan-and-apply.md`](plan-and-apply.md) | `pg-decider plan` and `apply`, exit codes, precedence, skip reasons, audit, failure escalation, run counters            |
-| [`config.md`](config.md)                 | The decider configuration file: location, format and keys                                                               |
-| [`pr-change.md`](pr-change.md)           | `pg-pr-change`, the composed command: per-PR lock, hydrate then decide, delivery key, run record, exit codes            |
-| [`backfill.md`](backfill.md)             | `pg-pr-backfill`, the backfill driver: the set, the paced run, the plan summary, the flip marker, the listing of writes |
+| Doc                                      | Covers                                                                                                                                    |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| [`work-items.md`](work-items.md)         | The work-item contract: the kinds, the bead shapes, the dedup key, the same-context rule, the rule conditions                             |
+| [`plan-and-apply.md`](plan-and-apply.md) | `pg-decider plan` and `apply`, exit codes, precedence, skip reasons, audit, failure escalation, run counters                              |
+| [`config.md`](config.md)                 | The decider configuration file: location, format and keys                                                                                 |
+| [`pr-change.md`](pr-change.md)           | `pg-pr-change`, the composed command: per-PR lock, hydrate then decide, delivery key, run record, exit codes                              |
+| [`backfill.md`](backfill.md)             | `pg-pr-backfill`, the backfill driver: the set, the marking step, the paced run, the plan summary, the flip marker, the listing of writes |
 
 ## The rules
 
@@ -87,7 +87,7 @@ The invariants of this set are numbered `INV-DECIDER-<n>` across the docs, in RF
 - `INV-DECIDER-7` to `INV-DECIDER-20`, `INV-DECIDER-25`, `INV-DECIDER-27` and `INV-DECIDER-28` are in [`plan-and-apply.md`](plan-and-apply.md).
 - `INV-DECIDER-21` to `INV-DECIDER-24` and `INV-DECIDER-26` are in [`config.md`](config.md).
 - `INV-PRCHANGE-1` to `INV-PRCHANGE-14` are in [`pr-change.md`](pr-change.md).
-- `INV-BACKFILL-1` to `INV-BACKFILL-14` are in [`backfill.md`](backfill.md).
+- `INV-BACKFILL-1` to `INV-BACKFILL-18` are in [`backfill.md`](backfill.md).
 
 ## Scope
 

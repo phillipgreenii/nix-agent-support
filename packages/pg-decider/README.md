@@ -57,7 +57,9 @@ It ships in this package's output beside `pg-decider`, with `pg-desk`, `pg-conne
 ## `pg-pr-backfill`
 
 `cmd/pg-pr-backfill` and `internal/backfill` are the PR lane's backfill driver: `enumerate` lists the
-backfill set (the tracker's open anchors plus the open PRs of the deployment's queries), `run --mode
+backfill set (the tracker's open anchors plus the open PRs of the deployment's queries), `mark-watched`
+is the cutover's marking step (read each open-anchor PR with the watch option, refresh it hydrate-only,
+check the daemon's watched count against the open-anchor count), `run --mode
 plan|apply` runs `pg-pr-change` over it, paced, under a floor on the GraphQL budget, with resume and
 the operator's create limits, `summary` prints the plan summary or the apply residual check from the
 run record, `flip-marker` writes the flip marker and `writes` lists every write since it. It ships in

@@ -8,8 +8,8 @@ these commands in its own runbook.
 
 ## Prerequisites
 
-- `pg-pr-backfill`, `pg-pr-change` and `pg-connector` on `PATH` (the package puts the last two on the
-  driver's own `PATH`). `PG_DECIDER_CONFIG` set as for the `pr-change` role: the driver takes the
+- `pg-pr-backfill`, `pg-pr-change` and `pg-connector` on `PATH` (the package puts the last two, and
+  `pg-desk` for `mark-watched`, on the driver's own `PATH`). `PG_DECIDER_CONFIG` set as for the `pr-change` role: the driver takes the
   tracker backend and directory (`agent_tracker_backend`, `beads_dir`) from it unless its own
   configuration names them.
 - The deployment's query-name file and the driver configuration file (below).
@@ -36,6 +36,8 @@ decide). A flag of the same name overrides a key.
 | `max_plan_age`                 | Bound on the age of the oldest plan record (a Go duration)              | `48h`                                                                               |
 | `run_record`                   | The run record the composed command appends to                          | `PG_PR_CHANGE_RUN_RECORD`, else `$XDG_STATE_HOME/pg-pr-change/pr-change-runs.jsonl` |
 | `set_file`                     | Where `enumerate` persists the set                                      | `$XDG_STATE_HOME/pg-pr-backfill/set.json`                                           |
+| `pr_backend`                   | The PR backend instance `mark-watched` reads and inspects through       | none (the umbrella resolves it)                                                     |
+| `desk_cmd`                     | The pg-desk command `mark-watched` refreshes with                       | `pg-desk`                                                                           |
 
 The daemon cutover changes ONE key: `rate_source` from `old-backend-log` to `daemon-metrics`. Until it
 is changed, the driver reads a log that stops being written once the old backend is gone, and a log
@@ -62,6 +64,27 @@ pg-pr-backfill summary --mode apply
 pg-pr-backfill run --mode apply --new-pass --max-creates anchor=0
 pg-pr-backfill writes                       # every write since the flip, by timestamp
 ```
+
+## Marking the open-anchor PRs watched (the cutover's verify step)
+
+After the daemon serves PR reads and the watch read exists, `mark-watched` marks every PR that has an
+open anchor as watched, refreshes those PRs (hydrate only: no decider, no apply, no tracker write) and
+checks that the daemon's watched count equals the tracker's open-anchor count. Run it in the
+cutover window, before the consumer's cursor is reset (the reset is the cutover's own step, not this
+tool's). It enumerates afresh and leaves the persisted set alone; `--from-set` marks from the persisted
+set instead. It needs the same `rate_source` as `run`.
+
+```bash
+pg-pr-backfill mark-watched                 # exit 0 and a last line DONE watched=N expected=N, N non-zero
+pg-pr-backfill mark-watched                 # idempotent: run again after a FLOOR or a FAILED 11
+```
+
+Read the lines before the last one: `UNMAPPED anchor <id> "<title>"` is an open anchor whose title names
+no PR (it cannot be counted or marked: decide what it is); `skip <pr>` is an anchor whose PR is merged
+or closed (not marked: the apply pass closes it). Exit `20` with `check=` in the last line means every
+PR was marked and the count still differs: run `pg-connector pr inspect <id>...` on the PRs listed in
+the output to see which are not watched. Exit `20` with "no PR with an open anchor to mark" means the
+tracker listed no open anchor with a PR: the step refuses to pass at zero equals zero.
 
 ## Reading the last line
 

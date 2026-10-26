@@ -10,6 +10,7 @@ the driver is the pace between two PRs.
 
 ```text
 pg-pr-backfill enumerate
+pg-pr-backfill mark-watched [--from-set] [--pr-backend INSTANCE]
 pg-pr-backfill run --mode plan|apply [--max-creates KIND=N,... | --limits-file FILE | --no-create-limits] [--new-pass]
 pg-pr-backfill summary [--mode plan|apply] [--max-plan-age DURATION]
 pg-pr-backfill flip-marker [--time RFC3339] [--epic-bead ID]
@@ -48,6 +49,46 @@ distinct PRs they name and the number of PRs the queries listed, which the check
 against open anchors reads. An open anchor whose title maps to no PR, and a query id that is no PR
 id, are listed as unparseable, never dropped.
 
+## Mark watched
+
+`mark-watched` is the marking step of the daemon cutover. The daemon appends change rows only for
+PRs it WATCHES, and a PR that has an open anchor but has never matched a watched query is tracked by
+the backfill's reads yet not watched, so it would never deliver the `merged` row that makes the
+decider close its anchor. `mark-watched` closes that gap for the backlog at cutover, in one packaged
+tool and not a hand-rolled loop. It enumerates afresh (read-only; it leaves the persisted set alone,
+and `--from-set` reads the persisted one instead) and takes the entries that came in through an open
+anchor, then:
+
+1. reads each such PR with the watch option (`pg-connector pr show <id> --watch`), one at a time,
+   paced, and under the same GraphQL floor and rate signal as `run`; a read needs no query;
+2. refreshes the PRs it marked with `pg-desk pr refresh <id>`, which only hydrates: no decider, no
+   apply, no write to the tracker. The refresh is needed because a watch-option read of a PR the
+   daemon had never seen appends no change row, and because the backfill MAY have hydrated the PR
+   before the daemon first saw it, so a change in that gap would otherwise be missed;
+3. asks the daemon how many of those PRs it watches (`pg-connector pr inspect <id>...`, in chunks of
+   at most 2,000, the counts added) and compares that count with the tracker's open-anchor count.
+
+The open-anchor count the daemon's watched count MUST equal is the number of distinct PRs the open
+anchors name, less the anchors whose PR is merged or closed. Those are not marked: the backfill
+refreshes them once and the decider closes their anchors in the apply pass. An open anchor whose
+title maps to no PR cannot be counted or marked, so it is listed (`UNMAPPED anchor <id> "<title>"`)
+and never dropped; the operator decides what each is. The count MUST be non-zero, so the check
+cannot pass at 0 equals 0. The step never resets a consumer's cursor: the replay decision belongs to
+the cutover.
+
+The last line is `DONE`, `FLOOR` or `FAILED` with the counts (`open_anchors=`, `open_anchor_prs=`,
+`targets=`, `skipped_closed=`, `unmapped=`, `marked=`, `refreshed=`, `failed=`, `watched=`,
+`expected=`), and the exit code says which:
+
+| Last line | Exit | Meaning                                                                                                                    |
+| --------- | ---- | -------------------------------------------------------------------------------------------------------------------------- |
+| `DONE`    | `0`  | every target was marked and refreshed and the watched count equals the open-anchor count                                   |
+| `FLOOR`   | `10` | the budget fell under the floor: wait for the window and run again; the step is idempotent                                 |
+| `FAILED`  | `11` | some reads or refreshes failed (named by `failed_prs=`), or the inspection could not run: run it again                     |
+| `FAILED`  | `12` | stopped at once (`stop=` says why): an `unauthenticated` read, a command that cannot be started, an unreadable rate signal |
+| `FAILED`  | `20` | every PR was marked but the count check does not hold (`check=` says how), or there was nothing to mark                    |
+| none      | `30` | the enumeration failed closed (the same causes as `enumerate`); nothing was marked                                         |
+
 ## Run
 
 `run` runs the composed command over the set, one PR at a time, in the mode given, paced. The command
@@ -75,8 +116,8 @@ The last line is one of `DONE`, `FLOOR` or `FAILED`, with the counts, and the ex
 | `FAILED`  | `12` | the run stopped at once (`stop=` says why): do not run again, go to the rollback                                                                              |
 | none      | `64` | a usage or configuration error; nothing ran                                                                                                                   |
 
-Exit `20` is `summary` (a check does not hold), and `30` and `31` are `enumerate` and the marker
-failing to write. None of the driver's exit codes is `1` or `9`.
+Exit `20` is `summary` (a check does not hold) and the count check of `mark-watched`, and `30` and
+`31` are `enumerate` (and the enumeration inside `mark-watched`) and the marker failing to write. None of the driver's exit codes is `1` or `9`.
 
 A run that ends `transient` or `degraded` is not a stop. A run that ends `unauthenticated` or
 `decide_failed`, a command that cannot be started, an unreadable rate signal and a create limit that
@@ -152,3 +193,15 @@ which is a display value.
   zero or when an enumerated PR has no usable apply-mode record.
 - **INV-BACKFILL-14.** <!-- uuid: 095acc61-4ef3-4a0c-8e6c-a4e5c79f5700 --> The driver MUST NOT keep a clock of its own: it MUST NOT retry inside one run, and its only wait
   MUST be the pace between two PRs.
+- **INV-BACKFILL-15.** <!-- uuid: 5c1e8a3d-7b94-4f2a-9d60-e3a17c4b52f8 --> `mark-watched` MUST read every PR that has an open anchor and whose PR is not merged or closed
+  with the watch option, MUST then refresh those PRs with the hydrate-only `pg-desk pr refresh`, and
+  MUST NOT run the decider, apply anything, write to the tracker or reset a consumer cursor.
+- **INV-BACKFILL-16.** <!-- uuid: b7d4026e-91c3-4a58-8e1f-2f6a0d93c7b1 --> `mark-watched` MUST compare the daemon's watched count over the PRs it marked, read with the
+  inspection command, with the tracker's open-anchor count (the distinct PRs named by open anchors,
+  less those whose PR is merged or closed), MUST require that count to be non-zero, and MUST exit
+  non-zero, with a last line that names the mismatch, when the two differ.
+- **INV-BACKFILL-17.** <!-- uuid: e92a6f15-03bd-4c7e-b4a9-6d8c51e0a37f --> `mark-watched` MUST list every open anchor whose title maps to no PR and every anchor skipped
+  because its PR is merged or closed, and MUST NOT drop either silently.
+- **INV-BACKFILL-18.** <!-- uuid: 3f08d6b2-a5e1-4690-8c7d-14b9e2f7a6c0 --> `mark-watched` MUST read the newest GraphQL points left before each call and MUST NOT call below
+  the floor, MUST stop at once on an `unauthenticated` read or an unreadable rate signal, and MUST be
+  idempotent: running it again marks and refreshes the same PRs and changes nothing else.

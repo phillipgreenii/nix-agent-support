@@ -52,6 +52,13 @@ type Config struct {
 	SetFile   string `json:"set_file,omitempty"`
 	Connector string `json:"connector,omitempty"`
 	ChangeCmd string `json:"change_cmd,omitempty"`
+
+	// PRBackend pins the PR backend instance the marking step (mark-watched) reads
+	// and inspects through (--backend); empty lets the umbrella resolve it. DeskCmd
+	// names pg-desk, the program the marking step's hydrate-only refresh runs
+	// (default pg-desk).
+	PRBackend string `json:"pr_backend,omitempty"`
+	DeskCmd   string `json:"desk_cmd,omitempty"`
 }
 
 // StateHome is $XDG_STATE_HOME, else ~/.local/state, else the temporary directory.

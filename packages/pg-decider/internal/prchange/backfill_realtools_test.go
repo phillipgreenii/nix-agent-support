@@ -27,7 +27,7 @@ import (
 // minBackfillScenarios is the number of subtests TestBackfillRealTools has; the nix
 // check requires at least this many PASS lines (keep it equal to the number of run
 // calls and to the nix check's minScenarios).
-const minBackfillScenarios = 9
+const minBackfillScenarios = 10
 
 // The four PRs: #7 an open PR of mine whose anchor is open (nothing to do), #8 and
 // #12 merged PRs with no work items, #11 an open PR of mine with an unaddressed
@@ -454,6 +454,60 @@ func TestBackfillRealTools(t *testing.T) {
 		var out bytes.Buffer
 		if n, ok := backfill.PrintWrites(&out, b.log()); !ok || n != len(ws) {
 			t.Errorf("printed %d", n)
+		}
+	})
+
+	run("mark-watched-reads-each-open-anchor-PR-with-the-watch-option-then-hydrates-it-with-the-real-pg-desk-and-never-decides-or-writes", func(t *testing.T) {
+		b := newBFRig(t) // the set below is the marking step's own
+		b.ctlWrite("watched", "")
+		b.ctlWrite("nowatch", "")
+		set := &backfill.Set{
+			Contract: backfill.SetContract, OpenAnchorCount: 4, OpenAnchorPRCount: 3,
+			Entries: []backfill.Entry{
+				{PR: "acme/api#7", State: backfill.StateOpen, From: []string{backfill.FromAnchor}, AnchorIDs: []string{"bd-7a"}},
+				{PR: "acme/api#8", State: backfill.StateMerged, From: []string{backfill.FromAnchor}, AnchorIDs: []string{"bd-8a"}},
+				{PR: "acme/api#11", State: backfill.StateUnknown, From: []string{backfill.FromAnchor}, AnchorIDs: []string{"bd-11a"}},
+				{PR: "acme/api#12", State: backfill.StateOpen, From: []string{backfill.FromQuery}, Queries: []string{"mine"}},
+			},
+			Unparseable: []backfill.Unparseable{{From: backfill.FromAnchor, ID: "bd-x", Title: "no PR named", Reason: "not a PR title"}},
+		}
+		mark := func() *backfill.MarkResult {
+			t.Helper()
+			res, err := backfill.MarkWatched(context.Background(), backfill.MarkOptions{
+				Set: set, Rate: backfill.LogSource{Path: b.rateLog}, Floor: backfill.DefaultFloor,
+				// Absolute paths: the hermetic runner resolves a bare name on the test
+				// process's PATH, and the sandbox's own programs are in binDir.
+				Connector: filepath.Join(b.binDir, "pg-connector"), Desk: filepath.Join(b.binDir, "pg-desk"),
+				Env: b.env, Runner: b.hermetic, Progress: io.Discard,
+			})
+			must(t, err)
+			return res
+		}
+		res := mark()
+		if res.Code != backfill.ExitDone || res.Watched != 2 || res.Expected != 2 || res.Marked != 2 || res.Refreshed != 2 {
+			t.Fatalf("%s (code %d)", res.Line, res.Code)
+		}
+		if got := b.ctlRead("watched"); got != "acme/api#7\nacme/api#11\n" {
+			t.Errorf("the watched set is %q: the merged-PR anchor and the query-only PR must not be marked", got)
+		}
+		// The refresh was the real pg-desk's: both marked PRs are now hydrated in its store.
+		if got := b.sqlite("SELECT COUNT(*) FROM entity WHERE entity_type = 'pr' AND version > 0;"); got != "2" {
+			t.Errorf("%s hydrated PR rows, want 2", got)
+		}
+		// Nothing was decided or written: the decider never ran and the tracker saw no create.
+		if got := b.deciderRuns(); len(got) != 0 {
+			t.Errorf("the decider ran during the marking step: %q", got)
+		}
+		if n := b.created(); n != 0 {
+			t.Errorf("%d work items were created", n)
+		}
+		// The negative: a daemon that answers the watch read but does not watch one
+		// PR makes the step fail its count check.
+		b.ctlWrite("watched", "")
+		b.ctlWrite("nowatch", "acme/api#11\n")
+		bad := mark()
+		if bad.Code != backfill.ExitMarkCheckFailed || bad.Watched != 1 || bad.Expected != 2 {
+			t.Fatalf("a PR that was not watched passed the check: %s (code %d)", bad.Line, bad.Code)
 		}
 	})
 

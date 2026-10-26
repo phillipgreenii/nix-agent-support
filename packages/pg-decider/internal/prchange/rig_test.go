@@ -338,7 +338,31 @@ case "$*" in
   fi;;
 esac
 case "$*" in
-` + realCase + `'pr show '*)
+` + realCase + `'pr show '*' --watch'*)
+  # The marking step's watch read: the daemon double keeps the watched set in the
+  # control file "watched" (a PR listed in "nowatch" is answered but not watched)
+  # and answers the read as the plain show of the same PR.
+  while [ -f "$CTL/block" ]; do sleep 0.05; done
+  if [ -f "$CTL/fail.pr-show" ]; then
+    mode=$(cat "$CTL/fail.pr-show")
+    case "$mode" in
+      not_found) exit 4;;
+      *) code_answer "$mode" "$(cat "$CTL/fail.pr-show.message" 2>/dev/null || echo "forced $mode")";;
+    esac
+  fi
+  grep -qxF "$3" "$CTL/nowatch" 2>/dev/null || echo "$3" >> "$CTL/watched"
+  exec ` + shq(base) + ` pr show "$3";;
+'pr inspect '*)
+  # The inspection: how many of the PRs named (up to the first flag) are in "watched".
+  shift 2; req=0; won=0
+  for a; do
+    case "$a" in --*) break;; esac
+    req=$((req + 1))
+    if grep -qxF "$a" "$CTL/watched" 2>/dev/null; then won=$((won + 1)); fi
+  done
+  printf '{"protocolVersion":1,"schemaVersion":1,"result":{"instance":"pr","results":[],"counts":{"requested":%s,"watched":%s}}}\n' "$req" "$won"
+  exit 0;;
+'pr show '*)
   while [ -f "$CTL/block" ]; do sleep 0.05; done
   if [ -f "$CTL/fail.pr-show" ]; then
     mode=$(cat "$CTL/fail.pr-show")

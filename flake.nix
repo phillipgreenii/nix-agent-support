@@ -5936,7 +5936,10 @@
               # could not be hydrated, the create limits stop the pass after the PR
               # that exceeded them, a second apply pass after the flip writes nothing,
               # and the by-timestamp listing since the flip marker lists the real
-              # creates. Like pg-pr-change-real-tools it exports the three BUILT
+              # creates; and the `mark-watched` step (packet P1-a) reads each
+              # open-anchor PR with the watch option through the fake connector, then
+              # hydrates it with the real pg-desk and neither decides nor writes, and a
+              # PR the daemon double does not watch fails its count check. Like pg-pr-change-real-tools it exports the three BUILT
               # binaries and sets PG_PR_CHANGE_REQUIRE_BINARIES, runs ONLY its test, and
               # asserts the test's own PASS line, NO SKIP line and at least minScenarios
               # scenario PASS lines (keep equal to minBackfillScenarios in
@@ -5955,7 +5958,7 @@
                     PG_PR_CHANGE_BIN = "${pkgs.pg-decider}/bin/pg-pr-change";
                     PG_PR_CHANGE_SQLITE3_BIN = "${lib.getBin pkgs.sqlite}/bin/sqlite3";
                     PG_PR_CHANGE_REQUIRE_BINARIES = "1";
-                    minScenarios = "9";
+                    minScenarios = "10";
                     buildPhase = ''
                       runHook preBuild
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"

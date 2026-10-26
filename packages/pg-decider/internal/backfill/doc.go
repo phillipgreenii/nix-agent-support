@@ -9,6 +9,10 @@
 //
 //   - enumerate: list the backfill set from the tracker's open anchors plus the
 //     open PRs of the deployment's PR queries, and persist it (Enumerate, Set).
+//   - mark-watched: the cutover's marking step (packet P1-a): read every PR that has
+//     an open anchor with the watch option, refresh the same PRs (hydrate only), and
+//     check that the daemon's watched count equals the tracker's open-anchor count
+//     (MarkWatched).
 //   - run --mode plan|apply: run the composed command over the set, paced,
 //     under a floor on the GitHub GraphQL budget, resuming after an
 //     interruption (Run).
