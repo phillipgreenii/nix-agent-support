@@ -46,6 +46,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
 )
 
 // ErrNoConfig is returned by Load when no config file is found.
@@ -249,6 +251,17 @@ type WatchConfig struct {
 // WatchTypeConfig is the watch.pr / watch.issue block.
 type WatchTypeConfig struct {
 	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`
+	// Backends maps a watched query name to the backend instance that serves
+	// it and whether that backend owns its changes (watch.issue.backends).
+	// A query with no entry is non-owning and unpinned (no --backend).
+	Backends map[string]WatchBackend `yaml:"backends,omitempty" json:"backends,omitempty"`
+}
+
+// WatchBackend is one watch.issue.backends entry: the backend instance that
+// serves a watched query and whether that backend owns its changes.
+type WatchBackend struct {
+	Instance    string `yaml:"instance" json:"instance"`
+	OwnsChanges bool   `yaml:"owns_changes,omitempty" json:"owns_changes,omitempty"`
 }
 
 // WatchThreadConfig is the watch.thread block.
@@ -313,6 +326,73 @@ func (c *Config) WatchQueries(entityType string) []string {
 		return c.Watch.Thread.Queries
 	}
 	return nil
+}
+
+// WatchQueryBackend returns the watch.issue.backends entry of a watched query.
+// ok is false for a query with no entry (non-owning, unpinned) and for any
+// entity type other than "issue".
+func (c *Config) WatchQueryBackend(entityType, query string) (WatchBackend, bool) {
+	if c == nil || entityType != "issue" {
+		return WatchBackend{}, false
+	}
+	b, ok := c.Watch.Issue.Backends[query]
+	return b, ok
+}
+
+// OwningWatchQueries returns the watched queries whose backends entry owns
+// its changes, in the order of the entity type's watch queries.
+func (c *Config) OwningWatchQueries(entityType string) []string {
+	return c.splitWatchQueries(entityType, true)
+}
+
+// NonOwningWatchQueries returns every watched query that OwningWatchQueries
+// does not, in the order of the entity type's watch queries.
+func (c *Config) NonOwningWatchQueries(entityType string) []string {
+	return c.splitWatchQueries(entityType, false)
+}
+
+func (c *Config) splitWatchQueries(entityType string, owning bool) []string {
+	if c == nil {
+		return nil
+	}
+	var out []string
+	for _, q := range c.WatchQueries(entityType) {
+		b, _ := c.WatchQueryBackend(entityType, q)
+		if b.OwnsChanges == owning {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+// OwningInstances returns the distinct, sorted backend instances of the
+// owning watched queries of an entity type; nil when there are none.
+func (c *Config) OwningInstances(entityType string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, q := range c.OwningWatchQueries(entityType) {
+		b, _ := c.WatchQueryBackend(entityType, q)
+		if !seen[b.Instance] {
+			seen[b.Instance] = true
+			out = append(out, b.Instance)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// OwningInstanceForID returns the single owning backend instance of an
+// entity type when id matches one of ticket_patterns and exactly one owning
+// instance is configured. It does no I/O.
+func (c *Config) OwningInstanceForID(entityType, id string) (string, bool) {
+	if c == nil || !ticketkey.MatchesShape(id, c.TicketPatterns) {
+		return "", false
+	}
+	inst := c.OwningInstances(entityType)
+	if len(inst) != 1 {
+		return "", false
+	}
+	return inst[0], true
 }
 
 // ThreadActiveWindow returns watch.thread.active_window (default 7 days).
@@ -521,6 +601,9 @@ func validateChangeFlow(cfg *Config) error {
 			seen[q] = true
 		}
 	}
+	if err := validateWatchBackends(cfg); err != nil {
+		return err
+	}
 	for _, d := range []struct{ key, val string }{
 		{"watch.thread.active_window", cfg.Watch.Thread.ActiveWindow},
 		{"sweep.max_age", cfg.Sweep.MaxAge},
@@ -544,6 +627,29 @@ func validateChangeFlow(cfg *Config) error {
 	} {
 		if n.val != nil && *n.val <= 0 {
 			return fmt.Errorf("%s %d must be positive", n.key, *n.val)
+		}
+	}
+	return nil
+}
+
+// validateWatchBackends checks watch.issue.backends: every entry names a
+// query listed in watch.issue.queries and a non-empty instance.
+func validateWatchBackends(cfg *Config) error {
+	listed := map[string]bool{}
+	for _, q := range cfg.Watch.Issue.Queries {
+		listed[q] = true
+	}
+	names := make([]string, 0, len(cfg.Watch.Issue.Backends))
+	for q := range cfg.Watch.Issue.Backends {
+		names = append(names, q)
+	}
+	sort.Strings(names)
+	for _, q := range names {
+		if !listed[q] {
+			return fmt.Errorf("watch.issue.backends: query %q is not listed in watch.issue.queries", q)
+		}
+		if strings.TrimSpace(cfg.Watch.Issue.Backends[q].Instance) == "" {
+			return fmt.Errorf("watch.issue.backends[%q].instance: must not be empty", q)
 		}
 	}
 	return nil

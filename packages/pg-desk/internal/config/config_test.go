@@ -94,7 +94,8 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"AttentionRuleConfig", reflect.TypeOf(AttentionRuleConfig{}), []string{"enabled", "severity", "stale_after_days", "due_soon_days"}},
 		{"AttentionOrderingConfig", reflect.TypeOf(AttentionOrderingConfig{}), []string{"ties"}},
 		{"WatchConfig", reflect.TypeOf(WatchConfig{}), []string{"pr", "issue", "thread"}},
-		{"WatchTypeConfig", reflect.TypeOf(WatchTypeConfig{}), []string{"queries"}},
+		{"WatchTypeConfig", reflect.TypeOf(WatchTypeConfig{}), []string{"backends", "queries"}},
+		{"WatchBackend", reflect.TypeOf(WatchBackend{}), []string{"instance", "owns_changes"}},
 		{"WatchThreadConfig", reflect.TypeOf(WatchThreadConfig{}), []string{"queries", "active_window"}},
 		{"SweepConfig", reflect.TypeOf(SweepConfig{}), []string{"max_age", "max_per_poll", "reconcile_age"}},
 		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll", "read_issue_deps"}},
@@ -279,8 +280,14 @@ func TestLoadFile_FullExample(t *testing.T) {
 	if got := cfg.WatchQueries("pr"); !reflect.DeepEqual(got, []string{"mine", "team"}) {
 		t.Errorf("watch.pr.queries: got %v", got)
 	}
-	if got := cfg.WatchQueries("issue"); !reflect.DeepEqual(got, []string{"assigned-to-me", "work-items"}) {
+	if got := cfg.WatchQueries("issue"); !reflect.DeepEqual(got, []string{"assigned-to-me", "work-items", "demo-watched"}) {
 		t.Errorf("watch.issue.queries: got %v", got)
+	}
+	if b, ok := cfg.WatchQueryBackend("issue", "demo-watched"); !ok || b != (WatchBackend{Instance: "demo-backend", OwnsChanges: true}) {
+		t.Errorf("WatchQueryBackend(demo-watched) = %+v, %v", b, ok)
+	}
+	if got := cfg.OwningWatchQueries("issue"); !reflect.DeepEqual(got, []string{"demo-watched"}) {
+		t.Errorf("OwningWatchQueries(issue) = %v", got)
 	}
 	if got := cfg.WatchQueries("thread"); !reflect.DeepEqual(got, []string{"mentions"}) {
 		t.Errorf("watch.thread.queries: got %v", got)
@@ -1188,5 +1195,157 @@ func TestPRLaneMode(t *testing.T) {
 	var nilCfg *Config
 	if got := nilCfg.PRLaneMode(); got != PRLaneModeOff {
 		t.Errorf("nil Config PRLaneMode = %q, want off", got)
+	}
+}
+
+func TestWatchBackends_AbsentKeyIsAllNonOwning(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+`
+watch:
+  issue:
+    queries: [open, mine]
+`))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got := cfg.OwningWatchQueries("issue"); len(got) != 0 {
+		t.Errorf("OwningWatchQueries = %v, want none", got)
+	}
+	if got := cfg.NonOwningWatchQueries("issue"); !reflect.DeepEqual(got, []string{"open", "mine"}) {
+		t.Errorf("NonOwningWatchQueries = %v", got)
+	}
+	if got := cfg.OwningInstances("issue"); got != nil {
+		t.Errorf("OwningInstances = %v, want nil", got)
+	}
+	if _, ok := cfg.WatchQueryBackend("issue", "open"); ok {
+		t.Error("WatchQueryBackend on an unpinned query must report ok=false")
+	}
+}
+
+func TestWatchBackends_Mixed(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+`
+watch:
+  issue:
+    queries: [q-b, q-pinned, q-a, q-plain, q-a2]
+    backends:
+      q-a:
+        instance: zeta-backend
+        owns_changes: true
+      q-a2:
+        instance: zeta-backend
+        owns_changes: true
+      q-b:
+        instance: alpha-backend
+        owns_changes: true
+      q-pinned:
+        instance: beads-backend
+        owns_changes: false
+`))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got := cfg.OwningWatchQueries("issue"); !reflect.DeepEqual(got, []string{"q-b", "q-a", "q-a2"}) {
+		t.Errorf("OwningWatchQueries = %v", got)
+	}
+	if got := cfg.NonOwningWatchQueries("issue"); !reflect.DeepEqual(got, []string{"q-pinned", "q-plain"}) {
+		t.Errorf("NonOwningWatchQueries = %v", got)
+	}
+	if got := cfg.OwningInstances("issue"); !reflect.DeepEqual(got, []string{"alpha-backend", "zeta-backend"}) {
+		t.Errorf("OwningInstances = %v, want sorted distinct", got)
+	}
+	if b, ok := cfg.WatchQueryBackend("issue", "q-pinned"); !ok || b != (WatchBackend{Instance: "beads-backend"}) {
+		t.Errorf("WatchQueryBackend(q-pinned) = %+v, %v", b, ok)
+	}
+	if got := cfg.WatchQueries("issue"); len(got) != 5 {
+		t.Errorf("WatchQueries must keep returning every watched query, got %v", got)
+	}
+	if _, ok := cfg.WatchQueryBackend("pr", "q-a"); ok {
+		t.Error("WatchQueryBackend must report ok=false for a non-issue type")
+	}
+}
+
+func TestWatchBackends_LoadErrors(t *testing.T) {
+	cases := map[string]struct {
+		yaml string
+		want []string
+	}{
+		"query not listed": {`
+watch:
+  issue:
+    queries: [listed]
+    backends:
+      unlisted:
+        instance: demo-backend
+        owns_changes: true
+`, []string{"watch.issue.backends", "unlisted"}},
+		"empty instance": {`
+watch:
+  issue:
+    queries: [listed]
+    backends:
+      listed:
+        instance: ""
+        owns_changes: true
+`, []string{"watch.issue.backends", "listed"}},
+		"missing instance": {`
+watch:
+  issue:
+    queries: [listed]
+    backends:
+      listed:
+        owns_changes: true
+`, []string{"watch.issue.backends", "listed"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+tc.yaml))
+			if err == nil {
+				t.Fatal("LoadFile succeeded, want a load error")
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q lacks %q", err, w)
+				}
+			}
+		})
+	}
+}
+
+func TestOwningInstanceForID(t *testing.T) {
+	load := func(t *testing.T, backends string) *Config {
+		t.Helper()
+		cfg, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+`
+ticket_patterns:
+  - "PROJ-[0-9]+"
+watch:
+  issue:
+    queries: [q-a, q-b]
+`+backends))
+		if err != nil {
+			t.Fatalf("LoadFile: %v", err)
+		}
+		return cfg
+	}
+	one := load(t, `    backends:
+      q-a: {instance: demo-backend, owns_changes: true}
+      q-b: {instance: demo-backend, owns_changes: true}
+`)
+	if inst, ok := one.OwningInstanceForID("issue", "PROJ-12"); !ok || inst != "demo-backend" {
+		t.Errorf("matching id = %q, %v; want demo-backend, true", inst, ok)
+	}
+	for _, id := range []string{"abc-12", "PROJ-12x", "xPROJ-12", ""} {
+		if inst, ok := one.OwningInstanceForID("issue", id); ok || inst != "" {
+			t.Errorf("id %q = %q, %v; want no match", id, inst, ok)
+		}
+	}
+	none := load(t, "")
+	if _, ok := none.OwningInstanceForID("issue", "PROJ-12"); ok {
+		t.Error("no owning instance must give ok=false")
+	}
+	two := load(t, `    backends:
+      q-a: {instance: demo-backend, owns_changes: true}
+      q-b: {instance: other-backend, owns_changes: true}
+`)
+	if _, ok := two.OwningInstanceForID("issue", "PROJ-12"); ok {
+		t.Error("two owning instances must give ok=false")
 	}
 }

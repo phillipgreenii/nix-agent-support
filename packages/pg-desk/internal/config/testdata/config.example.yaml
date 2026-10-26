@@ -91,7 +91,15 @@ watch:
   pr:
     queries: [mine, team]
   issue:
-    queries: [assigned-to-me, work-items]
+    queries: [assigned-to-me, work-items, demo-watched]
+    # backends pins a watched query to the backend instance that serves it
+    # and says whether that backend owns its changes (feed consumption). A
+    # query with no entry is non-owning and unpinned. Every key MUST name a
+    # query listed above; instance MUST be non-empty.
+    backends:
+      demo-watched:
+        instance: demo-backend
+        owns_changes: true
   thread:
     queries: [mentions]
     active_window: 7d
