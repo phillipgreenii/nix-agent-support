@@ -58,9 +58,13 @@ repository's change:
 5. Observe the live feed: the next poll of `pr-changes` answers only what changed since the replay;
    `pg-connector pr inspect <id>...` shows a PR as tracked or watched; the daemon's budget stays above
    the driver's floor (`graphql_remaining` gauge).
-6. The post-apply verification of the deployment's verify bead (the same checks, run by an agent)
-   closes the cutover. Only after it, and after the lane is declared stable, is the old backend
-   removed.
+6. The post-apply verification closes the cutover. Two verify beads, gated on the apply, carry the
+   checks (run by an agent): `pg2-g6stl` for the daemon enablement (daemon up under launchd with the
+   4000 points/h budget, the registry on the daemon's argv, a live pg-router exercise with a
+   non-trivial outcome, the ccpool precheck treating an unavailable connector as retryable, and the
+   drain evidence recorded on the already-closed `pg2-xg2k8`) and `pg2-accquj` for the PR lane
+   (registry, marker file, marking, replay). Only after both, and after the lane is declared stable,
+   is the old backend removed.
 
 ## The cursor decision
 
@@ -95,7 +99,8 @@ Rolling back is a deployment edit plus an apply, not a runtime toggle. In this o
 1. Put the registry back to the two old-backend sources (`pr-mine` and `pr-team`) in place of
    `pr-changes`, and set the backfill driver's `rate_source` back to `old-backend-log`.
 2. Restore `--fresh` on the PR gather read (a revert of the single change in
-   `packages/pg-desk/internal/gather/gather.go`), in the SAME relock and apply as step 1.
+   `packages/pg-desk/internal/gather/gather.go`), in the SAME relock and apply as step 1. Only the
+   `pr` read changes: the `issue` reads and the head check keep `--fresh` in both directions.
 3. Clear the umbrella cache and ledger files of the two instances again, so neither side serves the
    other's state: `pg-connector ledger clear --backend <pr instance>` and
    `pg-connector ledger clear --backend <ci instance>` (each also drops the cache files of that backend).
@@ -106,8 +111,9 @@ Rolling back is a deployment edit plus an apply, not a runtime toggle. In this o
    hydration burst that the lane absorbs.
 
 The lane mode is independent of the cutover: the `pr-change` role stays in whatever mode the flip
-left it. The retired sweep roles are NOT restored by a rollback; they were removed for good with the
-lane refactor. The posted-review sidecar is untouched.
+left it. `pr-sweep` and `pr-sweep-full` (and the `pr.reconcile` event type) are NOT restored by a
+rollback: the PR lane refactor removed them for good, so a rollback has no sweep to bring back. The
+posted-review sidecar is untouched.
 
 ## Shadow criteria
 
@@ -115,4 +121,20 @@ The cutover went ahead with one unmet shadow criterion (daemon uptime, 36.4 perc
 host reboot downtime with the daemon healthy on every sampled tick). The operator ruled the
 criterion waived (2026-10-23), so no follow-up bead exists for it; the decision is recorded on the
 daemon program's cutover bead. Every other criterion of the shadow report was met
-(`docs/runbooks/pg-desk-shadow-compare.md`).
+(`docs/runbooks/pg-desk-shadow-compare.md`). The ruling also supersedes the earlier plan for a
+follow-up bead on the uptime criterion: there is none. The post-apply checks are the verify beads
+named in step 6 of "Cutover order".
+
+## Plugin documentation check
+
+The cutover needs no edit to the plugin documentation. The check is a search for any file under
+`claude-marketplace` that calls `pg-connector pr` or `pg-connector ci`:
+
+```bash
+rg -n 'pg-connector (pr|ci)\b' claude-marketplace
+```
+
+Its result at the time of writing was no output and exit status `1`: no plugin file makes that call,
+and the retired PR plugin is gone and is not reintroduced. Had a file made the call, the only edits
+would be docs-only: an unavailable connector is retryable, and `pg-connector pr refresh <id>` (or
+`--fresh`) gives read-your-own-write. Re-run the search before a cutover if plugins changed since.
