@@ -7132,11 +7132,15 @@
                         plain=$(go test -list '.*' "$dir" | grep -c '^Test' || true)
                         [ "$tagged" -gt "$plain" ] || fail "$dir: the tagged build lists $tagged tests, the default build $plain; the tag moves nothing"
                       done
-                      # The untagged build must not list a known integration test.
-                      if go test -list '.*' ./cmd/pg-connector/ | grep -q '^TestCrossCompileLinuxWholeModule$'; then
+                      # The untagged build must not list a known integration test. The
+                      # listings go to variables first: `grep -q` closing the pipe early
+                      # would fail a pipefail pipeline on SIGPIPE.
+                      plain=$(go test -list '.*' ./cmd/pg-connector/)
+                      tagged=$(go test -tags integration -list '.*' ./cmd/pg-connector/)
+                      if echo "$plain" | grep -q '^TestCrossCompileLinuxWholeModule$'; then
                         fail "the default build lists TestCrossCompileLinuxWholeModule"
                       fi
-                      go test -tags integration -list '.*' ./cmd/pg-connector/ | grep -q '^TestCrossCompileLinuxWholeModule$' || fail "the tagged build does not list TestCrossCompileLinuxWholeModule"
+                      echo "$tagged" | grep -q '^TestCrossCompileLinuxWholeModule$' || fail "the tagged build does not list TestCrossCompileLinuxWholeModule"
                       go vet ./... || fail "go vet of the default build failed"
                       go vet -tags integration ./... || fail "go vet of the integration build failed"
                       echo "pg-connector-integration-tests-gating: the tag splits $(echo "$pkgs" | wc -l) packages; both builds vet clean"
