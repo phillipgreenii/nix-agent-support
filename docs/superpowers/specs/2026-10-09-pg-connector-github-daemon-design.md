@@ -1251,7 +1251,13 @@ origin call.
     change waits for `detail`;
   - a dependent fetch that fails, or passes `settle_timeout`, still appends the row with the group left
     stale and still queued, and the group's later refresh appends its own row;
-  - settle under a governor pause times out, appends, and counts `result=timeout`;
+  - settle under a reserve or cap refusal (the governor refuses every class, so the dependents never go
+    out) appends the row at its deadline, leaves the groups stale with no `last_error`, and counts
+    `result=timeout`;
+  - settle under a secondary-limit pause is not held back (a pause holds only classes 3 to 5 and the
+    dependents are class 2), so the dependents go out, the origin refuses them, `last_error` is stored,
+    and the row is appended at its deadline and counts `result=failed` (INV-GH-CHG-3: the row is appended
+    in both cases);
   - a single-flight join onto a fetch that started before the detection does not satisfy the barrier,
     and content fetched for an old head never settles a row for the new head;
   - a second `summary` change while a row is pending merges into it (earliest before, latest after; a

@@ -52,7 +52,10 @@
 # Controls, per kind K (any may be absent):
 #
 #   fail.K               an HTTP status the kind answers instead of its fixture
-#                        ("502"; "502 3" for the next three calls only)
+#                        ("502"; "502 3" for the next three calls only), or the
+#                        word "secondary" for the secondary-rate-limit answer of
+#                        mode secondary, for this kind only ("secondary 3": the
+#                        next three calls)
 #   fail.K.batch         the same, but only for a call that carries more than one id
 #   block.K              hold the next N calls of the kind (N is the file's content,
 #                        default 1) after their answer is decided and before it is
@@ -305,6 +308,13 @@ status_reply() {
   reply "HTTP/2.0 $code $text" "" "{\"message\":\"$text\"}" "gh: $text (HTTP $code)" 1
 }
 
+# secondary_reply: the secondary-rate-limit answer (403 with a Retry-After).
+secondary_reply() {
+  reply "HTTP/2.0 403 Forbidden" "Retry-After: $(read_or retry_after 3600)" \
+    '{"message":"You have exceeded a secondary rate limit."}' \
+    "gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)" 1
+}
+
 # fail_control <file>: if the control names a status for this call, answer it
 # (and count a limited one down).
 fail_control() {
@@ -317,6 +327,9 @@ fail_control() {
     else
       echo "$code $((count - 1))" >"$f"
     fi
+  fi
+  if [ "$code" = secondary ]; then
+    secondary_reply
   fi
   status_reply "$code"
 }
@@ -341,9 +354,7 @@ case "$mode" in
   reply "HTTP/2.0 401 Unauthorized" "" '{"message":"Bad credentials"}' "gh: Bad credentials (HTTP 401)" 1
   ;;
 secondary)
-  reply "HTTP/2.0 403 Forbidden" "Retry-After: $(read_or retry_after 3600)" \
-    '{"message":"You have exceeded a secondary rate limit."}' \
-    "gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)" 1
+  secondary_reply
   ;;
 primary)
   remaining=0

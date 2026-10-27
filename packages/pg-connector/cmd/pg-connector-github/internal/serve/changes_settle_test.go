@@ -19,9 +19,13 @@ import (
 
 // A settle that its dependents do not satisfy: the row is still appended at the
 // deadline, the group is left stale (and still queued), and the result word says
-// why. A governor pause ends as "timeout", a dependent fetch that failed as
-// "failed". The metric is read in-process; the failing dependent is shown on the
-// real binary through its log.
+// why. A reserve or cap refusal (the governor refuses every class, so the
+// dependents never go out and no last_error is stored) ends as "timeout"; a
+// dependent fetch that failed ends as "failed", and so does a secondary-limit
+// pause: it holds only classes 3 to 5, the dependents are class 2, so they go
+// out, the origin refuses them and the refusal is stored as last_error. The
+// metric is read in-process; the failing dependent is shown on the real binary
+// through its log.
 
 // settleResults sums the change.settle counter by its result label.
 func settleResults(t *testing.T, reader *sdkmetric.ManualReader) map[string]int64 {
@@ -62,7 +66,7 @@ func requireNoToken(t *testing.T, d *servetest.Daemon, output string) {
 	}
 }
 
-func TestChangesSettle_AGovernorPauseTimesOutTheRowAppendsItAndIsCountedTimeout(t *testing.T) {
+func TestChangesSettle_AReserveRefusalTimesOutTheRowAppendsItAndIsCountedTimeout(t *testing.T) {
 	d := servetest.NewDaemon(t, servetest.Options{Before: seed3a, Config: settleConfig("3s")})
 	reader := sdkmetric.NewManualReader()
 	p := runInProcess(t, d, func(o *serve.Options) { o.MeterProvider = sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)) })
@@ -234,6 +238,90 @@ func TestChangesSettle_AFailingDependentAppendsTheRowAtTheDeadlineWithTheGroupLe
 	all := d.ChangeLog(t)
 	if len(all) != 2 || !slices.Contains(all[1].Kinds, "ci_changed") || all[1].Version != all[0].Version+1 {
 		t.Errorf("change log = %+v, want the head row then the runs' own ci_changed row", all)
+	}
+	if code := servetest.StopDaemon(t, d); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	requireNoToken(t, d, d.Stderr())
+}
+
+// A secondary-limit pause holds only the background classes (3 to 5), and the
+// settle dependents are class 2, so unlike a reserve refusal they go out, meet
+// the limit at the origin, and are stored as the groups' last_error: the settle
+// ends "failed", not "timeout". The row is appended at its deadline either way.
+func TestChangesSettle_ASecondaryLimitFailsTheDependentsAppendsTheRowAtTheDeadlineAndIsCountedFailed(t *testing.T) {
+	t.Parallel()
+	d := startFilled(t, servetest.Options{Config: settleConfig(failedSettleTimeout)})
+	versionBefore := d.EntityVersion(t, "pr", prA.NodeID)
+	callsBefore := d.Shim.CountKind("files") + d.Shim.CountKind("commits")
+
+	// Only the dependent kinds answer the secondary limit: a global
+	// Mode("secondary") would refuse the summary fetch that detects the head
+	// change too, and no row would ever be pending.
+	d.Shim.FailSecondary("files")
+	d.Shim.FailSecondary("commits")
+	armHeadChange(t, d)
+	d.Shim.Release("runs") // the rest of armHeadChange's hold: the limit is the point
+	var pending servetest.PendingRow
+	until(t, 60*time.Second, "the head change to be stored as a pending row", func() bool {
+		rows := d.PendingRows(t)
+		if len(rows) != 1 {
+			return false
+		}
+		pending = rows[0]
+		return true
+	})
+	if !slices.Contains(pending.Awaited, "files") || !slices.Contains(pending.Awaited, "commits") {
+		t.Fatalf("the pending row = %+v, want it to await files and commits", pending)
+	}
+
+	// The limit's answers are stored as the groups' last_error before the deadline
+	// (the result word is "failed" only if they are; see failedSettleTimeout).
+	until(t, 60*time.Second, "the refused dependents to be stored as the groups' last_error", func() bool {
+		if len(d.ChangeLog(t)) > 0 {
+			t.Fatalf("the row was appended before the dependents were refused: %+v", d.ChangeLog(t))
+		}
+		return d.Group(t, prA.NodeID, "files").LastError != "" && d.Group(t, prA.NodeID, "commits").LastError != ""
+	})
+	until(t, 60*time.Second, "the row to be appended at its deadline", func() bool { return len(d.ChangeLog(t)) >= 1 })
+	if now := time.Now(); now.Before(pending.Deadline.Add(-time.Second)) {
+		t.Errorf("the row was appended at %s, long before its deadline %s", now, pending.Deadline)
+	}
+	rows := d.ChangeLog(t)
+	if len(rows) != 1 {
+		t.Fatalf("change log = %+v, want the one row", rows)
+	}
+	row := rows[0]
+	if !slices.Contains(row.Kinds, "head_changed") || row.HeadSHA != prAHead {
+		t.Errorf("the row = %+v, want head_changed at %s", row, prAHead)
+	}
+	if got := d.EntityVersion(t, "pr", prA.NodeID); got != versionBefore+1 || row.Version != got {
+		t.Errorf("entity version = %d (row %d), want %d: moved once", got, row.Version, versionBefore+1)
+	}
+	if left := d.PendingRows(t); len(left) != 0 {
+		t.Errorf("pending rows after the deadline: %+v", left)
+	}
+
+	// Unlike a reserve refusal, the dependents went out: the governor admitted them.
+	if got := d.Shim.CountKind("files") + d.Shim.CountKind("commits"); got <= callsBefore {
+		t.Errorf("no files or commits call reached the origin (%d before, %d after), want the class-2 dependents admitted", callsBefore, got)
+	}
+	for _, g := range []string{"files", "commits"} {
+		st := d.Group(t, prA.NodeID, g)
+		if !st.Stale(time.Now()) || st.LastError == "" {
+			t.Errorf("group %s after the limit = %+v, want stale with last_error set", g, st)
+		}
+	}
+
+	// The limit paused the GraphQL bucket's background classes.
+	if b := graphqlBucket(t, statusReport(t, d)); !b.Paused || !strings.Contains(b.PauseReason, "secondary") {
+		t.Errorf("graphql bucket = %+v, want it paused for the secondary limit", b)
+	}
+
+	// The result word is "failed", once.
+	ended := logLines(d.DaemonLog(t), "settle_ended")
+	if len(ended) != 1 || ended[0]["result"] != "failed" {
+		t.Errorf("settle_ended lines = %v, want one with result failed", ended)
 	}
 	if code := servetest.StopDaemon(t, d); code != 0 {
 		t.Fatalf("exit = %d", code)

@@ -74,6 +74,14 @@ func (s *Shim) Fail(kind string, status, times int) {
 	s.Set("fail."+kind, fmt.Sprint(status))
 }
 
+// FailSecondary makes every call of kind answer the secondary-rate-limit 403
+// (with its Retry-After) while the other kinds are served: a global Mode
+// "secondary" would refuse the summary fetch that detects a change as well.
+func (s *Shim) FailSecondary(kind string) {
+	s.t.Helper()
+	s.Set("fail."+kind, "secondary")
+}
+
 // FailBatch makes every call of kind that carries more than one id answer the
 // HTTP status.
 func (s *Shim) FailBatch(kind string, status int) {
