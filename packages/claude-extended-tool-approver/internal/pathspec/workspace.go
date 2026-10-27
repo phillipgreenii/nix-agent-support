@@ -797,7 +797,7 @@ func markerDirs(abs string) []string {
 // hasMarker reports whether any marker exists directly under dir.
 func hasMarker(dir string, markers []string) bool {
 	for _, m := range markers {
-		if _, err := os.Stat(filepath.Join(dir, m)); err == nil {
+		if patheval.Exists(filepath.Join(dir, m)) {
 			return true
 		}
 	}

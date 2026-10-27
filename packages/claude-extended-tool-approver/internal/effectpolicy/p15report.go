@@ -9,6 +9,7 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
 // P15Entry is one row of an approve-reachability report: one spec fact (a
@@ -854,6 +855,10 @@ func GenerateEffectiveCWDP15(base string) (*P15CWDReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The fixture is complete and nothing below changes the filesystem, so
+	// resolve each realpath and existence probe once instead of once per
+	// Evaluate (the cells below run thousands of them; pg2-1w4c4n).
+	defer patheval.MemoizeRealPaths()()
 	reg := cmddesc.DefaultRegistry()
 	rep := &P15CWDReport{
 		Requests: []string{"marker dir", "git checkout", "no marker"},

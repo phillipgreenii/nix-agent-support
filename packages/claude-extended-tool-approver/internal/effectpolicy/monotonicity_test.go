@@ -47,11 +47,13 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/goldencorpus"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/pathspec"
 )
 
 // monotonicityDefaultPairs is the default pair count: the Phase 2 exit
-// criterion's 10^4 (about 10s of CPU; measured 9.4s for 10^4 on the dev host).
+// criterion's 10^4 (about 10s of CPU; measured 9.4s for 10^4 on the dev host;
+// without the realpath memo below it took 107s to 230s under host load).
 // CETA_MONOTONICITY_PAIRS overrides it (a smaller number for a quick local
 // run, a larger one for a deeper sweep).
 const monotonicityDefaultPairs = 10000
@@ -107,6 +109,11 @@ func TestVerdictMonotonicity(t *testing.T) {
 		return pathspec.WorktreeUnknown, fmt.Errorf("monotonicity test: no real git")
 	}))
 	t.Cleanup(pathspec.SetGitTrackedProbe(func(string, string, bool) (bool, error) { return false, nil }))
+	// The filesystem is static for the whole test, so resolve each reference
+	// and zone-root path once instead of re-walking it with lstat on every one
+	// of the ~10^4 Evaluate calls (pg2-1w4c4n: that walk, not CPU, was the
+	// wall time under host load).
+	t.Cleanup(patheval.MemoizeRealPaths())
 
 	pairs := monotonicityDefaultPairs
 	if v := os.Getenv("CETA_MONOTONICITY_PAIRS"); v != "" {

@@ -129,6 +129,17 @@ func resolveExtraRoots(envVar string) []string {
 // that, and reattaches the remaining suffix. Returns "" only for broken symlinks
 // or if the filesystem root is reached without finding any resolvable ancestor.
 func evalSymlinksWithFallback(path string) string {
+	if v, ok := memoLookup(path); ok {
+		return v
+	}
+	v := evalSymlinksWithFallbackUncached(path)
+	memoStore(path, v)
+	return v
+}
+
+// evalSymlinksWithFallbackUncached is the real filesystem walk behind
+// evalSymlinksWithFallback (see realpath_memo.go for the opt-in memo).
+func evalSymlinksWithFallbackUncached(path string) string {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		// Check if the path itself exists as a symlink (broken symlink case)
@@ -1040,7 +1051,7 @@ func GitRoot(path string) (string, bool) {
 // rather than on the returned string, which is "" in that case.
 func gitRoot(dir string) (string, bool) {
 	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		if Exists(filepath.Join(dir, ".git")) {
 			return dir, true
 		}
 		parent := filepath.Dir(dir)
