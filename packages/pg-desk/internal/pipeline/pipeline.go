@@ -1367,6 +1367,7 @@ func Run(ctx context.Context, entityType, entityID string, change gather.ChangeK
 	if err != nil {
 		return fmt.Errorf("pipeline: open store: %w", err)
 	}
+	InstallIssueGate(st, cfg)
 	defer func() { _ = st.Close() }()
 
 	return New(cfg, st).Run(ctx, entityType, entityID, change)

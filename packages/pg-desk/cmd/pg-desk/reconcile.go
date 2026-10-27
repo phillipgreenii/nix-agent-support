@@ -31,7 +31,7 @@ var reconcileCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("reconcile: load config: %w", err)
 		}
-		st, err := runStoreOpen()
+		st, err := openRunStore(cfg)
 		if err != nil {
 			return fmt.Errorf("reconcile: open store: %w", err)
 		}

@@ -35,6 +35,16 @@ type ChangeRecord struct {
 	Kinds      []string
 	Origin     string
 	At         string // RFC3339 UTC
+
+	// The remaining fields are inputs of AppendChangeLogTx only (never read
+	// back): the transactional column writes of one append. SetBackend, when
+	// non-nil, writes entity.backend BEFORE the delivery gate runs (a pointer
+	// to "" writes NULL); SetWatched, when non-nil, writes entity.watched
+	// before the append and counts as watched for the gate of this same
+	// write; ClearWatchedAfter marks the entity not watched AFTER the append.
+	SetBackend        *string
+	SetWatched        *bool
+	ClearWatchedAfter bool
 }
 
 // ConflictCount returns how many entity writes on this Store handle have
@@ -54,7 +64,7 @@ func (s *Store) ConflictCount() int64 { return s.conflicts.Load() }
 // it in ConflictCount, and leaves the store untouched. It requires the new
 // schema.
 func (s *Store) WriteEntityWithLog(e Entity, expectedVersion int64, kinds []string, origin, at string) (int64, error) {
-	return s.writeEntity(e, expectedVersion, nil, kinds, origin, at)
+	return s.writeEntity(e, expectedVersion, nil, kinds, origin, at, WriteOptions{})
 }
 
 // entityState is the extra pair WriteEntityStateWithLog sets in the same
@@ -75,7 +85,7 @@ type entityState struct {
 // is empty it still updates the row and bumps the version (a re-hydration
 // must refresh hydrated_at) but appends NO change_log row.
 func (s *Store) WriteEntityStateWithLog(e Entity, expectedVersion int64, hydratedAt string, active bool, kinds []string, origin, at string) (int64, error) {
-	return s.writeEntity(e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active}, kinds, origin, at)
+	return s.writeEntity(e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active}, kinds, origin, at, WriteOptions{})
 }
 
 // WriteEntityStateWithLogFP is WriteEntityStateWithLog that additionally sets
@@ -86,7 +96,7 @@ func (s *Store) WriteEntityStateWithLog(e Entity, expectedVersion int64, hydrate
 // store never computes the fingerprint. Same compare-and-set, same
 // ErrVersionConflict and ConflictCount behavior, new schema only.
 func (s *Store) WriteEntityStateWithLogFP(e Entity, expectedVersion int64, hydratedAt string, active bool, listFP *string, kinds []string, origin, at string) (int64, error) {
-	return s.writeEntity(e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active, listFP: listFP}, kinds, origin, at)
+	return s.writeEntity(e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active, listFP: listFP}, kinds, origin, at, WriteOptions{})
 }
 
 // SetBetweenBumpAndAppendHook installs fn as a fault-injection seam run
@@ -98,8 +108,11 @@ func (s *Store) SetBetweenBumpAndAppendHook(fn func() error) { s.betweenBumpAndA
 
 // writeEntity is the shared compare-and-set write. A nil state leaves
 // hydrated_at and active untouched (WriteEntityWithLog); a non-nil state sets
-// them and skips the change_log append when kinds is empty.
-func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState, kinds []string, origin, at string) (int64, error) {
+// them and skips the change_log append when kinds is empty. opts carries the
+// feed path's transactional column writes: they happen before the append (a
+// clear after it), appended or not, and the delivery gate may still withhold
+// the row without affecting the write.
+func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState, kinds []string, origin, at string, opts WriteOptions) (int64, error) {
 	if err := s.RequireNewSchema(); err != nil {
 		return 0, err
 	}
@@ -177,8 +190,20 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 		if _, err := s.AppendChangeLogTx(tx, ChangeRecord{
 			Repo: e.Repo, EntityType: e.EntityType, EntityID: e.EntityID,
 			Version: newVersion, Kinds: kinds, Origin: origin, At: at,
+			SetBackend: opts.Backend, SetWatched: opts.Watched, ClearWatchedAfter: opts.ClearWatchedAfterAppend,
 		}); err != nil {
 			return 0, err
+		}
+	} else if !opts.isZero() {
+		// No row is appended (an empty-kinds re-hydration), but the column
+		// writes still commit with the snapshot: set before, clear after.
+		if err := setColumnsTx(tx, e.Repo, e.EntityType, e.EntityID, opts.Backend, opts.Watched); err != nil {
+			return 0, err
+		}
+		if opts.ClearWatchedAfterAppend {
+			if err := clearWatchedTx(tx, e.Repo, e.EntityType, e.EntityID); err != nil {
+				return 0, err
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -238,6 +263,15 @@ func (s *Store) conflict(e Entity) error {
 // AppendChangeLogTx appends r to change_log inside the caller's transaction
 // and returns its seq (r.Seq is ignored). It is the append-only primitive:
 // nothing updates or deletes rows here. A nil Kinds is stored as [].
+//
+// It is also the ONE place the delivery gate (INV-ICD-16) runs: when a gate
+// scope is installed (SetGateScope) and the entity is in scope, the append is
+// skipped (no row, no sequence consumed, no error, returned seq 0) unless the
+// entity is watched in this transaction, where watched means the mark as it
+// stood before this call or the mark r.SetWatched sets. r.SetBackend and
+// r.SetWatched are written before the gate decision; r.ClearWatchedAfter is
+// written after the append, so the closed or removed row of a watched entity
+// is always appended.
 func (s *Store) AppendChangeLogTx(tx *sql.Tx, r ChangeRecord) (int64, error) {
 	kinds := r.Kinds
 	if kinds == nil {
@@ -247,19 +281,62 @@ func (s *Store) AppendChangeLogTx(tx *sql.Tx, r ChangeRecord) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("store: append change_log: encode kinds: %w", err)
 	}
-	res, err := tx.Exec(
-		`INSERT INTO change_log (repo, entity_type, entity_id, version, kinds, origin, at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		r.Repo, r.EntityType, r.EntityID, r.Version, string(kindsJSON), r.Origin, r.At,
-	)
+	gated, err := s.gateDecision(tx, r)
 	if err != nil {
-		return 0, fmt.Errorf("store: append change_log (%s,%s,%s): %w", r.Repo, r.EntityType, r.EntityID, err)
+		return 0, err
 	}
-	seq, err := res.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("store: append change_log (%s,%s,%s): %w", r.Repo, r.EntityType, r.EntityID, err)
+	if err := setColumnsTx(tx, r.Repo, r.EntityType, r.EntityID, r.SetBackend, r.SetWatched); err != nil {
+		return 0, err
+	}
+	var seq int64
+	if !gated {
+		res, err := tx.Exec(
+			`INSERT INTO change_log (repo, entity_type, entity_id, version, kinds, origin, at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			r.Repo, r.EntityType, r.EntityID, r.Version, string(kindsJSON), r.Origin, r.At,
+		)
+		if err != nil {
+			return 0, fmt.Errorf("store: append change_log (%s,%s,%s): %w", r.Repo, r.EntityType, r.EntityID, err)
+		}
+		seq, err = res.LastInsertId()
+		if err != nil {
+			return 0, fmt.Errorf("store: append change_log (%s,%s,%s): %w", r.Repo, r.EntityType, r.EntityID, err)
+		}
+	}
+	if r.ClearWatchedAfter {
+		if err := clearWatchedTx(tx, r.Repo, r.EntityType, r.EntityID); err != nil {
+			return 0, err
+		}
 	}
 	return seq, nil
+}
+
+// gateDecision reports whether the delivery gate withholds r's append. With no
+// scope installed, or an entity row that does not exist, nothing is withheld.
+// It reads the entity's columns as they stand BEFORE this write's column sets.
+func (s *Store) gateDecision(tx *sql.Tx, r ChangeRecord) (bool, error) {
+	scope := s.gateScope.Load()
+	if scope == nil {
+		return false, nil
+	}
+	backend, watched, found, err := gateColumns(tx, r.Repo, r.EntityType, r.EntityID)
+	if err != nil {
+		return false, fmt.Errorf("store: append change_log (%s,%s,%s): read gate columns: %w", r.Repo, r.EntityType, r.EntityID, err)
+	}
+	if !found {
+		return false, nil
+	}
+	if r.SetBackend != nil {
+		backend = *r.SetBackend
+	}
+	if r.SetWatched != nil && *r.SetWatched {
+		watched = true
+	}
+	inScope, err := (*scope)(tx, r.Repo, r.EntityType, r.EntityID, backend)
+	if err != nil {
+		return false, fmt.Errorf("store: append change_log (%s,%s,%s): gate scope: %w", r.Repo, r.EntityType, r.EntityID, err)
+	}
+	return inScope && !watched, nil
 }
 
 // ListChangesAfter returns change_log records of entityType with seq >

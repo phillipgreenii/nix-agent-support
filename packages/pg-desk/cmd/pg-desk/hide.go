@@ -52,7 +52,7 @@ func setHiddenAnnotation(cmd *cobra.Command, cmdName, ref string, hidden bool, r
 	if err != nil {
 		return fmt.Errorf("%s: load config: %w", cmdName, err)
 	}
-	st, err := deskStoreOpen()
+	st, err := openDeskStore()
 	if err != nil {
 		return fmt.Errorf("%s: open store: %w", cmdName, err)
 	}

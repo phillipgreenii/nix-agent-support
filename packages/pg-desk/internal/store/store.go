@@ -81,6 +81,10 @@ type Store struct {
 	// default Locker (runtime-dir lock files). Tests set it via
 	// SetConsumerLockerOptions to point at a temp dir.
 	consumerLocker *Locker
+
+	// gateScope is the delivery gate's scope predicate (SetGateScope); nil
+	// means no gate, so nothing is withheld.
+	gateScope atomic.Pointer[GateScope]
 }
 
 // synchronousPragma, when non-empty, is applied as `PRAGMA synchronous=<value>`

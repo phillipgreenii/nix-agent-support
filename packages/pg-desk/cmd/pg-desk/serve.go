@@ -168,6 +168,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("serve: open store: %w", err)
 	}
+	installIssueGate(st, cfg)
 	defer func() { _ = st.Close() }()
 
 	routerPath := serveRouterConfig

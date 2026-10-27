@@ -421,3 +421,69 @@ func TestParseTypedRefSplitsAtFirstColon(t *testing.T) {
 		t.Errorf("parseTypedRef = %q, %q, %v", typ, ref, err)
 	}
 }
+
+// owningLinkConfig is linkTestConfig plus one watched issue query served by an
+// owning backend instance, so the delivery gate's scope lists that instance.
+func owningLinkConfig(instance string) *config.Config {
+	cfg := linkTestConfig()
+	cfg.Watch.Issue.Queries = []string{"owned-q"}
+	cfg.Watch.Issue.Backends = map[string]config.WatchBackend{
+		"owned-q": {Instance: instance, OwnsChanges: true},
+	}
+	return cfg
+}
+
+// issueRowCount counts the change_log rows of one issue entity.
+func issueRowCount(t *testing.T, st *store.Store, id string) int {
+	t.Helper()
+	rows, err := st.ListEntityHistory("o/r", "issue", id, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(rows)
+}
+
+// TestLinkAddAppendsNoRowForUnwatchedOwningIssue runs the real `issue link add`
+// verb in-process against a store whose configuration lists the owning
+// instance: the link is recorded, but the delivery gate withholds the
+// link_changed row of an unwatched issue, while a watched one still gets it.
+func TestLinkAddAppendsNoRowForUnwatchedOwningIssue(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"issue", "K-1"}, [2]string{"issue", "K-2"})
+	withOpenSeams(t, owningLinkConfig("jira-1"), open)
+	instance := "jira-1"
+	for _, id := range []string{"K-1", "K-2"} {
+		if err := seed.SetEntityColumns("o/r", "issue", id, &instance, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base1, base2 := issueRowCount(t, seed, "K-1"), issueRowCount(t, seed, "K-2")
+
+	if _, err := runLink(t, "issue", "add", "K-1", "issue:K-2", "--relation", "blocks"); err != nil {
+		t.Fatalf("link add: %v", err)
+	}
+	links, err := seed.ListXrefLinksFrom("o/r", "issue", "K-1")
+	if err != nil || len(links) != 1 {
+		t.Fatalf("link not recorded: %+v, %v", links, err)
+	}
+	if got := issueRowCount(t, seed, "K-1"); got != base1 {
+		t.Errorf("K-1 rows = %d, want %d: an unwatched owning issue got a row", got, base1)
+	}
+	if got := issueRowCount(t, seed, "K-2"); got != base2 {
+		t.Errorf("K-2 rows = %d, want %d: an unwatched owning issue got a row", got, base2)
+	}
+
+	// Watch K-1: removing the link now appends its row to K-1 only.
+	watched := true
+	if err := seed.SetEntityColumns("o/r", "issue", "K-1", nil, &watched); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runLink(t, "issue", "remove", "K-1", "issue:K-2"); err != nil {
+		t.Fatalf("link remove: %v", err)
+	}
+	if got := issueRowCount(t, seed, "K-1"); got <= base1 {
+		t.Errorf("K-1 rows = %d, want more than %d: a watched issue gets its row", got, base1)
+	}
+	if got := issueRowCount(t, seed, "K-2"); got != base2 {
+		t.Errorf("K-2 rows = %d, want %d", got, base2)
+	}
+}

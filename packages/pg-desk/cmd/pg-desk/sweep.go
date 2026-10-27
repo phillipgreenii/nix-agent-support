@@ -37,7 +37,7 @@ var sweepCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("sweep: load config: %w", err)
 		}
-		st, err := runStoreOpen()
+		st, err := openRunStore(cfg)
 		if err != nil {
 			return fmt.Errorf("sweep: open store: %w", err)
 		}

@@ -71,7 +71,7 @@ var importPgPrAnnotationsCmd = &cobra.Command{
 			return fmt.Errorf("import-pg-pr-annotations: --store is required (path to pg-pr's store.db)")
 		}
 
-		desk, err := importPgPrDeskStoreOpen()
+		desk, err := openGatedStore(importPgPrDeskStoreOpen)
 		if err != nil {
 			return fmt.Errorf("import-pg-pr-annotations: open pg-desk store: %w", err)
 		}

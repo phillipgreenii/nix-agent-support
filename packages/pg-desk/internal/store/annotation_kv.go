@@ -82,7 +82,7 @@ var ErrNoEntity = errors.New("entity not found")
 // a.SetAt) in the same transaction. It errors, writing nothing, when the
 // entity has no row.
 func (s *Store) SetAnnotation(a KVAnnotation) error {
-	_, err := s.annotationTx(a.Repo, a.EntityType, a.EntityID, a.Key, a.Origin, a.SetAt, func(tx *sql.Tx) (bool, error) {
+	_, _, err := s.annotationTx(a.Repo, a.EntityType, a.EntityID, a.Key, a.Origin, a.SetAt, func(tx *sql.Tx) (bool, error) {
 		return true, upsertAnnotation(tx, a)
 	})
 	return err
@@ -113,7 +113,8 @@ func upsertAnnotation(tx *sql.Tx, a KVAnnotation) error {
 // share one transaction; callers that need two writers serialized hold the
 // per-entity Locker around the call.
 func (s *Store) SetAnnotationSeq(a KVAnnotation) (seq int64, changed bool, err error) {
-	seq, err = s.annotationTx(a.Repo, a.EntityType, a.EntityID, a.Key, a.Origin, a.SetAt, func(tx *sql.Tx) (bool, error) {
+	var mutated bool
+	seq, mutated, err = s.annotationTx(a.Repo, a.EntityType, a.EntityID, a.Key, a.Origin, a.SetAt, func(tx *sql.Tx) (bool, error) {
 		var current string
 		qerr := tx.QueryRow(
 			`SELECT value FROM annotation WHERE repo = ? AND entity_type = ? AND entity_id = ? AND key = ?`,
@@ -130,7 +131,7 @@ func (s *Store) SetAnnotationSeq(a KVAnnotation) (seq int64, changed bool, err e
 	if err != nil {
 		return 0, false, err
 	}
-	return seq, seq != 0, nil
+	return seq, mutated, nil
 }
 
 // DeleteAnnotation removes the annotation key from the entity and, when a
@@ -139,7 +140,7 @@ func (s *Store) SetAnnotationSeq(a KVAnnotation) (seq int64, changed bool, err e
 // nothing, when the entity has no row.
 func (s *Store) DeleteAnnotation(repo, entityType, entityID, key, origin, at string) (bool, error) {
 	removed := false
-	_, err := s.annotationTx(repo, entityType, entityID, key, origin, at, func(tx *sql.Tx) (bool, error) {
+	_, _, err := s.annotationTx(repo, entityType, entityID, key, origin, at, func(tx *sql.Tx) (bool, error) {
 		res, err := tx.Exec(
 			`DELETE FROM annotation WHERE repo = ? AND entity_type = ? AND entity_id = ? AND key = ?`,
 			repo, entityType, entityID, key,
@@ -157,17 +158,20 @@ func (s *Store) DeleteAnnotation(repo, entityType, entityID, key, origin, at str
 // annotationTx runs mutate inside a transaction that first requires the
 // entity row (capturing its current version). When mutate reports a change,
 // the annotation_changed record is appended before commit and its change_log
-// sequence is returned (0 when nothing was appended).
-func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string, mutate func(tx *sql.Tx) (changed bool, err error)) (int64, error) {
+// sequence is returned (0 when nothing was appended, which also happens when
+// the delivery gate withheld the row). changed reports whether mutate changed
+// anything, independent of the sequence, so a written annotation whose row the
+// gate withheld still reads as changed.
+func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string, mutate func(tx *sql.Tx) (changed bool, err error)) (int64, bool, error) {
 	if err := s.RequireNewSchema(); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	wrap := func(err error) error {
 		return fmt.Errorf("store: annotation %q on (%s,%s,%s): %w", key, repo, entityType, entityID, err)
 	}
 	tx, err := s.sql.Begin()
 	if err != nil {
-		return 0, wrap(err)
+		return 0, false, wrap(err)
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
@@ -177,21 +181,21 @@ func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string,
 		repo, entityType, entityID,
 	).Scan(&version)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, wrap(ErrNoEntity)
+		return 0, false, wrap(ErrNoEntity)
 	}
 	if err != nil {
-		return 0, wrap(err)
+		return 0, false, wrap(err)
 	}
 
 	changed, err := mutate(tx)
 	if err != nil {
-		return 0, wrap(err)
+		return 0, false, wrap(err)
 	}
 	var seq int64
 	if changed {
 		if s.betweenAnnotationAndAppend != nil {
 			if err := s.betweenAnnotationAndAppend(); err != nil {
-				return 0, wrap(err)
+				return 0, false, wrap(err)
 			}
 		}
 		seq, err = s.AppendChangeLogTx(tx, ChangeRecord{
@@ -199,13 +203,13 @@ func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string,
 			Version: version, Kinds: []string{ChangeKindAnnotationChanged}, Origin: origin, At: at,
 		})
 		if err != nil {
-			return 0, err
+			return 0, false, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, wrap(err)
+		return 0, false, wrap(err)
 	}
-	return seq, nil
+	return seq, changed, nil
 }
 
 // GetKVAnnotation returns one entity's annotation for key, or found=false.

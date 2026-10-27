@@ -105,7 +105,7 @@ pg-desk never converts a draft to ready automatically).`,
 		if err != nil {
 			return fmt.Errorf("open: load config: %w", err)
 		}
-		st, err := deskStoreOpen()
+		st, err := openDeskStore()
 		if err != nil {
 			return fmt.Errorf("open: open store: %w", err)
 		}

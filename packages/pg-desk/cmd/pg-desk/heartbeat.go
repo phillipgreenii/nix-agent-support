@@ -48,7 +48,7 @@ var heartbeatCmd = &cobra.Command{
 	Use:   "heartbeat",
 	Short: "Stamp the store's last-heartbeat time and record source fetch times",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		st, err := deskStoreOpen()
+		st, err := openDeskStore()
 		if err != nil {
 			return fmt.Errorf("heartbeat: open store: %w", err)
 		}

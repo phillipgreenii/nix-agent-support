@@ -161,7 +161,7 @@ func runEntity(cmd *cobra.Command, args []string, rec io.Writer) error {
 	if err != nil {
 		return pipeline.TagStage(runStageConfig, fmt.Errorf("run: load config: %w", err))
 	}
-	st, err := runStoreOpen()
+	st, err := openRunStore(cfg)
 	if err != nil {
 		return pipeline.TagStage(runStageStoreOpen, fmt.Errorf("run: open store: %w", err))
 	}

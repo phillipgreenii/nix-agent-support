@@ -122,7 +122,7 @@ func runShow(cmd *cobra.Command, ref string) error {
 		}
 	}
 
-	st, err := deskStoreOpen()
+	st, err := openDeskStore()
 	if err != nil {
 		return fmt.Errorf("show: open store: %w", err)
 	}

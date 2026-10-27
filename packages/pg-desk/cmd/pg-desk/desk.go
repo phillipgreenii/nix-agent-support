@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -203,4 +204,44 @@ func resolvePRRef(cfg *config.Config, ref string) (repo, entityID string, err er
 		return "", "", fmt.Errorf("PR reference %q names repository %q, but the only configured repository is %q (multi-repository references are not supported)", ref, named, repo)
 	}
 	return repo, repo + "#" + n, nil
+}
+
+// installIssueGate installs the delivery gate (INV-ICD-16) on st with the
+// scope cfg defines: an issue entity of an owning backend, or a NULL-backend
+// id that resolves to one, appends no change_log row until it is watched.
+// Every production store-open path calls it (directly, or through
+// openDeskStore, openRunStore and openGatedStore), so no write reaches
+// change_log around the gate.
+func installIssueGate(st *store.Store, cfg *config.Config) {
+	pipeline.InstallIssueGate(st, cfg)
+}
+
+// openGatedStore opens through open and installs the gate from the config the
+// deskConfigLoad seam yields. A config that cannot be loaded lists no owning
+// instance, so nothing is in scope and no gate is installed; a verb that
+// needs the config fails on its own.
+func openGatedStore(open func() (*store.Store, error)) (*store.Store, error) {
+	st, err := open()
+	if err != nil {
+		return nil, err
+	}
+	if cfg, cerr := deskConfigLoad(context.Background()); cerr == nil {
+		installIssueGate(st, cfg)
+	}
+	return st, nil
+}
+
+// openDeskStore is deskStoreOpen plus the delivery gate; every desk verb that
+// can append a change_log row opens through it.
+func openDeskStore() (*store.Store, error) { return openGatedStore(deskStoreOpen) }
+
+// openRunStore is runStoreOpen plus the delivery gate, for a command that has
+// already loaded cfg.
+func openRunStore(cfg *config.Config) (*store.Store, error) {
+	st, err := runStoreOpen()
+	if err != nil {
+		return nil, err
+	}
+	installIssueGate(st, cfg)
+	return st, nil
 }

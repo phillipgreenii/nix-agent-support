@@ -48,7 +48,7 @@ func runHistory(cmd *cobra.Command, entityType, ref string, limit int, jsonOut b
 	if err != nil {
 		return fmt.Errorf("history: %w", err)
 	}
-	st, err := deskStoreOpen()
+	st, err := openDeskStore()
 	if err != nil {
 		return fmt.Errorf("history: open store: %w", err)
 	}

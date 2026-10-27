@@ -104,7 +104,7 @@ func runFeedbackList(cmd *cobra.Command, ref string) error {
 	if err != nil {
 		return fmt.Errorf("feedback list: load config: %w", err)
 	}
-	st, err := deskStoreOpen()
+	st, err := openDeskStore()
 	if err != nil {
 		return fmt.Errorf("feedback list: open store: %w", err)
 	}
@@ -169,7 +169,7 @@ func runFeedbackSetWith(cmd *cobra.Command, ref, commentID, disposition, actorFl
 	if err != nil {
 		return fmt.Errorf("feedback set: load config: %w", err)
 	}
-	st, err := deskStoreOpen()
+	st, err := openDeskStore()
 	if err != nil {
 		return fmt.Errorf("feedback set: open store: %w", err)
 	}

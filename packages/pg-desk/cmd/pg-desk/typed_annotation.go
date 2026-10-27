@@ -31,7 +31,7 @@ func init() {
 // oldPath (the existing top-level verb, which opens its own); a nil oldPath
 // means the verb has no old-schema form, so the store's refusal is returned.
 func runSchemaDual(oldPath func() error, newPath func(st *store.Store) error) error {
-	st, err := deskStoreOpen()
+	st, err := openDeskStore()
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}

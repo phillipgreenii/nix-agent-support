@@ -43,7 +43,7 @@ func setWIPAnnotation(cmd *cobra.Command, ref string, wip bool) error {
 	if err != nil {
 		return fmt.Errorf("wip: load config: %w", err)
 	}
-	st, err := deskStoreOpen()
+	st, err := openDeskStore()
 	if err != nil {
 		return fmt.Errorf("wip: open store: %w", err)
 	}

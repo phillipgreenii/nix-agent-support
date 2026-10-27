@@ -153,7 +153,7 @@ func pairLinks(st *store.Store, e linkEnds) ([]store.XrefLink, error) {
 // openNewSchemaStore opens the store for a link or consumer verb and refuses an
 // old-schema one.
 func openNewSchemaStore(cmdName string) (*store.Store, error) {
-	st, err := deskStoreOpen()
+	st, err := openDeskStore()
 	if err != nil {
 		return nil, fmt.Errorf("%s: open store: %w", cmdName, err)
 	}
