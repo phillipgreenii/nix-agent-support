@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot"
 )
 
 func readInput(t *testing.T, cwd, path string) *hookio.HookInput {
@@ -209,12 +210,38 @@ func TestGrepGlobFollowPathAllowlist(t *testing.T) {
 		want(t, evalAt(t, sub, "Grep", "hi", ""), evalcontract.Approve)
 		// cwd "/" is a fabricated project root that covers $HOME: no zone.
 		want(t, evalAt(t, "/", "Grep", "hi", ""), evalcontract.Abstain)
-		// The same call, same pattern, flips with nothing but the cwd.
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			if st, err := os.Stat(home); err == nil && st.IsDir() && !patheval.InGitRepo(home) {
-				want(t, evalAt(t, home, "Grep", "hi", ""), evalcontract.Abstain)
-			}
+	})
+	t.Run("grep with no path and cwd = HOME abstains when HOME is no zone", func(t *testing.T) {
+		// HOME is pinned to a directory that exists on no machine and lies
+		// under no zone, so the verdict does not depend on where the test
+		// runs. The nix go-tests check exports HOME=$TMPDIR, which lies under the
+		// /tmp landing zone, so an ambient HOME there is approved by that
+		// zone rather than refused as a $HOME root; a never-created path
+		// directly under "/" is outside every zone in the sandbox and on a
+		// developer machine alike (pg2-zcqvsd).
+		const home = "/ceta-test-home-in-no-zone"
+		if _, err := os.Lstat(home); err == nil {
+			t.Skipf("%s exists on this machine", home)
 		}
+		t.Setenv("HOME", home)
+		if temproot.Under(home) || patheval.InGitRepo(home) {
+			t.Fatalf("%s is under a temp root or in a git repo; the fixture must be in no zone", home)
+		}
+		want(t, evalAt(t, home, "Grep", "hi", ""), evalcontract.Abstain)
+
+		// Negative control: the very same call approves once HOME lies in a
+		// zone, here the /tmp landing zone. That is what the nix go-tests
+		// check does to the ambient HOME (HOME=$TMPDIR under /private/tmp),
+		// so the abstain above is decided by the zone and not by the
+		// directory being missing.
+		t.Run("the same call approves when HOME is under /tmp", func(t *testing.T) {
+			if st, err := os.Stat("/tmp"); err != nil || !st.IsDir() {
+				t.Skipf("/tmp is not a directory on this machine: %v", err)
+			}
+			const tmpHome = "/tmp/ceta-test-home-in-tmp-zone"
+			t.Setenv("HOME", tmpHome)
+			want(t, evalAt(t, tmpHome, "Grep", "hi", ""), evalcontract.Approve)
+		})
 	})
 	t.Run("glob with no path and a relative pattern is decided by the working directory", func(t *testing.T) {
 		want(t, evalAt(t, root, "Glob", "**/*.md", ""), evalcontract.Approve)
