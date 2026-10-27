@@ -165,6 +165,7 @@ per-backend deadline override).
 | `scm worktree remove <path>`                                      | remove a local git worktree by path (targeted)                                                                                 |
 | `scm worktree list`                                               | list local git worktrees (targeted; `scm` is single-valued, so there is no fan-out here)                                       |
 | `scm branch detect [cwd]`                                         | resolve a working directory to its repo and current branch (defaults to the process's own cwd) (targeted)                      |
+| `<type> capabilities [--backend B]`                               | report each backend's capabilities and every configured query's `watched` value (fan-out)                                      |
 | `auth status`                                                     | fan `auth_status` out across every registered backend, regardless of capability (fan-out)                                      |
 | `config validate`                                                 | fan `auth_status` **and** `capabilities`/schema-version checks out across every registered backend (fan-out)                   |
 | `--output json\|human`                                            | persistent flag on every command above: `json` (default; the stable envelope scripts already parse) or `human` (readable text) |

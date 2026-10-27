@@ -266,6 +266,7 @@ func newCiCmd() *cobra.Command {
 	ciCmd.AddCommand(newCiListCmd())
 	ciCmd.AddCommand(newCiChangesCmd())
 	ciCmd.AddCommand(newChangesAckCmd("ci"))
+	ciCmd.AddCommand(newCapabilitiesCmd("ci"))
 	ciCmd.AddCommand(newCiLogsCmd())
 	ciCmd.AddCommand(newCiRerunFailedCmd())
 	ciCmd.AddCommand(newCiExplainCmd())

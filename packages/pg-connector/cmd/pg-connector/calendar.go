@@ -60,6 +60,7 @@ func newCalendarCmd() *cobra.Command {
 	calendarCmd.AddCommand(newCalendarListCmd())
 	calendarCmd.AddCommand(newCalendarChangesCmd())
 	calendarCmd.AddCommand(newChangesAckCmd("calendar"))
+	calendarCmd.AddCommand(newCapabilitiesCmd("calendar"))
 	return calendarCmd
 }
 

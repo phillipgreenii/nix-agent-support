@@ -67,6 +67,7 @@ func newIssueCmd() *cobra.Command {
 	issueCmd.AddCommand(newIssueChildrenCmd())
 	issueCmd.AddCommand(newIssueChangesCmd())
 	issueCmd.AddCommand(newChangesAckCmd("issue"))
+	issueCmd.AddCommand(newCapabilitiesCmd("issue"))
 	return issueCmd
 }
 

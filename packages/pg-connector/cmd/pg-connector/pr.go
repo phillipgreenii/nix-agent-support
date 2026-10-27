@@ -50,6 +50,7 @@ func newPrCmd() *cobra.Command {
 	prCmd.AddCommand(newPrCommitsCmd())
 	prCmd.AddCommand(newPrChangesCmd())
 	prCmd.AddCommand(newChangesAckCmd("pr"))
+	prCmd.AddCommand(newCapabilitiesCmd("pr"))
 	prCmd.AddCommand(newPrReviewCmd())
 	prCmd.AddCommand(newPrRefreshCmd())
 	prCmd.AddCommand(newPrExplainCmd())
