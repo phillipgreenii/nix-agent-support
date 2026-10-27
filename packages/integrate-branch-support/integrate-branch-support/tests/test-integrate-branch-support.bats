@@ -444,7 +444,7 @@ printf 'cwd=%s\n' "\$(pwd -P)" >>"$STUB_BIN/pg-hooks-calls"
 printf 'args=%s\n' "\$*" >>"$STUB_BIN/pg-hooks-calls"
 if [ "\$1" = status ]; then
   if [ -n "\${STUB_PGH_STATE:-}" ]; then
-    printf 'state=%s\nbundle=\ngeneration=\nstages=\nreinstall=\n' "\$STUB_PGH_STATE"
+    printf 'state=%s\nbundle=%s\ngeneration=\nstages=\nreinstall=\n' "\$STUB_PGH_STATE" "\${STUB_PGH_BUNDLE:-}"
   fi
   exit "\${STUB_PGH_STATUS_RC:-0}"
 fi
@@ -600,7 +600,7 @@ assert_no_hook_config_created() {
   [ -f "$STUB_BIN/pg-hooks-calls" ]
   grep -qxF "cwd=$wt" "$STUB_BIN/pg-hooks-calls"
   grep -qxF "args=run pre-land feat" "$STUB_BIN/pg-hooks-calls"
-  [ "$(grep -c '^args=' "$STUB_BIN/pg-hooks-calls")" -eq 1 ]
+  [ "$(grep -c '^args=run ' "$STUB_BIN/pg-hooks-calls")" -eq 1 ]
 }
 
 @test "prek-branch-diff: exit 10 (a hook failed) is passed through as 10" {
@@ -1031,4 +1031,253 @@ run_scrubbed_nix() {
   [ ! -e "$bogus" ]
 
   rm -rf "$bogus_parent"
+}
+
+# --- FF-1b pass reuse (bead pg2-wclb73) --------------------------------------
+# Real git throughout (real branch, real rebase, real patch-id, real merge-base);
+# only pg-hooks is stubbed, because what is under test is the DECISION whether to
+# call it again. A "run" is one `pg-hooks run pre-land` call in the stub log.
+
+rl_git() { git -c user.email=t@t -c user.name=t "$@"; }
+
+# rl_commit <repo> <message> <path>...: write each path (content = message) and commit.
+rl_commit() {
+  local repo="$1" msg="$2" p
+  shift 2
+  for p in "$@"; do
+    mkdir -p "$repo/$(dirname "$p")"
+    printf '%s\n' "$msg" >>"$repo/$p"
+  done
+  rl_git -C "$repo" add -A
+  rl_git -C "$repo" commit -q -m "$msg"
+}
+
+# rl_fixture: main holds modules a (replaces ../c), b, c, d, a root flake.nix and
+# docs; worktree `feat` is checked out and one commit on feat edits module a.
+# Leaves the cwd in the worktree with pg-hooks stubbed as a present bundle.
+rl_fixture() {
+  rl_commit "$TEST_DIR" base flake.nix docs/x.md packages/a/go.mod packages/a/a.go \
+    packages/b/go.mod packages/b/b.go packages/c/go.mod packages/c/c.go packages/d/go.mod packages/d/d.go
+  printf 'module a\n\nrequire c v0.0.0\n\nreplace c => ../c\n' >"$TEST_DIR/packages/a/go.mod"
+  printf 'module b\n\nreplace (\n\tc v1.0.0 => ../c\n)\n' >"$TEST_DIR/packages/b/go.mod"
+  rl_git -C "$TEST_DIR" commit -q -a -m replaces
+  add_worktree feat
+  RL_WT="$(pwd -P)"
+  rl_commit "$RL_WT" "edit a" packages/a/a.go
+  stub_pg_hooks 0
+  export STUB_PGH_STATE=present STUB_PGH_BUNDLE=/bundles/gen-1/bundle
+}
+
+rl_runs() { grep -c '^args=run pre-land' "$STUB_BIN/pg-hooks-calls" || true; }
+
+# rl_land_race <path>...: main gains a commit touching the paths, feat is rebased.
+rl_advance_and_rebase() {
+  rl_commit "$TEST_DIR" "main moves" "$@"
+  rl_git -C "$RL_WT" rebase -q main
+}
+
+@test "pre-land reuse: the first pass runs the hooks and records a marker" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ "$(rl_runs)" -eq 1 ]
+  [ -f "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+}
+
+@test "pre-land reuse: unchanged patch and main gaining only an unrelated module reuses the pass" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/d/d.go
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FF-1b: reused the pre-land pass"* ]]
+  [ "$(rl_runs)" -eq 1 ]
+}
+
+@test "pre-land reuse: main gaining nothing (same base) reuses the pass" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"main gained no files"* ]]
+  [ "$(rl_runs)" -eq 1 ]
+}
+
+@test "pre-land reuse: main changing a file of the diff's own module re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/a/other.go
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"inside packages/a"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: main changing a module the diff replaces (a => ../c) re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/c/c.go
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"inside packages/c"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: main changing a consumer of a library the diff touches re-runs (edges count both ways)" {
+  rl_fixture
+  # The branch edits module c instead; a replaces c, so a is a neighbour of the diff.
+  rl_git -C "$RL_WT" reset -q --hard main
+  rl_commit "$RL_WT" "edit c" packages/c/c.go
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/a/a.go
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"inside packages/a"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: main changing a sibling consumer of a shared library the diff reaches re-runs (component is transitive)" {
+  rl_fixture
+  # Branch edits a (a -> c); b also replaces c, so b is in a's component via c.
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/b/b.go
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"inside packages/b"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: main changing a shared root file (flake.nix) re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase flake.nix
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"shared path"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: main changing docs (outside every project) re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase docs/y.md
+  run bash "$BIN" --prek-branch-diff
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a branch diff outside every Go module re-runs even when main is unrelated" {
+  rl_fixture
+  rl_commit "$RL_WT" "edit docs" docs/x.md
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/d/d.go
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"not inside a Go module"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a changed branch patch-id re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_commit "$RL_WT" "more a" packages/a/a.go
+  rl_advance_and_rebase packages/d/d.go
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"patch-id changed"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: an amended branch (same name, new patch) re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  # Same branch name, brand new content of the same size: amend rewrites the patch.
+  printf 'different\n' >"$RL_WT/packages/a/a.go"
+  rl_git -C "$RL_WT" commit -q -a --amend -m "edit a again"
+  rl_advance_and_rebase packages/d/d.go
+  run bash "$BIN" --prek-branch-diff
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a different hook bundle re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/d/d.go
+  export STUB_PGH_BUNDLE=/bundles/gen-2/bundle
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"hook bundle changed"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a stale bundle state re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/d/d.go
+  export STUB_PGH_STATE=stale
+  run bash "$BIN" --prek-branch-diff
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a marker older than the max age re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/d/d.go
+  sed -i.bak 's/^epoch=.*/epoch=1/' "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat"
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"older than"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a recorded base that is not an ancestor of the new base re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/d/d.go
+  sed -i.bak "s/^base=.*/base=$(git rev-parse HEAD)/" "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat"
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"not an ancestor"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a go.work anywhere in the tree re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase go.work
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"go.work"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a failed run records nothing, so the next call runs again" {
+  rl_fixture
+  stub_pg_hooks 10 "pg-hooks: pre-land hooks failed"
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 10 ]
+  [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+  stub_pg_hooks 0
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a dirty worktree records nothing" {
+  rl_fixture
+  printf 'dirty\n' >>"$RL_WT/packages/a/a.go"
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+}
+
+@test "pre-land reuse: no bundle (exit 13) records nothing" {
+  rl_fixture
+  stub_pg_hooks 13 "pg-hooks: no hook bundle for repo; pre-land hooks not run."
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+}
+
+@test "pre-land reuse: git config preLandReuse=false disables recording and reuse" {
+  rl_fixture
+  git config pgii-integrate-branch.preLandReuse false
+  run bash "$BIN" --prek-branch-diff
+  [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+  run bash "$BIN" --prek-branch-diff
+  [ "$(rl_runs)" -eq 2 ]
+  # Marker recorded while enabled is ignored once disabled.
+  git config pgii-integrate-branch.preLandReuse true
+  run bash "$BIN" --prek-branch-diff
+  git config pgii-integrate-branch.preLandReuse false
+  rl_advance_and_rebase packages/d/d.go
+  run bash "$BIN" --prek-branch-diff
+  [ "$(rl_runs)" -eq 4 ]
 }

@@ -278,6 +278,287 @@ precommit_state() {
 # not on PATH (exit 127 semantics). FF-1b records it and continues.
 PG_HOOKS_MISSING_NOTICE='pg-hooks not installed on this machine; ask the operator to run pn workspace apply'
 
+# ---------------------------------------------------------------------------
+# FF-1b pass reuse (bead pg2-wclb73). A pre-land run takes tens of minutes on a
+# loaded host, and main usually advances under it, so the fast-forward race is
+# lost and FF-3 re-runs the whole check. When the rebase changed nothing the
+# hooks could see, a prior PASS is carried over instead. The rule is
+# conservative: any doubt re-runs the hooks.
+#
+# A pass is recorded (pre_land_record_pass) only after `pg-hooks run pre-land`
+# exited 0 from a clean worktree with a present hook bundle. It is reused
+# (pre_land_reuse_check) only when ALL of these hold:
+#   1. the marker is current: right version, younger than the max age
+#      (INTEGRATE_BRANCH_PRE_LAND_REUSE_MAX_AGE seconds, default 21600), and
+#      recorded with the same hook bundle (so the hook definitions are the same);
+#   2. the marker's base is an ancestor of the branch's new merge-base with the
+#      primary branch (the branch was rebased forward, not rewound or moved);
+#   3. the branch patch-id (`git patch-id --stable` of base..FB) is unchanged;
+#   4. the branch diff is a set of paths each inside a Go module (the nearest
+#      ancestor directory holding go.mod, never the repo root), no go.work
+#      exists, and every path main gained since the recorded base (git diff
+#      --name-only) lies inside a project directory that is NOT in the diff's
+#      dependency component. The component is the connected set of directories
+#      linked by local go.mod `replace => ./x` or `=> ../x` edges (either
+#      direction, so a library's consumers and a consumer's libraries both
+#      count), starting from the diff's modules and read from the tree being
+#      landed. A path main gained that is in no project (flake.nix, docs,
+#      scripts, a root file) is shared, so it re-runs.
+# `git config pgii-integrate-branch.preLandReuse false` turns reuse (and the
+# recording) off. bash 3.2 compatible: no associative arrays, no mapfile.
+# ---------------------------------------------------------------------------
+PRE_LAND_MARKER_VERSION=1
+
+pre_land_reuse_enabled() {
+  local v
+  v="$(git config --type=bool --get pgii-integrate-branch.preLandReuse 2>/dev/null || true)"
+  [ "$v" != false ]
+}
+
+# pre_land_marker_path <wt> <branch>
+pre_land_marker_path() {
+  local common
+  common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  printf '%s/integrate-branch/pre-land-pass/%s' "$common" "${2//\//%}"
+}
+
+# pre_land_marker_get <file> <key>
+pre_land_marker_get() {
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+    "$2="*)
+      printf '%s' "${line#"$2="}"
+      return 0
+      ;;
+    esac
+  done <"$1"
+  return 0
+}
+
+# pre_land_patch_id <wt> <base> <fb>: the stable patch-id of base..fb (empty diff: nothing).
+pre_land_patch_id() {
+  local out
+  out="$(git -C "$1" diff --no-ext-diff --no-renames "$2" "$3" 2>/dev/null | git patch-id --stable 2>/dev/null)" || return 0
+  printf '%s' "${out%% *}"
+}
+
+# pre_land_bundle_id <wt>: `bundle=<path>` of a PRESENT hook bundle, else nothing.
+pre_land_bundle_id() {
+  local out line state="" bundle=""
+  out="$(cd "$1" && pg-hooks status --porcelain 2>/dev/null)" || true
+  while IFS= read -r line; do
+    case "$line" in
+    state=*) state="${line#state=}" ;;
+    bundle=*) bundle="${line#bundle=}" ;;
+    esac
+  done <<<"$out"
+  if [ "$state" = present ] && [ -n "$bundle" ]; then
+    printf '%s' "$bundle"
+  fi
+  return 0
+}
+
+# pre_land_record_pass <wt> <branch>: remember a passing pre-land run. Silent
+# and best-effort: failing to record only costs a re-run later.
+pre_land_record_pass() {
+  local wt="$1" fb="$2" primary base pid bundle file tmp
+  pre_land_reuse_enabled || return 0
+  [ -z "$(git -C "$wt" status --porcelain 2>/dev/null)" ] || return 0
+  primary="$(cd "$wt" && resolve_primary_branch)"
+  base="$(git -C "$wt" merge-base "$primary" "$fb" 2>/dev/null)" || return 0
+  pid="$(pre_land_patch_id "$wt" "$base" "$fb")"
+  [ -n "$pid" ] || return 0
+  bundle="$(pre_land_bundle_id "$wt")"
+  [ -n "$bundle" ] || return 0
+  file="$(pre_land_marker_path "$wt" "$fb")" || return 0
+  mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
+  tmp="$file.$$"
+  {
+    printf 'version=%s\n' "$PRE_LAND_MARKER_VERSION"
+    printf 'patch_id=%s\n' "$pid"
+    printf 'base=%s\n' "$base"
+    printf 'bundle=%s\n' "$bundle"
+    printf 'epoch=%s\n' "$(date +%s)"
+  } >"$tmp" 2>/dev/null && mv -f "$tmp" "$file" 2>/dev/null || rm -f "$tmp"
+  return 0
+}
+
+# pre_land_normalize <dir> <relative path>: join and collapse `.`/`..`; prints
+# nothing when the result leaves the repo root.
+pre_land_normalize() {
+  local joined="$1/$2" part out="" IFS=/
+  local -a parts stack
+  read -r -a parts <<<"$joined"
+  stack=()
+  for part in "${parts[@]}"; do
+    case "$part" in
+    "" | .) ;;
+    ..)
+      [ "${#stack[@]}" -gt 0 ] || return 0
+      unset 'stack[${#stack[@]}-1]'
+      stack=("${stack[@]+"${stack[@]}"}")
+      ;;
+    *) stack+=("$part") ;;
+    esac
+  done
+  out="${stack[*]+"${stack[*]}"}"
+  printf '%s' "$out"
+}
+
+# pre_land_project_root <marker dirs file> <path>: the nearest ancestor
+# directory of <path> listed in the file (never the repo root), or nothing.
+pre_land_project_root() {
+  local d="${2%/*}"
+  [ "$d" != "$2" ] || return 0
+  while [ -n "$d" ]; do
+    if grep -qxF -- "$d" "$1"; then
+      printf '%s' "$d"
+      return 0
+    fi
+    [ "$d" != "${d%/*}" ] || break
+    d="${d%/*}"
+  done
+  return 0
+}
+
+# pre_land_reuse_check <wt> <branch>: decide whether a recorded pass carries
+# over. Prints one `FF-1b: ...` line saying why. Returns 0 to reuse, 1 to re-run.
+pre_land_reuse_check() {
+  local wt="$1" fb="$2" file primary newbase oldbase pid_old pid_new bundle_old bundle_new
+  local epoch now max_age tmp markers gomods edges droots comp p r g rel target changed n_count
+  pre_land_reuse_enabled || return 1
+  file="$(pre_land_marker_path "$wt" "$fb")" || return 1
+  [ -f "$file" ] || return 1
+  if [ "$(pre_land_marker_get "$file" version)" != "$PRE_LAND_MARKER_VERSION" ]; then
+    echo "FF-1b: re-running hooks (recorded pass has an unknown format)"
+    return 1
+  fi
+  epoch="$(pre_land_marker_get "$file" epoch)"
+  now="$(date +%s)"
+  max_age="${INTEGRATE_BRANCH_PRE_LAND_REUSE_MAX_AGE:-21600}"
+  case "$epoch$max_age" in *[!0-9]* | "")
+    echo "FF-1b: re-running hooks (recorded pass has no usable age)"
+    return 1
+    ;;
+  esac
+  if [ $((now - epoch)) -gt "$max_age" ]; then
+    echo "FF-1b: re-running hooks (recorded pass is older than ${max_age}s)"
+    return 1
+  fi
+  primary="$(cd "$wt" && resolve_primary_branch)"
+  newbase="$(git -C "$wt" merge-base "$primary" "$fb" 2>/dev/null)" || return 1
+  oldbase="$(pre_land_marker_get "$file" base)"
+  if ! git -C "$wt" merge-base --is-ancestor "$oldbase" "$newbase" 2>/dev/null; then
+    echo "FF-1b: re-running hooks (recorded base ${oldbase:0:9} is not an ancestor of the new base ${newbase:0:9})"
+    return 1
+  fi
+  pid_old="$(pre_land_marker_get "$file" patch_id)"
+  pid_new="$(pre_land_patch_id "$wt" "$newbase" "$fb")"
+  if [ -z "$pid_new" ] || [ "$pid_old" != "$pid_new" ]; then
+    echo "FF-1b: re-running hooks (the branch patch-id changed since the recorded pass)"
+    return 1
+  fi
+  bundle_old="$(pre_land_marker_get "$file" bundle)"
+  bundle_new="$(pre_land_bundle_id "$wt")"
+  if [ -z "$bundle_new" ] || [ "$bundle_old" != "$bundle_new" ]; then
+    echo "FF-1b: re-running hooks (the hook bundle changed since the recorded pass)"
+    return 1
+  fi
+  changed="$(git -C "$wt" diff --no-ext-diff --no-renames --name-only "$oldbase" "$newbase" 2>/dev/null)" || return 1
+  if [ -z "$changed" ]; then
+    echo "FF-1b: reused the pre-land pass recorded on base ${oldbase:0:9}; main gained no files since (patch-id ${pid_new:0:12}); pg-hooks not re-run"
+    return 0
+  fi
+
+  tmp="$(mktemp -d 2>/dev/null)" || return 1
+  markers="$tmp/markers"
+  gomods="$tmp/gomods"
+  edges="$tmp/edges"
+  droots="$tmp/droots"
+  comp="$tmp/comp"
+  # Project directories of the tree being landed (repo root never counts).
+  git -C "$wt" ls-tree -r --name-only "$fb" 2>/dev/null >"$tmp/tree" || {
+    rm -rf "$tmp"
+    return 1
+  }
+  if grep -qE '(^|/)go\.work(\.sum)?$' "$tmp/tree"; then
+    rm -rf "$tmp"
+    echo "FF-1b: re-running hooks (the repo has a go.work, so modules are coupled)"
+    return 1
+  fi
+  grep -E '/(go\.mod|package\.json|pyproject\.toml)$' "$tmp/tree" | sed 's|/[^/]*$||' | sort -u >"$markers" || true
+  grep -E '/go\.mod$' "$tmp/tree" | sed 's|/go\.mod$||' | sort -u >"$gomods" || true
+  : >"$edges"
+  : >"$droots"
+  # Every branch-diff path must sit in a Go module.
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    r="$(pre_land_project_root "$markers" "$p")"
+    if [ -z "$r" ] || ! grep -qxF -- "$r" "$gomods"; then
+      rm -rf "$tmp"
+      echo "FF-1b: re-running hooks (branch path $p is not inside a Go module, so shared checks may read it)"
+      return 1
+    fi
+    printf '%s\n' "$r" >>"$droots"
+  done < <(git -C "$wt" diff --no-ext-diff --no-renames --name-only "$newbase" "$fb" 2>/dev/null)
+  sort -u "$droots" -o "$droots"
+  [ -s "$droots" ] || {
+    rm -rf "$tmp"
+    return 1
+  }
+  # Local replace edges between modules (read from the tree being landed).
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      target="$(pre_land_normalize "$g" "$rel")"
+      [ -n "$target" ] || continue
+      printf '%s\t%s\n' "$g" "$target" >>"$edges"
+    done < <(git -C "$wt" show "$fb:$g/go.mod" 2>/dev/null |
+      sed -n -E 's/^[[:space:]]*(replace[[:space:]]+)?[^[:space:]=]+([[:space:]]+[^[:space:]=]+)?[[:space:]]*=>[[:space:]]*(\.{1,2}(\/[^[:space:]]*)?)([[:space:]].*)?$/\3/p')
+  done <"$gomods"
+  # Fixpoint: connected component of the diff's modules, edges both ways.
+  cp "$droots" "$comp"
+  n_count=-1
+  while [ "$(wc -l <"$comp")" -ne "$n_count" ]; do
+    n_count="$(wc -l <"$comp")"
+    while IFS="$(printf '\t')" read -r g target; do
+      if grep -qxF -- "$g" "$comp"; then
+        printf '%s\n' "$target" >>"$comp"
+      fi
+      if grep -qxF -- "$target" "$comp"; then
+        printf '%s\n' "$g" >>"$comp"
+      fi
+    done <"$edges"
+    sort -u "$comp" -o "$comp"
+  done
+  # Every path main gained must be in a project outside the component.
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    r="$(pre_land_project_root "$markers" "$p")"
+    if [ -z "$r" ]; then
+      rm -rf "$tmp"
+      echo "FF-1b: re-running hooks (main gained $p, a shared path outside every project)"
+      return 1
+    fi
+    while IFS= read -r g; do
+      case "$p" in
+      "$g" | "$g"/*)
+        rm -rf "$tmp"
+        echo "FF-1b: re-running hooks (main gained $p, inside $g which the branch diff depends on)"
+        return 1
+        ;;
+      esac
+    done <"$comp"
+  done <<<"$changed"
+  n_count="$(printf '%s\n' "$changed" | wc -l | tr -d ' ')"
+  printf 'FF-1b: reused the pre-land pass recorded on base %s (now %s): the branch patch-id %s is unchanged and the %s files main gained lie outside the diff modules (%s) and their local-replace neighbours; pg-hooks not re-run\n' \
+    "${oldbase:0:9}" "${newbase:0:9}" "${pid_new:0:12}" "$n_count" "$(paste -sd, "$droots")"
+  rm -rf "$tmp"
+  return 0
+}
+
 # pre_land_check <worktree root> <branch>: FF-1b. Run `pg-hooks run pre-land
 # <branch>` from the worktree root and map its exit status (spec 5.3):
 #   0   -> 0
@@ -297,8 +578,15 @@ pre_land_check() {
     printf '%s\n' "$PG_HOOKS_MISSING_NOTICE"
     return 0
   fi
+  if pre_land_reuse_check "$wt" "$fb"; then
+    return 0
+  fi
   (cd "$wt" && pg-hooks run pre-land "$fb") || rc=$?
   case "$rc" in
+  0)
+    pre_land_record_pass "$wt" "$fb"
+    return 0
+    ;;
   13) return 0 ;;
   127)
     printf '%s\n' "$PG_HOOKS_MISSING_NOTICE"

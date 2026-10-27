@@ -29,7 +29,13 @@ Options:
                       and any other failure are passed through; exit 13 (no
                       hook bundle) and a missing pg-hooks
                       (127) record their notice line and exit 0. Never
-                      links, copies or regenerates a hook config
+                      links, copies or regenerates a hook config. A passing
+                      run is remembered under <git-common-dir>/integrate-branch/
+                      and reused (one `FF-1b: reused ...` line, exit 0) after a
+                      rebase when the branch patch-id is unchanged and main's
+                      new files lie outside the diff's Go modules and their
+                      local-replace neighbours; any doubt re-runs. Turn off
+                      with git config pgii-integrate-branch.preLandReuse false
   --bundle-refresh <old-sha>
                       FF-4: run from the canonical clone after an ff-merge
                       that moved the primary branch from <old-sha>. When the
