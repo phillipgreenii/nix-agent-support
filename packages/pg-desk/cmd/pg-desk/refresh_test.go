@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -353,5 +354,287 @@ func TestRefreshSuccessPrintsNoClassLine(t *testing.T) {
 	}
 	if strings.Contains(out, "class=") {
 		t.Errorf("stdout %q carries a class line on success", out)
+	}
+}
+
+// backendFixture is a new-schema store, a config with one OWNING issue
+// backend (jira-a) and two non-owning ones, and a fake pg-connector that logs
+// every call to <dir>/calls.log. `issue show <id> --backend jira-a` answers
+// only for an id with a held-<id> file (exit 4 otherwise); any other call
+// answers show-<id>.json (show-<id>.watch.json for a --watch call); a file
+// named down makes every call answer the wire error unavailable.
+type backendFixture struct {
+	*refreshFixture
+	cfg *config.Config
+}
+
+func backendTestConfig() *config.Config {
+	cfg := openTestConfig("o/r")
+	cfg.TicketPatterns = []string{`[A-Z]+-\d+`}
+	cfg.AgentTrackerBackend = "beads-a"
+	cfg.Watch.Issue.Queries = []string{"jira-q", "beads-q", "beads-q2"}
+	cfg.Watch.Issue.Backends = map[string]config.WatchBackend{
+		"jira-q":   {Instance: "jira-a", OwnsChanges: true},
+		"beads-q":  {Instance: "beads-a"},
+		"beads-q2": {Instance: "beads-b"},
+	}
+	return cfg
+}
+
+const backendFakeScript = `D=%q
+echo "$*" >> "$D/calls.log"
+id="$3"
+backend=""; watch=0; prev=""
+for a in "$@"; do
+  if [ "$prev" = "--backend" ]; then backend="$a"; fi
+  if [ "$a" = "--watch" ]; then watch=1; fi
+  prev="$a"
+done
+if [ -f "$D/down" ]; then echo '{"error":{"code":"unavailable","message":"daemon down"}}'; exit 1; fi
+if [ "$backend" = "jira-a" ] && [ ! -f "$D/held-$id" ]; then echo '{"error":{"code":"not_found","message":"no"}}'; exit 4; fi
+if [ "$watch" = 1 ] && [ -f "$D/show-$id.watch.json" ]; then cat "$D/show-$id.watch.json"; exit 0; fi
+if [ -f "$D/show-$id.json" ]; then cat "$D/show-$id.json"; exit 0; fi
+echo '{"error":{"code":"not_found","message":"no"}}'; exit 4`
+
+func newBackendFixture(t *testing.T, seedIDs ...string) *backendFixture {
+	t.Helper()
+	ents := make([][2]string, 0, len(seedIDs))
+	for _, id := range seedIDs {
+		ents = append(ents, [2]string{"issue", id})
+	}
+	open, seed := seedLinkStore(t, ents...)
+	cfg := backendTestConfig()
+	withOpenSeams(t, cfg, open)
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	dir := t.TempDir()
+	installFakePGConnector(t, fmt.Sprintf(backendFakeScript, dir))
+	return &backendFixture{refreshFixture: &refreshFixture{t: t, seed: seed, dir: dir}, cfg: cfg}
+}
+
+// showJira writes the answer for a Jira issue; watched is the stated
+// entity_meta.watched ("" states nothing).
+func (f *backendFixture) showJira(id, title, watched string) {
+	f.t.Helper()
+	meta := ""
+	if watched != "" {
+		meta = fmt.Sprintf(`,"entity_meta":{"watched":%s}`, watched)
+	}
+	body := fmt.Sprintf(
+		`{"protocolVersion":1,"schemaVersion":4,"result":{"id":%q,"title":%q,"owner":"me","assignee":"x","issue_type":"task","state":"open","updated_at":%q,"as_of":"2026-09-30T00:00:00Z"%s}}`,
+		id, title, "2026-09-30T00:00:00Z", meta,
+	)
+	f.write("show-"+id+".json", body)
+	f.write("held-"+id, "")
+}
+
+func (f *backendFixture) calls() []string {
+	f.t.Helper()
+	b, err := os.ReadFile(filepath.Join(f.dir, "calls.log"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		f.t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
+
+func (f *backendFixture) setBackend(id, backend string) {
+	f.t.Helper()
+	if err := f.seed.SetEntityColumns("o/r", "issue", id, &backend, nil); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func (f *backendFixture) history(id string) []store.ChangeRecord {
+	f.t.Helper()
+	h, err := f.seed.ListEntityHistory("o/r", "issue", id, 0)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return h
+}
+
+// T-8: refresh of an owning-backend entity reads the column and pins it; the
+// unwatched entity is hydrated and appends no row (the gate).
+func TestRefreshOwningBackendColumnPinsTheReadAndAppendsNoRowWhenUnwatched(t *testing.T) {
+	f := newBackendFixture(t, "PROJ-1")
+	f.setBackend("PROJ-1", "jira-a")
+	f.showJira("PROJ-1", "first", "")
+	before := f.entity("issue", "PROJ-1")
+
+	if _, err := runRefreshCmd(t, "issue", "PROJ-1"); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	calls := f.calls()
+	if len(calls) != 1 || calls[0] != "issue show PROJ-1 --fresh --backend jira-a" {
+		t.Fatalf("calls = %q, want exactly the pinned show", calls)
+	}
+	after := f.entity("issue", "PROJ-1")
+	if after.Version <= before.Version || after.Backend != "jira-a" {
+		t.Errorf("entity = %+v (was version %d), want a new version with backend jira-a", after, before.Version)
+	}
+	if h := f.history("PROJ-1"); len(h) != 1 {
+		t.Errorf("history = %d records, want only the seed record: an unwatched owning entity appends no row", len(h))
+	}
+}
+
+func TestRefreshNullColumnResolvesTheBackendFromTheConfiguredQueries(t *testing.T) {
+	f := newBackendFixture(t, "bd-5", "PROJ-2")
+	if err := f.seed.SetMeta("change_flow.watchset.issue.beads-q", `["bd-5"]`); err != nil {
+		t.Fatal(err)
+	}
+	f.write("show-bd-5.json", `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"bd-5","title":"t","updated_at":"2026-09-30T00:00:00Z","as_of":"2026-09-30T00:00:00Z"}}`)
+	if _, err := runRefreshCmd(t, "issue", "bd-5"); err != nil {
+		t.Fatalf("refresh bd-5: %v", err)
+	}
+	if calls := f.calls(); len(calls) != 1 || calls[0] != "issue show bd-5 --fresh --backend beads-a" {
+		t.Errorf("calls = %q, want the show pinned to the watch set's backend", calls)
+	}
+	if e := f.entity("issue", "bd-5"); e.Backend != "beads-a" {
+		t.Errorf("backend = %q, want beads-a", e.Backend)
+	}
+
+	// A ticket-shaped id in no watch set resolves to the single owning
+	// instance with no probe: the one call is the pinned read.
+	f.showJira("PROJ-2", "t", "")
+	if _, err := runRefreshCmd(t, "issue", "PROJ-2"); err != nil {
+		t.Fatalf("refresh PROJ-2: %v", err)
+	}
+	calls := f.calls()
+	if len(calls) != 2 || calls[1] != "issue show PROJ-2 --fresh --backend jira-a" {
+		t.Errorf("calls = %q, want one pinned read for PROJ-2 and no probe", calls)
+	}
+	if e := f.entity("issue", "PROJ-2"); e.Backend != "jira-a" {
+		t.Errorf("backend = %q, want jira-a", e.Backend)
+	}
+}
+
+func TestRefreshAnIDServedByTwoBackendsFailsWithErrAmbiguousBackend(t *testing.T) {
+	f := newBackendFixture(t, "bd-9")
+	if err := f.seed.SetMeta("change_flow.watchset.issue.beads-q", `["bd-9"]`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.seed.SetMeta("change_flow.watchset.issue.beads-q2", `["bd-9"]`); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runRefreshCmd(t, "issue", "bd-9")
+	if !errors.Is(err, changes.ErrAmbiguousBackend) || !strings.Contains(err.Error(), "bd-9") {
+		t.Fatalf("err = %v, want ErrAmbiguousBackend naming the id", err)
+	}
+	if out != "" {
+		t.Errorf("stdout = %q, want none", out)
+	}
+	if calls := f.calls(); len(calls) != 0 {
+		t.Errorf("calls = %q, want no read of an ambiguous id", calls)
+	}
+}
+
+// T-20: refresh --watch forwards --watch, sets watched in the same write, and
+// the first-observation row is appended and readable by ReadChanges; a repeat
+// appends no second added; a later content change on the now-watched entity
+// appends the classifier's kinds.
+func TestRefreshWatchForwardsTheOptionAndDeliversTheFirstRow(t *testing.T) {
+	f := newBackendFixture(t, "PROJ-1")
+	f.setBackend("PROJ-1", "jira-a")
+	f.showJira("PROJ-1", "first", "")
+	f.write("show-PROJ-1.watch.json", strings.Replace(readFile(t, filepath.Join(f.dir, "show-PROJ-1.json")), `"as_of"`, `"entity_meta":{"watched":true},"as_of"`, 1))
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	if _, err := f.seed.ReadChanges("c1", "issue", 10, now); err != nil {
+		t.Fatal(err)
+	}
+	base := len(f.history("PROJ-1"))
+
+	if _, err := runRefreshCmd(t, "issue", "PROJ-1", "--watch"); err != nil {
+		t.Fatalf("refresh --watch: %v", err)
+	}
+	if calls := f.calls(); len(calls) != 1 || calls[0] != "issue show PROJ-1 --fresh --backend jira-a --watch" {
+		t.Fatalf("calls = %q, want the pinned show carrying --watch", calls)
+	}
+	if e := f.entity("issue", "PROJ-1"); e.Watched == nil || !*e.Watched {
+		t.Errorf("watched = %v, want true from the same write", e.Watched)
+	}
+	h := f.history("PROJ-1")
+	if len(h) != base+1 || strings.Join(h[0].Kinds, ",") != "added" || h[0].Origin != refreshOrigin {
+		t.Fatalf("history = %+v, want one new added row at origin %q", h, refreshOrigin)
+	}
+	recs, err := f.seed.ReadChanges("c1", "issue", 10, now)
+	if err != nil || len(recs) != base+1 || strings.Join(recs[len(recs)-1].Kinds, ",") != "added" {
+		t.Fatalf("ReadChanges = %+v, %v; want the seed record then the added row", recs, err)
+	}
+
+	// A repeated --watch on an already-watched entity appends no second added.
+	if _, err := runRefreshCmd(t, "issue", "PROJ-1", "--watch"); err != nil {
+		t.Fatalf("repeat refresh --watch: %v", err)
+	}
+	if h2 := f.history("PROJ-1"); len(h2) != len(h) {
+		t.Errorf("history grew from %d to %d on a repeated --watch", len(h), len(h2))
+	}
+
+	// A watched entity whose content changed gets one row from the classifier.
+	f.showJira("PROJ-1", "second", "true")
+	if _, err := runRefreshCmd(t, "issue", "PROJ-1"); err != nil {
+		t.Fatalf("refresh after a change: %v", err)
+	}
+	h3 := f.history("PROJ-1")
+	if len(h3) != len(h)+1 || len(h3[0].Kinds) == 0 || h3[0].Kinds[0] == "added" {
+		t.Fatalf("history = %+v, want one new classified row after the content change", h3)
+	}
+}
+
+func TestRefreshWatchFlagExistsForIssueOnly(t *testing.T) {
+	if newRefreshCmd("issue").Flags().Lookup("watch") == nil {
+		t.Error("issue refresh has no --watch")
+	}
+	for _, typ := range []string{"pr", "thread"} {
+		if newRefreshCmd(typ).Flags().Lookup("watch") != nil {
+			t.Errorf("%s refresh has a --watch", typ)
+		}
+	}
+}
+
+func TestRefreshOwningEntityUnavailableIsATransientFailureAndWritesNothing(t *testing.T) {
+	f := newBackendFixture(t, "PROJ-1")
+	f.setBackend("PROJ-1", "jira-a")
+	f.showJira("PROJ-1", "first", "")
+	f.write("down", "")
+	before := f.entity("issue", "PROJ-1")
+	baseHist := len(f.history("PROJ-1"))
+
+	out, err := runRefreshCmd(t, "issue", "PROJ-1", "--watch")
+	if err == nil || exitCodeFor(err) != exitTotal || !errors.Is(err, gather.ErrUnavailable) {
+		t.Fatalf("err = %v (exit %d), want exit %d wrapping ErrUnavailable", err, exitCodeFor(err), exitTotal)
+	}
+	if out != "class=transient\n" || !strings.Contains(err.Error(), "unavailable") {
+		t.Errorf("stdout %q, err %q; want class=transient and an error naming unavailable", out, err)
+	}
+	after := f.entity("issue", "PROJ-1")
+	if after.Version != before.Version || after.Watched != nil || len(f.history("PROJ-1")) != baseHist {
+		t.Errorf("a failed refresh wrote: before %+v after %+v", before, after)
+	}
+
+	// The next run retries once the daemon is back.
+	if err := os.Remove(filepath.Join(f.dir, "down")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runRefreshCmd(t, "issue", "PROJ-1"); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+}
+
+func TestRefreshWatchProbesOwningInstancesWhenNothingNamesTheBackend(t *testing.T) {
+	f := newBackendFixture(t, "bd-7")
+	f.write("show-bd-7.json", `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"bd-7","title":"t","updated_at":"2026-09-30T00:00:00Z","as_of":"2026-09-30T00:00:00Z"}}`)
+	// Not ticket-shaped, in no watch set, held by no owning instance: the
+	// watch is ignored (no error) and the read stays unpinned.
+	if _, err := runRefreshCmd(t, "issue", "bd-7", "--watch"); err != nil {
+		t.Fatalf("refresh --watch: %v", err)
+	}
+	calls := f.calls()
+	if len(calls) != 2 || calls[0] != "issue show bd-7 --fresh --backend jira-a" || calls[1] != "issue show bd-7 --fresh" {
+		t.Errorf("calls = %q, want one probe and the unpinned read without --watch", calls)
+	}
+	if e := f.entity("issue", "bd-7"); e.Watched != nil {
+		t.Errorf("watched = %v, want unchanged", e.Watched)
 	}
 }

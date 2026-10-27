@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -720,5 +722,133 @@ func TestRunCmdThread_NotFoundForOtherChanges_StillFails(t *testing.T) {
 				t.Fatalf("run thread (%s, not_found): error = %q, want it to mention not_found", change, runErr.Error())
 			}
 		})
+	}
+}
+
+// hydrateJira runs hydrateJiraIssue against the backendFixture's store and
+// config through a fresh pipeline, with the delivery gate installed.
+func (f *backendFixture) hydrateJira(t *testing.T, id string, change gather.ChangeKind) error {
+	t.Helper()
+	st, err := deskStoreOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	installIssueGate(st, f.cfg)
+	return hydrateJiraIssue(context.Background(), pipeline.New(f.cfg, st), f.cfg, st, id, change)
+}
+
+func TestHydrateJiraIssueWritesTheBackendOfTheFirstOwningInstanceThatHoldsTheID(t *testing.T) {
+	f := newBackendFixture(t)
+	f.showJira("PROJ-3", "t", "")
+	if err := f.hydrateJira(t, "PROJ-3", gather.ChangeAdded); err != nil {
+		t.Fatalf("hydrateJiraIssue: %v", err)
+	}
+	calls := f.calls()
+	if len(calls) == 0 {
+		t.Fatal("no connector call")
+	}
+	for _, c := range calls {
+		if !strings.Contains(c, "--backend jira-a") {
+			t.Errorf("call %q is not pinned to the owning instance: no unpinned (bd-backed) read is allowed", c)
+		}
+	}
+	if !strings.HasPrefix(calls[0], "issue show PROJ-3 --fresh --backend jira-a") {
+		t.Errorf("first call = %q, want the pinned probe", calls[0])
+	}
+	e := f.entity("issue", "PROJ-3")
+	if e.Backend != "jira-a" || e.Version == 0 || e.HydratedAt == "" {
+		t.Errorf("entity = %+v, want a hydrated snapshot with backend jira-a", e)
+	}
+	if h := f.history("PROJ-3"); len(h) != 0 {
+		t.Errorf("history = %+v, want no change_log row from a hydration", h)
+	}
+}
+
+func TestHydrateJiraIssueAnIDNoOwningInstanceHoldsGetsTheNonOwningBackend(t *testing.T) {
+	f := newBackendFixture(t)
+	// Only the unpinned answer exists: jira-a answers not held.
+	f.write("show-PROJ-4.json", `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"PROJ-4","title":"t","updated_at":"2026-09-30T00:00:00Z","as_of":"2026-09-30T00:00:00Z"}}`)
+	if err := f.hydrateJira(t, "PROJ-4", gather.ChangeAdded); err != nil {
+		t.Fatalf("hydrateJiraIssue: %v", err)
+	}
+	calls := f.calls()
+	if len(calls) != 2 || calls[0] != "issue show PROJ-4 --fresh --backend jira-a" || strings.Contains(calls[1], "--backend") {
+		t.Errorf("calls = %q, want the owning probe, then today's unpinned read", calls)
+	}
+	if e := f.entity("issue", "PROJ-4"); e.Backend != "beads-a" {
+		t.Errorf("backend = %q, want the non-owning backend beads-a", e.Backend)
+	}
+}
+
+func TestHydrateJiraIssueUnavailableWritesNothingAndIsRetried(t *testing.T) {
+	f := newBackendFixture(t)
+	f.showJira("PROJ-5", "t", "")
+	f.write("down", "")
+	err := f.hydrateJira(t, "PROJ-5", gather.ChangeAdded)
+	if !errors.Is(err, gather.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+	if _, found, gerr := f.seed.GetEntity("o/r", "issue", "PROJ-5"); gerr != nil || found {
+		t.Fatalf("entity found=%v err=%v, want nothing written (no non-owning fallback on an unavailable probe)", found, gerr)
+	}
+	if err := os.Remove(filepath.Join(f.dir, "down")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.hydrateJira(t, "PROJ-5", gather.ChangeAdded); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if e := f.entity("issue", "PROJ-5"); e.Backend != "jira-a" {
+		t.Errorf("backend = %q after the retry, want jira-a", e.Backend)
+	}
+}
+
+func TestHydrateJiraIssueKeepsAStoredBackendAndSkipsTheProbe(t *testing.T) {
+	f := newBackendFixture(t, "PROJ-6")
+	f.setBackend("PROJ-6", "jira-a")
+	f.showJira("PROJ-6", "t", "")
+	if err := f.hydrateJira(t, "PROJ-6", gather.ChangeChanged); err != nil {
+		t.Fatalf("hydrateJiraIssue: %v", err)
+	}
+	if calls := f.calls(); len(calls) != 1 || calls[0] != "issue show PROJ-6 --fresh --backend jira-a" {
+		t.Errorf("calls = %q, want the one pinned read", calls)
+	}
+}
+
+func TestHydrateJiraIssueWithNoOwningInstanceKeepsTheUnpinnedPath(t *testing.T) {
+	f := newBackendFixture(t)
+	delete(f.cfg.Watch.Issue.Backends, "jira-q")
+	f.write("show-PROJ-8.json", `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"PROJ-8","title":"t","updated_at":"2026-09-30T00:00:00Z","as_of":"2026-09-30T00:00:00Z"}}`)
+	if err := f.hydrateJira(t, "PROJ-8", gather.ChangeAdded); err != nil {
+		t.Fatalf("hydrateJiraIssue: %v", err)
+	}
+	if calls := f.calls(); len(calls) != 1 || strings.Contains(calls[0], "--backend") {
+		t.Errorf("calls = %q, want one unpinned read", calls)
+	}
+	if e := f.entity("issue", "PROJ-8"); e.Backend != "" {
+		t.Errorf("backend = %q, want it left NULL when no owning backend is configured", e.Backend)
+	}
+}
+
+// A NULL-backend id that resolves to an owning backend is in the gate's
+// scope: a change row appended for it is withheld until it is watched.
+func TestHydrateJiraIssueANullBackendOwningIDIsGatedUntilWatched(t *testing.T) {
+	f := newBackendFixture(t, "PROJ-9")
+	st, err := deskStoreOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	installIssueGate(st, f.cfg)
+	e := f.entity("issue", "PROJ-9")
+	if e.Backend != "" {
+		t.Fatalf("seed backend = %q, want NULL", e.Backend)
+	}
+	base := len(f.history("PROJ-9"))
+	if _, err := st.WriteEntityStateWithLogFP(e, e.Version, "2026-10-01T00:00:00Z", true, nil, []string{"changed"}, "sync", "2026-10-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if h := f.history("PROJ-9"); len(h) != base {
+		t.Fatalf("history grew to %d for a NULL-backend owning id, want the row gated", len(h))
 	}
 }

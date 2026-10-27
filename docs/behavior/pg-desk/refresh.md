@@ -54,12 +54,12 @@ entity.
 
 ## Failure semantics and exit codes
 
-| Exit | Meaning                                                                                                  |
-| ---- | -------------------------------------------------------------------------------------------------------- |
-| `0`  | The entity was hydrated.                                                                                 |
-| `1`  | Any other error: bad arguments, an unresolvable reference, an old-schema store, a store or config error. |
-| `2`  | Hydration degraded for this entity: part of the detail read failed. The stale detail is kept.            |
-| `3`  | Hydration failed entirely, including an entity that is not found. The previous snapshot is kept.         |
+| Exit | Meaning                                                                                                                                                                                       |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | The entity was hydrated.                                                                                                                                                                      |
+| `1`  | Any other error: bad arguments, an unresolvable reference, an `issue` id served by watched queries of two different backends (nothing is read), an old-schema store, a store or config error. |
+| `2`  | Hydration degraded for this entity: part of the detail read failed. The stale detail is kept.                                                                                                 |
+| `3`  | Hydration failed entirely, including an entity that is not found. The previous snapshot is kept.                                                                                              |
 
 - On exit `2` and `3` the verb prints one line `class=<class>` on standard output (nothing else is
   written to standard output on those exits; the error text goes to standard error as before). The
@@ -76,7 +76,9 @@ entity.
   The connector's own wire code decides first, because its message text can say anything: a
   transient answer whose message mentions a missing repository is `transient`, never `not_found`.
   Exit `3` therefore still covers both a missing entity and a transient failure, and the class is how
-  they are told apart. Refresh defines only the exits `0` to `3`.
+  they are told apart. An `issue` whose backend's daemon answers `unavailable` (during the read or the
+  probe of the owning backends that `--watch` makes for an id nothing names) is therefore exit `3` with
+  class `transient`: nothing is written and the next run retries, with no retry loop in the command. Refresh defines only the exits `0` to `3`.
 
 - A failed or degraded refresh writes nothing: the previous snapshot stands, `hydrated_at` is
   unchanged, and the entity stays active and due, so a later refresh or sweep retries it (for `issue`,

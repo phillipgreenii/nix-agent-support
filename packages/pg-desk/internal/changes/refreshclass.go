@@ -1,9 +1,11 @@
 package changes
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
 )
 
@@ -39,6 +41,10 @@ func RefreshClass(err error, degraded string) string {
 			return RefreshClassDegraded
 		}
 		return ""
+	}
+	// The daemon-down wire error is transient whatever the message says.
+	if errors.Is(err, gather.ErrUnavailable) {
+		return RefreshClassTransient
 	}
 	msg := err.Error()
 	if m := wireCodeRe.FindStringSubmatch(msg); m != nil {

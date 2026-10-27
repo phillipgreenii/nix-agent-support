@@ -60,6 +60,25 @@ type EntityChangeOptions struct {
 	// removal confirmation read, --reset, the remote sweep) leaves list_fp
 	// untouched. The pipeline never derives it from the hydrated payload.
 	ListFP *string
+	// Backend, when non-empty (issue only), pins the hydration read to that
+	// backend instance (issue show <id> --fresh --backend <Backend>) and is
+	// written to the entity's backend column in the same transaction as the
+	// snapshot. The entity counts as owned by an owning backend when Backend
+	// (or, with no Backend, the stored column) names one of the configured
+	// owning instances. Empty keeps the unpinned read and the column as is.
+	Backend string
+	// Watch (issue only, needs Backend) makes the read also ask the backend
+	// to watch the entity (--watch), writes entity.watched = true in the same
+	// transaction, and records kind added instead of the classified kinds
+	// when the entity was not already watched, so the first-observation row
+	// passes the delivery gate. A repeat on an already-watched entity appends
+	// no second added.
+	Watch bool
+	// SnapshotOnly stores the snapshot, interpretation and derived links but
+	// appends no change_log row for this entity and no local record for any
+	// other (nil kinds): the write of an attention-rule hydration, not of a
+	// change.
+	SnapshotOnly bool
 
 	// beforeWrite, when set, runs once per compare-and-set attempt after the
 	// old snapshot is read and before the write (a test seam for a
@@ -124,7 +143,22 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 
 	// (1) gather and interpret: every error and non-write outcome returns
 	// before any store write.
-	result, err := ge.GatherEntity(ctx, entityID, change)
+	var result gather.GatherResult
+	var err error
+	switch {
+	case opts.Backend != "" || opts.Watch:
+		bg, ok := ge.(gather.BackendEntityGatherer)
+		if !ok || opts.Backend == "" {
+			return EntityChangeResult{}, fmt.Errorf("pipeline: %s %s: a backend-pinned read needs a backend and a backend-aware gatherer", entityType, entityID)
+		}
+		if opts.Watch {
+			result, err = bg.GatherEntityWatch(ctx, entityID, opts.Backend)
+		} else {
+			result, err = bg.GatherEntityOn(ctx, entityID, opts.Backend, change)
+		}
+	default:
+		result, err = ge.GatherEntity(ctx, entityID, change)
+	}
 	if err != nil {
 		return EntityChangeResult{}, fmt.Errorf("pipeline: gather %s %s: %w", entityType, entityID, err)
 	}
@@ -238,8 +272,13 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 			}
 		}
 		observed = old.Exists && old.Active
-		newSnap.OwningBackend = found && row.Backend != "" && slices.Contains(owningInstances, row.Backend)
+		backendNow := opts.Backend
+		if backendNow == "" && found {
+			backendNow = row.Backend
+		}
+		newSnap.OwningBackend = backendNow != "" && slices.Contains(owningInstances, backendNow)
 		old.OwningBackend = newSnap.OwningBackend
+		alreadyWatched := found && row.Watched != nil && *row.Watched
 
 		kindSet := map[string]bool{}
 		propagate = false
@@ -268,14 +307,29 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 			kinds = append(kinds, k)
 		}
 		sort.Strings(kinds)
+		if opts.Watch && !alreadyWatched {
+			kinds = []string{string(classify.KindAdded)}
+		}
+		if opts.SnapshotOnly {
+			kinds, propagate, otherLinks = nil, false, nil
+		}
 
 		if opts.beforeWrite != nil {
 			opts.beforeWrite(attempt)
 		}
-		v, err := p.store.WriteEntityStateWithLogFP(store.Entity{
+		wo := store.WriteOptions{Watched: result.Watched}
+		if opts.Backend != "" {
+			b := opts.Backend
+			wo.Backend = &b
+		}
+		if opts.Watch {
+			on := true
+			wo.Watched = &on
+		}
+		v, err := p.store.WriteEntityStateWithLogOpts(store.Entity{
 			Repo: repo, EntityType: entityType, EntityID: entityID,
 			Facts: string(factsJSON), AsOf: asOf, ContentHash: newSnap.ContentHash, HeadSHA: headSHA,
-		}, expected, at, true, opts.ListFP, kinds, origin, at)
+		}, expected, at, true, opts.ListFP, kinds, origin, at, wo)
 		if err == nil {
 			res.Kinds, res.Version, res.Written = kinds, v, true
 			break

@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/beadref"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
@@ -254,20 +256,106 @@ func runJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config,
 // A `removed` change re-reads an issue the store already holds (so the row
 // reflects the status or assignee that took it out of the watched set) and is
 // a no-op for one it does not.
+//
+// Backend (docket pg2-2qyyh.3): when the configuration has an owning backend,
+// no Jira entity keeps a NULL backend column. The id's backend is the stored
+// column, else (resolveJiraBackend) a non-owning watch set that holds it, else
+// the first owning instance whose backend-pinned read holds it, else the
+// non-owning agent tracker backend. An id held by an owning instance is read
+// with that pin and stored through the CAS entity write with the column set
+// and no change_log row; any other backend keeps the unpinned hydration and
+// gets its column written afterwards.
 func hydrateJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config, st *store.Store, ticketKey string, change gather.ChangeKind) error {
 	if len(cfg.WatchQueries(entityTypeIssue)) == 0 {
 		return nil
 	}
-	if change == gather.ChangeRemoved {
-		_, known, err := st.GetEntity(runRepo(cfg), entityTypeIssue, ticketKey)
-		if err != nil {
-			return fmt.Errorf("check entity known: %w", err)
+	repo := runRepo(cfg)
+	row, known, err := st.GetEntity(repo, entityTypeIssue, ticketKey)
+	if err != nil {
+		return fmt.Errorf("check entity known: %w", err)
+	}
+	if change == gather.ChangeRemoved && !known {
+		return nil
+	}
+	owning := cfg.OwningInstances(entityTypeIssue)
+	if len(owning) == 0 {
+		return p.RunGenericEntity(ctx, entityTypeIssue, ticketKey, change)
+	}
+	// An old-schema store has no backend column and no change-log write
+	// path: keep the unpinned hydration there.
+	if err := st.RequireNewSchema(); err != nil {
+		if errors.Is(err, store.ErrOldSchema) {
+			return p.RunGenericEntity(ctx, entityTypeIssue, ticketKey, change)
 		}
-		if !known {
-			return nil
+		return err
+	}
+
+	// No Jira entity keeps a NULL backend: resolve it and write the column.
+	backend := ""
+	if known {
+		backend = row.Backend
+	}
+	if backend == "" {
+		backend, err = resolveJiraBackend(ctx, cfg, st, ticketKey)
+		if err != nil {
+			return err
 		}
 	}
-	return p.RunGenericEntity(ctx, entityTypeIssue, ticketKey, change)
+	if !slices.Contains(owning, backend) {
+		// A backend that keeps no store (or none configured): today's
+		// unpinned hydration, then the column.
+		if err := p.RunGenericEntity(ctx, entityTypeIssue, ticketKey, change); err != nil {
+			return err
+		}
+		if backend == "" || (known && row.Backend == backend) {
+			return nil
+		}
+		if err := st.SetEntityColumns(repo, entityTypeIssue, ticketKey, &backend, nil); err != nil {
+			return fmt.Errorf("write backend %s: %w", backend, err)
+		}
+		return nil
+	}
+
+	// An owning backend: one backend-pinned read, stored as a snapshot with
+	// the backend column in the same write and no change_log row.
+	res, err := p.RunEntityChange(ctx, entityTypeIssue, ticketKey, change, pipeline.EntityChangeOptions{
+		Origin:       refreshOrigin,
+		Backend:      backend,
+		SnapshotOnly: true,
+	})
+	if err != nil {
+		return err
+	}
+	if res.Degraded != "" {
+		return fmt.Errorf("issue %s read from %s was degraded (%s): nothing written, retry", ticketKey, backend, res.Degraded)
+	}
+	return nil
+}
+
+// resolveJiraBackend names the backend of a ticket key whose entity has no
+// backend column yet. A non-owning watched query whose persisted watch set
+// holds the id names its instance without any call; otherwise the owning
+// instances are probed in order with a backend-pinned read (a daemon read,
+// never a bd call), the first that holds the id wins, and an id none holds
+// belongs to the non-owning agent tracker backend ("" when none is
+// configured). A daemon that is unavailable fails the probe with an error
+// naming unavailable: nothing is written and the next run retries.
+func resolveJiraBackend(ctx context.Context, cfg *config.Config, st *store.Store, ticketKey string) (string, error) {
+	inst, owning, err := changes.ResolveIssueBackend(cfg, st, ticketKey)
+	if err != nil {
+		return "", err
+	}
+	if inst != "" && !owning {
+		return inst, nil
+	}
+	held, ok, err := changes.ProbeOwning(ctx, gather.NewGatherer(cfg, st), cfg, ticketKey)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return held, nil
+	}
+	return cfg.AgentTrackerBackend, nil
 }
 
 // runRepo returns the single Phase-9 configured repository's remote, or ""

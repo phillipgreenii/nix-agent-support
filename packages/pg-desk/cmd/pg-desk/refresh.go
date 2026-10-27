@@ -43,11 +43,20 @@ func init() {
 // entity through RunEntityChange [design 6.9, 9.12]. It is a typed verb with
 // no old-schema counterpart, so it refuses an old-schema store.
 func newRefreshCmd(entityType string) *cobra.Command {
-	return &cobra.Command{
+	var watch bool
+	cmd := &cobra.Command{
 		Use:   "refresh <id>",
 		Short: fmt.Sprintf("Re-hydrate one %s from pg-connector", entityType),
 		Long: fmt.Sprintf(`Hydrate exactly one %[1]s through the entity-change pipeline: read it from
 pg-connector, classify the change against the previous snapshot, and log it.
+
+For an issue the read is pinned to its backend (the stored backend column, else
+the configured watched queries, else the single owning backend for an id that
+matches ticket_patterns); an id served by queries of two different backends is
+refused with exit 1 before any read. --watch (issue only) also asks that
+backend to watch the one entity and marks it watched in the same write, so its
+first row is delivered; without it an unwatched owning issue is hydrated and
+appends no row.
 
 Exit codes: 0 hydrated; 2 hydration degraded (the previous snapshot is kept
 and the entity stays due); 3 hydration failed entirely (previous snapshot
@@ -61,12 +70,16 @@ unauthenticated (the source refused the credentials), degraded (exit 2: part
 of the read failed) or hydrate_error (any other failure).`, entityType),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRefresh(cmd, entityType, args[0])
+			return runRefresh(cmd, entityType, args[0], watch)
 		},
 	}
+	if entityType == entityTypeIssue {
+		cmd.Flags().BoolVar(&watch, "watch", false, "also ask the issue's backend to watch this one entity and mark it watched in the same write, so its first row is delivered (ignored for a backend that keeps no store)")
+	}
+	return cmd
 }
 
-func runRefresh(cmd *cobra.Command, entityType, ref string) error {
+func runRefresh(cmd *cobra.Command, entityType, ref string, watch bool) error {
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("refresh: load config: %w", err)
@@ -82,7 +95,12 @@ func runRefresh(cmd *cobra.Command, entityType, ref string) error {
 	defer func() { _ = st.Close() }()
 	cmd.SilenceUsage = true
 
-	res, err := refreshEntity(cmd.Context(), cfg, st, entityType, id)
+	res, err := refreshEntityWatch(cmd.Context(), cfg, st, entityType, id, watch)
+	if errors.Is(err, changes.ErrAmbiguousBackend) {
+		// Not a hydration outcome: the id cannot be pinned to one backend, so
+		// nothing was read. A plain error (exit 1) names the id.
+		return fmt.Errorf("refresh: %s %s: %w", entityType, id, err)
+	}
 	if class := changes.RefreshClass(err, res.Degraded); class != "" {
 		// The machine-readable class goes to standard output, ahead of the
 		// error text main prints to standard error.
@@ -121,13 +139,53 @@ func notFoundLoud(err error) error {
 // it). A failed or degraded read writes nothing: the previous snapshot stands
 // and the entity stays active and due.
 func refreshEntity(ctx context.Context, cfg *config.Config, st *store.Store, entityType, entityID string) (pipeline.EntityChangeResult, error) {
+	return refreshEntityWatch(ctx, cfg, st, entityType, entityID, false)
+}
+
+// refreshEntityWatch is refreshEntity with the one-off watch of `issue
+// refresh --watch`. For an issue it first resolves the backend (the entity's
+// backend column, else the configured watched queries, else the single owning
+// instance for an id matching ticket_patterns) and pins the read to it, so a
+// Jira id never costs a call to another backend first. An ambiguous id fails
+// with changes.ErrAmbiguousBackend before any read. The pinned instance is
+// also written to the backend column in the hydration write.
+//
+// watch asks the backend to watch the entity and marks it watched in the SAME
+// write. With no resolved backend, the owning instances are probed for the
+// id; an id none holds is read unpinned and the watch is ignored, as it is for
+// a backend that keeps no store. A daemon that answers unavailable while
+// probing or reading is returned as an error wrapping gather.ErrUnavailable
+// (class transient): nothing is written and the next run retries.
+func refreshEntityWatch(ctx context.Context, cfg *config.Config, st *store.Store, entityType, entityID string, watch bool) (pipeline.EntityChangeResult, error) {
 	if cfg == nil {
 		return pipeline.EntityChangeResult{}, errors.New("refresh: no config")
 	}
-	res, err := newRefreshHydrator(cfg, st).RunEntityChange(ctx, entityType, entityID, refreshChangeKind, pipeline.EntityChangeOptions{
+	opts := pipeline.EntityChangeOptions{
 		Origin:             refreshOrigin,
 		ThreadActiveWindow: cfg.ThreadActiveWindow(),
-	})
+	}
+	if entityType == entityTypeIssue {
+		instance, owning, err := changes.ResolveIssueBackend(cfg, st, entityID)
+		if err != nil {
+			return pipeline.EntityChangeResult{}, err
+		}
+		if instance == "" && watch {
+			// Nothing in the store or config names a backend: ask the owning
+			// instances (a daemon read, never a bd call) so --watch can reach
+			// the one that holds the id.
+			var held bool
+			instance, held, err = changes.ProbeOwning(ctx, gather.NewGatherer(cfg, st), cfg, entityID)
+			if err != nil {
+				res := pipeline.EntityChangeResult{}
+				changes.RecordHydration(st, entityType, entityID, res, err)
+				return res, err
+			}
+			owning = held
+		}
+		opts.Backend = instance
+		opts.Watch = watch && owning
+	}
+	res, err := newRefreshHydrator(cfg, st).RunEntityChange(ctx, entityType, entityID, refreshChangeKind, opts)
 	changes.RecordHydration(st, entityType, entityID, res, err)
 	return res, err
 }
