@@ -1,4 +1,4 @@
-package serve
+package parentwatch
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 // daemon whose supervisor vanished without a signal (a test binary killed by a
 // timeout, a SIGKILLed runner) stops by itself instead of living on, orphaned.
 //
-// interval <= 0 (production: Hooks.ParentWatch is never set) returns ctx
+// interval <= 0 (production: a daemon's ParentWatch hook is never set) returns ctx
 // unchanged with a no-op cancel and starts nothing. getppid is os.Getppid in
 // the daemon; a test injects its own.
 func ExitWithParent(ctx context.Context, interval time.Duration, getppid func() int) (context.Context, context.CancelFunc) {

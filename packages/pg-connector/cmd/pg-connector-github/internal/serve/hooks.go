@@ -25,7 +25,7 @@ type Hooks struct {
 	// SweepInterval replaces the 10-minute expiry sweep.
 	SweepInterval time.Duration
 	// ParentWatch makes the daemon drain and exit when its parent process
-	// ends, checking this often (see ExitWithParent). A test harness sets it so
+	// ends, checking this often (see parentwatch.ExitWithParent). A test harness sets it so
 	// a daemon whose test binary was killed without running its cleanups (a
 	// timeout, SIGKILL) cannot outlive it. Production never sets it: the
 	// supervisor's own death must not stop a deployed daemon.

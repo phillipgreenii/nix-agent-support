@@ -13,11 +13,11 @@ import (
 )
 
 func TestParseHooks(t *testing.T) {
-	h, err := serve.ParseHooks("retry_delay=1s, poll_interval=20ms,migration_delay=2s,sweep_interval=3m")
+	h, err := serve.ParseHooks("retry_delay=1s, poll_interval=20ms,migration_delay=2s,sweep_interval=3m,parent_watch=250ms")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := serve.Hooks{RetryDelay: time.Second, PollInterval: 20 * time.Millisecond, MigrationDelay: 2 * time.Second, SweepInterval: 3 * time.Minute}
+	want := serve.Hooks{RetryDelay: time.Second, PollInterval: 20 * time.Millisecond, MigrationDelay: 2 * time.Second, SweepInterval: 3 * time.Minute, ParentWatch: 250 * time.Millisecond}
 	if h != want {
 		t.Errorf("hooks = %+v, want %+v", h, want)
 	}

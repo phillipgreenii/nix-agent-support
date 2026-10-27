@@ -53,6 +53,10 @@ const Instance = config.DefaultInstance
 // SupervisorLabel is the label of the rendered config's supervisor entry.
 const SupervisorLabel = "com.example.jira-daemon"
 
+// ParentWatchHook is the serve hook every harness-built binary carries: the
+// daemon exits when the process that started it is gone.
+const ParentWatchHook = "parent_watch=250ms"
+
 // Options configure a daemon.
 type Options struct {
 	// Config keys replace the defaults of the rendered config (top level).
@@ -101,9 +105,15 @@ type Daemon struct {
 func Binary(t testing.TB, hooks, clientBudget string) string {
 	t.Helper()
 	var flags []string
+	// Every daemon the harness starts drains and exits when its parent (the test
+	// process) ends, however it ends: t.Cleanup does not run when the test
+	// binary is killed (a timeout, SIGKILL), and an orphaned daemon would then
+	// live on for days (pg2-krpw80).
 	if hooks != "" {
-		flags = append(flags, "-X main.serveHooks="+hooks)
+		hooks += ","
 	}
+	hooks += ParentWatchHook
+	flags = append(flags, "-X main.serveHooks="+hooks)
 	if clientBudget != "" {
 		flags = append(flags, "-X main.clientBudgetOverride="+clientBudget)
 	}
