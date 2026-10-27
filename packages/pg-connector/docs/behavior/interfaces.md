@@ -890,6 +890,32 @@ flowchart LR
   A caller that keeps its own list of the queries it treats as watched SHOULD compare it with
   `queries` when it starts and report a difference as a configuration error, rather than choose
   between the two lists.
+- **`INTF-WIRE-HEALTH-1`** <!-- uuid: b216faae-31ba-4add-be36-9f88ef61b876 --> **The caller-facing
+  `health` verb.** `pg-connector <type> health [--backend <binary>]` returns, for each backend it
+  queries, that backend's own `status` document. Until this verb the `status` op reached an operator
+  only as the one-line health rows of `auth status` and `config validate`; no caller could read the
+  document, and so none could learn a query's baseline: `queries[].baseline_at` once the baseline is
+  stored, `queries[].baseline_open_age_seconds` (measured from daemon start) while it is not. It is a
+  **fan-out** read like `capabilities` (`--backend` pins it to one backend; the exit codes are the
+  fan-out scheme's, `0`/`2`/`3`), and it writes nothing to the ledger or the cache. The answer is
+
+  ```json
+  {
+    "sources": [
+      { "source": "<backend>", "status": "succeeded", "count": 1, "reason": "" }
+    ],
+    "backends": [{ "backend": "<backend>", "status": { "health": "healthy" } }]
+  }
+  ```
+
+  where `status` is exactly the document the backend answered, never re-encoded or summarised, so a
+  later per-backend fact needs no umbrella change. A backend that does not offer `status` contributes
+  a `disabled` `sources[]` row (reason `status op not offered`, counted healthy in the exit code) and
+  NO `backends` entry; a backend whose `status` call failed contributes a `degraded` row with its
+  reason and NO `backends` entry (`INV-OUT-1`). A daemon-backed backend answers `status` with its
+  daemon down by degrading to a local report, so an outage is visible as the document's `health`, not
+  as a failed read. An unknown `--backend` name fails `invalid_argument` with no backend call.
+
 - **`INTF-WIRE-WATCH-1`** <!-- uuid: e812a808-4466-4101-bf98-f184dee46f57 --> **The `--watch`
   option on `show`.** `pg-connector issue show <id> [--backend <binary>] [--watch]` and
   `pg-connector pr show <id> [--backend <binary>] [--watch]` are each a lookup of

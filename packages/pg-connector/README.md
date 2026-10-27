@@ -515,7 +515,9 @@ normalised content, and the rules are:
 **Where a consumer learns a query's baseline time.** The feed wire's `sources_freshness[]` carries only `query`,
 `last_success_at` and `last_error`; the baseline marker time is NOT on it. A consumer that must know whether a query's
 baseline exists, or for how long it has been open, MUST read the `status` op: `queries[].baseline_at` once the
-baseline is stored, `queries[].baseline_open_age_seconds` (measured from daemon start) while it is not. This was
+baseline is stored, `queries[].baseline_open_age_seconds` (measured from daemon start) while it is not. The umbrella's
+`pg-connector <type> health [--backend <name>]` verb returns each backend's own `status` document unmodified
+(`INTF-WIRE-HEALTH-1`), so a caller reads those members through it. This was
 decided against adding `baseline_at` to the wire (bead `pg2-sdmhx`): `SourceFreshness` is the one shared type behind
 the GitHub daemon's `pr` and `ci` wires and the generic `ChangesResult`, so a new field would change those wires and
 their schema versions for no consumer need; the only consumer of the baseline (the open-too-long doctor gate) needs the
