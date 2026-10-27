@@ -1168,7 +1168,9 @@ func (p *Pipeline) factsChanged(entityType, entityID string, facts gather.Facts)
 //
 //   - every `as_of` key, at any depth: a re-read stamps a new one;
 //   - `served_from` and `age_seconds` on pr_show and on each jira_issues
-//     entry: the connector's read-through-cache provenance;
+//     entry: the connector's read-through-cache provenance; and each
+//     jira_issues entry's `entity_meta`, which can flip without a content
+//     change;
 //   - pr_show `mergeable` unless CONFLICTING and `merge_state_status` unless
 //     DIRTY: GitHub recomputes mergeability lazily and reports UNKNOWN in
 //     between, so only a conflict starting or stopping counts (the same rule
@@ -1215,6 +1217,7 @@ func normalizeVolatile(facts map[string]any) {
 			if issue, ok := raw.(map[string]any); ok {
 				delete(issue, "served_from")
 				delete(issue, "age_seconds")
+				delete(issue, "entity_meta")
 			}
 		}
 	}

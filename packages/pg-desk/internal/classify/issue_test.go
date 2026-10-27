@@ -160,3 +160,25 @@ func TestIssueAbsentIssueDepsNeverYieldsDepsChangedByItself(t *testing.T) {
 		t.Fatalf("issue_deps appearing yielded %v, want empty", got)
 	}
 }
+
+// The pipeline hands the classifier a normalised payload (no updated_at) and
+// the raw timestamp in Snapshot.Updated; the beads comments proxy reads it
+// from there, and an Updated-only difference is not "identical".
+func TestIssueCommentsProxyReadsSnapshotUpdated(t *testing.T) {
+	payload := json.RawMessage(`{"issue_show":{"id":"iss-1","state":"open","title":"t"}}`)
+	snap := func(updated string) Snapshot {
+		return Snapshot{Type: "issue", ID: "iss-1", Exists: true, Active: true, Payload: payload, Updated: updated}
+	}
+	if got := issueKinds(snap("2026-09-30T00:00:00Z"), snap("2026-09-30T05:00:00Z")); !reflect.DeepEqual(got, []Kind{KindCommentsChanged}) {
+		t.Errorf("updated advanced alone: kinds = %v, want [comments_changed]", got)
+	}
+	if got := issueKinds(snap("2026-09-30T05:00:00Z"), snap("2026-09-30T00:00:00Z")); len(got) != 0 {
+		t.Errorf("updated moved backwards: kinds = %v, want none", got)
+	}
+	if got := issueKinds(snap("2026-09-30T00:00:00Z"), snap("2026-09-30T00:00:00Z")); len(got) != 0 {
+		t.Errorf("identical snapshots: kinds = %v, want none", got)
+	}
+	if got := issueKinds(snap(""), snap("")); len(got) != 0 {
+		t.Errorf("no timestamps: kinds = %v, want none", got)
+	}
+}

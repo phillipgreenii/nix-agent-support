@@ -59,8 +59,14 @@ func Classify(old, new Snapshot) []Record {
 	return normalize(c.Classify(old, new), new.Degraded)
 }
 
+// identical compares the payloads, the decorations and Updated. Updated is
+// the raw issue_show.updated_at, which the normalised issue payload no longer
+// carries: it is compared so the beads comments proxy (updated_at advancing
+// alone) still reaches the issue classifier. It is "" on both sides for every
+// other type.
 func identical(old, new Snapshot) bool {
-	return bytes.Equal(old.Payload, new.Payload) && bytes.Equal(old.Decorations, new.Decorations)
+	return bytes.Equal(old.Payload, new.Payload) && bytes.Equal(old.Decorations, new.Decorations) &&
+		old.Updated == new.Updated
 }
 
 // normalize drops removed/closed when degraded, de-duplicates by kind and

@@ -27,6 +27,10 @@ const (
 	// for OTHER entities (link and propagation records).
 	localChangeOrigin = "pg-desk"
 
+	// issueEntityType is the entity type whose snapshot comparison is
+	// normalised (NormalizeIssuePayload).
+	issueEntityType = "issue"
+
 	// derivedOriginPrefix and legacyDerivedOrigin pick the rows the extractors
 	// own out of an entity's links: external and legacy rows are never
 	// diffed, so they are never reported as removed.
@@ -149,9 +153,20 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 	if asOf == "" {
 		asOf = interp.AsOf
 	}
+	// An issue entity is compared and hashed by its NORMALISED payload (the
+	// volatile fields dropped, INV-ICD-6/7); the stored entity.facts stays the
+	// RAW facts. Snapshot.Updated carries the raw issue_show.updated_at, which
+	// normalisation drops.
+	comparePayload := factsJSON
+	var newUpdated string
+	if entityType == issueEntityType {
+		comparePayload = issueCompareBytes(factsJSON)
+		newUpdated = issueUpdatedAt(factsJSON)
+	}
 	newSnap := classify.Snapshot{
 		Type: entityType, ID: entityID, Exists: true, Active: true,
-		Payload: factsJSON, AsOf: asOf, ContentHash: contentHash(factsJSON), HeadSHA: headSHA,
+		Payload: comparePayload, AsOf: asOf, ContentHash: contentHash(comparePayload), HeadSHA: headSHA,
+		Updated: newUpdated,
 	}
 	origin := opts.Origin
 	if origin == "" {
@@ -207,6 +222,10 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 			if !opts.ForceReconcile && !(row.Version == 0 && row.HydratedAt == "") {
 				old.Exists = true
 				old.Payload = []byte(row.Facts)
+				if entityType == issueEntityType {
+					old.Updated = issueUpdatedAt(old.Payload)
+					old.Payload = issueCompareBytes(old.Payload)
+				}
 				old.AsOf, old.ContentHash, old.HeadSHA = row.AsOf, row.ContentHash, row.HeadSHA
 			}
 		}

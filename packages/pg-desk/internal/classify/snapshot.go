@@ -29,6 +29,10 @@ type Snapshot struct {
 	AsOf        string
 	ContentHash string
 	HeadSHA     string
+	// Updated is the raw issue_show.updated_at of an issue snapshot ("" when
+	// absent or for any other type). The payload handed to the classifier is
+	// normalised (updated_at dropped), so the timestamp travels here.
+	Updated string
 	// Decorations is the entity's serialized interpretation row; may be empty.
 	Decorations json.RawMessage
 }

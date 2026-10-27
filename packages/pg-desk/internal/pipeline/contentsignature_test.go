@@ -109,6 +109,9 @@ func TestContentSignature_UnchangedPRIsStableAcrossGathers(t *testing.T) {
 			d.jira["ABC-1"].(map[string]any)["served_from"] = "cache"
 			d.jira["ABC-1"].(map[string]any)["age_seconds"] = 90
 		},
+		"entity_meta flips on a ticket read": func(d *sigDoc) {
+			d.jira["ABC-1"].(map[string]any)["entity_meta"] = map[string]any{"watched": true}
+		},
 		"mergeable UNKNOWN flap": func(d *sigDoc) {
 			d.show["mergeable"], d.show["merge_state_status"] = "UNKNOWN", "UNKNOWN"
 		},

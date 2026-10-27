@@ -140,7 +140,7 @@ func (issueClassifier) Classify(old, new Snapshot) []Record {
 		if !reflect.DeepEqual(o.deps, n.deps) {
 			kinds = append(kinds, KindDepsChanged)
 		}
-		if issueCommentsProxy(o.show, n.show) {
+		if issueCommentsProxy(o.show, n.show, old.Updated, new.Updated) {
 			kinds = append(kinds, KindCommentsChanged)
 		}
 	}
@@ -239,10 +239,18 @@ func decodeIssueFacts(payload json.RawMessage) issueView {
 }
 
 // issueCommentsProxy reports whether updated_at advanced while every other
-// field, ignoring the read-time as_of and stale, is unchanged.
-func issueCommentsProxy(oldShow, newShow map[string]any) bool {
-	oldAt, _ := oldShow["updated_at"].(string)
-	newAt, _ := newShow["updated_at"].(string)
+// field, ignoring the read-time as_of and stale, is unchanged. The timestamps
+// come from the snapshots' Updated (the pipeline hands over a normalised
+// payload without updated_at); a payload-embedded updated_at is the fallback
+// for a snapshot built without Updated.
+func issueCommentsProxy(oldShow, newShow map[string]any, oldUpdated, newUpdated string) bool {
+	oldAt, newAt := oldUpdated, newUpdated
+	if oldAt == "" {
+		oldAt, _ = oldShow["updated_at"].(string)
+	}
+	if newAt == "" {
+		newAt, _ = newShow["updated_at"].(string)
+	}
 	if !issueAdvanced(oldAt, newAt) {
 		return false
 	}
