@@ -24,10 +24,16 @@ type Hooks struct {
 	MigrationDelay time.Duration
 	// SweepInterval replaces the 10-minute expiry sweep.
 	SweepInterval time.Duration
+	// ParentWatch makes the daemon drain and exit when its parent process
+	// ends, checking this often (see ExitWithParent). A test harness sets it so
+	// a daemon whose test binary was killed without running its cleanups (a
+	// timeout, SIGKILL) cannot outlive it. Production never sets it: the
+	// supervisor's own death must not stop a deployed daemon.
+	ParentWatch time.Duration
 }
 
 // ParseHooks reads "key=duration,key=duration" (keys: viewer_interval,
-// retry_delay, poll_interval, migration_delay, sweep_interval). The empty
+// retry_delay, poll_interval, migration_delay, sweep_interval, parent_watch). The empty
 // string is the zero Hooks.
 func ParseHooks(s string) (Hooks, error) {
 	var h Hooks
@@ -55,6 +61,8 @@ func ParseHooks(s string) (Hooks, error) {
 			h.MigrationDelay = d
 		case "sweep_interval":
 			h.SweepInterval = d
+		case "parent_watch":
+			h.ParentWatch = d
 		default:
 			return Hooks{}, fmt.Errorf("serve hooks: unknown key %q", k)
 		}

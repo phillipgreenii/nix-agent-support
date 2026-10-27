@@ -207,13 +207,13 @@ func TestOriginTheRetryGuardStopsARetryThatWouldSpendBelowTheReserve(t *testing.
 }
 
 func TestParseHooks(t *testing.T) {
-	h, err := ParseHooks("viewer_interval=300ms, retry_delay=1s,poll_interval=50ms,migration_delay=2s,sweep_interval=1m")
+	h, err := ParseHooks("viewer_interval=300ms, retry_delay=1s,poll_interval=50ms,migration_delay=2s,sweep_interval=1m,parent_watch=250ms")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := Hooks{
 		ViewerInterval: 300 * time.Millisecond, RetryDelay: time.Second, PollInterval: 50 * time.Millisecond,
-		MigrationDelay: 2 * time.Second, SweepInterval: time.Minute,
+		MigrationDelay: 2 * time.Second, SweepInterval: time.Minute, ParentWatch: 250 * time.Millisecond,
 	}
 	if h != want {
 		t.Errorf("got %+v, want %+v", h, want)

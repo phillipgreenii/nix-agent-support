@@ -745,6 +745,16 @@ the real `go` tool that the tag splits every integration package and that both b
 single-process test is a unit test even when it is real (a `git` fixture repo, an in-process serve
 loop, the re-exec-the-test-binary helper process).
 
+A daemon a test starts MUST NOT outlive the test process (bead `pg2-qupkv0`: `t.Cleanup` does not
+run when the test binary is killed by a timeout or SIGKILL, so daemons were orphaned for days). Every
+`pg-connector-github` binary the `servetest` harness builds, and the re-exec'd serve in
+`main_test.go`, carries the link-time serve hook `parent_watch=250ms`: the daemon polls its parent pid
+and drains like a SIGTERM when it changes (`serve.ExitWithParent`). Shipped builds never set the hook,
+so a deployed daemon is unaffected. A new test that starts the daemon by another route MUST build it
+through `servetest.Binary` (or add `servetest.ParentWatchHook` to its `serveHooks`).
+`TestDaemonExitsWhenItsParentIsKilled` (integration tier) is the regression test. The Jira daemon's
+own `servetest` copy does not have the hook yet.
+
 The scheduler/governor/change-engine load test
 (`cmd/pg-connector-github/internal/loadtest`) is NOT part of that run. It simulates nineteen
 minutes of fake time over 150 pull requests and takes tens of minutes under `-race`, so it is an

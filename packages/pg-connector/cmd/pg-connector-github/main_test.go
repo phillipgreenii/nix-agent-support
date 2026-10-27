@@ -20,6 +20,9 @@ const reexecEnv = "PG_CONNECTOR_GITHUB_TEST_REEXEC"
 
 func TestMain(m *testing.M) {
 	if os.Getenv(reexecEnv) == "1" {
+		// A re-exec'd serve whose test process dies uncleanly must not outlive
+		// it (pg2-qupkv0): same hook the servetest-built binaries carry.
+		serveHooks = servetest.ParentWatchHook
 		main() // exits the process
 		return
 	}

@@ -47,5 +47,10 @@ func serveWith(ctx context.Context, cfg *config.Config, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pg-connector-github serve: %v\n", err)
 		return exitServe
 	}
+	// Test builds only (hooks.ParentWatch): drain when the parent ends, so a
+	// daemon whose test process was killed without running its cleanups does not
+	// outlive it (pg2-qupkv0). A zero ParentWatch (every shipped build) is inert.
+	ctx, stopWatch := serve.ExitWithParent(ctx, hooks.ParentWatch, os.Getppid)
+	defer stopWatch()
 	return serve.Run(ctx, serve.Options{Config: cfg, Version: Version, Stderr: stderr, Hooks: hooks})
 }
