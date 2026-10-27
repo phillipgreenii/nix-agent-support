@@ -86,6 +86,10 @@ type scenarioOpts struct {
 	// ackEarly makes the consumer acknowledge the log head instead of the
 	// poll's NextSeq (mutation c).
 	ackEarly bool
+	// restPerHour overrides the REST core cap (the harness's 1,500 an hour) when
+	// set: the cap mutation lowers it so that ten times it is exceeded in minutes
+	// instead of in the better part of an hour.
+	restPerHour int
 
 	// The tracked-set scenario (see TestTrackedSetLoad); the zero values are
 	// the default scenario. prs and members override nPRs and nMembers;
@@ -523,6 +527,13 @@ type harness struct {
 
 	// stats of the driver, for the summary line
 	stepCalls, batches, released int
+	// where the driver's REAL time went besides the daemon's own work: spinning in
+	// quiesce (spins, and the real time of the spinning calls) and blocked in the
+	// pump's select waiting for the worker to finish or reach the origin.
+	quiesceSpins int
+	quiesceReal  time.Duration
+	pumpReal     time.Duration
+	started      time.Time // real time of the start of run, for the progress lines
 
 	// releaseAll lets a parked origin call go before its due time (the end of
 	// the run).
@@ -586,6 +597,9 @@ func newHarness(t *testing.T, o scenarioOpts) *harness {
 	// the GraphQL cap, the reserve, the background share and the REST search cap
 	// are the defaults.
 	h.cfg.RESTRequestsPerHour = 1500
+	if o.restPerHour > 0 {
+		h.cfg.RESTRequestsPerHour = o.restPerHour
+	}
 	h.cfg.PR.Queries = map[string]schema.QueryDef{}
 	for n := 0; n < 11; n++ {
 		h.queryNames = append(h.queryNames, queryName(n))
@@ -854,8 +868,10 @@ func (h *harness) pump() {
 		}
 		p := h.gate.first()
 		if p == nil {
+			waited := time.Now()
 			select {
 			case <-h.worker:
+				h.pumpReal += time.Since(waited)
 				h.worker = nil
 				// A call whose flight just finished runs on, locally, until it
 				// returns or queues the next one: let it, so it never overlaps the
@@ -864,6 +880,7 @@ func (h *harness) pump() {
 					h.quiesce(c)
 				}
 			case <-h.gate.arrived:
+				h.pumpReal += time.Since(waited)
 			case <-time.After(stallLimit):
 				h.t.Fatal("loadtest: the scheduler's worker neither finished nor reached the origin within " + stallLimit.String() + " of real time")
 			}
@@ -930,14 +947,20 @@ func (h *harness) quiet(c *call) bool {
 // quiesce waits, in real time, until the call is quiet: its goroutine does only
 // local store work between its flights, so it always gets there.
 func (h *harness) quiesce(c *call) {
-	deadline := time.Now().Add(30 * time.Second)
+	if h.quiet(c) {
+		return // the common case: nothing to wait for, and nothing to count
+	}
+	begin := time.Now()
+	deadline := begin.Add(30 * time.Second)
 	for !h.quiet(c) {
 		if time.Now().After(deadline) {
 			h.t.Fatalf("loadtest: the %s call for %s neither returned nor queued a flight within 30 s of real time", c.kind, c.node)
 		}
+		h.quiesceSpins++
 		runtime.Gosched()
 		time.Sleep(20 * time.Microsecond)
 	}
+	h.quiesceReal += time.Since(begin)
 }
 
 // settleCalls records the wait of every call that has returned.
@@ -995,6 +1018,7 @@ func (h *harness) sweep(now time.Time) {
 // run drives the scenario to its end and collects the result.
 func (h *harness) run() *result {
 	h.start()
+	h.started = time.Now()
 	ticks := int(h.opt.duration / tick)
 	for k := 1; k <= ticks; k++ {
 		h.clk.Advance(tick)
@@ -1009,10 +1033,20 @@ func (h *harness) run() *result {
 			h.sample()
 		}
 		h.cons.step()
+		if k%progressEvery == 0 {
+			// Streamed under -v: a run that the go test timeout kills shows how far it
+			// got, and a stalled one shows where it stopped, instead of only a goroutine
+			// dump at the timeout.
+			h.t.Logf("progress: fake %s of %s, real %s, %d batches", time.Duration(k)*tick, h.opt.duration, time.Since(h.started).Round(time.Second), h.batches)
+		}
 	}
 	h.finish()
 	return h.collect()
 }
+
+// progressEvery is the number of ticks between progress lines: two minutes of
+// fake time.
+const progressEvery = int(2 * time.Minute / tick)
 
 // finish lets everything in flight end: the origin answers at once, every call
 // returns, a last sweep ends the rows past their deadline, and the consumer

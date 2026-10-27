@@ -85,11 +85,81 @@
 //	PG_CONNECTOR_LOAD_TEST=1 nice -n 10 go test -p 4 -count=1 -race -timeout 60m \
 //	    ./cmd/pg-connector-github/internal/loadtest/
 //
-// TestLoad runs the scenario twice side by side and requires the appended rows
-// and the totals to be identical. TestLoadMutationsAreCaught weakens the
-// harness three ways (a governor with ten times the caps, a lifecycle that is
-// never swept, a consumer that acknowledges the log head instead of the poll's
-// NextSeq) and requires the matching property to fail.
+// TestLoad runs the whole scenario twice side by side and requires the appended
+// rows and the totals of the two runs to be identical (the signature of the
+// WHOLE run, nineteen fake minutes; a replay of a prefix was tried and dropped,
+// because it saved about 5% of TestLoad's CPU and left minutes 12 to 19 without
+// a determinism check). TestLoadMutationsAreCaught weakens the harness three ways
+// and requires the matching property to fail:
+//
+//   - a governor with ten times the caps, run for 6 fake minutes at a REST cap of
+//     750 an hour (capMutationRESTPerHour; the 1,500 of the scenario is only passed
+//     after about nine minutes, which cost 12 fake minutes), and still caught by
+//     property 1: 1,049 spent over a cap of 750;
+//   - a lifecycle that is never swept (property 5, pending deadlines), 5 minutes;
+//   - a consumer that acknowledges the log head instead of the poll's NextSeq
+//     (property 7), 5 minutes.
+//
+// # Cost, and the verdict on TestTrackedSetLoad (bead pg2-4u5i2h)
+//
+// Verdict: TestTrackedSetLoad is SLOW under -race, not hung. Run alone with the
+// criterion command (PG_CONNECTOR_LOAD_TEST=1 nice -n 10 go test -p 4 -count=1
+// -race -v -run '^TestTrackedSetLoad$' -timeout 10m, 2026-10-26, before this
+// change, 1-minute load average 12, so NOT an idle host) it passed in 338.73 s,
+// and in 439.88 s at load 13.73. Its cost is the daemon's own work under the race
+// detector: 370.395 s of user CPU plus 12.325 s of system with -race against
+// 18.560 plus 1.414 = 20.0 s without, a factor of 382.7 / 20.0 = 19. The pump
+// already fails a run in which the scheduler's worker neither finishes nor
+// reaches the origin for stallLimit (5 minutes) of real time, and that guard
+// never fired: not in the 40-minute whole-package -race run that the go timeout
+// killed with TestTrackedSetLoad at fake minute 14 of 15 (its goroutine dump
+// shows the worker runnable inside sqlite, store.aliasesByFoldedRefs under
+// revalidate.OnSummaryRefreshed, not blocked), and not in the 2026-10-25 30-minute
+// panic, which has the same shape. So no stall exists to fix, and the guard is
+// the test that makes a recurrence fail in five minutes instead of at the go
+// timeout. Under -v the run now logs a progress line every two fake minutes, so a
+// run killed by the timeout shows how far it got.
+//
+// The quiesce spin-wait (runtime.Gosched plus a 20 microsecond sleep) is kept: its
+// cost is negligible. Measured by the harness's own counters (the "driver:" line of
+// the summary): 1.201 s of 954.64 s (0.13%) in TestTrackedSetLoad, 4.669 s of
+// 1,219.86 s (0.38%) in TestLoad inside the whole-package -race run, and 0.849 s
+// of 259.76 s (0.33%) in TestLoad alone. The same line reports the real time the
+// pump spent waiting for the worker (12 m 45.9 s of the 954.64 s in
+// TestTrackedSetLoad: the daemon's own work).
+//
+// Before and after, CPU time (user + sys) without -race, the load-independent
+// figure, because wall times here moved with the host load (1-minute load 9 to 83
+// across the runs). "After" is this change as first measured, with the
+// determinism replay of 12 of 19 minutes; restoring the full second run gives back
+// the 5% of TestLoad (the second run's CPU is the same work as the first's):
+//
+//	test                         before            after             change
+//	TestLoad                     18.167+1.551=19.7 17.427+1.291=18.7 -5%
+//	TestLoadMutationsAreCaught   14.636+1.137=15.8 11.412+1.014=12.4 -21%
+//	TestTrackedSetLoad           18.461+1.201=19.7 18.560+1.414=20.0 +2% (noise)
+//	whole package                53.168+3.165=56.3 47.516+3.404=50.9 -10%
+//
+// (change = (after - before) / before; only the mutations run, with its shorter
+// scenarios, is cheaper by design.) With -race, wall time and the 1-minute load
+// average of each run, load-tagged and NOT comparable as speed-ups:
+//
+//	test                         before            after
+//	TestLoad                     229.65 s (11.31)  259.78 s (22.25)
+//	TestLoadMutationsAreCaught   211.89 s (14.13)  140.17 s (23.36)
+//	TestTrackedSetLoad           439.88 s (13.73)  954.64 s (41.76)
+//	whole package                607 s (9.30)      killed at 2401 s (41.09)
+//
+// Only TestLoadMutationsAreCaught is faster across loads (faster at a higher
+// load). TestTrackedSetLoad's body is unchanged, so the gap from 339 s to 955 s is
+// host load, and the whole-package kill at 2401 s happened at a load of 60 to 83.
+//
+// Acceptance criterion 5 (the whole check inside half of its 60 minute timeout,
+// that is 1800 s, on an idle host) is INFERRED, not measured on an idle host:
+// before this change the whole package took 607 s under -race at a load of 9 to 14
+// (607 / 3600 = 17% of the timeout), with TestTrackedSetLoad at 605.09 s, and this
+// change does not alter TestTrackedSetLoad, which sets the whole-package time. The
+// "after" whole-package -race run was never completed on a calm host.
 package loadtest
 
 import (
@@ -126,11 +196,15 @@ const (
 	// guess was twice summary_ttl (120 s); the measured p99 is under a second.
 	interactiveBound = 5 * time.Second
 
-	// The fake time of the mutated runs: the cap is reached after about nine
-	// minutes (the REST spend is 1,947 in twelve with ten times the cap); the
-	// burst's rows are all appended within five.
-	capMutationDuration   = 12 * time.Minute
-	burstMutationDuration = 5 * time.Minute
+	// The fake time of the mutated runs. The cap mutation also halves the REST cap
+	// again (capMutationRESTPerHour), because the harness's 1,500 an hour is only
+	// exceeded after about nine minutes (1,947 spent in twelve with ten times the
+	// cap) and what the mutation shows is that a governor which ignores its caps is
+	// caught, whatever the cap: at 750 the same ten-times governor spends past it
+	// within the first five minutes. The burst's rows are all appended within five.
+	capMutationDuration    = 6 * time.Minute
+	capMutationRESTPerHour = 750
+	burstMutationDuration  = 5 * time.Minute
 
 	// The progress windows are five minutes (scheduler.DefaultAgeAfter), stepping
 	// by a minute.
@@ -181,8 +255,9 @@ func (h *harness) collect() *result {
 		prs: h.nPRs, members: h.nMembers, queries: len(h.queryNames), burstHeads: h.burstHeads, burstAt: h.burstAt,
 		summaryTTL: h.cfg.SummaryTTL.Std(),
 		maxAges:    []time.Duration{h.cfg.DetailMaxAge.Std(), h.cfg.ConversationMaxAge.Std(), h.cfg.CIMaxAge.Std()},
-		driver:     fmt.Sprintf("%d scheduler steps, %d batches, %d origin calls", h.stepCalls, h.batches, h.released),
-		samples:    h.samples, maxPend: h.maxPend, late: h.late, steps: h.steps, delivered: h.cons.delivered, twice: h.cons.twice,
+		driver: fmt.Sprintf("%d scheduler steps, %d batches, %d origin calls; real time: %s waiting for the worker, %s in %d quiesce spins",
+			h.stepCalls, h.batches, h.released, h.pumpReal.Round(time.Millisecond), h.quiesceReal.Round(time.Millisecond), h.quiesceSpins),
+		samples: h.samples, maxPend: h.maxPend, late: h.late, steps: h.steps, delivered: h.cons.delivered, twice: h.cons.twice,
 	}
 	h.rec.mu.Lock()
 	r.spends = slices.Clone(h.rec.spends)
@@ -677,7 +752,9 @@ func TestLoad(t *testing.T) {
 	t.Parallel() // with TestLoadMutationsAreCaught: under -race the two run for minutes each
 	start := time.Now()
 	// Two runs of the same seed, side by side: the first is checked, and the two
-	// must agree.
+	// must agree. (The second run is the whole scenario on purpose: it runs beside
+	// the first, so it adds CPU but no wall time on a host with a free core, and a
+	// shorter replay would leave the tail of the run without a determinism check.)
 	res := runAll(t, "runs", scenarioOpts{seed: loadSeed}, scenarioOpts{seed: loadSeed})
 	first, second := res[0], res[1]
 	if first == nil || second == nil {
@@ -735,7 +812,7 @@ func TestLoadMutationsAreCaught(t *testing.T) {
 		opt  scenarioOpts
 		want string // the property that must report it
 	}{
-		{"governor caps times ten", scenarioOpts{seed: loadSeed, duration: capMutationDuration, capScale: 10}, "1 spend"},
+		{"governor caps times ten", scenarioOpts{seed: loadSeed, duration: capMutationDuration, capScale: 10, restPerHour: capMutationRESTPerHour}, "1 spend"},
 		{"lifecycle never swept", scenarioOpts{seed: loadSeed, duration: burstMutationDuration, skipSweep: true}, "5 pending deadlines"},
 		{"consumer acknowledges the head", scenarioOpts{seed: loadSeed, duration: burstMutationDuration, ackEarly: true}, "7 consumer"},
 	}
