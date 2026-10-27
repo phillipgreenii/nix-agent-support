@@ -206,6 +206,17 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 			}
 		}
 	}
+	if afterAppendHook != nil {
+		if err := afterAppendHook(); err != nil {
+			return 0, fmt.Errorf("store: write entity (%s,%s,%s): %w", e.Repo, e.EntityType, e.EntityID, err)
+		}
+	}
+	if opts.FeedMarker != nil {
+		// The marker commits with the entity write and its row (INV-ICD-19).
+		if err := writeFeedMarkerTx(tx, *opts.FeedMarker); err != nil {
+			return 0, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("store: write entity (%s,%s,%s): commit: %w", e.Repo, e.EntityType, e.EntityID, err)
 	}

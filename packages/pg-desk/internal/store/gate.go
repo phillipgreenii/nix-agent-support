@@ -80,8 +80,9 @@ type WriteOptions struct {
 	// append, in the same transaction, so a closed or removed row of a watched
 	// entity is always appended and delivered.
 	ClearWatchedAfterAppend bool
-	// FeedMarker is accepted and ignored here; the feed-marker write is the
-	// feed store's own step.
+	// FeedMarker, when non-nil, is stored as the feed marker of its instance
+	// in the same transaction as the entity write and its change row (see
+	// feed_marker.go); nil writes none.
 	FeedMarker *FeedMarker
 }
 
