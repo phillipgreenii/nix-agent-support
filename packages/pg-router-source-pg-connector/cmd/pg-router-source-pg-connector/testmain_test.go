@@ -1,28 +1,32 @@
 // testmain_test.go: the in-process wire double for pg-connector — this
 // packet's own "fake pg-connector binary or a stubbed exec" acceptance
-// requirement, implemented as a stubbed exec. Mirrors
-// packages/pg-connector's own pkg/scriptout/exec_test.go double: a Runner
-// (runner.go) that impersonates pg-connector by inspecting the real CLI
-// args this adapter passed it (Call.Args) and the helper settings that
-// select which canned wire response/exit code to answer with.
+// requirement, implemented as a stubbed exec. It is a cmdruntest.Fake (the
+// shared in-process command runner from x, ADR 0001) whose one catch-all
+// rule impersonates pg-connector by inspecting the real CLI args this adapter
+// passed it (Call.Args) and the helper settings that select which canned wire
+// response/exit code to answer with. The Fake records every Call, so a test
+// asserts on the exact argv and env this adapter built through Fake.Calls().
 //
-// It used to re-execute the race-built test binary once per call
-// (GO_WANT_HELPER_PROCESS), and a race-built child sleeps 1 s at exit
-// (atexit_sleep_ms), so every fake call cost about 1 s under -race. The
-// behavior names and the GO_HELPER_* setting names are kept, so call sites
-// in the tests did not change; withFactory's extra "KEY=value" strings are
-// now settings of the double rather than environment of a child. The real
-// exec path (ExecRunner) is covered by runner_test.go with sh -c.
+// It used to re-execute the race-built test binary once per call, and a
+// race-built child sleeps 1 s at exit (atexit_sleep_ms), so every fake call
+// cost about 1 s under -race. The behavior names and the GO_HELPER_* setting
+// names are kept, so call sites in the tests did not change; withFactory's
+// extra "KEY=value" strings are settings of the double rather than
+// environment of a child. The real exec path (cmdrun.Exec) is covered by
+// x's own cmdruntest.RunContract and by exec_test.go's one real-process
+// check of this adapter's wiring.
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/cmdrun"
+	"github.com/phillipgreenii/x/cmdruntest"
 )
 
 // flagValue returns the value following flag in args, or "" if flag is
@@ -60,70 +64,28 @@ func (s helperSettings) get(key string) string {
 	return v
 }
 
-// callEnv returns the value of key as the child would have observed it:
-// the last Call.Env entry (appended to the inherited environment) wins,
-// else the test process's own environment.
-func callEnv(c Call, key string) (string, bool) {
-	val, found := "", false
-	for _, e := range c.Env {
-		if v, ok := strings.CutPrefix(e, key+"="); ok {
-			val, found = v, true
-		}
-	}
-	if found {
-		return val, true
-	}
-	return os.LookupEnv(key)
+// reply is one canned pg-connector answer, in the string form the wire
+// fixtures below are written in.
+type reply struct {
+	Code           int
+	Stdout, Stderr string
 }
 
-// recordAmbientEnvIfRequested is the "the double records its own env"
-// side channel this packet's own --beads-dir acceptance criterion needs:
-// when the test sets GO_HELPER_ENV_RECORD_FILE (to the path of a
-// t.TempDir file) and GO_HELPER_ENV_RECORD_VAR (the env var name to
-// capture), the double writes that var's own value, as the CHILD would
-// have observed it (i.e. what runPgConnector's Call.Env actually
-// carried), to that file — independent of which behavior was also
-// selected, so any behavior can be combined with this recording.
-func recordAmbientEnvIfRequested(s helperSettings, c Call) {
-	file := s.get("GO_HELPER_ENV_RECORD_FILE")
-	if file == "" {
-		return
-	}
-	val, ok := callEnv(c, s.get("GO_HELPER_ENV_RECORD_VAR"))
-	if !ok {
-		// Distinguishable from "set to empty string" — this packet's own
-		// Contract distinguishes "not given -> do not set the var at
-		// all" from any actually-set value [design: section 6.1].
-		val = "<unset>"
-	}
-	_ = os.WriteFile(file, []byte(val), 0o600)
-}
-
-// recordArgsIfRequested writes the call's argv (space-joined) to the path
-// named by GO_HELPER_ARGS_RECORD_FILE, when set, so a test can assert on the
-// exact pg-connector argv this adapter built.
-func recordArgsIfRequested(s helperSettings, childArgs []string) {
-	file := s.get("GO_HELPER_ARGS_RECORD_FILE")
-	if file == "" {
-		return
-	}
-	_ = os.WriteFile(file, []byte(strings.Join(childArgs, " ")), 0o600)
+func (r reply) result() cmdrun.Result {
+	return cmdrun.Result{Code: r.Code, Stdout: []byte(r.Stdout), Stderr: []byte(r.Stderr)}
 }
 
 // helperRun answers one Call as pg-connector would for behavior.
-func helperRun(behavior string, s helperSettings, c Call) Result {
-	recordAmbientEnvIfRequested(s, c)
-	recordArgsIfRequested(s, c.Args)
-
+func helperRun(behavior string, s helperSettings, c cmdrun.Call) reply {
 	childArgs := c.Args
-	ok := func(stdout string) Result { return Result{Stdout: stdout} }
+	ok := func(stdout string) reply { return reply{Stdout: stdout} }
 
 	switch behavior {
 	case "changes_degraded":
 		// One succeeded backend, one degraded, one disabled — proving
 		// degraded_sources names only the degraded one, never the
 		// succeeded or disabled ones [design: section 6.1].
-		return Result{Code: 2, Stdout: `{"sources":[` +
+		return reply{Code: 2, Stdout: `{"sources":[` +
 			`{"backend":"b1","status":"succeeded","version":1,"truncated":false},` +
 			`{"backend":"b2","status":"degraded","version":2,"truncated":false},` +
 			`{"backend":"b3","status":"disabled","version":0,"truncated":false}` +
@@ -179,7 +141,7 @@ func helperRun(behavior string, s helperSettings, c Call) Result {
 		// own changesSourceRow does since bead pg2-unqcn) — proving this
 		// adapter now forwards it into each printed item's own
 		// degraded_reasons metadata, keyed by backend name.
-		return Result{Code: 2, Stdout: `{"sources":[` +
+		return reply{Code: 2, Stdout: `{"sources":[` +
 			`{"backend":"b1","status":"succeeded","version":1,"truncated":false},` +
 			`{"backend":"b2","status":"degraded","version":2,"truncated":false,"reason":"rate limited: too many requests"},` +
 			`{"backend":"b3","status":"disabled","version":0,"truncated":false}` +
@@ -192,7 +154,7 @@ func helperRun(behavior string, s helperSettings, c Call) Result {
 		// writeFanOutResult, which writes the JSON body before ever
 		// checking exitCode) — this adapter must ignore it entirely on
 		// this path and print nothing of its own [design: section 6.1].
-		return Result{
+		return reply{
 			Code:   3,
 			Stdout: `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false}],"changes":[]}`,
 			Stderr: "pg-connector: total failure: no backend succeeded\n",
@@ -209,7 +171,7 @@ func helperRun(behavior string, s helperSettings, c Call) Result {
 		// on this path, so this adapter's own stderr was completely
 		// empty too and every caller downstream only ever saw a bare
 		// "exit status 1".
-		return Result{Code: 3, Stdout: `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false,"reason":"rate limited: too many requests"}],"changes":[]}`}
+		return reply{Code: 3, Stdout: `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false,"reason":"rate limited: too many requests"}],"changes":[]}`}
 	case "changes_cursor_expired":
 		// The wire the real umbrella (pg-connector's own forwarded "changes",
 		// changes_forward.go) answers when a daemon-backed backend that owns
@@ -220,16 +182,16 @@ func helperRun(behavior string, s helperSettings, c Call) Result {
 		// source). Pinned to pg-connector's own
 		// TestForwardedChanges_CursorExpiredReachesTheCaller, whose double
 		// answers the same refusal.
-		return Result{Code: 3, Stdout: `{"sources":[{"backend":"pg-connector-github","status":"degraded","version":1,"truncated":false,` +
+		return reply{Code: 3, Stdout: `{"sources":[{"backend":"pg-connector-github","status":"degraded","version":1,"truncated":false,` +
 			`"reason":"cursor_expired: position fell outside retention; re-run with --reset"}],"changes":[]}`}
 	case "invalid_argument":
-		return Result{
+		return reply{
 			Code:   1,
 			Stdout: `{"error":{"code":"invalid_argument","message":"query not recognized"}}`,
 			Stderr: "pg-connector: invalid_argument: query \"bogus\" is not recognized by any registered backend\n",
 		}
 	case "backend_not_registered":
-		return Result{Code: 1, Stderr: `dispatch: --backend "not-a-backend" is not registered for connector.issue (registered: [pg-connector-issue-beads])` + "\n"}
+		return reply{Code: 1, Stderr: `dispatch: --backend "not-a-backend" is not registered for connector.issue (registered: [pg-connector-issue-beads])` + "\n"}
 	case "sweep_ids_by_query":
 		// present_ids-only responses whose content depends on which
 		// --query was passed, so a multi-query sweep invocation can be
@@ -257,7 +219,7 @@ func helperRun(behavior string, s helperSettings, c Call) Result {
 		case "40m":
 			return ok(`{"entities":[],"present_ids":["recent"],"sources":[]}`)
 		default:
-			return Result{Code: 98, Stderr: "unexpected --since value: " + since + "\n"}
+			return reply{Code: 98, Stderr: "unexpected --since value: " + since + "\n"}
 		}
 	case "list_full_ok":
 		return ok(`{"entities":[` +
@@ -270,24 +232,35 @@ func helperRun(behavior string, s helperSettings, c Call) Result {
 		// fallback [design: section 6.1].
 		return ok(`{"entities":[{"id":"i9","title":"","issue_type":"task","metadata":{}}],"present_ids":["i9"],"sources":[]}`)
 	default:
-		return Result{Code: 99, Stderr: "unknown GO_HELPER_BEHAVIOR: " + behavior + "\n"}
+		return reply{Code: 99, Stderr: "unknown GO_HELPER_BEHAVIOR: " + behavior + "\n"}
 	}
 }
 
-// helperRunner returns a Runner that answers every Call with behavior,
-// configured by the GO_HELPER_* "KEY=value" settings in extra.
-func helperRunner(behavior string, extra ...string) Runner {
-	s := helperSettings(extra)
-	return func(_ context.Context, c Call) Result {
-		return helperRun(behavior, s, c)
-	}
-}
-
-func withFactory(t *testing.T, behavior string, extraEnv ...string) {
+// withFactory installs a cmdruntest.Fake as the adapter's command runner for
+// the test: every call is answered as pg-connector would for behavior,
+// configured by the GO_HELPER_* "KEY=value" settings in extra. The returned
+// Fake exposes the recorded calls (Calls) for argv and env assertions.
+func withFactory(t *testing.T, behavior string, extra ...string) *cmdruntest.Fake {
 	t.Helper()
+	s := helperSettings(extra)
+	fake := cmdruntest.New(t)
+	fake.On(cmdruntest.MatchName(pgConnectorBinary)).Respond(func(c cmdrun.Call) cmdrun.Result {
+		return helperRun(behavior, s, c).result()
+	})
 	orig := connectorRunner
-	connectorRunner = helperRunner(behavior, extraEnv...)
+	connectorRunner = fake.Runner()
 	t.Cleanup(func() { connectorRunner = orig })
+	return fake
+}
+
+// onlyCall returns the single call the fake saw, failing the test otherwise.
+func onlyCall(t *testing.T, fake *cmdruntest.Fake) cmdrun.Call {
+	t.Helper()
+	calls := fake.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("pg-connector calls = %d (%v), want exactly 1", len(calls), calls)
+	}
+	return calls[0]
 }
 
 // runCLI drives newRootCmd() end-to-end (cobra arg parsing + RunE),
@@ -320,17 +293,6 @@ func mustUnmarshalItems(t *testing.T, stdout string) []rawItem {
 		t.Fatalf("unmarshal items: %v (stdout=%q)", err, stdout)
 	}
 	return items
-}
-
-// readFile reads path (a small test fixture/recording file), failing the
-// test on any error.
-func readFile(t *testing.T, path string) string {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	return string(b)
 }
 
 var _ io.Writer = (*writerBuf)(nil)

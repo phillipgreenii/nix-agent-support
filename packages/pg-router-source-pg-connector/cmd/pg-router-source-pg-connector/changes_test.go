@@ -4,11 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // pinnedEmitTime is the fixed adapter emit instant the retry-window tests
@@ -207,41 +208,44 @@ func TestChanges_InvalidArgument_ExitsNonZeroPrintingNothingOnStdout(t *testing.
 	}
 }
 
+// envValue returns the value of key among the KEY=value entries the adapter
+// appended to the child's environment (Call.Env), and whether it was there at
+// all (the last entry wins, like a real environment).
+func envValue(c cmdrun.Call, key string) (string, bool) {
+	val, found := "", false
+	for _, e := range c.Env {
+		if v, ok := strings.CutPrefix(e, key+"="); ok {
+			val, found = v, true
+		}
+	}
+	return val, found
+}
+
 func TestChanges_BeadsDirSetsPgConnectorIssueBeadsDirInChildEnv(t *testing.T) {
-	recordFile := filepath.Join(t.TempDir(), "recorded-env")
-	withFactory(
-		t, "changes_ok_empty",
-		"GO_HELPER_ENV_RECORD_FILE="+recordFile,
-		"GO_HELPER_ENV_RECORD_VAR=PG_CONNECTOR_ISSUE_BEADS_DIR",
-	)
+	fake := withFactory(t, "changes_ok_empty")
 
 	_, stderr, code := runCLI(t, "changes", "issue", "q", "--consumer", "c1", "--beads-dir", "/some/beads/path")
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
 	}
 
-	got := readFile(t, recordFile)
-	if got != "/some/beads/path" {
-		t.Fatalf("child's own PG_CONNECTOR_ISSUE_BEADS_DIR = %q, want /some/beads/path", got)
+	got, found := envValue(onlyCall(t, fake), "PG_CONNECTOR_ISSUE_BEADS_DIR")
+	if !found || got != "/some/beads/path" {
+		t.Fatalf("child's own PG_CONNECTOR_ISSUE_BEADS_DIR = %q (set=%v), want /some/beads/path", got, found)
 	}
 }
 
 func TestChanges_NoBeadsDirFlag_LeavesPgConnectorIssueBeadsDirUnset(t *testing.T) {
-	recordFile := filepath.Join(t.TempDir(), "recorded-env")
-	withFactory(
-		t, "changes_ok_empty",
-		"GO_HELPER_ENV_RECORD_FILE="+recordFile,
-		"GO_HELPER_ENV_RECORD_VAR=PG_CONNECTOR_ISSUE_BEADS_DIR",
-	)
+	fake := withFactory(t, "changes_ok_empty")
 
 	_, stderr, code := runCLI(t, "changes", "issue", "q", "--consumer", "c1")
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
 	}
 
-	got := readFile(t, recordFile)
-	if got != "<unset>" {
-		t.Fatalf("child's own PG_CONNECTOR_ISSUE_BEADS_DIR = %q, want left unset entirely", got)
+	call := onlyCall(t, fake)
+	if got, found := envValue(call, "PG_CONNECTOR_ISSUE_BEADS_DIR"); found {
+		t.Fatalf("child's own PG_CONNECTOR_ISSUE_BEADS_DIR = %q, want left unset entirely (env %v)", got, call.Env)
 	}
 }
 
@@ -258,12 +262,11 @@ func TestChanges_BackendFlag_IsPassedThroughOnlyWhenGiven(t *testing.T) {
 		{"given", []string{"changes", "issue", "q", "--consumer", "c1", "--backend", "pg-connector-issue-beads-zr"}, "pg-connector-issue-beads-zr"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			recordFile := filepath.Join(t.TempDir(), "recorded-args")
-			withFactory(t, "changes_ok_empty", "GO_HELPER_ARGS_RECORD_FILE="+recordFile)
+			fake := withFactory(t, "changes_ok_empty")
 			if _, stderr, code := runCLI(t, tc.args...); code != 0 {
 				t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
 			}
-			got := strings.Fields(readFile(t, recordFile))
+			got := onlyCall(t, fake).Args
 			if v := flagValue(got, "--backend"); v != tc.want {
 				t.Fatalf("child argv %v: --backend = %q, want %q", got, v, tc.want)
 			}
@@ -286,12 +289,11 @@ func TestChanges_QueryArgumentIsOptional(t *testing.T) {
 		{"given", []string{"changes", "pr", "team", "--consumer", "pr-changes"}, true, "team"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			recordFile := filepath.Join(t.TempDir(), "recorded-args")
-			withFactory(t, "changes_ok_empty", "GO_HELPER_ARGS_RECORD_FILE="+recordFile)
+			fake := withFactory(t, "changes_ok_empty")
 			if _, stderr, code := runCLI(t, tc.args...); code != 0 {
 				t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
 			}
-			got := strings.Fields(readFile(t, recordFile))
+			got := onlyCall(t, fake).Args
 			present := false
 			for _, a := range got {
 				if a == "--query" {

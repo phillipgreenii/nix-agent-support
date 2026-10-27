@@ -1,8 +1,6 @@
 package main
 
 import (
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -124,12 +122,11 @@ func TestSweep_BackendFlag_IsPassedThroughToEveryListCallOnlyWhenGiven(t *testin
 		{"given", []string{"sweep", "issue", "--backend", "pg-connector-issue-beads-pg2", "q1"}, "pg-connector-issue-beads-pg2"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			recordFile := filepath.Join(t.TempDir(), "recorded-args")
-			withFactory(t, "sweep_ids_by_query", "GO_HELPER_ARGS_RECORD_FILE="+recordFile)
+			fake := withFactory(t, "sweep_ids_by_query")
 			if _, stderr, code := runCLI(t, tc.args...); code != 0 {
 				t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
 			}
-			got := strings.Fields(readFile(t, recordFile))
+			got := onlyCall(t, fake).Args
 			if v := flagValue(got, "--backend"); v != tc.want {
 				t.Fatalf("child argv %v: --backend = %q, want %q", got, v, tc.want)
 			}

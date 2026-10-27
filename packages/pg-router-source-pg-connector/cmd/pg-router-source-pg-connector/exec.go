@@ -18,18 +18,31 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // pgConnectorBinary is the ambient $PATH name this adapter execs. Never a
 // compile-time import of packages/pg-connector [design: section 6.1].
 const pgConnectorBinary = "pg-connector"
 
-// connectorRunner runs the pg-connector subprocess (see runner.go). nil
-// means ExecRunner; tests swap it for an in-process double — the "stubbed
-// exec" half of this packet's own "fake pg-connector binary or a stubbed
-// exec" wire-double requirement — instead of re-executing the test binary
-// (a race-built child sleeps 1 s at exit).
-var connectorRunner Runner
+// connectorRunner runs the pg-connector subprocess through the shared x
+// command-runner seam (cmdrun, ADR 0001 in repo x). nil means cmdrun.Exec;
+// tests swap it for a cmdruntest.Fake — the "stubbed exec" half of this
+// packet's own "fake pg-connector binary or a stubbed exec" wire-double
+// requirement — instead of re-executing the test binary (a race-built child
+// sleeps 1 s at exit).
+var connectorRunner cmdrun.Runner
+
+// runConnector runs c through connectorRunner, falling back to cmdrun.Exec
+// when it is nil.
+func runConnector(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+	r := connectorRunner
+	if r == nil {
+		r = cmdrun.Exec
+	}
+	return r(ctx, c)
+}
 
 // pgConnectorResult is one subprocess invocation's raw, unclassified
 // outcome: pg-connector's own captured stdout/stderr (never interleaved,
@@ -50,11 +63,11 @@ type pgConnectorResult struct {
 // denied, context already canceled, ...) — there is then no exit code to
 // classify and no child stderr to trust.
 func runPgConnector(ctx context.Context, args []string, extraEnv []string) (pgConnectorResult, error) {
-	r := connectorRunner.do(ctx, Call{Name: pgConnectorBinary, Args: args, Env: extraEnv})
+	r := runConnector(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: extraEnv})
 	if r.StartErr != nil {
 		return pgConnectorResult{}, fmt.Errorf("pg-connector: exec %v: %w", args, r.StartErr)
 	}
-	return pgConnectorResult{stdout: []byte(r.Stdout), stderr: []byte(r.Stderr), exitCode: r.Code}, nil
+	return pgConnectorResult{stdout: r.Stdout, stderr: r.Stderr, exitCode: r.Code}, nil
 }
 
 // classifyExit maps pg-connector's own CLI exit-code taxonomy (its
