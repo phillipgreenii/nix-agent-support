@@ -51,9 +51,10 @@ repository's change:
    ```
 
    The answer lists every watched PR as `added`. Compare its set with the watched count of step 3.
-   The call acknowledges what it printed, so keep its output: it is the record of the replay, and the
-   backfill driver's passes bring every followed PR through the composed command whatever the
-   router saw.
+   The call acknowledges what it printed, so keep its output: it is the record of the replay. The
+   replay goes to the operator's call and NOT to the router's `pr.changed` queue (see "The replay
+   does not reach the router"): the backfill driver's passes bring every followed PR through the
+   composed command whatever the router saw.
 
 5. Observe the live feed: the next poll of `pr-changes` answers only what changed since the replay;
    `pg-connector pr inspect <id>...` shows a PR as tracked or watched; the daemon's budget stays above
@@ -78,10 +79,9 @@ with a replay after the marking step.
   premature tail nor skips rows.
 - The replay lists only WATCHED PRs. A replay before the marking step therefore lacks every PR
   that only the marking step reaches; that is why the marking step comes first.
-- The replay is a hydration burst: the old backend's replacement reports every watched PR as
-  `added` once. That burst is accepted, and the lane absorbs it because a re-run of the composed
-  command on an unchanged view writes nothing. A second replay of an unchanged view is the same set
-  and writes nothing new.
+- The replay is a hydration burst: the daemon reports every watched PR as `added` once, to the
+  caller of the reset. A re-run of the composed command on an unchanged view writes nothing, so a
+  second replay of an unchanged view is the same set and writes nothing new.
 - The replay MUST NOT run while the backfill driver is running: both read and write the same
   per-PR lane state.
 
@@ -91,6 +91,32 @@ Both properties are shown against the real daemon, client, umbrella and adapter 
 (`packages/pg-connector/cmd/pg-connector-github/cursor_decision_e2e_test.go`), each with a negative
 case (a replay before the marking step lacks the directly marked PR; a poll before the baselines
 creates no consumer row).
+
+## The replay does not reach the router
+
+Decision (2026-10-27): the router does NOT need to see the cutover replay on `pr.changed`, and
+`pg-router-source-pg-connector` does not gain a `--reset` option. Evidence:
+
+- The replay cannot reach the router by that route. The reset is run by the operator and its answer
+  and acknowledgement belong to that call; the reset moves the consumer to the tail of the feed, so
+  the router's next poll of `pr-changes` answers only what changed after it. The adapter is polled
+  by the router on a schedule, so a `--reset` in the registry stanza would replay every watched PR on
+  every poll, and a hand-run adapter call prints to the operator, not to the queue.
+- Every PR the replay lists is also reached by the backfill driver, which does the same work through
+  the composed command. `pg-pr-backfill enumerate` takes the tracker's open anchors plus the open
+  members of the deployment's PR queries, which covers the watched PRs: the open-anchor PRs are the
+  ones `mark-watched` marks, and the queries the daemon watches are the ones the driver lists
+  (`docs/behavior/pg-decider/backfill.md`). The first apply pass over that whole set follows the
+  cutover (the flip is plan, then apply: `docs/runbooks/pg-pr-backfill.md`), so it also covers a
+  change that landed between the last old-backend poll and the consumer's first poll, the only
+  rows the tail start skips.
+- A PR watched only through a direct watch-option read, outside every anchor and query, is not in
+  the backfill set; it is reached by the first change to it, as any watched PR is, and it was not
+  followed before the cutover either.
+
+Cost of the decision: the lane learns of a quiet PR at the apply pass, not at the replay. If a future
+cutover needs the router to see a replay, inject it with the router's own operator command
+(`push-inject`), not through the adapter.
 
 ## Rollback
 
