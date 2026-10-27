@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"os"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -133,21 +133,22 @@ func TestListEscalatedHonorsExplicitTimeout(t *testing.T) {
 	}
 }
 
-// recordedArgs runs fn with GO_HELPER_ARGS_RECORD_FILE pointed at a fresh
-// temp file and returns the exact argv the helper process observed
-// (recordArgsIfRequested, testmain_test.go), so a test can assert on the
-// REAL argv this probe built rather than trusting a code read of the
-// hardcoded --backend constant.
+// recordedArgs runs fn and returns the exact argv the in-process double
+// observed on its last call (recordCall, testmain_test.go), so a test can
+// assert on the REAL argv this probe built rather than trusting a code read
+// of the hardcoded --backend constant.
 func recordedArgs(t *testing.T, fn func()) string {
 	t.Helper()
-	path := t.TempDir() + "/args.txt"
-	t.Setenv("GO_HELPER_ARGS_RECORD_FILE", path)
+	recordedMu.Lock()
+	recordedCalls = nil
+	recordedMu.Unlock()
 	fn()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read recorded args: %v", err)
+	recordedMu.Lock()
+	defer recordedMu.Unlock()
+	if len(recordedCalls) == 0 {
+		t.Fatalf("read recorded args: no call reached the double")
 	}
-	return string(data)
+	return fmt.Sprint(recordedCalls[len(recordedCalls)-1].Args)
 }
 
 func TestEveryPgConnectorCallPinsTheBeadsBackend(t *testing.T) {

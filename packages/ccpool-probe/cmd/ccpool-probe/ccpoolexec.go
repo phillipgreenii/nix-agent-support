@@ -18,13 +18,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 )
 
 // ccpoolBinary is the ambient $PATH name this probe execs.
@@ -35,13 +32,12 @@ const ccpoolBinary = "ccpool"
 // item 1, its parenthetical: "no new tagging scheme is needed"].
 const pgRouterPoolFilter = "pgrouter.pool=pg-router"
 
-// ccpoolExecCmdFactory constructs the *exec.Cmd used to invoke ccpool.
-// Production code uses exec.CommandContext; tests swap this to spawn a
-// reentrant test-helper process (testmain_test.go), mirroring connector.go's
-// own execCmdFactory pattern — kept as a SEPARATE variable from
-// execCmdFactory (connector.go) so a test can independently fake ccpool's
+// ccpoolRunner runs the ccpool subprocess. nil means ExecRunner; tests
+// swap it for an in-process double (testmain_test.go) instead of
+// re-executing the test binary. Kept as a SEPARATE variable from
+// connector.go's connectorRunner so a test can independently fake ccpool's
 // and pg-connector's own behavior in the same run.
-var ccpoolExecCmdFactory = exec.CommandContext
+var ccpoolRunner Runner
 
 type ccpoolResult struct {
 	stdout   []byte
@@ -57,30 +53,15 @@ type ccpoolResult struct {
 // mutated). The returned error is non-nil only when the child could never
 // even be started.
 func runCcpool(ctx context.Context, poolDir string, args []string) (ccpoolResult, error) {
-	cmd := ccpoolExecCmdFactory(ctx, ccpoolBinary, args...)
+	call := Call{Name: ccpoolBinary, Args: args}
 	if poolDir != "" {
-		env := cmd.Env
-		if env == nil {
-			env = os.Environ()
-		}
-		cmd.Env = append(env, "CCPOOL_POOL="+poolDir)
+		call.Env = []string{"CCPOOL_POOL=" + poolDir}
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-	res := ccpoolResult{stdout: stdout.Bytes(), stderr: stderr.Bytes()}
-
-	if runErr == nil {
-		return res, nil
+	r := ccpoolRunner.do(ctx, call)
+	if r.StartErr != nil {
+		return ccpoolResult{}, fmt.Errorf("ccpool: exec %v: %w", args, r.StartErr)
 	}
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
-		res.exitCode = exitErr.ExitCode()
-		return res, nil
-	}
-	return ccpoolResult{}, fmt.Errorf("ccpool: exec %v: %w", args, runErr)
+	return ccpoolResult{stdout: []byte(r.Stdout), stderr: []byte(r.Stderr), exitCode: r.Code}, nil
 }
 
 var errCcpoolFailed = errors.New("ccpool-probe: ccpool call failed")
