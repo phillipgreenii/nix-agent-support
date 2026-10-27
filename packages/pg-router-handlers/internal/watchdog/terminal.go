@@ -107,8 +107,15 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 		w.emit("info", "budget_unclaim_skipped", "bead already closed; release skipped (no reopen)", map[string]any{
 			"session": sessionName, "bead": beadID, "role": be.Role,
 		})
-	} else {
-		_ = beads.Unclaim(ctx, w.BD, beadID)
+	} else if err := beads.UnclaimHeld(ctx, w.BD, beadID); err != nil {
+		// The claim usually belongs to the worker's actor, not this runner's, so
+		// the release is guarded by the observed holder (pg2-ybkav). A stale guard
+		// means the claim changed hands and is not a failure.
+		if !beads.IsGuardStale(err) {
+			w.emit("error", "budget_unclaim_failed", "budget hard stop could not release the claim", map[string]any{
+				"session": sessionName, "bead": beadID, "role": be.Role, "error": err.Error(),
+			})
+		}
 	}
 	fields := map[string]any{
 		"session": sessionName, "bead": beadID, "worktree_reset": didReset, "worktree": wt,

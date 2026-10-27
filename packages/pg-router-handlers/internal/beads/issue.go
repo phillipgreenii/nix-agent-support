@@ -180,7 +180,16 @@ func IsGuardStale(err error) bool {
 // for an unassigned bead).
 func heldGuard(ctx context.Context, r Runner, id string) []string {
 	iss, err := ShowObj(ctx, r, id)
-	if err != nil || iss.Status != "in_progress" || iss.Assignee == "" {
+	if err != nil {
+		return nil
+	}
+	return guardOf(iss)
+}
+
+// guardOf is heldGuard for a bead the caller has already read: the guard flags
+// of an in_progress bead under a named assignee, nil otherwise.
+func guardOf(iss Issue) []string {
+	if iss.Status != "in_progress" || iss.Assignee == "" {
 		return nil
 	}
 	return []string{"--if-assignee", iss.Assignee, "--if-status", "in_progress"}
@@ -195,6 +204,19 @@ func UnclaimHeld(ctx context.Context, r Runner, id string) error {
 		slog.Error("release of a dead session's claim failed; the bead keeps its claim",
 			"bead", id, "guard_stale", IsGuardStale(err), "err", err)
 		return fmt.Errorf("unclaim %s: %w", id, err)
+	}
+	return nil
+}
+
+// UnclaimObserved is UnclaimHeld for a bead the caller has already read: the
+// guard comes from iss (no second read), so the release only lands if the claim
+// is still the one the caller observed. A stale guard (IsGuardStale) means the
+// claim changed hands; nothing was written and the caller decides what that
+// means.
+func UnclaimObserved(ctx context.Context, r Runner, iss Issue) error {
+	args := append([]string{"update", iss.ID, "--status=open", "--assignee="}, guardOf(iss)...)
+	if _, err := r.Run(ctx, args...); err != nil {
+		return fmt.Errorf("unclaim %s: %w", iss.ID, err)
 	}
 	return nil
 }

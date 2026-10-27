@@ -554,7 +554,9 @@ func TestStopActiveOrphan_overBudgetHardStopsOnceThenRemovesWorktree(t *testing.
 			var comment, unclaim, stop bool
 			for _, w := range h.bd.writes() {
 				comment = comment || w == "comment zr-w interrupted — budget"
-				unclaim = unclaim || w == "update zr-w --status=open --assignee="
+				// The hard stop releases the observed holder's claim with the guard
+				// bd's cross-actor refusal requires (pg2-ybkav).
+				unclaim = unclaim || w == "update zr-w --status=open --assignee= --if-assignee pgii-pool__worker --if-status in_progress"
 				stop = stop || strings.Contains(w, "--add-label budget-stop:"+orphanID)
 			}
 			if !comment || !unclaim || !stop {

@@ -578,6 +578,10 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 		if errors.As(err, &ec) && ec.escalated {
 			return failureAction(report.Escalated, beadID)
 		}
+		if ec != nil && ec.releaseErr != nil {
+			// The release did not land, so no unclaim verb is claimed (pg2-ybkav).
+			return report.Result{}
+		}
 		return failureAction(report.Unclaimed, beadID)
 	}
 	if errors.Is(err, ErrSessionDied) {
@@ -1544,9 +1548,14 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 				if externalCloseReasons[reason] {
 					_ = beads.Comment(ctx, r.deps.BD, d.Item.ID,
 						fmt.Sprintf("released: ccpool closed the session (%s) before the bead completed; retrying", reason))
-					_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
+					// The claim is the closed session's, usually under another actor's
+					// identity, so the release is guarded by the observed holder (pg2-ybkav).
+					rerr := beads.UnclaimHeld(ctx, r.deps.BD, d.Item.ID)
+					if rerr != nil {
+						r.externalReleaseFailed(d, name, reason, rerr)
+					}
 					escalated := r.escalateEviction(ctx, d.Item.ID)
-					return fmt.Errorf("%s: %w", d.Item.ID, &externallyClosed{reason: reason, escalated: escalated})
+					return fmt.Errorf("%s: %w", d.Item.ID, &externallyClosed{reason: reason, escalated: escalated, releaseErr: rerr})
 				}
 				if end == complete.EndUnclaimed {
 					return r.unclaimedEndResult(ctx, d, name)
@@ -1729,6 +1738,36 @@ var ErrExternallyClosed = errors.New("session closed externally by ccpool")
 type externallyClosed struct {
 	reason    string
 	escalated bool
+	// releaseErr is the failure of the claim release (a stale guard included:
+	// then the claim changed hands and nothing was written), nil when it landed.
+	// waitFailureResult reports no unclaim verb for a release that did not land.
+	releaseErr error
+}
+
+// externalReleaseKind is the eventlog kind of an external close's claim release
+// that bd refused or that otherwise failed (pg2-ybkav): the bead is still
+// in_progress under the closed session. A stale guard is not recorded: the claim
+// changed hands and the release was rightly skipped.
+const externalReleaseKind = "external_close_release_failed"
+
+// externalReleaseFailed surfaces a failed release after an external close: a
+// log line, plus one externalReleaseKind eventlog record unless the guard was
+// stale.
+func (r *ccpoolRun) externalReleaseFailed(d DispatchContext, name, reason string, err error) {
+	if beads.IsGuardStale(err) {
+		slog.Info("session closed externally; the bead's claim changed hands, release skipped",
+			"role", d.Role.Name, "bead", d.Item.ID, "session", name, "close_reason", reason)
+		return
+	}
+	slog.Error("session closed externally; releasing its claim failed; the bead keeps its claim",
+		"role", d.Role.Name, "bead", d.Item.ID, "session", name, "close_reason", reason, "err", err)
+	if r.deps.Log != nil {
+		_ = r.deps.Log.Emit("error", externalReleaseKind, "externally closed session's claim release failed",
+			map[string]any{
+				"role": d.Role.Name, "bead": d.Item.ID, "session": name,
+				"close_reason": reason, "error": err.Error(),
+			})
+	}
 }
 
 func (e *externallyClosed) Error() string {

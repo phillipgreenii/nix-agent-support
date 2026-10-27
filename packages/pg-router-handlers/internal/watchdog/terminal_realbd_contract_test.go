@@ -162,6 +162,32 @@ func (r *recordingRunner) index(prefix string) int {
 	return slices.IndexFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, prefix) })
 }
 
+// Bead pg2-ybkav (the pg2-qyc3h class): the tests above run the worker and the
+// watchdog under ONE actor, which is not the production shape. There the bead's
+// claim belongs to the worker's actor while the watchdog's runner carries
+// another, and bd 1.3.1 refuses an unguarded `--assignee=` overwrite of
+// another actor's in_progress claim, which stranded the bead under a stopped
+// session. The release must therefore be guarded by the observed holder. The
+// name carries the TestPark_RealBD_ prefix so the bd-contract-test hook runs it.
+func TestPark_RealBD_HardStopReleasesClaimHeldByAnotherActor(t *testing.T) {
+	ctx, worker := newRealBD(t)
+	id := claimedBead(ctx, t, worker)
+	watchdogRunner := &beads.CLIRunner{Dir: worker.Dir, Env: worker.Env, Actor: "pgii-pool__watchdog-runner"}
+	if iss, err := beads.ShowObj(ctx, watchdogRunner, id); err != nil || iss.Assignee != realBDActor {
+		t.Fatalf("precondition: bead must be claimed by %s; got assignee=%q err=%v", realBDActor, iss.Assignee, err)
+	}
+
+	hardStop(ctx, watchdogRunner, id, 3)
+
+	iss, err := beads.ShowObj(ctx, watchdogRunner, id)
+	if err != nil {
+		t.Fatalf("ShowObj: %v", err)
+	}
+	if iss.Status != "open" || iss.Assignee != "" {
+		t.Errorf("a hard stop must release a claim held by another actor: status=%q assignee=%q", iss.Status, iss.Assignee)
+	}
+}
+
 // Bead pg2-cty80: a time-budget stop at threshold 1 (the drain roles' setting)
 // escalates against the REAL bd. The bead is labelled escalated (and NOT
 // needs-split-review or human), keeps its budget-stop record and the

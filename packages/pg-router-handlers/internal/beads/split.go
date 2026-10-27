@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -75,12 +76,21 @@ func childLabels(parent Issue) []string {
 
 // releaseIfClaimed returns a still-claimed parent to the pool in ONE bd update
 // (status open + assignee cleared); a parent that is not in_progress is left
-// alone.
+// alone. The split runs as the split-triager's actor while the claim belongs to
+// the drain worker's, which bd 1.3.1 refuses to overwrite unguarded (pg2-qyc3h),
+// so the update carries the guard of the claim already read. A stale guard means
+// the claim changed hands after that read: nothing is released and that is not a
+// failure.
 func releaseIfClaimed(ctx context.Context, r Runner, iss Issue) error {
 	if iss.Status != "in_progress" {
 		return nil
 	}
-	return Unclaim(ctx, r, iss.ID)
+	err := UnclaimObserved(ctx, r, iss)
+	if IsGuardStale(err) {
+		slog.Info("split-triage: the parent's claim changed hands; release skipped", "bead", iss.ID)
+		return nil
+	}
+	return err
 }
 
 // ApplySplit executes a SPLITTABLE decision on parentID and returns the new
@@ -119,7 +129,9 @@ func ApplySplit(ctx context.Context, r Runner, parentID string, plan SplitPlan) 
 		msg := fmt.Sprintf("split-triage failed after creating children [%s]: %v; escalated to human", strings.Join(ids, ", "), err)
 		_ = HandToHuman(ctx, r, parentID)
 		_ = Comment(ctx, r, parentID, msg)
-		_ = releaseIfClaimed(ctx, r, parent)
+		if rerr := releaseIfClaimed(ctx, r, parent); rerr != nil {
+			slog.Error("split-triage: release of the failed-safe parent's claim failed", "bead", parentID, "err", rerr)
+		}
 		_ = RemoveLabel(ctx, r, parentID, LabelNeedsSplitReview)
 		return ids, fmt.Errorf("%w (parent %s failed safe to human)", err, parentID)
 	}
