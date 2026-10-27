@@ -52,6 +52,9 @@ var alwaysSafe = map[string]bool{
 	"which": true, "type": true, "command": true, "unset": true, "export": true,
 	"env": true, "printenv": true, "id": true, "whoami": true,
 	"date": true, "uname": true, "hostname": true, "uptime": true, "pwd": true, "cd": true,
+	// uuidgen (pg2-b1lir W4): prints a fresh UUID and touches no file, network or
+	// state; same class as date/uname/hostname above.
+	"uuidgen": true,
 	"sw_vers": true,
 	// set (pg2-uejmb): toggles shell OPTIONS (-e/-u/-o pipefail/-x/+H/…) or
 	// positional parameters (`set -- a b c`) — zero filesystem/network access,
@@ -609,6 +612,38 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// loss for the malformed case. extractBashSyntaxCheckFiles is deleted below.
 			if issue, cat := readPathIssue(pc.Args, pe, "", true, vars); issue != "" {
 				return r.refuseCategorized(cat, "safe-commands: "+basename+" -n "+issue+" (deferred to claude-code)")
+			}
+			continue
+		}
+		// sysctl -n / pmset -g / mktemp / tar -x (pg2-b1lir W4 and W6, operator ruling
+		// pg2-r9kv7): the host scalars and the scratch writes a pool session needs; see
+		// hostprobes.go for each closed-form check.
+		if basename == "sysctl" {
+			if issue := sysctlIssue(pc.Args); issue != "" {
+				return r.refuse("safe-commands: sysctl " + issue + " (deferred to claude-code)")
+			}
+			continue
+		}
+		if basename == "pmset" {
+			if issue := pmsetIssue(pc.Args); issue != "" {
+				return r.refuse("safe-commands: pmset " + issue + " (deferred to claude-code)")
+			}
+			continue
+		}
+		if basename == "mktemp" || basename == "tar" {
+			if argsHaveDynamicExpansion(pc.Args) {
+				return r.refuse("safe-commands: " + basename + " has a dynamically expanded argument, so its target is not statically known (deferred to claude-code)")
+			}
+			eval := evaluateMktemp
+			if basename == "tar" {
+				eval = evaluateTar
+			}
+			result, err := eval(pc.Args, pe, cwd, r.Name())
+			if err != nil {
+				return result, err
+			}
+			if result.Decision != hookio.Approve {
+				return result, nil
 			}
 			continue
 		}

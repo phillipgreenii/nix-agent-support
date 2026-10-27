@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/inputproc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/metrics"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/killshell"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/sandboxdetect"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/setup"
 	"github.com/spf13/cobra"
@@ -194,18 +195,24 @@ func handlePreToolUse(input *hookio.HookInput) {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog open: %v\n", err)
 	}
 
-	var eng *engine.Engine
-	if store != nil {
-		eng = setup.NewEngineForCWDLive(input.CWD, store)
-	} else {
-		eng = setup.NewEngineForCWDLive(input.CWD, nil)
-	}
 	// An autonomous worker has no human to answer a permission dialog, so the engine
 	// turns any Ask into a deny with instructions (hookio.NeverAskWhenUnattended). The
 	// permission-mode half of that decision rides in the payload; this is the
 	// environment half, read here — the process's one entry point — so the engine
 	// itself never touches the environment and offline replay stays deterministic.
 	input.Unattended = unattendedFromEnv()
+	// The same signal decides whether the path evaluator gets the unattended-only
+	// roots (pg2-b1lir W3): an attended session never sees them.
+	var shells killshell.ShellStore
+	if store != nil {
+		shells = store
+	}
+	var eng *engine.Engine
+	if input.IsUnattended() {
+		eng = setup.NewEngineForCWDLiveUnattended(input.CWD, shells)
+	} else {
+		eng = setup.NewEngineForCWDLive(input.CWD, shells)
+	}
 	result := eng.EvaluateHook(input)
 
 	// updatedInput rewrites the Bash command through ceta's ORDERED

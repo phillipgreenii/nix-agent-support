@@ -164,6 +164,27 @@ lives at the one place every folded verdict passes, `engine.EvaluateHook`
   that make git open a named file (`-X`, `--exclude-from`, any `--e...` long option) keep every
   operand screened.
 
+### Unattended sessions get a few more read roots
+
+The same unattended signal that stops an Ask from stalling a pool worker also widens WHAT that
+worker may read, and only that worker (bead `pg2-b1lir` W3, operator ruling `pg2-r9kv7`,
+2026-10-27; decision record: `docs/adr/0110-ceta-unattended-sessions-get-extra-read-roots-and-their-own-tmpdir.md`):
+
+- `main.go` decides once, from `HookInput.IsUnattended()`, which engine to build:
+  `setup.NewEngineForCWDLiveUnattended` for an unattended session, the unchanged
+  `setup.NewEngineForCWDLive` for an attended one. Only the first calls
+  `patheval.PathEvaluator.ExtendForUnattended`, so an attended session cannot see these roots and
+  offline replay (`evaluate`, `baseline`, `compare`) never has them.
+- `ExtendForUnattended` appends each root of `CETA_UNATTENDED_EXTRA_READONLY_ROOTS` (a ":"-separated
+  list, rendered by the home-manager option `unattendedExtraReadOnlyRoots`) to the extra READ-ONLY
+  roots, and the session's own `$TMPDIR` (when it is a directory strictly inside
+  `/private/var/folders`, `/private/tmp` or `/tmp`) to the extra READ-WRITE roots, so the bgrun job
+  state under it is readable and a scratch directory made there is writable. A root at or above
+  `$HOME`, or one that is, contains or sits under `~/.claude`, is ignored.
+- The extra roots are checked LAST, after every built-in zone and after the secrets and `denyRead`
+  guards, so a root can only make an otherwise-unknown path known; it can never unblock a credential
+  path.
+
 ## Extension point 1: adding a rule module (code-level)
 
 A **rule module** governs a _class of tool calls by policy logic_ — reachable only by changing Go

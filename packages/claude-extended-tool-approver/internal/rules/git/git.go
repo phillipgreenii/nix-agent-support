@@ -30,6 +30,9 @@ var readOnlySubcommands = map[string]bool{
 	"verify-commit": true, "verify-tag": true, "verify-pack": true, "fsck": true,
 	// Plumbing: gitignore/gitattributes checks
 	"check-ignore": true, "check-attr": true, "check-mailmap": true, "check-ref-format": true,
+	// patch-id (pg2-b1lir W5, ruling pg2-r9kv7): reads a patch on stdin and prints its
+	// stable ID; it writes nothing and takes no path.
+	"patch-id": true,
 }
 
 // remoteBlockedSubcommands is the `git remote` subcommand set that MUTATES which
@@ -335,7 +338,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// CanRead/CanWrite, not IsDeny*) instead of auto-approving a write into an
 		// unknown zone (pg2-b3eow). Gated to a non-empty -C so a bare git command
 		// keeps its verdict regardless of the CWD's zone.
-		if res.Decision == hookio.Approve && !r.chdirSafe(input.CWD, chdirs, subcmd) {
+		if res.Decision == hookio.Approve && !r.chdirSafe(input.CWD, chdirs, subcmd, rest) {
 			return r.refuse("git: -C target directory is unsafe for a " + subcmd + " (deferred to claude-code)")
 		}
 		return res, nil
@@ -1753,15 +1756,29 @@ func (r *Rule) configGateResult(key string, class configGateClass) hookio.RuleRe
 // (pg2-1k8sd). Unlike `config`, whose Approve covers BOTH a read AND an
 // ordinary (non-gated-key) write, there is no write-shaped Approve for
 // `symbolic-ref` this listing could wrongly relax.
-func (r *Rule) chdirSafe(cwd string, chdirs []string, subcmd string) bool {
+func (r *Rule) chdirSafe(cwd string, chdirs []string, subcmd string, rest []string) bool {
 	if r.eval == nil || len(chdirs) == 0 {
 		return true
 	}
 	access := r.eval.Evaluate(effectiveDir(cwd, chdirs))
-	if readOnlySubcommands[subcmd] || subcmd == "remote" || subcmd == "symbolic-ref" {
+	if readOnlySubcommands[subcmd] || subcmd == "remote" || subcmd == "symbolic-ref" || isWorktreeList(subcmd, rest) {
 		return access.CanRead()
 	}
 	return access.CanWrite()
+}
+
+// isWorktreeList reports whether this is `git worktree list`, the one `worktree`
+// verb that only reads (pg2-b1lir W5, operator ruling pg2-r9kv7: a pool session
+// inspecting a worktree set must not need a WRITABLE -C directory). The verb is
+// located with cmdparse.FirstOperand, which skips leading flags, so an option
+// ahead of it cannot displace it; `add`, `remove`, `move`, `lock`, `unlock`,
+// `prune` and `repair` all keep the write requirement.
+func isWorktreeList(subcmd string, rest []string) bool {
+	if subcmd != "worktree" {
+		return false
+	}
+	verb, _ := cmdparse.FirstOperand(rest)
+	return verb == "list"
 }
 
 // effectiveDir folds git's `-C` chdir values onto cwd the way git does: an

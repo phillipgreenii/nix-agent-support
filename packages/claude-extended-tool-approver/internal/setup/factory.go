@@ -67,6 +67,16 @@ func NewEngineForCWDLive(cwd string, shells killshell.ShellStore) *engine.Engine
 	return newEngineForCWD(cwd, shells, bgkill.NewFileStore())
 }
 
+// NewEngineForCWDLiveUnattended is NewEngineForCWDLive for a session that has no
+// human to answer a permission dialog (hookio.HookInput.IsUnattended): its path
+// evaluator is extended with the unattended-only roots (patheval.ExtendForUnattended,
+// bead pg2-b1lir W3). The attended constructors never call it, so an interactive
+// session's zones are exactly what they were.
+func NewEngineForCWDLiveUnattended(cwd string, shells killshell.ShellStore) *engine.Engine {
+	cfg := configrules.Load(configrules.DefaultPath())
+	return buildEngineForCWD(cwd, shells, bgkill.NewFileStore(), cfg, true)
+}
+
 func newEngineForCWD(cwd string, shells killshell.ShellStore, jobs bgkill.JobStore) *engine.Engine {
 	// Load the consumer config ONCE PER CALL and inject its structured
 	// sub-configs into the kubectl, build-tools, ssh, vault, curl, and monorepo
@@ -94,8 +104,17 @@ func newEngineForCWD(cwd string, shells killshell.ShellStore, jobs bgkill.JobSto
 // and the ~17 rule modules RuleChain constructs — only the config PARSE is
 // shared.
 func newEngineForCWDWithConfig(cwd string, shells killshell.ShellStore, jobs bgkill.JobStore, cfg *configrules.Config) *engine.Engine {
+	return buildEngineForCWD(cwd, shells, jobs, cfg, false)
+}
+
+// buildEngineForCWD is the one constructor body; unattended extends the path
+// evaluator with the unattended-only roots and the session's own $TMPDIR.
+func buildEngineForCWD(cwd string, shells killshell.ShellStore, jobs bgkill.JobStore, cfg *configrules.Config, unattended bool) *engine.Engine {
 	projectRoot := patheval.DetectProjectRoot(cwd)
 	pe := patheval.NewWithCWD(projectRoot, cwd)
+	if unattended {
+		pe.ExtendForUnattended()
+	}
 
 	sandboxCfg := patheval.LoadSandboxFilesystemConfig(cwd)
 	pe.SetSandboxConfig(sandboxCfg)
