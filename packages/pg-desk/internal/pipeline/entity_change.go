@@ -291,18 +291,44 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 
 	// (4) after the commit: local records for other entities, the
 	// interpretation, and the derived-link replacement LAST.
-	if err := p.appendLocalRecords(repo, entityType, entityID, observed, propagate, otherLinks, own, at); err != nil {
+	if err := p.finishEntityChange(repo, entityType, entityID, postCommit{
+		observed: observed, propagate: propagate, otherLinks: otherLinks, own: own, at: at,
+		interp: interpRow, haveLinks: haveLinks, newLinks: newLinks,
+	}); err != nil {
 		return res, err
 	}
-	if err := p.store.UpsertInterpretation(interpRow); err != nil {
-		return res, fmt.Errorf("pipeline: persist interpretation %s %s: %w", entityType, entityID, err)
+	return res, nil
+}
+
+// postCommit carries what the steps after an entity's commit need.
+type postCommit struct {
+	observed   bool
+	propagate  bool
+	otherLinks []classify.Targeted
+	own        classify.WorkLookup
+	at         string
+	interp     store.Interpretation
+	haveLinks  bool
+	newLinks   []store.XrefLink
+}
+
+// finishEntityChange runs the steps that follow the entity's own commit, in
+// the pinned order: the other-entity and propagation records, the
+// interpretation row and, LAST, the derived-link replacement. RunEntityChange
+// and IngestFeedRow both call it.
+func (p *Pipeline) finishEntityChange(repo, entityType, entityID string, pc postCommit) error {
+	if err := p.appendLocalRecords(repo, entityType, entityID, pc.observed, pc.propagate, pc.otherLinks, pc.own, pc.at); err != nil {
+		return err
 	}
-	if haveLinks {
-		if err := p.store.ReplaceDerivedXrefs(repo, entityType, entityID, newLinks); err != nil {
-			return res, fmt.Errorf("pipeline: links %s %s: %w", entityType, entityID, err)
+	if err := p.store.UpsertInterpretation(pc.interp); err != nil {
+		return fmt.Errorf("pipeline: persist interpretation %s %s: %w", entityType, entityID, err)
+	}
+	if pc.haveLinks {
+		if err := p.store.ReplaceDerivedXrefs(repo, entityType, entityID, pc.newLinks); err != nil {
+			return fmt.Errorf("pipeline: links %s %s: %w", entityType, entityID, err)
 		}
 	}
-	return res, nil
+	return nil
 }
 
 // appendLocalRecords appends, at origin pg-desk, the link records naming the
