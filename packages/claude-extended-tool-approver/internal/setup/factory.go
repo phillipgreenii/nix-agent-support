@@ -271,7 +271,7 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// not pre-approved by safe-commands as a bare "safe command". safe-commands
 		// is currently not-applicable on these executables anyway, but ordering them
 		// first makes that guarantee explicit and robust against future safe-list drift.
-		curl.New(cfg.Curl),
+		curl.New(cfg.Curl).WithEvaluator(pe),
 		sshrule.New(cfg.Ssh),
 		vaultrule.New(cfg.Vault),
 		// pn-workspace approves the routine, non-destructive `pn workspace`

@@ -213,7 +213,7 @@ is authoritative.
 15. **gh-stack** -- hardcoded (not consumer-configured) per-subcommand allowlist for the `gh stack <verb> ...` GitHub CLI extension (bead `pg2-s4lzw`, follow-up to `pg2-z3u4f`'s conformance enumeration finding the plugin's ENTIRE prescribed command surface -- `view`/`up`/`down`/`top`/`bottom`/`trunk`/`checkout`/`init`/`add`/`push`/`submit`/`link`/`sync`/`rebase`/`merge`/`unstack` -- abstained through the whole rule chain, since `gh` itself only recognizes its own built-in resources, not this third-party extension). `view`/`up`/`down`/`top`/`bottom`/`trunk`/`init`/`unstack --local`/`add <branch>` bare (no `-A`/`-u`/`-m`) → Approve (read-only, navigation-only, or local-only, no PR/GitHub-API side effect); `checkout <branch-name>` → Approve (resolves against LOCALLY TRACKED stacks only, per the vendored SKILL.md), but `checkout <stack-number|pr-number|pr-url>` → Ask (a real network fetch); `unstack` / `unstack <number>` without `--local` → Ask (a real GitHub API write, though PRs/branches are never deleted); `push`/`submit --auto[--open]`/`link`/`sync` → Ask (each a real remote mutation, or -- for `link`/`submit` -- an open question the package doc records for a future revisit); `rebase` (every flag/form) → **Approve**, mirroring plain `git rebase`'s verdict in `internal/rules/git` rather than its own Ask bucket, since gh-stack's rebase has no interactive/`-i` mode at all; `merge` (every flag/form) → **Reject**, mirroring `gh pr merge`'s immediate-merge Reject exactly, with no deferred/queued spelling to carve out. `gh stack add -A`/`-u`/`-m <msg> <branch>` (bundling an uninspected commit) is deliberately left UNCLAIMED rather than claimed at any verdict -- CETA cannot see what is being committed, mirroring why a plain `git commit` is not blanket-approved -- and so is `gh stack modify` (the SKILL.md's own exit-code table states this skill never produces it)
 16. **monorepo** -- config-driven monorepo command/script boundary (`monorepo` block: `approvedCommands` + `dangerousEnvByWrapper`); Abstains until configured
 17. **nix** / **docker** -- nix and docker policies (mount-aware inner eval). docker `rm`, `rmi`, `stop` and `volume rm` (and the `container`/`image` spellings) are approved only against objects the session itself created, proven from the session transcript; the prune verbs are never approved (agent rule C-3)
-18. **curl** -- config-driven curl approval (`curl` block: `allowedDomainSuffixes` read-only + per-domain `domainMethods`); base generic hosts (localhost/loopback, GitHub read hosts) approved read-only even with no config; only ever Approves or Abstains
+18. **curl** -- config-driven curl approval (`curl` block: `allowedDomainSuffixes` read-only + per-domain `domainMethods`); base generic hosts (localhost/loopback, GitHub read hosts) approved read-only even with no config; `-G`/`--get` query-string requests to a loopback host are approved (see "Consumer configuration" below); only ever Approves or Abstains
 19. **ssh** -- config-driven ssh/scp classification (`ssh` block: user allowlist / read-only commands / secret-path / password-auth); Abstains until configured
 20. **vault** -- config-driven Vault read/write verb split (`vault` block: `readVerbs` → approve, `writeVerbs` → ask); Abstains until configured
 21. **pn-workspace** -- hardcoded (not consumer-configured) allowlist for the routine, non-destructive `pn workspace` subcommand family, per operator ruling (Phillip, 2026-09-17, `pg2-4zyqf`/`pg2-vlpe1`): `pn workspace build|status|push|doctor|update` and `pn workspace workforest add|list` → Approve. `pn workspace workforest remove` and any direct write to `pn-workspace.toml` are explicitly excluded and keep their prior (non-relaxed) scrutiny -- the latter is not even a `pn` invocation, so this rule never reaches it at all. Any other/unlisted subcommand Abstains
@@ -344,7 +344,17 @@ or empty block leaves its rule at the safe base default (the command-aware
   compound, compound matched first); anything else → Abstain.
 - **curl**: a read-only method (GET/HEAD) to a base host or an
   `allowedDomainSuffixes` domain → Approve; a `domainMethods` domain whose list
-  includes the request method → Approve; everything else → Abstain.
+  includes the request method → Approve; everything else → Abstain. `-G`/`--get`
+  (bead `pg2-b1lir` W1, operator ruling `pg2-r9kv7`, 2026-10-27) turns
+  `-d`/`--data*`/`--data-urlencode` into query parameters of a GET, so
+  `curl -sG --data-urlencode 'query=up' http://127.0.0.1:9090/api/v1/query` →
+  Approve; this get mode approves ONLY a loopback or `.localhost` host, never `-X`
+  non-GET, `-T`, `-F`, `--json`, `-K`, a data operand that names a local file
+  (`@file`), `-L`, a proxy, `--unix-socket`, `--resolve`/`--connect-to` or a
+  write-capable option, and an unknown option fails closed (`parseInvocation` in
+  `internal/rules/curl/getmode.go`). It only adds approvals: whatever it does not
+  approve is judged by the unchanged scan. Rule-wide, `-K`/`--config` and `-o`/`-O`
+  outside the path evaluator's write roots are refused (`/dev/null` and `-` pass).
 - **monorepo**: a `monorepo.approvedCommands` basename — this block's own nested
   key, distinct from the top-level list above — after normalizing the executable
   relative to the project root → Approve, unless it carries an inline

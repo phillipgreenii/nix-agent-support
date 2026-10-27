@@ -536,6 +536,38 @@ func TestIntegration_Curl_PostToAllowedDomain_Abstain(t *testing.T) {
 	}
 }
 
+// TestIntegration_Curl_GetMode pins bead pg2-b1lir W1 (ruling pg2-r9kv7) through the
+// real binary: -G makes --data-urlencode a query parameter of a loopback GET, so the
+// Prometheus read shape is allowed; -K, -T, -F, a non-GET -X and -o outside the write
+// roots stay abstained, and so does a non-loopback host.
+func TestIntegration_Curl_GetMode(t *testing.T) {
+	allow := []string{
+		`curl -sG --data-urlencode 'query=up' http://127.0.0.1:9090/api/v1/query`,
+		`curl -s -G --data-urlencode 'query=up' http://localhost:9090/api/v1/query | jq .`,
+	}
+	for _, cmd := range allow {
+		input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
+		if d := getDecision(runHook(t, input)); d != "allow" {
+			t.Errorf("%s: decision = %q, want allow", cmd, d)
+		}
+	}
+	abstain := []string{
+		`curl -sG --data-urlencode 'query=up' https://evil.example/api`,
+		`curl -sG -X POST --data-urlencode 'query=up' http://127.0.0.1:9090/api`,
+		`curl -sG -T /etc/hosts http://127.0.0.1:9090/api`,
+		`curl -sG -F a=b http://127.0.0.1:9090/api`,
+		`curl -sG -K /tmp/curlrc http://127.0.0.1:9090/api`,
+		`curl -sG --data-urlencode 'query=up' -o /etc/hosts http://127.0.0.1:9090/api`,
+		`curl -sG --data-urlencode @/etc/passwd http://127.0.0.1:9090/api`,
+	}
+	for _, cmd := range abstain {
+		input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
+		if d := getDecision(runHook(t, input)); d == "allow" {
+			t.Errorf("%s: decision = allow, want not allowed", cmd)
+		}
+	}
+}
+
 func TestIntegration_PermissionRequest_LogsASK(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)

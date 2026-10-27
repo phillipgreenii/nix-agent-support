@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
 
@@ -88,6 +89,9 @@ type domainMethods struct {
 type Rule struct {
 	allowedDomainSuffixes []string
 	domainMethods         []domainMethods
+	// eval gates the files a get-mode invocation writes (-o, -O). Nil in legacy
+	// construction; see WithEvaluator.
+	eval *patheval.PathEvaluator
 }
 
 // New constructs the curl rule from cfg (the rules.json `curl` block). A zero
@@ -125,6 +129,26 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			continue
 		}
 		foundCurl = true
+		// The strict walk (getmode.go) understands curl's own option grammar. Two refusals
+		// apply to every invocation it can account for, because the W1 ruling (bead
+		// pg2-b1lir) says they stay denied and the legacy scan never checked them: a
+		// config file (-K, whose content curl obeys as if typed) and an output file
+		// (-o, -O) outside the write roots (checked only when a path evaluator is
+		// injected; /dev/null and `-` always pass).
+		inv, understood := parseInvocation(pc.Args)
+		if understood {
+			if inv.config {
+				return hookio.NotApplicable()
+			}
+			if r.eval != nil && !r.outputsWritable(inv, input.CWD) {
+				return hookio.NotApplicable()
+			}
+			// -G / --get (W1): query-string data on a loopback GET. Additive only;
+			// anything get mode does not approve is judged by the legacy scan below.
+			if r.getModeApproves(inv, input.CWD) && r.getModeOutputsOK(inv, input.CWD) {
+				continue
+			}
+		}
 		if !r.allURLsAllowed(pc.Args) {
 			return hookio.NotApplicable()
 		}
