@@ -143,6 +143,7 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 	f.bd(t, "close", closed)
 	human := f.bead(t, "escalated for a human", "escalated", "human")
 	deEscalated := f.bead(t, "de-escalated")
+	handedToHuman := f.bead(t, "handed to a human, no longer escalated", "attention", "human")
 	deferred := f.bead(t, "deferred escalated", "escalated")
 	f.bd(t, "defer", deferred, "--until", "2999-01-01")
 	blocked := f.bead(t, "blocked escalated", "escalated")
@@ -154,7 +155,7 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 	listed := f.bd(t, "ready", "--label", "escalated", "--exclude-label", "human", "--json", "--limit", "0")
 	for id, want := range map[string]bool{
 		openEscalated: true, peerHeld: true,
-		closed: false, human: false, deEscalated: false, deferred: false, blocked: false,
+		closed: false, human: false, deEscalated: false, handedToHuman: false, deferred: false, blocked: false,
 	} {
 		if got := strings.Contains(listed, `"`+id+`"`); got != want {
 			t.Fatalf("discovery query lists %s = %v, want %v (fixture is not what the test assumes):\n%s", id, got, want, listed)
@@ -193,6 +194,7 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 		{"closed bead is completed as skipped", closed, "skipped-bead-closed"},
 		{"human bead is declined", human, "skipped-bead-human"},
 		{"de-escalated bead is completed as skipped", deEscalated, "skipped-bead-not-escalated"},
+		{"human bead without escalated is completed as skipped (pg2-4u0d0u)", handedToHuman, "skipped-bead-not-escalated"},
 		{"deferred bead is declined", deferred, "skipped-bead-deferred"},
 		{"blocked bead is declined", blocked, "skipped-bead-blocked"},
 		{"unreadable bead fails open", unreadable, wire.BusyReasonPoolUnreadable},

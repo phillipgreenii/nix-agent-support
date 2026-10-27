@@ -490,7 +490,9 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     over 15 hours while no other event of its type was dispatched; bead `pg2-57oql`). Exactly
     three outcomes are moot: the bead is closed (`skipped-bead-closed`, for every check, a closed
     status being read as this and not as not-open), the pull request is merged (`skipped-pr-merged`)
-    and the bead no longer carries `escalated` (`skipped-bead-not-escalated`). The router counts
+    and the bead no longer carries `escalated` (`skipped-bead-not-escalated`; this includes a bead
+    that carries `human` but not `escalated`, which was handed to a person through hand-to-human
+    and leaves no triager work, bead `pg2-4u0d0u`). The router counts
     the completion on its own counter (`pg_router_skipped_total`, by type, role and reason) and
     NOT as throughput or as role progress, so a stream of them cannot make a stuck queue look
     like it is progressing (`pg-router-queue-stalled`).
@@ -560,13 +562,17 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     does not claim). The check reads only the bead as just re-read at dispatch and declines unless
     the bead still matches the role's own discovery query (open, undeferred, unblocked, carrying
     `escalated`, not carrying `human`). It declines when ANY of these holds, in this order: (a)
-    the bead is not `open` (`skipped-bead-not-open`; a `closed` status is MOOT and completed as
-    `skipped-bead-closed`, which is the head-of-queue case of `pg2-57oql`; a `deferred` or
-    `blocked` status gets `skipped-bead-deferred` or `skipped-bead-blocked` instead); (b) the bead
-    carries `human` (`skipped-bead-human`); (c) the bead no longer carries `escalated`, because it
-    was de-escalated after the event was queued (MOOT, completed as
-    `skipped-bead-not-escalated`); (d) the bead's
-    deferral date is in the future (`skipped-bead-deferred`); (e) the bead has an open `blocks`
+    the bead is `closed` (MOOT, completed as `skipped-bead-closed`, which is the head-of-queue
+    case of `pg2-57oql`); (b) the bead no longer carries `escalated`, because it was de-escalated
+    after the event was queued, or was handed to a person through hand-to-human (which removes
+    `escalated` and adds `human`) (MOOT, completed as `skipped-bead-not-escalated`, whatever its
+    status and whether or not it carries `human`: no triager work can remain, and a decline of
+    such an event at the head of the queue jammed it, bead `pg2-4u0d0u`); (c) the bead is not
+    `open` otherwise (`skipped-bead-not-open`; a `deferred` or `blocked` status gets
+    `skipped-bead-deferred` or `skipped-bead-blocked` instead); (d) the bead carries `human` and
+    `escalated` together (`skipped-bead-human`: declined, not moot, because the triager never
+    handles a bead for a person but the work still exists); (e) the bead's
+    deferral date is in the future (`skipped-bead-deferred`); (f) the bead has an open `blocks`
     dependency (`skipped-bead-blocked`). Who holds the bead is NOT checked: the discovery query
     lists an open bead whatever its assignee, and this role never claims its bead. An unreadable
     bead (no bead came back) proceeds, and so does a deferral date that does not parse as a

@@ -78,7 +78,7 @@ Extensions:
 - 2h. A dispatch whose role opts in to the pre-launch check and whose check says the dispatch is
   not worth running (`INV-CCH-22`): before any capacity, isolation or launch step this module
   either COMPLETES the event as skipped, when it is moot (a bead already closed, a PR already
-  merged, a bead no longer escalated: `skipped-bead-closed`, `skipped-pr-merged`,
+  merged, a bead no longer escalated, human-handed-off ones included: `skipped-bead-closed`, `skipped-pr-merged`,
   `skipped-bead-not-escalated`; the router settles it on its first offer and never re-offers it),
   or declines `busy` with a reason that starts `skipped-`, when the work still exists. For a
   REVIEW role the decline is a pending review that already holds content for the head

@@ -52,6 +52,7 @@ func TestPrecheck_EveryReasonIsPinnedMootOrDecline(t *testing.T) {
 		{"ready: bead closed", readyRun(ready(func(i *beads.Issue) { i.Status = "closed" })), SkipBeadClosed, true, false},
 		{"triage: bead closed (the head-of-line jam of 2026-10-15)", triageRun(triage(func(i *beads.Issue) { i.Status = "closed" })), SkipBeadClosed, true, false},
 		{"triage: bead no longer escalated", triageRun(triage(func(i *beads.Issue) { i.Labels = []string{"agent-support"} })), SkipBeadNotEscalated, true, false},
+		{"triage: human bead without escalated (handed to a person, pg2-4u0d0u)", triageRun(triage(func(i *beads.Issue) { i.Labels = []string{"attention", "human"} })), SkipBeadNotEscalated, true, false},
 
 		// NOT moot: still declines, the work still exists.
 		{"review: pending review holds the head", review(openBead(), &fakePR{pending: PendingReview{Pending: true}}), SkipPendingReview, false, false},

@@ -266,3 +266,38 @@ esac
 		t.Fatalf("the event behind the settled head: got exit %d reply %v, want the unchanged launch path (pool-unreadable: no ccpool on PATH)", code, reply)
 	}
 }
+
+// The head-of-queue jam that survived pg2-6t91v7 (bead pg2-4u0d0u, 2026-10-27):
+// an escalated event whose bead was handed to a person through hand-to-human
+// (labels attention and human, NO escalated) was still DECLINED as
+// skipped-bead-human on every offer, because the human check ran before the
+// not-escalated check, and so blocked every later escalated event. It is now moot
+// and completes as skipped on its first offer, and the next event is offered. A
+// bead that carries BOTH human and escalated still declines: the work is not moot.
+func TestDispatch_triageHumanHandedOffHeadOfQueueSettlesOnItsFirstOffer(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", stubBin(t, map[string]string{"bd": `case "$*" in
+  *esc-handed*) printf '%s' '{"data":[{"id":"esc-handed","status":"open","labels":["attention","human"]}]}' ;;
+  *esc-both*) printf '%s' '{"data":[{"id":"esc-both","status":"open","labels":["escalated","human"]}]}' ;;
+  *) printf '%s' '{"data":[{"id":"esc-open","status":"open","labels":["escalated"]}]}' ;;
+esac
+`}))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
+	triager := roleUnderTest{"triager", configFrom(t, `{"ccpool":{"actor":"test-actor","completion":"close-or-triage","precheck":"triage","onFailure":"add-human","onDispatchFail":"unclaim","promptBody":"hello"}}`)}
+	event := func(id string) string {
+		return `{"id":"e-` + id + `","type":"dispatch","payload":{"id":"` + id + `","type":"escalated.pg2"}}`
+	}
+
+	code, reply := runDispatchReply(t, triager, event("esc-handed"))
+	assertSkippedCompletion(t, code, reply, "skipped-bead-not-escalated")
+
+	code, reply = runDispatchReply(t, triager, event("esc-open"))
+	if code != conformance.ExitBusy || reply["reason"] != wire.BusyReasonPoolUnreadable {
+		t.Fatalf("the event behind the settled head: got exit %d reply %v, want the unchanged launch path (pool-unreadable: no ccpool on PATH)", code, reply)
+	}
+
+	code, reply = runDispatchReply(t, triager, event("esc-both"))
+	if code != conformance.ExitBusy || reply["reason"] != "skipped-bead-human" {
+		t.Fatalf("a bead with both human and escalated: got exit %d reply %v, want ExitBusy with skipped-bead-human (a decline, not moot)", code, reply)
+	}
+}

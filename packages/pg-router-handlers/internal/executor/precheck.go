@@ -97,7 +97,9 @@ const reviewRoleName = "review"
 // and the queue is a per-handler serial FIFO, so a dead event declined at the head
 // blocks every later event for the handler; a completion settles it on its first
 // offer. Exactly three outcomes are moot: the bead is closed, the PR is merged, the
-// bead no longer carries the escalated label. Every other outcome stays a decline
+// bead no longer carries the escalated label (this includes a human bead that lost it
+// through hand-to-human, bead pg2-4u0d0u; a bead carrying BOTH human and escalated is
+// not moot). Every other outcome stays a decline
 // because the work still exists and a completion would drop it: a pending review
 // awaiting submission, a human or not-groomed bead, a blocked, deferred, claimed or
 // otherwise not-open bead, and an unavailable connector.
@@ -381,12 +383,16 @@ const escalatedLabel = complete.EscalatedLabel
 // RefreshItemIssue just fetched (no extra bd call). It declines when, in this
 // order:
 //
-//  1. the bead is not open (a closed, deferred or blocked status gets its own
-//     reason; closed is MOOT, see Moot, the rest are declines);
-//  2. it carries human;
-//  3. it no longer carries escalated (it was de-escalated; MOOT, see Moot);
-//  4. its defer_until is in the future;
-//  5. it has an open blocks dependency.
+//  1. the bead is closed (MOOT, see Moot);
+//  2. it no longer carries escalated (it was de-escalated, or handed to a person
+//     through hand-to-human, which removes escalated and adds human; MOOT, see
+//     Moot, whatever its status or other labels, because no triager work can
+//     remain for the event: bead pg2-4u0d0u);
+//  3. it is otherwise not open (a deferred or blocked status gets its own reason,
+//     the rest is not-open; all are declines);
+//  4. it carries human (together with escalated: a decline, the work is not moot);
+//  5. its defer_until is in the future;
+//  6. it has an open blocks dependency.
 //
 // The assignee is deliberately NOT checked: `bd ready` lists an open bead
 // whatever its assignee, and the triager never claims its bead. A nil iss (the
@@ -399,10 +405,18 @@ func PrecheckTriage(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool)
 	decline := func(reason, detail string) (Skip, bool) {
 		return deps.skip(d, Skip{Reason: reason, Detail: detail}, ""), true
 	}
+	if iss.Status == "closed" {
+		return decline(SkipBeadClosed, "the bead is closed")
+	}
+	// The escalated check runs before the status and human checks: a bead that
+	// lacks escalated is moot whatever else it carries. A human bead without
+	// escalated was handed to a person (hand-to-human), and a head-of-queue event
+	// declined for it jammed the serial FIFO (bead pg2-4u0d0u).
+	if !iss.HasLabel(escalatedLabel) {
+		return decline(SkipBeadNotEscalated, "the bead no longer carries the "+escalatedLabel+" label")
+	}
 	switch iss.Status {
 	case "open":
-	case "closed":
-		return decline(SkipBeadClosed, "the bead is closed")
 	case "deferred":
 		return decline(SkipBeadDeferred, "the bead's status is deferred")
 	case "blocked":
@@ -412,9 +426,6 @@ func PrecheckTriage(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool)
 	}
 	if iss.HasLabel(beads.LabelHuman) {
 		return decline(SkipBeadHuman, "the bead now carries the "+beads.LabelHuman+" label")
-	}
-	if !iss.HasLabel(escalatedLabel) {
-		return decline(SkipBeadNotEscalated, "the bead no longer carries the "+escalatedLabel+" label")
 	}
 	if iss.DeferredUntilAfter(deps.clock()) {
 		return decline(SkipBeadDeferred, "the bead's defer_until is in the future")
