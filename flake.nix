@@ -1152,7 +1152,7 @@
         pg-router-ccpool-handler-bd-contract-test = {
           enable = true;
           name = "pg-router-ccpool-handler-bd-contract-test";
-          description = "pg-router-ccpool-handler: run the contract-tagged real-bd hard-stop, park-note and triage-precheck tests (pg2-sx246, pg2-78mxs, pg2-p9lcg)";
+          description = "pg-router-ccpool-handler: run the contract-tagged real-bd hard-stop, park-note, triage-precheck and split-triage tests (pg2-sx246, pg2-78mxs, pg2-p9lcg, pg2-9hd67n)";
           entry = "${
             pkgs.writeShellApplication {
               name = "pg-router-ccpool-handler-bd-contract-test-hook";
@@ -1174,12 +1174,12 @@
 
                 top="$(git rev-parse --show-toplevel)"
                 cd "$top/packages/pg-router-handlers"
-                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Terminal|Park|Triage)_RealBD_' ./internal/watchdog/ ./internal/executor/ ./cmd/pg-router-handler-command/ ./cmd/pg-router-handler-ccpool/
+                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Terminal|Park|Triage|Split)_RealBD_' ./internal/watchdog/ ./internal/executor/ ./cmd/pg-router-handler-command/ ./cmd/pg-router-handler-ccpool/
               '';
             }
           }/bin/pg-router-ccpool-handler-bd-contract-test-hook";
           language = "system";
-          files = "^packages/pg-router-handlers/(internal/(watchdog|beads|executor|complete|parknote|dtest|roles|wire|dispatchlib|handlerstate|rolefile)/|cmd/(pg-router-handler-command|pg-router-handler-ccpool)/dispatch[^/]*\\.go$|go\\.(mod|sum)$)";
+          files = "^packages/pg-router-handlers/(internal/(watchdog|beads|executor|complete|parknote|dtest|roles|wire|dispatchlib|handlerstate|rolefile)/|cmd/(pg-router-handler-command|pg-router-handler-ccpool)/(dispatch|split)[^/]*\\.go$|go\\.(mod|sum)$)";
           pass_filenames = false;
           require_serial = true;
         };
