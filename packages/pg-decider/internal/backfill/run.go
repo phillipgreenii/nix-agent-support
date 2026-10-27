@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -173,6 +174,69 @@ func (o *RunOptions) fill() error {
 	return nil
 }
 
+// MaxReasonBytes bounds the reason text a progress line carries, so a log line
+// cannot explode on a long upstream error.
+const MaxReasonBytes = 400
+
+// failureLineMarker identifies the composed command's one failure line
+// (`pg-pr-change: <what> (stage=<stage>, class=<class>): <detail>: run <next>`).
+// Its detail is the decider's own diagnostic lines, which name the failing
+// action (op, work item, rule) and carry its error text.
+const failureLineMarker = "pg-pr-change: "
+
+// countersMarker marks the decider's run counters line, which the composed
+// command passes through ahead of its own failure line and which says nothing
+// about why a run failed.
+const countersMarker = "pg-decider.run-counters/v1"
+
+// secretPattern matches the shapes of a credential in upstream error text: a
+// URL userinfo and a token-, secret-, password- or authorization-style
+// key=value, key: value, or bearer pair.
+var secretPattern = regexp.MustCompile(`(?i)(://)[^/\s@]+@|\b(token|secret|password|passwd|authorization|api[_-]?key)\b\s*[=:]\s*(bearer\s+)?\S+|\bbearer\s+\S+`)
+
+// FailureReason is the reason a failed composed-command call reports on its
+// progress line, taken from its stderr: its failure line when it wrote one (the
+// last one, since the failure line is the command's final output), else the
+// first line that is not the decider's counters line, else the first line. The
+// result is one line, redacted of credential-shaped text and bounded to
+// MaxReasonBytes.
+func FailureReason(stderr string) string {
+	var lines []string
+	for _, l := range strings.Split(stderr, "\n") {
+		if l = strings.TrimSpace(strings.TrimRight(l, "\r")); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	pick := ""
+	for _, l := range lines {
+		if strings.HasPrefix(l, failureLineMarker) && strings.Contains(l, "(stage=") {
+			pick = l
+		}
+	}
+	if pick == "" {
+		for _, l := range lines {
+			if !strings.Contains(l, countersMarker) {
+				pick = l
+				break
+			}
+		}
+	}
+	if pick == "" && len(lines) > 0 {
+		pick = lines[0]
+	}
+	pick = strings.TrimPrefix(pick, "Error: ")
+	pick = secretPattern.ReplaceAllStringFunc(pick, func(m string) string {
+		if strings.HasPrefix(m, "://") {
+			return "://[redacted]@"
+		}
+		return "[redacted]"
+	})
+	if len(pick) > MaxReasonBytes {
+		pick = strings.ToValidUTF8(pick[:MaxReasonBytes], "") + "..."
+	}
+	return pick
+}
+
 // finished reports whether the log holds a final result of mode for pr after
 // the start of the current pass (file position since): a success, or a not-found
 // (which a re-run cannot change).
@@ -262,7 +326,7 @@ func Run(ctx context.Context, o RunOptions) (*RunResult, error) {
 			if !known {
 				cls = ExitClass{Class: "unknown"}
 			}
-			fmt.Fprintf(o.Progress, "fail %s: exit %d (%s): %s\n", e.PR, cr.Code, cls.Class, firstLine(cr.Stderr))
+			fmt.Fprintf(o.Progress, "fail %s: exit %d (%s): %s\n", e.PR, cr.Code, cls.Class, FailureReason(cr.Stderr))
 			if cls.Final {
 				res.Counts.NotFound++
 			} else if !failedAt[e.PR] {

@@ -307,3 +307,38 @@ func TestThePaceWaitsBetweenPRsAndNotAfterTheLast(t *testing.T) {
 		t.Fatalf("waits %v, want two (between three PRs)", waits)
 	}
 }
+
+func TestFailureReasonPrefersTheFailureLineOverTheCountersLine(t *testing.T) {
+	counters := `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"o/r#1","rules":{}}`
+	failure := "pg-pr-change: the decider applied only part of its plan (stage=decide, class=decide_partial): update bd-7a (rule anchor.backfill): failed: unsupported: run pg-decider plan pr o/r#1"
+	cases := []struct {
+		name, stderr, want string
+	}{
+		{"counters first", counters + "\n" + failure + "\n", failure},
+		{"no failure line: first line that is not the counters", counters + "\nsomething broke\n", "something broke"},
+		{"only the counters line", counters + "\n", counters},
+		{"empty", "", ""},
+		{"error prefix", "Error: boom\n", "boom"},
+	}
+	for _, c := range cases {
+		if got := FailureReason(c.stderr); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestFailureReasonIsBoundedAndRedactsCredentials(t *testing.T) {
+	long := FailureReason("pg-pr-change: x (stage=decide, class=decide_partial): " + strings.Repeat("é", 1000))
+	if len(long) > MaxReasonBytes+len("...") || !strings.HasSuffix(long, "...") {
+		t.Fatalf("not bounded: %d bytes", len(long))
+	}
+	got := FailureReason("pg-pr-change: x (stage=decide, class=decide_partial): fetch https://user:hunter2@host/x failed: Authorization: Bearer abc123 token=zzz9 password: pw1")
+	for _, secret := range []string{"hunter2", "abc123", "zzz9", "pw1"} {
+		if strings.Contains(got, secret) {
+			t.Errorf("reason leaks %q: %s", secret, got)
+		}
+	}
+	if !strings.Contains(got, "failed:") {
+		t.Errorf("redaction ate the surrounding text: %s", got)
+	}
+}

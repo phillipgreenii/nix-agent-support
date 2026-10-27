@@ -98,6 +98,10 @@ tracker listed no open anchor with a PR: the step refuses to pass at zero equals
 
 ## Failure modes
 
+- Each failed PR of a pass prints a progress line `fail <PR>: exit <n> (<class>): <reason>` before the
+  last line. For `decide_partial` the reason is the composed command's failure line, which carries the
+  decider's own lines naming each failing action (op, work item, rule) and its error text. The reason is
+  one line, credential-shaped text redacted, at most 400 bytes.
 - `enumerate` exits `30` with "fails closed": the query-name file is absent or lists no query, a
   listing was incomplete (a source degraded, truncated), or the set is empty. Nothing was written.
 - A PR the forge reports gone (`not_found`) is a final result: it is counted apart and not run again, and
