@@ -77,6 +77,11 @@ type Engine struct {
 	Store    *store.Store
 	Lister   Lister
 	Hydrator Hydrator
+	// Feeder and Ingester serve the owning backends of an issue type: the
+	// feed read and acknowledge, and the per-row commit. They are only
+	// required when a watched query's backend owns its changes.
+	Feeder   Feeder
+	Ingester Ingester
 	Now      func() time.Time
 	Warn     io.Writer
 
@@ -127,17 +132,21 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	if opts.Cached {
 		return e.runCached(opts, emit)
 	}
-	queries, err := SelectQueries(e.Cfg, opts.EntityType, opts.Query)
+	selected, err := SelectQueries(e.Cfg, opts.EntityType, opts.Query)
 	if err != nil {
 		return Outcome{}, err
 	}
+	// An owning backend's queries are read from its change feed; every other
+	// query is listed and diffed exactly as before.
+	queries, owningQueries := e.splitQueries(opts.EntityType, selected)
 	// Liveness: every real call stamps the consumer's seen_at, even one that
 	// ends in total failure [design 6.9].
 	if err := e.Store.RegisterConsumer(opts.Consumer, opts.EntityType, e.now()); err != nil {
 		return Outcome{}, fmt.Errorf("changes: %w", err)
 	}
 
-	// Phase A: list every watched query, whole and fingerprinted.
+	// Phase A: list every listed (non-owning) watched query, whole and
+	// fingerprinted.
 	runs := make([]queryRun, 0, len(queries))
 	failedQueries := 0
 	for _, q := range queries {
@@ -150,32 +159,24 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 		}
 		runs = append(runs, queryRun{query: q, res: res, err: lerr})
 	}
-	total := failedQueries == len(queries)
+	// An owning-only configuration has no listed query: the phases run over an
+	// empty list and that is not a failure.
+	listOK := len(queries) == 0 || failedQueries < len(queries)
 
 	st := &pollState{hydrated: map[string]error{}, notes: map[string][]string{}}
 
-	if !total {
+	if listOK {
 		// Phase A2: watched-set membership. An entity no configured query
-		// lists any more becomes removed/inactive [design 6.1].
+		// lists any more becomes removed/inactive [design 6.1]. Owning queries
+		// keep no membership here (operator ruling pg2-ggs5p).
 		st.side = append(st.side, e.applyMembershipCtx(ctx, opts.EntityType, runs)...)
 
 		// Phase B: --reset replays every active entity as reconcile. The
 		// replay is exempt from hydration.max_per_poll (see the behavior
 		// doc): it is an explicit operator request and nothing is deferred.
 		if opts.Reset {
-			ids, err := e.activeEntityIDs(opts.EntityType)
-			if err != nil {
+			if err := e.resetReplay(ctx, opts.EntityType, st); err != nil {
 				return Outcome{}, err
-			}
-			for _, id := range ids {
-				if err := ctx.Err(); err != nil {
-					return Outcome{}, fmt.Errorf("changes: %w", err)
-				}
-				herr := e.hydrate(ctx, opts.EntityType, id, gather.ChangeChanged, OriginReset, true, nil)
-				st.hydrated[id] = herr
-				if herr != nil {
-					st.side = append(st.side, fmt.Sprintf("reset %s: %s", id, firstErrLine(herr.Error())))
-				}
 			}
 		}
 
@@ -200,10 +201,10 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 		}
 	}
 
-	sources := make([]Source, 0, len(runs))
+	listed := make(map[string]Source, len(runs))
 	for _, r := range runs {
 		if r.err != nil {
-			sources = append(sources, Source{Query: r.query, Status: StatusFailed, Reason: firstErrLine(r.err.Error())})
+			listed[r.query] = Source{Query: r.query, Status: StatusFailed, Reason: firstErrLine(r.err.Error())}
 			continue
 		}
 		reasons := degradedBackendReasons(r.res.Sources)
@@ -213,10 +214,14 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 		reasons = appendUnique(reasons, st.notes[r.query]...)
 		reasons = appendUnique(reasons, st.all...)
 		if len(reasons) > 0 {
-			sources = append(sources, Source{Query: r.query, Status: StatusDegraded, Reason: strings.Join(reasons, "; ")})
+			listed[r.query] = Source{Query: r.query, Status: StatusDegraded, Reason: strings.Join(reasons, "; ")}
 		} else {
-			sources = append(sources, Source{Query: r.query, Status: StatusOK})
+			listed[r.query] = Source{Query: r.query, Status: StatusOK}
 		}
+	}
+	listedSources := make([]Source, 0, len(runs))
+	for _, r := range runs {
+		listedSources = append(listedSources, listed[r.query])
 	}
 	// Persist each consulted query's listing status (incl. on total failure)
 	// so store-only readers can report coverage. Best-effort: a write error
@@ -225,9 +230,40 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	if set == nil {
 		set = e.Store.SetMeta
 	}
-	if err := recordListing(set, opts.EntityType, e.now().UTC().Format(time.RFC3339), sources); err != nil {
+	if err := recordListing(set, opts.EntityType, e.now().UTC().Format(time.RFC3339), listedSources); err != nil {
 		e.warnf("changes: persist listing status: %v\n", err)
 	}
+
+	// The feed step of every owning instance runs after phases A-C2 and
+	// before phase D (and before any total early return).
+	feedFailed := 0
+	feedOutcomes := []feedOutcome(nil)
+	if len(owningQueries) > 0 {
+		feedOutcomes, err = e.runFeed(ctx, opts.EntityType, e.feedInstances(opts.EntityType, owningQueries), st)
+		if err != nil {
+			return Outcome{}, err
+		}
+		for _, o := range feedOutcomes {
+			if o.failed {
+				feedFailed++
+			}
+		}
+	}
+	feedSources := e.feedSources(opts.EntityType, owningQueries, feedOutcomes)
+	bySource := make(map[string]Source, len(selected))
+	for _, s := range listedSources {
+		bySource[s.Query] = s
+	}
+	for _, s := range feedSources {
+		bySource[s.Query] = s
+	}
+	sources := make([]Source, 0, len(selected))
+	for _, q := range selected {
+		sources = append(sources, bySource[q])
+	}
+	// Total failure: no source answered at all.
+	total := failedQueries == len(queries) && feedFailed == len(feedOutcomes) && len(sources) > 0
+
 	for _, f := range st.side {
 		e.warnf("%s\n", f)
 	}

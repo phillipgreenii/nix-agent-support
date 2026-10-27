@@ -53,6 +53,12 @@ cursor once the output is flushed. A hydration that fails writes nothing, so
 the entity is simply found different again on the next call: there is no retry
 queue and no give-up.
 
+A watched issue query served by a backend that owns its changes is not listed:
+the backend's change feed is read instead (pinned to the backend, not
+acknowledged by the connector), each row is committed in order, and the feed is
+acknowledged only after the commit. A row that fails to hydrate is recorded and
+retried at every poll. Both kinds of query can be watched in one call.
+
 A plain call (without --cached) advances NAME's own cursor exactly like a real
 pg-router poll: to inspect without moving anything use --cached or
 "pg-desk %[1]s history <id>".
@@ -107,11 +113,17 @@ func runChanges(cmd *cobra.Command, entityType string, f changesFlags) error {
 	}
 	cmd.SilenceUsage = true
 
+	gatherer := gather.NewGatherer(cfg, st)
+	pl := pipeline.New(cfg, st, pipeline.WithLogWriter(cmd.ErrOrStderr()))
 	eng := &changes.Engine{
-		Cfg:      cfg,
-		Store:    st,
-		Lister:   gather.NewGatherer(cfg, st),
-		Hydrator: pipeline.New(cfg, st, pipeline.WithLogWriter(cmd.ErrOrStderr())),
+		Cfg:   cfg,
+		Store: st,
+		// The gatherer lists and reads a backend's feed; the pipeline hydrates
+		// and commits (a listed entity, or a feed row of an owning backend).
+		Lister:   gatherer,
+		Feeder:   gatherer,
+		Hydrator: pl,
+		Ingester: pl,
 		Now:      changesNow,
 		Warn:     cmd.ErrOrStderr(),
 	}
