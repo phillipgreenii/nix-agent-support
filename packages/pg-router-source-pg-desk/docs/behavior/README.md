@@ -65,27 +65,27 @@ flowchart LR
 - **No telemetry.** The adapter emits no metrics or traces and has no persistent process. Logging
   is stderr-only, and only on a failure path. On success it writes nothing to stderr.
 
-## `--retry-window` (intended)
+## `--retry-window`
 
-> **Intended, not built.** The adapter today defines only `--consumer`, `--query` and `--limit`
-> and sets no expiry, so every item it prints is born expired. The rest of this section states what
-> the flag will do once it exists.
+> **Built.** Without the flag the adapter sets no expiry, so every item it prints is born expired;
+> the rest of this section states what the flag does.
 
 pg-router retries a failed dispatch of an event only while the event has not expired, and an event
 whose `expiresAt` is absent is born expired, so an item without an expiry is offered once and then
 dropped (`INV-EVT-4`, [the router's invariants](../../../pg-router/docs/behavior/invariants.md)). A
 poll that carries a pg-desk issue therefore never reaches the router's retry for a transient
-dispatch failure today. `--retry-window` gives each item the expiry that turns retry on.
+dispatch failure unless the flag is on. `--retry-window` gives each item the expiry that turns retry on.
 
 - **Syntax and default.** `--retry-window <duration>`, a Go duration such as `10m`. The default is
-  `0`, which means **off**, as it is on the sibling adapter for pg-connector. A negative window is a
-  usage error: the adapter exits `1` and runs no pg-desk call.
+  `0`, which means **off**, as it is on the sibling adapter for pg-connector. A negative or unparseable window
+  is a usage error: the adapter exits `1` with a diagnostic on stderr, nothing on stdout, and runs no
+  pg-desk call. The flag is never passed on to pg-desk.
 - **Off (`0`, or the flag absent).** The output is byte-identical to a call made without the flag:
   no `at` and no `expiresAt` is printed, so every event is born expired and a failed dispatch is
   offered once.
 - **On (a window greater than zero).** Every item of the call additionally carries `at`, this
-  invocation's emit time in UTC to whole seconds (one value for every item of the call), and
-  `expiresAt` = `at` + the window. The router then re-offers a failed dispatch of that event until
+  invocation's emit time in UTC to whole seconds, formatted `2006-01-02T15:04:05Z` (one value for every item of the call), and
+  `expiresAt` = `at` + the window, in the same format. The router then re-offers a failed dispatch of that event until
   `expiresAt`, and an attempt made after it has expired is the handler's last (`INV-EVT-4`: the
   expiry is evaluated at attempt time, and `expiresAt` IS the retry window). The window is anchored
   at the emit time and never at the time of the change, so an old row that is delivered late still
@@ -117,12 +117,12 @@ dispatch failure today. `--retry-window` gives each item the expiry that turns r
 ## Realization gaps
 
 This set's **realization-gap register**: intended behavior this adapter has not built yet, one row
-per gap. This README states behavior in sections rather than in id-bearing elements, so the first
+per gap (a row whose status reads `realised` is built and stays as the record). This README states behavior in sections rather than in id-bearing elements, so the first
 column names the section the gap is against.
 
-| Element                     | Intended                                                                                                                                                                                     | Where the implementation stands                                                                                               | Tracked by                 |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| `--retry-window (intended)` | the flag gives each item `at` and `expiresAt` = `at` + the window (default `0` = off) so the router can retry a transient dispatch failure of an `issue.changed` event until the window ends | the adapter defines only `--consumer`, `--query` and `--limit`, prints no `at` or `expiresAt`, so every event is born expired | `pg2-2qyyh` (later phases) |
+| Element          | Intended                                                                                                                                                                                     | Where the implementation stands | Tracked by  |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ----------- |
+| `--retry-window` | the flag gives each item `at` and `expiresAt` = `at` + the window (default `0` = off) so the router can retry a transient dispatch failure of an `issue.changed` event until the window ends | realised                        | `pg2-2qyyh` |
 
 ## External references
 

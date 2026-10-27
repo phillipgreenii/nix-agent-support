@@ -44,6 +44,11 @@ type rawItem struct {
 	Type     string         `json:"type"`
 	Title    string         `json:"title"`
 	Metadata map[string]any `json:"metadata"`
+	// At and ExpiresAt are UTC RFC 3339 strings (second precision), set only
+	// when --retry-window is greater than zero; omitted otherwise so the
+	// output without the flag is unchanged.
+	At        string `json:"at,omitempty"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
 }
 
 // writeItems encodes items as one JSON array to stdout. items MUST be a

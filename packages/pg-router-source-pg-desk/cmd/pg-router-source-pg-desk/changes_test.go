@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fixture(name string) string { return filepath.Join("testdata", name) }
@@ -321,5 +324,109 @@ func TestSameEntityDifferentMaxSeqYieldsDifferentIDs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(ids, map[string]bool{"w-1@7": true, "w-1@9": true}) {
 		t.Errorf("ids = %v, want w-1@7 and w-1@9", ids)
+	}
+}
+
+// --- --retry-window ----------------------------------------------------------
+
+// pinPollTime pins the adapter's emit-time clock (the now seam) to an instant
+// with a sub-second part, so the tests also prove second truncation.
+func pinPollTime(t *testing.T) {
+	t.Helper()
+	orig := now
+	now = func() time.Time { return time.Date(2026, 3, 4, 5, 6, 7, 987654321, time.UTC) }
+	t.Cleanup(func() { now = orig })
+}
+
+// Without the flag (and with a window of 0) the items are exactly the
+// unchanged golden: no at, no expiresAt, and the flag is never passed to
+// pg-desk.
+func TestRetryWindowOffLeavesOutputUnchanged(t *testing.T) {
+	pinPollTime(t)
+	for _, extra := range [][]string{nil, {"--retry-window", "0"}, {"--retry-window", "0s"}} {
+		argsFile := filepath.Join(t.TempDir(), "args")
+		withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=2", "GO_HELPER_ARGS_FILE="+argsFile)
+		args := append([]string{"widget", "--consumer", "router"}, extra...)
+		stdout, stderr, code := runCLI(t, args...)
+		if code != 0 {
+			t.Fatalf("args %v: exit = %d, stderr=%q", extra, code, stderr)
+		}
+		got := mustItems(t, stdout)
+		if want := readGolden(t, "items_degraded.golden.json"); !reflect.DeepEqual(got, want) {
+			t.Errorf("args %v: items differ from the golden:\n got: %s", extra, stdout)
+		}
+		if strings.Contains(stdout, `"at"`) || strings.Contains(stdout, "expiresAt") {
+			t.Errorf("args %v: output carries at or expiresAt: %s", extra, stdout)
+		}
+		wantArgv := []string{"widget", "changes", "--consumer", "router", "--json"}
+		if gotArgv := recordedArgs(t, argsFile); !reflect.DeepEqual(gotArgv, wantArgv) {
+			t.Errorf("args %v: pg-desk argv = %v, want %v", extra, gotArgv, wantArgv)
+		}
+	}
+}
+
+// With a window every item carries the SAME at (the poll time, UTC, whole
+// seconds) and expiresAt exactly the window later; the id and the metadata
+// are unchanged, and the flag is not passed to pg-desk.
+func TestRetryWindowStampsAtAndExpiresAt(t *testing.T) {
+	pinPollTime(t)
+	argsFile := filepath.Join(t.TempDir(), "args")
+	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=2", "GO_HELPER_ARGS_FILE="+argsFile)
+	stdout, stderr, code := runCLI(t, "widget", "--consumer", "router", "--retry-window", "10m")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr)
+	}
+	got := mustItems(t, stdout)
+	want := readGolden(t, "items_degraded.golden.json")
+	if len(got) != len(want) || len(got) < 2 {
+		t.Fatalf("got %d items, want %d (at least 2 to prove one shared at)", len(got), len(want))
+	}
+	for i, it := range got {
+		if it["at"] != "2026-03-04T05:06:07Z" {
+			t.Errorf("items[%d].at = %v, want 2026-03-04T05:06:07Z", i, it["at"])
+		}
+		if it["expiresAt"] != "2026-03-04T05:16:07Z" {
+			t.Errorf("items[%d].expiresAt = %v, want 2026-03-04T05:16:07Z", i, it["expiresAt"])
+		}
+		delete(it, "at")
+		delete(it, "expiresAt")
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("apart from at and expiresAt the items must equal the golden:\n got: %s", stdout)
+	}
+	wantArgv := []string{"widget", "changes", "--consumer", "router", "--json"}
+	if gotArgv := recordedArgs(t, argsFile); !reflect.DeepEqual(gotArgv, wantArgv) {
+		t.Errorf("pg-desk argv = %v, want %v", gotArgv, wantArgv)
+	}
+}
+
+// An empty poll still prints [] with the flag on.
+func TestRetryWindowEmptyPollIsEmptyArray(t *testing.T) {
+	pinPollTime(t)
+	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_empty.json"))
+	stdout, _, code := runCLI(t, "widget", "--consumer", "router", "--retry-window", "10m")
+	if code != 0 || strings.TrimSpace(stdout) != "[]" {
+		t.Errorf("code=%d stdout=%q, want 0 and []", code, stdout)
+	}
+}
+
+// A negative or unparseable duration exits 1 with a diagnostic and nothing on
+// stdout, before pg-desk is run (the exec seam is never reached).
+func TestRetryWindowInvalidFailsBeforeRunningPgDesk(t *testing.T) {
+	for _, window := range []string{"-5m", "-1s", "banana", "10", ""} {
+		called := false
+		orig := execCmdFactory
+		execCmdFactory = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+			called = true
+			return orig(ctx, name, args...)
+		}
+		stdout, stderr, code := runCLI(t, "widget", "--consumer", "router", "--retry-window", window)
+		execCmdFactory = orig
+		if code != 1 || stdout != "" || stderr == "" {
+			t.Errorf("window %q: code=%d stdout=%q stderr=%q, want 1, empty stdout, a diagnostic", window, code, stdout, stderr)
+		}
+		if called {
+			t.Errorf("window %q: pg-desk was run", window)
+		}
 	}
 }

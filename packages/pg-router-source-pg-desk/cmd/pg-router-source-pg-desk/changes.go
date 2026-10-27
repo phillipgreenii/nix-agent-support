@@ -5,9 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 )
+
+// now is the adapter's emit-time clock, a seam so tests can pin the "at"
+// stamp --retry-window puts on each item.
+var now = time.Now
+
+// stampLayout is the UTC RFC 3339 second-precision layout of at and expiresAt.
+const stampLayout = "2006-01-02T15:04:05Z"
 
 // statusOK is the envelope source status that does not count as degraded.
 const statusOK = "ok"
@@ -110,7 +118,7 @@ const rootLong = `Exposes pg-desk's change envelope as pg-router command-query i
 
 Invocation shape:
 
-  pg-router-source-pg-desk <type> --consumer <name> [--query Q] [--limit N]
+  pg-router-source-pg-desk <type> --consumer <name> [--query Q] [--limit N] [--retry-window D]
 
 It execs "pg-desk <type> changes --consumer <name> [--query Q] [--limit N] --json"
 (pg-desk on $PATH), decodes the pg-desk.changes/v1 envelope and prints one JSON
@@ -122,6 +130,13 @@ origin, degraded_sources}}. pg-router types the event from emit, so a query
 running this adapter MUST declare emit "<type>.changed". --cached is never
 passed (it does not advance the cursor).
 
+--retry-window D (a Go duration such as 10m; default 0 = off) is NOT passed to
+pg-desk. When D is greater than zero every item additionally carries "at" (this
+invocation's emit time, one UTC second-precision RFC 3339 value for the whole
+call) and "expiresAt" (at + D), so pg-router re-offers a failed dispatch until
+the window ends. A negative D exits 1 before pg-desk is run. A router role must
+also opt in with max_dispatch_retries to re-run a handler that failed.
+
 Exit codes (translated, not mirrored): pg-desk 0 or 2 -> 0 with every entity
 emitted (degraded detail in metadata.degraded_sources); pg-desk 3, any other
 pg-desk exit code, an unparseable envelope, or pg-desk not startable -> 1 with
@@ -130,6 +145,7 @@ nothing on stdout and the diagnostic on stderr.`
 func newRootCmd() *cobra.Command {
 	var consumer, query string
 	var limit int
+	var retryWindow time.Duration
 	root := &cobra.Command{
 		Use:     "pg-router-source-pg-desk <type> --consumer <name>",
 		Short:   "Exposes pg-desk's change envelope as pg-router command-query items",
@@ -143,8 +159,13 @@ func newRootCmd() *cobra.Command {
 	root.Flags().StringVar(&consumer, "consumer", "", "pg-desk consumer name whose cursor the call reads and advances (required)")
 	root.Flags().StringVar(&query, "query", "", "restrict the call to one configured watched query (passed through)")
 	root.Flags().IntVar(&limit, "limit", 0, "return at most N records (passed through; 0 = all)")
+	root.Flags().DurationVar(&retryWindow, "retry-window", 0, "when > 0, give each item at (emit time) and expiresAt (at + window) so pg-router retries a failed dispatch inside the window; 0 (default) = off, not passed to pg-desk")
 	_ = root.MarkFlagRequired("consumer")
 	root.RunE = func(cmd *cobra.Command, args []string) error {
+		if retryWindow < 0 {
+			fmt.Fprintln(cmd.ErrOrStderr(), "pg-router-source-pg-desk: --retry-window must not be negative")
+			return errFailed
+		}
 		argv := []string{args[0], "changes", "--consumer", consumer}
 		if query != "" {
 			argv = append(argv, "--query", query)
@@ -176,6 +197,17 @@ func newRootCmd() *cobra.Command {
 		if err != nil {
 			fmt.Fprintf(stderr, "pg-router-source-pg-desk: malformed envelope: %v\n", err)
 			return errFailed
+		}
+		if retryWindow > 0 {
+			// One emit instant for the whole call; expiresAt is computed from the
+			// truncated at so expiresAt - at is exactly the window.
+			at := now().UTC().Truncate(time.Second)
+			stampAt := at.Format(stampLayout)
+			stampExp := at.Add(retryWindow).Format(stampLayout)
+			for i := range items {
+				items[i].At = stampAt
+				items[i].ExpiresAt = stampExp
+			}
 		}
 		if err := writeItems(cmd.OutOrStdout(), items); err != nil {
 			fmt.Fprintln(stderr, err)
