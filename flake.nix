@@ -12995,6 +12995,144 @@
                     touch $out
                   '';
 
+              # Durable check (pg2-b1lir W3, operator ruling pg2-r9kv7) for ceta's
+              # unattendedExtraReadOnlyRoots option: the list reaches the hook wrapper as
+              # `--set CETA_UNATTENDED_EXTRA_READONLY_ROOTS` (the binary reads it for an
+              # unattended session only), the default adds no flag, contributions list-merge,
+              # and the module's assertion rejects a relative root, a root with `:`, `.`/`..`
+              # segments, and every too-broad root (/, /Volumes, /Volumes/gitrepos, /Users,
+              # the home directory, a parent of one) AND every root that is, contains or sits
+              # under ~/.claude (transcripts can hold secrets). Like test-ceta-extra-temp-roots
+              # it forces cfg.package to a stub that prints the variable, so the wrapper is
+              # observed, not assumed.
+              test-ceta-unattended-roots =
+                let
+                  stubPkg = pkgs.runCommand "ceta-stub-0" { } ''
+                    mkdir -p $out/bin
+                    printf '#!${pkgs.runtimeShell}\necho "CETA_UNATTENDED_EXTRA_READONLY_ROOTS=$CETA_UNATTENDED_EXTRA_READONLY_ROOTS"\n' \
+                      > $out/bin/claude-extended-tool-approver
+                    chmod +x $out/bin/claude-extended-tool-approver
+                  '';
+
+                  evalCfg =
+                    extra:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/claude-extended-tool-approver/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.knownAbsentRoots = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
+                                default = [ ];
+                              };
+                              home.homeDirectory = lib.mkOption {
+                                type = lib.types.str;
+                                default = "/home/test";
+                              };
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              warnings = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
+                                default = [ ];
+                              };
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf lib.types.unspecified;
+                                default = [ ];
+                              };
+                            };
+                          }
+                        )
+                        {
+                          phillipgreenii.programs.claude-code.enable = true;
+                          phillipgreenii.programs.claude-extended-tool-approver = {
+                            enable = true;
+                            package = stubPkg;
+                          };
+                        }
+                        extra
+                      ];
+                    }).config;
+
+                  withRoots = roots: {
+                    phillipgreenii.programs.claude-extended-tool-approver.unattendedExtraReadOnlyRoots = roots;
+                  };
+                  hookOf = cfg: lib.head cfg.home.packages;
+                  failedAssertions = cfg: lib.filter (a: !a.assertion) cfg.assertions;
+
+                  defaultCfg = evalCfg { };
+                  agreed = [
+                    "/var/log"
+                    "/Library/LaunchDaemons"
+                    "/usr/local/libexec/pg-launchd"
+                  ];
+                  agreedCfg = evalCfg (withRoots agreed);
+                  mergedCfg = evalCfg {
+                    imports = [
+                      (withRoots [ "/a" ])
+                      (withRoots [ "/b" ])
+                    ];
+                  };
+                  mergedRoots =
+                    mergedCfg.phillipgreenii.programs.claude-extended-tool-approver.unattendedExtraReadOnlyRoots;
+                  bad = roots: failedAssertions (evalCfg (withRoots roots));
+                  rejected = [
+                    "relative/dir"
+                    ""
+                    "/"
+                    "/Volumes"
+                    "/Volumes/gitrepos"
+                    "/Users"
+                    "/home/test"
+                    "/home"
+                    "/a/../b"
+                    "/a:/b"
+                    # the ruling's exclusion: ~/.claude, a parent of it, anything under it
+                    "/home/test/.claude"
+                    "/home/test/.claude/"
+                    "/home/test/.claude/projects"
+                    "/home/test/.claude/projects/p"
+                  ];
+                in
+                assert
+                  lib.sort (x: y: x < y) mergedRoots == [
+                    "/a"
+                    "/b"
+                  ];
+                assert failedAssertions agreedCfg == [ ];
+                assert failedAssertions defaultCfg == [ ];
+                assert lib.all (r: lib.length (bad [ r ]) == 1) rejected;
+                pkgs.runCommand "ceta-unattended-roots-ok"
+                  {
+                    defaultHook = hookOf defaultCfg;
+                    agreedHook = hookOf agreedCfg;
+                  }
+                  ''
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+                    bin=bin/claude-extended-tool-approver
+
+                    # Default: no flag, so the variable is not exported at all.
+                    ! grep -q CETA_UNATTENDED_EXTRA_READONLY_ROOTS "$defaultHook/$bin" \
+                      || fail "default wrapper mentions CETA_UNATTENDED_EXTRA_READONLY_ROOTS"
+                    [ "$("$defaultHook/$bin")" = "CETA_UNATTENDED_EXTRA_READONLY_ROOTS=" ] \
+                      || fail "default run exported CETA_UNATTENDED_EXTRA_READONLY_ROOTS"
+
+                    # The agreed list is baked into the wrapper as one --set, in order.
+                    want='CETA_UNATTENDED_EXTRA_READONLY_ROOTS=/var/log:/Library/LaunchDaemons:/usr/local/libexec/pg-launchd'
+                    [ "$("$agreedHook/$bin")" = "$want" ] \
+                      || fail "agreed wrapper exported '$("$agreedHook/$bin")', want '$want'"
+                    # --set, not --suffix: nothing else defines this variable, and a value from the
+                    # calling environment must not widen the pool roots.
+                    [ "$(CETA_UNATTENDED_EXTRA_READONLY_ROOTS=/etc "$agreedHook/$bin")" = "$want" ] \
+                      || fail "an inherited CETA_UNATTENDED_EXTRA_READONLY_ROOTS must be replaced, not merged"
+                    touch $out
+                  '';
+
               # Durable eval test (tc-o14i5.8.3, Track X.3): confirms ceta's OWN
               # contribution to programs.claude-hook-router.delegates carries a SIXTH
               # entry for PostToolUseFailure, observe-contract, alongside the original

@@ -98,6 +98,26 @@ let
     else
       null;
 
+  # unattendedExtraReadOnlyRoots validation (pg2-b1lir W3, ruling pg2-r9kv7): the
+  # same shape rules as a temp root (absolute, no `:`, no `.`/`..` segment, not `/`
+  # or an ancestor of the home directory or the workspace volume) plus the ruling's
+  # own exclusion: a root may not be, contain or sit under ~/.claude, whose
+  # transcripts (~/.claude/projects) can hold secrets. The Go side drops the same
+  # roots at run time (patheval.ExtendForUnattended); this fails the BUILD instead.
+  claudeDir = "${config.home.homeDirectory}/.claude";
+  unattendedRootProblem =
+    root:
+    let
+      n = tempRootNorm root;
+      c = tempRootNorm claudeDir;
+    in
+    if tempRootProblem root != null then
+      tempRootProblem root
+    else if n == c || lib.hasPrefix "${c}/" n || lib.hasPrefix "${n}/" c then
+      "is, contains or sits under ${claudeDir} (transcripts can hold secrets; ruling pg2-r9kv7 excludes them)"
+    else
+      null;
+
   # wrapProgram flags, contributed only by the settings that are active. The
   # binary is wrapped iff at least one flag is present; otherwise the unwrapped
   # package is used directly.
@@ -124,6 +144,12 @@ let
     ++ lib.optional (
       cfg.extraTempRoots != [ ]
     ) ''--suffix CETA_EXTRA_TEMP_ROOTS : "${lib.concatStringsSep ":" cfg.extraTempRoots}"''
+    # Unattended-only read roots (pg2-b1lir W3): the binary reads this variable ONLY for
+    # an unattended session (permission mode dontAsk or CCPOOL_AUTONOMOUS=1), never for an
+    # interactive one. --set: nothing else defines it.
+    ++
+      lib.optional (cfg.unattendedExtraReadOnlyRoots != [ ])
+        ''--set CETA_UNATTENDED_EXTRA_READONLY_ROOTS "${lib.concatStringsSep ":" cfg.unattendedExtraReadOnlyRoots}"''
     ++ lib.optional (
       knownAbsentRoots != [ ]
     ) ''--set CETA_DENIED_ROOTS "${lib.concatStringsSep ":" knownAbsentRoots}"'';
@@ -264,14 +290,40 @@ in
         real repositories); the module asserts this.
       '';
     };
+    unattendedExtraReadOnlyRoots = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = ''
+        Absolute paths whose subtrees the path-safety evaluator classifies read-only for
+        an UNATTENDED session ONLY (exported as CETA_UNATTENDED_EXTRA_READONLY_ROOTS, a
+        ":"-separated list): a pg-router pool session, whose permission mode is `dontAsk`
+        or whose environment carries CCPOOL_AUTONOMOUS=1. An interactive session never
+        sees them, unlike `extraReadOnlyRoots`, which every session shares. Checked after
+        every built-in zone and after the secrets and denyRead guards, so a root can only
+        make an unknown path known. The session's own $TMPDIR is granted read-write by
+        the binary itself, not listed here. Bead pg2-b1lir W3 (ruling pg2-r9kv7). Empty by
+        default so this repo stays generic; set machine paths in the consuming flake.
+        Definitions list-merge.
+
+        Every root must pass the `extraTempRoots` shape rules (absolute, no `:`, no `.` or
+        `..` segment, not `/`, `/Volumes`, `/Volumes/gitrepos`, `/Users`, the home
+        directory or a parent of one) and MUST NOT be, contain or sit under `~/.claude`;
+        the module asserts this.
+      '';
+    };
   };
 
   config = lib.mkIf (config.phillipgreenii.programs.claude-code.enable && cfg.enable) {
 
-    assertions = map (root: {
-      assertion = tempRootProblem root == null;
-      message = "phillipgreenii.programs.claude-extended-tool-approver.extraTempRoots: \"${root}\" ${tempRootProblem root}";
-    }) cfg.extraTempRoots;
+    assertions =
+      map (root: {
+        assertion = tempRootProblem root == null;
+        message = "phillipgreenii.programs.claude-extended-tool-approver.extraTempRoots: \"${root}\" ${tempRootProblem root}";
+      }) cfg.extraTempRoots
+      ++ map (root: {
+        assertion = unattendedRootProblem root == null;
+        message = "phillipgreenii.programs.claude-extended-tool-approver.unattendedExtraReadOnlyRoots: \"${root}\" ${unattendedRootProblem root}";
+      }) cfg.unattendedExtraReadOnlyRoots;
 
     # Base read-only inspection roots (pg2-t76k8): home dot-files/dirs that are
     # safe to READ for inspection but are deliberately NOT base-code path-safety
