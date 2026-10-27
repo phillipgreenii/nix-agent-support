@@ -1,79 +1,64 @@
-// testmain_test.go: the reentrant test-helper-process double for pg-desk.
-// The test binary re-execs itself with GO_WANT_HELPER_PROCESS=1;
-// TestHelperProcess then runs helperMain, which impersonates pg-desk: it
-// records the argv it was given (so tests can assert on the exact pg-desk
-// command line, e.g. that --cached is never passed), prints the fixture
-// named by GO_HELPER_STDOUT_FILE (or the literal GO_HELPER_STDOUT) to
-// stdout, GO_HELPER_STDERR to stderr, and exits GO_HELPER_EXIT. Same
-// pattern as packages/pg-router-source-pg-connector's testmain_test.go.
+// testmain_test.go: the in-process pg-desk double. withHelper swaps the
+// Runner seam for a fake that impersonates pg-desk: it records the argv it
+// was given (so tests can assert on the exact pg-desk command line, e.g. that
+// --cached is never passed), answers with the fixture named by
+// GO_HELPER_STDOUT_FILE (or the literal GO_HELPER_STDOUT) on stdout,
+// GO_HELPER_STDERR on stderr, and exit code GO_HELPER_EXIT. The vocabulary is
+// kept from the earlier re-executed-test-binary double (a race-built child
+// sleeps 1 s at exit); nothing here starts a process. The real exec path is
+// covered by runner_test.go.
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
 )
 
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	defer os.Exit(0)
-	helperMain()
+// fakePgDesk is what withHelper installs; calls is every Call it saw.
+type fakePgDesk struct {
+	calls []Call
 }
 
-// childArgs recovers the argv this adapter passed to execCmdFactory (the
-// helper factory inserts "--" then the impersonated binary name then the args).
-func childArgs() []string {
-	for i, a := range os.Args {
-		if a == "--" {
-			if i+2 <= len(os.Args) {
-				return os.Args[i+2:]
-			}
-			return nil
-		}
+// lastArgs is the argv of the most recent call (nil when never called).
+func (f *fakePgDesk) lastArgs() []string {
+	if len(f.calls) == 0 {
+		return nil
 	}
-	return nil
+	return f.calls[len(f.calls)-1].Args
 }
 
-func helperMain() {
-	if f := os.Getenv("GO_HELPER_ARGS_FILE"); f != "" {
-		_ = os.WriteFile(f, []byte(strings.Join(childArgs(), "\n")), 0o600)
-	}
-	if f := os.Getenv("GO_HELPER_STDOUT_FILE"); f != "" {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			_, _ = os.Stderr.WriteString("helper: " + err.Error())
-			os.Exit(99)
-		}
-		_, _ = os.Stdout.Write(b)
-	}
-	if s := os.Getenv("GO_HELPER_STDOUT"); s != "" {
-		_, _ = os.Stdout.WriteString(s)
-	}
-	if s := os.Getenv("GO_HELPER_STDERR"); s != "" {
-		_, _ = os.Stderr.WriteString(s)
-	}
-	code, _ := strconv.Atoi(os.Getenv("GO_HELPER_EXIT"))
-	os.Exit(code)
-}
-
-// withHelper swaps execCmdFactory for a factory spawning the helper process
-// with the given extra environment entries.
-func withHelper(t *testing.T, env ...string) {
+// withHelper swaps the Runner seam for an in-process pg-desk double with the
+// given GO_HELPER_* behaviour entries.
+func withHelper(t *testing.T, env ...string) *fakePgDesk {
 	t.Helper()
-	orig := execCmdFactory
-	execCmdFactory = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cs := append([]string{"-test.run=^TestHelperProcess$", "--", name}, args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(append(os.Environ(), "GO_WANT_HELPER_PROCESS=1"), env...)
-		return cmd
+	cfg := map[string]string{}
+	for _, e := range env {
+		k, v, _ := strings.Cut(e, "=")
+		cfg[k] = v
 	}
-	t.Cleanup(func() { execCmdFactory = orig })
+	f := &fakePgDesk{}
+	orig := runner
+	runner = func(_ context.Context, c Call) Result {
+		f.calls = append(f.calls, c)
+		var res Result
+		if file := cfg["GO_HELPER_STDOUT_FILE"]; file != "" {
+			b, err := os.ReadFile(file)
+			if err != nil {
+				return Result{Stderr: "helper: " + err.Error(), Code: 99}
+			}
+			res.Stdout = string(b)
+		}
+		res.Stdout += cfg["GO_HELPER_STDOUT"]
+		res.Stderr = cfg["GO_HELPER_STDERR"]
+		res.Code, _ = strconv.Atoi(cfg["GO_HELPER_EXIT"])
+		return res
+	}
+	t.Cleanup(func() { runner = orig })
+	return f
 }
 
 type buf struct{ b []byte }

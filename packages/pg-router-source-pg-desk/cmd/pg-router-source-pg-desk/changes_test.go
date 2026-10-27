@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -186,36 +184,28 @@ func TestPgDeskNotStartableFailsWithDiagnosticNamingPgDesk(t *testing.T) {
 	}
 }
 
-func recordedArgs(t *testing.T, file string) []string {
-	t.Helper()
-	b, err := os.ReadFile(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.Split(string(b), "\n")
-}
-
 // The exact pg-desk command line; --cached is never passed (it never
 // advances the cursor, so a polling source would see the same records forever).
 func TestPgDeskInvocationNeverPassesCached(t *testing.T) {
-	argsFile := filepath.Join(t.TempDir(), "args")
-	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_empty.json"), "GO_HELPER_ARGS_FILE="+argsFile)
+	fake := withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_empty.json"))
 	if _, stderr, code := runCLI(t, "widget", "--consumer", "router"); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
 	}
+	if n := fake.calls[0].Name; n != "pg-desk" {
+		t.Errorf("binary = %q, want pg-desk", n)
+	}
 	want := []string{"widget", "changes", "--consumer", "router", "--json"}
-	if got := recordedArgs(t, argsFile); !reflect.DeepEqual(got, want) {
+	if got := fake.lastArgs(); !reflect.DeepEqual(got, want) {
 		t.Errorf("pg-desk argv = %v, want %v", got, want)
 	}
 }
 
 func TestOptionalQueryAndLimitArePassedThroughButNeverCached(t *testing.T) {
-	argsFile := filepath.Join(t.TempDir(), "args")
-	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_empty.json"), "GO_HELPER_ARGS_FILE="+argsFile)
+	fake := withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_empty.json"))
 	if _, stderr, code := runCLI(t, "widget", "--consumer", "router", "--query", "open-widgets", "--limit", "5"); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
 	}
-	got := recordedArgs(t, argsFile)
+	got := fake.lastArgs()
 	want := []string{"widget", "changes", "--consumer", "router", "--query", "open-widgets", "--limit", "5", "--json"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("pg-desk argv = %v, want %v", got, want)
@@ -344,8 +334,7 @@ func pinPollTime(t *testing.T) {
 func TestRetryWindowOffLeavesOutputUnchanged(t *testing.T) {
 	pinPollTime(t)
 	for _, extra := range [][]string{nil, {"--retry-window", "0"}, {"--retry-window", "0s"}} {
-		argsFile := filepath.Join(t.TempDir(), "args")
-		withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=2", "GO_HELPER_ARGS_FILE="+argsFile)
+		fake := withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=2")
 		args := append([]string{"widget", "--consumer", "router"}, extra...)
 		stdout, stderr, code := runCLI(t, args...)
 		if code != 0 {
@@ -359,7 +348,7 @@ func TestRetryWindowOffLeavesOutputUnchanged(t *testing.T) {
 			t.Errorf("args %v: output carries at or expiresAt: %s", extra, stdout)
 		}
 		wantArgv := []string{"widget", "changes", "--consumer", "router", "--json"}
-		if gotArgv := recordedArgs(t, argsFile); !reflect.DeepEqual(gotArgv, wantArgv) {
+		if gotArgv := fake.lastArgs(); !reflect.DeepEqual(gotArgv, wantArgv) {
 			t.Errorf("args %v: pg-desk argv = %v, want %v", extra, gotArgv, wantArgv)
 		}
 	}
@@ -370,8 +359,7 @@ func TestRetryWindowOffLeavesOutputUnchanged(t *testing.T) {
 // are unchanged, and the flag is not passed to pg-desk.
 func TestRetryWindowStampsAtAndExpiresAt(t *testing.T) {
 	pinPollTime(t)
-	argsFile := filepath.Join(t.TempDir(), "args")
-	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=2", "GO_HELPER_ARGS_FILE="+argsFile)
+	fake := withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=2")
 	stdout, stderr, code := runCLI(t, "widget", "--consumer", "router", "--retry-window", "10m")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr)
@@ -395,7 +383,7 @@ func TestRetryWindowStampsAtAndExpiresAt(t *testing.T) {
 		t.Errorf("apart from at and expiresAt the items must equal the golden:\n got: %s", stdout)
 	}
 	wantArgv := []string{"widget", "changes", "--consumer", "router", "--json"}
-	if gotArgv := recordedArgs(t, argsFile); !reflect.DeepEqual(gotArgv, wantArgv) {
+	if gotArgv := fake.lastArgs(); !reflect.DeepEqual(gotArgv, wantArgv) {
 		t.Errorf("pg-desk argv = %v, want %v", gotArgv, wantArgv)
 	}
 }
@@ -414,18 +402,12 @@ func TestRetryWindowEmptyPollIsEmptyArray(t *testing.T) {
 // stdout, before pg-desk is run (the exec seam is never reached).
 func TestRetryWindowInvalidFailsBeforeRunningPgDesk(t *testing.T) {
 	for _, window := range []string{"-5m", "-1s", "banana", "10", ""} {
-		called := false
-		orig := execCmdFactory
-		execCmdFactory = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-			called = true
-			return orig(ctx, name, args...)
-		}
+		fake := withHelper(t)
 		stdout, stderr, code := runCLI(t, "widget", "--consumer", "router", "--retry-window", window)
-		execCmdFactory = orig
 		if code != 1 || stdout != "" || stderr == "" {
 			t.Errorf("window %q: code=%d stdout=%q stderr=%q, want 1, empty stdout, a diagnostic", window, code, stdout, stderr)
 		}
-		if called {
+		if len(fake.calls) != 0 {
 			t.Errorf("window %q: pg-desk was run", window)
 		}
 	}

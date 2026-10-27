@@ -7,19 +7,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"os/exec"
 )
 
 // pgDeskBinary is the ambient $PATH name this adapter execs.
 const pgDeskBinary = "pg-desk"
-
-// execCmdFactory constructs the *exec.Cmd used to invoke pg-desk. Tests swap
-// it to spawn a reentrant test-helper process.
-var execCmdFactory = exec.CommandContext
 
 type pgDeskResult struct {
 	stdout   []byte
@@ -27,26 +20,16 @@ type pgDeskResult struct {
 	exitCode int
 }
 
-// runPgDesk execs pg-desk with args. The returned error is non-nil only
-// when the child could never be started (binary not on $PATH, permission
-// denied, ...): there is then no exit code and no child stderr.
+// runPgDesk execs pg-desk with args through the Runner seam. The returned
+// error is non-nil only when the child could never be started (binary not on
+// $PATH, permission denied, ...): there is then no exit code and no child
+// stderr.
 func runPgDesk(ctx context.Context, args []string) (pgDeskResult, error) {
-	cmd := execCmdFactory(ctx, pgDeskBinary, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-	res := pgDeskResult{stdout: stdout.Bytes(), stderr: stderr.Bytes()}
-	if runErr == nil {
-		return res, nil
+	r := runnerOrExec()(ctx, Call{Name: pgDeskBinary, Args: args})
+	if r.StartErr != nil {
+		return pgDeskResult{}, fmt.Errorf("%s: cannot run: %w", pgDeskBinary, r.StartErr)
 	}
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
-		res.exitCode = exitErr.ExitCode()
-		return res, nil
-	}
-	return pgDeskResult{}, fmt.Errorf("%s: cannot run: %w", pgDeskBinary, runErr)
+	return pgDeskResult{stdout: []byte(r.Stdout), stderr: []byte(r.Stderr), exitCode: r.Code}, nil
 }
 
 // classifyExit translates pg-desk's `changes` exit codes into what
