@@ -81,8 +81,12 @@ metrics backend, …) define their own terms in their own behavior sets.
   stays in the queue for its **retention even after
   acceptance** — not so a late-binding handler can pick it up, but so **every matching handler still
   owed an attempt gets one** and so **de-duplication by `id`** (`INV-EVT-3`) still covers
-  already-delivered ids. A deployment MAY opt in to evicting an event once all bound handlers have
-  accepted it.
+  already-delivered ids. A deployment MAY opt in, **per event type**, to evicting an event once all
+  bound handlers have accepted it (`[pool].early_eviction_types`); an event of a type that has not
+  opted in keeps its full retention, and an event of an opted-in type MUST leave the queue and the
+  queue-depth gauge when its last bound handler accepts it, not at its `expiresAt`. The
+  `escalated.pg2` type uses this opt-in, because one bead is escalated at a time and de-duplication
+  by `id` is not expected to matter for it.
 - **Acceptance** — a handler's signal that it has taken responsibility for an event: an inline
   **completion** (synchronous) or a deferred **ack** (asynchronous), keyed by the tracking id. The
   core retries delivery **only until acceptance** (`INV-FAIL-1`); after acceptance the handler owns

@@ -84,6 +84,11 @@ type poolTOML struct {
 	// one event of a marked type at a time, across every bound handler, until
 	// it is released. Absent/empty: marks nothing (unchanged from today).
 	SerializeTypes []string `toml:"serialize_types"`
+	// EarlyEvictionTypes opts each named event TYPE in to early eviction
+	// (pg2-u0p2d, DEC-EVENT-2): the queue evicts an event of that type once
+	// every bound handler has accepted it, instead of retaining it until
+	// expiresAt. Absent/empty: every type keeps full retention (unchanged).
+	EarlyEvictionTypes []string `toml:"early_eviction_types"`
 	// CompactThresholdBytes is the queue.jsonl size that triggers a background
 	// compaction of the log (bead pg2-8e0m6). A pointer so an explicit 0
 	// (disable runtime compaction) is distinguishable from absent (keep the
@@ -288,6 +293,11 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	// overlay for this one — see DEC-CONC-1's "not decided here".
 	if len(shape.Pool.SerializeTypes) > 0 {
 		c.SerializeTypes = shape.Pool.SerializeTypes
+	}
+	// early_eviction_types (pg2-u0p2d, DEC-EVENT-2): same present-replaces,
+	// absent-leaves-default shape as serialize_types above.
+	if len(shape.Pool.EarlyEvictionTypes) > 0 {
+		c.EarlyEvictionTypes = shape.Pool.EarlyEvictionTypes
 	}
 	if v := shape.Pool.CompactThresholdBytes; v != nil {
 		if *v < 0 {

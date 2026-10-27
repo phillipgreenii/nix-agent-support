@@ -224,6 +224,9 @@ func handlerCommandFor(cfg config.Config) wireclient.CommandFor {
 // threads through as WithRetryBackoff — this is the ONE production seam that
 // resolves the config-level mark into the queue's dispatch-time occupancy gate;
 // an empty/absent [pool].serialize_types leaves every type unaffected.
+// cfg.EarlyEvictionTypes (pg2-u0p2d, DEC-EVENT-2) threads through the same way as
+// eventqueue.WithEarlyEvictionTypes; an empty/absent [pool].early_eviction_types
+// leaves every type on full retention.
 // declaredRoles is the FULL, pre-selector role list (prepareRun captures it
 // before applySelectors runs — Task 4.1, Binding Decision 4) and excluded
 // is that same call's runExclusions; both flow straight onto core.Options
@@ -393,7 +396,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// pg_router_role_{last_progress_age_seconds,unsuccessful_since_progress,
 	// busy_since_progress}{role}, counted in roleListener.Offer (docket pg2-12gr4.8).
 	o.RoleProgressObserver = emitter
-	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithGateObserver(emitter),
+	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithEarlyEvictionTypes(cfg.EarlyEvictionTypes...), eventqueue.WithGateObserver(emitter),
 		// Compact queue.jsonl down to live state: once at startup (before the queue
 		// replays it or accepts an event) and, at runtime, whenever it outgrows
 		// cfg.CompactThresholdBytes (bead pg2-8e0m6).

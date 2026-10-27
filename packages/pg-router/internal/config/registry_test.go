@@ -340,6 +340,57 @@ argv = ["x"]
 	}
 }
 
+// --- early-eviction opt-in config surface (pg2-u0p2d, DEC-EVENT-2) ---
+
+const earlyEvictionTail = `
+[[query]]
+name = "s"
+emits = ["escalated.pg2"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "r"
+handler = "/bin/h"
+type = "command"
+binds = ["escalated.pg2"]
+[role.command]
+argv = ["x"]
+`
+
+// [pool].early_eviction_types decodes into Config.EarlyEvictionTypes verbatim:
+// escalated.pg2 is listed (so it evicts on all-accepted) and another type is not.
+func TestLoad_earlyEvictionTypesDecodesFromPool(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, "[pool]\nearly_eviction_types = [\"escalated.pg2\"]\n"+earlyEvictionTail)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.EarlyEvictionTypes, []string{"escalated.pg2"}) {
+		t.Fatalf("EarlyEvictionTypes = %v, want [escalated.pg2]", c.EarlyEvictionTypes)
+	}
+	if slices.Contains(c.EarlyEvictionTypes, "other") {
+		t.Fatalf("EarlyEvictionTypes = %v must not list an unlisted type", c.EarlyEvictionTypes)
+	}
+}
+
+// Absent [pool].early_eviction_types leaves Config.EarlyEvictionTypes empty:
+// every type keeps its full retention, unchanged for an existing deployment.
+func TestLoad_earlyEvictionTypesAbsentLeavesItEmpty(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, earlyEvictionTail)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.EarlyEvictionTypes) != 0 {
+		t.Fatalf("EarlyEvictionTypes = %v, want empty (key absent)", c.EarlyEvictionTypes)
+	}
+}
+
 // --- role-name charset/path-safety hardening (this bead, pg2-ymb3v) ---
 //
 // A role name is used as a filesystem path component, so a name containing

@@ -869,6 +869,43 @@ func TestOptInEviction(t *testing.T) {
 	}
 }
 
+// Per-type opt-in (bead pg2-u0p2d, DEC-EVENT-2): a type named in
+// WithEarlyEvictionTypes leaves the queue and the depth gauge AT ACCEPT time
+// (evict record, reason all-accepted), not at its expiresAt (an hour away
+// here), while another type bound by the same listener keeps its retention.
+func TestEarlyEvictionTypesEvictsOnlyNamedType(t *testing.T) {
+	clk := newClock()
+	store := NewMemStore()
+	q, err := New(store, WithClock(clk.now), WithEarlyEvictionTypes("escalated.pg2"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	q.Register(newListener("h", "escalated.pg2", "other"))
+	mustEnqueue(t, q, evtUntil("esc1", "escalated.pg2", clk.in(time.Hour)))
+	mustEnqueue(t, q, evtUntil("oth1", "other", clk.in(time.Hour)))
+	q.Dispatch() // h is offered and accepts its head
+	q.Dispatch()
+	q.Dispatch()
+
+	depth := q.DepthByType()
+	if depth["escalated.pg2"] != 0 {
+		t.Fatalf("depth[escalated.pg2] = %d at accept time (expiresAt is an hour out), want 0: %v", depth["escalated.pg2"], depth)
+	}
+	if depth["other"] != 1 {
+		t.Fatalf("depth[other] = %d, want 1 (type not opted in keeps retention): %v", depth["other"], depth)
+	}
+	recs, _ := store.Replay()
+	var reasons []string
+	for _, r := range recs {
+		if r.Op == opEvict {
+			reasons = append(reasons, r.EventID+":"+r.Reason)
+		}
+	}
+	if want := []string{"esc1:" + EvictReasonAllAccepted}; !equal(reasons, want) {
+		t.Fatalf("evict records = %v, want %v", reasons, want)
+	}
+}
+
 // Without early eviction, an accepted event is retained until its expiry, so its
 // id keeps bounding the de-dup window (INV-EVT-3).
 func TestNoEvictionRetainsUntilExpiry(t *testing.T) {

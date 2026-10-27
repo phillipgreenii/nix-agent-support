@@ -89,7 +89,28 @@ and which pg-router's behavior docs cite directly for that reason.
 **Not decided here.** The storage mechanism (jsonl / embedded DB / write-ahead log) is an open
 realization choice, not behavior or this entry's — `ADR 0031`'s own "Consequences" leaves it so.
 Whether a deployment opts in to evicting an accepted event before its retention window ends is
-stated directly in the behavior set's glossary and is not repeated here.
+stated directly in the behavior set's glossary and is not repeated here; this entry records only
+that the opt-in exists and how it is scoped.
+
+**Early eviction is a per-type opt-in, and `escalated.pg2` uses it** (operator ruling, Phillip,
+2026-10-26, bead `pg2-u0p2d`). `[pool].early_eviction_types` names event **types**
+(`Config.EarlyEvictionTypes`, threaded into the queue as `eventqueue.WithEarlyEvictionTypes`), and an
+event of a listed type MUST be evicted, with reason `all-accepted`, once every bound handler has
+accepted it; a type not listed keeps retention until `expiresAt` exactly as before, and an empty or
+absent list changes nothing for an existing deployment. The `escalated.pg2` type is listed in the
+pg2 deployment. Operator reasoning, verbatim: "a triaging event is not something which fan-out or
+dedup is expected to be a problem. a single bead will be escalated." The reason is that retained but
+settled `escalated.pg2` events otherwise inflated `pg_router_queue_depth{type="escalated.pg2"}`
+until `expiresAt`, which can be a day or more away.
+
+**Consequence of that opt-in (accepted by the operator).** `work-report` re-emits the **same** bead
+id on every pull while a source stays degraded (one bead per source, comments appended; `expiresAt` is
+the end of the local day plus 6 hours). Retention de-duplication used to hold that to one triage per
+day; for `escalated.pg2` it no longer does, so a still-degraded source MAY be offered to the triager
+again on each later pull. A bead that is already handled settles as a cheap moot skip (the handler
+half of the ruling, bead `pg2-6t91v7`), and a bead that still carries `escalated` MAY start a new
+triager session, which is an accepted retry. Stopping `work-report` from emitting beads that carry
+`human` is an optional follow-up and is not decided here.
 
 ### `DEC-EVENT-3` — the durable queue is size-bounded: a soft threshold halts polled emitters, the maximum refuses admission with a classified reason <!-- uuid: 8e5ff850-31f1-4c4a-bf55-875701f70455 -->
 

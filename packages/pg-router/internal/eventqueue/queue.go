@@ -455,6 +455,13 @@ type Queue struct {
 	// window — safe only when the consumer set is fixed).
 	evictWhenAllAccept bool
 
+	// earlyEvictTypes is the per-TYPE form of evictWhenAllAccept (pg2-u0p2d,
+	// `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions ·
+	// DEC-EVENT-2`): an event whose type is named here is evicted once every
+	// currently-bound listener has accepted it, while every other type keeps its
+	// full retention. nil/empty (the default) leaves every type unaffected.
+	earlyEvictTypes map[string]bool
+
 	// serializeTypes is the set of event TYPES marked to serialize (INV-CONC-1,
 	// mechanism resolved by
 	// `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions ·
@@ -571,6 +578,22 @@ func WithObserver(o Observer) Option { return func(q *Queue) { q.obs = o } }
 // WithEarlyEviction opts into evicting an event once all bound listeners have
 // accepted it (ADR 0031 "opt-in early eviction").
 func WithEarlyEviction() Option { return func(q *Queue) { q.evictWhenAllAccept = true } }
+
+// WithEarlyEvictionTypes is the per-TYPE form of WithEarlyEviction (pg2-u0p2d):
+// each named event TYPE is evicted once every currently-bound listener that
+// matches it has accepted it; a type never named here keeps its full retention
+// (and de-duplication window). Additive and opt-in, per type; passing the same
+// name more than once (in one call or across calls) is harmless.
+func WithEarlyEvictionTypes(types ...string) Option {
+	return func(q *Queue) {
+		if q.earlyEvictTypes == nil {
+			q.earlyEvictTypes = map[string]bool{}
+		}
+		for _, t := range types {
+			q.earlyEvictTypes[t] = true
+		}
+	}
+}
 
 // WithSerializeTypes marks each named event TYPE to serialize (INV-CONC-1,
 // `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions ·
@@ -1714,7 +1737,7 @@ func (q *Queue) runOfferOnce(p pendingOffer) (next pendingOffer, chained bool) {
 // pass instead of one per record); Kick's caller persists its own single
 // offer's evict, if any, by itself. Caller holds q.mu.
 func (q *Queue) maybeEvict(e *entry) (Record, bool) {
-	if !q.evictWhenAllAccept {
+	if !q.evictWhenAllAccept && !q.earlyEvictTypes[e.evt.Type] {
 		return Record{}, false
 	}
 	for _, ls := range q.listeners {

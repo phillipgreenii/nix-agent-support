@@ -62,6 +62,13 @@ type Config struct {
 	// (the default) marks nothing, so an existing deployment's dispatch is
 	// unchanged.
 	SerializeTypes []string
+	// EarlyEvictionTypes is the set of event TYPES that opt in to early eviction
+	// (pg2-u0p2d, `packages/pg-router/docs/decisions · DEC-EVENT-2`): the queue
+	// evicts an event of a listed type as soon as every bound handler has
+	// accepted it, instead of retaining it until expiresAt. From
+	// [pool].early_eviction_types; empty (the default) keeps full retention for
+	// every type.
+	EarlyEvictionTypes []string
 	// CompactThresholdBytes is the queue.jsonl size above which the queue starts
 	// a background compaction of its write-ahead log down to live state
 	// (eventqueue.WithCompaction, bead pg2-8e0m6). From [pool].compact_threshold_bytes
