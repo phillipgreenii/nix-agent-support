@@ -5,22 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
-// gather_test.go is this packet's wire-double test harness: a reentrant
-// test-helper process impersonates pg-connector (mirroring
-// packages/pg-router-source-pg-connector/cmd/pg-router-source-pg-connector's
-// testmain_test.go pattern exactly, one layer up), and every fixture the
-// helper answers a TARGETED op with (pr show/files/commits, issue deps) is
+// gather_test.go is this packet's wire-double test harness: an in-process
+// cmdrun.Runner impersonates pg-connector (a race-built re-executed test
+// binary sleeps 1 s at each exit, so no double starts a process; the real
+// exec path is covered by internal/cmdrun), and every fixture the double
+// answers a TARGETED op with (pr show/files/commits, issue deps) is
 // checked against pkg/scriptout/conformance's real wire-envelope schema
 // (TestFixturesConformToWireSchema below) — reusing that package rather
 // than hand-rolling a parallel shape check, per this packet's own Files
@@ -32,59 +31,54 @@ import (
 // like packages/pg-connector's own CLI layer prints them (no result/error
 // wrapper).
 
-// --- reentrant helper-process plumbing -------------------------------------
-
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	defer os.Exit(0)
-	helperMain()
-}
+// --- in-process double plumbing ----------------------------------------------
 
 // ambientBeadsDir is the value this test suite sets for the inherited
-// $BEADS_DIR in every helper invocation, so a test can prove gather's own
+// $BEADS_DIR in every double invocation, so a test can prove gather's own
 // PG_CONNECTOR_ISSUE_BEADS_DIR fallback rule ("nothing at all when the
 // configured beads_dir is empty, so the child falls back to whatever
 // BEADS_DIR it inherited") without depending on whatever $BEADS_DIR the
 // real test-runner environment happens to have.
 const ambientBeadsDir = "ambient-beads-dir"
 
-// helperCmdFactory mirrors packages/pg-router-source-pg-connector's own
-// helperCmdFactory: re-execs this test binary with
-// -test.run=^TestHelperProcess$, recognized by TestHelperProcess above.
-func helperCmdFactory(behavior, recordFile string) func(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cs := append([]string{"-test.run=^TestHelperProcess$", "--", name}, args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(
-			os.Environ(),
-			"GO_WANT_HELPER_PROCESS=1",
-			"GO_HELPER_BEHAVIOR="+behavior,
-			"GO_HELPER_CALLS_RECORD_FILE="+recordFile,
-			"BEADS_DIR="+ambientBeadsDir,
-		)
-		return cmd
+// callLog is every pg-connector call a double saw, in order.
+type callLog struct {
+	recs []callRecord
+}
+
+// helperRunner is the in-process pg-connector double for behavior: it
+// records every call into log (when non-nil) and answers per helperRun.
+func helperRunner(behavior string, log *callLog) cmdrun.Runner {
+	return func(_ context.Context, c cmdrun.Call) cmdrun.Result {
+		return helperRun(behavior, log, c)
 	}
 }
 
-// withFactory installs the reentrant helper as execCmdFactory for the
-// duration of one test and returns the path of the calls-record file the
-// helper appends one JSON line to per invocation (see callRecord).
-func withFactory(t *testing.T, behavior string) string {
+// withFactory installs the double as the runner seam for the duration of
+// one test and returns the log of every call it saw (see callRecord).
+func withFactory(t *testing.T, behavior string) *callLog {
 	t.Helper()
-	recordFile := filepath.Join(t.TempDir(), "calls.jsonl")
-	orig := execCmdFactory
-	execCmdFactory = helperCmdFactory(behavior, recordFile)
-	t.Cleanup(func() { execCmdFactory = orig })
-	return recordFile
+	log := &callLog{}
+	orig := runner
+	runner = helperRunner(behavior, log)
+	t.Cleanup(func() { runner = orig })
+	return log
 }
 
-// callRecord is one line of the calls-record file: the real pg-connector
-// CLI args gather invoked (proving "every one of the six inputs is called
-// with the right args"), plus what this helper process itself observed for
-// the two beads-workspace env vars (proving the PG_CONNECTOR_ISSUE_BEADS_DIR
-// / BEADS_DIR fallback rule).
+// useRealRunner puts the production runner (nil, meaning ExecRunner) back
+// for the rest of one test, so a test can exercise a real missing binary.
+func useRealRunner(t *testing.T) {
+	t.Helper()
+	orig := runner
+	runner = nil
+	t.Cleanup(func() { runner = orig })
+}
+
+// callRecord is one entry of the call log: the real pg-connector CLI args
+// gather invoked (proving "every one of the six inputs is called with the
+// right args"), plus what the child would have observed for the two
+// beads-workspace env vars (proving the PG_CONNECTOR_ISSUE_BEADS_DIR /
+// BEADS_DIR fallback rule).
 type callRecord struct {
 	Args                []string `json:"args"`
 	PGConnectorBeadsDir string   `json:"pg_connector_issue_beads_dir"`
@@ -93,27 +87,9 @@ type callRecord struct {
 
 const unsetSentinel = "<unset>"
 
-func readCallRecords(t *testing.T, path string) []callRecord {
+func readCallRecords(t *testing.T, log *callLog) []callRecord {
 	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		t.Fatalf("read %s: %v", path, err)
-	}
-	var out []callRecord
-	for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
-		if line == "" {
-			continue
-		}
-		var rec callRecord
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatalf("decode call record %q: %v", line, err)
-		}
-		out = append(out, rec)
-	}
-	return out
+	return append([]callRecord(nil), log.recs...)
 }
 
 // verbOf joins a call's first two args ("pr show", "issue deps", ...) —
@@ -125,44 +101,30 @@ func (r callRecord) verb() string {
 	return r.Args[0] + " " + r.Args[1]
 }
 
-func findChildArgs() []string {
-	for i, a := range os.Args {
-		if a == "--" {
-			if i+2 <= len(os.Args) {
-				return os.Args[i+2:]
-			}
-			return nil
-		}
-	}
-	return nil
-}
-
-func recordCall(args []string) {
-	file := os.Getenv("GO_HELPER_CALLS_RECORD_FILE")
-	if file == "" {
+// recordCall appends the call to log with the env the old helper child saw:
+// the process environment, the double's own BEADS_DIR, then the Call's own
+// entries (the last entry for a name wins, as exec's env de-duplication does).
+func recordCall(log *callLog, c cmdrun.Call) {
+	if log == nil {
 		return
 	}
+	m := map[string]string{}
+	for _, kv := range append(append(os.Environ(), "BEADS_DIR="+ambientBeadsDir), c.Env...) {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			m[k] = v
+		}
+	}
 	lookup := func(name string) string {
-		if v, ok := os.LookupEnv(name); ok {
+		if v, ok := m[name]; ok {
 			return v
 		}
 		return unsetSentinel
 	}
-	rec := callRecord{
-		Args:                args,
+	log.recs = append(log.recs, callRecord{
+		Args:                append([]string(nil), c.Args...),
 		PGConnectorBeadsDir: lookup("PG_CONNECTOR_ISSUE_BEADS_DIR"),
 		BeadsDir:            lookup("BEADS_DIR"),
-	}
-	b, err := json.Marshal(rec)
-	if err != nil {
-		return
-	}
-	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	_, _ = f.Write(append(b, '\n'))
+	})
 }
 
 // --- canned fixtures --------------------------------------------------------
@@ -276,44 +238,43 @@ func boolStr(b bool) string {
 	return "false"
 }
 
-// --- helper process dispatch -------------------------------------------------
+// --- double dispatch ---------------------------------------------------------
 
-func helperMain() {
-	args := findChildArgs()
-	recordCall(args)
-	behavior := os.Getenv("GO_HELPER_BEHAVIOR")
+func helperRun(behavior string, log *callLog, c cmdrun.Call) cmdrun.Result {
+	args := c.Args
+	recordCall(log, c)
 	verb := ""
 	if len(args) >= 2 {
 		verb = args[0] + " " + args[1]
 	}
 
-	writeAndExit := func(body string, exitCode int) {
-		_, _ = os.Stdout.WriteString(body)
-		os.Exit(exitCode)
+	writeAndExit := func(body string, exitCode int) cmdrun.Result {
+		return cmdrun.Result{Stdout: body, Code: exitCode}
+	}
+	fail := func(stderr string, exitCode int) cmdrun.Result {
+		return cmdrun.Result{Stderr: stderr, Code: exitCode}
 	}
 
 	switch behavior {
 	case "happy", "degraded_ci", "truncated_threads", "truncated_comments_reviews", "connections_complete":
 		switch verb {
 		case "pr show":
-			writeAndExit(prShowConnectionsFixture(behavior), 0)
+			return writeAndExit(prShowConnectionsFixture(behavior), 0)
 		case "pr files":
-			writeAndExit(prFilesFixture(), 0)
+			return writeAndExit(prFilesFixture(), 0)
 		case "pr commits":
-			writeAndExit(prCommitsFixture(), 0)
+			return writeAndExit(prCommitsFixture(), 0)
 		case "ci list":
 			if behavior == "degraded_ci" {
-				os.Stderr.WriteString("unavailable")
-				os.Exit(3)
+				return fail("unavailable", 3)
 			}
-			writeAndExit(ciListFixture(), 0)
+			return writeAndExit(ciListFixture(), 0)
 		case "issue list":
-			writeAndExit(issueListFixture(), 0)
+			return writeAndExit(issueListFixture(), 0)
 		case "issue deps":
-			writeAndExit(issueDepsFixture(), 0)
+			return writeAndExit(issueDepsFixture(), 0)
 		default:
-			os.Stderr.WriteString("unexpected verb: " + verb)
-			os.Exit(99)
+			return fail("unexpected verb: "+verb, 99)
 		}
 	case "happy_with_jira", "jira_not_found", "jira_error":
 		// Same six-input happy path, but `pr show` carries ticket keys in
@@ -321,17 +282,17 @@ func helperMain() {
 		// per this behavior's own name.
 		switch verb {
 		case "pr show":
-			writeAndExit(prShowWithTicketsFixture(), 0)
+			return writeAndExit(prShowWithTicketsFixture(), 0)
 		case "pr files":
-			writeAndExit(prFilesFixture(), 0)
+			return writeAndExit(prFilesFixture(), 0)
 		case "pr commits":
-			writeAndExit(prCommitsFixture(), 0)
+			return writeAndExit(prCommitsFixture(), 0)
 		case "ci list":
-			writeAndExit(ciListFixture(), 0)
+			return writeAndExit(ciListFixture(), 0)
 		case "issue list":
-			writeAndExit(issueListFixture(), 0)
+			return writeAndExit(issueListFixture(), 0)
 		case "issue deps":
-			writeAndExit(issueDepsFixture(), 0)
+			return writeAndExit(issueDepsFixture(), 0)
 		case "issue show":
 			key := ""
 			if len(args) >= 3 {
@@ -339,40 +300,36 @@ func helperMain() {
 			}
 			switch behavior {
 			case "jira_not_found":
-				writeAndExit(notFoundFixture(), 4)
+				return writeAndExit(notFoundFixture(), 4)
 			case "jira_error":
-				os.Stderr.WriteString("unavailable")
-				os.Exit(1)
+				return fail("unavailable", 1)
 			default:
 				priority := "Low"
 				if key == fixtureTicketKey1 {
 					priority = "Highest"
 				}
-				writeAndExit(jiraIssueShowFixture(key, priority), 0)
+				return writeAndExit(jiraIssueShowFixture(key, priority), 0)
 			}
 		default:
-			os.Stderr.WriteString("unexpected verb: " + verb)
-			os.Exit(99)
+			return fail("unexpected verb: "+verb, 99)
 		}
 	case "removed_open":
-		writeAndExit(prShowFixture("open", false, fixtureHeadSHA), 0)
+		return writeAndExit(prShowFixture("open", false, fixtureHeadSHA), 0)
 	case "removed_merged":
-		writeAndExit(prShowFixture("closed", true, fixtureHeadSHA), 0)
+		return writeAndExit(prShowFixture("closed", true, fixtureHeadSHA), 0)
 	case "removed_closed":
-		writeAndExit(prShowFixture("closed", false, fixtureHeadSHA), 0)
+		return writeAndExit(prShowFixture("closed", false, fixtureHeadSHA), 0)
 	case "removed_not_found":
-		writeAndExit(notFoundFixture(), 4)
+		return writeAndExit(notFoundFixture(), 4)
 	case "sweep_same_head":
 		switch verb {
 		case "pr show":
-			writeAndExit(prShowFixture("open", false, fixtureHeadSHA), 0)
+			return writeAndExit(prShowFixture("open", false, fixtureHeadSHA), 0)
 		default:
-			os.Stderr.WriteString("unexpected call for an unchanged sweep: " + verb)
-			os.Exit(99)
+			return fail("unexpected call for an unchanged sweep: "+verb, 99)
 		}
 	default:
-		os.Stderr.WriteString("unknown GO_HELPER_BEHAVIOR: " + behavior)
-		os.Exit(99)
+		return fail("unknown GO_HELPER_BEHAVIOR: "+behavior, 99)
 	}
 }
 
@@ -680,9 +637,9 @@ func TestGather_Sweep_UnchangedHead_SkipsRestOfStageOne(t *testing.T) {
 
 	// Switch to a behavior that only tolerates a "pr show" call — proving
 	// the second sweep, at the same head_sha, makes no further calls.
-	orig := execCmdFactory
-	execCmdFactory = helperCmdFactory("sweep_same_head", recordFile)
-	t.Cleanup(func() { execCmdFactory = orig })
+	orig := runner
+	runner = helperRunner("sweep_same_head", recordFile)
+	t.Cleanup(func() { runner = orig })
 
 	facts, err := g.Gather(context.Background(), "pr", "PR1", ChangeSweep)
 	if err != nil {

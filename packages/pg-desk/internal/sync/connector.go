@@ -1,16 +1,13 @@
 package sync
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"sort"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 )
 
@@ -21,13 +18,12 @@ import (
 // the same rule gather already follows (design sections 7.3, 7.5).
 const pgConnectorBinary = "pg-connector"
 
-// execCmdFactory constructs the *exec.Cmd used to invoke pg-connector.
-// Production code uses exec.CommandContext; sync_test.go swaps this to
-// spawn a reentrant test-helper process, mirroring gather_test.go's own
-// wire-double harness exactly (this packet's own Files instruction: "Tests
-// against an in-process pg-connector wire double reusing
-// pkg/scriptout/conformance").
-var execCmdFactory = exec.CommandContext
+// runner is the exec seam (cmdrun.Runner; nil means cmdrun.ExecRunner).
+// Production code runs pg-connector through it; sync_test.go swaps it for an
+// in-process pg-connector wire double, mirroring gather_test.go's own
+// harness (this packet's own Files instruction: "Tests against an in-process
+// pg-connector wire double reusing pkg/scriptout/conformance").
+var runner cmdrun.Runner
 
 // issueClient wraps the subset of `pg-connector issue` this package needs:
 // create/update/transition (plus the live `issue children` read, which
@@ -298,40 +294,24 @@ func (c *issueClient) targetedCall(ctx context.Context, args []string) (issueRes
 // targetedRaw is targetedCall's transport: it runs the verb, classifies the
 // exit code, and returns the envelope's undecoded result payload.
 func (c *issueClient) targetedRaw(ctx context.Context, args []string) (json.RawMessage, error) {
-	cmd := execCmdFactory(ctx, pgConnectorBinary, args...)
-	if env := c.issueBeadsDirEnv(); len(env) > 0 {
-		base := cmd.Env
-		if base == nil {
-			base = os.Environ()
-		}
-		cmd.Env = append(append([]string{}, base...), env...)
+	res := cmdrun.Or(runner)(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: c.issueBeadsDirEnv()})
+	if res.StartErr != nil {
+		return nil, fmt.Errorf("sync: exec pg-connector %v: %w", args, res.StartErr)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-	exitCode := 0
-	if runErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(runErr, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		} else {
-			return nil, fmt.Errorf("sync: exec pg-connector %v: %w", args, runErr)
-		}
-	}
+	exitCode := res.Code
+	stdout := []byte(res.Stdout)
 
 	switch exitCode {
 	case 0:
 		var env wireEnvelope
-		if decErr := json.Unmarshal(stdout.Bytes(), &env); decErr != nil {
+		if decErr := json.Unmarshal(stdout, &env); decErr != nil {
 			return nil, fmt.Errorf("sync: decode pg-connector %v stdout: %w", args, decErr)
 		}
 		return env.Result, nil
 	case 4:
 		return nil, &ConnectorError{Args: args, ExitCode: exitCode, Code: "not_found"}
 	default:
-		code, detail := wireErrorDetail(stdout.Bytes())
+		code, detail := wireErrorDetail(stdout)
 		return nil, &ConnectorError{Args: args, ExitCode: exitCode, Code: code, Detail: detail}
 	}
 }

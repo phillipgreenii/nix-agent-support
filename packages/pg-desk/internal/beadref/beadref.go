@@ -16,16 +16,13 @@
 package beadref
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	desksync "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
@@ -83,7 +80,7 @@ func (r *Resolver) ResolvePR(ctx context.Context, beadID string) (repo, entityID
 	return repo, repo + "#" + strconv.Itoa(prNumber), nil
 }
 
-// pgConnectorBinary/execCmdFactory mirror internal/gather and
+// pgConnectorBinary/runner mirror internal/gather and
 // internal/sync's own identical constants/vars, one more layer (this
 // package's own `issue show` call) — never a compile-time import of
 // packages/pg-connector (D10). See those packages' doc comments for why
@@ -91,7 +88,9 @@ func (r *Resolver) ResolvePR(ctx context.Context, beadID string) (repo, entityID
 // shared one.
 const pgConnectorBinary = "pg-connector"
 
-var execCmdFactory = exec.CommandContext
+// runner is the exec seam (cmdrun.Runner; nil means cmdrun.ExecRunner).
+// Tests swap it for an in-process double.
+var runner cmdrun.Runner
 
 // connectorIssueShower is the production issueShower: it execs
 // `pg-connector issue show <id>` and decodes the result's title/metadata.
@@ -121,33 +120,17 @@ func (c *connectorIssueShower) Show(ctx context.Context, id string) (string, map
 	args := []string{"issue", "show", id}
 	args = append(args, c.backendFlag()...)
 
-	cmd := execCmdFactory(ctx, pgConnectorBinary, args...)
-	if env := c.issueBeadsDirEnv(); len(env) > 0 {
-		base := cmd.Env
-		if base == nil {
-			base = os.Environ()
-		}
-		cmd.Env = append(append([]string{}, base...), env...)
+	res := cmdrun.Or(runner)(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: c.issueBeadsDirEnv()})
+	if res.StartErr != nil {
+		return "", nil, fmt.Errorf("beadref: exec pg-connector %v: %w", args, res.StartErr)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-	exitCode := 0
-	if runErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(runErr, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		} else {
-			return "", nil, fmt.Errorf("beadref: exec pg-connector %v: %w", args, runErr)
-		}
-	}
+	exitCode := res.Code
+	stdout := []byte(res.Stdout)
 
 	switch exitCode {
 	case 0:
 		var env wireEnvelope
-		if decErr := json.Unmarshal(stdout.Bytes(), &env); decErr != nil {
+		if decErr := json.Unmarshal(stdout, &env); decErr != nil {
 			return "", nil, fmt.Errorf("beadref: decode pg-connector %v stdout: %w", args, decErr)
 		}
 		var res issueShowResult
@@ -160,7 +143,7 @@ func (c *connectorIssueShower) Show(ctx context.Context, id string) (string, map
 	case 4:
 		return "", nil, fmt.Errorf("beadref: pg-connector %v: not_found", args)
 	default:
-		return "", nil, fmt.Errorf("beadref: pg-connector %v: exit %d: %s", args, exitCode, wireErrorMessage(stdout.Bytes()))
+		return "", nil, fmt.Errorf("beadref: pg-connector %v: exit %d: %s", args, exitCode, wireErrorMessage(stdout))
 	}
 }
 

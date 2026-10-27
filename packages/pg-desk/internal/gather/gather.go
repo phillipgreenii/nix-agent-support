@@ -94,17 +94,15 @@
 package gather
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
@@ -235,14 +233,12 @@ type Facts struct {
 // compile-time import of packages/pg-connector (D10).
 const pgConnectorBinary = "pg-connector"
 
-// execCmdFactory constructs the *exec.Cmd used to invoke pg-connector.
-// Production code uses exec.CommandContext; gather_test.go swaps this to
-// spawn a reentrant test-helper process (this packet's own "fake
-// pg-connector binary or a stubbed exec" wire-double requirement) —
-// mirrors packages/pg-router-source-pg-connector/cmd/pg-router-source-pg-connector's
-// exec.go execCmdFactory pattern exactly, one layer up (pg-desk calling
-// pg-connector rather than an adapter calling it).
-var execCmdFactory = exec.CommandContext
+// runner is the exec seam (cmdrun.Runner; nil means cmdrun.ExecRunner).
+// Production code runs pg-connector through it; gather_test.go swaps it for
+// an in-process pg-connector wire double (this packet's own "fake
+// pg-connector binary or a stubbed exec" wire-double requirement) — the
+// shape mirrors packages/pg-decider/internal/prchange/exec.go's Runner.
+var runner cmdrun.Runner
 
 // ThreadRef is one thread already cross-referenced to the triggering PR in
 // the store — Facts.LinkedThreads' own element type (Phase 13's eighth
@@ -848,27 +844,11 @@ type runResult struct {
 // permission denied, context already canceled, ...) — there is then no
 // exit code to classify.
 func (g *Gatherer) run(ctx context.Context, args []string, extraEnv []string) (runResult, error) {
-	cmd := execCmdFactory(ctx, pgConnectorBinary, args...)
-	if len(extraEnv) > 0 {
-		base := cmd.Env
-		if base == nil {
-			base = os.Environ()
-		}
-		cmd.Env = append(append([]string{}, base...), extraEnv...)
+	res := cmdrun.Or(runner)(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: extraEnv})
+	if res.StartErr != nil {
+		return runResult{}, fmt.Errorf("exec pg-connector %v: %w", args, res.StartErr)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-	if runErr == nil {
-		return runResult{stdout: stdout.Bytes(), exitCode: 0}, nil
-	}
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
-		return runResult{stdout: stdout.Bytes(), exitCode: exitErr.ExitCode()}, nil
-	}
-	return runResult{}, fmt.Errorf("exec pg-connector %v: %w", args, runErr)
+	return runResult{stdout: []byte(res.Stdout), exitCode: res.Code}, nil
 }
 
 // wireEnvelope is the subset of pkg/scriptout's Response envelope this

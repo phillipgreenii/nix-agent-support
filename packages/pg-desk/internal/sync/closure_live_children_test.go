@@ -27,7 +27,7 @@ func removedMergedFacts() gather.Facts {
 	return gather.Facts{PRShow: prFixture(map[string]any{"state": "closed", "merged": true}), HeadSHA: fixtureHeadSHA, RemovedState: "merged"}
 }
 
-func callsOfVerb(t *testing.T, recordFile, verb string) []callRecord {
+func callsOfVerb(t *testing.T, recordFile *callLog, verb string) []callRecord {
 	t.Helper()
 	var out []callRecord
 	for _, r := range readCallRecords(t, recordFile) {

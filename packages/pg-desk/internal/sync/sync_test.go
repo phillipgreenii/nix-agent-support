@@ -5,61 +5,46 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
-// sync_test.go is this packet's wire-double test harness: a reentrant
-// test-helper process impersonates `pg-connector issue`, mirroring
-// internal/gather/gather_test.go's own testmain-style pattern exactly (this
-// packet's own Files instruction: "Tests against an in-process
-// pg-connector wire double reusing pkg/scriptout/conformance").
+// sync_test.go is this packet's wire-double test harness: an in-process
+// cmdrun.Runner impersonates `pg-connector issue`, answering every call
+// without starting a process (a race-built re-executed test binary sleeps 1 s
+// at each exit). The helper vocabulary (GO_HELPER_* variables set with
+// t.Setenv, the callRecord log) is kept from the earlier re-executed-binary
+// double; the real exec path is covered by internal/cmdrun.
 
-// --- reentrant helper-process plumbing -------------------------------------
-
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	defer os.Exit(0)
-	helperMain()
-}
+// --- in-process pg-connector double ------------------------------------------
 
 const ambientBeadsDir = "ambient-beads-dir"
 
-func helperCmdFactory(recordFile string) func(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cs := append([]string{"-test.run=^TestHelperProcess$", "--", name}, args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(
-			os.Environ(),
-			"GO_WANT_HELPER_PROCESS=1",
-			"GO_HELPER_CALLS_RECORD_FILE="+recordFile,
-			"BEADS_DIR="+ambientBeadsDir,
-		)
-		return cmd
-	}
+// callLog is every pg-connector call the double saw, in order.
+type callLog struct {
+	recs []callRecord
 }
 
-func withFactory(t *testing.T) string {
+// withFactory swaps the runner seam for the in-process double and returns its
+// call log.
+func withFactory(t *testing.T) *callLog {
 	t.Helper()
-	recordFile := filepath.Join(t.TempDir(), "calls.jsonl")
-	orig := execCmdFactory
-	execCmdFactory = helperCmdFactory(recordFile)
-	t.Cleanup(func() { execCmdFactory = orig })
-	return recordFile
+	log := &callLog{}
+	orig := runner
+	runner = func(_ context.Context, c cmdrun.Call) cmdrun.Result { return helperRun(log, c) }
+	t.Cleanup(func() { runner = orig })
+	return log
 }
 
 // callRecord is one recorded pg-connector invocation: its args, plus the
-// two beads-workspace env vars this helper observed (proving the
+// two beads-workspace env vars the child would have observed (proving the
 // PG_CONNECTOR_ISSUE_BEADS_DIR fallback rule).
 type callRecord struct {
 	Args                []string `json:"args"`
@@ -69,67 +54,22 @@ type callRecord struct {
 
 const unsetSentinel = "<unset>"
 
-func findChildArgs() []string {
-	for i, a := range os.Args {
-		if a == "--" {
-			if i+2 <= len(os.Args) {
-				return os.Args[i+2:]
-			}
-			return nil
+// childEnv is the environment the old helper child saw: the process
+// environment, the double's own BEADS_DIR, then the Call's entries (last
+// entry for a name wins, as exec's env de-duplication does).
+func childEnv(c cmdrun.Call) func(string) (string, bool) {
+	m := map[string]string{}
+	for _, kv := range append(append(os.Environ(), "BEADS_DIR="+ambientBeadsDir), c.Env...) {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			m[k] = v
 		}
 	}
-	return nil
+	return func(name string) (string, bool) { v, ok := m[name]; return v, ok }
 }
 
-func recordCall(args []string) {
-	file := os.Getenv("GO_HELPER_CALLS_RECORD_FILE")
-	if file == "" {
-		return
-	}
-	lookup := func(name string) string {
-		if v, ok := os.LookupEnv(name); ok {
-			return v
-		}
-		return unsetSentinel
-	}
-	rec := callRecord{
-		Args:                args,
-		PGConnectorBeadsDir: lookup("PG_CONNECTOR_ISSUE_BEADS_DIR"),
-		BeadsDir:            lookup("BEADS_DIR"),
-	}
-	b, err := json.Marshal(rec)
-	if err != nil {
-		return
-	}
-	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	_, _ = f.Write(append(b, '\n'))
-}
-
-func readCallRecords(t *testing.T, path string) []callRecord {
+func readCallRecords(t *testing.T, log *callLog) []callRecord {
 	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		t.Fatalf("read %s: %v", path, err)
-	}
-	var out []callRecord
-	for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
-		if line == "" {
-			continue
-		}
-		var rec callRecord
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatalf("decode call record %q: %v", line, err)
-		}
-		out = append(out, rec)
-	}
-	return out
+	return append([]callRecord(nil), log.recs...)
 }
 
 func (r callRecord) verb() string {
@@ -139,18 +79,29 @@ func (r callRecord) verb() string {
 	return r.Args[0] + " " + r.Args[1]
 }
 
-// helperMain answers every `issue create|update|transition` call with a
+// helperRun answers every `issue create|update|transition` call with a
 // well-formed wire-envelope success response. create's id is deterministic
-// — a counter over how many lines the calls-record file already held
-// before this call — so tests can predict ids without a shared side
-// channel beyond the same record file they already read.
-func helperMain() {
-	args := findChildArgs()
-	recordCall(args)
+// - a counter over how many calls the log already held, this one included -
+// so tests can predict ids without a shared side channel beyond the same log
+// they already read.
+func helperRun(log *callLog, c cmdrun.Call) cmdrun.Result {
+	args := append([]string(nil), c.Args...)
+	getenv := childEnv(c)
+	lookup := func(name string) string {
+		if v, ok := getenv(name); ok {
+			return v
+		}
+		return unsetSentinel
+	}
+	log.recs = append(log.recs, callRecord{
+		Args:                args,
+		PGConnectorBeadsDir: lookup("PG_CONNECTOR_ISSUE_BEADS_DIR"),
+		BeadsDir:            lookup("BEADS_DIR"),
+	})
+	env := func(name string) string { v, _ := getenv(name); return v }
 
 	if len(args) < 2 || args[0] != "issue" {
-		os.Stderr.WriteString("unexpected pg-connector invocation: " + strings.Join(args, " "))
-		os.Exit(99)
+		return cmdrun.Result{Stderr: "unexpected pg-connector invocation: " + strings.Join(args, " "), Code: 99}
 	}
 
 	switch args[1] {
@@ -159,27 +110,24 @@ func helperMain() {
 		// workspace that is not there (an unmounted volume): create fails the
 		// way the real backend does, with wire code "unavailable" and bd's
 		// chdir error, until that directory exists (bead pg2-xb6fs).
-		if dir := os.Getenv("GO_HELPER_REQUIRE_DIR"); dir != "" {
+		if dir := env("GO_HELPER_REQUIRE_DIR"); dir != "" {
 			if _, err := os.Stat(dir); err != nil {
-				writeWireError("unavailable", "pg-connector-issue-beads: chdir "+dir+": no such file or directory")
+				return fakeWireError("unavailable", "pg-connector-issue-beads: chdir "+dir+": no such file or directory")
 			}
 		}
 		// GO_HELPER_FAIL_CODE makes create fail with that wire error code.
-		if code := os.Getenv("GO_HELPER_FAIL_CODE"); code != "" {
-			writeWireError(code, "injected "+code+" failure")
+		if code := env("GO_HELPER_FAIL_CODE"); code != "" {
+			return fakeWireError(code, "injected "+code+" failure")
 		}
-		n := priorCallCount()
-		id := fmt.Sprintf("bd-created-%d", n)
-		writeIssueResult(id)
+		return fakeIssueResult(fmt.Sprintf("bd-created-%d", len(log.recs)))
 	case "show":
 		// GO_HELPER_SHOW_METADATA is the JSON metadata object `issue show`
 		// reports (closed-anchor audit, pg2-a6aw6).
-		md := os.Getenv("GO_HELPER_SHOW_METADATA")
+		md := env("GO_HELPER_SHOW_METADATA")
 		if md == "" {
 			md = "{}"
 		}
-		os.Stdout.WriteString(fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":6,"result":{"id":%q,"state":"closed","metadata":%s}}`, args[2], md))
-		os.Exit(0)
+		return cmdrun.Result{Stdout: fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":6,"result":{"id":%q,"state":"closed","metadata":%s}}`, args[2], md)}
 	case "children":
 		// `issue children <id>`: the live read of id's non-closed direct
 		// children (bead pg2-ubvmh). GO_HELPER_CHILDREN_FAIL_CODE fails it
@@ -188,32 +136,30 @@ func helperMain() {
 		// same child:parent edges bd's refusal uses), minus every child that
 		// already has a recorded close, so a bead is a live child exactly while
 		// bd would still count it as an open child.
-		if code := os.Getenv("GO_HELPER_CHILDREN_FAIL_CODE"); code != "" {
-			writeWireError(code, "injected "+code+" failure")
+		if code := env("GO_HELPER_CHILDREN_FAIL_CODE"); code != "" {
+			return fakeWireError(code, "injected "+code+" failure")
 		}
-		result := os.Getenv("GO_HELPER_CHILDREN_RAW")
+		result := env("GO_HELPER_CHILDREN_RAW")
 		if result == "" {
-			closed := closedBeadsSoFar()
+			closed := closedBeadsSoFar(log.recs)
 			var kids []string
-			for _, e := range strings.Split(os.Getenv("GO_HELPER_PARENT_OF"), ",") {
+			for _, e := range strings.Split(env("GO_HELPER_PARENT_OF"), ",") {
 				if child, parent, ok := strings.Cut(e, ":"); ok && parent == args[2] && !closed[child] {
 					kids = append(kids, fmt.Sprintf(`{"id":%q,"title":"live child","state":"open","parent":%q}`, child, parent))
 				}
 			}
 			result = `{"children":[` + strings.Join(kids, ",") + `]}`
 		}
-		os.Stdout.WriteString(`{"protocolVersion":1,"schemaVersion":9,"result":` + result + `}`)
-		os.Exit(0)
+		return cmdrun.Result{Stdout: `{"protocolVersion":1,"schemaVersion":9,"result":` + result + `}`}
 	case "update", "transition":
 		id := ""
 		if len(args) > 2 {
 			id = args[2]
 		}
 		// GO_HELPER_FAIL_ID makes any call naming that bead id fail (exit 1,
-		// stderr) — the closure-failure injection point (pg2-kftf9.1).
-		if failID := os.Getenv("GO_HELPER_FAIL_ID"); failID != "" && failID == id {
-			os.Stderr.WriteString("boom: injected failure for " + id)
-			os.Exit(1)
+		// stderr) - the closure-failure injection point (pg2-kftf9.1).
+		if failID := env("GO_HELPER_FAIL_ID"); failID != "" && failID == id {
+			return cmdrun.Result{Stderr: "boom: injected failure for " + id, Code: 1}
 		}
 		// GO_HELPER_PARENT_OF impersonates bd >= 1.3.1, which refuses to
 		// close a parent while any child is still open ("cannot close X: N
@@ -221,26 +167,23 @@ func helperMain() {
 		// child:parent edges. Closing a bead fails unless EVERY descendant
 		// of it (children, grandchildren, ...) already has an earlier
 		// recorded `issue transition <id> closed` call.
-		if edges := os.Getenv("GO_HELPER_PARENT_OF"); edges != "" && args[1] == "transition" {
-			if open := openDescendantsAtThisCall(id, strings.Split(edges, ",")); open > 0 {
-				writeWireError("unavailable", fmt.Sprintf("cannot close %s: %d open child issue(s); close children first or use --force to override", id, open))
+		if edges := env("GO_HELPER_PARENT_OF"); edges != "" && args[1] == "transition" {
+			if open := openDescendantsAtThisCall(id, strings.Split(edges, ","), log.recs); open > 0 {
+				return fakeWireError("unavailable", fmt.Sprintf("cannot close %s: %d open child issue(s); close children first or use --force to override", id, open))
 			}
 		}
-		writeIssueResult(id)
+		return fakeIssueResult(id)
 	default:
-		os.Stderr.WriteString("unexpected issue verb: " + args[1])
-		os.Exit(99)
+		return cmdrun.Result{Stderr: "unexpected issue verb: " + args[1], Code: 99}
 	}
 }
 
 // closedBeadsSoFar is every bead id with a recorded `issue transition <id>
 // ... closed` call.
-func closedBeadsSoFar() map[string]bool {
-	b, _ := os.ReadFile(os.Getenv("GO_HELPER_CALLS_RECORD_FILE"))
+func closedBeadsSoFar(recs []callRecord) map[string]bool {
 	closed := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
-		var rec callRecord
-		if json.Unmarshal([]byte(line), &rec) != nil || len(rec.Args) < 3 {
+	for _, rec := range recs {
+		if len(rec.Args) < 3 {
 			continue
 		}
 		if rec.verb() == "issue transition" && strings.Contains(strings.Join(rec.Args, " "), "closed") {
@@ -252,25 +195,10 @@ func closedBeadsSoFar() map[string]bool {
 
 // openDescendantsAtThisCall counts how many descendants of id (reached through
 // the child:parent edges, transitively and cycle-safe) have NO earlier recorded
-// `issue transition <descendant> closed` call. The record file already holds
-// this invocation's own line (recordCall ran first), so only earlier lines
-// count.
-func openDescendantsAtThisCall(id string, edges []string) int {
-	b, _ := os.ReadFile(os.Getenv("GO_HELPER_CALLS_RECORD_FILE"))
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	if len(lines) > 0 {
-		lines = lines[:len(lines)-1]
-	}
-	closed := map[string]bool{}
-	for _, line := range lines {
-		var rec callRecord
-		if json.Unmarshal([]byte(line), &rec) != nil || len(rec.Args) < 3 {
-			continue
-		}
-		if rec.verb() == "issue transition" && strings.Contains(strings.Join(rec.Args, " "), "closed") {
-			closed[rec.Args[2]] = true
-		}
-	}
+// `issue transition <descendant> closed` call. recs already holds this
+// invocation's own record (appended first), so only the earlier ones count.
+func openDescendantsAtThisCall(id string, edges []string, recs []callRecord) int {
+	closed := closedBeadsSoFar(recs[:len(recs)-1])
 	childrenOf := map[string][]string{}
 	for _, e := range edges {
 		if child, parent, ok := strings.Cut(e, ":"); ok {
@@ -297,30 +225,14 @@ func openDescendantsAtThisCall(id string, edges []string) int {
 	return open
 }
 
-// priorCallCount counts how many lines the calls-record file held BEFORE
-// this invocation's own recordCall already appended one — i.e. this call's
-// own 1-based ordinal.
-func priorCallCount() int {
-	file := os.Getenv("GO_HELPER_CALLS_RECORD_FILE")
-	b, err := os.ReadFile(file)
-	if err != nil {
-		return 1
-	}
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	return len(lines)
+// fakeWireError answers with pg-connector's targeted-op failure shape: an error
+// envelope on stdout and exit 1.
+func fakeWireError(code, message string) cmdrun.Result {
+	return cmdrun.Result{Stdout: fmt.Sprintf(`{"protocolVersion":1,"error":{"code":%q,"message":%q}}`, code, message), Code: 1}
 }
 
-// writeWireError answers with pg-connector's targeted-op failure shape: an
-// error envelope on stdout and exit 1.
-func writeWireError(code, message string) {
-	os.Stdout.WriteString(fmt.Sprintf(`{"protocolVersion":1,"error":{"code":%q,"message":%q}}`, code, message))
-	os.Exit(1)
-}
-
-func writeIssueResult(id string) {
-	env := fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":5,"result":{"id":%q,"state":"open"}}`, id)
-	os.Stdout.WriteString(env)
-	os.Exit(0)
+func fakeIssueResult(id string) cmdrun.Result {
+	return cmdrun.Result{Stdout: fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":5,"result":{"id":%q,"state":"open"}}`, id)}
 }
 
 // --- fixtures ----------------------------------------------------------------
@@ -868,7 +780,7 @@ func TestSync_ConfirmedClosure_ClosesChildrenBeforeAnchor(t *testing.T) {
 
 // closedTransitions lists, in call order, the bead ids a recorded run asked
 // to close.
-func closedTransitions(t *testing.T, recordFile string) []string {
+func closedTransitions(t *testing.T, recordFile *callLog) []string {
 	t.Helper()
 	var order []string
 	for _, r := range readCallRecords(t, recordFile) {
@@ -1274,7 +1186,7 @@ func TestSync_ConfirmedClosure_StampsTerminalStateBeforeClose(t *testing.T) {
 
 // anchorCalls returns the recorded issue update/transition calls aimed at
 // beadID, in order.
-func anchorCalls(t *testing.T, recordFile, beadID string, from int) []callRecord {
+func anchorCalls(t *testing.T, recordFile *callLog, beadID string, from int) []callRecord {
 	t.Helper()
 	var out []callRecord
 	for _, r := range readCallRecords(t, recordFile)[from:] {

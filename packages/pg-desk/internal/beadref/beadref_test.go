@@ -3,11 +3,10 @@ package beadref
 import (
 	"context"
 	"errors"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 )
 
@@ -132,74 +131,42 @@ func TestResolvePR_ShowFailurePropagates(t *testing.T) {
 	}
 }
 
-// --- connectorIssueShower: a minimal reentrant wire double for the real
-// `pg-connector issue show` exec/decode path, mirroring
-// internal/gather/gather_test.go and internal/sync/sync_test.go's own
-// TestHelperProcess pattern (one level lighter: this package's only verb
-// is "issue show", so it needs no scriptout/conformance cross-check).
+// --- connectorIssueShower: an in-process wire double (a cmdrun.Runner) for
+// the `pg-connector issue show` exec/decode path. It answers `issue show
+// <id>` per behavior ("ok", "not-found", "error"), records every Call, and
+// starts no process; the real exec path is covered by internal/cmdrun.
 
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	defer os.Exit(0)
-	helperMain()
-}
-
-func helperCmdFactory(behavior string) func(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cs := append([]string{"-test.run=^TestHelperProcess$", "--", name}, args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "GO_HELPER_BEHAVIOR="+behavior)
-		return cmd
-	}
-}
-
-func withFactory(t *testing.T, behavior string) {
-	t.Helper()
-	orig := execCmdFactory
-	execCmdFactory = helperCmdFactory(behavior)
-	t.Cleanup(func() { execCmdFactory = orig })
-}
-
-// helperMain answers `issue show <id>` per GO_HELPER_BEHAVIOR: "ok" writes
-// a well-formed wire-envelope success with a fixed title/metadata, "not-
-// found" exits 4, and "error" exits 1 with a wire-envelope error.
-func helperMain() {
-	args := findChildArgs()
-	if len(args) < 2 || args[0] != "issue" || args[1] != "show" {
-		os.Stderr.WriteString("unexpected pg-connector invocation: " + strings.Join(args, " "))
-		os.Exit(99)
-	}
-	switch os.Getenv("GO_HELPER_BEHAVIOR") {
-	case "ok":
-		os.Stdout.WriteString(`{"protocolVersion":1,"schemaVersion":5,"result":{"id":"bead-1","title":"myorg/repo#42: fix the bug","metadata":{"repo":"myorg/repo","pr_number":"42"}}}`)
-		os.Exit(0)
-	case "not-found":
-		os.Exit(4)
-	case "error":
-		os.Stdout.WriteString(`{"protocolVersion":1,"error":{"code":"internal","message":"boom"}}`)
-		os.Exit(1)
-	default:
-		os.Stderr.WriteString("unknown GO_HELPER_BEHAVIOR")
-		os.Exit(99)
-	}
-}
-
-func findChildArgs() []string {
-	for i, a := range os.Args {
-		if a == "--" {
-			if i+2 <= len(os.Args) {
-				return os.Args[i+2:]
-			}
-			return nil
+func helperRunner(behavior string, calls *[]cmdrun.Call) cmdrun.Runner {
+	return func(_ context.Context, c cmdrun.Call) cmdrun.Result {
+		*calls = append(*calls, c)
+		args := c.Args
+		if len(args) < 2 || args[0] != "issue" || args[1] != "show" {
+			return cmdrun.Result{Stderr: "unexpected pg-connector invocation: " + strings.Join(args, " "), Code: 99}
+		}
+		switch behavior {
+		case "ok":
+			return cmdrun.Result{Stdout: `{"protocolVersion":1,"schemaVersion":5,"result":{"id":"bead-1","title":"myorg/repo#42: fix the bug","metadata":{"repo":"myorg/repo","pr_number":"42"}}}`}
+		case "not-found":
+			return cmdrun.Result{Code: 4}
+		case "error":
+			return cmdrun.Result{Stdout: `{"protocolVersion":1,"error":{"code":"internal","message":"boom"}}`, Code: 1}
+		default:
+			return cmdrun.Result{Stderr: "unknown GO_HELPER_BEHAVIOR", Code: 99}
 		}
 	}
-	return nil
+}
+
+func withFactory(t *testing.T, behavior string) *[]cmdrun.Call {
+	t.Helper()
+	orig := runner
+	calls := &[]cmdrun.Call{}
+	runner = helperRunner(behavior, calls)
+	t.Cleanup(func() { runner = orig })
+	return calls
 }
 
 func TestConnectorIssueShower_Show_Success(t *testing.T) {
-	withFactory(t, "ok")
+	calls := withFactory(t, "ok")
 	c := &connectorIssueShower{cfg: &config.Config{Repos: []config.RepoConfig{{Remote: "myorg/repo"}}}}
 	title, metadata, err := c.Show(context.Background(), "bead-1")
 	if err != nil {
@@ -210,6 +177,32 @@ func TestConnectorIssueShower_Show_Success(t *testing.T) {
 	}
 	if metadata["repo"] != "myorg/repo" || metadata["pr_number"] != "42" {
 		t.Fatalf("metadata = %v, want repo/pr_number from the fixture", metadata)
+	}
+	if len(*calls) != 1 || (*calls)[0].Name != "pg-connector" || strings.Join((*calls)[0].Args, " ") != "issue show bead-1" {
+		t.Fatalf("calls = %+v, want one pg-connector [issue show bead-1]", *calls)
+	}
+	if len((*calls)[0].Env) != 0 {
+		t.Fatalf("env = %v, want none when no beads_dir is configured", (*calls)[0].Env)
+	}
+}
+
+// The configured repo's beads_dir and agent tracker backend reach the child
+// as the PG_CONNECTOR_ISSUE_BEADS_DIR env entry and the --backend flag.
+func TestConnectorIssueShower_Show_PassesBeadsDirEnvAndBackendFlag(t *testing.T) {
+	calls := withFactory(t, "ok")
+	c := &connectorIssueShower{cfg: &config.Config{
+		AgentTrackerBackend: "beads-x",
+		Repos:               []config.RepoConfig{{Remote: "myorg/repo", BeadsDir: "/w/.beads"}},
+	}}
+	if _, _, err := c.Show(context.Background(), "bead-1"); err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	got := (*calls)[0]
+	if strings.Join(got.Args, " ") != "issue show bead-1 --backend beads-x" {
+		t.Errorf("args = %v", got.Args)
+	}
+	if len(got.Env) != 1 || got.Env[0] != "PG_CONNECTOR_ISSUE_BEADS_DIR=/w/.beads" {
+		t.Errorf("env = %v", got.Env)
 	}
 }
 

@@ -44,6 +44,7 @@ func TestProbeQueryTotalFailureAndCannotStart(t *testing.T) {
 	if err := g.ProbeQuery(context.Background(), "pr", "mine"); err == nil {
 		t.Fatal("exit 3 must be an error")
 	}
+	useRealRunner(t)
 	t.Setenv("PATH", t.TempDir())
 	if err := g.ProbeQuery(context.Background(), "pr", "mine"); err == nil {
 		t.Fatal("a pg-connector that cannot start must be an error")

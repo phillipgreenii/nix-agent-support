@@ -3,6 +3,7 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/x/gitfixture"
@@ -26,7 +28,7 @@ import (
 // deterministic code whose correctness depends on a REAL tool's semantics:
 // bd >= 1.3.1 refuses to close a parent that still has an open direct child.
 // closure_live_children_test.go and sync_test.go only impersonate that
-// refusal with a reentrant helper process (GO_HELPER_PARENT_OF), and a mock
+// refusal with a in-process double (GO_HELPER_PARENT_OF), and a mock
 // of the tool does not count. These tests drive pg-desk's real closure path
 // (Syncer.Sync, ChangeRemoved, confirmed merge) through the REAL
 // pg-connector and pg-connector-issue-beads binaries (built from this
@@ -198,23 +200,38 @@ func (f *closureRealBD) status(id string) string {
 }
 
 // syncer builds a pg-desk Syncer in apply mode whose pg-connector calls run
-// the real binary against this fixture's workspace, and swaps execCmdFactory
+// the real binary against this fixture's workspace, and swaps the runner seam
 // for the test's duration.
 func (f *closureRealBD) syncer() *Syncer {
 	f.t.Helper()
-	orig := execCmdFactory
-	f.t.Cleanup(func() { execCmdFactory = orig })
-	execCmdFactory = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if name != pgConnectorBinary {
-			f.t.Fatalf("pg-desk exec'd %q, want only %q", name, pgConnectorBinary)
+	orig := runner
+	f.t.Cleanup(func() { runner = orig })
+	runner = func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		if c.Name != pgConnectorBinary {
+			f.t.Fatalf("pg-desk exec'd %q, want only %q", c.Name, pgConnectorBinary)
 		}
-		f.calls = append(f.calls, append([]string{}, args...))
+		f.calls = append(f.calls, append([]string{}, c.Args...))
 		if f.onCall != nil {
-			f.onCall(args)
+			f.onCall(c.Args)
 		}
-		cmd := exec.CommandContext(ctx, filepath.Join(f.bin, pgConnectorBinary), args...)
-		cmd.Env = f.env
-		return cmd
+		// The real binary under the fixture's own hermetic environment, plus the
+		// call's own entries (f.env REPLACES the process environment, so this
+		// does not go through cmdrun.ExecRunner, whose Env appends to it).
+		cmd := exec.CommandContext(ctx, filepath.Join(f.bin, pgConnectorBinary), c.Args...)
+		cmd.Env = append(append([]string{}, f.env...), c.Env...)
+		var out, errb bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		res := cmdrun.Result{}
+		if err := cmd.Run(); err != nil {
+			var ee *exec.ExitError
+			if !errors.As(err, &ee) {
+				res.Code, res.StartErr = -1, err
+			} else {
+				res.Code = ee.ExitCode()
+			}
+		}
+		res.Stdout, res.Stderr = out.String(), errb.String()
+		return res
 	}
 	cfg := testConfig(ModeApply)
 	cfg.Repos[0].BeadsDir = f.dir

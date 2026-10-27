@@ -30,6 +30,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -63,8 +64,19 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(exitCodeFor(err))
+	if code := execute(ctx, os.Stderr); code != 0 {
+		os.Exit(code)
 	}
+}
+
+// execute runs the command tree against the process arguments and returns
+// the process exit code (0 on success; a failure's text goes to stderr, its
+// code from exitCodeFor). main is its only production caller; tests run a
+// verb in process through it instead of re-executing the test binary.
+func execute(ctx context.Context, stderr io.Writer) int {
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitCodeFor(err)
+	}
+	return 0
 }

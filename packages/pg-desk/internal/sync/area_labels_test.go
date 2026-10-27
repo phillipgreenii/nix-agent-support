@@ -40,7 +40,7 @@ func areaPR() map[string]any { return map[string]any{"title": areaTitle, "branch
 
 // createdLabels returns the sorted --labels values of the `issue create`
 // whose argv contains marker, and whether such a create happened.
-func createdLabels(t *testing.T, recordFile, marker string) ([]string, bool) {
+func createdLabels(t *testing.T, recordFile *callLog, marker string) ([]string, bool) {
 	t.Helper()
 	for _, r := range readCallRecords(t, recordFile) {
 		if r.verb() != "issue create" || !strings.Contains(strings.Join(r.Args, " "), marker) {
@@ -57,7 +57,7 @@ func createdLabels(t *testing.T, recordFile, marker string) ([]string, bool) {
 }
 
 // addedLabels returns every --add-label value on `issue update` calls for id.
-func addedLabels(t *testing.T, recordFile, id string) []string {
+func addedLabels(t *testing.T, recordFile *callLog, id string) []string {
 	t.Helper()
 	var out []string
 	for _, r := range readCallRecords(t, recordFile) {

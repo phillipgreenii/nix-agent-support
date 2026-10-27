@@ -3,70 +3,56 @@ package gather
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 )
 
-// entityHelper re-execs this test binary as a fake pg-connector. behavior is
-// a comma list of "<verb>=<exit>:<stdout>" entries, e.g. "issue show=0:{...}";
-// every invocation appends its argv to the record file.
-func TestEntityHelperProcess(t *testing.T) {
-	if os.Getenv("GO_ENTITY_HELPER") != "1" {
-		return
-	}
-	defer os.Exit(0)
-	args := findChildArgs()
-	if f, err := os.OpenFile(os.Getenv("GO_ENTITY_REC"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
-		_, _ = f.WriteString(strings.Join(args, " ") + "\n")
-		_ = f.Close()
-	}
-	verb := ""
-	if len(args) >= 2 {
-		verb = args[0] + " " + args[1]
-	}
-	for _, ent := range strings.Split(os.Getenv("GO_ENTITY_BEHAVIOR"), "|") {
-		k, rest, ok := strings.Cut(ent, "=")
-		if !ok || k != verb {
-			continue
-		}
-		code, out, _ := strings.Cut(rest, ":")
-		_, _ = os.Stdout.WriteString(out)
-		n := 0
-		for _, c := range code {
-			n = n*10 + int(c-'0')
-		}
-		os.Exit(n)
-	}
-	os.Stderr.WriteString("unexpected verb: " + verb)
-	os.Exit(99)
+// entityLog is every argv (joined with spaces) the entity double saw, in order.
+type entityLog struct {
+	calls []string
 }
 
-// entityFactory installs a fake pg-connector (see TestEntityHelperProcess)
-// and returns its call-record file.
-func entityFactory(t *testing.T, behavior string) string {
+// entityFactory installs an in-process fake pg-connector as the runner seam
+// and returns its call log. behavior is a "|"-separated list of
+// "<verb>=<exit>:<stdout>" entries, e.g. "issue show=0:{...}"; every
+// invocation appends its argv to the log, and a verb with no entry answers
+// exit 99 ("unexpected verb"). Nothing here starts a process.
+func entityFactory(t *testing.T, behavior string) *entityLog {
 	t.Helper()
-	rec := filepath.Join(t.TempDir(), "calls.txt")
-	orig := execCmdFactory
-	execCmdFactory = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cs := append([]string{"-test.run=^TestEntityHelperProcess$", "--", name}, args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(os.Environ(), "GO_ENTITY_HELPER=1", "GO_ENTITY_REC="+rec, "GO_ENTITY_BEHAVIOR="+behavior)
-		return cmd
+	log := &entityLog{}
+	orig := runner
+	runner = func(_ context.Context, c cmdrun.Call) cmdrun.Result {
+		log.calls = append(log.calls, strings.Join(c.Args, " "))
+		verb := ""
+		if len(c.Args) >= 2 {
+			verb = c.Args[0] + " " + c.Args[1]
+		}
+		for _, ent := range strings.Split(behavior, "|") {
+			k, rest, ok := strings.Cut(ent, "=")
+			if !ok || k != verb {
+				continue
+			}
+			code, out, _ := strings.Cut(rest, ":")
+			n := 0
+			for _, c := range code {
+				n = n*10 + int(c-'0')
+			}
+			return cmdrun.Result{Stdout: out, Code: n}
+		}
+		return cmdrun.Result{Stderr: "unexpected verb: " + verb, Code: 99}
 	}
-	t.Cleanup(func() { execCmdFactory = orig })
-	return rec
+	t.Cleanup(func() { runner = orig })
+	return log
 }
 
-func readCalls(t *testing.T, rec string) []string {
+func readCalls(t *testing.T, rec *entityLog) []string {
 	t.Helper()
-	b, err := os.ReadFile(rec)
-	if err != nil {
+	if len(rec.calls) == 0 {
 		return nil
 	}
-	return strings.Split(strings.TrimSpace(string(b)), "\n")
+	return append([]string(nil), rec.calls...)
 }
 
 const issueShowWire = `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"bd-1","owner":"me","assignee":"x","issue_type":"task","as_of":"2026-09-16T00:00:00Z"}}`
@@ -216,9 +202,9 @@ func TestPRPathParityFixtures(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.behavior+"/"+string(tc.change), func(t *testing.T) {
-			orig := execCmdFactory
-			t.Cleanup(func() { execCmdFactory = orig })
-			execCmdFactory = helperCmdFactory(tc.behavior, "")
+			orig := runner
+			t.Cleanup(func() { runner = orig })
+			runner = helperRunner(tc.behavior, nil)
 			direct, derr := NewGatherer(testConfig(""), nil).Gather(context.Background(), "pr", fixturePRKey, tc.change)
 			res, aerr := NewGatherer(testConfig(""), nil).EntityGatherers()["pr"].GatherEntity(context.Background(), fixturePRKey, tc.change)
 			if (derr == nil) != (aerr == nil) {

@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"syscall"
@@ -32,6 +33,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -489,7 +491,8 @@ type verbResult struct {
 }
 
 // start launches the verb as its own process (a re-execution of this test
-// binary, see runVerbChildIfRequested).
+// binary, see runVerbChildIfRequested). Only the daemon verb still runs this
+// way: its SIGTERM-to-clean-exit contract belongs to a real process.
 func (f *verbFixture) start(ctx context.Context, verb string, args []string) (*exec.Cmd, *bytes.Buffer, *bytes.Buffer) {
 	full := append(strings.Fields(verb), args...)
 	cmd := exec.CommandContext(ctx, os.Args[0])
@@ -500,21 +503,123 @@ func (f *verbFixture) start(ctx context.Context, verb string, args []string) (*e
 	return cmd, &out, &errb
 }
 
-func (f *verbFixture) run(verb string, args []string) verbResult {
+// run runs one verb IN PROCESS (bead pg2-zpmuzy: a re-executed race-built test
+// binary sleeps 1 s at every exit, and this walk used to start about seventy
+// of them). It is the same code path as the process the daemon verb still
+// gets: the root command tree, the flag parser, the config loader, the store
+// open and the exit-code mapping (execute), under this fixture's hermetic
+// environment, with the standard streams captured and every flag put back to
+// its default afterwards so each verb starts from fresh flag state.
+func (f *verbFixture) run(verb string, args []string) (res verbResult) {
+	full := append(strings.Fields(verb), args...)
+	defer f.applyEnv()()
+	restoreStd, readStd, err := captureStd(f.dir)
+	if err != nil {
+		return verbResult{err: err}
+	}
+	defer func() {
+		restoreStd()
+		res.stdout, res.stderr = readStd()
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd, out, errb := f.start(ctx, verb, args)
-	err := cmd.Run()
-	res := verbResult{stdout: out.String(), stderr: errb.String()}
-	if ee, ok := err.(*exec.ExitError); ok {
-		res.exit = ee.ExitCode()
-	} else if err != nil {
-		res.err = err
-	}
+	rootCmd.SetArgs(full)
+	defer func() {
+		rootCmd.SetArgs(nil)
+		resetFlags(rootCmd)
+	}()
+	defer func() {
+		// A verb that panics must read as a crash in its stderr, as the
+		// child process did, not take the whole test binary down.
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "panic: %v\ngoroutine 1 [running]:\n%s", r, debug.Stack())
+			res.exit = 2
+		}
+	}()
+	res.exit = execute(ctx, os.Stderr)
 	if ctx.Err() != nil {
 		res.err = fmt.Errorf("timed out: %w", ctx.Err())
 	}
 	return res
+}
+
+// applyEnv replaces the whole process environment with the fixture's (as the
+// child process had: nothing of the caller's environment leaks in) and
+// returns the function that puts the original back.
+func (f *verbFixture) applyEnv() func() {
+	saved := os.Environ()
+	os.Clearenv()
+	for _, kv := range f.env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k != verbChildEnv {
+			_ = os.Setenv(k, v)
+		}
+	}
+	return func() {
+		os.Clearenv()
+		for _, kv := range saved {
+			if k, v, ok := strings.Cut(kv, "="); ok {
+				_ = os.Setenv(k, v)
+			}
+		}
+	}
+}
+
+// captureStd points os.Stdin at an empty input and os.Stdout and os.Stderr at
+// files under dir, and returns the function that restores them and the one
+// that reads what was written.
+func captureStd(dir string) (restore func(), read func() (stdout, stderr string), err error) {
+	outF, err := os.CreateTemp(dir, "verb-stdout-")
+	if err != nil {
+		return nil, nil, err
+	}
+	errF, err := os.CreateTemp(dir, "verb-stderr-")
+	if err != nil {
+		_ = outF.Close()
+		return nil, nil, err
+	}
+	inF, err := os.Open(os.DevNull)
+	if err != nil {
+		_ = outF.Close()
+		_ = errF.Close()
+		return nil, nil, err
+	}
+	origIn, origOut, origErr := os.Stdin, os.Stdout, os.Stderr
+	os.Stdin, os.Stdout, os.Stderr = inF, outF, errF
+	restore = func() {
+		os.Stdin, os.Stdout, os.Stderr = origIn, origOut, origErr
+		_ = inF.Close()
+	}
+	read = func() (string, string) {
+		o, _ := os.ReadFile(outF.Name())
+		e, _ := os.ReadFile(errF.Name())
+		_ = outF.Close()
+		_ = errF.Close()
+		return string(o), string(e)
+	}
+	return restore, read, nil
+}
+
+// resetFlags puts every flag of c and its subcommands back to its default and
+// clears its changed mark, so the next in-process run starts from the state a
+// fresh process would.
+func resetFlags(c *cobra.Command) {
+	reset := func(f *pflag.Flag) {
+		if sv, ok := f.Value.(pflag.SliceValue); ok {
+			var def []string
+			if inner := strings.Trim(f.DefValue, "[]"); inner != "" {
+				def = strings.Split(inner, ",")
+			}
+			_ = sv.Replace(def)
+		} else {
+			_ = f.Value.Set(f.DefValue)
+		}
+		f.Changed = false
+	}
+	c.Flags().VisitAll(reset)
+	c.PersistentFlags().VisitAll(reset)
+	for _, sub := range c.Commands() {
+		resetFlags(sub)
+	}
 }
 
 // runDaemon starts a long-running verb, waits for its log to say it is

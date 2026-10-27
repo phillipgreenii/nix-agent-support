@@ -50,7 +50,7 @@ func syncHead(t *testing.T, st *store.Store, mode, window string, at time.Time, 
 }
 
 // reviewReopens returns the `issue update` calls that reopened the review bead.
-func reviewReopens(t *testing.T, recordFile string) []string {
+func reviewReopens(t *testing.T, recordFile *callLog) []string {
 	t.Helper()
 	var out []string
 	for _, r := range readCallRecords(t, recordFile) {
