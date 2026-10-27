@@ -556,7 +556,7 @@ normalised content, and the rules are:
   group stores it, so the change-detection normaliser and a change row's entity never see it), and the `list` result
   declares `fingerprint_excludes: ["entity_meta"]` so the umbrella's list fingerprint does not move when the flag does.
   Behavior: `INV-GH-FRESH-13` in `docs/behavior/github/invariants.md`. Tests: `internal/serve/entity_meta_test.go`
-  (real daemon binary over the fake `gh`), `internal/ops/prread/entitymeta_test.go`, `internal/ops/list/entitymeta_test.go`.
+  (real daemon binary over the fake `gh`; integration tier, `//go:build integration`, run with `-tags integration`), `internal/ops/prread/entitymeta_test.go`, `internal/ops/list/entitymeta_test.go`.
 
 **Where a consumer learns a query's baseline time.** The feed wire's `sources_freshness[]` carries only `query`,
 `last_success_at` and `last_error`; the baseline marker time is NOT on it. A consumer that must know whether a query's
