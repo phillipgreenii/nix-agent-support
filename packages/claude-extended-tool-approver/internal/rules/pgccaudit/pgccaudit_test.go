@@ -87,6 +87,86 @@ func TestPgCCAudit_IngestAsks(t *testing.T) {
 	}
 }
 
+// TestPgCCAudit_ClassifyCmdEnvVarDefers pins pg2-tqles: pg-ccaudit classify
+// execs the program PG_CCAUDIT_CLASSIFY_CMD names, so a pg-ccaudit leaf whose
+// VISIBLE environment (own prefix, `env` words, earlier same-expression exports)
+// assigns it must not be approved. Each row would be Approve without the guard
+// (the same command minus the assignment is in ApprovedSubcommands). Defer is
+// NoOpinion, which is stricter than Approve and leaves the verdict to the chain.
+func TestPgCCAudit_ClassifyCmdEnvVarDefers(t *testing.T) {
+	r := New()
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{"inline prefix, bare classify", "PG_CCAUDIT_CLASSIFY_CMD=x pg-ccaudit classify"},
+		{"inline prefix, classify run", "PG_CCAUDIT_CLASSIFY_CMD=x pg-ccaudit classify --classifier cli"},
+		{"inline prefix, program with args", "PG_CCAUDIT_CLASSIFY_CMD='rm -rf /tmp/x' pg-ccaudit classify --classifier cli"},
+		{"export then classify", "export PG_CCAUDIT_CLASSIFY_CMD=x; pg-ccaudit classify"},
+		{"export then classify with &&", "export PG_CCAUDIT_CLASSIFY_CMD=x && pg-ccaudit classify --classifier cli"},
+		{"export with unreadable value", "export PG_CCAUDIT_CLASSIFY_CMD=$PROG; pg-ccaudit classify"},
+		{"bare export of the name", "export PG_CCAUDIT_CLASSIFY_CMD; pg-ccaudit classify"},
+		{"declare -x then classify", "declare -x PG_CCAUDIT_CLASSIFY_CMD=x; pg-ccaudit classify"},
+		{"allexport then plain assignment", "set -a; PG_CCAUDIT_CLASSIFY_CMD=x; pg-ccaudit classify"},
+		{"env wrapper", "env PG_CCAUDIT_CLASSIFY_CMD=x pg-ccaudit classify"},
+		{"other approved subcommand", "PG_CCAUDIT_CLASSIFY_CMD=x pg-ccaudit report --classifier cli"},
+		{"bare invocation", "PG_CCAUDIT_CLASSIFY_CMD=x pg-ccaudit"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != hookio.NoOpinion {
+				t.Errorf("%q => %v, want NoOpinion (defer)", tt.command, got)
+			}
+		})
+	}
+}
+
+// TestPgCCAudit_ClassifyCmdEnvVarGuardIsNarrow pins the other half of pg2-tqles:
+// without the variable assigned in the visible environment, nothing changes.
+// Includes the shapes a too-broad guard would break: another variable, a
+// shell-local (unexported) assignment that never reaches the child, an export in
+// a pipeline stage (subshell), and ingest, which keeps its Ask.
+func TestPgCCAudit_ClassifyCmdEnvVarGuardIsNarrow(t *testing.T) {
+	r := New()
+	approved := []struct {
+		name    string
+		command string
+	}{
+		{"classify status", "pg-ccaudit classify status"},
+		{"classify", "pg-ccaudit classify"},
+		{"report", "pg-ccaudit report"},
+		{"version", "pg-ccaudit version"},
+		{"unrelated variable inline", "FOO=x pg-ccaudit classify"},
+		{"unrelated export", "export FOO=x; pg-ccaudit classify"},
+		{"similarly-named variable", "PG_CCAUDIT_CLASSIFY_CMD_X=x pg-ccaudit classify"},
+		{"unexported shell variable", "PG_CCAUDIT_CLASSIFY_CMD=x; pg-ccaudit classify"},
+		{"export in a pipeline stage", "export PG_CCAUDIT_CLASSIFY_CMD=x | cat; pg-ccaudit classify"},
+		{"export AFTER the leaf", "pg-ccaudit classify; export PG_CCAUDIT_CLASSIFY_CMD=x"},
+	}
+	for _, tt := range approved {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != hookio.Approve {
+				t.Errorf("%q => %v, want Approve", tt.command, got)
+			}
+		})
+	}
+
+	for _, command := range []string{
+		"pg-ccaudit ingest",
+		"PG_CCAUDIT_CLASSIFY_CMD=x pg-ccaudit ingest",
+		"export PG_CCAUDIT_CLASSIFY_CMD=x; pg-ccaudit ingest",
+	} {
+		t.Run("ingest keeps Ask: "+command, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(command)}
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != hookio.Ask {
+				t.Errorf("%q => %v, want Ask", command, got)
+			}
+		})
+	}
+}
+
 // TestPgCCAudit_UnrelatedCommandsAbstain covers shapes this rule must NOT
 // claim: an unlisted subcommand, a non-Bash tool, and a non-pg-ccaudit
 // command entirely — all deferred (NoOpinion/not-applicable), unchanged.

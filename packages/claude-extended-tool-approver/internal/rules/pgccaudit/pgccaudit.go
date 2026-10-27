@@ -46,6 +46,12 @@
 //     requirement, not a "this is dangerous" one, so `ingest` resolves to
 //     Ask rather than Reject.
 //
+// One carve-out from the Approve band (pg2-tqles): `classify` runs the program
+// named by PG_CCAUDIT_CLASSIFY_CMD, so a pg-ccaudit leaf whose visible
+// environment assigns that variable is never approved; the rule defers
+// (NotApplicable), whatever the subcommand. Whether classify should stay
+// approved at all is a separate question.
+//
 // Any OTHER/unlisted subcommand (a future addition, or a typo) is left
 // unmatched and falls through to NotApplicable — under-matching here only
 // costs a prompt, never a wrong Approve (the same bias pnworkspace's own
@@ -56,6 +62,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
@@ -69,6 +76,27 @@ var approvedSubcommands = map[string]bool{
 	"candidates": true, "classify": true, "report": true, "evaluate": true,
 	"gold": true, "cost": true, "version": true, "help": true,
 	"--version": true, "-V": true, "--help": true, "-h": true,
+}
+
+// classifyCmdEnvVar is the variable packages/pg-ccaudit/internal/classify
+// (classify.EnvCommand) reads to pick the program its CLI classifier runs: the
+// value is split on spaces and exec'd once per candidate batch. It is a
+// program-naming variable, so any approved subcommand reached with it set is an
+// exec sink (pg2-tqles).
+const classifyCmdEnvVar = "PG_CCAUDIT_CLASSIFY_CMD"
+
+// assignsClassifyCmd reports whether the visible environment (a leaf's own
+// prefix, `env NAME=v` words, and names earlier leaves export) assigns the
+// classifier-command variable. Value-blind on purpose: an unreadable value
+// (`export PG_CCAUDIT_CLASSIFY_CMD=$X`, a bare `export PG_CCAUDIT_CLASSIFY_CMD`)
+// must defer as well.
+func assignsClassifyCmd(envs []cmdparse.EnvAssignment) bool {
+	for _, e := range envs {
+		if e.Name == classifyCmdEnvVar {
+			return true
+		}
+	}
+	return false
 }
 
 type Rule struct{}
@@ -88,8 +116,17 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("pg-ccaudit: read bash command: %w", err)
 	}
-	for _, pc := range parsed {
+	for i, pc := range parsed {
 		if filepath.Base(pc.Executable) != "pg-ccaudit" {
+			continue
+		}
+		// pg-ccaudit classify runs whatever program PG_CCAUDIT_CLASSIFY_CMD names
+		// (see classifyCmdEnvVar), so an Approve on a leaf whose visible
+		// environment assigns it would approve an arbitrary exec (pg2-tqles).
+		// Defer instead; ingest below keeps its Ask because it never reads the
+		// variable and a prompt is already the stricter answer.
+		if (len(pc.Args) == 0 || pc.Args[0] != "ingest") &&
+			assignsClassifyCmd(hookio.VisibleEnvVars(input, parsed, i)) {
 			continue
 		}
 		if len(pc.Args) == 0 {
