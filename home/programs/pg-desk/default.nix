@@ -56,9 +56,49 @@ let
     queries = cfg.watch.thread.queries;
     active_window = cfg.watch.thread.activeWindow;
   };
+  # watch.issue.queries and watch.issue.backends, derived from the SAME
+  # declaration as the connector registry's query blocks (INV-CONFIG-6 and -7),
+  # so a deployment declares a watched query once. A query is watched exactly
+  # when written in the object form with `watched = true` under an ISSUE backend
+  # instance's backends.<name>.queries; the shorthand forms (a bare string, a
+  # list) are unwatched. A backend registered under connector.pr or connector.ci
+  # is not an issue backend (its watched queries feed the pr flow), so it
+  # contributes nothing here. Nothing is derived while the connector module is
+  # disabled.
+  connectorCfg = config.phillipgreenii.programs.pg-connector;
+  registeredName = e: if builtins.isString e then e else e.name;
+  nonIssueInstances = map registeredName (connectorCfg.connector.pr ++ connectorCfg.connector.ci);
+  watchedQueryNames =
+    instance:
+    lib.attrNames (
+      lib.filterAttrs (_: q: builtins.isAttrs q && (q.watched or false) == true) (
+        (connectorCfg.backends.${instance} or { }).queries or { }
+      )
+    );
+  derivedWatchPairs = lib.optionals connectorCfg.enable (
+    lib.concatMap (
+      instance:
+      map (query: {
+        inherit query instance;
+      }) (watchedQueryNames instance)
+    ) (lib.filter (n: !(lib.elem n nonIssueInstances)) (lib.attrNames connectorCfg.backends))
+  );
+  derivedWatchBackends = lib.listToAttrs (
+    map (p: {
+      name = p.query;
+      value = {
+        inherit (p) instance;
+        owns_changes = connectorCfg.ownsChanges.${p.instance} or false;
+      };
+    }) derivedWatchPairs
+  );
+  watchIssueQueries = lib.unique (lib.attrNames derivedWatchBackends ++ cfg.watch.issue.queries);
+
   renderedWatch = lib.filterAttrs (_: v: v != { }) {
     pr = lib.optionalAttrs (cfg.watch.pr.queries != [ ]) { queries = cfg.watch.pr.queries; };
-    issue = lib.optionalAttrs (cfg.watch.issue.queries != [ ]) { queries = cfg.watch.issue.queries; };
+    issue =
+      lib.optionalAttrs (watchIssueQueries != [ ]) { queries = watchIssueQueries; }
+      // lib.optionalAttrs (derivedWatchBackends != { }) { backends = derivedWatchBackends; };
     thread = renderedWatchThread;
   };
   renderedSweep = lib.filterAttrs (_: v: v != null) {
@@ -541,8 +581,14 @@ in
         default = [ ];
         description = ''
           config.yaml's watch.issue.queries: the named pg-connector queries
-          whose results form the watched set of issues. Empty (the default)
-          renders no watch.issue block.
+          whose results form the watched set of issues. With
+          `phillipgreenii.programs.pg-connector` enabled, the names derived
+          from every issue backend's queries written as
+          `{ expr = ...; watched = true; }` are rendered FIRST (with a
+          watch.issue.backends entry each, naming the backend instance and its
+          `ownsChanges`), followed by the names listed here, de-duplicated; a
+          name listed here gets no backends entry. Empty with nothing derived
+          (the default) renders no watch.issue block.
         '';
       };
       thread = {
@@ -963,6 +1009,15 @@ in
       platform = "common";
       source = "${cfg.package}/share/tldr/pages.common/pg-desk-focus.md";
     };
+
+    # Two watched queries of the same name on different backends cannot both
+    # be pinned (watch.issue.backends is keyed by query name).
+    assertions = [
+      {
+        assertion = lib.length derivedWatchPairs == lib.length (lib.attrNames derivedWatchBackends);
+        message = "phillipgreenii.programs.pg-desk: a watched query name is declared under more than one pg-connector issue backend; watched query names MUST be unique across backends, because watch.issue.backends is keyed by query name.";
+      }
+    ];
 
     xdg.configFile."pg-desk/config.yaml".source =
       (pkgs.formats.yaml { }).generate "pg-desk-config.yaml"

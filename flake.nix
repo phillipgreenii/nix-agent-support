@@ -15764,6 +15764,63 @@
                 assert !r.disabled.hasPlugin && r.disabled.hasDesk;
                 pkgs.runCommand "pg-desk-attention-registration-ok" { } "touch $out";
 
+              # home/programs/pg-desk's derived watch.issue keys (docket
+              # pg2-2qyyh.3, packet P3-06): watch.issue.queries and
+              # watch.issue.backends are rendered from the SAME declaration as
+              # the pg-connector registry's query blocks (a query written
+              # { expr = ...; watched = true; } under an issue backend), with
+              # owns_changes from pg-connector's ownsChanges (true for the Jira
+              # daemon instance when jira.enable is set), so a deployment
+              # declares a watched query once. Pure module eval plus one tiny
+              # build that parses each rendered config.yaml.
+              test-pg-desk-watch-render =
+                let
+                  r = import ./tests/pg-desk-watch-render.nix { inherit lib pkgs; };
+                in
+                assert r.mixed.failedAssertions == [ ];
+                assert r.collision.failedAssertions != [ ];
+                pkgs.runCommand "pg-desk-watch-render-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.yq-go
+                      pkgs.jq
+                    ];
+                  }
+                  ''
+                    j() { yq -o=json '.' "$1"; }
+
+                    # Watched queries only, each pinned to its instance; owns_changes
+                    # true only for the Jira daemon instance, and a pr backend's
+                    # watched query is not an issue query.
+                    j ${r.mixed.yaml} | jq -e --arg jira ${r.jiraInstance} --arg other ${r.otherInstance} '
+                      .watch.issue.queries == ["watched-demo-other-query", "watched-demo-query"]
+                      and .watch.issue.backends == {
+                        "watched-demo-query": {"instance": $jira, "owns_changes": true},
+                        "watched-demo-other-query": {"instance": $other, "owns_changes": false}
+                      }
+                      and (.watch | has("pr") | not)
+                    ' >/dev/null || { echo "mixed: wrong watch block:" >&2; cat ${r.mixed.yaml} >&2; exit 1; }
+                    ! grep -qE 'unwatched-demo|watched-demo-pr-query' ${r.mixed.yaml}
+
+                    # A manual name is kept after the derived ones, de-duplicated, and
+                    # gets no backends entry.
+                    j ${r.mixedWithManual.yaml} | jq -e '
+                      .watch.issue.queries == ["watched-demo-other-query", "watched-demo-query", "manual-demo-query"]
+                      and (.watch.issue.backends | keys) == ["watched-demo-other-query", "watched-demo-query"]
+                    ' >/dev/null || { echo "mixedWithManual: wrong watch block:" >&2; cat ${r.mixedWithManual.yaml} >&2; exit 1; }
+
+                    # Connector module disabled: the manual list alone, no backends key.
+                    j ${r.connectorOff.yaml} | jq -e '
+                      .watch.issue == {"queries": ["manual-demo-query"]}
+                    ' >/dev/null || { echo "connectorOff: wrong watch block:" >&2; cat ${r.connectorOff.yaml} >&2; exit 1; }
+                    ! grep -q 'backends' ${r.connectorOff.yaml}
+                    ! grep -qE '^watch:' ${r.connectorOffNoManual.yaml}
+
+                    # Nothing watched anywhere: no watch block.
+                    ! grep -qE '^watch:' ${r.noneWatched.yaml}
+                    touch $out
+                  '';
+
               # The pg-desk-focus tldr page and shell completions (docket
               # pg2-2j5ac.44, help packet): the package installs the page and
               # the bash/zsh/fish completions, and the home module registers the

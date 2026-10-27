@@ -747,6 +747,24 @@ in
       '';
     };
 
+    ownsChanges = lib.mkOption {
+      type = lib.types.attrsOf lib.types.bool;
+      default = { };
+      example = {
+        some-issue-backend = true;
+      };
+      description = ''
+        Whether a registered backend instance OWNS its issue changes (it keeps
+        its own change feed and the umbrella's `issue changes` reads it),
+        keyed by instance name. An instance not named here does not own its
+        changes. This is the single source of truth home/programs/pg-desk reads
+        for each watched query's `owns_changes` (watch.issue.backends); it is
+        never rendered into the shared config file (the backend itself declares
+        the capability at runtime). The Jira daemon's instance is set true
+        whenever `jira.enable` is set.
+      '';
+    };
+
     state = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
       default = { };
@@ -1043,6 +1061,7 @@ in
     {
       phillipgreenii.programs.pg-connector = {
         inherit renderedConfig;
+        ownsChanges = lib.optionalAttrs jr.enable { ${jr.instance} = lib.mkDefault true; };
         lib.backendBinDirs =
           {
             includeSelf ? false,
