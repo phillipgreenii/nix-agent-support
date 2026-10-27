@@ -380,15 +380,21 @@ func (g *Governor) check(b *bucketState, req Request, now time.Time) *Refusal {
 			Reason: fmt.Sprintf(format, args...), RetryAt: retry,
 		}
 	}
+	// inflightOnly marks a refusal the reservations alone cause: it would not
+	// be made were they settled.
+	inflightOnly := func(r *Refusal, reservedHere int64, passesWithout bool) *Refusal {
+		r.InFlight = reservedHere > 0 && passesWithout
+		return r
+	}
 	if rem, ok := b.remaining(now); ok && rem-b.inflight-cost < b.lim.Reserve {
-		return refuse(RefusedReserve, b.lim.Reserve, b.reading.ResetAt,
+		return inflightOnly(refuse(RefusedReserve, b.lim.Reserve, b.reading.ResetAt,
 			"%s below reserve: %d %s remaining at the origin, reserve %d, this spend %d",
-			name, rem-b.inflight, unit, b.lim.Reserve, cost)
+			name, rem-b.inflight, unit, b.lim.Reserve, cost), b.inflight, rem-cost >= b.lim.Reserve)
 	}
 	if b.sum+b.inflight+cost > b.lim.Cap {
-		return refuse(RefusedCap, b.lim.Cap, b.freeAt(b.sum+b.inflight+cost-b.lim.Cap, false),
+		return inflightOnly(refuse(RefusedCap, b.lim.Cap, b.freeAt(b.sum+b.inflight+cost-b.lim.Cap, false),
 			"%s cap reached: %d of %d %s per %s spent, this spend %d",
-			name, b.sum+b.inflight, b.lim.Cap, unit, windowName(b.lim.Window), cost)
+			name, b.sum+b.inflight, b.lim.Cap, unit, windowName(b.lim.Window), cost), b.inflight, b.sum+cost <= b.lim.Cap)
 	}
 	if req.Class.Background() {
 		if now.Before(b.pausedUntil) {
@@ -396,9 +402,9 @@ func (g *Governor) check(b *bucketState, req Request, now time.Time) *Refusal {
 				"%s background work paused until %s: %s", name, b.pausedUntil.UTC().Format(time.RFC3339), b.pauseReason)
 		}
 		if b.bgSum+b.inflightBG+cost > b.bgCap {
-			return refuse(RefusedBackgroundShare, b.bgCap, b.freeAt(b.bgSum+b.inflightBG+cost-b.bgCap, true),
+			return inflightOnly(refuse(RefusedBackgroundShare, b.bgCap, b.freeAt(b.bgSum+b.inflightBG+cost-b.bgCap, true),
 				"%s background share reached: %d of %d %s per %s spent (background share of a cap of %d), this spend %d",
-				name, b.bgSum+b.inflightBG, b.bgCap, unit, windowName(b.lim.Window), b.lim.Cap, cost)
+				name, b.bgSum+b.inflightBG, b.bgCap, unit, windowName(b.lim.Window), b.lim.Cap, cost), b.inflightBG, b.bgSum+cost <= b.bgCap)
 		}
 	}
 	return nil

@@ -36,6 +36,14 @@
 // interactive task is completed with the refusal so its caller can serve stale.
 // An executor whose own admission refuses reports the *governor.Refusal as the
 // task's error and is treated the same way.
+//
+// A refusal caused only by the reservations of requests in flight
+// (governor.Refusal.InFlight; Check reserves nothing, so a daemon whose Workers
+// exceed a bucket's background cap meets it every pass) holds the group only
+// until a batch finishes, which is when a reservation settles, and for at most
+// InFlightRetryDelay (or the refusal's RetryAt when that is sooner). It never
+// holds for RetryDelay: that would cap the background throughput at one request
+// per RetryDelay however large the budget.
 package scheduler
 
 import (
@@ -154,6 +162,12 @@ type Options struct {
 	// RetryDelay is how long a failed task waits before it is retried; zero
 	// means DefaultRetryDelay.
 	RetryDelay time.Duration
+	// InFlightRetryDelay bounds how long a refusal caused only by in-flight
+	// reservations (governor.Refusal.InFlight) holds its class group. The hold
+	// also ends when any batch finishes, which is when a reservation settles; the
+	// bound covers reservations the scheduler does not know about. Zero means
+	// DefaultInFlightRetryDelay.
+	InFlightRetryDelay time.Duration
 	// PollInterval bounds how long Run sleeps between passes; zero means
 	// DefaultPollInterval.
 	PollInterval time.Duration
@@ -168,6 +182,8 @@ const (
 	DefaultRetryDelay   = 30 * time.Second
 	DefaultPollInterval = time.Second
 	defaultHistory      = 32
+	// DefaultInFlightRetryDelay is the longest an in-flight-only refusal holds.
+	DefaultInFlightRetryDelay = time.Second
 )
 
 type entry struct {
@@ -193,7 +209,10 @@ type Scheduler struct {
 	// hold maps a bucket and a foreground flag to the time before which the
 	// class group makes no further attempt, set by a governor refusal.
 	holdFG, holdBG map[governor.Bucket]time.Time
-	history        []*BatchState
+	// settleFG and settleBG mark the holds that an in-flight-only refusal set:
+	// a finished batch (a settled reservation) ends them early.
+	settleFG, settleBG map[governor.Bucket]bool
+	history            []*BatchState
 
 	wake chan struct{}
 	wg   sync.WaitGroup
@@ -213,6 +232,9 @@ func New(opt Options) *Scheduler {
 	if opt.RetryDelay <= 0 {
 		opt.RetryDelay = DefaultRetryDelay
 	}
+	if opt.InFlightRetryDelay <= 0 {
+		opt.InFlightRetryDelay = DefaultInFlightRetryDelay
+	}
 	if opt.PollInterval <= 0 {
 		opt.PollInterval = DefaultPollInterval
 	}
@@ -224,6 +246,7 @@ func New(opt Options) *Scheduler {
 		execs: map[string]Executor{}, queue: map[key]*entry{}, running: map[key]*Flight{},
 		runClass: map[key]governor.Class{},
 		holdFG:   map[governor.Bucket]time.Time{}, holdBG: map[governor.Bucket]time.Time{},
+		settleFG: map[governor.Bucket]bool{}, settleBG: map[governor.Bucket]bool{},
 		wake: make(chan struct{}, 1),
 	}
 }

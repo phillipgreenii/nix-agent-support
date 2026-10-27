@@ -187,3 +187,61 @@ func TestDeclaredSpendIsReplayedAfterARestart(t *testing.T) {
 		t.Errorf("admission after the oldest spend aged out: %v", err)
 	}
 }
+
+// TestARefusalCausedOnlyByReservationsSaysSo: the background cap of 1 is held by
+// one admitted request, so a second background request is refused for the
+// reservation alone (InFlight, and no time can be named); once the first settles
+// the refusal comes from the window and names when the spend ages out.
+func TestARefusalCausedOnlyByReservationsSaysSo(t *testing.T) {
+	cfg := declaredConfig()
+	cfg.BackgroundShare = 0.9 // a cap of 2 leaves a background cap of 1
+	g, _ := newGov(t, cfg, Options{})
+	bg := Request{Bucket: requestsBucket, Class: ClassQuery}
+	tk, err := g.Admit(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r *Refusal
+	err = g.Check(bg)
+	if !errors.As(err, &r) || r.Kind != RefusedBackgroundShare {
+		t.Fatalf("second background request = %v, want a background share refusal", err)
+	}
+	if !r.InFlight || !r.RetryAt.IsZero() {
+		t.Errorf("refusal = InFlight %v, RetryAt %v; want an in-flight-only refusal with no retry time", r.InFlight, r.RetryAt)
+	}
+	// An interactive request is not held back by the background share.
+	if err := g.Check(Request{Bucket: requestsBucket, Class: ClassInteractive}); err != nil {
+		t.Errorf("interactive request refused: %v", err)
+	}
+	if err := tk.Settle(Spend{Purpose: PurposeQuery, Cost: 1, Outcome: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	err = g.Check(bg)
+	if !errors.As(err, &r) || r.Kind != RefusedBackgroundShare {
+		t.Fatalf("after the settle = %v, want a background share refusal", err)
+	}
+	if r.InFlight {
+		t.Error("a refusal caused by recorded spend claims to be in-flight")
+	}
+	if want := t0.Add(time.Second); !r.RetryAt.Equal(want) {
+		t.Errorf("RetryAt = %v, want when the spend ages out, %v", r.RetryAt, want)
+	}
+}
+
+func TestACapRefusalCausedOnlyByReservationsSaysSo(t *testing.T) {
+	g, _ := newGov(t, declaredConfig(), Options{})
+	req := Request{Bucket: requestsBucket, Class: ClassInteractive}
+	for i := 0; i < 2; i++ {
+		if _, err := g.Admit(req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var r *Refusal
+	if err := g.Check(req); !errors.As(err, &r) || r.Kind != RefusedCap || !r.InFlight {
+		t.Fatalf("third request = %v, want an in-flight cap refusal", err)
+	}
+	// A request larger than the cap fails whatever is in flight: not in-flight.
+	if err := g.Check(Request{Bucket: requestsBucket, Class: ClassInteractive, Cost: 3}); !errors.As(err, &r) || r.InFlight {
+		t.Errorf("oversize request = %+v, want a refusal that is not in-flight", r)
+	}
+}

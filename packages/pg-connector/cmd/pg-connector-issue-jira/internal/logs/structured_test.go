@@ -106,6 +106,9 @@ func TestStructuredLogOneLinePerStateChange(t *testing.T) {
 			"store refusal", ChangeStoreRefused, "error", func(l *StructuredLog) { l.StoreRefused("/state/store.sqlite", 9, 3) },
 			map[string]any{"store": "/state/store.sqlite", "found_version": float64(9), "supported_version": float64(3)},
 		},
+		{"workers over the background cap", ChangeWorkersOverBackgroundCap, "warn", func(l *StructuredLog) {
+			l.WorkersOverBackgroundCap(2, 1, 2)
+		}, map[string]any{"workers": float64(2), "background_cap": float64(1), "request_rate_per_second": float64(2)}},
 		{"store opened: migrated", ChangeStoreMigrated, "info", func(l *StructuredLog) {
 			l.StoreOpened("/s", store.Result{Outcome: store.OutcomeMigrated, FromVersion: 1, ToVersion: 3}, nil, time.Second)
 		}, map[string]any{"from_version": float64(1), "to_version": float64(3)}},

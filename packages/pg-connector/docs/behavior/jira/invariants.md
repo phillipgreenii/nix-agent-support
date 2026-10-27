@@ -250,7 +250,10 @@ different meaning for a shared term it takes a different name (`INV-20`).
   (requests per second) and a configured **concurrency cap**, and MUST **count** its requests. The
   origin's tenant is shared with every other user's traffic, so the budget is a small share of it.
   The set assumes no quota figure for the origin: the external signal the daemon can rely on is a
-  rate, not a quota.
+  rate, not a quota. When the configured number of workers exceeds the requests per second that
+  background work may spend (the request-rate cap times the background share, rounded down), the
+  daemon MUST log one warning at start-up naming both numbers: the extra workers can never all
+  run at once, and background throughput is that cap.
 - **`INV-JIRA-BUDGET-2`** <!-- uuid: fec1b2ee-5810-43d9-9934-ff7dfc082cac --> — When the origin refuses a request for rate
   (a `429` answer), the daemon MUST **pause background work** for the retry delay the answer states,
   or for a configured default pause when it states none, and MUST **double the pause with jitter**

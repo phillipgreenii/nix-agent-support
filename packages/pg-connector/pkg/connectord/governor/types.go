@@ -385,6 +385,13 @@ type Refusal struct {
 	// the pause. It is zero when it cannot be known (a request larger than
 	// the cap never fits).
 	RetryAt time.Time
+	// InFlight is true when the refusal is caused only by the reservations of
+	// admitted, unsettled requests: the same request would be admitted were
+	// those settled or released. A request that settles frees the room, and
+	// no time known now says when that happens, so RetryAt may be zero. A
+	// caller SHOULD retry when one of its own requests settles, and after a
+	// short bound for the reservations of requests it does not know about.
+	InFlight bool
 }
 
 // Error returns the reason.

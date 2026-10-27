@@ -46,3 +46,15 @@ func NewCLIRunner(cfg *config.Config) *internal.CLIRunner {
 	sort.Strings(env)
 	return &internal.CLIRunner{BinaryOverride: cfg.PjiraPath, Env: env}
 }
+
+// WorkersOverBackgroundCap reports the background cap of the daemon's bucket
+// (the requests one window admits to background work, floor(request_rate_per_second
+// x BackgroundShare)) and whether workers exceed it. More workers than that
+// cannot all run background requests at once; the daemon logs it at start-up.
+func WorkersOverBackgroundCap(gov *governor.Governor, workers int) (backgroundCap int64, over bool) {
+	bs, ok := gov.State().Bucket(Bucket)
+	if !ok {
+		return 0, false
+	}
+	return bs.BackgroundCap, int64(workers) > bs.BackgroundCap
+}

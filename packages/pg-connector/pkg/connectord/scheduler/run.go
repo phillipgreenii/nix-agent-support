@@ -137,11 +137,11 @@ func due2(e *entry, now time.Time) bool { return due(e.Task, now) }
 // completed with it (their callers serve stale), and the refused bucket's class
 // group is held until the refusal's RetryAt.
 func (s *Scheduler) refused(lead *entry, req governor.Request, err error, now time.Time) {
-	retry := s.retryAt(err, now)
+	retry, settle := s.holdUntil(err, now)
 	switch lead.Class {
 	case governor.ClassInteractive, governor.ClassInvalidated:
-		s.holdFG[req.Bucket] = retry
-		s.holdBG[req.Bucket] = retry
+		s.setHold(true, req.Bucket, retry, settle)
+		s.setHold(false, req.Bucket, retry, settle)
 		if lead.Class == governor.ClassInteractive {
 			// Every waiting caller is refused, not just the lead's.
 			// The refreshes themselves stay queued as background work.
@@ -156,7 +156,7 @@ func (s *Scheduler) refused(lead *entry, req governor.Request, err error, now ti
 			}
 		}
 	default:
-		s.holdBG[req.Bucket] = retry
+		s.setHold(false, req.Bucket, retry, settle)
 	}
 }
 
@@ -166,6 +166,51 @@ func (s *Scheduler) retryAt(err error, now time.Time) time.Time {
 		return r.RetryAt
 	}
 	return now.Add(s.opt.RetryDelay)
+}
+
+// holdUntil is when the class group of a refused bucket may try again, and
+// whether the hold is an in-flight one that a finished batch ends early.
+func (s *Scheduler) holdUntil(err error, now time.Time) (until time.Time, settle bool) {
+	var r *governor.Refusal
+	if errors.As(err, &r) && r.InFlight {
+		until = now.Add(s.opt.InFlightRetryDelay)
+		if r.RetryAt.After(now) && r.RetryAt.Before(until) {
+			until = r.RetryAt
+		}
+		return until, true
+	}
+	return s.retryAt(err, now), false
+}
+
+// setHold holds the foreground (fg) or background class group of bucket until
+// until. A settle hold never shortens a hold already in force.
+func (s *Scheduler) setHold(fg bool, bucket governor.Bucket, until time.Time, settle bool) {
+	hold, marks := s.holdBG, s.settleBG
+	if fg {
+		hold, marks = s.holdFG, s.settleFG
+	}
+	if settle && hold[bucket].After(until) {
+		return
+	}
+	hold[bucket] = until
+	if settle {
+		marks[bucket] = true
+	} else {
+		delete(marks, bucket)
+	}
+}
+
+// endSettleHolds lifts the in-flight holds: a batch finished, so a reservation
+// settled and the room it held may be free. The caller holds s.mu.
+func (s *Scheduler) endSettleHolds() {
+	for b := range s.settleFG {
+		delete(s.holdFG, b)
+		delete(s.settleFG, b)
+	}
+	for b := range s.settleBG {
+		delete(s.holdBG, b)
+		delete(s.settleBG, b)
+	}
 }
 
 // Step dispatches every batch that can go now, up to the free workers, and
@@ -224,6 +269,7 @@ func (s *Scheduler) finish(b *batch, res []Result) {
 	now := s.clock.Now()
 	s.active--
 	b.state.Running = false
+	s.endSettleHolds()
 	if over := len(s.history) - s.opt.History; over > 0 {
 		// Drop the oldest finished batches; a running one is never dropped.
 		kept := s.history[:0]
@@ -246,12 +292,12 @@ func (s *Scheduler) finish(b *batch, res []Result) {
 		switch {
 		case r.Err != nil && errors.As(r.Err, &refusal):
 			bucket := b.exec.Spend(it.Task.Class, 1).Bucket
-			retry := s.retryAt(r.Err, now)
+			retry, settle := s.holdUntil(r.Err, now)
 			if bucket != "" {
 				if it.Task.Class <= governor.ClassInvalidated {
-					s.holdFG[bucket] = retry
+					s.setHold(true, bucket, retry, settle)
 				}
-				s.holdBG[bucket] = retry
+				s.setHold(false, bucket, retry, settle)
 			}
 			s.requeue(it.Task, now)
 		case r.Err != nil:

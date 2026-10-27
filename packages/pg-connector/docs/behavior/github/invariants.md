@@ -276,7 +276,11 @@ restated.
 - **`INV-GH-BUDGET-3`** <!-- uuid: 3d9c2d1d-7fc1-4a92-b786-ecd42ebfb6e8 --> — Background classes (3 to 5) MUST stop at the
   **background share** of each bucket's cap, so the remainder stays available to classes 1 and 2; the
   share applies to the request and search buckets as it does to the point-metered one. When a cap is
-  reached, interactive reads MUST be served stale or answered `unavailable` naming the cap.
+  reached, interactive reads MUST be served stale or answered `unavailable` naming the cap. Work
+  held back only because the daemon's own requests in flight occupy the background share MUST be
+  retried as soon as one of those requests finishes (and within a second regardless), never after
+  the delay that follows a failed request: the background classes MUST be able to spend the whole
+  background share however many workers the daemon has.
 - **`INV-GH-BUDGET-4`** <!-- uuid: e820a564-bb12-460b-ada1-55a26453b110 --> — An op that is not cached (`search`, `list_activity`,
   `get_logs`) MUST be performed by the daemon, as a **metered pass-through**: the governor sees and
   limits its spend, and nothing is stored. A write is class 2.

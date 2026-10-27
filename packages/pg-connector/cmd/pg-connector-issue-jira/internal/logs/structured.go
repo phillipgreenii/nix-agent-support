@@ -29,6 +29,9 @@ const (
 	ChangeBudgetResumed   = "budget_resumed"
 	ChangeStoreMovedAside = "store_moved_aside"
 	ChangeStoreRefused    = "store_refused"
+	// ChangeWorkersOverBackgroundCap is the start-up warning that the daemon
+	// has more workers than its background request budget admits at once.
+	ChangeWorkersOverBackgroundCap = "workers_over_background_cap"
 )
 
 // StructuredLog is the daemon's structured log (daemon.log.jsonl, Loki
@@ -147,6 +150,18 @@ func (l *StructuredLog) StoreRefused(path string, found, supported int) {
 	l.write(evlog.LevelError, ChangeStoreRefused, "store refused: schema is newer than this binary", []any{
 		"store", path, "found_version", found, "supported_version", supported,
 	})
+}
+
+// WorkersOverBackgroundCap logs, once at start-up, that the configured workers
+// exceed the background cap (the requests one window admits to background work,
+// floor(request_rate_per_second x background share)): the extra workers can
+// never all run at once, so the daemon's background throughput is the cap and
+// raising workers adds nothing. Raise request_rate_per_second or lower workers.
+func (l *StructuredLog) WorkersOverBackgroundCap(workers int, backgroundCap int64, requestRatePerSecond int) {
+	l.write(evlog.LevelWarn, ChangeWorkersOverBackgroundCap,
+		fmt.Sprintf("workers (%d) exceed the background request cap (%d per window)", workers, backgroundCap), []any{
+			"workers", workers, "background_cap", backgroundCap, "request_rate_per_second", requestRatePerSecond,
+		})
 }
 
 // StoreOpened logs what store.Open did, from its Result and error: a migration,

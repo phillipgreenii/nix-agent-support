@@ -582,7 +582,13 @@ launchd entry sets it to `<state_dir>/pprof.sock` unless `jira.pprof.enable` is 
   opposite: they run under the CALLER's environment.
 - **Budget.** The request rate and concurrency are internal and conservative; `pjira` surfaces no rate-limit header, so
   the only quota signal is a 429, which pauses background work (interactive calls made during the pause are refused,
-  and stored content is served stale where there is some).
+  and stored content is served stale where there is some). Background work spends at most
+  `floor(request_rate_per_second x 0.9)` requests per second (1 with the default rate of 2), however many
+  `workers` there are: a worker whose request the budget refuses only because another worker's request is
+  in flight retries when that request finishes, so the background throughput is that cap (about one request
+  a second with the defaults), not one request per 30 s. A `workers` value above the cap (the defaults are
+  over it) logs one `workers_over_background_cap` warning at start-up, in `daemon.log.jsonl`, naming
+  `workers`, `background_cap` and `request_rate_per_second`; raise the rate or lower `workers` to silence it.
 - **Closed issues.** An issue is stamped closed when it reaches the done status category, is refreshed until
   `terminal_ttl` after that and evicted `expiry` after it (the flag goes with it); a reopen clears the stamp.
 

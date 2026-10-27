@@ -276,6 +276,9 @@ func (d *daemon) start(ctx context.Context) error {
 		return fmt.Errorf("budget governor: %w", err)
 	}
 	d.gov.Store(gov)
+	if bgCap, over := origin.WorkersOverBackgroundCap(gov, cfg.Workers); over {
+		d.log.WorkersOverBackgroundCap(cfg.Workers, bgCap, cfg.RequestRatePerSecond)
+	}
 	d.background(bgCtx, "governor_tick", func(ctx context.Context) {
 		t := time.NewTicker(time.Second)
 		defer t.Stop()
