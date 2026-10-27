@@ -10,12 +10,15 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/phillipgreenii/pg-rescue/internal/inproc"
 	"github.com/phillipgreenii/pg-rescue/internal/testenv"
 )
 
 // TestMain re-executes the test binary as the real pg-rescue main (the
-// GO_WANT_HELPER_PROCESS pattern used across this repo), so the tests below
-// see genuine process exit codes without a separate `go build`.
+// GO_WANT_HELPER_PROCESS pattern used across this repo), for the tests that
+// need a genuine process (the umask test, and the `pg-rescue` the flake-lock
+// handler script calls) without a separate `go build`. Every other test calls
+// run in process (runMain): a race-built child costs a flat 1.0 s at exit.
 func TestMain(m *testing.M) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
 		args := os.Args
@@ -31,7 +34,17 @@ func TestMain(m *testing.M) {
 	os.Exit(testenv.Run(m))
 }
 
+// runMain runs the wrapper in process, with env added to the process
+// environment for the call.
 func runMain(t *testing.T, env []string, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
+	var out, errb bytes.Buffer
+	code = inproc.Call(t, run, args, "", env, nil, &out, &errb)
+	return code, out.String(), errb.String()
+}
+
+// runMainProc runs the real main as a process (this test binary re-executed).
+func runMainProc(t *testing.T, env []string, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], append([]string{"-test.run=^$", "--"}, args...)...)
 	cmd.Env = append(os.Environ(), append([]string{"GO_WANT_HELPER_PROCESS=1"}, env...)...)
@@ -46,7 +59,7 @@ func runMain(t *testing.T, env []string, args ...string) (code int, stdout, stde
 	return code, out.String(), errb.String()
 }
 
-func TestResultProcessExitCodes(t *testing.T) {
+func TestResultExitCodes(t *testing.T) {
 	for outcome, want := range map[string]int{"resolved": 0, "declined": 2, "deferred": 3} {
 		code, stdout, _ := runMain(t, nil, "result", outcome, "s")
 		if code != want || !strings.Contains(stdout, `"outcome":"`+outcome+`"`) {
@@ -55,14 +68,14 @@ func TestResultProcessExitCodes(t *testing.T) {
 	}
 }
 
-func TestWrapperErrorProcessExit70(t *testing.T) {
+func TestWrapperErrorExit70(t *testing.T) {
 	code, stdout, stderr := runMain(t, nil, "--", "true")
 	if code != 70 || stdout != "" || !strings.Contains(stderr, "pg-rescue: ") {
 		t.Errorf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
 
-func TestCheckProcessUsesXDGConfigHome(t *testing.T) {
+func TestCheckUsesXDGConfigHome(t *testing.T) {
 	xdg := t.TempDir()
 	cfg := filepath.Join(xdg, "pg-rescue", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(cfg), 0o700); err != nil {
@@ -98,7 +111,7 @@ func TestProcessSetsUmask077(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := filepath.Join(root, "state")
-	code, stdout, stderr := runMain(t, []string{"XDG_STATE_HOME=" + state}, "--config", cfg, "--handlers", "h", "--verify", "true",
+	code, stdout, stderr := runMainProc(t, []string{"XDG_STATE_HOME=" + state}, "--config", cfg, "--handlers", "h", "--verify", "true",
 		"--", "sh", "-c", "echo out; echo err >&2; exit 3")
 	if code != 0 || stdout != "out\n" || !strings.HasPrefix(stderr, "err\n\n== pg-rescue: `sh -c 'echo out; echo err >&2; exit 3'` exited 3 · handlers h ==\n") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"io"
 	"os"
 
 	"github.com/phillipgreenii/pg-rescue/internal/claudehandler"
@@ -13,5 +14,14 @@ import (
 var Version = "dev"
 
 func main() {
-	os.Exit(claudehandler.Main(os.Args[1:], claudehandler.DefaultRuntime()))
+	os.Exit(run(os.Args[1:], os.Environ(), os.Stdin, os.Stdout, os.Stderr))
+}
+
+// run is main without the process: the handler's arguments, its environment
+// (KEY=VALUE entries) and its streams in, its exit code out. The tests call it
+// in process.
+func run(args, env []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	rt := claudehandler.DefaultRuntime()
+	rt.Environ, rt.Stdin, rt.Stdout, rt.Stderr = env, stdin, stdout, stderr
+	return claudehandler.Main(args, rt)
 }

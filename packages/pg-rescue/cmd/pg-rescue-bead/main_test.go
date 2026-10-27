@@ -11,12 +11,14 @@ import (
 
 	"github.com/phillipgreenii/pg-rescue/internal/contract"
 	"github.com/phillipgreenii/pg-rescue/internal/contracttest"
+	"github.com/phillipgreenii/pg-rescue/internal/inproc"
 	"github.com/phillipgreenii/pg-rescue/internal/testenv"
 )
 
 // TestMain re-executes the test binary as the real pg-rescue-bead main (the
-// GO_WANT_HELPER_PROCESS pattern used across this repo), so the tests see
-// genuine process exit codes, pipes and process groups without a `go build`.
+// GO_WANT_HELPER_PROCESS pattern used across this repo) for the one test that
+// needs a genuine process, the orphan test. Every other test calls run in
+// process through inproc.Run: a race-built child costs a flat 1.0 s at exit.
 func TestMain(m *testing.M) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
 		for i, a := range os.Args {
@@ -31,12 +33,18 @@ func TestMain(m *testing.M) {
 	os.Exit(testenv.Run(m))
 }
 
-// handlerArgv is the argv that runs the real main with args.
+// handlerArgv is the argv that runs the real main as a process with args.
 func handlerArgv(args ...string) []string {
 	return append([]string{os.Args[0], "-test.run=^$", "--"}, args...)
 }
 
 var helperEnv = []string{"GO_WANT_HELPER_PROCESS=1"}
+
+// runHandler runs the handler in process against a canned report.
+func runHandler(t *testing.T, fixture string, env []string, args ...string) contracttest.Result {
+	t.Helper()
+	return inproc.Run(t, run, args, fixture, env)
+}
 
 func trackerDir(t *testing.T) string {
 	t.Helper()
@@ -52,8 +60,7 @@ func TestContractAgainstEveryCannedReport(t *testing.T) {
 		t.Run(fixture, func(t *testing.T) {
 			fake := testenv.NewFakeConnector(t)
 			tracker := trackerDir(t)
-			env := append(append([]string{}, helperEnv...), fake.Env()...)
-			res := contracttest.Run(t, handlerArgv("--tracker-dir", tracker, "--dedup-query", "pg-rescue-open"), contracttest.Fixture(fixture), env)
+			res := runHandler(t, contracttest.Fixture(fixture), fake.Env(), "--tracker-dir", tracker, "--dedup-query", "pg-rescue-open")
 			if res.Exit != 3 || res.Outcome != contract.Deferred {
 				t.Fatalf("exit %d outcome %s reason %q stderr %q", res.Exit, res.Outcome, res.Reason, res.Stderr)
 			}
@@ -75,8 +82,7 @@ func TestContractAgainstEveryCannedReport(t *testing.T) {
 
 func TestUnknownSchemaVersionExits1(t *testing.T) {
 	fake := testenv.NewFakeConnector(t)
-	env := append(append([]string{}, helperEnv...), fake.Env()...)
-	res := contracttest.Run(t, handlerArgv("--tracker-dir", trackerDir(t)), contracttest.Fixture("unknown-schema-version"), env)
+	res := runHandler(t, contracttest.Fixture("unknown-schema-version"), fake.Env(), "--tracker-dir", trackerDir(t))
 	if res.Exit != 1 || res.Outcome != contract.Failed || !strings.Contains(res.Stderr, "schema_version 2") || len(fake.Calls()) != 0 {
 		t.Errorf("exit %d outcome %s stderr %q calls %v", res.Exit, res.Outcome, res.Stderr, fake.Calls())
 	}
@@ -85,10 +91,9 @@ func TestUnknownSchemaVersionExits1(t *testing.T) {
 func TestDerivedTrackerAndUnreachableTrackerThroughTheContract(t *testing.T) {
 	t.Run("no .beads and no --tracker-dir exits 1", func(t *testing.T) {
 		fake := testenv.NewFakeConnector(t)
-		env := append(append([]string{}, helperEnv...), fake.Env()...)
 		// The canned report's cwd (/abs/repo) does not exist, so there is no
 		// repository to derive a tracker from.
-		res := contracttest.Run(t, handlerArgv(), contracttest.Fixture("first-attempt"), env)
+		res := runHandler(t, contracttest.Fixture("first-attempt"), fake.Env())
 		if res.Exit != 1 || !strings.Contains(res.Stderr, "--tracker-dir") || len(fake.Calls()) != 0 {
 			t.Errorf("exit %d stderr %q calls %v", res.Exit, res.Stderr, fake.Calls())
 		}
@@ -96,8 +101,7 @@ func TestDerivedTrackerAndUnreachableTrackerThroughTheContract(t *testing.T) {
 	t.Run("an unreachable tracker exits 1", func(t *testing.T) {
 		fake := testenv.NewFakeConnector(t)
 		fake.Fail("create", 1, "bd unreachable")
-		env := append(append([]string{}, helperEnv...), fake.Env()...)
-		res := contracttest.Run(t, handlerArgv("--tracker-dir", trackerDir(t)), contracttest.Fixture("first-attempt"), env)
+		res := runHandler(t, contracttest.Fixture("first-attempt"), fake.Env(), "--tracker-dir", trackerDir(t))
 		if res.Exit != 1 || res.Stdout != "" || !strings.Contains(res.Stderr, "bd unreachable") {
 			t.Errorf("exit %d stdout %q stderr %q", res.Exit, res.Stdout, res.Stderr)
 		}
@@ -105,7 +109,7 @@ func TestDerivedTrackerAndUnreachableTrackerThroughTheContract(t *testing.T) {
 }
 
 func TestUsageErrorIsNotTheDeclinedExitCode(t *testing.T) {
-	res := contracttest.Run(t, handlerArgv("--no-such-flag"), contracttest.Fixture("first-attempt"), helperEnv)
+	res := runHandler(t, contracttest.Fixture("first-attempt"), nil, "--no-such-flag")
 	if res.Exit != 1 {
 		t.Errorf("exit %d (2 would be read as declined)", res.Exit)
 	}

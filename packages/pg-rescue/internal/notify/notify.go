@@ -79,11 +79,14 @@ type Runtime struct {
 	Watch func(cleanup func()) (stop func())
 	// Tmpl feeds tmpldata.New.
 	Tmpl tmpldata.Env
+	// Getenv reads the handler's environment (PG_RESCUE_REPORT); os.Getenv
+	// when nil. osascript is still found on the process PATH.
+	Getenv func(string) string
 }
 
 // DefaultRuntime is backed by the real process.
 func DefaultRuntime() Runtime {
-	return Runtime{Watch: orphan.Watch, Tmpl: tmpldata.DefaultEnv()}
+	return Runtime{Watch: orphan.Watch, Tmpl: tmpldata.DefaultEnv(), Getenv: os.Getenv}
 }
 
 type options struct {
@@ -151,7 +154,11 @@ func Run(rt Runtime, args []string, stdout, stderr io.Writer) int {
 		return failf(stderr, "--body-template-file: %v", err)
 	}
 
-	data, err := loadData(rt, os.Getenv("PG_RESCUE_REPORT"))
+	getenv := rt.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	data, err := loadData(rt, getenv("PG_RESCUE_REPORT"))
 	if err != nil {
 		return failf(stderr, "%v", err)
 	}

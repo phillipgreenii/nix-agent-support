@@ -4,11 +4,23 @@
 package main
 
 import (
+	"io"
 	"os"
 
 	"github.com/phillipgreenii/pg-rescue/internal/beadhandler"
+	"github.com/phillipgreenii/pg-rescue/internal/environ"
 )
 
 func main() {
-	os.Exit(beadhandler.Main(beadhandler.DefaultRuntime(), os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(run(os.Args[1:], os.Environ(), os.Stdin, os.Stdout, os.Stderr))
+}
+
+// run is main without the process: the handler's arguments, its environment
+// (KEY=VALUE entries) and its streams in, its exit code out. The tests call it
+// in process; the handler reads no standard input.
+func run(args, env []string, _ io.Reader, stdout, stderr io.Writer) int {
+	rt := beadhandler.DefaultRuntime()
+	rt.Getenv = environ.Getenv(env)
+	rt.Environ = func() []string { return env }
+	return beadhandler.Main(rt, args, stdout, stderr)
 }

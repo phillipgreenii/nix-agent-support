@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -16,13 +17,16 @@ import (
 	"github.com/phillipgreenii/pg-rescue/internal/claudehandler"
 	"github.com/phillipgreenii/pg-rescue/internal/contract"
 	"github.com/phillipgreenii/pg-rescue/internal/contracttest"
+	"github.com/phillipgreenii/pg-rescue/internal/inproc"
 	"github.com/phillipgreenii/pg-rescue/internal/testenv"
 )
 
 // TestMain re-executes the test binary as the real pg-rescue-claude main (the
-// GO_WANT_HELPER_PROCESS pattern used across this repo), so the tests see
-// genuine process exit codes. The re-executed handler must keep the PG_RESCUE_*
-// variables contracttest.Run gives it, so it skips the isolation.
+// GO_WANT_HELPER_PROCESS pattern used across this repo) for the one test that
+// needs a genuine process, the orphan test. Every other test calls run in
+// process through inproc.Run: a race-built child costs a flat 1.0 s at exit.
+// The re-executed handler must keep the PG_RESCUE_* variables it is given, so
+// it skips the isolation.
 func TestMain(m *testing.M) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
 		args := os.Args
@@ -58,22 +62,21 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	r.env = []string{
-		"GO_WANT_HELPER_PROCESS=1",
 		"PATH=" + r.binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"FAKE_CLAUDE_DIR=" + r.recDir,
 	}
 	return r
 }
 
-// handlerArgv is the command line that runs the handler binary.
+// handlerArgv is the command line that runs the handler binary as a process.
 func handlerArgv(args ...string) []string {
 	return append([]string{os.Args[0], "-test.run=^$", "--"}, args...)
 }
 
-// run executes the handler once against a canned report, through contracttest.
+// run executes the handler once, in process, against a canned report.
 func (r *rig) run(fixture string, extraEnv []string, args ...string) contracttest.Result {
 	r.t.Helper()
-	return contracttest.Run(r.t, handlerArgv(args...), fixture, append(append([]string(nil), r.env...), extraEnv...))
+	return inproc.Run(r.t, run, args, fixture, append(append([]string(nil), r.env...), extraEnv...))
 }
 
 func (r *rig) read(name string) string {
@@ -524,26 +527,16 @@ func TestTemplateFlags(t *testing.T) {
 }
 
 func TestPrintFlagsNeedNoReport(t *testing.T) {
-	run := func(args ...string) (int, string, string) {
-		cmd := exec.Command(os.Args[0], handlerArgv(args...)[1:]...)
-		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	runPlain := func(args ...string) (int, string, string) {
 		var out, errb bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &out, &errb
-		code := 0
-		if err := cmd.Run(); err != nil {
-			ee, ok := err.(*exec.ExitError)
-			if !ok {
-				t.Fatal(err)
-			}
-			code = ee.ExitCode()
-		}
+		code := inproc.Call(t, run, args, "", nil, nil, &out, &errb)
 		return code, out.String(), errb.String()
 	}
-	code, out, _ := run("--print-default-template")
+	code, out, _ := runPlain("--print-default-template")
 	if code != 0 || out != claudehandler.DefaultPromptTemplate {
 		t.Errorf("--print-default-template: exit %d, stdout differs from the built-in template", code)
 	}
-	code, out, _ = run("--print-template-vars")
+	code, out, _ = runPlain("--print-template-vars")
 	if code != 0 || !strings.Contains(out, ".OutputTail") || !strings.Contains(out, ".Quote") {
 		t.Errorf("--print-template-vars: exit %d, stdout %q", code, out)
 	}
@@ -759,13 +752,10 @@ func TestContractHoldsOnEveryCannedReport(t *testing.T) {
 
 func TestNoReportEnvironmentExitsOne(t *testing.T) {
 	r := newRig(t)
-	cmd := exec.Command(os.Args[0], handlerArgv()[1:]...)
-	cmd.Env = append(os.Environ(), r.env...)
-	var errb bytes.Buffer
-	cmd.Stderr = &errb
-	err := cmd.Run()
-	if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 || !strings.Contains(errb.String(), "PG_RESCUE_REPORT") {
-		t.Errorf("err=%v stderr=%q", err, errb.String())
+	var out, errb bytes.Buffer
+	code := inproc.Call(t, run, nil, "", r.env, nil, &out, &errb)
+	if code != 1 || !strings.Contains(errb.String(), "PG_RESCUE_REPORT") {
+		t.Errorf("code=%d stderr=%q", code, errb.String())
 	}
 }
 
@@ -819,28 +809,29 @@ func TestSIGTERMStopsClaudeAndExits128Plus15(t *testing.T) {
 	var claudePID, sleeperPID int
 	killLeftovers(t, &claudePID, &sleeperPID)
 
-	cmd := exec.Command(os.Args[0], handlerArgv()[1:]...)
-	cmd.Env = append(append(os.Environ(), r.env...), "FAKE_CLAUDE_MODE=hang", "PG_RESCUE_REPORT="+contracttest.Fixture("first-attempt"))
+	// The handler runs in this process, so the SIGTERM below is sent to the
+	// test binary itself. The handler subscribes to it (signal.Notify) before
+	// it starts claude; this guard subscribes first, so that a handler that
+	// forgot to would fail the test by never exiting rather than terminate the
+	// whole test binary.
+	guard := make(chan os.Signal, 1)
+	signal.Notify(guard, syscall.SIGTERM)
+	defer signal.Stop(guard)
+
 	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	handlerPID := cmd.Process.Pid
-	killLeftovers(t, &handlerPID)
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	env := append(append([]string(nil), r.env...), "FAKE_CLAUDE_MODE=hang", "PG_RESCUE_REPORT="+contracttest.Fixture("first-attempt"))
+	done := make(chan int, 1)
+	go func() { done <- inproc.Call(t, run, nil, "", env, nil, &out, &errb) }()
 
 	waitFor(t, 20*time.Second, "claude to be running", func() bool { return r.recorded("child-pid") })
 	claudePID, sleeperPID = readPID(t, filepath.Join(r.recDir, "pid")), readPID(t, filepath.Join(r.recDir, "child-pid"))
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
 	select {
-	case err := <-done:
-		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 128+int(syscall.SIGTERM) {
-			t.Errorf("handler exit = %v; want 143", err)
+	case code := <-done:
+		if code != 128+int(syscall.SIGTERM) {
+			t.Errorf("handler exit = %d; want 143", code)
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("the handler did not exit after SIGTERM")
@@ -858,7 +849,7 @@ func TestOrphanedHandlerExitsAndKillsItsClaudeChild(t *testing.T) {
 	handlerPIDFile := filepath.Join(r.recDir, "handler-pid")
 	cmd := exec.Command("bash", append([]string{"-c", `"$@" >/dev/null 2>&1 & echo $! > "$HANDLER_PID_FILE"; wait`, "wrapper"}, handlerArgv()...)...)
 	cmd.Env = append(append(os.Environ(), r.env...),
-		"FAKE_CLAUDE_MODE=hang", "HANDLER_PID_FILE="+handlerPIDFile, "PG_RESCUE_REPORT="+contracttest.Fixture("first-attempt"))
+		"GO_WANT_HELPER_PROCESS=1", "FAKE_CLAUDE_MODE=hang", "HANDLER_PID_FILE="+handlerPIDFile, "PG_RESCUE_REPORT="+contracttest.Fixture("first-attempt"))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

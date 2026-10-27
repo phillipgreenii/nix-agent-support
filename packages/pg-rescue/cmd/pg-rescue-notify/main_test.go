@@ -14,21 +14,18 @@ import (
 
 	"github.com/phillipgreenii/pg-rescue/internal/contract"
 	"github.com/phillipgreenii/pg-rescue/internal/contracttest"
+	"github.com/phillipgreenii/pg-rescue/internal/inproc"
 	"github.com/phillipgreenii/pg-rescue/internal/notify"
 	"github.com/phillipgreenii/pg-rescue/internal/report"
 	"github.com/phillipgreenii/pg-rescue/internal/testenv"
 )
 
 // TestMain re-executes the test binary as the real pg-rescue-notify main (the
-// GO_WANT_HELPER_PROCESS pattern used across this repo), so contracttest.Run
-// can drive a genuine process. GO_NOTIFY_ROLE=parent is the orphan test's
-// short-lived parent.
+// GO_WANT_HELPER_PROCESS pattern used across this repo) for the one test that
+// needs a genuine process, the orphan test. Every other test calls run in
+// process through inproc.Run: a race-built child costs a flat 1.0 s at exit.
 func TestMain(m *testing.M) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
-		if os.Getenv("GO_NOTIFY_ROLE") == "parent" {
-			parentRole()
-			return
-		}
 		for i, a := range os.Args {
 			if a == "--" {
 				os.Args = append([]string{"pg-rescue-notify"}, os.Args[i+1:]...)
@@ -39,25 +36,6 @@ func TestMain(m *testing.M) {
 		return
 	}
 	os.Exit(testenv.Run(m))
-}
-
-// parentRole starts the real handler, waits until its fake osascript is
-// running, then exits, orphaning the handler.
-func parentRole() {
-	pidFile := os.Getenv("FAKE_OSASCRIPT_PIDFILE")
-	child := exec.Command(os.Args[0], "-test.run=^$", "--")
-	child.Env = append(os.Environ(), "GO_NOTIFY_ROLE=child")
-	if err := child.Start(); err != nil {
-		os.Exit(2)
-	}
-	for i := 0; i < 1000; i++ {
-		if b, err := os.ReadFile(pidFile); err == nil && strings.TrimSpace(string(b)) != "" {
-			os.Exit(0)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	_ = child.Process.Kill()
-	os.Exit(3)
 }
 
 // fakeOSAScript puts a fake osascript first on PATH. It records its argv,
@@ -84,13 +62,15 @@ exit 0
 	}, argvFile
 }
 
-// handlerArgv is how contracttest.Run starts the real main.
+// handlerArgv is the argv that runs the real main as a process.
 func handlerArgv(args ...string) []string {
 	return append([]string{os.Args[0], "-test.run=^$", "--"}, args...)
 }
 
-func helperEnv(extra ...string) []string {
-	return append([]string{"GO_WANT_HELPER_PROCESS=1"}, extra...)
+// runHandler runs the handler in process against a canned report.
+func runHandler(t *testing.T, fixture string, env []string, args ...string) contracttest.Result {
+	t.Helper()
+	return inproc.Run(t, run, args, fixture, env)
 }
 
 func recordedArgv(t *testing.T, file string) []string {
@@ -160,7 +140,7 @@ func TestDefaultTemplatesPostOneNotificationAndDecline(t *testing.T) {
 	for _, fixture := range []string{"first-attempt", "three-prior-attempts", "stdin-mode"} {
 		t.Run(fixture, func(t *testing.T) {
 			_ = os.Remove(argvFile)
-			res := contracttest.Run(t, handlerArgv(), contracttest.Fixture(fixture), helperEnv(env...))
+			res := runHandler(t, contracttest.Fixture(fixture), env)
 			assertDeclined(t, res)
 			title, body, sound := valuesOf(t, recordedArgv(t, argvFile))
 			if sound != "" {
@@ -185,10 +165,11 @@ func TestDefaultTemplatesPostOneNotificationAndDecline(t *testing.T) {
 
 func TestInlineTemplates(t *testing.T) {
 	env, argvFile := fakeOSAScript(t)
-	res := contracttest.Run(t, handlerArgv(
+	res := runHandler(
+		t, contracttest.Fixture("three-prior-attempts"), env,
 		"--title-template", "T {{.Repo}} exit={{.Exit}}",
 		"--body-template", "B {{.Host}} {{.Context}}",
-	), contracttest.Fixture("three-prior-attempts"), helperEnv(env...))
+	)
 	assertDeclined(t, res)
 	title, body, _ := valuesOf(t, recordedArgv(t, argvFile))
 	if title != "T repo exit=1" || body != "B phillipg-mbp-02 sync-projects: rebase repo onto origin" {
@@ -208,8 +189,8 @@ func TestFileTemplates(t *testing.T) {
 	if err := os.WriteFile(bodyFile, []byte("file body {{.LastSummary}}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	res := contracttest.Run(t, handlerArgv("--title-template-file", titleFile, "--body-template-file", bodyFile),
-		contracttest.Fixture("three-prior-attempts"), helperEnv(env...))
+	res := runHandler(t, contracttest.Fixture("three-prior-attempts"), env,
+		"--title-template-file", titleFile, "--body-template-file", bodyFile)
 	assertDeclined(t, res)
 	title, body, _ := valuesOf(t, recordedArgv(t, argvFile))
 	if title != "file title 1" || body != "file body Resolved the conflict markers and continued the rebase" {
@@ -219,7 +200,7 @@ func TestFileTemplates(t *testing.T) {
 
 func TestSoundIsAnArgvItem(t *testing.T) {
 	env, argvFile := fakeOSAScript(t)
-	res := contracttest.Run(t, handlerArgv("--sound", "Glass"), contracttest.Fixture("first-attempt"), helperEnv(env...))
+	res := runHandler(t, contracttest.Fixture("first-attempt"), env, "--sound", "Glass")
 	assertDeclined(t, res)
 	argv := recordedArgv(t, argvFile)
 	if _, _, sound := valuesOf(t, argv); sound != "Glass" || argv[len(argv)-1] != "Glass" {
@@ -238,8 +219,8 @@ func TestSoundIsAnArgvItem(t *testing.T) {
 func TestHostileSummaryReachesOsascriptAsArgvUnchanged(t *testing.T) {
 	env, argvFile := fakeOSAScript(t)
 	hostile := `done" & (do shell script "touch /tmp/pwned") & "\ and do shell script "id" -- -e 'x'`
-	res := contracttest.Run(t, handlerArgv("--body-template", "{{.LastSummary}}", "--title-template", "{{.LastSummary}}"),
-		withSummary(t, hostile), helperEnv(env...))
+	res := runHandler(t, withSummary(t, hostile), env,
+		"--body-template", "{{.LastSummary}}", "--title-template", "{{.LastSummary}}")
 	assertDeclined(t, res)
 	title, body, _ := valuesOf(t, recordedArgv(t, argvFile))
 	if body != hostile || title != hostile {
@@ -250,8 +231,8 @@ func TestHostileSummaryReachesOsascriptAsArgvUnchanged(t *testing.T) {
 func TestControlCharactersStrippedAndLengthCapped(t *testing.T) {
 	env, argvFile := fakeOSAScript(t)
 
-	res := contracttest.Run(t, handlerArgv("--body-template", "{{.LastSummary}}", "--sound", "Gl\x07ass"),
-		withSummary(t, "a\x00b\x07c\x1b[31md\ne\x7ff\u0085g"), helperEnv(env...))
+	res := runHandler(t, withSummary(t, "a\x00b\x07c\x1b[31md\ne\x7ff\u0085g"), env,
+		"--body-template", "{{.LastSummary}}", "--sound", "Gl\x07ass")
 	assertDeclined(t, res)
 	_, body, sound := valuesOf(t, recordedArgv(t, argvFile))
 	if body != "abc[31md efg" {
@@ -262,8 +243,8 @@ func TestControlCharactersStrippedAndLengthCapped(t *testing.T) {
 	}
 
 	long := strings.Repeat("x", 500)
-	res = contracttest.Run(t, handlerArgv("--title-template", long, "--body-template", "{{.LastSummary}}", "--sound", long),
-		withSummary(t, strings.Repeat("é", 300)), helperEnv(env...))
+	res = runHandler(t, withSummary(t, strings.Repeat("é", 300)), env,
+		"--title-template", long, "--body-template", "{{.LastSummary}}", "--sound", long)
 	assertDeclined(t, res)
 	title, body, sound := valuesOf(t, recordedArgv(t, argvFile))
 	if title != strings.Repeat("x", 200) || sound != strings.Repeat("x", 200) {
@@ -276,12 +257,12 @@ func TestControlCharactersStrippedAndLengthCapped(t *testing.T) {
 
 func TestPostFailureExits1(t *testing.T) {
 	env, _ := fakeOSAScript(t)
-	res := contracttest.Run(t, handlerArgv(), contracttest.Fixture("first-attempt"), helperEnv(append(env, "FAKE_OSASCRIPT_FAIL=1")...))
+	res := runHandler(t, contracttest.Fixture("first-attempt"), append(env, "FAKE_OSASCRIPT_FAIL=1"))
 	if res.Exit != 1 || res.Stdout != "" || !strings.Contains(res.Stderr, "boom") {
 		t.Errorf("exit=%d stdout=%q stderr=%q; want exit 1, empty stdout, osascript's message on stderr", res.Exit, res.Stdout, res.Stderr)
 	}
 	// An osascript that itself exits 2 is still a failure to post, not "declined".
-	res = contracttest.Run(t, handlerArgv(), contracttest.Fixture("first-attempt"), helperEnv(append(env, "FAKE_OSASCRIPT_FAIL=2")...))
+	res = runHandler(t, contracttest.Fixture("first-attempt"), append(env, "FAKE_OSASCRIPT_FAIL=2"))
 	if res.Exit != 1 {
 		t.Errorf("osascript exit 2 gave handler exit %d, want 1", res.Exit)
 	}
@@ -289,7 +270,7 @@ func TestPostFailureExits1(t *testing.T) {
 
 func TestMissingOsascriptExits1(t *testing.T) {
 	empty := t.TempDir()
-	res := contracttest.Run(t, handlerArgv(), contracttest.Fixture("first-attempt"), helperEnv("PATH="+empty))
+	res := runHandler(t, contracttest.Fixture("first-attempt"), []string{"PATH=" + empty})
 	if res.Exit != 1 || !strings.Contains(res.Stderr, "osascript") {
 		t.Errorf("exit=%d stderr=%q", res.Exit, res.Stderr)
 	}
@@ -317,7 +298,7 @@ func TestBadInputExits1NeverDeclined(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_ = os.Remove(argvFile)
-			res := contracttest.Run(t, handlerArgv(tc.args...), tc.fixture, helperEnv(append(env, tc.extra...)...))
+			res := runHandler(t, tc.fixture, append(append([]string(nil), env...), tc.extra...), tc.args...)
 			if res.Exit != 1 || res.Stdout != "" || res.Stderr == "" {
 				t.Errorf("exit=%d stdout=%q stderr=%q; want exit 1 with a message on stderr", res.Exit, res.Stdout, res.Stderr)
 			}
@@ -332,17 +313,8 @@ func TestBadInputExits1NeverDeclined(t *testing.T) {
 // text instead of a result.
 func runPlain(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], append([]string{"-test.run=^$", "--"}, args...)...)
-	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "PG_RESCUE_REPORT=")
 	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
-		ee, ok := err.(*exec.ExitError)
-		if !ok {
-			t.Fatal(err)
-		}
-		code = ee.ExitCode()
-	}
+	code = inproc.Call(t, run, args, "", []string{"PG_RESCUE_REPORT="}, nil, &out, &errb)
 	return code, out.String(), errb.String()
 }
 
@@ -364,23 +336,30 @@ func TestPrintedDefaultsAreTheDefaults(t *testing.T) {
 	}
 }
 
-// A real orphan: the parent role starts the real handler against a fake
-// osascript that hangs, then exits. The handler must notice, kill osascript
-// and go away.
+// A real orphan: a short-lived shell (the wrapper) starts the real handler, as
+// a process, against a fake osascript that hangs, waits until osascript is
+// running, then exits. The handler must notice, kill osascript and go away.
 func TestOrphanedHandlerKillsOsascriptAndExits(t *testing.T) {
 	env, _ := fakeOSAScript(t)
 	pidFile := filepath.Join(t.TempDir(), "osascript.pid")
-	cmd := exec.Command(os.Args[0], "-test.run=^$")
-	cmd.Env = append(os.Environ(), helperEnv(env...)...)
+	const wrapper = `"$@" </dev/null >/dev/null 2>&1 &
+handler=$!
+i=0
+while [ ! -s "$FAKE_OSASCRIPT_PIDFILE" ] && [ "$i" -lt 1500 ]; do sleep 0.01; i=$((i + 1)); done
+if [ -s "$FAKE_OSASCRIPT_PIDFILE" ]; then exit 0; fi
+kill "$handler"
+exit 3`
+	cmd := exec.Command("/bin/sh", append([]string{"-c", wrapper, "wrapper"}, handlerArgv()...)...)
+	cmd.Env = append(os.Environ(), env...)
 	cmd.Env = append(
 		cmd.Env,
-		"GO_NOTIFY_ROLE=parent",
+		"GO_WANT_HELPER_PROCESS=1",
 		"FAKE_OSASCRIPT_HANG=1",
 		"FAKE_OSASCRIPT_PIDFILE="+pidFile,
 		"PG_RESCUE_REPORT="+contracttest.Fixture("first-attempt"),
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("parent role failed: %v\n%s", err, out)
+		t.Fatalf("wrapper failed: %v\n%s", err, out)
 	}
 	b, err := os.ReadFile(pidFile)
 	if err != nil {
