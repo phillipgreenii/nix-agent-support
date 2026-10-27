@@ -114,7 +114,9 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 		}
 		return changes.EvaluateSweepBound(changes.SweepInputsForTier(cfg, tf, tier), poll, known)
 	}
-	if err := metrics.RegisterChangeFlow(mp, flowFn, metrics.WithSweepBound(sweepBound)); err != nil {
+	if err := metrics.RegisterChangeFlow(mp, flowFn, metrics.WithSweepBound(sweepBound),
+		metrics.WithIngestFailed(metrics.IngestFailedFromStore(st, cfg.OwningInstances(changes.EntityTypeIssue),
+			func() time.Time { return nowUTC() }))); err != nil {
 		return nil, fmt.Errorf("httpapi: register change-flow metrics: %w", err)
 	}
 

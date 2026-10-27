@@ -236,6 +236,9 @@ const (
 	DefaultReconcileAge        = 30 * time.Minute
 	DefaultSweepMaxPerPoll     = 20
 	DefaultHydrationMaxPerPoll = 50
+	// DefaultIngestFailedMaxAge is hydration.ingest_failed_max_age's default:
+	// how old the oldest failed-ingest entry may be before doctor gates.
+	DefaultIngestFailedMaxAge = 30 * time.Minute
 	// DefaultFocusPendingGateAge is focus.pending_gate_age's default.
 	DefaultFocusPendingGateAge = 30 * time.Minute
 )
@@ -298,6 +301,11 @@ type HydrationConfig struct {
 	// stored facts also carry `issue deps <id> --full` (issue_deps). False
 	// (the default, and what an unset key means) hydrates issue_show only.
 	ReadIssueDeps bool `yaml:"read_issue_deps,omitempty" json:"read_issue_deps,omitempty"`
+	// IngestFailedMaxAge is ingest_failed_max_age (a duration such as "30m"):
+	// how old the oldest failed-ingest entry may be before `pg-desk doctor`
+	// gates; empty means DefaultIngestFailedMaxAge. It does NOT move the
+	// pg-desk-ingest-failed-old alert, whose threshold is fixed in the rule.
+	IngestFailedMaxAge string `yaml:"ingest_failed_max_age,omitempty" json:"ingest_failed_max_age,omitempty"`
 }
 
 // DefaultInProgressStatuses is the status set jira.in_progress_statuses
@@ -433,6 +441,12 @@ func (c *Config) HydrationMaxPerPoll() int {
 // Config.
 func (c *Config) HydrationReadIssueDeps() bool {
 	return c != nil && c.Hydration.ReadIssueDeps
+}
+
+// IngestFailedMaxAge returns hydration.ingest_failed_max_age (default 30m): the
+// age of the oldest failed-ingest entry past which `pg-desk doctor` gates.
+func (c *Config) IngestFailedMaxAge() time.Duration {
+	return durationOrDefault(c.Hydration.IngestFailedMaxAge, DefaultIngestFailedMaxAge)
 }
 
 // ChangeLogRetention returns change_log_retention, or ZERO when unset so the
@@ -608,6 +622,7 @@ func validateChangeFlow(cfg *Config) error {
 		{"watch.thread.active_window", cfg.Watch.Thread.ActiveWindow},
 		{"sweep.max_age", cfg.Sweep.MaxAge},
 		{"sweep.reconcile_age", cfg.Sweep.ReconcileAge},
+		{"hydration.ingest_failed_max_age", cfg.Hydration.IngestFailedMaxAge},
 		{"change_log_retention", cfg.ChangeLogRetentionRaw},
 		{"consumer_stale_after", cfg.ConsumerStaleAfterRaw},
 	} {

@@ -263,3 +263,136 @@ func TestDueBacklogGaugeExcludesOwningBackendEntities(t *testing.T) {
 		})
 	}
 }
+
+// ingestPoints collects the two failed-ingest families into per-backend
+// values: count, and oldest age in seconds.
+func ingestPoints(t *testing.T, rm metricdata.ResourceMetrics) (count, age map[string]int64) {
+	t.Helper()
+	read := func(name string) map[string]int64 {
+		out := map[string]int64{}
+		d, ok := findMetric(t, rm, name).Data.(metricdata.Gauge[int64])
+		if !ok {
+			t.Fatalf("%s is not an int64 gauge", name)
+		}
+		for _, p := range d.DataPoints {
+			be, _ := p.Attributes.Value("backend")
+			out[be.AsString()] = p.Value
+		}
+		return out
+	}
+	return read(MetricIngestFailed), read(MetricIngestFailedOldestAge)
+}
+
+func collectIngest(t *testing.T, fn IngestFailedFunc, migrated bool) (metricdata.ResourceMetrics, error) {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	flow := func() (changes.Flow, error) { return changes.Flow{Migrated: migrated}, nil }
+	if err := RegisterChangeFlow(mp, flow, WithIngestFailed(fn)); err != nil {
+		t.Fatalf("RegisterChangeFlow: %v", err)
+	}
+	var rm metricdata.ResourceMetrics
+	err := reader.Collect(context.Background(), &rm)
+	return rm, err
+}
+
+// The failed-ingest series come from the table at scrape time: two entries of
+// one instance read as count 2 and the age of the older one, a configured
+// owning instance with no entry reads 0 and 0 (never absent), and an entry of
+// an instance that is not configured still gets its own series.
+func TestIngestFailedSeriesReadTheTableAtScrapeTime(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for _, f := range []store.IngestFailure{
+		{Instance: "jira-a", EntityID: "PROJ-1", Seq: 4, StoreIdentity: "s1", FirstFailedAt: now.Add(-10 * time.Minute).Format(time.RFC3339), LastError: "boom"},
+		{Instance: "jira-a", EntityID: "PROJ-2", Seq: 5, StoreIdentity: "s1", FirstFailedAt: now.Add(-40 * time.Minute).Format(time.RFC3339), LastError: "boom"},
+		{Instance: "stray", EntityID: "X-1", Seq: 1, StoreIdentity: "s9", FirstFailedAt: now.Add(-5 * time.Minute).Format(time.RFC3339), LastError: "boom"},
+	} {
+		if err := st.RecordIngestFailure(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rm, err := collectIngest(t, IngestFailedFromStore(st, []string{"jira-a", "jira-b"}, func() time.Time { return now }), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, age := ingestPoints(t, rm)
+	wantCount := map[string]int64{"jira-a": 2, "jira-b": 0, "stray": 1}
+	wantAge := map[string]int64{"jira-a": 2400, "jira-b": 0, "stray": 300}
+	for be, v := range wantCount {
+		if got, ok := count[be]; !ok || got != v {
+			t.Errorf("%s{backend=%s} = %d (present %v), want %d", MetricIngestFailed, be, got, ok, v)
+		}
+		if got, ok := age[be]; !ok || got != wantAge[be] {
+			t.Errorf("%s{backend=%s} = %d (present %v), want %d", MetricIngestFailedOldestAge, be, got, ok, wantAge[be])
+		}
+	}
+	if len(count) != len(wantCount) || len(age) != len(wantCount) {
+		t.Errorf("series = %v / %v, want exactly the backends %v", count, age, wantCount)
+	}
+
+	// Clearing the entries empties the table: both families read 0 again.
+	for _, f := range []store.IngestFailure{{Instance: "jira-a", EntityID: "PROJ-1", Seq: 4}, {Instance: "jira-a", EntityID: "PROJ-2", Seq: 5}} {
+		if err := st.ClearIngestFailure(f.Instance, f.EntityID, f.Seq); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rm, err = collectIngest(t, IngestFailedFromStore(st, []string{"jira-a"}, func() time.Time { return now }), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, age = ingestPoints(t, rm)
+	if count["jira-a"] != 0 || age["jira-a"] != 0 {
+		t.Errorf("after clearing: count %d, age %d, want 0 and 0", count["jira-a"], age["jira-a"])
+	}
+}
+
+// With no owning instance and an empty table the families still exist (one
+// series without a backend, valued 0), so a deployment without an owning
+// backend never reads as "the store cannot answer".
+func TestIngestFailedSeriesExistWithNoInstance(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	rm, err := collectIngest(t, IngestFailedFromStore(st, nil, time.Now), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, age := ingestPoints(t, rm)
+	if v, ok := count[""]; !ok || v != 0 || len(count) != 1 {
+		t.Errorf("count = %v, want one backendless series at 0", count)
+	}
+	if v, ok := age[""]; !ok || v != 0 || len(age) != 1 {
+		t.Errorf("age = %v, want one backendless series at 0", age)
+	}
+}
+
+// A store that is not on the new schema yields no series, and a failed read
+// or an unparseable timestamp fails the scrape rather than reading as 0.
+func TestIngestFailedSeriesAbsentWhenTheStoreCannotAnswer(t *testing.T) {
+	called := false
+	rm, err := collectIngest(t, func() ([]IngestFailedBackend, error) { called = true; return nil, nil }, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == MetricIngestFailed || m.Name == MetricIngestFailedOldestAge {
+				if d, ok := m.Data.(metricdata.Gauge[int64]); ok && len(d.DataPoints) != 0 {
+					t.Errorf("%s emitted %d points on an unmigrated store", m.Name, len(d.DataPoints))
+				}
+			}
+		}
+	}
+	if called {
+		t.Error("the table was read on an unmigrated store")
+	}
+	if _, err := collectIngest(t, func() ([]IngestFailedBackend, error) { return nil, errors.New("store gone") }, true); err == nil {
+		t.Error("a failing read must surface from Collect")
+	}
+	st := store.OpenNewSchemaForTest(t)
+	if err := st.RecordIngestFailure(store.IngestFailure{Instance: "jira-a", EntityID: "P-1", Seq: 1, FirstFailedAt: "not-a-time"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := collectIngest(t, IngestFailedFromStore(st, []string{"jira-a"}, time.Now), true); err == nil {
+		t.Error("an unparseable first_failed_at must fail the scrape")
+	}
+}

@@ -98,7 +98,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"WatchBackend", reflect.TypeOf(WatchBackend{}), []string{"instance", "owns_changes"}},
 		{"WatchThreadConfig", reflect.TypeOf(WatchThreadConfig{}), []string{"queries", "active_window"}},
 		{"SweepConfig", reflect.TypeOf(SweepConfig{}), []string{"max_age", "max_per_poll", "reconcile_age"}},
-		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll", "read_issue_deps"}},
+		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll", "read_issue_deps", "ingest_failed_max_age"}},
 		{"FocusConfig", reflect.TypeOf(FocusConfig{}), []string{"time_zone", "coverage_backlog_max", "pending_gate_age", "operator_identities", "priority_map", "suppressed_kind"}},
 	}
 	for _, c := range cases {
@@ -631,6 +631,9 @@ func TestChangeFlowKeys_Defaults(t *testing.T) {
 	if got := cfg.HydrationMaxPerPoll(); got != 50 {
 		t.Errorf("HydrationMaxPerPoll = %d, want 50", got)
 	}
+	if got := cfg.IngestFailedMaxAge(); got != 30*time.Minute {
+		t.Errorf("IngestFailedMaxAge = %v, want 30m", got)
+	}
 	if cfg.HydrationReadIssueDeps() {
 		t.Errorf("HydrationReadIssueDeps = true, want the false default")
 	}
@@ -659,6 +662,7 @@ sweep:
 hydration:
   max_per_poll: 9
   read_issue_deps: true
+  ingest_failed_max_age: 45m
 change_log_retention: 14d
 consumer_stale_after: 36h
 `))
@@ -691,6 +695,9 @@ consumer_stale_after: 36h
 	}
 	if !cfg.HydrationReadIssueDeps() {
 		t.Errorf("HydrationReadIssueDeps = false, want true")
+	}
+	if got := cfg.IngestFailedMaxAge(); got != 45*time.Minute {
+		t.Errorf("IngestFailedMaxAge = %v, want the configured 45m", got)
 	}
 	if got := cfg.ChangeLogRetention(); got != 14*24*time.Hour {
 		t.Errorf("ChangeLogRetention = %v", got)
@@ -739,6 +746,8 @@ func TestLoadFile_ChangeFlowInvalidValuesFail(t *testing.T) {
 		"malformed max_age":       {"sweep:\n  max_age: xyz", "sweep.max_age"},
 		"malformed reconcile_age": {"sweep:\n  reconcile_age: xyz", "sweep.reconcile_age"},
 		"zero reconcile_age":      {"sweep:\n  reconcile_age: 0s", "sweep.reconcile_age"},
+		"malformed ingest age":    {"hydration:\n  ingest_failed_max_age: soon", "hydration.ingest_failed_max_age"},
+		"zero ingest age":         {"hydration:\n  ingest_failed_max_age: 0s", "hydration.ingest_failed_max_age"},
 		"malformed retention":     {"change_log_retention: 14", "change_log_retention"},
 		"zero retention":          {"change_log_retention: 0d", "change_log_retention"},
 		"malformed stale after":   {"consumer_stale_after: forever", "consumer_stale_after"},

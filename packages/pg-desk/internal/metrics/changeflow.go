@@ -2,11 +2,15 @@ package metrics
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
 // The change-flow catalog (entity-change-flow design, observability). Label
@@ -39,7 +43,79 @@ const (
 	// violated and 0 when it holds. A tier whose poll interval is unknown has
 	// NO series (never a false violation). Labels: type, tier (local|remote).
 	MetricSweepBoundViolated = "pg_desk_sweep_bound_violated"
+	// MetricIngestFailed is the number of failed-ingest entries (change-feed
+	// rows that could not be hydrated and were recorded instead of lost), by
+	// backend instance. Derived from the ingest_failed table at scrape time.
+	MetricIngestFailed = "pg_desk_ingest_failed"
+	// MetricIngestFailedOldestAge is the age in seconds of the oldest
+	// failed-ingest entry of a backend instance, 0 when its table slice is
+	// empty (never absent for a configured owning instance, so an empty table
+	// reads as 0 and an absent series means the store could not answer).
+	MetricIngestFailedOldestAge = "pg_desk_ingest_failed_oldest_age_seconds"
 )
+
+// IngestFailedBackend is one backend instance's slice of the failed-ingest
+// table: its entry count and the age in seconds of its oldest entry (0 when
+// it has none).
+type IngestFailedBackend struct {
+	Backend          string
+	Count            int64
+	OldestAgeSeconds int64
+}
+
+// IngestFailedFunc supplies the failed-ingest observation at collect time.
+type IngestFailedFunc func() ([]IngestFailedBackend, error)
+
+// IngestFailedFromStore reads the ingest_failed table of st at every call. It
+// returns one element per owning instance (zero-filled when that instance has
+// no entry) plus one per other instance that holds entries, sorted by backend.
+// When there is no instance at all it returns a single element with an empty
+// backend and zeros, so the series exist (and read 0) on a deployment with no
+// owning backend; an absent series therefore always means the read failed.
+func IngestFailedFromStore(st *store.Store, owning []string, now func() time.Time) IngestFailedFunc {
+	return func() ([]IngestFailedBackend, error) {
+		fails, err := st.ListIngestFailures("")
+		if err != nil {
+			return nil, err
+		}
+		at := now()
+		by := map[string]*IngestFailedBackend{}
+		for _, inst := range owning {
+			by[inst] = &IngestFailedBackend{Backend: inst}
+		}
+		oldest := map[string]time.Time{}
+		for _, f := range fails {
+			b := by[f.Instance]
+			if b == nil {
+				b = &IngestFailedBackend{Backend: f.Instance}
+				by[f.Instance] = b
+			}
+			b.Count++
+			first, err := time.Parse(time.RFC3339Nano, f.FirstFailedAt)
+			if err != nil {
+				return nil, fmt.Errorf("metrics: ingest failure (%s,%s,%d): parse first_failed_at %q: %w",
+					f.Instance, f.EntityID, f.Seq, f.FirstFailedAt, err)
+			}
+			if cur, ok := oldest[f.Instance]; !ok || first.Before(cur) {
+				oldest[f.Instance] = first
+			}
+		}
+		if len(by) == 0 {
+			by[""] = &IngestFailedBackend{}
+		}
+		out := make([]IngestFailedBackend, 0, len(by))
+		for inst, b := range by {
+			if t, ok := oldest[inst]; ok {
+				if age := int64(at.Sub(t).Seconds()); age > 0 {
+					b.OldestAgeSeconds = age
+				}
+			}
+			out = append(out, *b)
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Backend < out[j].Backend })
+		return out, nil
+	}
+}
 
 // SweepBoundFunc evaluates the sizing bound for one observed type and sweep
 // tier. It MUST be the same evaluation `pg-desk doctor` uses
@@ -50,7 +126,16 @@ type SweepBoundFunc func(tf changes.TypeFlow, tier string) changes.BoundVerdict
 type ChangeFlowOption func(*changeFlowOptions)
 
 type changeFlowOptions struct {
-	sweepBound SweepBoundFunc
+	sweepBound   SweepBoundFunc
+	ingestFailed IngestFailedFunc
+}
+
+// WithIngestFailed supplies the failed-ingest observation behind
+// MetricIngestFailed and MetricIngestFailedOldestAge. Without it neither
+// metric emits a series. A read error fails the scrape, like the change-flow
+// read itself.
+func WithIngestFailed(fn IngestFailedFunc) ChangeFlowOption {
+	return func(o *changeFlowOptions) { o.ingestFailed = fn }
 }
 
 // WithSweepBound supplies the sizing-bound evaluation behind
@@ -118,6 +203,17 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 		return err
 	}
 
+	ingestFailed, err := m.Int64ObservableGauge(MetricIngestFailed,
+		metric.WithDescription("failed-ingest entries (change-feed rows that could not be hydrated), by backend instance; read from the ingest_failed table at scrape time"))
+	if err != nil {
+		return err
+	}
+	ingestOldest, err := m.Int64ObservableGauge(MetricIngestFailedOldestAge,
+		metric.WithDescription("age in seconds of the oldest failed-ingest entry of a backend instance, 0 when it has none"))
+	if err != nil {
+		return err
+	}
+
 	_, err = m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		flow, err := fn()
 		if err != nil {
@@ -151,13 +247,24 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 				o.ObserveInt64(bound, v, metric.WithAttributes(typ, attribute.String("tier", tier)))
 			}
 		}
+		if o0.ingestFailed != nil {
+			rows, err := o0.ingestFailed()
+			if err != nil {
+				return err
+			}
+			for _, r := range rows {
+				be := attribute.String("backend", r.Backend)
+				o.ObserveInt64(ingestFailed, r.Count, metric.WithAttributes(be))
+				o.ObserveInt64(ingestOldest, r.OldestAgeSeconds, metric.WithAttributes(be))
+			}
+		}
 		for _, c := range flow.Consumers {
 			o.ObserveInt64(lag, c.Lag, metric.WithAttributes(
 				attribute.String("type", c.Type), attribute.String("consumer", c.Name),
 			))
 		}
 		return nil
-	}, records, hydrations, failures, retries, due, lag, repeated, bound)
+	}, records, hydrations, failures, retries, due, lag, repeated, bound, ingestFailed, ingestOldest)
 	return err
 }
 

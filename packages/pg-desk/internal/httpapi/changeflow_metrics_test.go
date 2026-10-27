@@ -227,3 +227,45 @@ func TestMetricsSweepBoundViolatedPerTier(t *testing.T) {
 		t.Errorf("a series was emitted without a poll interval:\n%s", body)
 	}
 }
+
+// TestMetricsExposeTheFailedIngestSeriesFromTheTable pins the real scrape: the
+// failed-ingest gauges are derived from the ingest_failed table at scrape time,
+// an old-schema store has no series, and an empty table of a new-schema store
+// still reads 0 (an empty backend label, which Prometheus drops, when none is configured).
+func TestMetricsExposeTheFailedIngestSeriesFromTheTable(t *testing.T) {
+	setClock(t, time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
+	s := store.OpenNewSchemaForTest(t)
+	mustUpsertInterpretation(t, s, store.Interpretation{
+		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:59:00Z",
+	})
+	body := scrape(t, s)
+	for _, want := range []string{`pg_desk_ingest_failed{backend=""} 0`, `pg_desk_ingest_failed_oldest_age_seconds{backend=""} 0`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("an empty table: body missing %q; full body:\n%s", want, body)
+		}
+	}
+	if err := s.RecordIngestFailure(store.IngestFailure{
+		Instance: "jira-a", EntityID: "PROJ-1", Seq: 3, StoreIdentity: "s1",
+		FirstFailedAt: "2026-10-01T11:00:00Z", LastError: "boom",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body = scrape(t, s)
+	for _, want := range []string{
+		`pg_desk_ingest_failed{backend="jira-a"} 1`,
+		`pg_desk_ingest_failed_oldest_age_seconds{backend="jira-a"} 3600`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q; full body:\n%s", want, body)
+		}
+	}
+
+	old := store.OpenForTest(t)
+	mustUpsertInterpretation(t, old, store.Interpretation{
+		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
+		Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:59:00Z",
+	})
+	if body := scrape(t, old); strings.Contains(body, "pg_desk_ingest_failed") {
+		t.Errorf("an old-schema store has failed-ingest series:\n%s", body)
+	}
+}

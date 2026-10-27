@@ -40,6 +40,14 @@ report that as a notice and exit `0`; `doctor` reports it and does not gate on i
 and case-sensitive against the stored assignee trimmed of surrounding whitespace; the Jira owner
 field is not read.
 
+**The failed-ingest age bound.** `hydration.ingest_failed_max_age` (home-module option
+`hydration.ingestFailedMaxAge`, a duration string such as `30m`, default `30m`) is how old the oldest
+failed-ingest entry may be before `pg-desk doctor` gates (see [`store-schema.md`](store-schema.md), "The
+failed-ingest table"). It governs `doctor` only: the alert `pg-desk-ingest-failed-old` compares the oldest
+age with a FIXED `1800` seconds (the default of this key, see [`serve.md`](serve.md)), so a deployment that
+changes the key changes `doctor` and not the alert. A malformed or non-positive value is a load error
+naming the key.
+
 **A related key documented elsewhere.** `hydration.read_issue_deps` (home-module option
 `hydration.readIssueDeps`, boolean, default `false`) is what makes the rank's unblocks key
 computable for issues; it is specified in [`changes.md`](changes.md), "Issue-dependency

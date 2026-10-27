@@ -132,6 +132,13 @@ import (
 //     label, so each bead goes to the triager. A machine where the daemon is not deployed
 //     never holds the rules (the file's deleteRules twin is registered instead).
 //
+// pg-desk-ingest-failed-old is the pg-desk rule of packages/pg-desk/grafana/
+// alerting/alerts.yaml that fires on the oldest failed-ingest entry (a change-feed
+// row of an owning backend that could not be hydrated) waiting over 1800 seconds.
+// Registered so a firing instance reaches the escalation flow; it carries no
+// escalation label, so its bead goes to the triager. A machine where pg-desk
+// serve is not deployed never holds the rule.
+//
 // pg-router-triager-failures (pg2-u2yub) is deliberately NOT registered: the
 // probe files escalated beads/dispatches triagers, so probing triager failures
 // could feed a loop (operator decision pending).
@@ -159,6 +166,7 @@ var registeredRuleUIDs = []string{
 	"pg-conn-jira-auth-failing",
 	"pg-conn-jira-unavailable",
 	"pg-conn-jira-rate-limited",
+	"pg-desk-ingest-failed-old",
 }
 
 func defaultSnapshotPath() string {

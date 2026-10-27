@@ -436,6 +436,78 @@ groups:
                     type: gte
                     params: [1]
 
+      # Failed-ingest entry too old (INV-ICD-21, outcome alert). A change-feed
+      # row of an owning backend that pg-desk could not hydrate is RECORDED in the
+      # ingest_failed table instead of being acknowledged past silently, and the
+      # poll retries the table at every run (level-triggered, no counter). This
+      # rule fires when the OLDEST entry of a backend instance has waited over
+      # 1800 seconds (30 minutes, the documented default of
+      # hydration.ingest_failed_max_age): INGEST recovery (a row that could not
+      # be hydrated), not decider recovery. pg_desk_ingest_failed_oldest_age_seconds
+      # is derived from the table at scrape time and is 0 (never absent) for each
+      # configured owning instance with an empty table, and for a deployment
+      # with no owning instance one series without a backend, valued 0.
+      #
+      # The threshold is FIXED here at 1800 seconds: the config key
+      # hydration.ingest_failed_max_age governs `pg-desk doctor` only, so a
+      # deployment that changes the key changes doctor and not this alert.
+      #
+      # noDataState: Alerting, guarded by pg-desk liveness. The series is
+      # derived from the store at scrape time, so while pg-desk is up its
+      # ABSENCE means the store read failed or the store is not migrated, which
+      # is never "healthy": NoData therefore alerts. While pg-desk itself is
+      # down (pg_desk_liveness has no series either) the second branch of the
+      # expression answers 0, so this rule stays quiet and
+      # pg-desk-liveness-down is the alert that speaks:
+      #   max by (backend) (age)                          the series, when present
+      #   or (vector(0) and on() absent(liveness == 1))   0 when pg-desk is down
+      # Liveness up and the series absent leaves both branches empty: NoData.
+      #
+      # No SYSTEM_PAUSE guard: with an empty result NoData would alert, and a
+      # pause that outlasts the bound leaves a stuck entry stuck, which is
+      # worth hearing about. `for: 10m` rides out one slow poll; warning,
+      # because the feed is acknowledged past a row only after it is recorded,
+      # so nothing is lost while the alert is open.
+      - uid: pg-desk-ingest-failed-old
+        title: pg-desk has a failed-ingest entry older than 30 minutes
+        condition: C
+        for: 10m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-desk backend {{ $labels.backend }} has a failed-ingest entry older than 30 minutes, or cannot count its entries"
+          description: "pg_desk_ingest_failed_oldest_age_seconds has read over 1800 seconds for backend {{ $labels.backend }} for over 10 minutes (the oldest feed row pg-desk could not hydrate is still failing every retry), or the series is missing while pg-desk is up (the store cannot answer). Run `pg-desk doctor` for the entries and their last errors; pg_desk_ingest_failed counts them. The threshold is fixed at 1800 seconds; hydration.ingest_failed_max_age governs doctor only."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1800]
+
       # ---- Daily-focus alert rules (Phase 15, pg2-2j5ac.44.25) ----
       # Each rule reads a family of internal/metrics/focus.go (or the
       # change-flow families) that is computed at scrape time from the

@@ -109,6 +109,7 @@ let
   renderedHydration = lib.filterAttrs (_: v: v != null) {
     max_per_poll = cfg.hydration.maxPerPoll;
     read_issue_deps = cfg.hydration.readIssueDeps;
+    ingest_failed_max_age = cfg.hydration.ingestFailedMaxAge;
   };
 
   # Focus keys (focus.*, bead_id_pattern): each key only when set, and the
@@ -664,6 +665,17 @@ in
           (the recursive set the issue is blocked by), which the daily-focus
           rank's unblocks key reads. Costs one extra connector read per issue
           hydration. Null (and false) leave it off: pg-desk's default.
+        '';
+      };
+      ingestFailedMaxAge = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          config.yaml's hydration.ingest_failed_max_age (a duration such as
+          "30m"): how old the oldest failed-ingest entry may be before
+          `pg-desk doctor` gates. It does not move the
+          pg-desk-ingest-failed-old alert, whose threshold is fixed at 1800
+          seconds. Null uses pg-desk's default, "30m".
         '';
       };
     };

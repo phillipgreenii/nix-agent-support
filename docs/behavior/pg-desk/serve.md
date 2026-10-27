@@ -148,6 +148,38 @@ warning) fires per (type, tier) while a bound is violated. It is scoped to issue
 refactor): the PR inputs of the bound vanish with the PR sweep, so a `pr` series is not read. A cap on the sweep is allowed only while
 its bound is checked and alerting. An absent series (no verdict) is Normal, not an alert.
 
+- `pg_desk_ingest_failed{backend}` and `pg_desk_ingest_failed_oldest_age_seconds{backend}` — the
+  failed-ingest entries (change-feed rows of a backend that owns its changes that could not be
+  hydrated; see [`store-schema.md`](store-schema.md), "The failed-ingest table") and the age in seconds
+  of the oldest one, derived from the table at every scrape. `backend` is the backend instance of the
+  table's rows and of every configured owning instance: an owning instance with an empty table reads
+  `0` and `0` (never absent), so an empty table is a value and an absent series means the read failed.
+  A deployment with no owning instance and an empty table emits one series with an empty `backend`
+  (no label in Prometheus), valued `0`.
+
+The Grafana rule `pg-desk-ingest-failed-old` (`packages/pg-desk/grafana/alerting/alerts.yaml`)
+fires per `backend` while the oldest failed-ingest entry is older than `1800` seconds, held for
+`for: 10m`, severity `warning`. It reads the outcome of ingest, not that the poll ran: the poll retries the
+table at every run (level-triggered, no counter), so an entry this old is one that cannot be hydrated.
+This is INGEST recovery (a row that could not be hydrated), not decider recovery.
+
+- The threshold is FIXED in the rule at `1800` seconds, the documented default of
+  `hydration.ingest_failed_max_age`. That key governs `pg-desk doctor` only (see [`config.md`](config.md)),
+  so a deployment that changes the key changes `doctor` and not this alert.
+- The rule has `noDataState: Alerting`, guarded by pg-desk liveness: the series is derived from the
+  store at scrape time, so while `pg-desk serve` is up its absence means the store cannot answer, and an
+  alert is right. The expression `max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) or
+(vector(0) and on() absent(pg_desk_liveness == 1))` answers `0` while `pg_desk_liveness` itself has
+  no series (pg-desk down), so the rule stays quiet and `pg-desk-liveness-down` speaks alone. It never
+  fires on an empty table, which reads `0`. It carries no `SYSTEM_PAUSE` guard: an empty result would
+  alert under `noDataState: Alerting`.
+- Its uid is registered with the router probe (`registeredRuleUIDs` in `pg-router-probe`), so a
+  firing instance reaches the escalation flow. The rule is modelled in `internal/alertrules` (a model
+  test pinning the expression, the firing and clearing, and the NoData behaviour), has a promtool case
+  file (`grafana/alerting/rule-tests/pg-desk-ingest-failed-old.test.yaml`) run by
+  `grafana/check-alert-rules.sh`, and has its `noDataState` and liveness guard pinned by
+  `grafana/check-alert-structure.sh`.
+
 On a store that has not been cut over to the new schema these families MUST be absent from the
 scrape; `serve` keeps answering with the dashboard families and MUST NOT refuse or fail the scrape.
 
@@ -416,6 +448,8 @@ no-watched-PRs rule read the connector daemon's metrics and live in the connecto
 - **INV-SERVE-5.** <!-- uuid: 22ef8d46-9ab4-41fe-add0-fc0a25772a75 --> Every outcome rule of "PR lane outcome alerts" MUST read a metric a rule test can exercise, MUST NOT fire while a pg-router `SYSTEM_PAUSE` gate is active, and MUST have `noDataState: OK`. The residual rule MUST read `mode="apply"` series only, and the two stale-anchor rules MUST NOT fire while `pg_desk_pr_lane_mode` does not read `1` on `apply`.
 - **INV-SERVE-6.** <!-- uuid: 09f2a732-be1b-4cc1-aa2d-cda84cf764ba --> `pg-desk-pr-lane-hard-failure` MUST fire on any increase of `pg_desk_pr_lane_runs_total` for class `unauthenticated` or `decide_failed`, with no `for` hold, including the first event of a series that appears already above `0`.
 - **INV-SERVE-7.** <!-- uuid: 66d3ee48-e0c9-4da4-a2dc-f515dc67258a --> `pg-desk-sweep-bound-violated` and `pg-desk-watch-listing-degraded` MUST read the issue and thread series only; a `pr` series MUST NOT make either fire.
+
+- **INV-SERVE-8.** <!-- uuid: e631222d-73f7-46fb-a5ca-c4e9283812ee --> `pg_desk_ingest_failed` and `pg_desk_ingest_failed_oldest_age_seconds` MUST be derived from the failed-ingest table at every scrape, MUST be emitted with a value (`0` for an empty table) for every configured owning backend instance and every instance holding entries, and MUST have no series, never `0`, when the read fails or the store is not at schema 2. `pg-desk-ingest-failed-old` MUST fire while the oldest entry of a backend is older than `1800` seconds, MUST clear when the table empties, MUST NOT fire on an empty table, MUST have `noDataState: Alerting` guarded by `pg_desk_liveness` so that it is quiet while pg-desk is down, and its uid MUST be registered with the router probe.
 
 ## Out of scope (Phase 9, narrowed by Phase 10)
 
