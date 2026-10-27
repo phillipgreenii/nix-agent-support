@@ -334,6 +334,96 @@ func TestDockerRule_GosuNestedShC_StructuralDelegation(t *testing.T) {
 	}
 }
 
+func TestRunEntrypoint(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantValue   string
+		wantPresent bool
+	}{
+		{"absent", []string{"--rm", "img", "cmd"}, "", false},
+		{"separate", []string{"--rm", "--entrypoint", "/bin/rm", "img", "echo"}, "/bin/rm", true},
+		{"glued", []string{"--rm", "--entrypoint=/bin/rm", "img", "echo"}, "/bin/rm", true},
+		{"empty separate", []string{"--rm", "--entrypoint", "", "img", "echo"}, "", true},
+		{"empty glued", []string{"--rm", "--entrypoint=", "img", "echo"}, "", true},
+		{"last wins", []string{"--rm", "--entrypoint", "a", "--entrypoint=b", "img"}, "b", true},
+		{"after image is a CMD arg, not a flag", []string{"--rm", "img", "--entrypoint", "x"}, "", false},
+		{"value of another flag is not scanned", []string{"--rm", "-e", "--entrypoint", "img"}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotValue, gotPresent := runEntrypoint(tt.args)
+			if gotValue != tt.wantValue || gotPresent != tt.wantPresent {
+				t.Errorf("runEntrypoint(%v) = (%q, %v), want (%q, %v)", tt.args, gotValue, gotPresent, tt.wantValue, tt.wantPresent)
+			}
+		})
+	}
+}
+
+// TestDockerRule_EntrypointDelegation pins pg2-chc6m: docker runs ENTRYPOINT
+// CMD..., so the inner command the rule delegates is the entrypoint followed by
+// the CMD args, never the CMD args alone. `--entrypoint /bin/rm img echo -rf /w`
+// runs rm (GNU rm permutes options), so judging it as `echo -rf /w` approved a
+// host-directory delete.
+func TestDockerRule_EntrypointDelegation(t *testing.T) {
+	const mounts = "-v /Users/me/x:/w "
+	tests := []struct {
+		name        string
+		command     string
+		wantExec    string
+		wantArgs    []string
+		wantSource  string // "" = do not assert
+		wantRefused bool
+	}{
+		{"separate entrypoint", "docker run --rm " + mounts + "--entrypoint /bin/rm debian echo -rf /w", "/bin/rm", []string{"echo", "-rf", "/w"}, "", false},
+		{"glued entrypoint", "docker run --rm " + mounts + "--entrypoint=/bin/rm debian echo -rf /w", "/bin/rm", []string{"echo", "-rf", "/w"}, "", false},
+		{"entrypoint bash -c delegates the script", "docker run --rm --entrypoint bash img -c expr", "expr", nil, "expr", false},
+		{"no entrypoint is unchanged", "docker run --rm img echo hi", "echo", []string{"hi"}, "", false},
+		{"empty entrypoint clears it", `docker run --rm --entrypoint "" img echo hi`, "echo", []string{"hi"}, "", false},
+		{"empty glued entrypoint clears it", "docker run --rm --entrypoint= img echo hi", "echo", []string{"hi"}, "", false},
+		{"dynamic entrypoint refused", "docker run --rm --entrypoint $E img echo hi", "", nil, "", true},
+		{"dynamic glued entrypoint refused", "docker run --rm --entrypoint=$E img echo hi", "", nil, "", true},
+		{"command substitution entrypoint refused", "docker run --rm --entrypoint `x` img echo hi", "", nil, "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cap := &capturingEvaluator{result: hookio.RuleResult{Decision: hookio.Approve, Module: "mock"}}
+			r := New(cap, nil)
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: mustJSON(map[string]string{"command": tt.command}),
+				CWD:       "/tmp/project",
+			}
+			res, err := r.Evaluate(input)
+			if tt.wantRefused {
+				if !errors.Is(err, hookio.ErrRefused) {
+					t.Fatalf("err=%v res=%+v, want ErrRefused", err, res)
+				}
+				if cap.lastLeaves != nil {
+					t.Errorf("a refused dynamic entrypoint still delegated leaves %#v", cap.lastLeaves)
+				}
+				return
+			}
+			if err != nil || res.Decision != hookio.Approve {
+				t.Fatalf("res=%+v err=%v, want the delegated verdict (Approve)", res, err)
+			}
+			leaves, ok := cap.lastLeaves.([]cmdparse.ParsedCommand)
+			if !ok || len(leaves) == 0 {
+				t.Fatalf("lastLeaves = %#v, want a non-empty []cmdparse.ParsedCommand", cap.lastLeaves)
+			}
+			if leaves[0].Executable != tt.wantExec {
+				t.Errorf("leaves[0].Executable = %q, want %q (leaves %+v)", leaves[0].Executable, tt.wantExec, leaves)
+			}
+			if tt.wantArgs != nil && !reflect.DeepEqual(leaves[0].Args, tt.wantArgs) {
+				t.Errorf("leaves[0].Args = %v, want %v", leaves[0].Args, tt.wantArgs)
+			}
+			if tt.wantSource != "" && cap.lastSource != tt.wantSource {
+				t.Errorf("lastSource = %q, want %q", cap.lastSource, tt.wantSource)
+			}
+		})
+	}
+}
+
 func TestDockerRule_Name(t *testing.T) {
 	r := New(&mockEvaluator{}, nil)
 	if got := r.Name(); got != "docker" {

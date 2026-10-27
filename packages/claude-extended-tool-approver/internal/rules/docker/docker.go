@@ -182,6 +182,22 @@ func (r *Rule) evaluateRun(pc cmdparse.ParsedCommand, input *hookio.HookInput) (
 		return hookio.Refused(r.Name(), "docker: unparseable mount spec")
 	}
 
+	// --entrypoint (pg2-chc6m): docker runs ENTRYPOINT CMD..., so when the flag
+	// carries a value the program that runs is the entrypoint, with the CMD args
+	// as ITS arguments. Judging the CMD args alone would let an approved-looking
+	// command (`echo -rf /w`) stand in for an arbitrary program
+	// (`--entrypoint /bin/rm`) against the host bind mounts.
+	//   - static non-empty value: the inner command is `<entrypoint> <cmd...>`.
+	//   - dynamic value ($E, `cmd`): not judgeable, REFUSE (ADR 0044 reading: this
+	//     rule examined the leaf and could not read it).
+	//   - empty value: clears the image's entrypoint, so the CMD runs as written.
+	if ep, present := runEntrypoint(runArgs); present && ep != "" {
+		if strings.ContainsAny(ep, "$`") {
+			return hookio.Refused(r.Name(), "docker: dynamic --entrypoint is not auto-approved")
+		}
+		cmdArgs = append([]string{ep}, cmdArgs...)
+	}
+
 	// Resolve the inner command STRUCTURALLY (I13, pg2-lwwwk): bash/sh -c and
 	// the docker-context-safe passthrough wrappers (gosu, su ... -c,
 	// init-firewall.sh) are all resolved on already-tokenized args/leaves,
@@ -437,6 +453,41 @@ func parseRunArgs(args []string) (string, []string) {
 		return a, nil
 	}
 	return "", nil
+}
+
+// runEntrypoint scans docker run's flags (the same walk parseRunArgs does, so
+// both agree on where the image is) and returns the value of the LAST
+// --entrypoint flag before the image, in either the separate or the glued
+// (--entrypoint=X) spelling. present is false when the flag does not appear.
+func runEntrypoint(args []string) (value string, present bool) {
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		if a == "--rm" || a == "--detach" || a == "--privileged" || a == "--interactive" || a == "--tty" || isBooleanFlagCluster(a) {
+			i++
+			continue
+		}
+		if a == "--entrypoint" {
+			if i+1 < len(args) {
+				value, present = args[i+1], true
+			}
+			i += 2
+			continue
+		}
+		if flagsWithValues[a] {
+			i += 2
+			continue
+		}
+		if strings.HasPrefix(a, "-") {
+			if v, ok := strings.CutPrefix(a, "--entrypoint="); ok {
+				value, present = v, true
+			}
+			i++
+			continue
+		}
+		break
+	}
+	return value, present
 }
 
 // knownSafeDockerScripts lists script basenames that are always safe inside a

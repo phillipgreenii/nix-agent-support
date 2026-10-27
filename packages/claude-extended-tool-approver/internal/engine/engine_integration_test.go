@@ -140,6 +140,11 @@ func TestIntegration_HookBypassRegression(t *testing.T) {
 		{"xargs -I{} sh -c splices item", "ls | xargs -I{} sh -c 'wc -l {}'"},
 		{"xargs -I % sh -c splices item", "ls | xargs -I % sh -c 'wc -l %'"},
 		{"xargs -i sh -c splices item", "ls | xargs -i sh -c 'wc -l {}'"},
+		// pg2-chc6m: docker runs ENTRYPOINT CMD..., so --entrypoint /bin/rm makes
+		// `echo -rf /w` the ARGUMENTS of rm against the host bind mount, not an echo.
+		{"docker entrypoint rm over bind mount", "docker run --rm -v /Users/testuser/x:/w --entrypoint /bin/rm debian echo -rf /w"},
+		{"docker glued entrypoint rm over bind mount", "docker run --rm -v /Users/testuser/x:/w --entrypoint=/bin/rm debian echo -rf /w"},
+		{"docker dynamic entrypoint", "docker run --rm --entrypoint $E img echo hi"},
 	}
 	for _, tt := range bypasses {
 		t.Run("bypass/"+tt.name, func(t *testing.T) {
@@ -187,6 +192,11 @@ func TestIntegration_HookBypassRegression(t *testing.T) {
 		// the script text, keeps its Approve; so does a plain value flag.
 		{"xargs -I{} sh -c positional form", `ls | xargs -I{} sh -c 'echo "$1"' _ {}`},
 		{"xargs -n1 echo", "ls | xargs -n1 echo"},
+		// pg2-chc6m NON-REGRESSION: with no entrypoint, or an EMPTY one (which clears
+		// the image's entrypoint so the CMD runs as written), the verdict is the plain
+		// CMD's.
+		{"docker run plain cmd", "docker run --rm img echo hi"},
+		{"docker run empty entrypoint", `docker run --rm --entrypoint "" img echo hi`},
 	}
 	for _, tt := range controls {
 		t.Run("control/"+tt.name, func(t *testing.T) {
