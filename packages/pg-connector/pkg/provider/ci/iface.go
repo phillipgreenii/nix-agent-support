@@ -7,7 +7,7 @@
 // named ci.Provider — for the CI CAPABILITY itself — rather than reusing
 // the retired PR tool's pkg/provider/cicd's old system-shaped "cicd" package name,
 // correcting that under INV-CAP-1's "scoped by capability, never by
-// system" rule (naming_convention_test.go).
+// system" rule.
 //
 // This package sits alongside pkg/schema and pkg/scriptout as part of the
 // module's shared surface importable across backend boundaries — see

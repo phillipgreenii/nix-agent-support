@@ -37,14 +37,10 @@
 //   - store carries the ladder of seven rungs, the one place the shared schema
 //     grows; the wire types of the answers live in pkg/schema.
 //
-// The genericity guard keeps the library generic mechanically:
-// genericity_guard_test.go in this package scans every Go file under
-// pkg/connectord for the known words of one upstream, for string-literal
-// comparisons in the generic packages and for imports of a cmd or internal
-// tree, against the committed baseline testdata/genericity_allowlist.json. The
-// guard's header comment says how to regenerate the baseline counts. Its third
-// rule is the import boundary: no file under this tree imports a path containing
-// /cmd/ or /internal/, and none declares package main.
+// The import-boundary guard keeps the library independent of any command
+// mechanically: genericity_guard_test.go in this package scans every Go file
+// under pkg/connectord, and no file under this tree may import a path
+// containing /cmd/ or /internal/ or declare package main.
 //
 // This package and its subpackages are part of the module's shared-surface
 // allowlist (cmd/pg-connector/layout_convention_test.go): any binary may

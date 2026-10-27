@@ -12,9 +12,8 @@
 // named after the capability (pr.Provider, ci.Provider, issue.Provider,
 // scm.Provider, attention.Provider — never e.g. pr.Source). This package
 // resolves that in favor of the repo's own established convention:
-// package search, interface Provider — matching every sibling capability
-// and what naming_convention_test.go's own capabilityPackages list already
-// anticipates. "search.Source" remains an informal way to refer to this
+// package search, interface Provider — matching every sibling capability.
+// "search.Source" remains an informal way to refer to this
 // capability in prose/comments where useful, but the exported Go symbol is
 // Provider. (The attention sibling capability independently reaches the
 // identical resolution for attention.Provider, for the same reason — this

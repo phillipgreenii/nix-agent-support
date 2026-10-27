@@ -18,8 +18,8 @@ import (
 )
 
 // Provider is the pr capability's provider interface: a Show-style read
-// plus the list/files/commits ops this docket names (naming_convention_test.go;
-// interfaces.md's pr op catalog). The categorize/feedback_set write ops
+// plus the list/files/commits ops this docket names (interfaces.md's pr op
+// catalog). The categorize/feedback_set write ops
 // this interface used to also carry were retired by bead pg2-2j5ac.28.7:
 // category/disposition are re-derived by pg-desk's interpreter rather than
 // persisted by any backend (statelessness, D3). A concrete backend MAY

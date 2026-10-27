@@ -13,14 +13,12 @@
 // issue.Provider, scm.Provider — never e.g. pr.Source). This package
 // resolves that in favor of the repo's own established convention:
 // package attention, interface Provider — matching every sibling
-// capability and what naming_convention_test.go's own capabilityPackages
-// list already anticipates. "attention.Source" remains an informal way to
+// capability. "attention.Source" remains an informal way to
 // refer to this capability in prose/comments where useful, but the
 // exported Go symbol is Provider.
 //
 // This package must never import a future daily-focus/df-survey package
-// or type — enforced by cmd/pg-connector's own dependency-direction check
-// (evaluateAttentionZeroImport in dependency_direction_test.go).
+// or type.
 //
 // This package sits alongside pkg/schema and pkg/scriptout as part of the
 // module's shared surface importable across backend boundaries — see

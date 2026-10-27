@@ -18,8 +18,8 @@ import (
 // would have silently dropped the module's only cross-backend `gh`
 // choke-point and stack-mutation guards. This umbrella package
 // (cmd/pg-connector) already hosts every other module-wide mechanical/
-// convention check (naming_convention_test.go, layout_convention_test.go,
-// dependency_direction_test.go, backend_internal_sync_test.go) — none of
+// convention check (layout_convention_test.go, dependency_direction_test.go,
+// backend_internal_sync_test.go) — none of
 // them tied to any single backend's own lifecycle — so it is this guard's
 // new home too. moduleRoot(t) is unchanged from the original: it walks up
 // from the test's own working directory to the nearest go.mod, so it needs

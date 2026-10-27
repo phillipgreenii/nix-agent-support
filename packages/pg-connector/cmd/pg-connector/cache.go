@@ -97,10 +97,9 @@ func (e CacheEntry) level() CacheLevel {
 }
 
 // Cache is the full persisted state for one (type, backend). Entries is a
-// single, entity-kind-agnostic field — exactly like Ledger.Entries, which
-// already exists and already passes entity_store_test.go's
-// TestNoCrossConnectorEntityStore — never split into a per-entity-kind map
-// field (no PRs/Issues/etc. map fields here).
+// single, entity-kind-agnostic field — exactly like Ledger.Entries — never
+// split into a per-entity-kind map field (no PRs/Issues/etc. map fields
+// here).
 type Cache struct {
 	Entries map[string]CacheEntry `json:"entries"`
 }
