@@ -45,6 +45,10 @@ const (
 	KindAssigneeChanged Kind = "assignee_changed"
 	KindCommentsChanged Kind = "comments_changed"
 	KindDepsChanged     Kind = "deps_changed"
+	// KindFieldsChanged is the residual kind: the normalised payloads differ
+	// in top-level fields no emitted specific kind covers (INV-ICD-5). The
+	// Record names the fields.
+	KindFieldsChanged Kind = "fields_changed"
 )
 
 // Kinds for the thread type.

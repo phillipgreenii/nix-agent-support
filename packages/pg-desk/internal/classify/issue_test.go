@@ -50,7 +50,7 @@ func TestIssueClassifyKinds(t *testing.T) {
 		{"comments_changed", "open", "touched", []Kind{KindCommentsChanged}},
 		{"deps_changed", "open", "dep_added", []Kind{KindDepsChanged}},
 		{"deps_changed via issue_deps", "with_deps", "with_more_deps", []Kind{KindDepsChanged}},
-		{"labels and priority only", "open", "relabeled", nil},
+		{"labels and priority only", "open", "relabeled", []Kind{KindFieldsChanged}},
 		{"no change", "open", "open", nil},
 	}
 	for _, tc := range cases {

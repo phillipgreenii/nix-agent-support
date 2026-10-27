@@ -196,10 +196,11 @@ func TestKindCatalogueValues(t *testing.T) {
 		KindReviewChanged: "review_changed", KindFeedbackChanged: "feedback_changed",
 		KindWorkChanged: "work_changed", KindStatusChanged: "status_changed",
 		KindAssigneeChanged: "assignee_changed", KindCommentsChanged: "comments_changed",
-		KindDepsChanged: "deps_changed", KindMessageAdded: "message_added", KindResolved: "resolved",
+		KindDepsChanged: "deps_changed", KindFieldsChanged: "fields_changed",
+		KindMessageAdded: "message_added", KindResolved: "resolved",
 	}
-	if len(want) != 23 {
-		t.Fatalf("catalogue has %d entries, want 23", len(want))
+	if len(want) != 24 {
+		t.Fatalf("catalogue has %d entries, want 24", len(want))
 	}
 	for k, s := range want {
 		if string(k) != s {

@@ -54,8 +54,13 @@ func init() { Register("issue", issueClassifier{}) }
 //     as every dependency having been removed.
 //   - comments_changed: schema.Issue carries NO comment list or count, so the
 //     proxy is updated_at advancing while every other issue_show field
-//     (except the read-time as_of and stale) is unchanged. A labels-only or
-//     priority-only edit therefore emits nothing.
+//     (except the volatile ones) is unchanged. The proxy is KEPT for beads and
+//     RETIRED for an owning backend (Snapshot.OwningBackend), which supplies a
+//     real comment summary (INV-ICD-6).
+//   - fields_changed:   the residual (INV-ICD-5): when the issue_show payloads
+//     differ in top-level fields that no emitted specific kind covers
+//     (issueKindFields), ONE record names those fields, so a labels-only or
+//     priority-only edit is never lost.
 //
 // A missing, empty or undecodable issue_show on either side contributes no
 // show-derived kind: it is never read as a state transition. A degraded new
@@ -125,6 +130,28 @@ type issueView struct {
 	hasDeps     bool     // issue_deps present and decodable
 }
 
+// issueKindFields is the residual table: the top-level issue_show keys each
+// specific kind covers. A key that differs between two snapshots and is covered
+// by no EMITTED kind is named by fields_changed.
+var issueKindFields = map[Kind][]string{
+	KindStatusChanged:   {"state", "status_category"},
+	KindClosed:          {"state", "status_category"},
+	KindReopened:        {"state", "status_category"},
+	KindOpened:          {"state", "status_category"},
+	KindAssigneeChanged: {"assignee"},
+	KindDepsChanged:     {"deps"},
+	KindCommentsChanged: {"comments", "comment_count"},
+}
+
+// issueVolatileFields are the top-level issue_show keys that move without the
+// issue changing. They mirror the keys pipeline.NormalizeIssuePayload drops
+// (which classify cannot import): the residual never names them, and the
+// comments proxy ignores them.
+var issueVolatileFields = map[string]struct{}{
+	"updated_at": {}, "updated": {}, "as_of": {}, "stale": {},
+	"served_from": {}, "age_seconds": {}, "entity_meta": {},
+}
+
 func (issueClassifier) Classify(old, new Snapshot) []Record {
 	if new.Degraded {
 		return nil
@@ -140,7 +167,7 @@ func (issueClassifier) Classify(old, new Snapshot) []Record {
 		if !reflect.DeepEqual(o.deps, n.deps) {
 			kinds = append(kinds, KindDepsChanged)
 		}
-		if issueCommentsProxy(o.show, n.show, old.Updated, new.Updated) {
+		if !new.OwningBackend && issueCommentsProxy(o.show, n.show, old.Updated, new.Updated) {
 			kinds = append(kinds, KindCommentsChanged)
 		}
 	}
@@ -148,10 +175,51 @@ func (issueClassifier) Classify(old, new Snapshot) []Record {
 		kinds = append(kinds, KindDepsChanged)
 	}
 
-	out := make([]Record, 0, len(kinds))
+	out := make([]Record, 0, len(kinds)+1)
 	for _, k := range kinds {
 		out = append(out, Record{Kind: k})
 	}
+	if o.show != nil && n.show != nil {
+		if fields := issueResidualFields(o.show, n.show, kinds); len(fields) > 0 {
+			out = append(out, Record{Kind: KindFieldsChanged, Fields: fields})
+		}
+	}
+	return out
+}
+
+// issueResidualFields returns the sorted top-level issue_show keys that differ
+// between the two shows, are not volatile and are covered by none of the
+// emitted kinds.
+func issueResidualFields(oldShow, newShow map[string]any, emitted []Kind) []string {
+	covered := map[string]struct{}{}
+	for _, k := range emitted {
+		for _, f := range issueKindFields[k] {
+			covered[f] = struct{}{}
+		}
+	}
+	keys := map[string]struct{}{}
+	for k := range oldShow {
+		keys[k] = struct{}{}
+	}
+	for k := range newShow {
+		keys[k] = struct{}{}
+	}
+	var out []string
+	for k := range keys {
+		if _, v := issueVolatileFields[k]; v {
+			continue
+		}
+		if _, c := covered[k]; c {
+			continue
+		}
+		ov, oOK := oldShow[k]
+		nv, nOK := newShow[k]
+		if oOK == nOK && reflect.DeepEqual(ov, nv) {
+			continue
+		}
+		out = append(out, k)
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -239,7 +307,7 @@ func decodeIssueFacts(payload json.RawMessage) issueView {
 }
 
 // issueCommentsProxy reports whether updated_at advanced while every other
-// field, ignoring the read-time as_of and stale, is unchanged. The timestamps
+// field, ignoring the volatile ones, is unchanged. The timestamps
 // come from the snapshots' Updated (the pipeline hands over a normalised
 // payload without updated_at); a payload-embedded updated_at is the fallback
 // for a snapshot built without Updated.
@@ -261,8 +329,7 @@ func issueCommentsProxy(oldShow, newShow map[string]any, oldUpdated, newUpdated 
 func issueStable(show map[string]any) map[string]any {
 	out := make(map[string]any, len(show))
 	for k, v := range show {
-		switch k {
-		case "updated_at", "as_of", "stale":
+		if _, volatile := issueVolatileFields[k]; volatile {
 			continue
 		}
 		out[k] = v

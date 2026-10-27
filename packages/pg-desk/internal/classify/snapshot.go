@@ -2,9 +2,13 @@ package classify
 
 import "encoding/json"
 
-// Record is one classified change. Siblings read only Kind.
+// Record is one classified change. Siblings read only Kind (and Fields for fields_changed).
 type Record struct {
 	Kind Kind
+	// Fields names the top-level payload fields behind a fields_changed
+	// record (sorted); nil for every other kind. It lives on the in-memory
+	// record only: the change log stores kinds.
+	Fields []string `json:"fields,omitempty"`
 }
 
 // Snapshot is one observation of an entity, the classifier's input. The write
@@ -33,6 +37,10 @@ type Snapshot struct {
 	// absent or for any other type). The payload handed to the classifier is
 	// normalised (updated_at dropped), so the timestamp travels here.
 	Updated string
+	// OwningBackend is set for an issue whose backend owns its changes (it
+	// supplies a real comment summary): the updated_at comments proxy never
+	// fires for it (INV-ICD-6). False for beads and for every other type.
+	OwningBackend bool
 	// Decorations is the entity's serialized interpretation row; may be empty.
 	Decorations json.RawMessage
 }

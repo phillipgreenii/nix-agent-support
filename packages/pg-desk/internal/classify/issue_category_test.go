@@ -56,18 +56,22 @@ func TestCategoryRolloutEmitsClosedForAlreadyStoredDoneIssue(t *testing.T) {
 	if want := []Kind{KindClosed}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("kinds = %v, want %v", got, want)
 	}
-	// A non-done category arriving on an unchanged state emits nothing.
-	if got := issueKinds(catSnap("In Progress", ""), catSnap("In Progress", "indeterminate")); got != nil {
-		t.Fatalf("category arriving on a non-done issue: kinds = %v, want none", got)
+	// A non-done category arriving on an unchanged state is no state movement,
+	// but it is a real content difference: no specific kind covers it, so the
+	// residual rule names it (INV-ICD-5).
+	if got, want := issueKinds(catSnap("In Progress", ""), catSnap("In Progress", "indeterminate")), []Kind{KindFieldsChanged}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("category arriving on a non-done issue: kinds = %v, want %v", got, want)
 	}
 }
 
 // TestCategoryDisappearingEmitsNothing: the old view had a category and the new
 // one does not (older pjira, degraded decode): the name fallback must not
-// be read as a state movement.
+// be read as a state movement (only the residual fields_changed may appear).
 func TestCategoryDisappearingEmitsNothing(t *testing.T) {
-	if got := issueKinds(catSnap("Complete", "done"), catSnap("Complete", "")); got != nil {
-		t.Fatalf("same state, category vanished: kinds = %v, want none", got)
+	// The vanished category is no closed/reopened/opened; the bare difference
+	// is the residual fields_changed naming status_category (INV-ICD-5).
+	if got, want := issueKinds(catSnap("Complete", "done"), catSnap("Complete", "")), []Kind{KindFieldsChanged}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("same state, category vanished: kinds = %v, want %v", got, want)
 	}
 	// Different state strings: only status_changed, never closed/reopened/opened.
 	if got, want := issueKinds(catSnap("Complete", "done"), catSnap("Released", "")), []Kind{KindStatusChanged}; !reflect.DeepEqual(got, want) {

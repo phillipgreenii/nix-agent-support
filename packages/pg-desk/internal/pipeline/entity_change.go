@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -199,6 +200,13 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 	}
 	own := classify.NewStoreWorkLookup(p.store, repo)
 
+	// An issue whose backend column names an owning instance has the comments
+	// proxy retired (Snapshot.OwningBackend, INV-ICD-6).
+	var owningInstances []string
+	if entityType == issueEntityType {
+		owningInstances = p.cfg.OwningInstances(issueEntityType)
+	}
+
 	// (3) the compare-and-set loop.
 	var (
 		res        EntityChangeResult
@@ -230,6 +238,8 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 			}
 		}
 		observed = old.Exists && old.Active
+		newSnap.OwningBackend = found && row.Backend != "" && slices.Contains(owningInstances, row.Backend)
+		old.OwningBackend = newSnap.OwningBackend
 
 		kindSet := map[string]bool{}
 		propagate = false

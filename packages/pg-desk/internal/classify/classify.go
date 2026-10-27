@@ -38,7 +38,8 @@ func Lookup(entityType string) (Classifier, bool) {
 //  1. no previous snapshot, or a previous snapshot of an inactive entity:
 //     exactly [reconcile] (before the identical rule, so --reset, a new
 //     watched query and the cutover wave are never swallowed);
-//  2. identical snapshots (byte-equal Payload and Decorations): nothing;
+//  2. identical snapshots (byte-equal Payload and Decorations, and equal
+//     Updated unless new.OwningBackend): nothing;
 //  3. dispatch on new.Type (an unregistered type yields nothing). new.Exists
 //     and new.Active are ignored: the caller builds new as an observed,
 //     active snapshot.
@@ -62,11 +63,13 @@ func Classify(old, new Snapshot) []Record {
 // identical compares the payloads, the decorations and Updated. Updated is
 // the raw issue_show.updated_at, which the normalised issue payload no longer
 // carries: it is compared so the beads comments proxy (updated_at advancing
-// alone) still reaches the issue classifier. It is "" on both sides for every
+// alone) still reaches the issue classifier. For an owning backend
+// (new.OwningBackend) the proxy is retired, so Updated is not compared and an
+// updated_at-only advance is identical. It is "" on both sides for every
 // other type.
 func identical(old, new Snapshot) bool {
 	return bytes.Equal(old.Payload, new.Payload) && bytes.Equal(old.Decorations, new.Decorations) &&
-		old.Updated == new.Updated
+		(new.OwningBackend || old.Updated == new.Updated)
 }
 
 // normalize drops removed/closed when degraded, de-duplicates by kind and

@@ -346,7 +346,9 @@ func TestRunEntityChange_LinkChangeAppendsToOtherEntityAndSkipsMissing(t *testin
 
 	res = ecIssue(t, "open", "me", "2026-09-16T01:00:00Z", workMeta("8"))
 	r := mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{})
-	if !reflect.DeepEqual(r.Kinds, []string{"link_changed"}) {
+	// The metadata edit that moves the link is itself a content difference no
+	// specific kind covers, so the residual fields_changed accompanies it.
+	if !reflect.DeepEqual(r.Kinds, []string{"fields_changed", "link_changed"}) {
 		t.Fatalf("own kinds = %v", r.Kinds)
 	}
 	rows := p.changeRows(t, "pr", ecRepo+"#7")
