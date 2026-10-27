@@ -78,6 +78,28 @@ update the canonical doc, not this skill's body.
    it needs. Don't skip this by assuming the liveness check is enough — it only proves the process
    is running, not that it's doing its job correctly.
 
+   **Grafana's 40-character UID limit.** Every alert-rule `uid`, and every contact-point receiver
+   `uid`, MUST be at most 40 characters (counted in bytes). Grafana rejects a longer one and then
+   refuses to start at all (2026-10-13: a 42-character rule UID crash-looped Grafana and aborted the
+   apply). A rule `uid` MUST also be unique across every file registered in
+   `phillipgreenii.observability.alertRuleFiles`. Write the UID to fit: a short descriptive slug, or
+   a hashed UID when it is built from variable parts. Two guards catch a violation, and neither
+   replaces counting the characters when you write the UID:
+   - **Commit time:** the shared `check-grafana-alert-uids` pre-commit hook (nix-repo-base, bead
+     `pg2-hlxmkk`) runs over `grafana/alerting/**/*.{yaml,yml}` (promtool `rule-tests*/` fixtures and
+     `*.test.yaml` files are skipped). It rejects a rule UID over 40 characters, a rule UID repeated
+     within one file, a receiver UID over 40 characters, and a file that does not parse. It does NOT
+     check duplicates across files, and it does not see an alert file kept outside a
+     `grafana/alerting/` directory, so put a package's alert YAML under `grafana/alerting/`. A clone
+     picks the hook up only after its hook bundle is rebuilt: `pg-hooks status --porcelain` reports
+     `state=stale` until then.
+   - **System build:** the observability funnel validator `validate-grafana-alerting-uids`
+     (nix-support-apps `darwin/modules/observability/alerting-validate.nix`, run from
+     `alerting.nix`) fails the build, naming the file and UID, for a rule UID over 40 characters or
+     repeated across any `alertRuleFiles` entries, and for a receiver UID over 40 characters in
+     `notificationFiles`. It is the backstop for every producer in every repo, but it fires only
+     when the whole system is built.
+
 5. **Does it alert when it isn't running?** For anything registered via `launchdServices`, the
    watch-list is automatic — `phillipgreenii.observability.launchdHealthCheck`
    (the observability flake's `darwin/modules/observability/launchd-health.nix`) derives

@@ -410,6 +410,12 @@ running.
   the server, or that database, down; and the `beads-claims-no-live-owner` rule, which fires after
   `beads_stranded_claims` has been above zero for 30 minutes (so about 30 minutes after the first
   pass that sees the claim).
+- Alert-rule `uid` limit: Grafana rejects a rule or contact-point receiver `uid` longer than 40
+  characters and then refuses to start, so a `uid` in this file MUST stay at most 40 characters and
+  unique. The shared `check-grafana-alert-uids` pre-commit hook rejects a violation at commit time
+  (once the clone's hook bundle has been rebuilt), and the nix-support-apps funnel validator
+  (`darwin/modules/observability/alerting-validate.nix`) fails the system build for the same cases;
+  see the `service-daemon-checklist` skill, item 4.
 - Checks: `test-beads-exporter-dashboard` (a `jq` lint against `metrics.txt` plus mutant
   self-tests, `check-dashboard.sh`), `test-beads-exporter-alert-rules` (Grafana-only fields plus
   `promtool test rules`, cases in `grafana/alerting/rule-tests/`, `check-alert-rules.sh`) and
