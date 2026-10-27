@@ -469,8 +469,7 @@ required".
    bd update <id> --defer +7d --remove-label human --status open --assignee "" --actor "ID"
    ```
 
-   `+7d` matches the re-check window used elsewhere in this family (`/unblock-human-beads`'
-   own `planning-session-required` defer); shorten it if the event is expected sooner. `--defer`
+   `+7d` is the default window; shorten it if the event is expected sooner. `--defer`
    is what keeps this out of `bd ready`, not a label — it clears itself on the date with no one
    having to remember to remove anything, and it never reaches `/unblock-human-beads`'
    `--label human` queue at all.
