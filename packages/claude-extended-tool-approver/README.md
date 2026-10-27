@@ -409,7 +409,9 @@ Because no default check or commit-time hook runs the tagged suite, the
 runs just `TestAgreement` (`go test -tags integration -run '^TestAgreement$'
 ./internal/effectpolicy/`) whenever a diff touches `internal/effectpolicy/` or
 `internal/cmddesc/` (including `testdata/agreement.txt`), so those changes cannot land
-with the agreement harness red (pg2-u57g1).
+with the agreement harness red (pg2-u57g1). The `ceta-depguard` pre-commit hook (also run
+by `pg-hooks run pre-land`) runs golangci-lint with only the depguard import-boundary rules
+of the root `.golangci.yml` whenever a diff touches the spike packages or `internal/hooktypes/`.
 
 ### Why it is I/O-bound
 

@@ -10,8 +10,8 @@
 // convention (README.md's "Two test suites") — because it is the one place
 // in the effectpolicy package that must reach internal/hookio, internal/
 // setup and internal/engine to drive the live decision path.
-// TestNoDirectHookioImport (imports_guard_test.go) explicitly excludes any
-// "*_integration_test.go" file from its scan for exactly this reason.
+// The `spike-no-hookio` depguard rule (root .golangci.yml) explicitly excludes
+// any "*_integration_test.go" file for exactly this reason.
 package effectpolicy
 
 import (

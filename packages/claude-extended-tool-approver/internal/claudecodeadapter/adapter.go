@@ -26,7 +26,7 @@
 //
 // Import-cycle note: internal/effectpolicy, internal/effectgraph,
 // internal/evalcontract and internal/cmddesc all guard against importing
-// internal/hookio directly (effectpolicy's imports_guard_test.go) — the
+// internal/hookio directly (the `spike-no-hookio` depguard rule in the root .golangci.yml) — the
 // effect-graph spike is deliberately hook-independent. This package is the
 // one place in the tree that is EXPECTED to import both: it is the seam
 // between the hook boundary and the spike, not a spike-internal package

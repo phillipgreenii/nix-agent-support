@@ -68,7 +68,7 @@ writing) takes a structurally different approach on **both** axes:
 PolicyContext) (Finding, bool)` result into per-node marks, then marks into one `Decision`
   (`internal/effectpolicy/policy.go:1-20`, `evaluate.go`). This is not a first-match-wins list
   over raw tool input — it is a full-graph fold over structured effects. `internal/effectpolicy`'s
-  own `imports_guard_test.go` deliberately forbids it from importing `internal/hookio` at all: the
+  own `spike-no-hookio` depguard rule (in the root `.golangci.yml`) deliberately forbids it from importing `internal/hookio` at all: the
   spike is designed to be **hook-independent**, with `internal/claudecodeadapter` as the one
   purpose-built seam that would translate a real `hookio.HookInput` into the spike's
   `evalcontract.Request` shape. That seam exists in the spike today but **main.go's hook-mode entry

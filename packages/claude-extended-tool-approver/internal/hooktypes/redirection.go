@@ -9,8 +9,8 @@
 // out. Before this package existed, Redirection lived in internal/hookio, so
 // cmdparse importing it for the type pulled hookio in transitively, and in turn
 // so did every spike package that imports cmdparse for ParsedCommand — even
-// though the spike's own import guard (internal/effectpolicy's
-// TestNoDirectHookioImport) forbids importing hookio directly. Moving the value
+// though the spike's own import guard (the `spike-no-hookio`
+// depguard rule in the root .golangci.yml) forbids importing hookio directly. Moving the value
 // type here (slice 3r of the effect-graph spike, tc-lc8f) breaks that chain:
 // hooktypes imports nothing internal, so any package may depend on it without
 // reaching hookio at all.

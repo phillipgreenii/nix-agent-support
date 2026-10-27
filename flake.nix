@@ -1037,6 +1037,75 @@
           require_serial = true;
         };
 
+        # pg2-g5hvao: the claude-extended-tool-approver import-boundary guards
+        # (the effect-graph spike packages MUST NOT import internal/hookio;
+        # internal/hooktypes MUST stay a zero-internal-import leaf) are depguard
+        # rules in the root .golangci.yml. They used to be a Go test
+        # (internal/effectpolicy/imports_guard_test.go) that `run-unit-tests`
+        # ran at commit and at `pg-hooks run pre-land`; deleting that test would
+        # have left NO commit-time or pre-land check of the rule, because
+        # golangci-lint is deliberately not a generic pre-commit hook (it
+        # cannot load the package graph in the no-network `checks.pre-commit`
+        # sandbox) and the `<module>-golangci` nix checks are not a land-time
+        # gate (operator ruling 2026-10-01, pg2-pla9d.1). This path-scoped hook
+        # keeps the rule enforced: it runs golangci-lint, with the repo config,
+        # over exactly the five packages the rules cover, and only when one of
+        # their Go files, the module's go.mod/go.sum or .golangci.yml is part of
+        # the diff. It runs ONLY depguard (`--enable-only depguard`, still with
+        # the repo config's rule settings), so an unrelated lint finding cannot
+        # block an unrelated commit; the full standard linter set stays in
+        # `checks.<system>.claude-extended-tool-approver-golangci` (and
+        # `-golangci-tagged`, which adds the registered non-unit build tags).
+        # `--allow-serial-runners` makes concurrent golangci-lint runs (other
+        # worktrees, agents) queue on its lock instead of failing the commit.
+        # The hook only runs after the shared hook bundle is rebuilt in the
+        # canonical clone (`nix run .#install-pre-commit-hooks`); the bundle
+        # state is `stale` until then.
+        # Like `ceta-agreement-test` it skips inside the nix sandbox (those
+        # hermetic checks cover it there), needs `go` on PATH (golangci-lint
+        # shells out to it to load packages) and fails LOUDLY, never skips,
+        # when `go` is missing. It never invokes nix (HK-2): golangci-lint is a
+        # store path from runtimeInputs.
+        ceta-depguard = {
+          enable = true;
+          name = "ceta-depguard";
+          description = "claude-extended-tool-approver import-boundary guards: golangci-lint (depguard rules in .golangci.yml) over the effect-graph spike packages and internal/hooktypes (pg2-g5hvao)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "ceta-depguard-hook";
+              runtimeInputs = [
+                pkgs.git
+                pkgs.golangci-lint
+              ];
+              text = ''
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "ceta-depguard: inside the nix build sandbox; skipping (checks.*-golangci covers this)" >&2
+                  exit 0
+                fi
+
+                if ! command -v go >/dev/null 2>&1; then
+                  echo "ceta-depguard: go not found on PATH -- enter the devShell or install go before committing. Do NOT bypass with --no-verify." >&2
+                  exit 1
+                fi
+
+                top="$(git rev-parse --show-toplevel)"
+                cd "$top/packages/claude-extended-tool-approver"
+                exec nice -n 10 golangci-lint run --config "$top/.golangci.yml" \
+                  --enable-only depguard --allow-serial-runners --concurrency 2 \
+                  ./internal/cmddesc/... \
+                  ./internal/effectgraph/... \
+                  ./internal/effectpolicy/... \
+                  ./internal/evalcontract/... \
+                  ./internal/hooktypes/...
+              '';
+            }
+          }/bin/ceta-depguard-hook";
+          language = "system";
+          files = "^(\\.golangci\\.yml|packages/claude-extended-tool-approver/(go\\.(mod|sum)|internal/(cmddesc|effectgraph|effectpolicy|evalcontract|hooktypes)/.*\\.go))$";
+          pass_filenames = false;
+          require_serial = true;
+        };
+
         # pg2-o0z8u: pg-desk's depth-first closure (pg2-seeo8, pg2-ubvmh) is
         # deterministic code whose correctness hinges on a real tool's
         # semantics (bd >= 1.3.1 refuses to close a parent with an open

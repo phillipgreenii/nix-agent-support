@@ -7,6 +7,10 @@ version: "2"
 # default, so pa-monitor's *.pb.go are not flagged.
 linters:
   default: standard
+  enable:
+    # depguard: import-boundary rules (see settings.depguard below). It is not
+    # in "standard", so it must be enabled explicitly.
+    - depguard
   settings:
     errcheck:
       # Writes to stdout/stderr via fmt.Fprint* essentially never fail in a CLI,
@@ -18,3 +22,65 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+    depguard:
+      # Import-boundary guards for packages/claude-extended-tool-approver,
+      # moved here from the Go test internal/effectpolicy/imports_guard_test.go
+      # (bead pg2-g5hvao). They are enforced at commit and at pre-land by the
+      # `ceta-depguard` hook (flake.nix) and in the nix sandbox by the module's
+      # `<module>-golangci` and `<module>-golangci-tagged` checks.
+      #
+      # The `files:` globs start with `**/internal/` (not a module-name prefix)
+      # because the nix sandbox builds from a differently named source path; the
+      # denied `pkg:` is this module's full import path, so a same-named
+      # internal/ directory in another module is never affected.
+      #
+      # LIMITS: depguard `pkg:` matching is prefix-only (a deny entry also bans
+      # every sub-package of it), so scope with `files:` globs, never with `pkg:`.
+      # A run without `run.build-tags` sees only the default build, which is the
+      # build these guards care about; the `-tagged` companion check adds the
+      # registered non-unit tags (contract, hostile, integration, smoke) and so
+      # covers files behind those. The `corpus` tag (effectpolicy/corpus_test.go)
+      # is NOT seen by any depguard run today; that file does not import hookio.
+      rules:
+        # The effect-graph spike packages (internal/cmddesc, effectgraph,
+        # evalcontract, effectpolicy) MUST stay hook-independent: none of them may
+        # import internal/hookio directly (beads tc-8og1 and slices 3r/3ap). A
+        # transitive reach through cmdparse used to exist: slice 3r moved
+        # Redirection (the value type cmdparse.ParsedCommand.Redirections held
+        # FROM hookio) into the zero-dependency internal/hooktypes, and slice 3ap
+        # (tc-8og1) moved LeavesOf/RootLeavesOf INTO hookio, which removed
+        # cmdparse's last import of hookio, so as of those slices the four
+        # packages no longer reach internal/hookio transitively either. This rule
+        # only checks DIRECT imports.
+        #
+        # EXEMPTION: any file named "*_integration_test.go" is skipped. That suffix
+        # is this repo's tagged-suite convention (README.md "Two test suites",
+        # `//go:build integration`); the agreement harness
+        # (agreement_integration_test.go) deliberately imports internal/hookio,
+        # internal/setup and internal/engine, because its whole job is bridging the
+        # spike to the LIVE hookio-based engine for comparison. Such files never
+        # compile into the default build (`go test ./...`, no `-tags integration`),
+        # whose hookio-independence is what this rule protects.
+        spike-no-hookio:
+          files:
+            - "**/internal/cmddesc/*.go"
+            - "**/internal/effectgraph/*.go"
+            - "**/internal/evalcontract/*.go"
+            - "**/internal/effectpolicy/*.go"
+            - "!**/*_integration_test.go"
+          deny:
+            - pkg: github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio
+              desc: the effect-graph spike packages MUST stay hook-independent (move the shared type into internal/hooktypes instead)
+        # internal/hooktypes exists PRECISELY so a value type (Redirection) can be
+        # shared by the hook boundary, the parser and the spike without any of
+        # them importing another to name it, so it MUST stay a true LEAF package:
+        # zero imports of any other internal package, standard library only. This
+        # is wider than the rule above: it also bans hookio and everything else
+        # internal, because a leaf that quietly grew its own internal dependency
+        # would defeat the point of the move.
+        hooktypes-leaf:
+          files:
+            - "**/internal/hooktypes/*.go"
+          deny:
+            - pkg: github.com/phillipgreenii/claude-extended-tool-approver/internal
+              desc: internal/hooktypes MUST stay a zero-dependency leaf package (standard library only)

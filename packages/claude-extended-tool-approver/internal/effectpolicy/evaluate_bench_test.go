@@ -19,8 +19,8 @@ import (
 // a p99 can be recorded into benchmark_p99.go and checked by CheckDeadline.
 //
 // Scope: Bash rows only. internal/goldencorpus's corpus carries non-Bash
-// tool rows too (Write, Skill, Agent, ...), but this package's own
-// TestNoDirectHookioImport guard (imports_guard_test.go) forbids this
+// tool rows too (Write, Skill, Agent, ...), but the
+// `spike-no-hookio` depguard rule (root .golangci.yml) forbids this
 // package from importing internal/hookio — and building a Claude Code
 // Write/Edit HookInput (the only other path Evaluate's sibling,
 // EvaluateGraph, is reached through — see claudecodeadapter.Evaluate) needs
