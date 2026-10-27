@@ -186,8 +186,13 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   a SUFFICIENT trigger and never a necessary one — removing the marker cannot let a genuinely
   substrate-mutating bead escape the guard. If the verdict is that isolation must still be torn
   down or pruned, the label MUST stay and the terminal action MUST be an in-session CLOSE with
-  the operator, or a DEFER — never a RELEASE. A DEFER MUST keep BOTH the label and the promoted
-  priority: the question is still open. A narrow provably-lossless-close exception exists — see
+  the operator, or a LEAVE — never a RELEASE that makes the bead drain-eligible. A LEAVE
+  (releases the claim and keeps EVERY label and the promoted priority, with no defer) is the
+  terminal action when the operator cannot answer now; operator unavailability MUST NOT select a
+  DEFER (operator ruling, Phillip, 2026-10-27: "DEFER is for the situation that nothing can be
+  done right now, regardless of my availability."). A DEFER is limited to the D-10 case (a live
+  external event) and MUST keep BOTH the label and the promoted priority: the question is still
+  open. A narrow provably-lossless-close exception exists — see
   `references/worktree-review-exceptions.md`; it MUST NOT be extended to a RELEASE under any
   circumstances.
 
@@ -348,7 +353,12 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   merely because a blocker failed D-2's ANOTHER-ISSUE test, and "no PERSON decision is actually
   needed" MUST be checked as its own, affirmative question — not inferred from "it wasn't a bead".
   Model it with `--defer <date>` (re-checked periodically, no label), never a dependency edge (a
-  defer is a TIMER, D-8's last sentence) and never `human`. Verified live 2026-09-22 (`pg2-yanwe`):
+  defer is a TIMER, D-8's last sentence) and never `human`. A DEFER is "very limitedly used" and
+  is for the situation that nothing can be done right now regardless of the operator's
+  availability; an AUTOMATED defer MUST be one day (`--defer +1d`), also on a re-defer, and an
+  agent MAY suggest a longer one (in a comment) but MUST NOT apply it (operator rulings, Phillip,
+  2026-10-27: "automated deferral should be only one day"; "it is acceptable for agents to
+  suggest a longer deferral"). Verified live 2026-09-22 (`pg2-yanwe`):
   `pg2-b48eq` — "confirm block-limit-hit + nudge.deferred counters on next live 100% five-hour
   window", whose own 2026-07-21 comment already ruled "No human decision required" — was
   re-labeled `human` at least three times across 2026-07-21..09-22 because the classification step

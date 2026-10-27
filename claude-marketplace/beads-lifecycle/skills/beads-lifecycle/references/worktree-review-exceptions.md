@@ -29,4 +29,4 @@ W-8's guard stays UNCONDITIONAL regardless of how strong the proof is, because d
 unattended and a losslessness proof MUST NOT be inherited from an earlier session (see this
 skill's Premise Freshness section) — it must be re-established by whoever acts. If ANY
 substrate work remains that the proof does not cover, this exception does not apply and W-8's
-ordinary rule (in-session CLOSE with the operator, or DEFER) governs.
+ordinary rule (in-session CLOSE with the operator, or LEAVE) governs.

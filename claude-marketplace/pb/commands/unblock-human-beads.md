@@ -942,8 +942,8 @@ longer reflects urgency. Invoke the `beads-lifecycle` skill and follow its
   substrate work to do (a set still to tear down, worktrees still to prune), the label STAYS
   and the terminal action is CLOSE-in-session or LEAVE, never RELEASE. LEAVE meets the purpose of
   `beads-lifecycle` W-8 (it keeps the label and the promoted priority and never makes the bead
-  drain-eligible), and this command uses it in place of W-8's "or a DEFER" for operator
-  unavailability (operator ruling, Phillip, 2026-10-27) until the skill's own wording follows.
+  drain-eligible), and W-8 names it for operator unavailability (operator ruling, Phillip,
+  2026-10-27).
   **Class 1a does not weaken
   it either**: it is an in-session CLOSE, so the action W-8 actually forbids — a RELEASE that makes
   the bead drain-eligible — stays forbidden, and W-8's "in-session CLOSE with the operator" is
@@ -1171,8 +1171,8 @@ LEAVE is "do nothing for now"; DEFER is used very sparingly (see its two routes 
   GENERAL RULE (so no ENGAGE branch is missed): at ANY ENGAGE point where the operator cannot
   answer now, or under `--no-engage`, the action is LEAVE. The DEFER recognition rule below runs
   first and may DEFER `+1d`; that DEFER is not caused by unavailability. For a `worktree-review`
-  bead, LEAVE meets the purpose of `beads-lifecycle` W-8 (label and promoted priority kept, never
-  drain-eligible) and replaces W-8's "or a DEFER" for operator unavailability in this command. A
+  bead, LEAVE is the terminal action `beads-lifecycle` W-8 names for operator unavailability
+  (label and promoted priority kept, never drain-eligible). A
   LEAVE does not count toward a "just one" / N-bead limit.
 
 - **DEFER** (very limitedly used) — operator ruling (Phillip, 2026-10-27): _"DEFER is for the
@@ -1490,9 +1490,8 @@ queue minus `human-focus-required` beads (the default exclusion).
   MUST be asked in the same class-1b exchange, but on the class-1a path an exchange MUST NOT be
   opened solely to ask — the bead is being CLOSEd, so its priority routes nothing, and the recorded
   gap is the whole obligation. Guessing and silent no-ops remain forbidden on both paths.
-  A LEAVE or a DEFER MUST keep the label and the promoted priority. In this command LEAVE
-  replaces W-8's "or a DEFER" for operator unavailability, until the `beads-lifecycle`
-  wording follows. Full contract: invoke the
+  A LEAVE or a DEFER MUST keep the label and the promoted priority. W-8 names LEAVE for
+  operator unavailability and limits DEFER to a live external event. Full contract: invoke the
   `beads-lifecycle` skill and follow its `Worktree-Review Label Lifecycle` rules (W-1..W-8).
 - **Freshness guard.** Before TRIAGE, the bead's premise MUST be re-verified against CURRENT
   reality with the matching named probes from the `beads-lifecycle` skill's `Premise
