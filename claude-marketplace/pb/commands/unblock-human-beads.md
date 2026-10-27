@@ -10,7 +10,7 @@ description: >-
   carve-outs below for close/substrate). Assumes `pn workspace apply` ran before
   invocation. Parallel-safe via atomic claims; accepts optional narrowing
   $ARGUMENTS.
-argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, --parent ID, or 'one'; optionally --monitor-if-empty]"
+argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, --parent ID, or 'one'; optionally --monitor-if-empty and/or --no-engage]"
 ---
 
 # /unblock-human-beads
@@ -25,8 +25,10 @@ resolve arrives here, handed on by `hand-to-human` as `human` + `attention`. You
 `human` bead so a separately-running `/drain-beads` can then finish the work.
 
 Work through the queue autonomously, ENGAGING the operator — the person running this
-session — only where a bead genuinely needs human input, until the ready `human` queue
-(within any `$ARGUMENTS` scope) is empty. Use `bd` for ALL task tracking.
+session — only where a bead genuinely needs human input, until no ready `human` bead (within
+any `$ARGUMENTS` scope) is left to act on: each one is resolved, or LEFT for the operator for
+now (see "Terminal actions" → LEAVE), and a left bead stays in the queue. Use `bd` for ALL task
+tracking.
 
 **You do ONLY enough to lift the human blocker — you do NOT complete the bead.** The
 observed failure mode of a naive unblocker is that it "keeps trying to complete the bead";
@@ -100,14 +102,19 @@ Main loop step 1) is NEVER the bare atomic form — it is always this two-step s
    <!-- pb-queue:unblock-human -->
 
    ```bash
-   bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json
+   bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json -n 0
    ```
+
+   `-n 0` lifts the 100-row default cap, so no candidate is hidden behind left beads.
 
 2. **Filter client-side**: walk the result array (`.data[]` under the `{"data":[…]}` envelope, the bare top-level `[]` when `BD_JSON_ENVELOPE` is unset — J-1) in the returned (priority) order and skip any entry
    whose `is_template` field is `true`. A template's OWN labels can omit `template` while its
    parent molecule carries it (`merge-request.pr` carries only `["human","merge-request"]`; its
    parent `merge-request` carries `["template"]`) — `is_template` is the only reliable signal;
-   do not rely on the `template` label being present.
+   do not rely on the `template` label being present. Then, still before claiming, apply the
+   **left-bead skip check** ("Tracking left beads" below): skip an entry whose id is in this
+   invocation's in-memory `left` or `acted` set, or whose tracking file matches its row. A
+   skipped candidate gets no claim, no release and no write.
 3. **Claim the first surviving candidate**:
 
    ```bash
@@ -161,7 +168,7 @@ or neither):
   <!-- pb-queue:unblock-human-focus -->
 
   ```bash
-  bd ready --label human-focus-required --exclude-label refactor-campaign --exclude-type handoff --json
+  bd ready --label human-focus-required --exclude-label refactor-campaign --exclude-type handoff --json -n 0
   ```
 
 These two flags are dedicated MODE flags parsed out of `$ARGUMENTS` BEFORE the rest of
@@ -173,11 +180,11 @@ are visible, by design, not a general safety-filter override.
 ## Goal / termination
 
 You are DONE when a SUCCESSFUL run of the preview-then-claim sequence ("Sourcing invariant" →
-"Template/formula exclusion") yields no non-template ready bead in scope, under whichever flag
-mode is active:
+"Template/formula exclusion") yields no non-template ready bead in scope that is not LEFT,
+under whichever flag mode is active:
 
 ```bash
-bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json
+bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json -n 0
 ```
 
 zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
@@ -188,13 +195,17 @@ refactor spec §3). `human-focus-required` is excluded here by DEFAULT only — 
 whether the result is empty — a template left in the candidate set is NOT agent-workable and
 MUST NOT be claimed as a last resort (see "Template/formula exclusion").
 
-If that list SUCCEEDS (exit 0) and has no non-template candidate, STOP — UNLESS this session was invoked with
-`--monitor-if-empty` (see "--monitor-if-empty" below), in which case an empty result ARMS
-a recurring check instead of stopping. If a claim ever returns a bead whose id is
-already in your session **skip-set**, also STOP, UNCONDITIONALLY — `--monitor-if-empty`
-does NOT apply to this branch: a correctly DEFERred bead cannot reappear
-this run, so a reappearance means the loop is stuck — this is a defensive guard, not the
-"queue is empty" condition the flag changes. If the
+If that list SUCCEEDS (exit 0) and every non-template candidate is either in this invocation's
+in-memory `left` set or matches the left-bead skip check (or there is no candidate at all), the
+list counts as EMPTY: STOP — UNLESS this session was invoked with `--monitor-if-empty` (see
+"--monitor-if-empty" below), in which case an empty result ARMS a recurring check instead of
+stopping. If any skipped candidate is in this invocation's in-memory **`acted`** set (an id
+this invocation DEFERred), STOP, UNCONDITIONALLY — `--monitor-if-empty` does NOT apply to this
+branch, and it wins over "all left": a correctly DEFERred bead cannot reappear this run, so a
+reappearance means the loop is stuck — this is a defensive guard, not the "queue is empty"
+condition the flag changes. A second LEAVE of an id already in `left` is the same
+unconditional STOP (defensive only: `left` ids are filtered out before any claim, so it cannot
+fire in correct operation). If the
 command ERRORS (a bd/dolt blip), that is NOT "empty" → back off briefly and retry; never
 exit on an error — EXCEPT a persistent condition that is not a blip (see "Persistent bd
 failure is not a blip" near the end of this file), which MUST stop the loop.
@@ -202,12 +213,13 @@ failure is not a blip" near the end of this file), which MUST stop the loop.
 ### --monitor-if-empty
 
 Accepted as one of this command's `$ARGUMENTS` (composes normally with the narrowing
-arguments in "Optional scope arguments" below). It changes ONLY what happens when the
-Main loop's atomic CLAIM query (step 1) comes back a SUCCESSFUL empty result — no ready
-`human` bead left in scope, the exact condition that otherwise means Goal met and STOP. It
-does **NOT** change the OTHER termination condition above (a returned id already in the
-session skip-set) — that is a defensive anomaly guard, unrelated to the queue being empty,
-and it STOPs unconditionally regardless of this flag.
+arguments in "Optional scope arguments" below, and with `--no-engage`). It changes ONLY what
+happens when the Main loop's CLAIM list (step 1) comes back a SUCCESSFUL empty result — no
+ready `human` bead left to act on in scope, where a list whose every candidate is LEFT counts
+as empty — the exact condition that otherwise means Goal met and STOP. It does **NOT** change
+the OTHER termination conditions above (a skipped candidate in the `acted` set, or a second
+LEAVE of an id already in `left`) — those are defensive anomaly guards, unrelated to the queue
+being empty, and they STOP unconditionally regardless of this flag.
 
 - **Flag ABSENT (default):** unchanged, byte-for-byte — an empty CLAIM result still means
   STOP, exactly as documented above.
@@ -227,7 +239,10 @@ and it STOPs unconditionally regardless of this flag.
   each wake.
 
   **On each wake** (this command running again, invoked by `loop`, from "Startup / resume"
-  below): the CLAIM query in Main loop step 1 runs exactly as always.
+  below — a FRESH invocation, so its in-memory `left` and `acted` sets start empty): the CLAIM
+  query in Main loop step 1 runs exactly as always, and the tracking files ("Tracking left
+  beads") skip the beads an earlier wake left that have not changed since; new or changed beads
+  are triaged.
   - Bead found → resume the normal Main loop (UNDERSTAND → FRESHNESS CHECK → TRIAGE →
     terminal action) on it. The flag has no further effect once a bead is claimed.
   - Still empty → take this SAME arm step again (re-invoke the identical
@@ -264,7 +279,11 @@ and it STOPs unconditionally regardless of this flag.
    If one exists, resume it (UNDERSTAND → FRESHNESS CHECK → TRIAGE → terminal action) before claiming new
    work.
 
-5. Start with an empty session skip-set.
+5. Start with EMPTY in-memory `left` and `acted` sets ("Terminal actions" → LEAVE and DEFER).
+   They live in conversation context, so they MUST be reset at the start of EVERY invocation,
+   including a plain `/unblock-human-beads` run later in the same conversation and every
+   `--monitor-if-empty` wake. Do NOT wipe the tracking directory (`<scratchpad>/left/`, see
+   "Tracking left beads"): it is what carries a LEAVE across wakes.
 
 ## Main loop — repeat until the Goal is met
 
@@ -273,34 +292,37 @@ and it STOPs unconditionally regardless of this flag.
    an unreleasable template):
 
    ```bash
-   bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json
+   bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json -n 0
    ```
 
    zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
    refactor spec §3). `human-focus-required` is excluded here by DEFAULT only — see
    "Sourcing invariant" above for the `--include-focus-required` / `--focus-required-only`
-   variants, which are parsed out of `$ARGUMENTS` before the narrowing filters below. If the
-   invocation supplied `$ARGUMENTS`, apply them as additional NARROWING filters on this list
-   query (see "Optional scope arguments").
+   variants, which are parsed out of `$ARGUMENTS` (together with the behaviour flags
+   `--monitor-if-empty` and `--no-engage`) before the narrowing filters below. If the
+   invocation supplied `$ARGUMENTS`, apply the remainder as additional NARROWING filters on
+   this list query (see "Optional scope arguments").
 
    Filter the result array (`.data[]` under the `{"data":[…]}` envelope, the bare top-level `[]` when `BD_JSON_ENVELOPE` is unset — J-1) client-side, in the returned (priority) order, skipping any entry whose
-   `is_template` is `true`. Then claim the first surviving candidate:
+   `is_template` is `true`, then skipping any entry the left-bead skip check matches (its id
+   is in `left` or `acted`, or its tracking file matches; see "Tracking left beads"). A skipped
+   candidate gets no claim, no release and no write. Then claim the first surviving candidate:
 
    ```bash
    bd update <id> --claim --actor "ID" --json
    ```
 
    This claims the highest-priority NON-TEMPLATE ready `human` bead (assignee=ID,
-   status=`in_progress`) and returns it. A SUCCESSFUL list with no non-template candidate →
-   Goal met → STOP (also run `session-mode set-status finished`, best-effort) — UNLESS this
-   session was invoked with `--monitor-if-empty`, in which case take the ARM path in
-   "--monitor-if-empty" above instead of stopping. A candidate id already in your skip-set →
-   skip it too (do not re-claim it) and continue down the candidate list; if EVERY remaining
-   candidate is either a template or already in your skip-set, that is the "id already in your
-   skip-set" STOP condition → STOP UNCONDITIONALLY, regardless of `--monitor-if-empty` (also
-   run `session-mode set-status finished`, best-effort — missing this STOP would leave the
-   record `running` whenever the loop ends via this defensive guard instead of an empty
-   result). A transient error on either call, OR the claim call failing because a peer claimed
+   status=`in_progress`) and returns it. A SUCCESSFUL list whose every non-template candidate
+   is skipped (in `left`, or matching the skip check), or that has none → no ready bead left to
+   act on → Goal met → STOP (also run `session-mode set-status finished`, best-effort) — UNLESS
+   this session was invoked with `--monitor-if-empty`, in which case take the ARM path in
+   "--monitor-if-empty" above instead of stopping. If any skipped candidate is in `acted` (an
+   id this invocation DEFERred), that is the `acted` STOP condition instead → STOP
+   UNCONDITIONALLY, regardless of `--monitor-if-empty` (STOP wins over "all left"; also run
+   `session-mode set-status finished`, best-effort — missing this STOP would leave the record
+   `running` whenever the loop ends via this defensive guard instead of an empty result). A
+   transient error on either call, OR the claim call failing because a peer claimed
    the same candidate first (the accepted preview-then-claim race window) → back off briefly
    and retry the WHOLE sequence from the list step, never re-issue the same claim call
    unchanged.
@@ -327,48 +349,32 @@ and it STOPs unconditionally regardless of this flag.
    "Terminal actions" (which strips `human`): a container-parent's only two honest states are
    OPEN or CLOSED (**D-9**) — stripping `human` would hand it to drain with nothing
    implementable of its own — so `human` and every other label are left UNTOUCHED; only
-   status and assignee change:
+   status and assignee change. It has the LEAVE shape ("Terminal actions").
+
+   First read the bead's comments with the J-1 comment-text read shown under "Class 4"
+   (re-check (a)), BEFORE writing this pass's comment, and look for an earlier
+   `(/unblock-human-beads, Container guard)` FRESHNESS comment. One present means this is the
+   SECOND release of this container (an earlier wake or session released it, and its 24 h
+   tracking bound has passed; the tracking directory is per session, so it cannot carry this
+   signal). Then write, in this order:
 
    ```bash
+   # second release only: the container-note marker, so NEITHER command probes it again
+   bd update <id> --append-notes "[container note $(date +%F)] Do NOT claim this container bead for direct work in /drain-beads or /unblock-human-beads -- D-9 container-parent, no independent decision of its own; real work/decisions are on its children." --actor "ID"
    bd comment <id> "FRESHNESS <ISO date> (/unblock-human-beads, Container guard): <sibling-open? per live child, verbatim> ⇒ premise LIVE. D-9 container-parent, no independent decision of its own -- real work/decisions are on its children. Releasing plainly (keep human, no defer, no close)." --actor "ID"
    bd update <id> --status open --assignee "" --actor "ID"
    ```
 
-   Bound consecutive container-guard hits (a hit on either check counts) to a shared budget
-   of 3 within one CLAIM invocation. A 4th hit without progress means the guard alone will not
-   resolve the hazard — almost always because this container TIES or OUTRANKS every other
-   ready `human` bead on priority, so `bd`'s created_at-DESCENDING tie-break re-selects it
-   every single pass (provenance `tc-ipgw`; the SAME hazard was independently rediscovered
-   here on `tc-w5rib.1`/`tc-d45t.1`/`tc-d45t`/`tc-gdpv` across 8+ `/unblock-human-beads`
-   sessions over 6 days before this guard existed — `tc-qwdys` ported the fix). Before
-   falling through to the skip-set STOP condition (step 1 above), take the one D-9-compliant
-   lever available — demote the container's own priority to match its children's (read it off
-   the check-2 listing, or run that query now if only check 1 fired):
-
-   ```bash
-   bd update <id> --priority <n> --actor "ID"
-   ```
-
-   This is neither a blocking edge nor a defer (**D-9** forbids both on a container), is
-   non-destructive and fully reversible, and stops the container from dominating the same
-   priority tie next pass. Release it (keeping `human`, as above) and return to CLAIM — this
-   alone resolves the common case. Only if the SAME container exhausts the guard AGAIN after
-   its priority was already demoted — meaning it still wins the claim even at its new,
-   demoted priority — write the container-note marker (check 1) into `notes`, so NEITHER
-   command needs the children-existence probe on it again, and ADD this id to the session
-   skip-set (same mechanism "DEFER termination" below uses) before returning to CLAIM:
-
-   ```bash
-   bd update <id> --append-notes "[container note $(date +%F)] Do NOT claim this container bead for direct work in /drain-beads or /unblock-human-beads -- D-9 container-parent, no independent decision of its own; real work/decisions are on its children." --actor "ID"
-   ```
-
-   Do NOT loop a third round on the same container by re-running this guard on it again —
-   return to CLAIM instead. Most passes end there: with the marker and demoted priority now
-   in place, the next CLAIM pass's list step picks something else. If it instead returns this
-   SAME id again, step 1's pre-existing "id already in your skip-set → STOP UNCONDITIONALLY"
-   condition fires — this command's ordinary defensive halt for "the loop cannot make forward
-   progress," the same one a wrongly-reappearing DEFER would trip, not a condition this guard
-   invents.
+   Then read the baseline and write the tracking file (untagged) per "Tracking left beads", add
+   the id to the in-memory `left` set (never to `acted`), and return to CLAIM. `left` skips the
+   released container for the rest of this invocation and its tracking file skips it across
+   wakes for 24 h, so a container that TIES or OUTRANKS every other ready `human` bead on
+   priority can no longer be re-selected pass after pass by `bd`'s created_at-DESCENDING
+   tie-break (provenance `tc-ipgw`; the SAME hazard was independently rediscovered here on
+   `tc-w5rib.1`/`tc-d45t.1`/`tc-d45t`/`tc-gdpv` across 8+ `/unblock-human-beads` sessions over
+   6 days before this guard existed — `tc-qwdys` ported the fix). No hit budget and no
+   priority demotion are needed. Each re-triage after the 24 h bound writes another FRESHNESS
+   comment, which changes `comment_count`; accepted.
 
 3. **UNDERSTAND** (brief): `bd show <id>`. Read the `stuck:` comment/description to learn
    the blocker, and — if `/drain-beads` or a drain worker escalated one — note the branch/set
@@ -394,11 +400,13 @@ and it STOPs unconditionally regardless of this flag.
    loop, present the specific decision/question to the operator in this session, and WAIT
    for their answer before acting** — this is the one point where autonomy yields to
    interaction. Not every class engages: classes 1a, 2, 3, 4, 6 and 7 are resolved mechanically and
-   MUST NOT prompt. Any change that produces committed code/docs happens in the REUSED parked
-   isolation (see "Isolation"). Obey the stop predicate.
+   MUST NOT prompt. Under `--no-engage`, or when the operator cannot answer now, an ENGAGE
+   point takes LEAVE instead (see "--no-engage" and "Terminal actions" → LEAVE). Any change
+   that produces committed code/docs happens in the REUSED parked isolation (see "Isolation").
+   Obey the stop predicate.
 
-6. **Terminal action** — take exactly one (RELEASE / CLOSE / DEFER), per the rubric and
-   "Terminal actions" below. Then go to 1.
+6. **Terminal action** — take exactly one of the four terminal actions (RELEASE / CLOSE /
+   LEAVE / DEFER), per the rubric and "Terminal actions" below. Then go to 1.
 
 While a bead is claimed (`in_progress` + owned by ID), it is invisible to every
 `/drain-beads` and peer unblock session (`bd ready` excludes `in_progress`), so all of
@@ -442,7 +450,7 @@ output verbatim:
   (or, when the bead names no external referent, `… ⇒ nothing to re-verify` — F-5).
 - **Premise PROVABLY MOOT** → **CLOSE-AS-MOOT** (see "Terminal actions"). The bead is
   answered, not blocked: it MUST NOT be RELEASEd (drain would just re-park it) and MUST NOT be
-  DEFERred (it returns unchanged next window). A class-1 substrate bead and a class-2 HANDOFF
+  LEFT or DEFERred (it returns unchanged next time). A class-1 substrate bead and a class-2 HANDOFF
   POINTER are the two carve-outs (step 4).
 - The `sibling-open?` reading is ALSO the recognition test for class 3
   (`label-to-dependency conversion`): a `stuck:` comment naming another bead as the thing it
@@ -457,18 +465,18 @@ output verbatim:
 
 ## Triage rubric (evaluate in order; first match wins)
 
-| #   | Class                                     | How to recognize                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Action                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| --- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1a  | **substrate-mutating, PROVABLY LOSSLESS** | the class-1 SHAPE — carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on — AND all three legs of the LOSSLESSNESS PROOF hold, run by YOU in THIS session, in EVERY member repo: a CLEAN `git status --porcelain`, and every commit on the branch either an ancestor of the primary branch or patch-identical to one that is, corroborated by `git range-diff` | **TEAR DOWN, then CLOSE-AS-PROVABLY-LOSSLESS. NO operator prompt.** Record every probe output verbatim on the bead. **Still NEVER RELEASEd to drain.** See below.                                                                                                                                                                                                                                                                                                                                                                                        |
-| 1b  | **substrate-mutating, NOT proven**        | the class-1 SHAPE (as in 1a) and ANY leg of that proof fails, is unrunnable, or was not run — a DIRTY worktree, an unmatched commit, an inconclusive `range-diff`, a repo or worktree path the probes cannot resolve                                                                                                                                                                                                                                                                                          | **ENGAGE the operator; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). See below.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| 2   | **handoff bead**                          | a bead of type `handoff` (or one unmistakably so, per the `beads-lifecycle:handoff-bead` skill, which is the sole definition; any ambiguity means it is NOT a handoff)                                                                                                                                                                                                                                                                                                                                        | **NO operator prompt. Follow the `beads-lifecycle:handoff-bead` skill's unattended handling:** a handoff carrying `human` (every bead this command claims) is the skill's EXCEPTION, so LEAVE it (release unchanged, session skip-set); typed handoffs are excluded from the claim query. Never demoted or deferred. See below.                                                                                                                                                                                                                          |
-| 3   | **label-to-dependency conversion**        | every live blocker named by the bead or its `stuck:` comment is ANOTHER BEAD — each resolves to an existing id whose `sibling-open?` probe reads `open` / `in_progress` / `blocked` — and nothing needs a person's decision, input, or authority                                                                                                                                                                                                                                                              | **CONVERT, then RELEASE. NO operator prompt.** `bd dep add` per blocker FIRST, then drop `human` in the single atomic release. See below.                                                                                                                                                                                                                                                                                                                                                                                                                |
-| 4   | **planning session already required**     | carries the `planning-session-required` label — an earlier run already concluded the blocker is a design/planning SESSION, not a single answerable question                                                                                                                                                                                                                                                                                                                                                   | **RE-CHECK the recorded evidence; NEVER re-present the question.** Still required (no evidence) → **DEFER**: a silent skip to the next bead, NO operator prompt. Session CONFIRMED held → drop that label (KEEP `human`) and re-enter the rubric. See below.                                                                                                                                                                                                                                                                                             |
-| 5   | **suspected stale precondition**          | carries the `stale-precondition` label — `/drain-beads` escalated it TWICE on the same `PRECONDITION-KEY`                                                                                                                                                                                                                                                                                                                                                                                                     | **MUST NOT RELEASE as-is.** Re-derive from the park comment's `DERIVED-FROM` → CLOSE if the outcome already holds, else ENGAGE → rewrite → RELEASE. See below.                                                                                                                                                                                                                                                                                                                                                                                           |
-| 6   | **apply-waiting**                         | "verify/act after apply", deploy-gated content                                                                                                                                                                                                                                                                                                                                                                                                                                                                | **RELEASE.** Trust that `pn workspace apply` ran before this command — see "apply-waiting = trust" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| 7   | **mislabeled / normal work**              | the label's reason is provably moot (referenced worktree already gone, decision already recorded in a later comment, transient infra passed, every named blocker bead now probes `closed`) and no human input is needed                                                                                                                                                                                                                                                                                       | **RELEASE** — no operator prompt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| 8   | **genuine decision / input**              | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                                                                                                                                                                                                                                                                                                                                      | **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / DEFER per outcome. **Branch:** if the blocker is a design/planning SESSION rather than a single answerable question, do NOT put it to the operator as a decision — label `planning-session-required` (KEEPING `human`) and DEFER. See "Class 4". If the ENGAGE instead matches the `human-focus-required` recognition test (not scoped to this row alone), label `human-focus-required` (KEEPING `human`) as part of the terminal action. See "Labeling a bead `human-focus-required`". |
-| 9   | **uncertain**                             | you cannot confidently place the bead in a class above                                                                                                                                                                                                                                                                                                                                                                                                                                                        | treat as genuine → **ENGAGE** (conservative; never silently auto-resolve).                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| #   | Class                                     | How to recognize                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Action                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1a  | **substrate-mutating, PROVABLY LOSSLESS** | the class-1 SHAPE — carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on — AND all three legs of the LOSSLESSNESS PROOF hold, run by YOU in THIS session, in EVERY member repo: a CLEAN `git status --porcelain`, and every commit on the branch either an ancestor of the primary branch or patch-identical to one that is, corroborated by `git range-diff` | **TEAR DOWN, then CLOSE-AS-PROVABLY-LOSSLESS. NO operator prompt.** Record every probe output verbatim on the bead. **Still NEVER RELEASEd to drain.** See below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 1b  | **substrate-mutating, NOT proven**        | the class-1 SHAPE (as in 1a) and ANY leg of that proof fails, is unrunnable, or was not run — a DIRTY worktree, an unmatched commit, an inconclusive `range-diff`, a repo or worktree path the probes cannot resolve                                                                                                                                                                                                                                                                                          | **ENGAGE the operator; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). The DEFER recognition rule runs first; an operator who cannot act now (or `--no-engage`) → LEAVE. See below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 2   | **handoff bead**                          | a bead of type `handoff` (or one unmistakably so, per the `beads-lifecycle:handoff-bead` skill, which is the sole definition; any ambiguity means it is NOT a handoff)                                                                                                                                                                                                                                                                                                                                        | **NO operator prompt. Follow the `beads-lifecycle:handoff-bead` skill's unattended handling:** a handoff carrying `human` (every bead this command claims) is the skill's EXCEPTION, so LEAVE it (the LEAVE terminal action: release unchanged, untagged tracking file); typed handoffs are excluded from the claim query. Never demoted or deferred. See below.                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 3   | **label-to-dependency conversion**        | every live blocker named by the bead or its `stuck:` comment is ANOTHER BEAD — each resolves to an existing id whose `sibling-open?` probe reads `open` / `in_progress` / `blocked` — and nothing needs a person's decision, input, or authority                                                                                                                                                                                                                                                              | **CONVERT, then RELEASE. NO operator prompt.** `bd dep add` per blocker FIRST, then drop `human` in the single atomic release. See below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 4   | **planning session already required**     | carries the `planning-session-required` label — an earlier run already concluded the blocker is a design/planning SESSION, not a single answerable question                                                                                                                                                                                                                                                                                                                                                   | **RE-CHECK the recorded evidence; NEVER re-present the question.** Still required (no evidence) → **LEAVE**: a silent skip to the next bead, NO operator prompt, never a DEFER. Session CONFIRMED held → drop that label (KEEP `human`) and re-enter the rubric. See below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 5   | **suspected stale precondition**          | carries the `stale-precondition` label — `/drain-beads` escalated it TWICE on the same `PRECONDITION-KEY`                                                                                                                                                                                                                                                                                                                                                                                                     | **MUST NOT RELEASE as-is.** Re-derive from the park comment's `DERIVED-FROM` → CLOSE if the outcome already holds, else ENGAGE → rewrite → RELEASE. See below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 6   | **apply-waiting**                         | "verify/act after apply", deploy-gated content                                                                                                                                                                                                                                                                                                                                                                                                                                                                | **RELEASE.** Trust that `pn workspace apply` ran before this command — see "apply-waiting = trust" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 7   | **mislabeled / normal work**              | the label's reason is provably moot (referenced worktree already gone, decision already recorded in a later comment, transient infra passed, every named blocker bead now probes `closed`) and no human input is needed                                                                                                                                                                                                                                                                                       | **RELEASE** — no operator prompt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 8   | **genuine decision / input**              | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                                                                                                                                                                                                                                                                                                                                      | The DEFER recognition rule runs first (a live external event → DEFER `+1d`, no prompt). Otherwise **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / LEAVE if the operator cannot act now (or `--no-engage`) / DEFER only on the operator's explicit instruction, per outcome. **Branch:** if the blocker is a design/planning SESSION rather than a single answerable question, do NOT put it to the operator as a decision — label `planning-session-required` (KEEPING `human`) and LEAVE. See "Class 4". If the ENGAGE instead matches the `human-focus-required` recognition test (not scoped to this row alone), label `human-focus-required` (KEEPING `human`) as part of the terminal action. See "Labeling a bead `human-focus-required`". |
+| 9   | **uncertain**                             | you cannot confidently place the bead in a class above                                                                                                                                                                                                                                                                                                                                                                                                                                                        | treat as genuine → **ENGAGE** (conservative; never silently auto-resolve).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 **The FRESHNESS CHECK runs BEFORE this rubric, not as a row in it.** A bead whose premise the
 probes proved moot needs no class — it is already resolved, so it goes straight to
@@ -494,7 +502,9 @@ which a quick multiple-choice answer cannot satisfy. When an ENGAGE point matche
 recognition test below, apply `human-focus-required` (keeping `human`) as part of that terminal
 action's `bd update`/comment, so later DEFAULT `/unblock-human-beads` runs stop re-surfacing it.
 This command is the ONLY place that ever applies the label, always alongside `human` (the
-dual-labeling invariant in "Sourcing invariant" above).
+dual-labeling invariant in "Sourcing invariant" above). Only an ENGAGE applies it: under
+`--no-engage` no ENGAGE happens, so the label is never applied there (the ENGAGE point takes
+LEAVE instead).
 
 **The test:** the bead's ENGAGE decision is not answerable by a one-off choice regardless of the
 operator's current availability — it requires the operator to be PRESENT AND WATCHING while a
@@ -567,7 +577,7 @@ Then, IN ORDER:
 1. **TEAR DOWN** at the convention the isolation was created with.
    `git worktree remove <worktree-path>` comes first either way — it refuses a DIRTY worktree, so it
    is a SECOND guard on leg (c), and a refusal CONTRADICTS your proof: treat that as the proof having
-   failed, LEAVE the isolation in place, and go to 1b. Which branch/set command follows depends on
+   failed, keep the isolation in place, and go to 1b. Which branch/set command follows depends on
    WHICH leg carried the proof:
    - **Leg (a) — every commit is an ancestor of main.** `git -C <repo> branch -d <work-branch>` for a
      single repo, `pn-workspace-rules:cleanup-workforest` for a SET. Both re-check the ancestry
@@ -598,7 +608,7 @@ unconditional and this class does not touch it (see "substrate-mutating beads NE
 1a is an in-session CLOSE under the standing ruling above, so **W-8** holds unchanged: nothing
 becomes drain-eligible, and if ANY substrate work REMAINS after the teardown (a member the skill
 kept, a second set the bead names), the label STAYS and the terminal action is 1b's operator CLOSE
-or a DEFER. **The asymmetry with `/drain-beads` is deliberate** — that command gets no such
+or, when the operator cannot act now, a LEAVE. **The asymmetry with `/drain-beads` is deliberate** — that command gets no such
 carve-out; see the note at the end of "substrate-mutating beads NEVER go to drain".
 
 ## Class 2 — handoff bead (mechanical, and it MUST NOT prompt)
@@ -614,10 +624,11 @@ unattended one (no `human` label) is drain's to absorb, an attended one (`human`
 operator's to continue with an agent. What can still reach this class is a bead that is
 unmistakably a handoff (per the skill) but not typed `handoff`; it carries `human`, because
 everything this command claims does. The skill's EXCEPTION governs it: **a handoff labelled
-`human` is NOT absorbed unattended.** LEAVE it: release the claim unchanged
-(`bd update <id> --status open --assignee "" --actor "ID"` in ONE call, keeping `human`; no
-comment, no close, no defer, no demotion, no retype), add `<id>` to your session skip-set, and
-mention it in the end-of-run summary. The trace-and-close handling the skill describes applies to
+`human` is NOT absorbed unattended.** LEAVE it: take the LEAVE terminal action, which releases
+the claim unchanged (`bd update <id> --status open --assignee "" --actor "ID"` in ONE call,
+keeping `human`; no comment, no close, no defer, no demotion, no retype), adds `<id>` to the
+in-memory `left` set and writes its tracking file (untagged), and mention it in the end-of-run
+summary. The trace-and-close handling the skill describes applies to
 a handoff WITHOUT `human`, which this command never holds; where this file says "absorbed" or
 "CLOSE-WITH-ABSORPTION-TRACE" for class 2, read it as the skill's handling for that bead, which
 for a `human` handoff is this LEAVE. (Provenance of the original class: `pg2-9ifbn`.)
@@ -719,11 +730,10 @@ down the rubric. The `human` label MUST sit on the bead that actually HOLDS the 
 which shape you have decides where that is:
 
 - **The question is only answerable AFTER the blocker lands** → the label stays on THIS bead, so
-  the terminal action is DEFER, not RELEASE: DEFER is the only one of the three that KEEPS
-  `human` while clearing the claim (B-1/B-2) and letting the loop terminate. That is not the
-  antipattern above — there the defer would REPLACE the edge, whereas here the EDGE is the gate
-  and the window is only the loop's bookkeeping, so the bead cannot reappear on the window's
-  expiry alone. Say so in the comment, because the consequence is not obvious: `bd ready`
+  the terminal action is LEAVE, not RELEASE: LEAVE KEEPS `human` while clearing the claim
+  (B-1/B-2), and the EDGE is the gate. No timer is needed on top of it (the edge already hides
+  the bead from `bd ready`), so a DEFER is not used here either. Say so in the comment, because
+  the consequence is not obvious: `bd ready`
   excludes blocked beads, so the bead now sits in NEITHER queue until its blockers clear, and
   only then resurfaces here. That is CORRECT — the question was not yet answerable. Verified
   2026-07-29: `pg2-4dz88`, `pg2-wr6lm.9`, `pg2-qhhil` and `pg2-r1f1j.9` each carry `human` with
@@ -761,11 +771,13 @@ PREMISE — not the deploy state — is the suspect. Therefore:
   park comment, against CURRENT source. A precondition phrased against a MECHANISM that the
   cited commit has since removed is UNSATISFIABLE, not unmet.
 - If the stated OBSERVABLE OUTCOME already holds, the bead is satisfied → **CLOSE**
-  (operator-confirmed, per the close guard).
+  (operator-confirmed, per the close guard). Under `--no-engage` there is no operator to
+  confirm it, so take **LEAVE** instead (tagged per the hidden-bead guard in "--no-engage").
 - If the outcome genuinely does not hold, **ENGAGE** the operator, rewrite the precondition
   as an observable outcome with a fresh `DERIVED-FROM`, and only then **RELEASE** — removing
   `stale-precondition` in the same atomic update. Releasing it with the old precondition, or
-  with the label still attached, just restarts the loop.
+  with the label still attached, just restarts the loop. An operator who cannot act now, or
+  `--no-engage`, means **LEAVE** (the bead keeps `stale-precondition`).
 
 **apply-waiting = trust, always.** This command EXPECTS `pn workspace apply` to have been
 run before it is invoked. Every apply-waiting bead is RELEASEd on that premise; do NOT try
@@ -781,8 +793,10 @@ UNCONDITIONAL — it binds 1a exactly as it binds 1b**, and a recorded losslessn
 licence to release one: drain is UNATTENDED, so the proof MUST be re-established by whoever acts
 and MUST NOT be inherited from this session's finding, which is already a stale reading by the
 time drain claims the bead (**F-1**). So for class **1b**: ENGAGE the operator and either (a)
-resolve it in-session WITH the operator, serially and carefully, then CLOSE it; or (b) DEFER it
-(when the operator can't act now). Never RELEASE it, and never run a substrate-mutating action
+resolve it in-session WITH the operator, serially and carefully, then CLOSE it; or (b) LEAVE it
+(when the operator can't act now, or under `--no-engage`). Only the DEFER recognition rule
+(a live external event, `+1d`) or the operator's explicit instruction DEFERs one. Never RELEASE
+it, and never run a substrate-mutating action
 autonomously OUTSIDE class 1a — 1a is the ONLY autonomous substrate action this command permits,
 and only on its full three-leg proof.
 
@@ -803,20 +817,24 @@ re-investigation cost to reach the same conclusion. The label is a REFINEMENT of
 replacement: a PERSON is still the blocker, so both labels are carried together and `/drain-beads`
 (`--exclude-label human`) still never sees the bead. Live carriers (2026-08-13): `pg2-kmd1s`,
 `pg2-ajab`, `pg2-ff0i` and `pg2-4dz88` — each `open` with `human` AND `planning-session-required`.
+Such a bead is LEFT, never DEFERred — operator ruling (Phillip, 2026-10-27): _"a design session
+should not trigger a defer because then i lose sight on what needs to be designed."_ A LEAVE keeps
+it in `bd ready --label human`, where the operator can see it.
 
 **APPLYING it (the class-8 branch).** The moment triage concludes the blocker is a design session,
 STOP — do NOT put the design question to the operator as a decision. Record an ENTRY MARKER, then
-DEFER. The marker is load-bearing: it is the only thing that makes the later re-check cheap, and
+LEAVE. The marker is load-bearing: it is the only thing that makes the later re-check cheap, and
 without a recorded SEARCH TERM the next run has nothing to look for (the same reason **W-2**
 requires one).
 
 ```bash
 bd comment <id> "[planning-session-required <ISO date>] BLOCKER IS A DESIGN SESSION, not an answerable question. THE DESIGN QUESTION: <one sentence>. EVIDENCE THAT WOULD CLEAR IT: <the artifact to look for — an ADR / behavior-doc section in <repo>, a decision recorded on this bead, or a sibling bead body>. SEARCH TERM: <distinguishing term>. Not presented to the operator: no multiple-choice question can discharge it." --actor "ID"
-bd update <id> --add-label planning-session-required --defer +7d --status open --assignee "" --actor "ID"
+bd update <id> --add-label planning-session-required --status open --assignee "" --actor "ID"
 ```
 
-`human` is NOT removed. That ONE `bd update` carries the label add, the defer window, `--status open`
-and `--assignee ""` together (**B-2**, **B-3**). Add `<id>` to the session skip-set.
+`human` is NOT removed. That ONE `bd update` is the LEAVE: it carries the label add, `--status open`
+and `--assignee ""` together (**B-2**, **B-3**), and no defer window. Then add `<id>` to the
+in-memory `left` set and write its tracking file (untagged; "Tracking left beads").
 
 **RE-CHECKING it (rule 2) — before anything else, and never by re-asking.** Run these against the
 marker's SEARCH TERM, cheapest first, keeping each decisive output verbatim. This is NOT the
@@ -843,14 +861,20 @@ approach, an `Accepted` ADR, a written design. A restatement of the question, a 
 mentions the term, a plan to hold the session, and an ADR still `Proposed` are all NOT evidence, and
 elapsed time is NEVER evidence (rule 5). Absence of evidence means the session has NOT happened.
 
-- **Still required (no decisive evidence) → DEFER, and move straight on to the next bead.** MUST NOT
-  prompt the operator, MUST NOT re-litigate, MUST NOT remove the label. Record the reading so the
-  next run inherits it, then re-defer:
+- **Still required (no decisive evidence) → LEAVE, and move straight on to the next bead.** MUST NOT
+  prompt the operator, MUST NOT re-litigate, MUST NOT remove the label. Write the recheck comment
+  ONLY when the decisive output DIFFERS from the output recorded in the previous
+  `[planning-session-required-recheck …]` comment (read with re-check (a) above); otherwise write
+  nothing and just LEAVE — an identical recheck comment every day is churn for peer sessions and
+  `/unstick-beads`. Then LEAVE:
 
   ```bash
-  bd comment <id> "[planning-session-required-recheck <ISO date>] STILL REQUIRED — <probe>=<decisive output verbatim, or: no match>. No operator prompt: the design question is unchanged. SEARCH TERM: <distinguishing term>." --actor "ID"
-  bd update <id> --defer +7d --status open --assignee "" --actor "ID"   # keeps human AND planning-session-required
+  bd comment <id> "[planning-session-required-recheck <ISO date>] STILL REQUIRED — <probe>=<decisive output verbatim, or: no match>. No operator prompt: the design question is unchanged. SEARCH TERM: <distinguishing term>." --actor "ID"   # only when the decisive output changed
+  bd update <id> --status open --assignee "" --actor "ID"   # LEAVE: keeps human AND planning-session-required
   ```
+
+  The tracking baseline is read AFTER this release ("Tracking left beads"), so this session's own
+  recheck comment is already in it and does not re-trigger its own triage.
 
 - **Session CONFIRMED held → drop the marker, then re-enter the rubric from the top** and
   disposition the bead normally — usually writing the decided design into the bead and RELEASing it.
@@ -864,15 +888,16 @@ elapsed time is NEVER evidence (rule 5). Absence of evidence means the session h
   bd comment <id> "[planning-session-required-resolved <ISO date>] SESSION HELD: <probe>=<decisive output verbatim> ⇒ <the decided outcome>. Marker dropped; re-triaged as class <n>." --actor "ID"
   ```
 
-**The skip is a DEFER — NOT a new terminal action.** "Terminal actions" still permits exactly one
-per claimed bead and this path takes DEFER, so nothing there is weakened. The claim is released by
-that same single `bd update`, which sets `--status open` AND `--assignee ""` in one write
-(**B-1**/**B-2**/**B-3**) — so the bead is never left `open` with a non-empty assignee, the
+**The skip is a LEAVE — one of the four terminal actions, not a new one.** "Terminal actions" still
+permits exactly one per claimed bead and this path takes LEAVE, so nothing there is weakened. The
+claim is released by that single `bd update`, which sets `--status open` AND `--assignee ""` in one
+write (**B-1**/**B-2**/**B-3**) — so the bead is never left `open` with a non-empty assignee, the
 stranded shape **B-6** describes, which `bd ready --claim` skips and `bd update --claim` rejects.
-`--defer` keeps it out of `bd ready`, so the loop still terminates. Unlike the class-3 antipattern a
-timer is CORRECT here: the window's expiry only brings the bead back HERE, where the re-check costs
-one `bd comments` read against a recorded SEARCH TERM — it can never expire the bead into the drain
-pool, because `human` stays attached.
+The bead stays in `bd ready` (ruling above: the operator keeps sight of what needs designing), and
+the loop still terminates: the in-memory `left` set skips it for the rest of this invocation, and
+its tracking file skips it across wakes until it changes or 24 h pass. The re-check after that
+costs one comment read against a recorded SEARCH TERM, and the bead can never reach the drain pool,
+because `human` stays attached.
 
 **Ranking.** BELOW classes 1-3 — class 1 claims every substrate-mutating bead (to 1a or 1b) and
 class 2 every spent pointer, whatever else they carry, and class 3 excludes this
@@ -885,6 +910,8 @@ ENGAGE, which is the re-nagging this class exists to remove.
 
 **The marker is SELF-CLEARING, so it cannot permanently strand a bead.** Rule 4 drops it on
 evidence; class 3 drops it as dead if the bead turns out to have been blocked only by other beads.
+And because a LEAVE never hides the bead, a still-required session stays visible in the `human`
+queue the whole time.
 It has no priority side effect — unlike `worktree-review` it never promotes, so there is no
 `Promoted P<n>->P0` record to restore.
 
@@ -913,7 +940,11 @@ longer reflects urgency. Invoke the `beads-lifecycle` skill and follow its
   work itself, so the label is a SUFFICIENT trigger, never a necessary one — clearing the
   marker cannot let a genuinely substrate-mutating bead escape class 1. If the verdict leaves
   substrate work to do (a set still to tear down, worktrees still to prune), the label STAYS
-  and the terminal action is CLOSE-in-session or DEFER, never RELEASE. **Class 1a does not weaken
+  and the terminal action is CLOSE-in-session or LEAVE, never RELEASE. LEAVE meets the purpose of
+  `beads-lifecycle` W-8 (it keeps the label and the promoted priority and never makes the bead
+  drain-eligible), and this command uses it in place of W-8's "or a DEFER" for operator
+  unavailability (operator ruling, Phillip, 2026-10-27) until the skill's own wording follows.
+  **Class 1a does not weaken
   it either**: it is an in-session CLOSE, so the action W-8 actually forbids — a RELEASE that makes
   the bead drain-eligible — stays forbidden, and W-8's "in-session CLOSE with the operator" is
   satisfied by the operator's standing ruling for provably-landed teardowns (see "Class 1a") plus
@@ -933,6 +964,10 @@ longer reflects urgency. Invoke the `beads-lifecycle` skill and follow its
 This catalog governs disposition after TRIAGE (Main loop step 5). A bead the Container guard
 (Main loop step 2) confirms a hit on is dispositioned by CONTAINER-RELEASE instead — see that
 step — and never reaches TRIAGE at all.
+
+There are four terminal actions: RELEASE, CLOSE, LEAVE and DEFER. Operator ruling (Phillip,
+2026-10-27): _"this skill should be able to release or close or do nothing for now or defer."_
+LEAVE is "do nothing for now"; DEFER is used very sparingly (see its two routes below).
 
 - **RELEASE** (default) — the human blocker is lifted and drain can make progress on what
   remains. If lifting the blocker produced an artifact, commit ONLY that artifact — the
@@ -975,7 +1010,7 @@ step — and never reaches TRIAGE at all.
   precondition has been rewritten as an observable outcome (class 5). A lingering
   `stale-precondition` label makes drain treat the NEXT, legitimately-fresh park as an
   already-escalated one. RELEASE only when drain can actually make progress; if the
-  only remaining work is a human-only action drain cannot perform, DEFER instead
+  only remaining work is a human-only action drain cannot perform, LEAVE instead
   (apply-waiting is exempt — it is released on the pre-apply premise).
 
   A class-3 **label-to-dependency conversion** is also exempt, and its release has one extra
@@ -1040,11 +1075,18 @@ step — and never reaches TRIAGE at all.
 
   ```bash
   bd create "worktree-review: reconcile leftover isolation for <id>" \
-    --labels human,worktree-review --defer +7d --deps "discovered-from:<id>" \
+    --labels human,worktree-review --deps "discovered-from:<id>" \
     --notes "[worktree-review $(date +%F)] Leftover isolation from <id> at <worktree-path> (branch <work-branch>). A person must rule on keep vs discard. No promotion (priority left at P2)." \
     --actor "ID"
   ```
 
+  The follow-up is not deferred, so it is in `bd ready --label human` at once and the operator
+  sees it. So that THIS run does not claim it, read the new bead with `bd show` (the baseline
+  read in "Tracking left beads", never the create command's own row), add its id to the
+  in-memory `left` set and write its tracking file. It is a class-1b bead whose next triage
+  would ENGAGE, and no question was put about it, so its file carries `"engage_skipped":true`
+  (the hidden-bead guard in "--no-engage"): a returning operator running plain
+  `/unblock-human-beads` sees it at once.
   - **CLOSE-AS-MOOT** — the variant the freshness check produces. The close guard's operator
     confirmation is satisfied by the RECORDED PROBE OUTPUT: a decisive output is the proof
     this close needs, and re-asking the operator is precisely the non-question the check
@@ -1106,31 +1148,118 @@ step — and never reaches TRIAGE at all.
     `worktree-review` label has an EXIT". If ANY substrate work remains, this variant does not
     apply — that is class 1b.
 
-- **DEFER** (operator-initiated, a substrate / human-only-action bead that can't be done
-  now, or a class-4 planning-session SKIP) — the operator decides it can't be resolved right now,
-  the only remaining work is a human-only action drain cannot perform, or the re-check confirms a
-  required design session still has not happened. The last of those is the ONLY DEFER that MUST NOT
-  involve the operator at all: it is class 4's silent skip to the next bead, and it also carries
-  `--add-label planning-session-required` on first application (see "Class 4"). Comment why, then
-  remove it from the ready queue while KEEPING the `human` label, and record it so the loop can't
-  re-nag:
+- **LEAVE** (do nothing for now) — the human blocker cannot be lifted in this invocation and
+  nothing else is due: the operator cannot answer now, said to skip the beads that need them,
+  or `--no-engage` is set; or the class itself prescribes it (a class-2 `human` handoff, a
+  class-3 mixed blocker whose question waits on the blocker, a class-4 planning session still
+  required, a Container guard CONTAINER-RELEASE). ONE call that releases the claim and keeps
+  every label and the priority as found:
 
   ```bash
-  bd comment <id> "deferred by /unblock-human-beads: <operator's reason, or: only remaining work is a human-only action>" --actor "ID"
-  bd update <id> --defer +7d --status open --assignee "" --actor "ID"   # keep human; window MUST outlive the session (>= +1d)
+  bd update <id> --status open --assignee "" --actor "ID"
   ```
 
-  Add `<id>` to your session skip-set. Deferred beads are excluded from `bd ready`, so the
-  loop continues and terminates; the bead resurfaces in the `human` queue when the window
-  passes. A DEFER MUST KEEP `worktree-review` and MUST KEEP the promoted priority (W-8) — the
-  isolation question is still unanswered, so the bead must come back substrate-class. It MUST
-  likewise KEEP `planning-session-required`: rule 5 makes absence of evidence mean the session has
-  not happened, so the marker is exactly what must survive to the next run.
+  A LEAVE MUST NOT carry `--remove-label`, `--defer` or `--priority`. It MAY add exactly two
+  labels, and only where this command already adds them: `planning-session-required` (the
+  class-4 entry marker) and `human-focus-required` (the recognition test in "Labeling a bead
+  `human-focus-required`"), in that same call, with the entry-marker or explanatory comment
+  written BEFORE the call. Every other label stays as found. The bead stays in
+  `bd ready --label human`, so the operator keeps sight of it. After the call, add the id to the
+  in-memory `left` set and write its tracking file ("Tracking left beads" below); a failed
+  release is retried once, then it is the "Persistent bd failure" stop.
 
-  This is also the terminal action for a MIXED class-3 blocker (a bead AND a person), where the
-  `human` label must stay: it is the only one of the three that keeps the label while clearing
-  the claim. The dependency edges added in class-3 step 1 are the real gate, so the window's
-  expiry alone cannot resurface the bead — it returns here only once its blockers close.
+  GENERAL RULE (so no ENGAGE branch is missed): at ANY ENGAGE point where the operator cannot
+  answer now, or under `--no-engage`, the action is LEAVE. The DEFER recognition rule below runs
+  first and may DEFER `+1d`; that DEFER is not caused by unavailability. For a `worktree-review`
+  bead, LEAVE meets the purpose of `beads-lifecycle` W-8 (label and promoted priority kept, never
+  drain-eligible) and replaces W-8's "or a DEFER" for operator unavailability in this command. A
+  LEAVE does not count toward a "just one" / N-bead limit.
+
+- **DEFER** (very limitedly used) — operator ruling (Phillip, 2026-10-27): _"DEFER is for the
+  situation that nothing can be done right now, regardless of my availability."_ A DEFER hides the
+  bead from `bd ready`, so it has exactly TWO routes:
+  1. **A live external event** (the DEFER recognition rule below). The window is exactly
+     `--defer +1d`, also on a re-defer (_"automated deferral should be only one day"_). The
+     comment records the event watched and the probe a later pass would use. It MAY name a later
+     date the agent suggests (_"it is acceptable for agents to suggest a longer deferral"_) but
+     MUST NOT apply it: a longer defer is the operator's to set.
+  2. **An explicit operator instruction during an ENGAGE** (the operator says to defer it for a
+     stated time): apply the operator's stated window in place of +1d, and quote their words
+     verbatim in the comment.
+
+  Operator unavailability MUST NOT select DEFER (not a stated absence, not "skip any which require me", not `--no-engage`): that is a LEAVE.
+  A needed design session (class 4) or a needed decision MUST NOT select DEFER either.
+
+  ```bash
+  bd comment <id> "deferred by /unblock-human-beads: <the external event and its probe output verbatim, or the operator's words verbatim>. Re-check with: <probe>. <optional: a longer window the agent suggests, NOT applied>" --actor "ID"
+  bd update <id> --defer +1d --status open --assignee "" --actor "ID"   # route 1; route 2 uses the operator's stated window instead
+  ```
+
+  A DEFER MUST NOT remove any label or change priority. It MUST KEEP `human`, `worktree-review`
+  and the promoted priority (W-8) — the isolation question is still unanswered, so the bead must
+  come back substrate-class — and it MUST likewise KEEP `planning-session-required` and every
+  other label. Add `<id>` to the in-memory `acted` set. Deferred beads are excluded from
+  `bd ready`, so the loop continues; the bead resurfaces in the `human` queue when the window
+  passes, and a re-triage then is expected: the `left` and `acted` sets, not the window, bound
+  the run.
+
+  **DEFER recognition rule (route 1).** In classes 8/9 and 1b, when the bead's ONLY remaining
+  blocker is a live external event outside anyone's control and not expected soon — an F-3
+  `ticket-open?` still open for an external ticket, an external PR still unresolved (a
+  `ticket-open?`-style probe on the PR), or a `landed?`/release probe still negative for an
+  upstream release the bead names — the terminal action is DEFER `+1d`, with the probe and its
+  decisive output recorded in the comment. The rule runs BEFORE any ENGAGE, puts no question to
+  the operator, and applies under `--no-engage` too (operator ruling, Phillip, 2026-10-27: such a
+  bead keeps `human` and is deferred `+1d`).
+
+## Tracking left beads (`<scratchpad>/left/`)
+
+The in-memory `left` and `acted` sets bound ONE invocation. A `--monitor-if-empty` wake is a
+fresh invocation, so a per-session tracking directory carries each LEAVE across wakes (operator
+ruling, Phillip, 2026-10-27: _"i think it would be acceptable to track items in the session temp
+directory."_).
+
+- **Location.** One file per bead, `<scratchpad>/left/<id>.json`, in the session's own private
+  scratchpad (the directory passed to `pb actor --scratchpad`). Never wipe it at startup or on a
+  wake.
+- **Writing.** Write each file with the Write tool, never a shell redirect or heredoc (a heredoc
+  is the form that trips the command parser's compound-command handling). The extended-tool-approver
+  treats a Write-tool write and the equivalent shell `>` alike, so the scratchpad MUST be under a
+  write-allowed root either way. The Write tool creates `left/` on the first write; if it refuses
+  a missing parent directory, report that once and skip tracking (do NOT fall back to a shell
+  `mkdir`). When replacing an existing file, Read it first, then Write. Each file is replaced in
+  full, so there are no append races and no partial lines.
+- **Contents.**
+  `{"id":"pg2-x","updated_at":"<ts>","comment_count":N,"left_at":"<ISO ts>","class":"8","reason":"<one line>","engage_skipped":true}`
+  — the last key only per the hidden-bead guard in "--no-engage".
+- **Baseline.** `updated_at` and `comment_count` come from a read made AFTER the release call,
+  never from the write call's own JSON row (its freshness is unverified). The read is J-1
+  shape-agnostic (bare array or envelope):
+
+  ```bash
+  bd show <id> --json | jq -c '(if type=="object" and has("data") then .data else . end)[0] | {updated_at, comment_count}'
+  ```
+
+  A failed or empty read writes no file (the next wake re-triages). A change landing between the
+  release and the read is recorded as baseline and missed once; accepted.
+
+- **Skip check** — the `(updated_at, comment_count)` key. In the client-side filter of BOTH copies
+  of the claim sequence ("Sourcing invariant" step 2 and Main loop step 1), after the
+  `is_template` filter and before claiming, skip a candidate whose id is in `left` or `acted`.
+  Also skip it when `left/<id>.json` exists and ALL hold: its `updated_at` equals the row's, its
+  `comment_count` equals the row's (a count missing from the file counts as 0), its `left_at` is
+  under 24 h old, and — for a file tagged engage_skipped — the current invocation carries
+  `--no-engage` or an unavailability instruction. A `bd ready --json` row lacking `updated_at` or
+  `comment_count` is never skipped on its file. Once per claim pass, Glob
+  `<scratchpad>/left/*.json` and Read only the files whose id is a candidate (a Read of a missing
+  file is an error, not "absent"). The 24 h bound is also how a change that does not touch the
+  bead row (an ADR landing for class 4, a dependency closing for class 3) gets re-checked.
+- **Fail-safe.** If a tracking write or read is denied or fails, skip tracking for that bead (the
+  in-memory `left` set still protects this invocation) and note it once in the report. A failed
+  tracking write is NOT retried and is not an error.
+- **Reporting.** Name each LEAVE in the report (id, class, one-line reason) when its tracking file
+  is first written. When the run STOPs (not on every quiet wake), the final report lists every
+  bead still left, read from the `left/` files whose `left_at` is under 24 h old.
 
 ## Isolation: reuse vs create
 
@@ -1149,7 +1278,7 @@ step — and never reaches TRIAGE at all.
 - **Never create a fresh multi-repo set mid-session.** `fork-workforest` MUST run from the
   canonical workspace root and MUST NOT be nested inside a set. If a NEW multi-repo
   isolation would be needed, record the decision on the bead per the RELEASE terminal action's
-  description-rewrite requirement above (not just a comment) and RELEASE (or DEFER), letting
+  description-rewrite requirement above (not just a comment) and RELEASE (or LEAVE), letting
   `/drain-beads` fork it.
 
 ## Optional scope arguments
@@ -1160,14 +1289,48 @@ new kind of top-level argument, not a per-bead narrowing filter: they widen/narr
 `human` beads are VISIBLE, by design, and are the sanctioned, deliberate exception to
 "Arguments may only NARROW" below. They MUST NOT both be given in the same invocation — if
 both are present, ask the operator which was meant rather than silently resolving one way.
+The two BEHAVIOUR flags `--monitor-if-empty` and `--no-engage` are NOT mode flags: they combine
+freely with either mode flag, or with neither.
 
-The REMAINDER of `$ARGUMENTS`, after the mode flags are parsed out, MAY further **restrict**
+### --no-engage
+
+A BEHAVIOUR flag meaning the operator is not in the session. It is parsed out of `$ARGUMENTS`
+together with `--monitor-if-empty` and stripped BEFORE the remainder is applied as `bd ready`
+filters, so it is never passed to `bd`. It widens or narrows nothing.
+
+- Every ENGAGE point (classes 1b, 5, 8 and 9) becomes LEAVE for that bead. The DEFER recognition
+  rule ("Terminal actions" → DEFER) runs first and may DEFER `+1d`; that DEFER is not caused by
+  unavailability. No question is put to the operator, and `human-focus-required` is not applied
+  (only an ENGAGE applies it).
+- A plain CLOSE that needs operator confirmation (the Close guard; class 5's "outcome holds →
+  CLOSE (operator-confirmed)") also becomes LEAVE. The evidence-based CLOSE variants
+  (CLOSE-AS-MOOT, CLOSE-WITH-ABSORPTION-TRACE, CLOSE-AS-PROVABLY-LOSSLESS) are unaffected.
+- The operator's unavailability, whether stated by this flag or in the arguments or the
+  conversation ("skip any which require me"), selects LEAVE and never DEFER. Such free text is
+  NOT parsed as a `bd ready` filter.
+
+**Hidden-bead guard.** A LEAVE taken at an ENGAGE point WITHOUT putting the question to the
+operator (because of `--no-engage`, or an unavailability instruction in the arguments or the
+conversation) is tagged `"engage_skipped":true` in its tracking file ("Tracking left beads"), and
+so is any bead this invocation creates and leaves whose next triage would ENGAGE (the
+worktree-review follow-up, about which no question was put). A LEAVE after the operator was asked
+and personally declined ("not now") is UNTAGGED and honoured for 24 h, so a present operator in a
+`--monitor-if-empty` session is not re-asked on every wake. A tagged file is honoured by the skip
+check ONLY when the current invocation carries `--no-engage` or an unavailability instruction in
+its arguments; a plain `/unblock-human-beads` run by a returned operator ignores tagged files and
+re-triages those beads, ENGAGING as usual. Untagged files (class 2 handoff, class 3 mixed,
+class 4, a container release, a declined ENGAGE) are always honoured. A bead named by an explicit
+id bypasses ONLY the tracking-file check, never the in-memory `left` set.
+
+### Narrowing
+
+The REMAINDER of `$ARGUMENTS`, after the mode and behaviour flags are parsed out, MAY further **restrict**
 the work this command claims — e.g. an extra label, a priority, a parent/epic, a type, a
 specific bead id, or a one-bead / N-bead limit ("just one"). Apply it as extra `bd ready`
 filters on the list step of the CLAIM sequence (see "Sourcing invariant" →
 "Template/formula exclusion"). Honor a specific bead id via the safe path: first confirm the id
 appears in `bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff
-[scope] --json` (under the DEFAULT mode; adjust `--label`/`--exclude-label` to match whichever
+[scope] --json -n 0` (under the DEFAULT mode; adjust `--label`/`--exclude-label` to match whichever
 mode flag is active, exactly as the CLAIM query does) — ready, in-scope, `human`, not deferred —
 AND that its `is_template` field is NOT `true` (a template MUST NOT be targeted even by an
 explicit id, for the same permanently-stranded-claim reason as the ordinary claim path) — then
@@ -1187,8 +1350,9 @@ queue minus `human-focus-required` beads (the default exclusion).
 ## Rules (RFC 2119)
 
 - **Sourcing.** Work MUST be claimed only via the preview-then-claim sequence — list with
-  `bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json` (DEFAULT
-  mode; plus narrowing `$ARGUMENTS`), skip any `is_template=true` entry client-side, then
+  `bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json -n 0` (DEFAULT
+  mode; plus narrowing `$ARGUMENTS`), skip any `is_template=true` entry and any entry the
+  left-bead skip check matches client-side, then
   `bd update <id> --claim --actor "ID"` on the first surviving candidate — and MUST NOT use the
   bare atomic `bd ready --claim` (it cannot exclude templates, and a claimed template's write
   paths are all refused, permanently stranding the claim); MUST NOT use `bd list --label human`
@@ -1228,24 +1392,21 @@ queue minus `human-focus-required` beads (the default exclusion).
   `human` and every other label left UNTOUCHED — never the ordinary RELEASE (which strips
   `human`), never a DEFER, and never a CLOSE (a container-parent's only two honest states are
   OPEN or CLOSED per **D-9**, and CLOSE requires the container itself, not its children, to be
-  resolved). Consecutive container-guard hits within one CLAIM invocation MUST be bounded to a
-  shared budget of 3 (a hit on either check counts); on a 4th hit the agent MUST demote the
-  container's own priority to match its children's (`bd update <id> --priority <n>` — neither
-  a blocking edge nor a defer, both forbidden on a container by **D-9**) before releasing and
-  continuing, and MUST NOT loop a third round on the same container without that demotion. If
-  the SAME container exhausts the guard again after its priority was already demoted, the
-  agent MUST write the container-note marker into `notes` (so neither this command nor
-  `/drain-beads` needs the children-existence probe on it again), MUST add the id to the
-  session skip-set, and MUST return to CLAIM rather than looping a third round on it — the
-  pre-existing "id already in your skip-set" condition on the NEXT claim (not this guard
-  itself) is what stops the run if the container still wins even at its demoted priority.
+  resolved). A CONTAINER-RELEASE has the LEAVE shape: it MUST add the id to the in-memory
+  `left` set (never to `acted`) and write its tracking file (untagged), so the container is not
+  re-selected for the rest of the invocation nor, while unchanged, for 24 h across wakes; no hit
+  budget and no priority demotion are used. When the bead already carries an earlier
+  `(/unblock-human-beads, Container guard)` FRESHNESS comment (a second release after the 24 h
+  bound), the agent MUST write the container-note marker into `notes` BEFORE this pass's
+  FRESHNESS comment and the release, so neither this command nor `/drain-beads` needs the
+  children-existence probe on it again.
 - **Minimality + stop predicate.** MUST stop and RELEASE the instant the bead no longer
   needs a human to proceed as ordinary drain work; MUST NOT drive the bead to completion
   (except the substrate carve-out), land, merge, or push. A commit made while unblocking
   MUST be only the blocker-lift artifact, never implementation progress.
 - **RELEASE only when drain can progress.** A bead MUST be RELEASEd only when drain can
-  make progress on what remains; a human-only-action-only bead is DEFERred (apply-waiting
-  and a class-3 label-to-dependency conversion are exempt).
+  make progress on what remains; a human-only-action-only bead is LEFT (apply-waiting and a
+  class-3 label-to-dependency conversion are exempt).
 - **Handoff bead (class 2) MUST NOT prompt.** Every query that sources work MUST carry
   `--exclude-type handoff`. A claimed `human` bead that is nonetheless unmistakably a handoff bead
   MUST be dispositioned as the `beads-lifecycle:handoff-bead` skill defines it (the sole
@@ -1266,8 +1427,8 @@ queue minus `human-focus-required` beads (the default exclusion).
   is class 8). A DEFER MUST NOT be used in place of the dependency edge: a defer window is a
   timer that expires whether or not the blocker cleared, while an edge is the state itself. A
   MIXED blocker (bead AND person) MUST get the edges AND keep `human` on whichever bead HOLDS
-  the question, and its terminal action MUST be DEFER — the only one of the three that keeps
-  the label — with the EDGE, not the window, as the gate. This class ranks above classes 4 and 5
+  the question, and its terminal action MUST be LEAVE — which keeps the label while clearing
+  the claim — with the EDGE as the gate. This class ranks above classes 4 and 5
   and below classes 1 and 2; its release MUST also drop a `planning-session-required` or
   `stale-precondition` marker, which this class outranks and therefore leaves unchecked. Full
   contract: invoke the `beads-lifecycle` skill and follow its `Blocker Modeling` rules
@@ -1279,7 +1440,8 @@ queue minus `human-focus-required` beads (the default exclusion).
   question and a SEARCH TERM, and MUST NOT put that question to the operator as a decision. On any
   LATER run, a bead already carrying the marker MUST first be RE-CHECKED for evidence that the
   session happened, BEFORE any part of the decision is re-presented. If the session is STILL
-  REQUIRED, the terminal action MUST be a DEFER: the operator MUST NOT be prompted, the question
+  REQUIRED, the terminal action MUST be a LEAVE, never a DEFER (a design session MUST NOT hide
+  the bead from the operator): the operator MUST NOT be prompted, the question
   MUST NOT be re-litigated, and the marker MUST NOT be removed. If the session is CONFIRMED to have
   happened, the marker MUST be removed and the bead MUST then be processed normally by re-entering
   the rubric — usually writing the decided design into the bead and RELEASing it — and that write
@@ -1299,7 +1461,8 @@ queue minus `human-focus-required` beads (the default exclusion).
   primary branch (`git merge-base --is-ancestor`) or (b) patch-identical to a commit already on it
   (`git patch-id --stable`, read via `git cherry -v`), corroborated by `git range-diff`. If ANY leg
   fails, is unrunnable, or was not run, the bead is class 1b and the operator MUST be ENGAGEd
-  (serial, in-session) → CLOSE, or DEFER. A DIRTY worktree — untracked files included — MUST
+  (serial, in-session) → CLOSE, or LEAVE when the operator cannot act now (a DEFER only on one
+  of DEFER's two routes). A DIRTY worktree — untracked files included — MUST
   ALWAYS be class 1b: uncommitted content is unreviewed by definition and exists in one place only,
   so losslessness is UNPROVABLE there, not merely unproven. A workforest force flag
   (`--force-unlanded-branch-removal`, `--force-dirty-worktree-removal`,
@@ -1327,7 +1490,9 @@ queue minus `human-focus-required` beads (the default exclusion).
   MUST be asked in the same class-1b exchange, but on the class-1a path an exchange MUST NOT be
   opened solely to ask — the bead is being CLOSEd, so its priority routes nothing, and the recorded
   gap is the whole obligation. Guessing and silent no-ops remain forbidden on both paths.
-  A DEFER MUST keep the label and the promoted priority. Full contract: invoke the
+  A LEAVE or a DEFER MUST keep the label and the promoted priority. In this command LEAVE
+  replaces W-8's "or a DEFER" for operator unavailability, until the `beads-lifecycle`
+  wording follows. Full contract: invoke the
   `beads-lifecycle` skill and follow its `Worktree-Review Label Lifecycle` rules (W-1..W-8).
 - **Freshness guard.** Before TRIAGE, the bead's premise MUST be re-verified against CURRENT
   reality with the matching named probes from the `beads-lifecycle` skill's `Premise
@@ -1340,7 +1505,7 @@ Freshness` rules (F-3) —
   field and its comments — a decision recorded there makes the description's framing STALE
   regardless of the description's own raw wording. A bead whose premise is provably moot MUST be
   CLOSEd-AS-MOOT: it MUST NOT be
-  RELEASEd (drain would re-park it) and MUST NOT be DEFERred (it returns unchanged) — EXCEPT a
+  RELEASEd (drain would re-park it) and MUST NOT be LEFT or DEFERred (it returns unchanged) — EXCEPT a
   class-1 substrate bead, which is dispositioned by class 1 on the ISOLATION's evidence (1a's
   three-leg proof, else 1b's ENGAGE), and a class-2 handoff pointer, which is
   CLOSEd-WITH-ABSORPTION-TRACE. A moot premise MUST NOT be read as a losslessness proof. An
@@ -1369,9 +1534,31 @@ Freshness` rules (F-3) —
 - **Reuse.** MUST reuse an existing parked isolation and MUST NOT clean it up. MAY create
   single-repo isolation at drain's convention when none exists and code is required; MUST
   NOT create a fresh multi-repo set mid-session.
-- **DEFER termination.** A DEFER MUST use a window that outlives the session (floor `+1d`)
-  and MUST add the id to the session skip-set; a CLAIM returning a skip-set id MUST
-  terminate the run.
+- **LEAVE.** A LEAVE MUST be ONE `bd update <id> --status open --assignee "" --actor "ID"`
+  carrying no `--remove-label`, `--defer` or `--priority`; it MAY add only
+  `planning-session-required` (class-4 entry marker) or `human-focus-required` (the recognition
+  test), in that same call, after the comment that explains it. At any ENGAGE point where the
+  operator cannot answer now, and at every ENGAGE point under `--no-engage`, the action MUST be
+  LEAVE (after the DEFER recognition rule).
+- **DEFER is limited to two routes.** A DEFER MUST be either a live external event outside
+  anyone's control, at exactly `--defer +1d` (also on a re-defer; a longer window MAY only be
+  suggested in the comment), or the operator's explicitly stated window from an ENGAGE, quoted
+  in the comment. A DEFER MUST NOT remove a label or change priority.
+  Operator unavailability MUST NOT select DEFER, nor does a needed design session or decision.
+- **`--no-engage` and the hidden-bead guard.** `--no-engage` MUST be stripped from
+  `$ARGUMENTS` before the `bd ready` filters are applied. Under it no question is put to the
+  operator. A LEAVE taken without putting the question to the operator MUST be tagged in its
+  tracking file per "--no-engage", and a tagged file MUST be honoured only by an invocation that
+  itself carries `--no-engage` or an unavailability instruction.
+- **Tracking.** Each LEAVE MUST write `<scratchpad>/left/<id>.json` with the Write tool, keyed
+  on `(updated_at, comment_count)` read AFTER the release, and the skip check MUST honour a file
+  only while that key matches the ready row and `left_at` is under 24 h old. A failed tracking
+  read or write MUST NOT stop the run: skip tracking for that bead and note it once.
+- **Termination: `left` and `acted`.** Both in-memory sets MUST start empty at every
+  invocation. Ids in either MUST be skipped before claiming. A list whose every candidate is
+  skipped counts as empty (STOP, or arm the wake under `--monitor-if-empty`), EXCEPT that a
+  skipped id in `acted`, or a second LEAVE of an id already in `left`, MUST terminate the run
+  unconditionally.
 - **Distinct actor.** The actor id MUST be distinct from any concurrent `/drain-beads`
   actor (the `-unblock` suffix).
 - **Close guard.** MUST NOT close a bead without explicit operator confirmation — except an
@@ -1384,10 +1571,13 @@ Freshness` rules (F-3) —
   provably-landed teardown needs no approval. A proof recorded by an EARLIER session is NOT such
   evidence — the legs MUST have been run in the closing session. If a worktree is
   left, MUST file a `worktree-review` follow-up (planned operator work, LV-2: `human` only)
-  (`bd create … --labels human,worktree-review --defer +7d --deps "discovered-from:<id>"`,
-  carrying the W-2 entry marker) rather than orphan it.
+  (`bd create … --labels human,worktree-review --deps "discovered-from:<id>"`,
+  carrying the W-2 entry marker, not deferred) rather than orphan it, and MUST put the new bead
+  in `left` and its tracking file, tagged per the hidden-bead guard. Under `--no-engage`, a
+  CLOSE that needs operator confirmation MUST become LEAVE.
 - **Arguments narrow-only.** `$ARGUMENTS` MUST only restrict the claim query and MUST NOT
-  remove safety filters or broaden scope.
+  remove safety filters or broaden scope. Free text such as "skip any which require me" MUST
+  NOT be parsed as a filter: it is an unavailability instruction and selects LEAVE.
 - Never use `--no-verify`. Transient infra failures (bd/dolt blip, `index.lock`
   contention) are NOT terminal — back off and retry.
 - **Persistent bd failure is not a blip.** A `bd` write that refuses with "refusing to
@@ -1401,51 +1591,55 @@ Freshness` rules (F-3) —
 
 ```mermaid
 flowchart TD
-    A["Start: set actor ID = session-unblock, bd prime, parse $ARGUMENTS<br/>(mode flags first), empty skip-set"] --> R{Own an unfinished<br/>in_progress human bead?}
-    R -- yes --> U
-    R -- no --> C["CLAIM (preview-then-claim): bd ready --label human<br/>--exclude-label refactor-campaign,human-focus-required --exclude-type handoff (default mode)<br/>[+narrowing] --json, skip is_template=true, then<br/>bd update id --claim --actor ID --json"]
-    C -->|successful + empty| DONE([Goal met: 0 ready human in scope. STOP])
-    C -->|id already in skip-set| DONE
-    C -->|transient bd/dolt error| C
-    C -->|got bead| CG{"CONTAINER GUARD:<br/>container-note in notes, else<br/>bd list --parent id --status all,<br/>confirmed against D-9?"}
+    A["Start: set actor ID = session-unblock, bd prime, parse $ARGUMENTS<br/>(mode flags, --monitor-if-empty and --no-engage first),<br/>empty in-memory left and acted sets"] --> R{"Own an unfinished<br/>in_progress human bead?"}
+    R -- "yes" --> U
+    R -- "no" --> C["CLAIM (preview-then-claim): bd ready --label human<br/>--exclude-label refactor-campaign,human-focus-required --exclude-type handoff (default mode)<br/>[+narrowing] --json -n 0, skip is_template=true,<br/>skip ids in left or acted and ids whose tracking file matches, then<br/>bd update id --claim --actor ID --json"]
+    C -->|"successful, and empty or every candidate left"| DONE(["No ready human bead left to act on, left beads stay in the queue:<br/>STOP, or arm the wake under --monitor-if-empty"])
+    C -->|"a skipped candidate is in acted"| HALT(["STOP unconditionally: the loop is stuck"])
+    C -->|"transient bd/dolt error"| C
+    C -->|"got bead"| CG{"CONTAINER GUARD:<br/>container-note in notes, else<br/>bd list --parent id --status all,<br/>confirmed against D-9?"}
     CG -- "no (not a container, or genuinely ambiguous)" --> U["UNDERSTAND: bd show,<br/>read stuck: comment + parked isolation"]
-    CG -- "hit, this is the 1st-3rd hit this CLAIM" --> CGR["CONTAINER-RELEASE:<br/>bd comment FRESHNESS + D-9 rationale →<br/>bd update --status open --assignee '' (keep ALL labels)"]
-    CG -- "hit, 4th this CLAIM, priority NOT yet demoted" --> CGD["Demote: bd update --priority n<br/>(match children's priority) → CONTAINER-RELEASE"]
-    CG -- "hit again after demotion" --> CGM["bd update --append-notes '[container note] Do NOT claim...' →<br/>add id to session skip-set"]
-    CGR --> C
-    CGD --> C
+    CG -- "hit" --> CGR["CONTAINER-RELEASE (LEAVE shape):<br/>read comments for an earlier Container guard FRESHNESS →<br/>bd comment FRESHNESS + D-9 rationale →<br/>bd update --status open --assignee '' (keep ALL labels) →<br/>add id to left and the tracking file"]
+    CGR -- "first release" --> C
+    CGR -- "released again after the 24 h bound" --> CGM["write the container-note marker BEFORE the FRESHNESS comment:<br/>bd update --append-notes '[container note] Do NOT claim...'<br/>id in left and the tracking file"]
     CGM --> C
     U --> FC{"FRESHNESS CHECK (F-3 probes):<br/>is the bead's PREMISE still live?"}
     FC -- "provably moot (not substrate, not a handoff bead)" --> CLOM["CLOSE-AS-MOOT: read the stale work →<br/>bd create extracted prediction --deps discovered-from →<br/>bd comment FRESHNESS: probe output verbatim →<br/>bd close --reason 'moot on re-verification'"]
     FC -- "live, or any probe unresolvable" --> T{"TRIAGE rubric<br/>first match wins"}
     CLOM --> C
     T -->|"1a substrate-mutating, PROVABLY lossless"| S1A["Run ALL THREE legs yourself, in EVERY member repo:<br/>git status --porcelain EMPTY, and every commit either<br/>landed (merge-base --is-ancestor) or patch-identical<br/>(git cherry -v '-' line), corroborated by range-diff.<br/>Then TEAR DOWN: git worktree remove, then branch -d<br/>(or -D for a patch-identical single repo),<br/>or cleanup-workforest. NEVER a workforest force flag"]
+    T -->|"8/9: live external event, not expected soon"| DEF["DEFER +1d, no operator prompt: bd comment the event and its probe<br/>(a longer window only suggested, never applied) →<br/>bd update --defer +1d --status open --assignee ''<br/>(keep every label and the priority), add id to acted"]
+    T -->|"1b: live external event, not expected soon"| DEF
     T -->|"1b substrate-mutating, any leg fails, unrunnable, or unrun — a DIRTY tree is ALWAYS 1b"| SUB["ENGAGE operator, NEVER release to drain.<br/>Read Promoted P-prior to P0 from notes,<br/>record the isolation VERDICT"]
-    T -->|"2 handoff bead"| ABS["NO operator prompt: follow beads-lifecycle:handoff-bead<br/>human-labelled handoff (every claimed bead) = LEAVE:<br/>release unchanged, session skip-set;<br/>typed handoffs never reach here (--exclude-type handoff)"]
+    T -->|"2 handoff bead"| ABS["NO operator prompt: follow beads-lifecycle:handoff-bead<br/>human-labelled handoff (every claimed bead) = LEAVE,<br/>release unchanged, untagged tracking file<br/>typed handoffs never reach here (--exclude-type handoff)"]
     T -->|"3 label-to-dependency conversion"| CDEP["CONVERT, NO operator prompt:<br/>bd dep add id --blocked-by blocker, ALL edges FIRST →<br/>bd dep list id to confirm direction →<br/>bd comment BLOCKED-BY-BEADS + FRESHNESS"]
     T -->|"4 planning-session-required label"| PSR{"RE-CHECK the recorded evidence, never re-ask:<br/>bd comments id, bd list --desc-contains SEARCH TERM<br/>--status all, git log/grep over docs.<br/>Has the design session HAPPENED?"}
     T -->|"5 stale-precondition label"| STL["Re-derive from DERIVED-FROM<br/>against CURRENT source"]
     T -->|"6 apply-waiting"| REL
     T -->|"7 mislabeled / normal work"| REL
-    T -->|"8 genuine decision/input"| ENG[ENGAGE operator<br/>pause loop, ask, wait]
+    T -->|"8 genuine decision/input"| ENG["ENGAGE operator<br/>pause loop, ask, wait"]
     T -->|"9 uncertain"| ENG
-    ABS --> C
-    PSR -- "no decisive evidence: STILL REQUIRED" --> DEF
+    ABS --> LEAVE["LEAVE (do nothing for now): bd update --status open --assignee ''<br/>one call, every label and the priority kept, no --remove-label, --defer or --priority,<br/>may add planning-session-required or human-focus-required →<br/>add id to left, write the tracking file left/id.json"]
+    LEAVE --> C
+    PSR -- "no decisive evidence: STILL REQUIRED (recheck comment only if the output changed)" --> LEAVE
     PSR -- "CONFIRMED held, evidence recorded verbatim" --> PSRC["bd update --remove-label planning-session-required<br/>KEEP human, then re-enter the rubric"]
     PSRC --> T
     CDEP -- "only beads blocked it" --> REL
-    CDEP -- "mixed, a person holds part of it too" --> ENG
+    CDEP -- "mixed: the question is answerable now" --> ENG
+    CDEP -- "mixed: question only answerable after the blocker lands" --> LEAVE
     S1A -->|"all legs held and the teardown succeeded"| CLOL["CLOSE-AS-PROVABLY-LOSSLESS, NO operator prompt:<br/>bd update --remove-label worktree-review --priority prior (keep human) →<br/>bd comment LOSSLESS: every leg's output verbatim,<br/>what was torn down, what remains →<br/>bd close. Still NEVER released to drain"]
     S1A -->|"branch -d or cleanup-workforest REFUSES, so the proof was wrong"| SUB
     CLOL --> C
-    SUB -->|resolved in-session| CLO
-    SUB -->|can't now| DEF
+    SUB -->|"resolved in-session"| CLO
+    SUB -->|"can't now, or --no-engage"| LEAVE
     STL -- "outcome holds or is unsatisfiable" --> CLO
     STL -- "outcome genuinely unmet" --> ENG
-    ENG -->|now drain-doable| REL["RELEASE (atomic): commit only the blocker-lift artifact →<br/>bd comment (precondition rewritten as an OUTCOME) →<br/>bd update --remove-label human,attention,human-focus-required (+stale-precondition,<br/>+worktree-review with --priority prior) --status open --assignee '' (one call)"]
-    ENG -->|obsolete, confirmed| CLO["CLOSE: if worktree-review, FIRST<br/>bd update --remove-label worktree-review --priority prior (keep human) →<br/>bd close (+ worktree-review follow-up, planned operator work: bd create<br/>--labels human,worktree-review --defer, if a worktree is left)"]
-    ENG -->|"blocker is a design SESSION, not an answerable question: do NOT present it"| DEF
-    ENG -->|operator can't now| DEF["DEFER: bd comment why, or the class-4 ENTRY MARKER<br/>naming the design question + SEARCH TERM →<br/>bd update --defer +7d --status open --assignee ''<br/>plus --add-label planning-session-required on first application<br/>(keep human AND worktree-review AND planning-session-required<br/>AND the promoted priority), add id to skip-set"]
+    STL -->|"under --no-engage: no operator to confirm or ask"| LEAVE
+    ENG -->|"now drain-doable"| REL["RELEASE (atomic): commit only the blocker-lift artifact →<br/>bd comment (precondition rewritten as an OUTCOME) →<br/>bd update --remove-label human,attention,human-focus-required (+stale-precondition,<br/>+worktree-review with --priority prior) --status open --assignee '' (one call)"]
+    ENG -->|"obsolete, confirmed"| CLO["CLOSE: if worktree-review, FIRST<br/>bd update --remove-label worktree-review --priority prior (keep human) →<br/>bd close (+ worktree-review follow-up, planned operator work: bd create<br/>--labels human,worktree-review, if a worktree is left, then id in left and the tracking file)"]
+    ENG -->|"blocker is a design SESSION, not an answerable question: do NOT present it, ENTRY MARKER comment, LEAVE adding planning-session-required"| LEAVE
+    ENG -->|"operator can't now, or --no-engage"| LEAVE
+    ENG -->|"operator instructs a defer: their window"| DEF
     REL --> C
     CLO --> C
     DEF --> C
@@ -1464,7 +1658,9 @@ mislabeled);
 **genuine-human** beads serialize on the one operator, so many interactive sessions at once buy
 little for those. Safe to run alongside `/drain-beads` — each RELEASE hands a bead to
 the drain pool; the two operate on disjoint claim sets (`--label human` — by default also
-excluding `human-focus-required` — vs `--exclude-label human,human-focus-required`).
+excluding `human-focus-required` — vs `--exclude-label human,human-focus-required`). Each
+session's `left` set and tracking directory are its own, so a peer may claim a bead this
+session left; run ONE `--monitor-if-empty` session at a time (see "Known limitations").
 
 ## Known limitations (accepted trade-offs)
 
@@ -1486,9 +1682,27 @@ excluding `human-focus-required` — vs `--exclude-label human,human-focus-requi
   operator's apply round-trips harmlessly (self-correcting churn) — see above.
 - **An unrecorded planning session is invisible.** Class 4's re-check reads artifacts, so a design
   session held entirely in conversation and never written down anywhere reads as "not happened" and
-  the bead keeps deferring. That is the deliberate cost of rule 5 (absence of evidence is decisive):
+  the bead keeps being left. That is the deliberate cost of rule 5 (absence of evidence is decisive):
   the alternative — assuming a session happened — silently RELEASEs a bead with no design to build
   on. The fix is to record the outcome where the marker's SEARCH TERM will find it, not to relax the
   rule.
+- **Chatty beads re-triage.** A bead whose comments change every few hours (an alert bead with
+  probe comments) changes `comment_count`, so it is re-triaged after each change: a few extra
+  reads per wake.
+- **The tracking directory is per session.** A new session re-triages every left bead once.
+- **A LEAVE writes no comment of its own.** A comment is written first only where this file
+  names one (the class-4 entry marker and a changed recheck, the class-3 comment, the
+  `human-focus-required` labelling, the Container guard FRESHNESS comment); otherwise the reason
+  for a LEAVE lives only in the pass report and the tracking file.
+- **Several `--monitor-if-empty` sessions churn.** Each LEAVE bumps `updated_at`, which
+  invalidates every peer session's tracking key, so concurrent monitor sessions re-claim each
+  other's left beads. Run one monitor session, or accept the churn (documented, not fixed).
+- **Changes outside the bead row wait for the 24 h bound.** An ADR landing for class 4, or a
+  dependency closing for class 3, is re-checked only once the tracking file's 24 h bound passes.
+- **An external-event DEFER is re-triaged daily.** The `+1d` window brings the bead back every
+  day, and each re-defer writes a comment (more `comment_count` churn).
+- **The write-allowlist fallback.** Where the scratchpad is not under a write-allowed root, or
+  the Write tool refuses the missing `left/` directory, tracking is skipped (reported once) and
+  only the in-memory `left` set bounds the run, so a wake re-triages beads left earlier.
 - **in_progress human beads untouched.** `bd ready` excludes `in_progress`, so a human bead
   already owned/in-flight is never claimed.

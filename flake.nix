@@ -2128,6 +2128,39 @@
                     touch $out
                   '';
 
+              # LEAVE terminal action and narrowed DEFER for /pb:unblock-human-beads (bead
+              # pg2-8gvdfi): text assertions over the command file, each with a mutated-copy
+              # negative control that fails exactly one assertion, plus contract checks of the
+              # tracking key (updated_at, comment_count) against the REAL bd (embedded Dolt,
+              # `env -i`, throwaway workspace; no shared server). This pins the flake's
+              # llm-agents beads, not the machine's bd.
+              test-pb-unblock-leave =
+                let
+                  pbUnblockSrc = lib.fileset.toSource {
+                    root = ./claude-marketplace/pb;
+                    fileset = ./claude-marketplace/pb/commands/unblock-human-beads.md;
+                  };
+                in
+                pkgs.runCommand "test-pb-unblock-leave"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.jq
+                      pkgs.git
+                      pkgs.gawk
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.coreutils
+                      (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
+                    ];
+                  }
+                  ''
+                    export PBUL_CMD="${pbUnblockSrc}/commands/unblock-human-beads.md"
+                    export HOME="$TMPDIR"
+                    bats --verbose-run ${./tests/pb-unblock-leave.bats}
+                    touch $out
+                  '';
+
               # ccpool-pools Grafana dashboard guard (bead pg2-om899.8): the JSON
               # parses, carries the fixed uid, and every panel query references only
               # the metric names the plan enumerates (a typo'd or invented series
