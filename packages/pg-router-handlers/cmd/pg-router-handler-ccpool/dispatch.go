@@ -120,6 +120,16 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	// warrants a session launches none. Read-only; fails open, except that a
 	// connector answer of class unavailable declines retryably.
 	if skip, skipped := executor.Precheck(ctx, dctx, deps, bead); skipped {
+		if skip.Moot {
+			// A MOOT outcome (bead closed, PR merged, bead no longer escalated) is
+			// accepted and COMPLETED as skipped, never declined: a decline is
+			// re-offered until the event expires and, the queue being a serial FIFO
+			// per handler, a dead event at the head would block every later one. The
+			// reply's skipped field lets the router count it apart from a real
+			// completion (bead pg2-6t91v7).
+			wire.WriteReply(stdout, wire.SkippedReply(req.ID, skip.Reason, dctx.Item.ID))
+			return conformance.ExitOK
+		}
 		decline := wire.NeutralDecline(skip.Reason, skip.Detail)
 		if skip.Retryable {
 			// A retryable skip proves nothing moot: it is routine backpressure the

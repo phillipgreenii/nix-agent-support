@@ -396,6 +396,9 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// pg_router_role_{last_progress_age_seconds,unsuccessful_since_progress,
 	// busy_since_progress}{role}, counted in roleListener.Offer (docket pg2-12gr4.8).
 	o.RoleProgressObserver = emitter
+	// pg_router_skipped_total{type,role,reason}: an offer the handler accepted and
+	// completed as skipped (bead pg2-6t91v7), kept out of pg_router_throughput_total.
+	o.SkippedObserver = emitter
 	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithEarlyEvictionTypes(cfg.EarlyEvictionTypes...), eventqueue.WithGateObserver(emitter),
 		// Compact queue.jsonl down to live state: once at startup (before the queue
 		// replays it or accepts an event) and, at runtime, whenever it outgrows

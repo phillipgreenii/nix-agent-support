@@ -358,6 +358,24 @@ func TestPushInjectRefResolves(t *testing.T) {
 	}
 }
 
+// A skipped completion (bead pg2-6t91v7) is an inline outcome reply with the
+// optional skipped reason; the closed object still rejects a skipped of the wrong
+// type and an unknown sibling.
+func TestDispatchReplySkippedField(t *testing.T) {
+	ok := map[string]any{"schemaVersion": "1", "id": "dsp-1", "outcome": "{}", "skipped": "skipped-bead-closed"}
+	if err := Validate("handler.dispatch-reply", ok); err != nil {
+		t.Fatalf("a skipped completion was rejected: %v", err)
+	}
+	bad := map[string]any{"schemaVersion": "1", "id": "dsp-1", "outcome": "{}", "skipped": true}
+	if err := Validate("handler.dispatch-reply", bad); err == nil {
+		t.Fatal("a non-string skipped was accepted")
+	}
+	unknown := map[string]any{"schemaVersion": "1", "id": "dsp-1", "outcome": "{}", "skip": "x"}
+	if err := Validate("handler.dispatch-reply", unknown); err == nil {
+		t.Fatal("an unknown sibling of outcome was accepted")
+	}
+}
+
 // DeclineDetailMaxLen is the Go-side copy of the decline body's detail bound
 // that an adapter imports; it MUST equal the schema file's own maxLength.
 func TestDeclineDetailMaxLenMatchesSchema(t *testing.T) {

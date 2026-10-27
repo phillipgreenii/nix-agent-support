@@ -93,3 +93,32 @@ func TestOutcomeReply_startedAtOnlyWhenSet(t *testing.T) {
 		t.Errorf("reply = %v", r)
 	}
 }
+
+// A moot precheck outcome is completed as skipped (bead pg2-6t91v7): an ordinary
+// inline-outcome reply plus the optional skipped reason, valid against the
+// handler.dispatch-reply schema, and carrying none of the decline body's fields.
+func TestSkippedReply_isAnOutcomeReplyWithTheReason(t *testing.T) {
+	reply := SkippedReply("dsp-1", "skipped-bead-closed", "pg2-x")
+	if err := schemas.Validate("handler.dispatch-reply", reply); err != nil {
+		t.Fatalf("the skipped reply does not validate: %v", err)
+	}
+	if reply["skipped"] != "skipped-bead-closed" || reply["id"] != "dsp-1" || reply["schemaVersion"] != schemas.SchemaVersion {
+		t.Fatalf("reply = %v", reply)
+	}
+	for _, decline := range []string{"reason", "kind", "detail", "deferred", "startedAt"} {
+		if _, has := reply[decline]; has {
+			t.Errorf("a skipped completion must not carry %q: %v", decline, reply)
+		}
+	}
+	out, _ := reply["outcome"].(string)
+	var fields struct {
+		Actions []struct {
+			Verb string `json:"verb"`
+			Refs []struct{ Type, ID string }
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal([]byte(out), &fields); err != nil || len(fields.Actions) != 1 ||
+		fields.Actions[0].Verb != "skipped" || len(fields.Actions[0].Refs) != 1 || fields.Actions[0].Refs[0].ID != "pg2-x" {
+		t.Fatalf("outcome = %q (%v), want the one skipped action for pg2-x", out, err)
+	}
+}

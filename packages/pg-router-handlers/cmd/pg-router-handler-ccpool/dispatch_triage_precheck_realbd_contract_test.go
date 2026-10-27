@@ -190,9 +190,9 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 	}{
 		{"open escalated bead launches as before", openEscalated, wire.BusyReasonPoolUnreadable},
 		{"open escalated bead held by a peer launches as before", peerHeld, wire.BusyReasonPoolUnreadable},
-		{"closed bead is declined", closed, "skipped-bead-not-open"},
+		{"closed bead is completed as skipped", closed, "skipped-bead-closed"},
 		{"human bead is declined", human, "skipped-bead-human"},
-		{"de-escalated bead is declined", deEscalated, "skipped-bead-not-escalated"},
+		{"de-escalated bead is completed as skipped", deEscalated, "skipped-bead-not-escalated"},
 		{"deferred bead is declined", deferred, "skipped-bead-deferred"},
 		{"blocked bead is declined", blocked, "skipped-bead-blocked"},
 		{"unreadable bead fails open", unreadable, wire.BusyReasonPoolUnreadable},
@@ -211,12 +211,19 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 			defer slog.SetDefault(prevLog)
 			code, got := dispatchWith(t, triager.name, triager.cfg, "", `{"id":"e-1","type":"dispatch","payload":{"id":"`+tc.id+`","type":"task"}}`)
 			var reply struct {
-				Reason string `json:"reason"`
+				Reason  string `json:"reason"`
+				Skipped string `json:"skipped"`
 			}
 			if err := json.Unmarshal([]byte(got), &reply); err != nil {
 				t.Fatalf("stdout = %q, not valid JSON: %v", got, err)
 			}
-			if code != conformance.ExitBusy || reply.Reason != tc.wantReason {
+			// A MOOT outcome (closed, de-escalated) is completed as skipped (exit 0,
+			// bead pg2-6t91v7); every other precheck outcome is still a busy decline.
+			if moot := tc.wantReason == "skipped-bead-closed" || tc.wantReason == "skipped-bead-not-escalated"; moot {
+				if code != conformance.ExitOK || reply.Skipped != tc.wantReason || reply.Reason != "" {
+					t.Fatalf("got exit %d skipped %q reason %q, want ExitOK completed as skipped %q", code, reply.Skipped, reply.Reason, tc.wantReason)
+				}
+			} else if code != conformance.ExitBusy || reply.Reason != tc.wantReason {
 				t.Fatalf("got exit %d reason %q, want ExitBusy with %q", code, reply.Reason, tc.wantReason)
 			}
 			// The bead read must really have happened (or really failed): a launch

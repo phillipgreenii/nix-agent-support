@@ -18,11 +18,13 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 )
 
-// The three precheck skip reasons (INV-CCH-22, bead pg2-5x29j). Each is the
-// busy-decline reason the handler replies with, so pg-router core's
-// pg_router_failures{class=declined,reason=...} counts each case separately.
-// They share the "skipped-" prefix so one alert matcher can exclude them as
-// routine, non-failing declines.
+// The three review precheck skip reasons (INV-CCH-22, bead pg2-5x29j). Each is
+// the reason tag of one precheck outcome. A MOOT outcome (see Moot) is accepted
+// and completed as skipped, its reason carried by the reply's skipped field; a
+// non-moot outcome is the busy-decline reason the handler replies with, so
+// pg-router core's pg_router_failures{class=declined,reason=...} counts each case
+// separately. They share the "skipped-" prefix so one alert matcher can exclude
+// the declines as routine, non-failing ones.
 const (
 	SkipBeadClosed    = "skipped-bead-closed"
 	SkipPRMerged      = "skipped-pr-merged"
@@ -88,6 +90,25 @@ const defaultConnectorBinary = "pg-connector"
 // review-pr bead (the same role-name convention INV-CCH-12 uses).
 const reviewRoleName = "review"
 
+// Moot reports whether a precheck outcome with this reason proves the event moot:
+// nothing it asks for can ever need doing, so the handler ACCEPTS the event and
+// COMPLETES it as skipped instead of declining it (INV-CCH-22, operator ruling
+// 2026-10-26, bead pg2-6t91v7). A decline is re-offered until the event expires,
+// and the queue is a per-handler serial FIFO, so a dead event declined at the head
+// blocks every later event for the handler; a completion settles it on its first
+// offer. Exactly three outcomes are moot: the bead is closed, the PR is merged, the
+// bead no longer carries the escalated label. Every other outcome stays a decline
+// because the work still exists and a completion would drop it: a pending review
+// awaiting submission, a human or not-groomed bead, a blocked, deferred, claimed or
+// otherwise not-open bead, and an unavailable connector.
+func Moot(reason string) bool {
+	switch reason {
+	case SkipBeadClosed, SkipPRMerged, SkipBeadNotEscalated:
+		return true
+	}
+	return false
+}
+
 // Skip is a precheck decision to launch no session for a dispatch.
 type Skip struct {
 	// Reason is one of the Skip* constants; it is the busy-decline reason tag.
@@ -98,6 +119,9 @@ type Skip struct {
 	// router re-offers the event, so the caller replies with a busy decline
 	// rather than a neutral one.
 	Retryable bool
+	// Moot is true when the outcome proves the event moot (Moot(Reason)): the
+	// caller completes the event as skipped rather than declining it.
+	Moot bool
 }
 
 // PendingReview is the part of pg-connector's review_pending record the
@@ -288,7 +312,8 @@ func Precheck(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issu
 // just fetched from `bd show` (no extra bd call), and declines when, in this
 // order:
 //
-//  1. the bead is not open (a deferred or blocked status gets its own reason);
+//  1. the bead is not open (a closed, deferred or blocked status gets its own
+//     reason; closed is MOOT, see Moot, the rest are declines);
 //  2. an actor other than the role's own holds or is assigned it;
 //  3. it carries human, human-focus-required, needs-split-review or escalated;
 //  4. it no longer carries has-acceptance-criteria;
@@ -316,6 +341,8 @@ func PrecheckReady(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) 
 	}
 	switch iss.Status {
 	case "open":
+	case "closed":
+		return decline(SkipBeadClosed, "the bead is closed")
 	case "deferred":
 		return decline(SkipBeadDeferred, "the bead's status is deferred")
 	case "blocked":
@@ -354,9 +381,10 @@ const escalatedLabel = complete.EscalatedLabel
 // RefreshItemIssue just fetched (no extra bd call). It declines when, in this
 // order:
 //
-//  1. the bead is not open (a deferred or blocked status gets its own reason);
+//  1. the bead is not open (a closed, deferred or blocked status gets its own
+//     reason; closed is MOOT, see Moot, the rest are declines);
 //  2. it carries human;
-//  3. it no longer carries escalated (it was de-escalated);
+//  3. it no longer carries escalated (it was de-escalated; MOOT, see Moot);
 //  4. its defer_until is in the future;
 //  5. it has an open blocks dependency.
 //
@@ -373,6 +401,8 @@ func PrecheckTriage(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool)
 	}
 	switch iss.Status {
 	case "open":
+	case "closed":
+		return decline(SkipBeadClosed, "the bead is closed")
 	case "deferred":
 		return decline(SkipBeadDeferred, "the bead's status is deferred")
 	case "blocked":
@@ -463,15 +493,17 @@ func unavailableSkip(err error) Skip {
 	return Skip{Reason: ReasonConnectorUnavailable, Detail: err.Error(), Retryable: true}
 }
 
-// skip logs a precheck decline with a message distinct per reason and records
-// it in the event log, then returns s. pr is "" for the bead-closed case.
+// skip logs a precheck outcome with a message distinct per reason and records
+// it in the event log, then returns s with Moot set from its reason. pr is ""
+// for the bead-closed case.
 func (d Deps) skip(dc DispatchContext, s Skip, pr string) Skip {
+	s.Moot = Moot(s.Reason)
 	var msg string
 	switch s.Reason {
 	case SkipBeadClosed:
-		msg = "dispatch declined: review bead already closed"
+		msg = "dispatch skipped: bead already closed"
 	case SkipPRMerged:
-		msg = "dispatch declined: PR already merged"
+		msg = "dispatch skipped: PR already merged"
 	case SkipPendingReview:
 		msg = "dispatch declined: pending review already covers the head"
 	case SkipBeadNotOpen:
@@ -487,7 +519,7 @@ func (d Deps) skip(dc DispatchContext, s Skip, pr string) Skip {
 	case SkipBeadBlocked:
 		msg = "dispatch declined: bead is blocked"
 	case SkipBeadNotEscalated:
-		msg = "dispatch declined: bead is no longer escalated"
+		msg = "dispatch skipped: bead is no longer escalated"
 	case ReasonConnectorUnavailable:
 		msg = "dispatch declined: connector unavailable, retry later"
 	default:

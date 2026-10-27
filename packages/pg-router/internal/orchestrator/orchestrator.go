@@ -144,6 +144,11 @@ type Orchestrator struct {
 	// NewListener like the observers above. cmd/pg-router's bootCore wires the
 	// metrics.Emitter in here.
 	RoleProgressObserver RoleProgressObserver
+	// SkippedObserver is notified of an offer the handler accepted and completed
+	// as skipped (bead pg2-6t91v7; see SkippedObserver in listener.go). nil
+	// disables it; captured by NewListener like the observers above.
+	// cmd/pg-router's bootCore wires the metrics.Emitter in here.
+	SkippedObserver SkippedObserver
 	// lastTick is the per-source next-fire substrate ProduceTick threads into
 	// discover.ProduceWithCadence (Task 1.3, discover.Cadence.LastTick): an
 	// Orchestrator OUTLIVES a single Produce call across `run`'s whole ticker

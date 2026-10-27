@@ -164,6 +164,54 @@ func TestUsageLimitHasNoAlertOfItsOwn(t *testing.T) {
 	}
 }
 
+// pg2-6t91v7: the handler's moot precheck outcomes (skipped-bead-closed,
+// skipped-pr-merged, skipped-bead-not-escalated) are accepted and completed as
+// skipped, so they are no longer declines and never reach pg_router_failures_total.
+// The residual still carries `skipped-.+` because the non-moot outcomes are still
+// declines, and the comment block above the rule says which is which and where the
+// moot ones are counted. A new skipped-* reason is excluded by the matcher either way.
+func TestResidualSkippedExclusionCoversTheNonMootDeclines(t *testing.T) {
+	m := regexp.MustCompile(`reason!~"([^"]+)"`).FindStringSubmatch(wantResidualExpr)
+	if m == nil {
+		t.Fatal("no reason!~ matcher in residual expr")
+	}
+	re := regexp.MustCompile("^(?:" + m[1] + ")$")
+	for _, reason := range []string{
+		// still declines (the work still exists; a completion would drop it)
+		"skipped-pending-review", "skipped-bead-human", "skipped-bead-not-groomed",
+		"skipped-bead-blocked", "skipped-bead-deferred", "skipped-bead-claimed", "skipped-bead-not-open",
+		// moot: completed as skipped, never a failure series; still matched in case of a stale series
+		"skipped-bead-closed", "skipped-pr-merged", "skipped-bead-not-escalated",
+	} {
+		if !re.MatchString(reason) {
+			t.Errorf("residual must exclude %q", reason)
+		}
+	}
+	// A connector outage is NOT moot and NOT excluded: it must keep paging.
+	if re.MatchString("connector-unavailable") {
+		t.Error("connector-unavailable must keep paging")
+	}
+	b, err := os.ReadFile("../../grafana/alerting/alerts.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	i := strings.Index(src, "reason=skipped-* is EXCLUDED too")
+	j := strings.Index(src, "- uid: pg-router-failure-rate\n")
+	if i < 0 || j < i {
+		t.Fatal("the failure-rate comment block lost its reason=skipped-* paragraph")
+	}
+	para := src[i:j]
+	for _, need := range []string{
+		"pg2-6t91v7", "pg_router_skipped_total", "skipped-bead-closed", "skipped-pr-merged",
+		"skipped-bead-not-escalated", "skipped-pending-review", "skipped-bead-not-open", "pg_router_throughput_total",
+	} {
+		if !strings.Contains(para, need) {
+			t.Errorf("the reason=skipped-* comment block must mention %q", need)
+		}
+	}
+}
+
 // pg2-fy2pm: the residual no longer matches reason=upstream-killed, but still
 // matches every reason the Emitter can attach otherwise (and no reason at
 // all), so an OOM/SIGKILL without "scriptout:" keeps paging individually.

@@ -635,6 +635,51 @@ func TestStalledDeclineStormHeldTheOldConditionForAFewMinutesOnly(t *testing.T) 
 	}
 }
 
+// A handler that completes moot events as skipped (pg2-6t91v7) instead of declining
+// them settles each one on its first offer, but the completion is counted on
+// pg_router_skipped_total and not on pg_router_throughput_total. Replay the
+// 2026-10-13 storm with every decline turned into such a skipped completion (the
+// same in-flight blip, now an accepted offer): the lane still has a backlog and no
+// real dispatch, so the rule pages exactly as it did for the declines, at every
+// scrape phase. The negative control counts the same skips as throughput, which is
+// what the router did before the skipped counter existed and what must not happen:
+// the progress clause then reads the stream as processing and the page never comes.
+func TestStalledMootSkipStormIsNotProgress(t *testing.T) {
+	declined := loadLane(t, stormFixture)
+	skipStorm := declined
+	skipStorm.skips, skipStorm.declines = declined.declines, nil
+	counted := skipStorm
+	counted.skipsAreThroughput = true
+
+	from := parseUTC("2026-10-13T20:45:00Z")
+	holdFrom, holdTo := parseUTC("2026-10-13T21:05:00Z"), parseUTC("2026-10-13T22:00:00Z")
+	for phase := time.Duration(0); phase < scrape; phase += time.Second {
+		viaDecline := replayStalled(declined.scrapes(stormScrapeStart.Add(phase), stormEnd), awakeIn(declined), from, stormEnd)
+		viaSkip := replayStalled(skipStorm.scrapes(stormScrapeStart.Add(phase), stormEnd), awakeIn(skipStorm), from, stormEnd)
+		for e := holdFrom; !e.After(holdTo); e = e.Add(evalEvery) {
+			if !viaSkip[e].cond {
+				t.Fatalf("phase %s: condition false at %s, a stream of moot skips read as processing", phase, e.Format("15:04:05"))
+			}
+		}
+		first, ok := firstWhere(viaSkip, from, stormEnd, isFiring)
+		wantFirst, wantOK := firstWhere(viaDecline, from, stormEnd, isFiring)
+		if !ok || !wantOK || !first.Equal(wantFirst) {
+			t.Fatalf("phase %s: the skip storm first paged at %v (found=%v), the decline storm at %v", phase, first, ok, wantFirst)
+		}
+		for e := first; !e.After(holdTo); e = e.Add(evalEvery) {
+			if !viaSkip[e].firing {
+				t.Fatalf("phase %s: alert not firing at %s, it resolved inside the idle stretch", phase, e.Format("15:04:05"))
+			}
+		}
+
+		// Negative control: the same skips counted as completions suppress the rule.
+		viaCounted := replayStalled(counted.scrapes(stormScrapeStart.Add(phase), stormEnd), awakeIn(counted), from, stormEnd)
+		if at, bad := firstWhere(viaCounted, parseUTC("2026-10-13T21:10:00Z"), holdTo, isFiring); bad {
+			t.Fatalf("phase %s: skips counted as throughput still page at %s, the control proves nothing", phase, at.Format("15:04:05"))
+		}
+	}
+}
+
 // Two D records of the storm fixture carry a daemon restart's re-offer as their
 // start, not the offer: 17:35:58Z (the session was created at 16:34:06Z) and
 // 19:48:46Z (created at 19:45:36Z); testdata/drain_pg2_2026-10-13.txt, "Re-timed

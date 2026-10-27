@@ -612,3 +612,60 @@ tests:
       - eval_time: 45m
         alertname: pg-router-queue-stalled
         exp_alerts: []
+
+  # Moot skips are not throughput (pg2-6t91v7). The handler accepts a moot event (bead closed, PR
+  # merged, bead no longer escalated) and completes it as skipped; the router counts that on
+  # pg_router_skipped_total and NOT on pg_router_throughput_total, so a lane that does nothing but
+  # skip dead events still has no completed dispatch. The skipped counter advances a few times a
+  # minute for the whole hour while the real throughput counter stays flat, and the backlog never
+  # drains: the alert must page exactly as it does for an idle lane (fires after the 9m window plus
+  # `for`). The rule's expression never reads the skipped series.
+  - name: moot skips advance the skipped counter, not the throughput counter, so a backlog behind them still pages
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="escalated.pg2",job="pg-router"}
+        values: "6x240"
+      - series: pg_router_listener_in_flight{role="pg2-escalation-triager",job="pg-router"}
+        values: "0x240"
+      - series: pg_router_skipped_total{type="escalated.pg2",role="pg2-escalation-triager",reason="skipped-bead-closed",job="pg-router"}
+        values: "0+2x240"
+      - series: pg_router_throughput_total{type="escalated.pg2",role="pg2-escalation-triager",job="pg-router"}
+        values: "7x240"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: escalated.pg2
+              job: pg-router
+              severity: warning
+      - eval_time: 60m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: escalated.pg2
+              job: pg-router
+              severity: warning
+
+  # The negative control for the case above: the same lane, but the skips ARE counted as throughput
+  # (what the router did before the skipped counter). The progress clause reads the stream as
+  # processing and the alert never fires, which is the masking the separate counter prevents.
+  - name: negative control, the same skips counted as throughput would mask the stall
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="escalated.pg2",job="pg-router"}
+        values: "6x240"
+      - series: pg_router_listener_in_flight{role="pg2-escalation-triager",job="pg-router"}
+        values: "0x240"
+      - series: pg_router_throughput_total{type="escalated.pg2",role="pg2-escalation-triager",job="pg-router"}
+        values: "0+2x240"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []

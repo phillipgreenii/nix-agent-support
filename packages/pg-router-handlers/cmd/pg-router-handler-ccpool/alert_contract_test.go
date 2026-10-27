@@ -125,7 +125,15 @@ func TestAlertContract_EveryEmittableReasonIsKnownToTheFailureRateRule(t *testin
 		"origin-unavailable":    {wire.DeclineKindNeutral, excluded},
 		"connector-unavailable": {wire.DeclineKindBusy, counted},
 	}
+	// A precheck skip is a neutral decline, except the MOOT outcomes (bead pg2-6t91v7),
+	// which are completed as skipped: not declines at all (no kind), so they never
+	// reach pg_router_failures_total. The rule's skipped-.+ matcher still covers
+	// them (and the non-moot declines), so all of them stay excluded.
 	for _, r := range skipReasonsInPrecheck(t) {
+		if executor.Moot(r) {
+			pins[r] = reasonPin{"", excluded}
+			continue
+		}
 		pins[r] = reasonPin{wire.DeclineKindNeutral, excluded}
 	}
 	// Reasons the core derives from a handler ERROR's text when a session ends
@@ -157,6 +165,10 @@ func TestAlertContract_EveryEmittableReasonIsKnownToTheFailureRateRule(t *testin
 	emitted[originprobe.ReasonOriginUnavailable] = wire.DeclineKindNeutral
 	emitted[executor.ReasonConnectorUnavailable] = wire.DeclineKindBusy
 	for _, r := range skipReasonsInPrecheck(t) {
+		if executor.Moot(r) {
+			emitted[r] = "" // completed as skipped, not a decline
+			continue
+		}
 		emitted[r] = wire.DeclineKindNeutral
 	}
 	emitted["usage-limit"] = ""

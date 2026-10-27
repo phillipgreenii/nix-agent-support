@@ -476,18 +476,39 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
 
 - **`INV-CCH-22`** <!-- uuid: 347d82ef-4149-4a35-945b-754ba35a8e6a --> — before a dispatch preflights anything that costs a session (capacity,
   isolation, launch), a role that opts in MUST have the handler check, read-only and at zero model
-  cost, that the dispatch is still worth running, and MUST decline it, launching no session and
-  writing nothing, when the check says no. The check is chosen by the role's `precheck` setting:
+  cost, that the dispatch is still worth running, and MUST launch no session and write nothing
+  when the check says no. The check is chosen by the role's `precheck` setting:
   `review` (also the default for the role named `review`, so that role is unchanged), `ready` or
-  `triage`; a role with none of them is never prechecked. The decline is the pre-accept busy decline of
-  `INV-CCH-6`, carrying one reason per case; every reason starts with `skipped-`, so the failure-rate
-  alert can exclude them as routine; each decline is logged with a message distinct per case and
-  written to the event log as a `precheck_skip` record carrying role, bead, PR (review only) and
-  reason. Every check MUST fail OPEN: an unreadable bead, an item that names no well-formed PR, or
+  `triage`; a role with none of them is never prechecked. What a "no" comes to depends on whether
+  the dispatch is MOOT, that is, nothing it asks for can ever need doing:
+  - **A moot outcome is accepted and completed as skipped, never declined.** The handler accepts
+    the event, does nothing, and replies with an inline outcome that also carries the reason as the
+    optional `skipped` field, so the router settles the event on its first offer and never
+    re-offers it. A decline is re-offered until the event expires and the queue is a serial FIFO
+    per handler (`DEC-EVENT-2`), so a dead event declined at the head of the queue blocks every
+    later event for that handler (observed 2026-10-15: a closed bead's event declined 288 times
+    over 15 hours while no other event of its type was dispatched; bead `pg2-57oql`). Exactly
+    three outcomes are moot: the bead is closed (`skipped-bead-closed`, for every check, a closed
+    status being read as this and not as not-open), the pull request is merged (`skipped-pr-merged`)
+    and the bead no longer carries `escalated` (`skipped-bead-not-escalated`). The router counts
+    the completion on its own counter (`pg_router_skipped_total`, by type, role and reason) and
+    NOT as throughput or as role progress, so a stream of them cannot make a stuck queue look
+    like it is progressing (`pg-router-queue-stalled`).
+  - **Every other outcome is declined** with the pre-accept busy decline of `INV-CCH-6`, carrying
+    one reason per case, because the work still exists and a completion would drop it:
+    `skipped-pending-review`, `skipped-bead-human`, `skipped-bead-not-groomed`,
+    `skipped-bead-blocked`, `skipped-bead-deferred`, `skipped-bead-claimed`,
+    `skipped-bead-not-open` (any status other than open and closed) and `connector-unavailable`.
+
+  Every `skipped-` reason starts with that prefix, so the failure-rate alert can exclude the
+  declines among them as routine. Each outcome, completed or declined, is logged with a message
+  distinct per case and written to the event log as a `precheck_skip` record carrying role, bead,
+  PR (review only) and reason. Every check MUST fail OPEN: an unreadable bead, an item that names no well-formed PR, or
   any connector failure (binary missing, timeout, error answer, malformed answer) is logged and the
   dispatch proceeds exactly as without this invariant, with ONE exception: a connector answer of
   error class `unavailable` (the `review` check only, below) declines the dispatch retryably.
-  - **`review`.** Decline when ANY of these holds, in this order: (a) the review bead is already
+  - **`review`.** Skip (the first two, moot: completed as skipped) or decline (the third) when ANY of
+    these holds, in this order: (a) the review bead is already
     closed (its status as just re-read at dispatch, no further bead call); (b) the pull request the
     item names (`<repo>#<number>` from the item's metadata) is merged; (c) the acting identity
     already has a pending review on that pull request that holds content for the PR's live head
@@ -515,8 +536,10 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     malformed answer) still fails open and launches.
   - **`ready`** (a role that works a bead it claims itself, such as a drain worker). The check
     reads only the bead as just re-read at dispatch (its status, assignee, labels, deferral date
-    and dependencies; no further bead call) and declines when ANY of these holds, in this order:
-    (a) the bead is not `open` (`skipped-bead-not-open`; a `deferred` or `blocked` status gets
+    and dependencies; no further bead call) and declines, except where it says moot, when ANY of
+    these holds, in this order:
+    (a) the bead is not `open` (`skipped-bead-not-open`; a `closed` status is MOOT and completed
+    as `skipped-bead-closed`; a `deferred` or `blocked` status gets
     `skipped-bead-deferred` or `skipped-bead-blocked` instead); (b) an actor other than the role's
     own actor holds or is assigned the bead (`skipped-bead-claimed`); (c) the bead now carries
     `human`, `human-focus-required`, `needs-split-review` or `escalated` (`skipped-bead-human`);
@@ -537,10 +560,12 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     does not claim). The check reads only the bead as just re-read at dispatch and declines unless
     the bead still matches the role's own discovery query (open, undeferred, unblocked, carrying
     `escalated`, not carrying `human`). It declines when ANY of these holds, in this order: (a)
-    the bead is not `open` (`skipped-bead-not-open`; a `deferred` or `blocked` status gets
-    `skipped-bead-deferred` or `skipped-bead-blocked` instead); (b) the bead carries `human`
-    (`skipped-bead-human`); (c) the bead no longer carries `escalated`, because it was
-    de-escalated after the event was queued (`skipped-bead-not-escalated`); (d) the bead's
+    the bead is not `open` (`skipped-bead-not-open`; a `closed` status is MOOT and completed as
+    `skipped-bead-closed`, which is the head-of-queue case of `pg2-57oql`; a `deferred` or
+    `blocked` status gets `skipped-bead-deferred` or `skipped-bead-blocked` instead); (b) the bead
+    carries `human` (`skipped-bead-human`); (c) the bead no longer carries `escalated`, because it
+    was de-escalated after the event was queued (MOOT, completed as
+    `skipped-bead-not-escalated`); (d) the bead's
     deferral date is in the future (`skipped-bead-deferred`); (e) the bead has an open `blocks`
     dependency (`skipped-bead-blocked`). Who holds the bead is NOT checked: the discovery query
     lists an open bead whatever its assignee, and this role never claims its bead. An unreadable
@@ -886,8 +911,8 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     close of `INV-CCH-17`.
   - **Redelivered finished work.** A redelivery of an event whose attempt has already settled (the
     narrow crash window, or a daemon restart that lands just as the attempt settles) is a dispatch
-    like any other. A role with a pre-launch check (`INV-CCH-22`) declines it at zero model cost
-    when its bead is already done, and the dispatch-time reconcile (`INV-CCH-14`) usually purges
+    like any other. A role with a pre-launch check (`INV-CCH-22`) completes it as skipped at zero
+    model cost when its bead is already closed, and the dispatch-time reconcile (`INV-CCH-14`) usually purges
     the settled session of a closed bead before the dispatch looks for one.
 
   **Not covered, accepted.**
@@ -1131,7 +1156,7 @@ changes a core gate or `INV-LIFE-2`.
     | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
     | `busy`    | `at-capacity` (a usage-limit refusal maps here, so a usage window never pages), `session-in-flight`, `command-busy`, `connector-unavailable` (the `review` precheck, `INV-CCH-22`) |
     | `fault`   | `capacity-unknown`, `pool-unreadable`, `low-disk`, `launch-failed`                                                                                                                 |
-    | `neutral` | `origin-unavailable` (the origin gate has its own rule, `INV-CCH-10`) and every `skipped-*` reason (a dispatch proven moot, `INV-CCH-22`)                                          |
+    | `neutral` | `origin-unavailable` (the origin gate has its own rule, `INV-CCH-10`) and every non-moot `skipped-*` reason (`INV-CCH-22`; a moot one is completed as skipped, not declined)       |
 
   - **The detail.** `detail` says why, for a reader. It is bounded, and redacted with the masking of
     `INV-CCH-9`, and the core never parses it. It MUST NOT carry an item's content, a prompt or the

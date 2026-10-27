@@ -282,6 +282,17 @@ groups:
       # that settled inside the window is processing too. Nothing is processing a
       # type only when no dispatch is outstanding AND none completed for 10 minutes.
       #
+      # Moot skips are not processing (pg2-6t91v7). A handler that finds an event moot
+      # (its bead closed, its PR merged, its bead no longer escalated) accepts it and
+      # completes it as skipped. The router counts that on pg_router_skipped_total and
+      # NOT on pg_router_throughput_total, so a lane that is only skipping dead events
+      # still has no completed dispatch for this clause, and a stuck lane is not masked
+      # by a stream of no-op completions. Each skipped offer is in flight for a moment,
+      # like a decline, which the in-flight run test above already discounts
+      # (internal/alertrules/queue_stalled_test.go,
+      # TestStalledMootSkipStormIsNotProgress; the rule-tests case "moot skips advance
+      # the skipped counter, not the throughput counter" and its negative control).
+      #
       # Window and hold. 10m window with at least 18 of its 20 scrapes (30s scrape
       # interval, the 10% slack of the other rules), `for: 5m`: a lane pages after
       # about 15 minutes idle. A healthy lane starts its next dispatch 0 to 150
@@ -592,12 +603,26 @@ groups:
       # budget-exceeded, and ranks below triager-failure, budget-exceeded and
       # upstream-killed.
       #
-      # reason=skipped-* is EXCLUDED too (pg2-5x29j): pg-router-handler-ccpool's
-      # review precheck declines a dispatch it has proven moot at zero
-      # model cost -- skipped-bead-closed, skipped-pr-merged, skipped-pending-review.
+      # reason=skipped-* is EXCLUDED too (pg2-5x29j, narrowed by pg2-6t91v7):
+      # pg-router-handler-ccpool's dispatch precheck declines a dispatch it has
+      # proven not worth a session at zero model cost. Since pg2-6t91v7 only the
+      # NON-moot outcomes are still declines: skipped-pending-review,
+      # skipped-bead-human, skipped-bead-not-groomed, skipped-bead-blocked,
+      # skipped-bead-deferred, skipped-bead-claimed and skipped-bead-not-open.
       # They are re-offered until the event expires, so a sustained nonzero rate is
       # expected and healthy; their per-reason counts stay visible on
-      # pg_router_failures_total{class="declined"} for dashboards.
+      # pg_router_failures_total{class="declined"} for dashboards. The three MOOT
+      # outcomes -- skipped-bead-closed, skipped-pr-merged and
+      # skipped-bead-not-escalated -- are no longer declines at all: the handler
+      # accepts the event and completes it as skipped, so the router settles it on its
+      # first offer (a re-offered dead event at the head of the serial per-handler
+      # queue blocked every later event: pg2-57oql). They are counted on
+      # pg_router_skipped_total{type,role,reason}, never on pg_router_failures_total
+      # (so this rule never sees them) and never on pg_router_throughput_total (so
+      # a stream of them cannot read as processing in pg-router-queue-stalled's
+      # `unless ... increase(pg_router_throughput_total[10m]) > 0` clause). The
+      # `skipped-.+` matcher below is unchanged: it still has to exclude the
+      # non-moot declines.
       #
       # reason=launch-failed is EXCLUDED too (docket pg2-12gr4.8): a ccpool session
       # that failed before it was ready is declined with kind fault, and a role that

@@ -377,6 +377,16 @@ instant and this offer's own start. It **MUST** ignore, and log, one outside tha
 and a reply without the field **MUST** leave the offer's own start, so a handler that adopts nothing
 is unaffected (`DEC-EVENT-5`).
 
+**A moot dispatch is completed as skipped, not declined.** A handler that finds a dispatch moot
+(its bead already closed, say) **MUST** accept it and reply with an inline outcome that also
+carries the optional `skipped`, a short reason tag, instead of declining it: a decline is
+re-offered until the event expires, and the per-handler queue is serial (`DEC-EVENT-2`), so a dead
+event declined at the head would block every later event. The core **MUST** treat the reply as an
+ordinary accept (the event settles on its first offer), **MUST** count it apart from a real
+completion (the **skipped** counter, never **throughput**) and **MUST NOT** treat it as the role's
+progress. The reason is the handler's own vocabulary and the core never reads it beyond bounding it
+as a label (`GOAL-MIN-1`).
+
 **A handler's run status is not part of this contract.** The core's delivery responsibility ends at
 acceptance (`INV-EVT-1`, `INV-FAIL-1`), so how far a handler has got, what it is doing, and how it
 finished are the **handler's** to expose on the **handler's own** surface (for a session-backed
@@ -617,7 +627,10 @@ sequenceDiagram
 
   and, alongside those catalog members, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
   metrics an observer watches to tell a busy system from a stalled one (`STORY-OBS-1`):
-  **throughput** is a counter per `type` **and** `role` (the accepting handler role); **enqueued** is
+  **throughput** is a counter per `type` **and** `role` (the accepting handler role) of REAL
+  completions; a completion the handler marks skipped (below) is NOT counted in it but in
+  **skipped**, a counter per `type`, `role` and `reason`, so a stream of no-op completions cannot
+  read as progress; **enqueued** is
   a counter per `type`: the events admitted to the queue (a duplicate id, a restored event, a refused
   admission and the Gate Registry's own records are not arrivals), the arrivals that throughput's
   completions are weighed against, less the events the queue retired without any handler accepting

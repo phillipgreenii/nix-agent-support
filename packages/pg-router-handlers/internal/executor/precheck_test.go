@@ -64,7 +64,7 @@ func TestPrecheckReview_SkipReasons(t *testing.T) {
 			bead:      closedBead(),
 			pr:        &fakePR{},
 			want:      SkipBeadClosed,
-			wantMsg:   "review bead already closed",
+			wantMsg:   "dispatch skipped: bead already closed",
 			wantCalls: nil,
 		},
 		{
@@ -72,7 +72,7 @@ func TestPrecheckReview_SkipReasons(t *testing.T) {
 			bead:      openBead(),
 			pr:        &fakePR{merged: true},
 			want:      SkipPRMerged,
-			wantMsg:   "PR already merged",
+			wantMsg:   "dispatch skipped: PR already merged",
 			wantCalls: []string{"merged o/r#120058"},
 		},
 		{
@@ -80,7 +80,7 @@ func TestPrecheckReview_SkipReasons(t *testing.T) {
 			bead:      openBead(),
 			pr:        &fakePR{pending: PendingReview{Pending: true, Stale: false}},
 			want:      SkipPendingReview,
-			wantMsg:   "pending review already covers the head",
+			wantMsg:   "dispatch declined: pending review already covers the head",
 			wantCalls: []string{"merged o/r#120058", "pending o/r#120058"},
 		},
 	}
@@ -467,7 +467,7 @@ func TestPrecheckReady_SkipReasons(t *testing.T) {
 	}{
 		{"unreadable bead fails open", nil, ""},
 		{"open, unassigned, groomed proceeds", with(func(*beads.Issue) {}), ""},
-		{"closed", with(func(i *beads.Issue) { i.Status = "closed" }), SkipBeadNotOpen},
+		{"closed", with(func(i *beads.Issue) { i.Status = "closed" }), SkipBeadClosed},
 		{"in_progress by a peer", with(func(i *beads.Issue) { i.Status = "in_progress"; i.Assignee = "someone-else" }), SkipBeadNotOpen},
 		{"open but assigned to a peer", with(func(i *beads.Issue) { i.Assignee = "someone-else" }), SkipBeadClaimed},
 		{"open assigned to own actor proceeds", with(func(i *beads.Issue) { i.Assignee = readyActor }), ""},
@@ -563,7 +563,7 @@ func TestPrecheckTriage_SkipReasons(t *testing.T) {
 		{"unreadable bead fails open", nil, ""},
 		{"open escalated proceeds", with(func(*beads.Issue) {}), ""},
 		{"open escalated assigned to a peer proceeds (bd ready lists it)", with(func(i *beads.Issue) { i.Assignee = "someone-else" }), ""},
-		{"closed", with(func(i *beads.Issue) { i.Status = "closed" }), SkipBeadNotOpen},
+		{"closed", with(func(i *beads.Issue) { i.Status = "closed" }), SkipBeadClosed},
 		{"in_progress", with(func(i *beads.Issue) { i.Status = "in_progress" }), SkipBeadNotOpen},
 		{"human", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "human") }), SkipBeadHuman},
 		{"de-escalated", with(func(i *beads.Issue) { i.Labels = []string{"agent-support"} }), SkipBeadNotEscalated},
@@ -631,8 +631,8 @@ func TestPrecheck_selection(t *testing.T) {
 		dc   DispatchContext
 		want string
 	}{
-		{"ready on any role name", mk("drain", roles.PrecheckReady), SkipBeadNotOpen},
-		{"triage on any role name", mk("escalation-triager", roles.PrecheckTriage), SkipBeadNotOpen},
+		{"ready on any role name", mk("drain", roles.PrecheckReady), SkipBeadClosed},
+		{"triage on any role name", mk("escalation-triager", roles.PrecheckTriage), SkipBeadClosed},
 		{"explicit review on any role name", mk("drain", roles.PrecheckReview), SkipBeadClosed},
 		{"no setting, role named review (historical)", mk("review", roles.PrecheckNone), SkipBeadClosed},
 		{"no setting, other role: never prechecked", mk("drain", roles.PrecheckNone), ""},

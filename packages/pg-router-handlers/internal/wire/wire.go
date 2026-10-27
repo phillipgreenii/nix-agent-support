@@ -26,6 +26,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
 	"github.com/phillipgreenii/pg-router-handlers/internal/failsig"
+	"github.com/phillipgreenii/pg-router-handlers/internal/report"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -70,6 +71,25 @@ func OutcomeReply(id, outcome string, startedAt time.Time) map[string]any {
 	if !startedAt.IsZero() {
 		reply["startedAt"] = ccpool.FormatMetaTime(startedAt)
 	}
+	return reply
+}
+
+// SkippedReply builds the inline-outcome handler.dispatch-reply of a MOOT
+// precheck outcome (INV-CCH-22, bead pg2-6t91v7): the handler accepts the event
+// and completes it without doing any work. It is an ordinary outcome reply
+// (outcome: the one-action {"verb":"skipped"} result for beadID) plus the
+// optional skipped field naming the reason tag, which is how pg-router core tells
+// it from a real completion and counts it separately
+// (pg_router_skipped_total, not pg_router_throughput_total). reason is one of the
+// executor's moot Skip* tags.
+func SkippedReply(id, reason, beadID string) map[string]any {
+	res := report.Result{Actions: []report.Action{{
+		Verb: report.Skipped,
+		Refs: []report.Ref{{Type: "bead", ID: beadID}},
+	}}}
+	outcome, _ := json.Marshal(res.Fields())
+	reply := OutcomeReply(id, string(outcome), time.Time{})
+	reply["skipped"] = reason
 	return reply
 }
 
@@ -149,7 +169,7 @@ const (
 // WriteBusyReply.
 type BusyDecline struct{ Reason, Kind, Detail string }
 
-// NeutralDecline is a decline of kind neutral (origin-unavailable and skipped-*):
+// NeutralDecline is a decline of kind neutral (origin-unavailable and the non-moot skipped-*):
 // the dispatch was not wanted or could not run for a reason that is neither
 // backpressure nor a fault. detail is redacted and bounded; "" omits it.
 func NeutralDecline(reason, detail string) BusyDecline {
@@ -202,7 +222,8 @@ func BoundedTailDetail(text string) string {
 //	busy:    at-capacity (usage-limit refusals map here, so a usage window never
 //	         pages), session-in-flight, command-busy
 //	fault:   capacity-unknown, pool-unreadable, low-disk, launch-failed
-//	neutral: origin-unavailable and skipped-* (NeutralDecline)
+//	neutral: origin-unavailable and the non-moot skipped-* outcomes (NeutralDecline);
+//	         a MOOT skipped-* outcome is not a decline at all (SkippedReply)
 //
 // Only launch-failed carries a detail: the redacted ccpool new error text, its
 // last bytes up to the schema bound (the stderr diagnosis is at the end).

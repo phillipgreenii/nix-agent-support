@@ -89,6 +89,23 @@ type HandlerFailureObserver interface {
 	OnHandlerFailure(eventID, evtType, listenerID string, err error)
 }
 
+// SkippedObserver is notified when Offer's dispatch was ACCEPTED and COMPLETED
+// by the handler as skipped (bead pg2-6t91v7): the handler's reply carried the
+// optional skipped reason because the event was moot (its bead already closed, its
+// PR merged, ...). The offer is an ordinary accept for the queue, which settles
+// the event on its first offer, so the head of a serial per-handler queue is never
+// blocked by a dead event. The observer is what keeps that no-op out of the
+// progress signals: OnSkipped fires before Offer returns, so the queue's OnAccept
+// for the same (eventID, listenerID) that follows moments later can be told apart
+// from a real completion. internal/metrics.Emitter counts it on
+// pg_router_skipped_total and does NOT advance pg_router_throughput_total (the
+// progress clause of the pg-router-queue-stalled rule), so a stream of moot skips
+// cannot make a stuck queue look like it is progressing. A skipped offer is also
+// not role progress (RoleProgressObserver is not told it succeeded).
+type SkippedObserver interface {
+	OnSkipped(eventID, evtType, listenerID, reason string)
+}
+
 // RoleProgressObserver is notified of what each offer to a role came to, for
 // the per-role progress gauges (pg_router_role_last_progress_age_seconds,
 // pg_router_role_unsuccessful_since_progress, pg_router_role_busy_since_progress;
@@ -196,6 +213,10 @@ type roleListener struct {
 	// progressObs is notified of each offer's outcome for the role-progress
 	// gauges, captured at construction like the observers above; nil disables it.
 	progressObs RoleProgressObserver
+	// skippedObs is notified of an accepted-and-completed-as-skipped offer
+	// (bead pg2-6t91v7), captured at construction like the observers above; nil
+	// disables the notification, not the accept.
+	skippedObs SkippedObserver
 	// maxRetries is role.MaxDispatchRetries clamped to
 	// roles.MaxDispatchRetriesCap; 0 disables the retry entirely.
 	maxRetries int
@@ -222,6 +243,7 @@ func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqu
 		handlerFailureObs: o.HandlerFailureObserver,
 		retryObs:          o.DispatchRetryObserver,
 		progressObs:       o.RoleProgressObserver,
+		skippedObs:        o.SkippedObserver,
 		maxRetries:        clampRetries(role.MaxDispatchRetries),
 	}
 }
@@ -479,7 +501,15 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	// whether or not the failed attempt is then handed back for a dispatch retry
 	// (the hand-back adds nothing); a clean finish is progress. A routine-sentinel
 	// error is progress too, which the observer decides.
-	if l.progressObs != nil {
+	//
+	// A reply that completed the event as skipped (bead pg2-6t91v7) did no work, so
+	// it is not progress either: the observer is told it was skipped instead, before
+	// Offer returns and the queue reports the accept.
+	skipped := err == nil && reply.Skipped != ""
+	if skipped && l.skippedObs != nil {
+		l.skippedObs.OnSkipped(evt.ID, evt.Type, l.role.Name, reply.Skipped)
+	}
+	if l.progressObs != nil && !skipped {
 		if err != nil {
 			l.progressObs.OnRoleFailed(l.role.Name, err)
 		} else {

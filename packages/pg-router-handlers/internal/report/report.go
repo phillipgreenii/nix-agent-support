@@ -27,6 +27,10 @@ const (
 	Unclaimed     Verb = "unclaimed"
 	Escalated     Verb = "escalated"     // add-human
 	Indeterminate Verb = "indeterminate" // preserves today's created="unknown" (snapshot read failed)
+	// Skipped is a moot precheck outcome accepted and completed without work
+	// (INV-CCH-22, bead pg2-6t91v7). This module's own addition to the otherwise
+	// verbatim copy: a verb is an opaque string to the core.
+	Skipped Verb = "skipped"
 )
 
 type Ref struct {

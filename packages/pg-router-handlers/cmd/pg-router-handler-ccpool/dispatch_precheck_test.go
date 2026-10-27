@@ -56,6 +56,25 @@ esac
 	return roleUnderTest{"review", configFrom(t, `{"ccpool":{"actor":"test-actor","completion":"close-or-handback","onFailure":"add-human","onDispatchFail":"unclaim","promptBody":"hello"}}`)}, connLog
 }
 
+// assertSkippedCompletion checks a reply is the accept-and-complete-as-skipped
+// outcome of a moot precheck: exit 0, an outcome string and the skipped reason, and
+// none of the decline body's reason/kind.
+func assertSkippedCompletion(t *testing.T, code int, reply map[string]any, wantReason string) {
+	t.Helper()
+	if code != conformance.ExitOK {
+		t.Fatalf("exit = %d (reply %v), want ExitOK (%d): a moot event is completed, never declined", code, reply, conformance.ExitOK)
+	}
+	if reply["skipped"] != wantReason {
+		t.Fatalf("skipped = %v (reply %v), want %q", reply["skipped"], reply, wantReason)
+	}
+	if out, _ := reply["outcome"].(string); !strings.Contains(out, `"verb":"skipped"`) {
+		t.Fatalf("outcome = %v, want the skipped action", reply["outcome"])
+	}
+	if _, declined := reply["reason"]; declined {
+		t.Fatalf("a skipped completion must not carry a decline reason: %v", reply)
+	}
+}
+
 func runDispatchReply(t *testing.T, r roleUnderTest, event string) (code int, reply map[string]any) {
 	t.Helper()
 	code, got := dispatchWith(t, r.name, r.cfg, "", event)
@@ -70,33 +89,44 @@ const (
 	staleReview = `{"result":{"pending":true,"review":{"stale":true}}}`
 )
 
-// The three precheck skips surface as the pre-accept busy decline carrying each
-// skip's own reason (the metric label pg-router core counts), and every other
-// review dispatch reaches the unchanged launch path (here: the prior-session
+// A MOOT precheck outcome (bead closed, PR merged) is accepted and COMPLETED as
+// skipped: exit 0 and an outcome reply carrying the optional skipped reason, so the
+// router settles the event on its first offer (bead pg2-6t91v7). The non-moot
+// skip (a pending review holds the head) is still the pre-accept busy decline
+// carrying its own reason (the metric label pg-router core counts), and every
+// other review dispatch reaches the unchanged launch path (here: the prior-session
 // read, which fails closed because the fake PATH has no ccpool).
 func TestDispatch_reviewPrecheck(t *testing.T) {
 	tests := []struct {
-		name       string
-		bead, pr   string
-		pending    string
-		wantReason string
-		wantCalls  int // pg-connector invocations
+		name        string
+		bead, pr    string
+		pending     string
+		wantReason  string // the decline reason, or the skipped reason of a completion
+		wantSkipped bool   // completed as skipped (exit 0) rather than declined (exit 9)
+		wantCalls   int    // pg-connector invocations
 	}{
-		{"bead closed", "closed", prOpen, noPending, "skipped-bead-closed", 0},
-		{"PR merged", "open", prMerged, noPending, "skipped-pr-merged", 1},
-		{"pending review covers the head", "open", prOpen, freshReview, "skipped-pending-review", 2},
-		{"launch path: nothing to skip", "open", prOpen, noPending, wire.BusyReasonPoolUnreadable, 2},
-		{"launch path: stale pending review", "open", prOpen, staleReview, wire.BusyReasonPoolUnreadable, 2},
+		{"bead closed", "closed", prOpen, noPending, "skipped-bead-closed", true, 0},
+		{"PR merged", "open", prMerged, noPending, "skipped-pr-merged", true, 1},
+		{"pending review covers the head", "open", prOpen, freshReview, "skipped-pending-review", false, 2},
+		{"launch path: nothing to skip", "open", prOpen, noPending, wire.BusyReasonPoolUnreadable, false, 2},
+		{"launch path: stale pending review", "open", prOpen, staleReview, wire.BusyReasonPoolUnreadable, false, 2},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			role, connLog := precheckEnv(t, tc.bead, tc.pr, tc.pending)
 			code, reply := runDispatchReply(t, role, reviewEvent)
-			if code != conformance.ExitBusy {
-				t.Fatalf("exit = %d, want ExitBusy (%d)", code, conformance.ExitBusy)
-			}
-			if reply["reason"] != tc.wantReason {
-				t.Fatalf("reason = %v, want %q", reply["reason"], tc.wantReason)
+			if tc.wantSkipped {
+				assertSkippedCompletion(t, code, reply, tc.wantReason)
+			} else {
+				if code != conformance.ExitBusy {
+					t.Fatalf("exit = %d, want ExitBusy (%d)", code, conformance.ExitBusy)
+				}
+				if reply["reason"] != tc.wantReason {
+					t.Fatalf("reason = %v, want %q", reply["reason"], tc.wantReason)
+				}
+				if _, completed := reply["outcome"]; completed {
+					t.Fatalf("a decline must not carry an outcome: %v", reply)
+				}
 			}
 			calls := 0
 			if b, err := os.ReadFile(connLog); err == nil {
@@ -179,7 +209,7 @@ func TestDispatch_readyPrecheck(t *testing.T) {
 		wantReason string
 	}{
 		{"groomed open bead launches", `{"id":"zr-d","status":"open",` + groomed + `}`, wire.BusyReasonPoolUnreadable},
-		{"closed", `{"id":"zr-d","status":"closed",` + groomed + `}`, "skipped-bead-not-open"},
+		{"closed is moot: completed as skipped, not declined", `{"id":"zr-d","status":"closed",` + groomed + `}`, "skipped-bead-closed"},
 		{"claimed by a peer", `{"id":"zr-d","status":"in_progress","assignee":"someone-else",` + groomed + `}`, "skipped-bead-not-open"},
 		{"human", `{"id":"zr-d","status":"open","labels":["has-acceptance-criteria","human"]}`, "skipped-bead-human"},
 		{"not groomed", `{"id":"zr-d","status":"open","labels":["x"]}`, "skipped-bead-not-groomed"},
@@ -191,9 +221,48 @@ func TestDispatch_readyPrecheck(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			code, reply := runDispatchReply(t, readyPrecheckEnv(t, tc.bead), `{"id":"e-1","type":"dispatch","payload":{"id":"zr-d","type":"task"}}`)
+			if tc.wantReason == "skipped-bead-closed" { // the one moot outcome of the ready precheck
+				assertSkippedCompletion(t, code, reply, tc.wantReason)
+				return
+			}
 			if code != conformance.ExitBusy || reply["reason"] != tc.wantReason {
 				t.Fatalf("got exit %d reply %v, want ExitBusy with %q", code, reply, tc.wantReason)
 			}
 		})
+	}
+}
+
+// The head-of-queue jam of 2026-10-15 (bead pg2-57oql, fixed by pg2-6t91v7): a
+// closed-bead escalated event at the head of a handler's queue used to be DECLINED
+// on every offer, so the router re-offered it until it expired and no later event
+// was dispatched for about 15 hours. The handler now accepts and completes it as
+// skipped, so it settles on its first offer. Driven through the real dispatch
+// wiring, the way the router drives its serial FIFO: the closed head is offered once
+// and completes (exit 0, skipped), and the very next event, the open escalated
+// bead behind it, is the one that reaches the launch path (here the prior-session
+// read, which fails closed because the fake PATH has no ccpool). The router-side
+// half (one offer, the next event dispatched in the same pass) is
+// internal/orchestrator's TestSkippedCompletion_SettlesOnFirstOfferAndTheNextEventIsDispatched.
+func TestDispatch_triageClosedHeadOfQueueSettlesOnItsFirstOffer(t *testing.T) {
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "bd.log")
+	t.Setenv("PATH", stubBin(t, map[string]string{"bd": `echo "$*" >> '` + calls + `'
+case "$*" in
+  *esc-closed*) printf '%s' '{"data":[{"id":"esc-closed","status":"closed","labels":["escalated"]}]}' ;;
+  *) printf '%s' '{"data":[{"id":"esc-open","status":"open","labels":["escalated"]}]}' ;;
+esac
+`}))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
+	triager := roleUnderTest{"triager", configFrom(t, `{"ccpool":{"actor":"test-actor","completion":"close-or-triage","precheck":"triage","onFailure":"add-human","onDispatchFail":"unclaim","promptBody":"hello"}}`)}
+	event := func(id string) string {
+		return `{"id":"e-` + id + `","type":"dispatch","payload":{"id":"` + id + `","type":"escalated.pg2"}}`
+	}
+
+	code, reply := runDispatchReply(t, triager, event("esc-closed"))
+	assertSkippedCompletion(t, code, reply, "skipped-bead-closed")
+
+	code, reply = runDispatchReply(t, triager, event("esc-open"))
+	if code != conformance.ExitBusy || reply["reason"] != wire.BusyReasonPoolUnreadable {
+		t.Fatalf("the event behind the settled head: got exit %d reply %v, want the unchanged launch path (pool-unreadable: no ccpool on PATH)", code, reply)
 	}
 }

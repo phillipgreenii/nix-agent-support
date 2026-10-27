@@ -250,7 +250,15 @@ func TestKilledHandlerDispatch_RetriedAsKilledAndExportedOnMetrics(t *testing.T)
 		t.Fatalf("recursion guard: %s is already set (%q) in the test process's own environment", selfTerminateSentinelEnv, v)
 	}
 
-	attemptsFile := filepath.Join(t.TempDir(), "attempts.log")
+	// Under os.TempDir() (TMPDIR) on purpose, not t.TempDir(): the helper refuses a
+	// path outside os.TempDir(), and t.TempDir() honors GOTMPDIR when it is set
+	// (as it is for the agent sessions and the commit hook), which puts it elsewhere.
+	attemptsDir, err := os.MkdirTemp("", "killed-dispatch-attempts")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(attemptsDir) })
+	attemptsFile := filepath.Join(attemptsDir, "attempts.log")
 
 	// Real exporter on an ephemeral loopback port.
 	var ln net.Listener

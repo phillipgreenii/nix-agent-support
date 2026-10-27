@@ -61,6 +61,12 @@ type Reply struct {
 	ID       string // echoes the dsp-<...> tracking id
 	Deferred bool
 	Outcome  string // opaque; internal/complete no longer lives here to interpret it (Task 5.5)
+	// Skipped is the reply's OPTIONAL skipped reason tag: the handler accepted the
+	// event and completed it WITHOUT doing any work because it was moot (bead
+	// pg2-6t91v7). "" for a real completion. It is relayed verbatim and only
+	// used to count the completion apart from a real one; the tag is the
+	// handler's own vocabulary and this package interprets nothing about it.
+	Skipped string
 	// StartedAt is the dispatch's own start as the handler reports it in the
 	// reply's OPTIONAL startedAt (DEC-EVENT-5, bead pg2-dm6de): a handler that
 	// ADOPTED a dispatch an earlier daemon had started names the instant that
@@ -278,6 +284,7 @@ type dispatchReply struct {
 	ID            string `json:"id"`
 	Deferred      bool   `json:"deferred,omitempty"`
 	Outcome       string `json:"outcome,omitempty"`
+	Skipped       string `json:"skipped,omitempty"`
 	Error         string `json:"error,omitempty"`
 	// StartedAt is the OPTIONAL adopted dispatch's own start (DEC-EVENT-5), kept
 	// raw so that a value of the wrong JSON type, like one that is not an RFC 3339
@@ -367,7 +374,7 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 		if reply.Error != "" {
 			return Reply{}, fmt.Errorf("wireclient: role %q: %s", role.Name, reply.Error)
 		}
-		return Reply{ID: reply.ID, Deferred: reply.Deferred, Outcome: reply.Outcome, StartedAt: reportedStart(role.Name, reply.StartedAt)}, nil
+		return Reply{ID: reply.ID, Deferred: reply.Deferred, Outcome: reply.Outcome, Skipped: reply.Skipped, StartedAt: reportedStart(role.Name, reply.StartedAt)}, nil
 	case 9: // DEC-WIRE-1's "Coarse exit codes": 9 is busy.
 		// The OPTIONAL busy-decline reply body (bead pg2-j4uwg): read
 		// opportunistically, exactly the same "peek at stdout on a non-zero

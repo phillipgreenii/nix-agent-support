@@ -33,9 +33,16 @@ type lane struct {
 	evict    []time.Time // events that left the queue (X)
 	disp     []span      // dispatches: offer in flight from..to, settled (accepted) at `to` (D)
 	declines []time.Time // offers the handler declined, as logged: in flight around the instant, never accepted (R)
-	retired  []time.Time // events retired without an accept: what pg_router_unconsumed_expired_total counts (U)
-	asleep   []span      // the host was asleep: no scrape in [from, to) (S)
-	holes    []span      // restart holes: a dispatch was running but the gauge read 0 in [from, to) (H)
+	// skips are offers the handler ACCEPTED and completed as skipped because the event was moot
+	// (pg2-6t91v7): in flight around the instant like a decline, and settled, but counted on
+	// pg_router_skipped_total, never on pg_router_throughput_total. Only built in code, no
+	// fixture record. skipsAreThroughput is the counterfactual in which they WERE counted as
+	// throughput, which the replays use as a negative control.
+	skips              []time.Time
+	skipsAreThroughput bool
+	retired            []time.Time // events retired without an accept: what pg_router_unconsumed_expired_total counts (U)
+	asleep             []span      // the host was asleep: no scrape in [from, to) (S)
+	holes              []span      // restart holes: a dispatch was running but the gauge read 0 in [from, to) (H)
 }
 
 func parseUTC(s string) time.Time {
@@ -127,6 +134,12 @@ func (l lane) inFlightAt(t time.Time) bool {
 			return true
 		}
 	}
+	// A skipped offer is in flight for as long as the precheck takes, like a decline.
+	for _, k := range l.skips {
+		if !t.Before(k.Add(-declineBefore)) && t.Before(k.Add(declineAfter)) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -182,6 +195,15 @@ func (l lane) scrapes(from, to time.Time) []obs {
 		for _, d := range l.disp {
 			if d.to.After(t.Add(-scrape)) && !d.to.After(t) {
 				o.settled = true
+			}
+		}
+		// A skipped completion settles too, but it advances pg_router_skipped_total, not
+		// the throughput counter the rule reads.
+		if l.skipsAreThroughput {
+			for _, k := range l.skips {
+				if k.After(t.Add(-scrape)) && !k.After(t) {
+					o.settled = true
+				}
 			}
 		}
 		out = append(out, o)

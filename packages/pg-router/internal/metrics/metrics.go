@@ -107,6 +107,14 @@ const (
 	// RecordThroughput's doc for why this task builds and exposes it without
 	// also wiring a live production call site.
 	MetricThroughput = "pg_router_throughput"
+	// MetricSkipped counts events the handler accepted and COMPLETED AS SKIPPED
+	// (bead pg2-6t91v7): moot ones (bead closed, PR merged, ...) it settled on their
+	// first offer without doing any work, per type, role and reason (exposed as
+	// pg_router_skipped_total). It is deliberately a counter of its own and NOT part
+	// of MetricThroughput: the pg-router-queue-stalled rule reads a throughput
+	// increase as "something was processed", and a stream of no-op completions must
+	// not make a stuck queue look like it is progressing.
+	MetricSkipped = "pg_router_skipped"
 	// MetricEnqueued counts events admitted to the queue, per type: the ARRIVAL
 	// half of the arrivals-versus-completions comparison the
 	// pg-router-queue-slow-growth alert makes against MetricThroughput (the
@@ -457,6 +465,7 @@ type Emitter struct {
 	unconsumed      metric.Int64Counter
 	unknownType     metric.Int64Counter
 	throughput      metric.Int64Counter
+	skipped         metric.Int64Counter
 	enqueued        metric.Int64Counter
 	sourceFailures  metric.Int64Counter
 	deduped         metric.Int64Counter
@@ -521,7 +530,27 @@ type Emitter struct {
 	mu      sync.Mutex
 	pending map[string]pendingDispatch
 	order   []string // insertion order, for FIFO eviction
+	// skippedMarks holds the (eventID, listenerID) pairs OnSkipped saw whose
+	// OnAccept has not yet arrived (also guarded by mu): the offer reported itself
+	// skipped just before it returned, and the queue's OnAccept for the same pair
+	// follows at once, which consumes the mark. Bounded (skippedMarksCap) so a mark
+	// that never meets its accept cannot grow without limit.
+	skippedMarks map[string]string
+	// skipReasonSeen is the bounded set of reason label values minted for the
+	// skipped counter (also guarded by mu).
+	skipReasonSeen map[string]struct{}
 }
+
+// skippedMarksCap bounds skippedMarks.
+const skippedMarksCap = 1024
+
+// maxSkipReasonLabels bounds how many distinct reason label values the skipped
+// counter mints per process; the rest fold into SkipReasonOther.
+const maxSkipReasonLabels = 16
+
+// SkipReasonOther is the reason label of a skipped completion whose reason tag is
+// not a short identifier or exceeds maxSkipReasonLabels distinct values.
+const SkipReasonOther = "other"
 
 // dispatchPendingCap bounds Emitter's eventID->pendingDispatch correlation
 // map — same shape and value as run.go's activityPendingTypesCap, which
@@ -739,6 +768,14 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		MetricThroughput,
 		metric.WithUnit("{event}"),
 		metric.WithDescription("events dispatched and accepted, per type (STORY-OBS-1)"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	skipped, err := m.Int64Counter(
+		MetricSkipped,
+		metric.WithUnit("{event}"),
+		metric.WithDescription("events the handler accepted and completed as skipped because they were moot, per type, role and reason; NOT counted in the throughput counter, so a no-op completion never reads as processing (bead pg2-6t91v7)"),
 	)
 	if err != nil {
 		return nil, err
@@ -1041,6 +1078,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	e.unconsumed = unconsumed
 	e.unknownType = unknownType
 	e.throughput = throughput
+	e.skipped = skipped
 	e.enqueued = enqueued
 	e.sourceFailures = sourceFailures
 	e.deduped = deduped
@@ -1057,6 +1095,8 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	e.gateDrops = gateDrops
 	e.now = cfg.now
 	e.pending = map[string]pendingDispatch{}
+	e.skippedMarks = map[string]string{}
+	e.skipReasonSeen = map[string]struct{}{}
 	e.preRecordZeroCounters()
 	return e, nil
 }
@@ -1219,8 +1259,19 @@ func (e *Emitter) seedPending(evt eventqueue.Event) {
 func (e *Emitter) OnAccept(eventID, listenerID string) {
 	e.mu.Lock()
 	p, ok := e.pending[eventID]
+	markKey := skipMarkKey(eventID, listenerID)
+	_, skipped := e.skippedMarks[markKey]
+	delete(e.skippedMarks, markKey)
 	e.mu.Unlock()
 	if !ok {
+		return
+	}
+	if skipped {
+		// The handler completed this accept as skipped (OnSkipped counted it): it
+		// is NOT throughput, so the stall rule's progress clause ignores it, and
+		// its latency is labeled apart from a real "accepted" completion.
+		elapsedMS := float64(e.now().Sub(p.enqueuedAt)) / float64(time.Millisecond)
+		e.RecordDispatchLatency(elapsedMS, "skipped", listenerID, p.typ)
 		return
 	}
 	e.RecordThroughput(p.typ, listenerID)
@@ -1229,6 +1280,55 @@ func (e *Emitter) OnAccept(eventID, listenerID string) {
 	// sample low against the histogram's own sub-10ms buckets.
 	elapsedMS := float64(e.now().Sub(p.enqueuedAt)) / float64(time.Millisecond)
 	e.RecordDispatchLatency(elapsedMS, "accepted", listenerID, p.typ)
+}
+
+func skipMarkKey(eventID, listenerID string) string { return eventID + "\x00" + listenerID }
+
+// OnSkipped implements orchestrator.SkippedObserver (structurally, without an
+// import, like OnHandlerFailure): roleListener.Offer calls it inline, just before
+// it returns an accepted OfferResult, when the handler's reply completed the event
+// as skipped because it was moot (bead pg2-6t91v7). It counts the completion on
+// MetricSkipped (type, role, reason) and marks the (eventID, listenerID) pair so
+// the queue's OnAccept, which follows for the same pair, records no throughput:
+// MetricThroughput stays the count of REAL completions, so the
+// pg-router-queue-stalled progress clause (`increase(pg_router_throughput_total[10m])
+// > 0`) is not fed by no-ops. reason is the handler's own tag, folded to a short
+// bounded label (skipReasonLabel).
+func (e *Emitter) OnSkipped(eventID, evtType, listenerID, reason string) {
+	label := e.skipReasonLabel(reason)
+	e.mu.Lock()
+	if len(e.skippedMarks) >= skippedMarksCap {
+		// A mark whose accept never arrived (it should not happen: Offer's accepted
+		// return always reaches OnAccept): drop the lot rather than grow. The only
+		// effect of a lost mark is one skipped event counted as throughput.
+		e.skippedMarks = map[string]string{}
+	}
+	e.skippedMarks[skipMarkKey(eventID, listenerID)] = label
+	e.mu.Unlock()
+	e.skipped.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("type", evtType),
+		attribute.String("role", listenerID),
+		attribute.String("reason", label),
+	))
+}
+
+// skipReasonLabel bounds the skipped counter's reason label like eventTypeLabel
+// bounds the type label: anything that is not a short [a-z][a-z0-9_.-]* tag, and
+// every distinct value past maxSkipReasonLabels, becomes SkipReasonOther.
+func (e *Emitter) skipReasonLabel(reason string) string {
+	if !validEventTypeLabel(reason) {
+		return SkipReasonOther
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, ok := e.skipReasonSeen[reason]; ok {
+		return reason
+	}
+	if len(e.skipReasonSeen) >= maxSkipReasonLabels {
+		return SkipReasonOther
+	}
+	e.skipReasonSeen[reason] = struct{}{}
+	return reason
 }
 
 // OnAcceptTiming implements eventqueue.TimingObserver (bead pg2-n7da9): it feeds

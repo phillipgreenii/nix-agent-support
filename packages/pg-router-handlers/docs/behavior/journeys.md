@@ -76,11 +76,15 @@ Extensions:
   start of a ccpool-backed session passes the whole environment again, and a send first checks that
   the session is live (`INV-CCH-38`).
 - 2h. A dispatch whose role opts in to the pre-launch check and whose check says the dispatch is
-  not worth running (`INV-CCH-22`): this module declines `busy` before any capacity, isolation or
-  launch step, with a reason that starts `skipped-`. For a REVIEW role that is a bead already
-  closed, a PR already merged, or a pending review that already holds content for the head
-  (`skipped-bead-closed`, `skipped-pr-merged`, `skipped-pending-review`). For a role that works a
-  bead it claims itself (`ready`) it is a bead that is no longer open, is held by another actor,
+  not worth running (`INV-CCH-22`): before any capacity, isolation or launch step this module
+  either COMPLETES the event as skipped, when it is moot (a bead already closed, a PR already
+  merged, a bead no longer escalated: `skipped-bead-closed`, `skipped-pr-merged`,
+  `skipped-bead-not-escalated`; the router settles it on its first offer and never re-offers it),
+  or declines `busy` with a reason that starts `skipped-`, when the work still exists. For a
+  REVIEW role the decline is a pending review that already holds content for the head
+  (`skipped-pending-review`). For a role that works a
+  bead it claims itself (`ready`) a closed bead is completed as skipped, and a decline is a bead
+  that is no longer open for another reason, is held by another actor,
   is now marked for a human, is no longer groomed, is deferred or is blocked
   (`skipped-bead-not-open`, `skipped-bead-claimed`, `skipped-bead-human`,
   `skipped-bead-not-groomed`, `skipped-bead-deferred`, `skipped-bead-blocked`); a bead that the
