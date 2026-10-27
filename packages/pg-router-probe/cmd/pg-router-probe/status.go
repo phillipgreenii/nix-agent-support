@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -34,7 +35,16 @@ func parseBacklog(raw []byte) (int, error) {
 func fetchBacklogFromStatus(ctx context.Context, opts runOptions) (int, error) {
 	sctx, cancel := context.WithTimeout(ctx, opts.statusTimeout)
 	defer cancel()
-	out, err := execCmdFactory(sctx, opts.pgRouterPath, "status", "--json").Output()
+	r := runner.do(sctx, Call{Name: opts.pgRouterPath, Args: []string{"status", "--json"}})
+	var err error
+	switch {
+	case r.StartErr != nil:
+		err = r.StartErr
+	case r.Signaled:
+		err = errors.New("signal: killed")
+	case r.Code != 0:
+		err = fmt.Errorf("exit status %d", r.Code)
+	}
 	if err != nil {
 		// A child killed by our own deadline surfaces as a bare "signal:
 		// killed" ExitError; attach the context error so the caller can tell
@@ -44,5 +54,5 @@ func fetchBacklogFromStatus(ctx context.Context, opts runOptions) (int, error) {
 		}
 		return 0, fmt.Errorf("pg-router status --json: %w", err)
 	}
-	return parseBacklog(out)
+	return parseBacklog([]byte(r.Stdout))
 }

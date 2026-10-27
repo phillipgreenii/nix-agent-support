@@ -26,7 +26,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -46,11 +45,11 @@ const defaultPgConnectorBackend = "pg-connector-issue-beads"
 // --connector-backend through runOptions (run.go defaultRunDeps), so there
 // is no package-level mutable state.
 
-// execCmdFactory constructs the *exec.Cmd used to invoke pg-connector.
-// Production code uses exec.CommandContext; tests swap this to spawn a
-// reentrant test-helper process (testmain_test.go), mirroring
-// pg-router-source-pg-connector's own exec.go execCmdFactory pattern.
-var execCmdFactory = exec.CommandContext
+// runner runs this probe's subprocesses: pg-connector (this file) and
+// `pg-router status --json` (status.go). nil means ExecRunner; tests swap it
+// for an in-process double (testmain_test.go) instead of re-executing the
+// test binary (a race-built child sleeps 1 s at exit).
+var runner Runner
 
 type pgConnectorResult struct {
 	stdout   []byte
@@ -63,23 +62,11 @@ type pgConnectorResult struct {
 // tracker is selected). The returned error is non-nil only when
 // the child could never even be started.
 func runPgConnector(ctx context.Context, args []string) (pgConnectorResult, error) {
-	cmd := execCmdFactory(ctx, pgConnectorBinary, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-	res := pgConnectorResult{stdout: stdout.Bytes(), stderr: stderr.Bytes()}
-
-	if runErr == nil {
-		return res, nil
+	r := runner.do(ctx, Call{Name: pgConnectorBinary, Args: args})
+	if r.StartErr != nil {
+		return pgConnectorResult{}, fmt.Errorf("pg-connector: exec %v: %w", args, r.StartErr)
 	}
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
-		res.exitCode = exitErr.ExitCode()
-		return res, nil
-	}
-	return pgConnectorResult{}, fmt.Errorf("pg-connector: exec %v: %w", args, runErr)
+	return pgConnectorResult{stdout: []byte(r.Stdout), stderr: []byte(r.Stderr), exitCode: r.Code}, nil
 }
 
 // invokeOrFail runs pg-connector with args and treats any exit code in
