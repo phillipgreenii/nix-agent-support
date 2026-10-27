@@ -91,6 +91,27 @@ func TestDispatch_roleWithoutOriginIsNeverGated(t *testing.T) {
 	}
 }
 
+// A role with `path` isolation is gated by the origin watched at ITS path, not by
+// the handler-wide repoRoot (bead pg2-96ogzy): a triager moved to a non-git path
+// is no longer declined while the repository origin is down, and a path role
+// whose path IS the watched repo root is still declined. The gate is neither
+// dropped nor widened for the roles that changed.
+func TestDispatch_pathIsolationIsGatedByItsOwnPathOnly(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "unmounted", "repo") // origin A gates
+	cfgPath, _, _ := originFixture(t, missing)
+
+	elsewhere := workerWithIsolation(t, fmt.Sprintf(`{"type":"path","path":%q}`, filepath.Join(t.TempDir(), "workspace-root")))
+	if _, out := dispatchWith(t, elsewhere.name, elsewhere.cfg, cfgPath, defaultEvent); strings.Contains(out, "origin-unavailable") {
+		t.Fatalf("a path role whose path is not a watched repo root was gated: %s", out)
+	}
+
+	atWatched := workerWithIsolation(t, fmt.Sprintf(`{"type":"path","path":%q}`, missing))
+	code, out := dispatchWith(t, atWatched.name, atWatched.cfg, cfgPath, defaultEvent)
+	if code != conformance.ExitBusy || decodeReply(t, out)["reason"] != "origin-unavailable" {
+		t.Fatalf("a path role at the watched repo root must still be gated; exit=%d out=%q", code, out)
+	}
+}
+
 func TestDispatchRepoRoot(t *testing.T) {
 	cfg := config.Default()
 	cfg.RepoRoot = "/r"

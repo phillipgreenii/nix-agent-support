@@ -15,7 +15,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
   `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`,
   `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`,
   `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`, `INV-CCH-32`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-35`,
-  `INV-CCH-36`, `INV-CCH-37`, `INV-CCH-38`.)_
+  `INV-CCH-36`, `INV-CCH-37`, `INV-CCH-38`, `INV-CCH-39`.)_
 - **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pg-router's core, I
   want a registered source to query beads for events on my behalf, so pg-router itself never needs
   to know beads' query language. _(→ `USECASE-CCH-QUERY`; `INV-CCH-1`, `INV-CCH-4`, `INV-CCH-5`.)_
@@ -28,7 +28,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-8`, `INV-CCH-11`, `INV-CCH-12`, `INV-CCH-13`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-16`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`, `INV-CCH-32`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-35`, `INV-CCH-36`, `INV-CCH-37`, `INV-CCH-38`.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-8`, `INV-CCH-11`, `INV-CCH-12`, `INV-CCH-13`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-16`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`, `INV-CCH-32`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-35`, `INV-CCH-36`, `INV-CCH-37`, `INV-CCH-38`, `INV-CCH-39`.
 _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind; `USECASE-CCH-RELEASE-END` for a role whose completion is `close-or-release`; `USECASE-CCH-SPLIT-TRIAGE` for a role whose completion is `close-or-split-triage`; `USECASE-CCH-LAUNCH-DECLINED` for a dispatch whose session failed before it was ready.
 
 1. The core dispatches one event under one tracking id to a bound role.
@@ -74,7 +74,8 @@ Extensions:
   the argv or the launch route, the base-environment variable names and the `sessionEnv` entries,
   never a secret, and exactly one outcome record follows it, success included (`INV-CCH-35`). Every
   start of a ccpool-backed session passes the whole environment again, and a send first checks that
-  the session is live (`INV-CCH-38`).
+  the session is live (`INV-CCH-38`). A role that needs no working tree runs in one fixed directory,
+  with no per-dispatch worktree (`INV-CCH-39`).
 - 2h. A dispatch whose role opts in to the pre-launch check and whose check says the dispatch is
   not worth running (`INV-CCH-22`): before any capacity, isolation or launch step this module
   either COMPLETES the event as skipped, when it is moot (a bead already closed, a PR already

@@ -1182,3 +1182,27 @@ changes a core gate or `INV-LIFE-2`.
   - **Accepted race.** Between the check and the send the session can die. That race is accepted, and
     its outcome is bounded: a resume into a session that has just died fails at once, rather than
     waiting for a launch that cannot happen.
+
+- **`INV-CCH-39`** <!-- uuid: 260b4781-bcc2-4270-ab3f-33eaf2a9496b --> — a role that needs no working
+  tree of its own MUST NOT cost a per-dispatch worktree: it runs with the `path` isolation (one fixed,
+  create-or-reuse directory that is never cleaned up), not the default per-bead worktree.
+  - **Which roles.** The split-triage role (`INV-CCH-13`) and the escalation triage roles that work
+    the pg2 tracker run with `path` isolation at the workspace root, which is not a git repository. The
+    split triager reads and writes only beads. An escalation triager needs at most READ access to a
+    branch or worktree an earlier session left for the bead, which it reaches by naming the repository
+    by absolute path (`git -C <path>`), because its working directory is no longer a repository.
+    The escalation triage role of a tracker whose beads live in a repository keeps the default
+    per-bead worktree until a follow-up decides what that role needs.
+  - **No persistent role worktree.** No role has a persistent, role-named, writable worktree: no triage
+    role needs one, and one MUST NOT be built for them (operator ruling, 2026-10-27: a triager uses a
+    single named worktree per role only if it needs its own, and may need only to look at an existing
+    one or neither). Bead `pg2-96ogzy`.
+  - **No worktree commands.** A dispatch of a `path`-isolated role runs no `git worktree add` and no
+    `git worktree remove`, and its session's working directory is the configured path. The teardown
+    of its session, which tries to remove the session's working directory as a worktree, finds a
+    directory outside any repository, removes nothing and does not warn (`INV-CCH-20`).
+  - **The origin gate is unchanged.** A `path` role is gated by the origin watched at its OWN path
+    (`INV-CCH-10`), not by the handler-wide repository root: a role moved to a directory that is not a
+    watched repository is no longer declined while that repository's origin is down, and a `path`
+    role whose path IS a watched repository root is still declined. The gate is neither dropped nor
+    widened for any other role.
