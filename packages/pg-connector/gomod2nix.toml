@@ -10,8 +10,6 @@ cachePackages = [
   'github.com/google/uuid',
   'github.com/grpc-ecosystem/grpc-gateway/v2/runtime',
   'github.com/grpc-ecosystem/grpc-gateway/v2/utilities',
-  'github.com/mattn/go-isatty',
-  'github.com/ncruces/go-strftime',
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
   'github.com/phillipgreenii/x/gittest',
@@ -59,7 +57,6 @@ cachePackages = [
   'golang.org/x/net/http2/hpack',
   'golang.org/x/net/idna',
   'golang.org/x/net/trace',
-  'golang.org/x/sys/cpu',
   'golang.org/x/sys/unix',
   'golang.org/x/text/secure/bidirule',
   'golang.org/x/text/transform',
@@ -118,30 +115,8 @@ cachePackages = [
   'google.golang.org/protobuf/types/known/wrapperspb',
   'gopkg.in/yaml.v3',
   'modernc.org/libc',
-  'modernc.org/libc/errno',
-  'modernc.org/libc/fcntl',
-  'modernc.org/libc/fts',
-  'modernc.org/libc/grp',
-  'modernc.org/libc/honnef.co/go/netdb',
-  'modernc.org/libc/langinfo',
-  'modernc.org/libc/limits',
-  'modernc.org/libc/netdb',
-  'modernc.org/libc/netinet/in',
-  'modernc.org/libc/poll',
-  'modernc.org/libc/pthread',
-  'modernc.org/libc/pwd',
-  'modernc.org/libc/signal',
-  'modernc.org/libc/stdio',
-  'modernc.org/libc/stdlib',
-  'modernc.org/libc/sys/socket',
-  'modernc.org/libc/sys/stat',
   'modernc.org/libc/sys/types',
-  'modernc.org/libc/termios',
-  'modernc.org/libc/time',
-  'modernc.org/libc/unistd',
-  'modernc.org/libc/utime',
   'modernc.org/libc/uuid/uuid',
-  'modernc.org/libc/wctype',
   'modernc.org/mathutil',
   'modernc.org/memory',
   'modernc.org/sqlite',
@@ -199,8 +174,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261025041111-c7b4ad60c6c2'
-    hash = 'sha256-PoBBCsyw8XnZATqlFIh/M9Mw+2Vqh4Tf+pFk4JIG5vo='
+    version = 'v0.0.0-20261025231613-3cae4f469680'
+    hash = 'sha256-2HS3YqxQzHT1ho7BKi4g4CZ27JNhGCguKDgHsXqVVjw='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -271,11 +246,11 @@ cachePackages = [
     hash = 'sha256-gykmMKFe61Tc4tblLPd3IyMKCqL0MSTQpgb6yE5EnDA='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20261019180522-ce908d29299b'
-    hash = 'sha256-qUTuVBTbGwE/GeuuO+2s0/PCEWi9vLt+HJQ9x0AQjRg='
+    version = 'v0.0.0-20261026165753-2ffab32bce7e'
+    hash = 'sha256-sRRg7QCSi0XQZELYEcMA/ElQcFM+CcHeaVOCMgoWcqQ='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20261019180522-ce908d29299b'
+    version = 'v0.0.0-20261026165753-2ffab32bce7e'
     hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
 
   [mod.'google.golang.org/grpc']
