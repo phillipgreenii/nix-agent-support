@@ -1,13 +1,18 @@
-// testmain_test.go: the reentrant test-helper-process wire double for
-// pg-connector — this packet's own "fake pg-connector binary or a
-// stubbed exec" acceptance requirement, implemented as a stubbed exec.
-// Mirrors packages/pg-connector's own pkg/scriptout/exec_test.go pattern
-// exactly: the test binary re-execs itself with
-// GO_WANT_HELPER_PROCESS=1 set, TestHelperProcess recognizes that and
-// runs helperMain instead of the real test suite, and helperMain
-// impersonates pg-connector by inspecting the real CLI args this adapter
-// passed it (findChildArgs) and the GO_HELPER_BEHAVIOR env var selecting
-// which canned wire response/exit code to answer with.
+// testmain_test.go: the in-process wire double for pg-connector — this
+// packet's own "fake pg-connector binary or a stubbed exec" acceptance
+// requirement, implemented as a stubbed exec. Mirrors
+// packages/pg-connector's own pkg/scriptout/exec_test.go double: a Runner
+// (runner.go) that impersonates pg-connector by inspecting the real CLI
+// args this adapter passed it (Call.Args) and the helper settings that
+// select which canned wire response/exit code to answer with.
+//
+// It used to re-execute the race-built test binary once per call
+// (GO_WANT_HELPER_PROCESS), and a race-built child sleeps 1 s at exit
+// (atexit_sleep_ms), so every fake call cost about 1 s under -race. The
+// behavior names and the GO_HELPER_* setting names are kept, so call sites
+// in the tests did not change; withFactory's extra "KEY=value" strings are
+// now settings of the double rather than environment of a child. The real
+// exec path (ExecRunner) is covered by runner_test.go with sh -c.
 package main
 
 import (
@@ -16,34 +21,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 )
-
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	defer os.Exit(0)
-	helperMain()
-}
-
-// findChildArgs recovers the real pg-connector CLI args this adapter
-// passed to execCmdFactory, out of the re-exec'd test binary's own
-// os.Args (helperCmdFactory below inserts "--" then the impersonated
-// binary name then those args).
-func findChildArgs() []string {
-	for i, a := range os.Args {
-		if a == "--" {
-			if i+2 <= len(os.Args) {
-				return os.Args[i+2:]
-			}
-			return nil
-		}
-	}
-	return nil
-}
 
 // flagValue returns the value following flag in args, or "" if flag is
 // absent or has no following value.
@@ -56,21 +36,60 @@ func flagValue(args []string, flag string) string {
 	return ""
 }
 
+// helperSettings are the GO_HELPER_* "KEY=value" strings a test handed to
+// withFactory; the last entry for a key wins, like a real environment, and
+// the test process's own environment is the fallback (a child would have
+// inherited it).
+type helperSettings []string
+
+func (s helperSettings) lookup(key string) (string, bool) {
+	val, found := "", false
+	for _, e := range s {
+		if v, ok := strings.CutPrefix(e, key+"="); ok {
+			val, found = v, true
+		}
+	}
+	if found {
+		return val, true
+	}
+	return os.LookupEnv(key)
+}
+
+func (s helperSettings) get(key string) string {
+	v, _ := s.lookup(key)
+	return v
+}
+
+// callEnv returns the value of key as the child would have observed it:
+// the last Call.Env entry (appended to the inherited environment) wins,
+// else the test process's own environment.
+func callEnv(c Call, key string) (string, bool) {
+	val, found := "", false
+	for _, e := range c.Env {
+		if v, ok := strings.CutPrefix(e, key+"="); ok {
+			val, found = v, true
+		}
+	}
+	if found {
+		return val, true
+	}
+	return os.LookupEnv(key)
+}
+
 // recordAmbientEnvIfRequested is the "the double records its own env"
 // side channel this packet's own --beads-dir acceptance criterion needs:
 // when the test sets GO_HELPER_ENV_RECORD_FILE (to the path of a
 // t.TempDir file) and GO_HELPER_ENV_RECORD_VAR (the env var name to
-// capture), the helper writes that var's own value, as this HELPER
-// PROCESS observed it (i.e. what runPgConnector's cmd.Env actually
-// carried), to that file — independent of which GO_HELPER_BEHAVIOR was
-// also selected, so any behavior can be combined with this recording.
-func recordAmbientEnvIfRequested() {
-	file := os.Getenv("GO_HELPER_ENV_RECORD_FILE")
+// capture), the double writes that var's own value, as the CHILD would
+// have observed it (i.e. what runPgConnector's Call.Env actually
+// carried), to that file — independent of which behavior was also
+// selected, so any behavior can be combined with this recording.
+func recordAmbientEnvIfRequested(s helperSettings, c Call) {
+	file := s.get("GO_HELPER_ENV_RECORD_FILE")
 	if file == "" {
 		return
 	}
-	varName := os.Getenv("GO_HELPER_ENV_RECORD_VAR")
-	val, ok := os.LookupEnv(varName)
+	val, ok := callEnv(c, s.get("GO_HELPER_ENV_RECORD_VAR"))
 	if !ok {
 		// Distinguishable from "set to empty string" — this packet's own
 		// Contract distinguishes "not given -> do not set the var at
@@ -80,107 +99,104 @@ func recordAmbientEnvIfRequested() {
 	_ = os.WriteFile(file, []byte(val), 0o600)
 }
 
-// recordArgsIfRequested writes the child's argv (space-joined) to the path
+// recordArgsIfRequested writes the call's argv (space-joined) to the path
 // named by GO_HELPER_ARGS_RECORD_FILE, when set, so a test can assert on the
 // exact pg-connector argv this adapter built.
-func recordArgsIfRequested(childArgs []string) {
-	file := os.Getenv("GO_HELPER_ARGS_RECORD_FILE")
+func recordArgsIfRequested(s helperSettings, childArgs []string) {
+	file := s.get("GO_HELPER_ARGS_RECORD_FILE")
 	if file == "" {
 		return
 	}
 	_ = os.WriteFile(file, []byte(strings.Join(childArgs, " ")), 0o600)
 }
 
-func helperMain() {
-	recordAmbientEnvIfRequested()
-	recordArgsIfRequested(findChildArgs())
+// helperRun answers one Call as pg-connector would for behavior.
+func helperRun(behavior string, s helperSettings, c Call) Result {
+	recordAmbientEnvIfRequested(s, c)
+	recordArgsIfRequested(s, c.Args)
 
-	childArgs := findChildArgs()
-	behavior := os.Getenv("GO_HELPER_BEHAVIOR")
+	childArgs := c.Args
+	ok := func(stdout string) Result { return Result{Stdout: stdout} }
 
 	switch behavior {
 	case "changes_degraded":
 		// One succeeded backend, one degraded, one disabled — proving
 		// degraded_sources names only the degraded one, never the
 		// succeeded or disabled ones [design: section 6.1].
-		_, _ = fmt.Fprint(os.Stdout, `{"sources":[`+
-			`{"backend":"b1","status":"succeeded","version":1,"truncated":false},`+
-			`{"backend":"b2","status":"degraded","version":2,"truncated":false},`+
-			`{"backend":"b3","status":"disabled","version":0,"truncated":false}`+
-			`],"changes":[`+
-			`{"change":"added","source":"b1","entity":{"id":"e1","title":"Entity One"}},`+
-			`{"change":"changed","source":"b2","entity":{"id":"e2","title":""}}`+
-			`]}`)
-		os.Exit(2)
+		return Result{Code: 2, Stdout: `{"sources":[` +
+			`{"backend":"b1","status":"succeeded","version":1,"truncated":false},` +
+			`{"backend":"b2","status":"degraded","version":2,"truncated":false},` +
+			`{"backend":"b3","status":"disabled","version":0,"truncated":false}` +
+			`],"changes":[` +
+			`{"change":"added","source":"b1","entity":{"id":"e1","title":"Entity One"}},` +
+			`{"change":"changed","source":"b2","entity":{"id":"e2","title":""}}` +
+			`]}`}
 	case "changes_pr_rows":
 		// bead pg2-1ldvy: five rows over two PRs exercising every field of
 		// the retry-window change identity (change kind, source, entity id,
 		// head_sha). Entities carry the volatile as_of/stale fields.
-		_, _ = fmt.Fprint(os.Stdout, `{"sources":[{"backend":"gh","status":"succeeded","version":1,"truncated":false}],"changes":[`+
-			`{"change":"changed","source":"gh","entity":{"id":"o/r#1","title":"One","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}},`+
-			`{"change":"changed","source":"gh","entity":{"id":"o/r#1","title":"One","head_sha":"h2","as_of":"2026-10-07T10:00:00Z","stale":false}},`+
-			`{"change":"added","source":"gh","entity":{"id":"o/r#1","title":"One","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}},`+
-			`{"change":"changed","source":"other","entity":{"id":"o/r#1","title":"One","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}},`+
-			`{"change":"changed","source":"gh","entity":{"id":"o/r#2","title":"Two","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}}`+
+		return ok(`{"sources":[{"backend":"gh","status":"succeeded","version":1,"truncated":false}],"changes":[` +
+			`{"change":"changed","source":"gh","entity":{"id":"o/r#1","title":"One","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}},` +
+			`{"change":"changed","source":"gh","entity":{"id":"o/r#1","title":"One","head_sha":"h2","as_of":"2026-10-07T10:00:00Z","stale":false}},` +
+			`{"change":"added","source":"gh","entity":{"id":"o/r#1","title":"One","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}},` +
+			`{"change":"changed","source":"other","entity":{"id":"o/r#1","title":"One","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}},` +
+			`{"change":"changed","source":"gh","entity":{"id":"o/r#2","title":"Two","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}}` +
 			`]}`)
-		os.Exit(0)
 	case "changes_pr_one":
 		// bead pg2-1ldvy: ONE changed row whose entity fields come from the
-		// environment, so a test can vary the volatile (as_of, stale, title,
+		// settings, so a test can vary the volatile (as_of, stale, title,
 		// comment_count) and stable (head_sha, version) fields independently
 		// across invocations. An empty GO_HELPER_HEAD / GO_HELPER_VERSION
 		// leaves that field out of the entity entirely.
 		entity := map[string]any{
 			"id":            "o/r#1",
-			"title":         os.Getenv("GO_HELPER_TITLE"),
-			"as_of":         os.Getenv("GO_HELPER_ASOF"),
-			"stale":         os.Getenv("GO_HELPER_STALE") == "1",
-			"comment_count": len(os.Getenv("GO_HELPER_TITLE")),
+			"title":         s.get("GO_HELPER_TITLE"),
+			"as_of":         s.get("GO_HELPER_ASOF"),
+			"stale":         s.get("GO_HELPER_STALE") == "1",
+			"comment_count": len(s.get("GO_HELPER_TITLE")),
 		}
-		if h := os.Getenv("GO_HELPER_HEAD"); h != "" {
+		if h := s.get("GO_HELPER_HEAD"); h != "" {
 			entity["head_sha"] = h
 		}
-		if v := os.Getenv("GO_HELPER_VERSION"); v != "" {
+		if v := s.get("GO_HELPER_VERSION"); v != "" {
 			entity["version"] = v
 		}
 		body, _ := json.Marshal(map[string]any{
 			"sources": []any{},
 			"changes": []any{map[string]any{"change": "changed", "source": "gh", "entity": entity}},
 		})
-		_, _ = os.Stdout.Write(body)
-		os.Exit(0)
+		return ok(string(body))
 	case "changes_body_env":
 		// The whole "changes" wire answer comes from GO_HELPER_BODY, so a
 		// test can drive the extended wire of a backend that owns its
 		// changes and give each invocation (poll) its own canned answer.
-		_, _ = fmt.Fprint(os.Stdout, os.Getenv("GO_HELPER_BODY"))
-		os.Exit(0)
+		return ok(s.get("GO_HELPER_BODY"))
 	case "changes_ok_empty":
-		_, _ = fmt.Fprint(os.Stdout, `{"sources":[],"changes":[]}`)
-		os.Exit(0)
+		return ok(`{"sources":[],"changes":[]}`)
 	case "changes_degraded_with_reason":
 		// bead pg2-wa5uk: same shape as "changes_degraded" but the
 		// degraded backend also carries a real reason (as pg-connector's
 		// own changesSourceRow does since bead pg2-unqcn) — proving this
 		// adapter now forwards it into each printed item's own
 		// degraded_reasons metadata, keyed by backend name.
-		_, _ = fmt.Fprint(os.Stdout, `{"sources":[`+
-			`{"backend":"b1","status":"succeeded","version":1,"truncated":false},`+
-			`{"backend":"b2","status":"degraded","version":2,"truncated":false,"reason":"rate limited: too many requests"},`+
-			`{"backend":"b3","status":"disabled","version":0,"truncated":false}`+
-			`],"changes":[`+
-			`{"change":"added","source":"b1","entity":{"id":"e1","title":"Entity One"}}`+
-			`]}`)
-		os.Exit(2)
+		return Result{Code: 2, Stdout: `{"sources":[` +
+			`{"backend":"b1","status":"succeeded","version":1,"truncated":false},` +
+			`{"backend":"b2","status":"degraded","version":2,"truncated":false,"reason":"rate limited: too many requests"},` +
+			`{"backend":"b3","status":"disabled","version":0,"truncated":false}` +
+			`],"changes":[` +
+			`{"change":"added","source":"b1","entity":{"id":"e1","title":"Entity One"}}` +
+			`]}`}
 	case "total_failure":
 		// A total-failure outcome still writes a well-formed wire body
 		// to its OWN stdout (matching pg-connector's real
 		// writeFanOutResult, which writes the JSON body before ever
 		// checking exitCode) — this adapter must ignore it entirely on
 		// this path and print nothing of its own [design: section 6.1].
-		_, _ = fmt.Fprint(os.Stdout, `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false}],"changes":[]}`)
-		_, _ = fmt.Fprintln(os.Stderr, "pg-connector: total failure: no backend succeeded")
-		os.Exit(3)
+		return Result{
+			Code:   3,
+			Stdout: `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false}],"changes":[]}`,
+			Stderr: "pg-connector: total failure: no backend succeeded\n",
+		}
 	case "total_failure_with_reason":
 		// bead pg2-wa5uk: the exact observed real-world shape — a single
 		// degraded backend (rate-limited), no other healthy source, so
@@ -193,8 +209,7 @@ func helperMain() {
 		// on this path, so this adapter's own stderr was completely
 		// empty too and every caller downstream only ever saw a bare
 		// "exit status 1".
-		_, _ = fmt.Fprint(os.Stdout, `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false,"reason":"rate limited: too many requests"}],"changes":[]}`)
-		os.Exit(3)
+		return Result{Code: 3, Stdout: `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false,"reason":"rate limited: too many requests"}],"changes":[]}`}
 	case "changes_cursor_expired":
 		// The wire the real umbrella (pg-connector's own forwarded "changes",
 		// changes_forward.go) answers when a daemon-backed backend that owns
@@ -205,16 +220,16 @@ func helperMain() {
 		// source). Pinned to pg-connector's own
 		// TestForwardedChanges_CursorExpiredReachesTheCaller, whose double
 		// answers the same refusal.
-		_, _ = fmt.Fprint(os.Stdout, `{"sources":[{"backend":"pg-connector-github","status":"degraded","version":1,"truncated":false,`+
-			`"reason":"cursor_expired: position fell outside retention; re-run with --reset"}],"changes":[]}`)
-		os.Exit(3)
+		return Result{Code: 3, Stdout: `{"sources":[{"backend":"pg-connector-github","status":"degraded","version":1,"truncated":false,` +
+			`"reason":"cursor_expired: position fell outside retention; re-run with --reset"}],"changes":[]}`}
 	case "invalid_argument":
-		_, _ = fmt.Fprint(os.Stdout, `{"error":{"code":"invalid_argument","message":"query not recognized"}}`)
-		_, _ = fmt.Fprintln(os.Stderr, "pg-connector: invalid_argument: query \"bogus\" is not recognized by any registered backend")
-		os.Exit(1)
+		return Result{
+			Code:   1,
+			Stdout: `{"error":{"code":"invalid_argument","message":"query not recognized"}}`,
+			Stderr: "pg-connector: invalid_argument: query \"bogus\" is not recognized by any registered backend\n",
+		}
 	case "backend_not_registered":
-		_, _ = fmt.Fprintln(os.Stderr, `dispatch: --backend "not-a-backend" is not registered for connector.issue (registered: [pg-connector-issue-beads])`)
-		os.Exit(1)
+		return Result{Code: 1, Stderr: `dispatch: --backend "not-a-backend" is not registered for connector.issue (registered: [pg-connector-issue-beads])` + "\n"}
 	case "sweep_ids_by_query":
 		// present_ids-only responses whose content depends on which
 		// --query was passed, so a multi-query sweep invocation can be
@@ -222,9 +237,8 @@ func helperMain() {
 		// is ALWAYS EMPTY here, matching the real --ids-only shape
 		// exactly [design: section 6.1] — a wire double with entities
 		// populated instead would catch the OPPOSITE bug.
-		query := flagValue(childArgs, "--query")
 		var presentIDs string
-		switch query {
+		switch flagValue(childArgs, "--query") {
 		case "q1":
 			presentIDs = `["a","b"]`
 		case "q2":
@@ -232,58 +246,48 @@ func helperMain() {
 		default:
 			presentIDs = `[]`
 		}
-		_, _ = fmt.Fprintf(os.Stdout, `{"entities":[],"present_ids":%s,"sources":[]}`, presentIDs)
-		os.Exit(0)
+		return ok(fmt.Sprintf(`{"entities":[],"present_ids":%s,"sources":[]}`, presentIDs))
 	case "sweep_since_echo":
 		// A ranged --ids-only response: with --since 40m only the recently
 		// updated id comes back; with no --since the whole open set does.
 		// Any other --since value is a test bug and fails loudly.
 		switch since := flagValue(childArgs, "--since"); since {
 		case "":
-			_, _ = fmt.Fprint(os.Stdout, `{"entities":[],"present_ids":["recent","old"],"sources":[]}`)
+			return ok(`{"entities":[],"present_ids":["recent","old"],"sources":[]}`)
 		case "40m":
-			_, _ = fmt.Fprint(os.Stdout, `{"entities":[],"present_ids":["recent"],"sources":[]}`)
+			return ok(`{"entities":[],"present_ids":["recent"],"sources":[]}`)
 		default:
-			_, _ = fmt.Fprintln(os.Stderr, "unexpected --since value: "+since)
-			os.Exit(98)
+			return Result{Code: 98, Stderr: "unexpected --since value: " + since + "\n"}
 		}
-		os.Exit(0)
 	case "list_full_ok":
-		_, _ = fmt.Fprint(os.Stdout, `{"entities":[`+
-			`{"id":"i1","title":"Alpha task one","issue_type":"task","metadata":{"k":"v1"}},`+
-			`{"id":"i2","title":"Beta task two","issue_type":"task","metadata":{"k":"v2"}},`+
-			`{"id":"i3","title":"Alpha bug three","issue_type":"bug","metadata":{"k":"v3"}}`+
+		return ok(`{"entities":[` +
+			`{"id":"i1","title":"Alpha task one","issue_type":"task","metadata":{"k":"v1"}},` +
+			`{"id":"i2","title":"Beta task two","issue_type":"task","metadata":{"k":"v2"}},` +
+			`{"id":"i3","title":"Alpha bug three","issue_type":"bug","metadata":{"k":"v3"}}` +
 			`],"present_ids":["i1","i2","i3"],"sources":[{"source":"b1","status":"succeeded","count":3}]}`)
-		os.Exit(0)
 	case "list_full_title_fallback":
 		// One entity with an empty title, proving the "else the id"
 		// fallback [design: section 6.1].
-		_, _ = fmt.Fprint(os.Stdout, `{"entities":[{"id":"i9","title":"","issue_type":"task","metadata":{}}],"present_ids":["i9"],"sources":[]}`)
-		os.Exit(0)
+		return ok(`{"entities":[{"id":"i9","title":"","issue_type":"task","metadata":{}}],"present_ids":["i9"],"sources":[]}`)
 	default:
-		_, _ = fmt.Fprintln(os.Stderr, "unknown GO_HELPER_BEHAVIOR: "+behavior)
-		os.Exit(99)
+		return Result{Code: 99, Stderr: "unknown GO_HELPER_BEHAVIOR: " + behavior + "\n"}
 	}
 }
 
-func helperCmdFactory(behavior string, extraEnv ...string) func(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cs := append([]string{"-test.run=^TestHelperProcess$", "--", name}, args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(append(
-			os.Environ(),
-			"GO_WANT_HELPER_PROCESS=1",
-			"GO_HELPER_BEHAVIOR="+behavior,
-		), extraEnv...)
-		return cmd
+// helperRunner returns a Runner that answers every Call with behavior,
+// configured by the GO_HELPER_* "KEY=value" settings in extra.
+func helperRunner(behavior string, extra ...string) Runner {
+	s := helperSettings(extra)
+	return func(_ context.Context, c Call) Result {
+		return helperRun(behavior, s, c)
 	}
 }
 
 func withFactory(t *testing.T, behavior string, extraEnv ...string) {
 	t.Helper()
-	orig := execCmdFactory
-	execCmdFactory = helperCmdFactory(behavior, extraEnv...)
-	t.Cleanup(func() { execCmdFactory = orig })
+	orig := connectorRunner
+	connectorRunner = helperRunner(behavior, extraEnv...)
+	t.Cleanup(func() { connectorRunner = orig })
 }
 
 // runCLI drives newRootCmd() end-to-end (cobra arg parsing + RunE),

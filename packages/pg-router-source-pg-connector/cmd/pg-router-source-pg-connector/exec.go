@@ -13,14 +13,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -28,13 +24,12 @@ import (
 // compile-time import of packages/pg-connector [design: section 6.1].
 const pgConnectorBinary = "pg-connector"
 
-// execCmdFactory constructs the *exec.Cmd used to invoke pg-connector.
-// Production code uses exec.CommandContext; tests swap this to spawn a
-// reentrant test-helper process — the "stubbed exec" half of this
-// packet's own "fake pg-connector binary or a stubbed exec" wire-double
-// requirement, mirroring packages/pg-connector's own
-// pkg/scriptout/exec.go execCmdFactory pattern exactly.
-var execCmdFactory = exec.CommandContext
+// connectorRunner runs the pg-connector subprocess (see runner.go). nil
+// means ExecRunner; tests swap it for an in-process double — the "stubbed
+// exec" half of this packet's own "fake pg-connector binary or a stubbed
+// exec" wire-double requirement — instead of re-executing the test binary
+// (a race-built child sleeps 1 s at exit).
+var connectorRunner Runner
 
 // pgConnectorResult is one subprocess invocation's raw, unclassified
 // outcome: pg-connector's own captured stdout/stderr (never interleaved,
@@ -55,40 +50,11 @@ type pgConnectorResult struct {
 // denied, context already canceled, ...) — there is then no exit code to
 // classify and no child stderr to trust.
 func runPgConnector(ctx context.Context, args []string, extraEnv []string) (pgConnectorResult, error) {
-	cmd := execCmdFactory(ctx, pgConnectorBinary, args...)
-	if len(extraEnv) > 0 {
-		// APPEND to whatever cmd.Env the factory already set, rather than
-		// overwriting it: in production execCmdFactory is
-		// exec.CommandContext, which leaves cmd.Env nil (meaning "inherit
-		// os.Environ() implicitly"), so base resolves to os.Environ()
-		// itself; in tests execCmdFactory is swapped to spawn a reentrant
-		// helper process that has ALREADY populated cmd.Env with the
-		// identity vars (GO_WANT_HELPER_PROCESS/GO_HELPER_BEHAVIOR) it
-		// needs to recognize itself as the helper on re-exec — clobbering
-		// that here would silently break every test that also exercises
-		// --beads-dir.
-		base := cmd.Env
-		if base == nil {
-			base = os.Environ()
-		}
-		cmd.Env = append(append([]string{}, base...), extraEnv...)
+	r := connectorRunner.do(ctx, Call{Name: pgConnectorBinary, Args: args, Env: extraEnv})
+	if r.StartErr != nil {
+		return pgConnectorResult{}, fmt.Errorf("pg-connector: exec %v: %w", args, r.StartErr)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-	res := pgConnectorResult{stdout: stdout.Bytes(), stderr: stderr.Bytes()}
-
-	if runErr == nil {
-		return res, nil
-	}
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
-		res.exitCode = exitErr.ExitCode()
-		return res, nil
-	}
-	return pgConnectorResult{}, fmt.Errorf("pg-connector: exec %v: %w", args, runErr)
+	return pgConnectorResult{stdout: []byte(r.Stdout), stderr: []byte(r.Stderr), exitCode: r.Code}, nil
 }
 
 // classifyExit maps pg-connector's own CLI exit-code taxonomy (its

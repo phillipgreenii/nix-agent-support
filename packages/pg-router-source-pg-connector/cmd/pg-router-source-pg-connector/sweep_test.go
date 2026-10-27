@@ -81,7 +81,7 @@ func TestSweep_NoSinceFlag_ListsTheWholeSetAsBefore(t *testing.T) {
 
 func TestSweep_ZeroQueryNames_IsUsageErrorWithNoSubprocessConsulted(t *testing.T) {
 	// No withFactory: if this RunE ever tried to exec pg-connector for
-	// this case, the (unset) execCmdFactory default would try to run a
+	// this case, the (unset) connectorRunner default would try to run a
 	// real "pg-connector" binary — this test's whole point is that it
 	// must never get that far [design: section 6.1, "there is no
 	// pg-connector subprocess to consult in this specific case"].
