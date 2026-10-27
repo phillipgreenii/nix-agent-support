@@ -40,6 +40,7 @@
     ./programs/pg-rescue
     ./programs/pg-task-focus
     ./programs/pg-keep-awake
+    ./programs/pg-probe
     ./programs/pg-ccaudit
     ./programs/integrate-branch-support
     ./programs/pnwf

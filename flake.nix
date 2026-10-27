@@ -440,6 +440,12 @@
           pg-keep-awake = final.callPackage ./packages/pg-keep-awake {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-probe (bead pg2-pqztiu, operator ruling pg2-r9kv7 W8): Pattern A
+          # (ADR 0008), stdlib only. A read-only pprof-socket GET client over a
+          # fixed path allowlist plus `wait-log`; NOT a generic curl.
+          pg-probe = final.callPackage ./packages/pg-probe {
+            inherit (goBuilders) mkGoApp;
+          };
           # ccpool-probe: Pattern A (ADR 0008), same shape as
           # pg-router-probe above — a standalone deterministic health
           # probe over ccpool's own operational health from pg-router's
@@ -1752,6 +1758,7 @@
                 "pg-rescue"
                 "pg-task-focus"
                 "pg-keep-awake"
+                "pg-probe"
                 "pg-wrap"
               ];
 
@@ -5809,6 +5816,15 @@
                 src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
                 gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
                 testFlags = [ "-v" ];
+              };
+
+              # pg-probe (bead pg2-pqztiu) - whole-module Go test gate. Pattern A,
+              # stdlib only. The tests use real unix sockets and real files under
+              # /tmp (the sandbox provides it); no testDeps.
+              pg-probe-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-probe-go-tests";
+                src = lib.cleanSource ./packages/pg-probe; # matches default.nix
+                gomod2nixToml = ./packages/pg-probe/gomod2nix.toml;
               };
 
               # pg-desk-shadow (bead pg2-nu7h0) - whole-module Go test gate. Pattern
@@ -16714,6 +16730,7 @@
               pg-rescue
               pg-task-focus
               pg-keep-awake
+              pg-probe
               integrate-branch-support
               pg-desk
               pg-desk-attention
