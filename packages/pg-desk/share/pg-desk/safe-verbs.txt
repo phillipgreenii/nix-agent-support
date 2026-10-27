@@ -18,6 +18,7 @@ heartbeat
 heartbeat-item
 hide
 issue annotate
+issue backfill-backend
 issue changes
 issue consumer forget
 issue consumer list

@@ -165,6 +165,9 @@ func verbClasses() map[string]verbClass {
 	// with a decode error, not a schema error.
 	m["pr lane-record"] = safe("--input", "/dev/null")
 	m["pr mark-inactive"] = safe("1")
+	// The issue-only one-shot backfill of the backend and watched columns: it
+	// reads a schema-2 store and a daemon, never the dropped ledger.
+	m["issue backfill-backend"] = safe()
 	// The verbs `version` reads nothing from the store at all.
 	m["version"] = safe()
 	return m
