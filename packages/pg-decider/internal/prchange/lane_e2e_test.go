@@ -25,7 +25,7 @@ import (
 )
 
 // The real-tracker end-to-end gate of the PR lane (docket pg2-6mo45.3, packet
-// P4c-1; nix check pg-decider-lane-e2e and the hook of the same name).
+// P4c-1; nix check pg-decider-lane-e2e, its only automatic run, and its script).
 //
 // What is real: pg-desk (a schema-2 store), pg-decider, pg-pr-change, the
 // umbrella pg-connector, the beads backend pg-connector-issue-beads and a bd in
@@ -38,7 +38,7 @@ import (
 // gate's own sandbox (its fake connector answers reads only).
 //
 // The nix sandbox has no network, so the binaries come from the environment
-// (the check exports the ones nix built; the hook builds them from source and
+// (the check exports the ones nix built; the script builds them from source and
 // exports the same names, scripts/run-pg-decider-lane-e2e.sh):
 //
 //	PG_PR_CHANGE_PG_DESK_BIN, PG_PR_CHANGE_PG_DECIDER_BIN, PG_PR_CHANGE_BIN
@@ -47,7 +47,7 @@ import (
 //	PG_PR_CHANGE_REQUIRE_BINARIES                     (set: a missing tool FAILS)
 //
 // bd and git are found on PATH. A missing tool is a LOUD failure whenever
-// PG_PR_CHANGE_REQUIRE_BINARIES is set (the check and the hook set it), never a
+// PG_PR_CHANGE_REQUIRE_BINARIES is set (the check and the script set it), never a
 // skip; without it the test skips, like the other real-tool tests, so a plain
 // `go test ./...` stays hermetic.
 const (
@@ -61,7 +61,7 @@ const (
 const laneE2EScenariosFile = "testdata/lane-e2e-scenarios.txt"
 
 // minLaneE2EScenarios is the number of scenarios the gate must run; keep it
-// equal to the minScenarios of the nix check and of the hook script.
+// equal to the minScenarios of the nix check and of the script.
 const minLaneE2EScenarios = 24
 
 // e2eSeeded is N, the number of PRs whose keyless anchors the adoption

@@ -1,1 +1,0 @@
-^(packages/(pg-decider/(cmd/(pg-decider|pg-pr-change)/|internal/|go\.(mod|sum)$)|pg-desk/(cmd/pg-desk/|internal/|go\.(mod|sum)$)|pg-connector/(cmd/pg-connector/|cmd/pg-connector-issue-beads/|pkg/|go\.(mod|sum)$))|scripts/(run-pg-decider-lane-e2e\.sh|pg-decider-lane-e2e-files\.regex)$)

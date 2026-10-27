@@ -26,10 +26,11 @@ behavior lives in `docs/behavior/pg-decider/`; this page covers building and tes
   listing is the ground truth): `nix build .#checks.<system>.pg-decider-lane-e2e -L`. It runs
   `TestLaneE2E` (`internal/prchange/lane_e2e_test.go`) through `scripts/run-pg-decider-lane-e2e.sh`,
   which asserts a PASS line for every scenario named in
-  `internal/prchange/testdata/lane-e2e-scenarios.txt`, no SKIP line and a minimum scenario count. A
-  nix check is not run at land, so the same script runs from the path-scoped `pg-decider-lane-e2e` hook
-  (it builds the five binaries from source; `bd`, `go`, `git` and `sqlite3` must be on `PATH`, and a
-  missing one is a loud failure). The scenarios: N keyless anchors adopted with no creates, the second
+  `internal/prchange/testdata/lane-e2e-scenarios.txt`, no SKIP line and a minimum scenario count. It
+  spans processes and takes tens of minutes, so it is NOT a commit or pre-land hook (operator standard V-4,
+  bead pg2-by94zu); the check is its automatic run. To run it by hand from source: `bash scripts/run-pg-decider-lane-e2e.sh`
+  (it builds the five binaries; `bd`, `go`, `git` and `sqlite3` must be on `PATH`, and a missing one is a
+  loud failure). A plain `go test ./...` skips it. The scenarios: N keyless anchors adopted with no creates, the second
   apply writing nothing, plan and apply agreeing per kind and operation, an unhydrated view refused, a
   lookup listing above the ceiling or reporting itself truncated failing the run closed, the `bd list`
   query that finds a PR's review items in every state, the review rule against the real tracker (a

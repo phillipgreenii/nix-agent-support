@@ -1,6 +1,6 @@
 # The scenarios of TestLaneE2E (lane_e2e_test.go), one per line. The test fails
 # when its own scenarios differ from this list, and the nix check
-# pg-decider-lane-e2e and the hook of the same name assert a PASS line for each.
+# pg-decider-lane-e2e and the script it runs assert a PASS line for each.
 n-keyless-anchors-are-adopted-from-the-trackers-own-listing-with-no-creates
 the-second-apply-writes-nothing
 plan-and-apply-agree-per-kind-and-operation

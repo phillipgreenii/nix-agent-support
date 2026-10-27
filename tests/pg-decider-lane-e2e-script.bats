@@ -1,13 +1,12 @@
 #!/usr/bin/env bats
 # bats file_tags=type:unit
-# Regression guard for the `pg-decider-lane-e2e` hook and the script that is its
-# body and the body of the nix check of the same name (docket pg2-6mo45.3, packet
-# P4c-1): the path regex the hook fires on, and what the script demands of the run.
+# Regression guard for the script that is the body of the nix check
+# `pg-decider-lane-e2e` and of the by-hand run (docket pg2-6mo45.3, packet P4c-1;
+# bead pg2-by94zu removed the commit/pre-land hook and its path regex, because the
+# suite is a multi-process end-to-end test and so MUST NOT gate a commit or a land):
+# what the script demands of the run.
 #
-# Deterministic logic (global rule V-3). The regex is read from the same file the
-# flake reads, and fed one real path of every input of every binary the gate builds
-# or runs (the binaries it builds are read from the script itself, so a new one
-# without a matching path fails here). The script is run for real against PATH
+# Deterministic logic (global rule V-3). The script is run for real against PATH
 # shims for `go`, `bd`, `git` and `sqlite3`: they stand in for the tools, and the
 # thing under test is which tool absence is fatal, what `go test` is asked to run,
 # and which run outputs the gate refuses (a missing scenario PASS line, a SKIP line,
@@ -16,7 +15,6 @@
 bats_require_minimum_version 1.5.0
 
 SCRIPT="$BATS_TEST_DIRNAME/../scripts/run-pg-decider-lane-e2e.sh"
-REGEX_FILE="$BATS_TEST_DIRNAME/../scripts/pg-decider-lane-e2e-files.regex"
 SCENARIOS="$BATS_TEST_DIRNAME/../packages/pg-decider/internal/prchange/testdata/lane-e2e-scenarios.txt"
 
 setup() {
@@ -61,97 +59,6 @@ passing_output() { # passing_output [skip-name] : the verbose output of a green 
 
 run_gate() { run --separate-stderr env PATH="$SHIM" "$BASH" "$SCRIPT" --prebuilt --module-dir "$MODULE"; }
 
-@test "the path regex matches one path of every input of every binary involved" {
-  regex="$(cat "$REGEX_FILE")"
-  [ -n "$regex" ]
-  paths=(
-    # pg-decider and pg-pr-change: their mains, every internal package they link
-    # and the test, its rig and its scenario list
-    packages/pg-decider/cmd/pg-decider/main.go
-    packages/pg-decider/cmd/pg-pr-change/main.go
-    packages/pg-decider/internal/prchange/lane_e2e_test.go
-    packages/pg-decider/internal/prchange/testdata/lane-e2e-scenarios.txt
-    packages/pg-decider/internal/rules/review.go
-    packages/pg-decider/internal/apply/lookup.go
-    packages/pg-decider/internal/action/action.go
-    packages/pg-decider/internal/decide/registry.go
-    packages/pg-decider/internal/config/config.go
-    packages/pg-decider/internal/view/view.go
-    packages/pg-decider/internal/workitem/index.go
-    packages/pg-decider/internal/parity/fakeconnector.go
-    packages/pg-decider/go.mod
-    packages/pg-decider/go.sum
-    # pg-desk: its main, the lane state and its vocabularies (the copy the drift
-    # check compares), the metrics and the store
-    packages/pg-desk/cmd/pg-desk/lane.go
-    packages/pg-desk/internal/lanestate/vocab.go
-    packages/pg-desk/internal/metrics/prlane_state.go
-    packages/pg-desk/internal/store/store.go
-    packages/pg-desk/go.mod
-    packages/pg-desk/go.sum
-    # pg-connector: the umbrella, the beads backend and the shared wire packages
-    packages/pg-connector/cmd/pg-connector/issue.go
-    packages/pg-connector/cmd/pg-connector-issue-beads/internal/backend.go
-    packages/pg-connector/pkg/provider/issue/dispatch.go
-    packages/pg-connector/go.mod
-    packages/pg-connector/go.sum
-    # the hook's own body and the regex itself
-    scripts/run-pg-decider-lane-e2e.sh
-    scripts/pg-decider-lane-e2e-files.regex
-  )
-  for p in "${paths[@]}"; do
-    if ! printf '%s\n' "$p" | grep -Eq -- "$regex"; then
-      echo "the hook regex does not match $p" >&2
-      return 1
-    fi
-  done
-}
-
-@test "every binary the script builds has its main inside the regex" {
-  regex="$(cat "$REGEX_FILE")"
-  n=0
-  while read -r _ mod _ pkg; do
-    path="packages/$mod/${pkg#./}/main.go"
-    n=$((n + 1))
-    if ! printf '%s\n' "$path" | grep -Eq -- "$regex"; then
-      echo "the hook regex does not match $path, a binary the script builds" >&2
-      return 1
-    fi
-  done < <(grep -E '^  build [a-z-]+ ' "$SCRIPT")
-  # Five binaries: pg-desk, pg-decider, pg-pr-change, pg-connector and its beads backend.
-  [ "$n" -eq 5 ]
-}
-
-@test "the path regex leaves unrelated paths alone" {
-  regex="$(cat "$REGEX_FILE")"
-  for p in \
-    packages/pg-router/cmd/pg-router/main.go \
-    packages/pg-connector/cmd/pg-connector-github/main.go \
-    docs/behavior/pg-decider/pr-change.md \
-    scripts/run-pg-pr-change-contract.sh \
-    scripts/run-tmp-sweep-bats.sh; do
-    if printf '%s\n' "$p" | grep -Eq -- "$regex"; then
-      echo "the hook regex matches the unrelated path $p" >&2
-      return 1
-    fi
-  done
-}
-
-@test "every directory the regex names as an input exists in the repo" {
-  cd "$BATS_TEST_DIRNAME/.."
-  for d in packages/pg-decider/cmd/pg-decider packages/pg-decider/cmd/pg-pr-change \
-    packages/pg-decider/internal packages/pg-desk/cmd/pg-desk packages/pg-desk/internal \
-    packages/pg-connector/cmd/pg-connector packages/pg-connector/cmd/pg-connector-issue-beads \
-    packages/pg-connector/pkg; do
-    [ -d "$d" ] || {
-      echo "missing directory $d" >&2
-      return 1
-    }
-  done
-  [ -f scripts/run-pg-decider-lane-e2e.sh ]
-  [ -f packages/pg-decider/internal/prchange/testdata/lane-e2e-scenarios.txt ]
-}
-
 @test "the scenario list is not empty and the script's minimum is the list's size" {
   n="$(grep -vcE '^(#|$)' "$SCENARIOS")"
   [ "$n" -gt 0 ]
@@ -168,8 +75,7 @@ run_gate() { run --separate-stderr env PATH="$SHIM" "$BASH" "$SCRIPT" --prebuilt
     run_gate
     [ "$status" -eq 2 ]
     [[ $stderr == *"$missing not found on PATH"* ]]
-    [[ $stderr == *"Do NOT bypass with --no-verify"* ]]
-  done
+    done
 }
 
 @test "a missing sqlite3 fails loudly unless the environment names one" {
@@ -266,4 +172,20 @@ cat "'"$BATS_TEST_TMPDIR"'/go-output"'
 @test "an unknown argument is a usage error" {
   run --separate-stderr bash "$SCRIPT" --nope
   [ "$status" -eq 2 ]
+}
+
+# Operator standard V-4 (bead pg2-by94zu): a multi-process end-to-end suite MUST NOT
+# gate a commit or a land, but MUST keep its own check so it can still fail (ADR 0024
+# of phillipg-nix-repo-base). Reads the flake source, so it skips off the repo.
+@test "the suite is a nix check running the real test, and is not a pre-commit hook" {
+  flake="$BATS_TEST_DIRNAME/../flake.nix"
+  [ -f "$flake" ] || skip "flake.nix is not next to the tests"
+  # no hook of that name, no hook wrapper, no path regex
+  run grep -En '^ *name = "pg-decider-lane-e2e"|pg-decider-lane-e2e-hook|pg-decider-lane-e2e-files' "$flake"
+  [ "$status" -eq 1 ]
+  [ ! -e "$BATS_TEST_DIRNAME/../scripts/pg-decider-lane-e2e-files.regex" ]
+  # the check exists and runs the script that runs only TestLaneE2E
+  grep -Eq '^ *pg-decider-lane-e2e =$' "$flake"
+  grep -q 'run-pg-decider-lane-e2e.sh} --prebuilt' "$flake"
+  grep -q "go test .*-run '\^TestLaneE2E\\$'" "$SCRIPT"
 }

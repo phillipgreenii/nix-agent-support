@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # The real-tracker end-to-end gate of the PR lane (docket pg2-6mo45.3, packet
-# P4c-1). Body of BOTH the nix check `checks.<system>.pg-decider-lane-e2e` (with
-# --prebuilt: nix built the binaries) and the `pg-decider-lane-e2e` pre-commit /
-# pre-land hook (no flag: the binaries are built from source here).
+# P4c-1). Body of the nix check `checks.<system>.pg-decider-lane-e2e` (with
+# --prebuilt: nix built the binaries) and of the by-hand run (no flag: the
+# binaries are built from source here). It is NOT a commit or pre-land hook: the
+# suite spans processes and takes tens of minutes, so operator standard V-4 keeps
+# it out of every commit and land gate (bead pg2-by94zu).
 #
 # What it runs: TestLaneE2E in packages/pg-decider/internal/prchange: the real
 # pg-desk, pg-decider, pg-pr-change, pg-connector and pg-connector-issue-beads
@@ -77,12 +79,12 @@ fi
 tools=(go bd git)
 for tool in "${tools[@]}"; do
   if ! command -v "${tool}" >/dev/null 2>&1; then
-    echo "run-pg-decider-lane-e2e: ${tool} not found on PATH -- the real-tracker gate needs it. Enter the devShell or install it before committing. Do NOT bypass with --no-verify." >&2
+    echo "run-pg-decider-lane-e2e: ${tool} not found on PATH -- the real-tracker gate needs it. Enter the devShell or install it." >&2
     exit 2
   fi
 done
 if [ -z "${PG_PR_CHANGE_SQLITE3_BIN:-}" ] && ! command -v sqlite3 >/dev/null 2>&1; then
-  echo "run-pg-decider-lane-e2e: sqlite3 not found on PATH and PG_PR_CHANGE_SQLITE3_BIN is unset -- the gate reads the pg-desk store with it. Do NOT bypass with --no-verify." >&2
+  echo "run-pg-decider-lane-e2e: sqlite3 not found on PATH and PG_PR_CHANGE_SQLITE3_BIN is unset -- the gate reads the pg-desk store with it." >&2
   exit 2
 fi
 
