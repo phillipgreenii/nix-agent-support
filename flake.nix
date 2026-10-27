@@ -6978,20 +6978,27 @@
                   touch $out
                 '';
 
-              # pg-connector — the Tier-1 umbrella module's own suite: the
-              # envelope round trip, the sentinel-error mapping, the registry
-              # loader's list-vs-single-valued parsing, and the
-              # outcome-reporting helper's exit-code table for both schemes
-              # (bead pg2-2j5ac.1). Several tests exec a small fake-backend
-              # shell script (via pkg/scriptout's Invoke) to exercise the
-              # dispatcher/fan-out helpers against a real subprocess, so `sh`
-              # needs to be reachable — testDeps puts bash's `sh` on PATH.
-              # pg-connector-scm-git's own tests (bead pg2-2j5ac.6) also need
-              # a real `git` binary on PATH: its fakeRunner-backed unit tests
-              # don't, but its packet-required real-git-checkout test
-              # (internal/provider_realgit_test.go) execs real git worktree/
-              # branch commands against a throwaway fixture repo — matching
-              # the git testDeps pattern of the sibling Go test gates.
+              # pg-connector — the module's UNIT tier (bead pg2-bkwi41): a plain
+              # `go test ./...` with no build tags, which is also what the
+              # commit-time `run-unit-tests` hook and `pg-hooks run pre-land` run.
+              # It holds the umbrella's envelope round trip, the sentinel-error
+              # mapping, the registry loader, the outcome-reporting exit-code
+              # table and the dispatcher/fan-out helpers against fake-backend
+              # shell scripts (via pkg/scriptout's Invoke, so `sh` must be
+              # reachable: testDeps puts bash's `sh` on PATH), plus the module-wide
+              # source guards (TestUnitTierHasNoIntegrationTests among them).
+              # pg-connector-scm-git's real-git-checkout test
+              # (internal/provider_realgit_test.go) execs real git against a
+              # throwaway fixture repo, hence `git`.
+              #
+              # Tests that start the daemon, build or run a binary, or need a real
+              # external tool carry `//go:build integration` and are NOT run here:
+              # they run on demand as checks.<system>.pg-connector-integration-tests
+              # below (the Linux cross-compile gate and the `env -i` independence
+              # tests live there now). No `-timeout` override: the 20m one existed
+              # for those tests (bead pg2-7r19vr measured them at 461s to 552s per
+              # package), and raising a timeout to fit a slow test into the unit gate
+              # is the wrong fix.
               pg-connector-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-connector-go-tests";
                 # Deliberately the raw, unfiltered package dir (not default.nix's own
@@ -7001,23 +7008,9 @@
                 # one derivation's own build dependency scope. Since bead
                 # pg2-pla9d.2 (mkGoApp's doCheck = false default) none of the
                 # pg-connector package derivations runs tests, so this check is
-                # the module's ONLY nix-side test gate.
+                # the module's ONLY nix-side unit test gate.
                 src = ./packages/pg-connector;
                 gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
-                # -timeout 20m: three packages approach go's default 10m per-package
-                # ceiling under -race on a loaded host (measured 2026-10-26, bead
-                # pg2-7r19vr): cmd/pg-connector (TestCrossCompileLinuxWholeModule, which
-                # carries its own 20m internal deadline) took 461s on a calm host and
-                # timed out at 600s three times under host load 28-50; serve took
-                # 536-552s and activity-git/internal 454-462s. This is NOT for the
-                # scheduler/governor load test: cmd/pg-connector-github/internal/loadtest
-                # skips itself (TestMain) unless PG_CONNECTOR_LOAD_TEST=1, which this
-                # check never sets, and runs on demand as
-                # checks.<system>.pg-connector-load-test below.
-                testFlags = [
-                  "-timeout"
-                  "20m"
-                ];
                 testDeps = [
                   pkgs.bash
                   pkgs.git
@@ -7026,14 +7019,130 @@
                   # to compare backends' internal/ copies against a checked-in
                   # baseline.
                   pkgs.diffutils
-                  # cmd/pg-connector-github's adapter_e2e_test.go chains the real
-                  # daemon, the real umbrella and the pg-router source adapter. The
-                  # adapter is a module of its own that this check's source does not
-                  # contain, so the built binary rides on PATH; the test fails (it
-                  # never skips) when it is absent here.
-                  pkgs.pg-router-source-pg-connector
                 ];
               };
+
+              # pg-connector INTEGRATION tier (bead pg2-bkwi41). ON DEMAND ONLY: build
+              # it by hand when the daemon, the umbrella or a connector's wire contract
+              # changes (`nix build .#checks.<system>.pg-connector-integration-tests`).
+              # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land
+              # gate (operator ruling, Phillip, 2026-10-26: "the integration tests are
+              # taking way too long. they should not be running as typical unit tests
+              # and in typical unit test situations like commit or landing").
+              #
+              # The tests are the ones in files tagged `//go:build integration`: they
+              # start the real daemon through the servetest harness, build and run the
+              # connector binaries as subprocesses, or run the whole-module Linux
+              # cross-compile gate. The buildPhase runs EXACTLY those tests (the tagged
+              # package's test list minus its untagged list, so the unit tests are not
+              # run a second time) under -race with a 60m timeout, and fails when the
+              # listing is empty, when a test does not report PASS, or when any test is
+              # skipped, so a gate that silently ran nothing cannot pass.
+              # pg-connector-integration-tests-gating is the cheap regression guard
+              # for the split itself.
+              pg-connector-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-connector-integration-tests";
+                  src = ./packages/pg-connector;
+                  gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
+                  testDeps = [
+                    pkgs.bash
+                    pkgs.git
+                    pkgs.diffutils
+                    # cmd/pg-connector-github's adapter_e2e_test.go chains the real
+                    # daemon, the real umbrella and the pg-router source adapter. The
+                    # adapter is a module of its own that this check's source does not
+                    # contain, so the built binary rides on PATH; the test fails (it
+                    # never skips) when it is absent here.
+                    pkgs.pg-router-source-pg-connector
+                  ];
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/integration.log"
+                      : > "$log"
+                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                      if [ -z "$pkgs" ]; then
+                        echo "pg-connector-integration-tests: no test file carries //go:build integration" >&2
+                        exit 1
+                      fi
+                      total=0
+                      for dir in $pkgs; do
+                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
+                        if [ -z "$names" ]; then
+                          echo "pg-connector-integration-tests: $dir lists no integration-only tests" >&2
+                          exit 1
+                        fi
+                        regex="^($(echo "$names" | paste -sd'|' -))\$"
+                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                        if ! go test -tags integration -count=1 -race -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
+                          cat "$log"
+                          echo "pg-connector-integration-tests: $dir FAILED" >&2
+                          exit 1
+                        fi
+                        for t in $names; do
+                          if ! grep -q -- "^--- PASS: $t " "$log"; then
+                            cat "$log"
+                            echo "pg-connector-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                            exit 1
+                          fi
+                        done
+                        total=$((total + $(echo "$names" | wc -l)))
+                      done
+                      if grep -q -- '^--- SKIP' "$log"; then
+                        cat "$log"
+                        echo "pg-connector-integration-tests: a test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      echo "pg-connector-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                      runHook postBuild
+                    '';
+                  });
+
+              # Regression guard for the unit/integration split (bead pg2-bkwi41, V-3):
+              # against the REAL go tool, proves that (a) the default build lists no
+              # test that the daemon harness or a built binary drives, and a tagged
+              # build lists strictly more tests than the default one in every package
+              # that has an integration file, (b) `go vet` compiles the module both
+              # with and without the tag. The source-level rule (an untagged test file
+              # may not start the daemon, build a binary or exec a real tool) is the
+              # unit test TestUnitTierHasNoIntegrationTests in cmd/pg-connector, which
+              # also runs in this check's sibling pg-connector-go-tests.
+              pg-connector-integration-tests-gating =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-connector-integration-tests-gating";
+                  src = ./packages/pg-connector;
+                  gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      fail() { echo "pg-connector-integration-tests-gating: $*" >&2; exit 1; }
+                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                      [ -n "$pkgs" ] || fail "no test file carries //go:build integration"
+                      for dir in $pkgs; do
+                        tagged=$(go test -tags integration -list '.*' "$dir" | grep -c '^Test' || true)
+                        plain=$(go test -list '.*' "$dir" | grep -c '^Test' || true)
+                        [ "$tagged" -gt "$plain" ] || fail "$dir: the tagged build lists $tagged tests, the default build $plain; the tag moves nothing"
+                      done
+                      # The untagged build must not list a known integration test.
+                      if go test -list '.*' ./cmd/pg-connector/ | grep -q '^TestCrossCompileLinuxWholeModule$'; then
+                        fail "the default build lists TestCrossCompileLinuxWholeModule"
+                      fi
+                      go test -tags integration -list '.*' ./cmd/pg-connector/ | grep -q '^TestCrossCompileLinuxWholeModule$' || fail "the tagged build does not list TestCrossCompileLinuxWholeModule"
+                      go vet ./... || fail "go vet of the default build failed"
+                      go vet -tags integration ./... || fail "go vet of the integration build failed"
+                      echo "pg-connector-integration-tests-gating: the tag splits $(echo "$pkgs" | wc -l) packages; both builds vet clean"
+                      runHook postBuild
+                    '';
+                  });
 
               # pg-connector-github load test (bead pg2-7r19vr). ON DEMAND ONLY: build it
               # by hand when the scheduler, governor or change engine changes

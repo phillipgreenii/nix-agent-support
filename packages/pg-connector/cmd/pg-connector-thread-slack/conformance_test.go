@@ -1,3 +1,5 @@
+//go:build integration
+
 // conformance_test.go: this bead's own required conformance-suite proof —
 // pkg/scriptout/conformance's existing Backend/ExecBackend/driver.Run
 // suite (unchanged; this bead's own Contract: "this packet is a NEW
@@ -6,16 +8,13 @@
 // resolved via internal.EnvBinary (this file's own env-var override,
 // mirroring cmd/pg-connector-issue-jira's identical "a fake claude
 // executable resolved via $PATH or an env-var override, mirroring
-// pjira's own resolution convention" contract clause). Deliberately NOT
-// gated behind a build tag: this bead's own Validation section runs this
-// package's tests with plain `go test`, no `-tags` flag, so the binary
-// build + subprocess exec below run as part of every ordinary
-// `go test ./...` pass over this module (unlike
+// pjira's own resolution convention" contract clause). This suite is fully
+// hermetic (a fake claude script, no network, no real credential), but it
+// builds the binary and execs it as a subprocess, so it carries the
+// `integration` build tag (bead pg2-bkwi41) and runs through
+// checks.<system>.pg-connector-integration-tests, not the unit tier (unlike
 // cmd/pg-connector/e2e_contract_test.go's `contract`-tagged real-external-
-// credential suite, or packages/pg-router/cmd/pg-router/e2e_test.go's
-// `smoke`-tagged one) — this suite is fully hermetic (a fake claude
-// script, no network, no real credential) so there is no reason to keep
-// it out of the default run.
+// credential suite, which needs real credentials as well).
 package main
 
 import (

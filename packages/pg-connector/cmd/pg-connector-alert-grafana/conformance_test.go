@@ -1,9 +1,14 @@
+//go:build integration
+
 // conformance_test.go: runs pkg/scriptout/conformance's shared suite
 // (conformance.Run) and its list helper (conformance.InvokeList) against the
 // REAL COMPILED pg-connector-alert-grafana binary, with an httptest server
 // standing in for Grafana (hermetic: no network beyond loopback). Mirrors
-// cmd/pg-connector-calendar-osx-bridge/conformance_test.go, and is likewise
-// not behind a build tag so a plain `go test ./...` runs it.
+// cmd/pg-connector-calendar-osx-bridge/conformance_test.go. It carries the
+// `integration` build tag (bead pg2-bkwi41): it compiles the binary and runs it
+// as a subprocess, so it stays out of the unit tier (see the package-versioning
+// rule's "integration tier" note) and runs through
+// checks.<system>.pg-connector-integration-tests.
 package main
 
 import (

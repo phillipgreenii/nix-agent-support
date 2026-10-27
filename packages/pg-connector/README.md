@@ -709,16 +709,48 @@ cd packages/pg-connector
 go test ./...
 ```
 
-`nix build .#checks.<system>.pg-connector-go-tests` (or the full `nix flake check`) is the
-whole-module test gate — `nix build .#pg-connector` alone only compiles `cmd/pg-connector` and
-does not exercise every backend's own tests.
+That is the UNIT tier: what the commit-time `run-unit-tests` hook, `pg-hooks run pre-land` and
+`nix build .#checks.<system>.pg-connector-go-tests` run. `nix build .#pg-connector` alone only
+compiles `cmd/pg-connector` and does not exercise every backend's own tests.
+
+### Integration tier (on demand)
+
+A test that starts the real daemon (`servetest.NewDaemon`, `StartDaemon`, `Binary`), builds or runs
+a binary as a subprocess (`go build`, `go vet`, `go test -c`, an `exec.Command` of a built binary),
+or needs a real external tool (`bd`, `dolt`, `tmux`, `ccpool`) is NOT a unit test (operator ruling,
+2026-10-26: "the integration tests are taking way too long. they should not be running as typical
+unit tests and in typical unit test situations like commit or landing"). Its file carries
+`//go:build integration`, so the unit tier does not compile it. The `contract` tag (real `bd`, real
+credentials) is a separate on-demand tier excluded the same way. The tag was chosen over an
+environment switch (the load test's `PG_CONNECTOR_LOAD_TEST`) because it keeps the tests out of the
+unit build entirely, it is the mechanism `pg-test-runner` already registers (`integration` is one of
+its non-unit labels, so the hook excludes it with no runner change), and a per-file tag splits a
+package test by test, which a package-level `TestMain` gate cannot.
+
+Run it when the daemon, the umbrella or a connector's wire contract changes:
+
+```bash
+nix build .#checks.<system>.pg-connector-integration-tests   # runs exactly the tagged tests, under -race, 60m; not part of any hook or land gate
+# or, from packages/pg-connector (all tests of every package, tagged ones included):
+nice -n 10 go test -p 4 -count=1 -tags integration ./...
+# or one package:
+nice -n 10 go test -p 4 -count=1 -tags integration ./cmd/pg-connector-github/internal/serve/
+```
+
+Classification is per test, not per package: a pure-logic test next to a daemon test stays in the
+unit tier, in an untagged file. `TestUnitTierHasNoIntegrationTests` (`cmd/pg-connector`, unit tier)
+fails when an untagged test file starts the daemon, execs a built binary or Go tool, or execs a real
+external tool, and `nix build .#checks.<system>.pg-connector-integration-tests-gating` proves against
+the real `go` tool that the tag splits every integration package and that both builds vet. A fast
+single-process test is a unit test even when it is real (a `git` fixture repo, an in-process serve
+loop, the re-exec-the-test-binary helper process).
 
 The scheduler/governor/change-engine load test
 (`cmd/pg-connector-github/internal/loadtest`) is NOT part of that run. It simulates nineteen
 minutes of fake time over 150 pull requests and takes tens of minutes under `-race`, so it is an
 on-demand load test, not a unit test (operator ruling 2026-10-25): the package's `TestMain` skips
 every test in it unless `PG_CONNECTOR_LOAD_TEST=1`, so `go test ./...`, `go test -short`, the hooks
-and `pg-connector-go-tests` leave it out. Run it by hand when the scheduler, governor or change
+and `pg-connector-go-tests` leave it out (as they do the integration tier above). Run it by hand when the scheduler, governor or change
 engine changes:
 
 ```bash

@@ -1,8 +1,9 @@
+//go:build integration
+
 package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,12 +16,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/servetest"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
-
-// The change feed over the real client: the in-process tests of the daemon's
-// packages prove the behavior; these prove the same answers survive the real
-// client binary, the real socket and a daemon child process.
 
 // confAwaitBaseline waits until the queries' membership baselines are in the
 // store, so the first poll of a key starts at the tail rather than racing the
@@ -309,8 +305,6 @@ func asMaps(v any) []map[string]any {
 	return out
 }
 
-// ---- the wire golden ----------------------------------------------------------
-
 // goldenUpdateEnv is the environment variable that rewrites the golden files
 // instead of comparing against them.
 const goldenUpdateEnv = "PG_CONNECTOR_GOLDEN_UPDATE"
@@ -418,11 +412,6 @@ func goldenFile(t *testing.T, steps []goldenStep) []byte {
 	}
 	return b.Bytes()
 }
-
-var (
-	_ = context.Background
-	_ = scriptout.ProtocolVersion
-)
 
 // TestConformanceBaselineTimeIsOnTheStatusOpNotTheFeedWire pins where a
 // consumer learns a query's baseline marker time: the status op's

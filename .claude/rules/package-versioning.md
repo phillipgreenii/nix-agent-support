@@ -57,12 +57,26 @@ per-change or land-time gate; build the targeted check). Every Go module with te
 package back into `doCheck = true` MUST carry a comment stating why its `*-go-tests` check is not
 enough.
 
-**pg-connector platform gates**: `checks.<system>.pg-connector-go-tests` also carries the Linux
-cross-compile gate (`cmd/pg-connector/crosscompile_test.go`: `GOOS=linux CGO_ENABLED=0 go vet ./...`
-plus `go test -c` for every package, so a `_linux.go` file or `_linux_test.go` that stops compiling
-fails the gate on a darwin host; Linux-only tests are only compiled there, pg2-opk5g first runs them)
-and the `env -i` independence test (`cmd/pg-connector-github/envindependence_test.go`). The gate adds
-minutes to the check's run; `go test -short` skips the whole-module half.
+**pg-connector unit tier and integration tier** (operator ruling 2026-10-26, bead `pg2-bkwi41`):
+`checks.<system>.pg-connector-go-tests`, the commit-time `run-unit-tests` hook and
+`pg-hooks run pre-land` all run a plain `go test ./...` (no tags): the UNIT tier. A test that starts
+the daemon (the `servetest` harness), builds or runs a binary as a subprocess, or needs a real
+external tool (`bd`, `dolt`, `tmux`, `ccpool`) sits in a file tagged `//go:build integration`, which
+that run does not compile. The integration tier includes the Linux cross-compile gate
+(`cmd/pg-connector/crosscompile_test.go`: `GOOS=linux CGO_ENABLED=0 go vet ./...` plus `go test -c`
+for every package, so a `_linux.go` file or `_linux_test.go` that stops compiling fails the gate on a
+darwin host; Linux-only tests are only compiled there, pg2-opk5g first runs them) and the `env -i`
+independence tests (`cmd/pg-connector-github/envindependence_test.go`). It runs on demand, not on
+commit or land: `nix build .#checks.<system>.pg-connector-integration-tests` (exactly the tagged
+tests, under `-race`, 60m), or `go test -tags integration ./...` from `packages/pg-connector`. Run it
+when the daemon, the umbrella or a connector's wire contract changes (and before relying on the
+Linux cross-compile gate). It MUST NOT be wired into any hook, `run-unit-tests` or pre-land gate, and
+a test MUST NOT move back into the unit tier by dropping its tag or by raising the unit timeout.
+Classification is per test (a pure-logic test stays untagged); the regression guards are
+`TestUnitTierHasNoIntegrationTests` (unit tier, fails when an untagged test file matches the criteria)
+and `checks.<system>.pg-connector-integration-tests-gating` (real `go`: the tag splits every
+integration package and both builds vet). Details: `packages/pg-connector/README.md`, "Integration
+tier (on demand)". The `contract` tag (real `bd`, real credentials) is a separate on-demand tier.
 
 **pg-connector load test (on demand, not a gate)**: `cmd/pg-connector-github/internal/loadtest` is
 excluded from `go test ./...` and from `pg-connector-go-tests` (operator ruling 2026-10-25, bead

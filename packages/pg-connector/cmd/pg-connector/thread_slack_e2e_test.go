@@ -1,3 +1,5 @@
+//go:build integration
+
 package main
 
 // thread_slack_e2e_test.go: the hermetic end-to-end proof for the thread
@@ -18,8 +20,10 @@ package main
 // placeholder; the real working directory, model and MCP declaration come
 // from the consuming flake's runtime config, and this repo is public.
 //
-// Not behind a build tag: it is part of every ordinary `go test ./...` run
-// of this module, like cmd/pg-connector-thread-slack's conformance test.
+// It builds the real binaries and execs them, so it carries the `integration`
+// build tag (bead pg2-bkwi41) and runs through
+// checks.<system>.pg-connector-integration-tests, not the unit tier, like
+// cmd/pg-connector-thread-slack's conformance test.
 
 import (
 	"bytes"

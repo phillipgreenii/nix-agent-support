@@ -1,3 +1,5 @@
+//go:build integration
+
 // conformance_test.go: pkg/scriptout/conformance's Backend/ExecBackend/driver.Run
 // suite run against the REAL COMPILED pg-connector-calendar-task-focus binary,
 // with a FAKE pg-task-focus daemon (an httptest server speaking the two reads
@@ -6,8 +8,10 @@
 // malformed-stdin and capabilities): the calendar and attention ops, the
 // failure mapping, and the event log of a real one-shot process. The fake is
 // hand-rolled from the daemon's OpenAPI document; this module never imports the
-// daemon's Go packages. Deliberately NOT gated behind a build tag: the suite is
-// hermetic (loopback only, no real daemon) so it runs in every `go test ./...`.
+// daemon's Go packages. The suite is hermetic
+// (loopback only, no real daemon), but it builds the binary and execs it, so it
+// carries the `integration` build tag (bead pg2-bkwi41) and runs through
+// checks.<system>.pg-connector-integration-tests, not the unit tier.
 package main
 
 import (
@@ -29,6 +33,22 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
 )
+
+var (
+	buildOnce sync.Once
+	builtBin  string
+	buildErr  error
+	buildDir  string
+)
+
+// TestMain removes the compiled binary after the package's tests ran.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if buildDir != "" {
+		_ = os.RemoveAll(buildDir)
+	}
+	os.Exit(code)
+}
 
 // Deadlines are hang guards, not performance assertions: a cold `go build`
 // under heavy machine load takes far longer than an idle build.
@@ -106,22 +126,6 @@ func (d *fakeDaemon) seen() []daemonRequest {
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
-}
-
-var (
-	buildOnce sync.Once
-	builtBin  string
-	buildErr  error
-	buildDir  string
-)
-
-// TestMain removes the compiled binary after the package's tests ran.
-func TestMain(m *testing.M) {
-	code := m.Run()
-	if buildDir != "" {
-		_ = os.RemoveAll(buildDir)
-	}
-	os.Exit(code)
 }
 
 // buildBinary compiles this package's own real binary via `go build`, once per

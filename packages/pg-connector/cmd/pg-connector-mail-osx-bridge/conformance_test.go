@@ -1,3 +1,5 @@
+//go:build integration
+
 // conformance_test.go: this packet's required conformance-suite proof —
 // pkg/scriptout/conformance's existing Backend/ExecBackend/driver.Run suite
 // (unchanged; this is a NEW consumer of it, not a modifier) run against the
@@ -10,11 +12,11 @@
 // mail-specific ops and the closed six-value error taxonomy are additionally
 // driven end to end through scriptout.Invoke against the same real binary.
 //
-// Deliberately NOT gated behind a build tag: this package's tests run with
-// plain `go test`, so the binary build + subprocess exec below run as part
-// of every ordinary `go test ./...` pass over this module — the suite is
-// fully hermetic (a fake, hand-rolled Unix-socket listener, no network, no
-// Mail.app).
+// The suite is fully hermetic (a fake, hand-rolled Unix-socket listener, no
+// network, no Mail.app), but it builds the binary and execs it as a
+// subprocess, so it carries the `integration` build tag (bead pg2-bkwi41) and
+// runs through checks.<system>.pg-connector-integration-tests, not the unit
+// tier.
 package main
 
 import (
@@ -36,6 +38,21 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
 )
+
+var (
+	builtOnce sync.Once
+	builtDir  string
+	builtBin  string
+	builtErr  error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if builtDir != "" {
+		_ = os.RemoveAll(builtDir)
+	}
+	os.Exit(code)
+}
 
 // osxBridgeAPISocketEnvVar mirrors internal/client.go's own (unexported)
 // socketEnvVar constant by value — this backend resolves this exact env var,
@@ -77,21 +94,6 @@ func buildMailOsxBridgeBinary(t *testing.T) string {
 		t.Fatal(builtErr)
 	}
 	return builtBin
-}
-
-var (
-	builtOnce sync.Once
-	builtDir  string
-	builtBin  string
-	builtErr  error
-)
-
-func TestMain(m *testing.M) {
-	code := m.Run()
-	if builtDir != "" {
-		_ = os.RemoveAll(builtDir)
-	}
-	os.Exit(code)
 }
 
 // fakeBridge is a minimal, hand-rolled Unix-socket listener standing in for

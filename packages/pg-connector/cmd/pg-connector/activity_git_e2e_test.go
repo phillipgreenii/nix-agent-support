@@ -1,3 +1,5 @@
+//go:build integration
+
 package main
 
 // activity_git_e2e_test.go: the phase's automated stand-in for the operator

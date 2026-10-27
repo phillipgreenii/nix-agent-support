@@ -1,3 +1,5 @@
+//go:build integration
+
 package main
 
 import (
@@ -24,8 +26,10 @@ import (
 // Linux-only TESTS are only COMPILED here; pg2-opk5g first RUNS them.
 //
 // It lives in cmd/pg-connector next to the other module-wide guards
-// (dependency_direction_test.go and friends), so it runs inside
-// checks.<system>.pg-connector-go-tests' `go test ./...`.
+// (dependency_direction_test.go and friends), so it carries the
+// `integration` build tag (bead pg2-bkwi41; it runs go vet and go test -c over the
+// whole module, minutes of work) and runs inside
+// checks.<system>.pg-connector-integration-tests, not the unit tier.
 
 // crossCompileFailure is one step of the gate that failed.
 type crossCompileFailure struct {

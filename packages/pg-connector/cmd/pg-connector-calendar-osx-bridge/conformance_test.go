@@ -1,3 +1,5 @@
+//go:build integration
+
 // conformance_test.go: this packet's own required conformance-suite proof
 // — pkg/scriptout/conformance's existing Backend/ExecBackend/driver.Run
 // suite (unchanged; this packet is a NEW consumer of it, not a modifier)
@@ -7,13 +9,11 @@
 // path>) — the SAME env var internal/client.go's own socketEnvVar/
 // ResolveSocketPath resolution reads, mirroring
 // cmd/pg-connector-thread-slack/conformance_test.go's own
-// t.Setenv(internal.EnvBinary, fakeClaude) precedent exactly. Deliberately
-// NOT gated behind a build tag: this packet's own Validation section runs
-// this package's tests with plain `go test`, no `-tags` flag, so the
-// binary build + subprocess exec below run as part of every ordinary
-// `go test ./...` pass over this module — this suite is fully hermetic (a
-// fake, hand-rolled Unix-socket listener, no network, no real EventKit/TCC)
-// so there is no reason to keep it out of the default run.
+// t.Setenv(internal.EnvBinary, fakeClaude) precedent exactly. This suite is
+// fully hermetic (a fake, hand-rolled Unix-socket listener, no network, no real
+// EventKit/TCC), but it builds the binary and execs it as a subprocess, so it
+// carries the `integration` build tag (bead pg2-bkwi41) and runs through
+// checks.<system>.pg-connector-integration-tests, not the unit tier.
 package main
 
 import (

@@ -219,8 +219,8 @@ Setting it (with a supervisor, or `allowUnsupervised`) rewrites every registry l
 `[pg-connector-issue-jira, --config, <configFile>, --instance, <instance>]` and stamps the umbrella block with the config
 hash and path. A host MUST NOT set it before the cutover phase.
 
-**Checks** (build one with `nix build .#checks.<system>.<name>`, in the background): `pg-connector-go-tests` (the whole
-module, including the Linux cross-compile gate), `test-pg-connector-issue-jira-hm-launchd`
+**Checks** (build one with `nix build .#checks.<system>.<name>`, in the background): `pg-connector-go-tests` (the module's unit
+tier; the daemon, binary and Linux cross-compile tests are on demand in `pg-connector-integration-tests`), `test-pg-connector-issue-jira-hm-launchd`
 (`tests/pg-connector-issue-jira-hm-launchd.nix`, which also runs the entry under `env -i` against a fake binary),
 `test-pg-connector-home-rendering`, `test-pg-connector-issue-jira-daemon-capabilities`,
 `test-pg-connector-issue-jira-daemon-darwin-module`, `test-pg-connector-issue-jira-alert-rules`,
