@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   update-flakes:
-    uses: phillipgreenii/nix-repo-base/.github/workflows/update-flakes-reusable.yml@6f5a244498b226403b999da8e1d1d49b72e61caa # main
+    uses: phillipgreenii/nix-repo-base/.github/workflows/update-flakes-reusable.yml@4b70d57580e99520e7ac40af1d98218120562943 # main
     secrets: inherit
     with:
       automerge: none
