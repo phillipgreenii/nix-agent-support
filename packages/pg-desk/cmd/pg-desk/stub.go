@@ -5,10 +5,8 @@ import "fmt"
 // notImplemented is the shared RunE body for every subcommand this packet
 // introduces as an empty shell (run, serve, open, hide, unhide, wip,
 // feedback, show, status, doctor, heartbeat, heartbeat-item, ledger).
-// import-pg-pr-annotations started as one of these stubs too; packet 9 of
-// this docket (pg2-2j5ac.32) replaced its RunE with a real implementation
-// (see import_pg_pr_annotations.go). A later packet replaces each
-// remaining one's RunE the same way; until then the stub errors rather
+// A later packet replaces each remaining one's RunE with a real
+// implementation; until then the stub errors rather
 // than silently succeeding, so a caller can tell "not built yet" from "ran
 // and did nothing."
 //

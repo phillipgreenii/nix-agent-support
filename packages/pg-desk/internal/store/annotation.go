@@ -25,9 +25,7 @@ const prEntityCommentID = ""
 // Human and agent annotations survive every pipeline run by construction:
 // no pipeline stage (gather, interpret, the run pipeline — packet 6) calls
 // UpsertAnnotation. Its only permitted callers are packet 8's CLI commands
-// (hide/unhide/wip/feedback set) and packet 9's import-pg-pr-annotations
-// command (this packet's Binding decisions section). This package itself
-// never calls it.
+// (hide/unhide/wip/feedback set). This package itself never calls it.
 type Annotation struct {
 	Repo       string
 	EntityType string

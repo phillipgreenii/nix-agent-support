@@ -506,8 +506,8 @@ classification naming a verb that does not exist. Every safe verb is run, in its
 a real store migrated to schema 2 under a deployment-style configuration; it passes when it runs
 without a schema or ledger error (it MAY still exit non-zero for another reason, such as a missing
 entity or no reachable connector). The unsafe verbs today are the legacy top-level `show` (replaced by
-`pr show`), `reconcile` and `ledger` (both read the dropped ledger), `import-pg-pr-annotations` and
-`migrate` (one-shot cutover verbs), and the `open` verbs (they exec the configured browser opener). The
+`pr show`), `reconcile` and `ledger` (both read the dropped ledger) and
+`migrate` (a one-shot cutover verb), and the `open` verbs (they exec the configured browser opener). The
 top-level `hide`, `unhide`, `wip` and `feedback list|set` are safe: they dispatch on the store schema
 like the typed `pr` forms. `run` and `sweep` are safe only while `sync.mode` is
 `off`: the sync stage reads the ledger.

@@ -14,15 +14,13 @@ import (
 // MUST still be reachable on rootCmd and fail with a "not implemented"
 // error rather than silently succeeding or panicking.
 //
-// "serve" and "import-pg-pr-annotations" are deliberately absent from this
+// "serve" is deliberately absent from this
 // list: this docket's packet 7 (Phase 9) replaced serve's stub RunE with a
 // real implementation (serve.go), so it no longer returns "not implemented"
 // — it is instead covered by packages/pg-desk/internal/httpapi's own tests
 // (the payload/metrics behavior) rather than a direct RunE call here, which
 // would try to open the real default store and block forever on
-// http.ListenAndServe. Likewise, packet 9 gave import-pg-pr-annotations a
-// real implementation (see import_pg_pr_annotations.go), so it is covered by
-// import_test.go instead. "run" is absent for the same reason as of packet
+// http.ListenAndServe. "run" is absent for the same reason as of packet
 // 6: it now has a real implementation for <type>=pr (run.go,
 // internal/pipeline), covered by run_test.go and internal/pipeline's own
 // tests instead — only run issue/run thread still return "not

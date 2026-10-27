@@ -30,8 +30,7 @@ In scope: `store` and its schema, `gather`, `interpret`, `sync` (all three modes
 stored entity), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`wip`,
 `feedback list`/`feedback set`, `show`, `links` (a read-only batch lookup of cross-reference
 links, see [`links.md`](links.md), which also holds the `<type> link add|remove` external-link
-verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `<type> changes` (see [`changes.md`](changes.md)), the focus configuration keys (`focus.*`, `bead_id_pattern`, see [`config.md`](config.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), `pg-desk-shadow` (the one-off shadow-compare measurement tool, see [`shadow-compare.md`](shadow-compare.md)), `attention list`/`attention explain` and the `pg-desk-attention` plugin (see [`attention.md`](attention.md)), `freshness` (the per-source data age, see [`freshness.md`](freshness.md)), the typed `<type> show` composite view (see [`show.md`](show.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
-`import-pg-pr-annotations`, and the annotation verbs `<type> annotate|suppress|unsuppress`,
+verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `<type> changes` (see [`changes.md`](changes.md)), the focus configuration keys (`focus.*`, `bead_id_pattern`, see [`config.md`](config.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), `pg-desk-shadow` (the one-off shadow-compare measurement tool, see [`shadow-compare.md`](shadow-compare.md)), `attention list`/`attention explain` and the `pg-desk-attention` plugin (see [`attention.md`](attention.md)), `freshness` (the per-source data age, see [`freshness.md`](freshness.md)), the typed `<type> show` composite view (see [`show.md`](show.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and the annotation verbs `<type> annotate|suppress|unsuppress`,
 `pr force-review`, `pr head-check`, `pr lane-record`, `pr mark-inactive` (see [`operator-commands.md`](operator-commands.md)) and the typed `hide`/`unhide`/`wip`/`pr feedback` forms (see
 [`annotate.md`](annotate.md)).
 
@@ -57,32 +56,31 @@ back here — not the full list.
 
 ## The docs
 
-| Doc                                                          | Covers                                                                                                                             |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| [`store-schema.md`](store-schema.md)                         | The SQLite store, its version ladder, schema cutover and tables                                                                    |
-| [`gather.md`](gather.md)                                     | Pipeline stage 1 — facts, only through `pg-connector`                                                                              |
-| [`interpret.md`](interpret.md)                               | Pipeline stage 2 — pure, deterministic derivation                                                                                  |
-| [`sync.md`](sync.md)                                         | Pipeline stage 3 — agent-visible bead writes (all modes)                                                                           |
-| [`pipeline-run.md`](pipeline-run.md)                         | `pg-desk run` and the three-stage pipeline shape                                                                                   |
-| [`run-issue.md`](run-issue.md)                               | `pg-desk run issue` — the beads-backend bead -> PR resolution and interpret-only re-run                                            |
-| [`run-thread.md`](run-thread.md)                             | `pg-desk run thread` — the Slack half: permalink/ticket-key cross-references and interpret-only re-run                             |
-| [`serve.md`](serve.md)                                       | `pg-desk serve`, soak-port only this phase                                                                                         |
-| [`open.md`](open.md)                                         | `pg-desk open` and the typed `pg-desk <type> open`                                                                                 |
-| [`show.md`](show.md)                                         | `pg-desk <type> show` — typed composite view (`pg-desk.view/v1`), links with origins, `--refresh`                                  |
-| [`hide-unhide-wip.md`](hide-unhide-wip.md)                   | `pg-desk hide`/`unhide`/`wip` and their typed `<type>` forms                                                                       |
-| [`feedback.md`](feedback.md)                                 | `pg-desk feedback list`/`feedback set` and `pr feedback list`/`set`                                                                |
-| [`annotate.md`](annotate.md)                                 | `pg-desk <type> annotate`/`suppress`/`unsuppress` and `pr force-review` — the key/value annotation verbs                           |
-| [`history.md`](history.md)                                   | `pg-desk pr`/`issue`/`thread` groups and `<type> history`                                                                          |
-| [`links.md`](links.md)                                       | `pg-desk links` — read-only batch lookup of PR/issue/thread/build cross-reference links; `<type> link add`/`remove` external links |
-| [`consumer.md`](consumer.md)                                 | `pg-desk <type> consumer list`/`forget` — change-log consumer lifecycle                                                            |
-| [`changes.md`](changes.md)                                   | `pg-desk <type> changes` — per-backend watched-only issue changes (the backend owns `pr` and `ci`), cursor, exit codes             |
-| [`refresh.md`](refresh.md)                                   | `pg-desk <type> refresh` — targeted single-entity hydration, change kind, exit codes                                               |
-| [`shadow-compare.md`](shadow-compare.md)                     | `pg-desk-shadow` — the side-by-side comparison of the fingerprint change detection against the live change flow (phase A)          |
-| [`attention.md`](attention.md)                               | `pg-desk attention list`/`explain` and the `pg-desk-attention` plugin — the read-time attention evaluator, its rules, grouping     |
-| [`freshness.md`](freshness.md)                               | `pg-desk freshness`, the dashboard `sources[]` and `pg_desk_source_age_seconds` — per-source data age, the staleness threshold     |
-| [`focus.md`](focus.md)                                       | `pg-desk focus` — the daily-focus command group: shared flags, exit codes, period addressing, `--json` contract, run record        |
-| [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                                                 |
-| [`import-pg-pr-annotations.md`](import-pg-pr-annotations.md) | The one-shot pg-pr cutover tool                                                                                                    |
+| Doc                                            | Covers                                                                                                                             |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| [`store-schema.md`](store-schema.md)           | The SQLite store, its version ladder, schema cutover and tables                                                                    |
+| [`gather.md`](gather.md)                       | Pipeline stage 1 — facts, only through `pg-connector`                                                                              |
+| [`interpret.md`](interpret.md)                 | Pipeline stage 2 — pure, deterministic derivation                                                                                  |
+| [`sync.md`](sync.md)                           | Pipeline stage 3 — agent-visible bead writes (all modes)                                                                           |
+| [`pipeline-run.md`](pipeline-run.md)           | `pg-desk run` and the three-stage pipeline shape                                                                                   |
+| [`run-issue.md`](run-issue.md)                 | `pg-desk run issue` — the beads-backend bead -> PR resolution and interpret-only re-run                                            |
+| [`run-thread.md`](run-thread.md)               | `pg-desk run thread` — the Slack half: permalink/ticket-key cross-references and interpret-only re-run                             |
+| [`serve.md`](serve.md)                         | `pg-desk serve`, soak-port only this phase                                                                                         |
+| [`open.md`](open.md)                           | `pg-desk open` and the typed `pg-desk <type> open`                                                                                 |
+| [`show.md`](show.md)                           | `pg-desk <type> show` — typed composite view (`pg-desk.view/v1`), links with origins, `--refresh`                                  |
+| [`hide-unhide-wip.md`](hide-unhide-wip.md)     | `pg-desk hide`/`unhide`/`wip` and their typed `<type>` forms                                                                       |
+| [`feedback.md`](feedback.md)                   | `pg-desk feedback list`/`feedback set` and `pr feedback list`/`set`                                                                |
+| [`annotate.md`](annotate.md)                   | `pg-desk <type> annotate`/`suppress`/`unsuppress` and `pr force-review` — the key/value annotation verbs                           |
+| [`history.md`](history.md)                     | `pg-desk pr`/`issue`/`thread` groups and `<type> history`                                                                          |
+| [`links.md`](links.md)                         | `pg-desk links` — read-only batch lookup of PR/issue/thread/build cross-reference links; `<type> link add`/`remove` external links |
+| [`consumer.md`](consumer.md)                   | `pg-desk <type> consumer list`/`forget` — change-log consumer lifecycle                                                            |
+| [`changes.md`](changes.md)                     | `pg-desk <type> changes` — per-backend watched-only issue changes (the backend owns `pr` and `ci`), cursor, exit codes             |
+| [`refresh.md`](refresh.md)                     | `pg-desk <type> refresh` — targeted single-entity hydration, change kind, exit codes                                               |
+| [`shadow-compare.md`](shadow-compare.md)       | `pg-desk-shadow` — the side-by-side comparison of the fingerprint change detection against the live change flow (phase A)          |
+| [`attention.md`](attention.md)                 | `pg-desk attention list`/`explain` and the `pg-desk-attention` plugin — the read-time attention evaluator, its rules, grouping     |
+| [`freshness.md`](freshness.md)                 | `pg-desk freshness`, the dashboard `sources[]` and `pg_desk_source_age_seconds` — per-source data age, the staleness threshold     |
+| [`focus.md`](focus.md)                         | `pg-desk focus` — the daily-focus command group: shared flags, exit codes, period addressing, `--json` contract, run record        |
+| [`operator-commands.md`](operator-commands.md) | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                                                 |
 
 ## Telemetry declaration (D24)
 

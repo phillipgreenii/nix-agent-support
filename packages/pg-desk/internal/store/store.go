@@ -10,8 +10,7 @@
 // sync logic that populates/consumes the ledger table beyond its bare
 // schema (Phase 10), and it does NOT populate xref (Phase 13). No pipeline
 // stage in this docket calls the annotation writer — packet 8's CLI
-// commands (hide/unhide/wip/feedback set) and packet 9's
-// import-pg-pr-annotations command are its only callers.
+// commands (hide/unhide/wip/feedback set) are its only callers.
 //
 // # Two schema versions
 //

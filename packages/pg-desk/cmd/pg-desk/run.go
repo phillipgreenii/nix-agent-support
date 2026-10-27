@@ -32,8 +32,7 @@ type runFlags struct {
 
 var runF runFlags
 
-// runConfigLoad and runStoreOpen are package-level vars — mirroring
-// import_pg_pr_annotations.go's importPgPrDeskStoreOpen convention — so
+// runConfigLoad and runStoreOpen are package-level vars so
 // tests can inject a fixture config/store without touching the real
 // $PG_DESK_CONFIG / $XDG_STATE_HOME/pg-desk/store.db.
 var runConfigLoad = func(ctx context.Context) (*config.Config, error) { return config.Load(ctx) }

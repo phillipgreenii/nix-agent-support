@@ -30,7 +30,7 @@ below. "Schema version 2 tables" describes what the cutover changes.
   [`run-issue.md`](run-issue.md)) and this docket's Slack-half sibling packet.
 - **`annotation`** — hidden state and reason, WIP state, and per-`(PR, comment)` disposition
   overrides with who set them. Written only by the CLI — an operator or an agent, through `hide`,
-  `unhide`, `wip`, `feedback set`, or `import-pg-pr-annotations` — and MUST NEVER be written by the
+  `unhide`, `wip`, or `feedback set` — and MUST NEVER be written by the
   pipeline. Human and agent annotations therefore survive every pipeline run by construction: no
   pipeline stage writes this table.
 - **`ledger`** — entity-to-bead-id mapping by kind, the last-synced content hash, the row's last-checked
