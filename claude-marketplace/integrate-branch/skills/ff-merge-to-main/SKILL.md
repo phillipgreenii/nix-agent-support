@@ -379,47 +379,63 @@ repo name, the failing hook(s), and the hooks' own output. Do not attempt to fix
 the violation yourself; that decision belongs to the operator. (FF-1c below is
 deliberately different: an evaluation failure is agent-fixable.)
 
-### FF-1b reuses a passing run across a rebase (lost fast-forward race)
+### FF-1b MAY reuse a passing run across a rebase (opt-in, lost fast-forward race)
 
-A hook run over a branch diff takes tens of minutes on a loaded host, and the primary branch usually advances under it, so FF-2b loses the
-race and FF-3 would re-run everything. `integrate-branch-support
---prek-branch-diff` therefore remembers a passing run and, on the FF-3 retry,
-reuses it when nothing the hooks could see has changed. The decision is the
-tool's, not the agent's: the agent just runs the same command and relays the
-one `FF-1b: ...` line it prints (`reused the pre-land pass ...` or `re-running
-hooks (<reason>)`), which the `landed` report MUST include when it says
-`reused`. Exit status keeps the table above (a reuse exits 0).
+A hook run over a branch diff takes tens of minutes on a loaded host, and the
+primary branch usually advances under it, so FF-2b loses the race and FF-3
+re-runs everything. `integrate-branch-support --prek-branch-diff` can remember a
+passing run and reuse it on the FF-3 retry when nothing the hooks could see has
+changed. **It is OFF unless the clone opts in** with `git config
+pgii-integrate-branch.preLandReuse true`; any other value (including a typo such
+as `flase`), an unreadable value, a one-shot `--no-reuse` flag, and a nix build
+sandbox (`IN_NIX_BUILD` or `NIX_BUILD_TOP` set, where the unit-test hook
+self-skips) all mean off. The decision is the tool's, not the agent's: the agent
+runs the same command and relays the one `FF-1b: ...` line it prints (`reused
+the pre-land pass ...` or `re-running hooks (<reason>)`). A reuse exits 0.
 
-A pass is recorded only when `pg-hooks run pre-land` exited 0 from a clean
-worktree with a present (not stale) hook bundle. Under
-`<git-common-dir>/integrate-branch/pre-land-pass/<branch>` the tool keeps the
-branch patch-id, the base the run was against, the bundle path and the time. A
-pass is reused only when ALL of these hold, and any doubt re-runs:
+A pass is recorded only when `pg-hooks run pre-land` exited 0 with a clean
+worktree, `HEAD` equal to the branch tip, and the same present hook bundle
+before and after the run (the bundle identity is its resolved real path,
+captured before the run). Under `<git-common-dir>/integrate-branch/pre-land-pass/<branch>`
+the tool keeps a hash of the branch diff's post-image, the base the run was
+against, the bundle and the time. A pass is reused only when ALL of these hold,
+and any doubt re-runs:
 
-1. the marker is at most six hours old, and the hook bundle is the same one;
+1. the marker is at most six hours old (`INTEGRATE_BRANCH_PRE_LAND_REUSE_MAX_AGE`
+   seconds overrides the limit), and the hook bundle is the same one;
 2. the recorded base is an ancestor of the new merge-base with the primary
    branch (the branch moved forward by a rebase);
-3. the branch patch-id (`git patch-id --stable` of base..`<FB>`) is unchanged,
-   so the rebase changed no line of the branch's own change;
+3. the branch's post-image is byte-identical: a hash over the `(new mode, new
+blob oid, path)` tuples of `git diff --raw` base..`<FB>`. Blob oids do not
+   change under a rebase for files main did not touch, and unlike `git
+patch-id` they do not ignore whitespace or hunk positions;
 4. every path the branch diff touches is inside a Go module (nearest ancestor
    directory with a `go.mod`, never the repo root), the tree has no `go.work`,
    and every path the primary branch gained since the recorded base is inside
    a project directory (`go.mod`, `package.json` or `pyproject.toml`) that is
-   NOT in the diff's dependency component. The component is the diff's modules
-   plus every module linked to them, in either direction, by a local
-   `replace ... => ./x` or `=> ../x` in `go.mod`, followed to a fixpoint.
+   NOT in the diff's dependency component. The component starts at the diff's
+   modules and, to a fixpoint and in either direction, follows (a) each local
+   `replace ... => ./x` or `=> ../x` of a `go.mod` (quoted and backtick targets
+   included), and (b) any sibling project whose directory name appears within
+   three lines of a `..` path token in a module's Go, script or data files (a
+   test that builds or reads `../pg-desk`, `filepath.Join("..", "pg-desk")`, a
+   `runtime.Caller` path with `..` segments). A `go.mod` `=>` target that is
+   neither local nor a versioned module, and any symlink inside the component,
+   fail closed.
 
-Why this is safe: the hooks run over the branch's files, and a hook (a package's
-Go tests, a contract test over a sibling module) reads only its own project and
-the modules it replaces locally or that replace it. Main's new files lie in
-none of those, and the patch is byte-for-byte the same, so the tree the hooks
+Why this is safe: the hooks read the branch's files, their own project, and the
+projects those name or replace, in either direction. Main's new files lie in
+none of those, and the branch's files are byte-identical, so the tree the hooks
 saw differs from the tree to be landed only in files they do not read. A path
-outside every project (`flake.nix`, `docs/`, `scripts/`, a root file, a skill)
-is shared, so a change there, or a branch diff there, always re-runs. Known
-limit: a hook that reads a sibling project through no local `replace` (for
-example a script that opens another package's files by path) is not seen by the
-dependency rule; give such a coupling a `replace` edge, or turn reuse off with
-`git config pgii-integrate-branch.preLandReuse false`.
+outside every project (`flake.nix`, `docs/`, `scripts/`, a root file, a skill,
+a shell package) is shared, so a change there, or a branch diff there, always
+re-runs. Known limit: the name scan is a heuristic. A coupling built without
+the sibling's directory name near a `..` token (a path assembled from an
+environment variable or from concatenated pieces) is not seen; that is why reuse
+is opt-in. Real pairs the rule is pinned against (all without a `replace`):
+pg-desk reading `../pg-decider` testdata, the pg-decider PR-change contract test
+building pg-desk and pg-connector, pa-monitor building `../pg-keep-awake`, and
+pg-desk-shadow building `../pg-desk`.
 
 ### What is NOT a land-time gate: a full `nix flake check`
 
@@ -570,9 +586,10 @@ possible to fast-forward." Handle it as a bounded retry, not a one-shot failure:
 - `attempts = 0`.
 - If FF-2b fails as non-fast-forward: `attempts++`, then **retry from FF-1**
   (rebase `<WT>` onto the now-advanced primary again, then re-attempt FF-1b,
-  FF-1c and FF-2 — this re-runs FF-1b's consolidated hook check and FF-1c's
-  eval-only check against the freshly rebased tree before FF-2b's merge is
-  retried).
+  FF-1c and FF-2 — this re-runs FF-1b's consolidated hook check (unless an
+  opted-in clone's recorded pass is reused under the conditions of "FF-1b MAY
+  reuse a passing run across a rebase") and always FF-1c's eval-only check
+  against the freshly rebased tree before FF-2b's merge is retried).
 - When `attempts` reaches **2** (the second consecutive non-ff failure), **stop
   and ask** the user rather than retry indefinitely — a persistent ff-race
   warrants attention (R-7).
@@ -697,7 +714,9 @@ the hooks (`pg-hooks` exit 13, no bundle) or could not run them (`pg-hooks`
 missing), a `landed` report MUST include the notice line verbatim
 (`pg-hooks: no hook bundle for ...`, or `pg-hooks not installed on this machine;
 ask the operator to run pn workspace apply`), and it MUST include FF-4a's
-`FF-4: bundle refresh ...` line. Likewise for FF-1c: a `landed` report MUST
+`FF-4: bundle refresh ...` line. When FF-1b reused a recorded pass, the report
+MUST also include the `FF-1b: reused the pre-land pass ...` line verbatim, so a
+reviewer sees that the hooks were not re-run on the landed tree. Likewise for FF-1c: a `landed` report MUST
 include the one line it printed for a `not-enabled` clone (`pre-land eval: not
 enabled for <repo>`), or the verbatim not-installed notice (`pre-land-eval not installed on this machine; ask the
 operator to run pn workspace apply`). Its
@@ -770,10 +789,11 @@ false` write to `<CC>`'s `.git/config` — that would also disable rerere for
   NOT substitute `prek run --all-files` (same false-block risk as a per-commit
   `--all-files` run).
 - FF-1b MAY reuse a recorded passing run across FF-3's rebase only through
-  `integrate-branch-support --prek-branch-diff`, and only under the four
-  conditions of "FF-1b reuses a passing run across a rebase". The agent MUST NOT
-  skip FF-1b, hand-write a marker, or decide to reuse on its own; a failed or
-  never-recorded run always re-runs.
+  `integrate-branch-support --prek-branch-diff`, only in a clone that opted in
+  (`pgii-integrate-branch.preLandReuse true`), and only under the four
+  conditions of "FF-1b MAY reuse a passing run across a rebase". The agent MUST
+  NOT skip FF-1b, hand-write a marker, or decide to reuse on its own; a failed
+  or never-recorded run always re-runs.
 - When `pg-hooks` reports no bundle (exit 13) or is not installed (exit 127),
   FF-1b MUST NOT run `prek` itself, MUST NOT link, copy, or regenerate a hook
   config, MUST NOT build a bundle, and MUST continue the land after the single

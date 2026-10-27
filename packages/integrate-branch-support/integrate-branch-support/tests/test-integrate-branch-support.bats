@@ -444,10 +444,13 @@ printf 'cwd=%s\n' "\$(pwd -P)" >>"$STUB_BIN/pg-hooks-calls"
 printf 'args=%s\n' "\$*" >>"$STUB_BIN/pg-hooks-calls"
 if [ "\$1" = status ]; then
   if [ -n "\${STUB_PGH_STATE:-}" ]; then
-    printf 'state=%s\nbundle=%s\ngeneration=\nstages=\nreinstall=\n' "\$STUB_PGH_STATE" "\${STUB_PGH_BUNDLE:-}"
+    bundle="\${STUB_PGH_BUNDLE:-}"
+    if [ -n "\${STUB_PGH_BUNDLE_FILE:-}" ] && [ -f "\$STUB_PGH_BUNDLE_FILE" ]; then bundle="\$(cat "\$STUB_PGH_BUNDLE_FILE")"; fi
+    printf 'state=%s\nbundle=%s\ngeneration=\nstages=\nreinstall=\n' "\$STUB_PGH_STATE" "\$bundle"
   fi
   exit "\${STUB_PGH_STATUS_RC:-0}"
 fi
+eval "\${STUB_PGH_RUN_HOOK:-:}"
 if [ -s "$STUB_BIN/pg-hooks-stderr" ]; then
   cat "$STUB_BIN/pg-hooks-stderr" >&2
   echo >&2
@@ -1066,6 +1069,7 @@ rl_fixture() {
   rl_commit "$RL_WT" "edit a" packages/a/a.go
   stub_pg_hooks 0
   export STUB_PGH_STATE=present STUB_PGH_BUNDLE=/bundles/gen-1/bundle
+  git -C "$TEST_DIR" config pgii-integrate-branch.preLandReuse true
 }
 
 rl_runs() { grep -c '^args=run pre-land' "$STUB_BIN/pg-hooks-calls" || true; }
@@ -1169,13 +1173,13 @@ rl_advance_and_rebase() {
   [ "$(rl_runs)" -eq 2 ]
 }
 
-@test "pre-land reuse: a changed branch patch-id re-runs" {
+@test "pre-land reuse: a changed branch diff re-runs" {
   rl_fixture
   run bash "$BIN" --prek-branch-diff
   rl_commit "$RL_WT" "more a" packages/a/a.go
   rl_advance_and_rebase packages/d/d.go
   run bash "$BIN" --prek-branch-diff
-  [[ "$output" == *"patch-id changed"* ]]
+  [[ "$output" == *"differ from the recorded pass"* ]]
   [ "$(rl_runs)" -eq 2 ]
 }
 
@@ -1266,18 +1270,310 @@ rl_advance_and_rebase() {
   [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
 }
 
-@test "pre-land reuse: git config preLandReuse=false disables recording and reuse" {
+@test "pre-land reuse: the default is OFF: nothing is recorded or reused without the opt-in" {
   rl_fixture
-  git config pgii-integrate-branch.preLandReuse false
+  git config --unset pgii-integrate-branch.preLandReuse
   run bash "$BIN" --prek-branch-diff
   [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
   run bash "$BIN" --prek-branch-diff
   [ "$(rl_runs)" -eq 2 ]
-  # Marker recorded while enabled is ignored once disabled.
-  git config pgii-integrate-branch.preLandReuse true
+}
+
+# rl_value_off <git config value>: with the opt-in key set to this value, nothing is reused.
+rl_value_off() {
+  rl_fixture
+  git config pgii-integrate-branch.preLandReuse "$1"
   run bash "$BIN" --prek-branch-diff
-  git config pgii-integrate-branch.preLandReuse false
+  run bash "$BIN" --prek-branch-diff
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a typo in the opt-in value (flase) fails closed" { rl_value_off flase; }
+@test "pre-land reuse: false fails closed" { rl_value_off false; }
+@test "pre-land reuse: an arbitrary word fails closed" { rl_value_off maybe; }
+@test "pre-land reuse: an empty value fails closed" { rl_value_off ""; }
+
+@test "pre-land reuse: --no-reuse is a one-shot off switch (no record, no reuse) and needs --prek-branch-diff" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff --no-reuse
+  [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+  run bash "$BIN" --prek-branch-diff
+  run bash "$BIN" --prek-branch-diff --no-reuse
+  [ "$(rl_runs)" -eq 3 ]
+  run bash "$BIN" --facts --no-reuse
+  [ "$status" -eq 1 ]
+}
+
+@test "pre-land reuse: inside a nix build (NIX_BUILD_TOP or IN_NIX_BUILD) nothing is recorded or reused" {
+  rl_fixture
+  NIX_BUILD_TOP=/tmp run bash "$BIN" --prek-branch-diff
+  [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+  run bash "$BIN" --prek-branch-diff
+  [ -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+  IN_NIX_BUILD=1 run bash "$BIN" --prek-branch-diff
+  NIX_BUILD_TOP=/tmp run bash "$BIN" --prek-branch-diff
+  [ "$(rl_runs)" -eq 4 ]
+}
+
+@test "pre-land reuse: a whitespace-only amend keeps the same git patch-id but re-runs (post-image identity)" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  local before after
+  before="$(git diff main HEAD | git patch-id --stable | cut -d' ' -f1)"
+  printf 'base\nedit a \n' >"$RL_WT/packages/a/a.go"
+  rl_git -C "$RL_WT" commit -q -a --amend -m "edit a"
+  after="$(git diff main HEAD | git patch-id --stable | cut -d' ' -f1)"
+  # The premise (the reviewer's finding): patch-id --stable cannot tell the two apart.
+  [ "$before" = "$after" ]
+  rl_commit "$TEST_DIR" "main moves" packages/d/d.go
+  rl_git -C "$RL_WT" rebase -q main
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" != *"reused"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a hunk-position or identical-context shift in the branch's file re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  # Same added line, now at a different position of the file: patch-id --stable ignores positions.
+  printf 'x\nedit a\n' >"$RL_WT/packages/a/a.go"
+  rl_git -C "$RL_WT" commit -q -a --amend -m "edit a"
   rl_advance_and_rebase packages/d/d.go
   run bash "$BIN" --prek-branch-diff
-  [ "$(rl_runs)" -eq 4 ]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: HEAD moving during the hook run records nothing" {
+  rl_fixture
+  STUB_PGH_RUN_HOOK="git -c user.email=t@t -c user.name=t commit -q --allow-empty -m moved" run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+}
+
+@test "pre-land reuse: a file written during the hook run (dirty after) records nothing" {
+  rl_fixture
+  STUB_PGH_RUN_HOOK="printf x >stray.txt" run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+}
+
+@test "pre-land reuse: the bundle identity is captured BEFORE the run (a bundle swapped mid-run records nothing)" {
+  rl_fixture
+  printf '/bundles/gen-1/bundle' >"$STUB_BIN/bundle-id"
+  export STUB_PGH_BUNDLE_FILE="$STUB_BIN/bundle-id"
+  STUB_PGH_RUN_HOOK="printf /bundles/gen-2/bundle >'$STUB_BIN/bundle-id'" run bash "$BIN" --prek-branch-diff
+  [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+}
+
+@test "pre-land reuse: the bundle identity is the resolved real path (a symlinked bundle dir swapped to another target re-runs)" {
+  rl_fixture
+  mkdir -p "$STUB_BIN/real1" "$STUB_BIN/real2"
+  ln -s "$STUB_BIN/real1" "$STUB_BIN/bundle"
+  export STUB_PGH_BUNDLE="$STUB_BIN/bundle"
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/d/d.go
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"reused"* ]]
+  ln -sfn "$STUB_BIN/real2" "$STUB_BIN/bundle"
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"hook bundle changed"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: main deleting or renaming files inside an unrelated module still reuses" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_git -C "$TEST_DIR" rm -q packages/d/d.go
+  rl_git -C "$TEST_DIR" commit -q -m "delete d.go"
+  rl_commit "$TEST_DIR" "add e" packages/d/e.go
+  rl_git -C "$TEST_DIR" mv packages/d/e.go packages/d/f.go
+  rl_git -C "$TEST_DIR" commit -q -m "rename e to f"
+  rl_git -C "$RL_WT" rebase -q main
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"reused"* ]]
+  [ "$(rl_runs)" -eq 1 ]
+}
+
+@test "pre-land reuse: main renaming a file from an unrelated module INTO the diff's module re-runs (both sides listed)" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_git -C "$TEST_DIR" mv packages/d/d.go packages/a/moved.go
+  rl_git -C "$TEST_DIR" commit -q -m "move into a"
+  rl_git -C "$RL_WT" rebase -q main
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"inside packages/a"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a non-ASCII path main gained fails safe and re-runs" {
+  rl_fixture
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase $'packages/d/caf\xc3\xa9.go'
+  run bash "$BIN" --prek-branch-diff
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a symlink inside the component re-runs" {
+  rl_fixture
+  ln -s ../d "$TEST_DIR/packages/a/link"
+  rl_git -C "$TEST_DIR" add -A
+  rl_git -C "$TEST_DIR" commit -q -m "symlink in a"
+  rl_git -C "$RL_WT" rebase -q main
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/d/d.go
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"symlink"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+# go.mod replace forms: each variant of module a's replace of c must still make c a neighbour.
+rl_replace_form() {
+  rl_fixture
+  printf '%b' "$1" >"$TEST_DIR/packages/a/go.mod"
+  rl_git -C "$TEST_DIR" commit -q -a -m "replace form"
+  rl_git -C "$RL_WT" rebase -q main
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/c/c.go
+  run bash "$BIN" --prek-branch-diff
+}
+
+rl_expect_linked() {
+  rl_replace_form "$1"
+  [[ "$output" == *"inside packages/c"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: go.mod replace with a quoted target links the module" {
+  rl_expect_linked 'module a\n\nreplace c => "../c"\n'
+}
+
+@test "pre-land reuse: go.mod replace with a backtick target links the module" {
+  rl_expect_linked 'module a\n\nreplace c => `../c`\n'
+}
+
+@test "pre-land reuse: go.mod replace with a versioned old side and a trailing slash links the module" {
+  rl_expect_linked 'module a\n\nreplace c v1.2.3 => ../c/\n'
+}
+
+@test "pre-land reuse: go.mod block replace with a quoted target and a comment links the module" {
+  rl_expect_linked 'module a\n\nreplace (\n\tc v1.2.3 => "../c" // note\n)\n'
+}
+
+@test "pre-land reuse: a go.mod replace target that is neither local nor a versioned module fails closed" {
+  rl_replace_form 'module a\n\nreplace c => /abs/elsewhere/c\n'
+  [[ "$output" == *"neither local nor a versioned module"* ]]
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a versioned module replace (not a local path) is ignored, so an unrelated change still reuses" {
+  rl_fixture
+  printf 'module a\n\nreplace example.com/x => example.com/y v1.0.0\n' >"$TEST_DIR/packages/a/go.mod"
+  rl_git -C "$TEST_DIR" commit -q -a -m "versioned replace"
+  rl_git -C "$RL_WT" rebase -q main
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase packages/d/d.go
+  run bash "$BIN" --prek-branch-diff
+  [[ "$output" == *"reused"* ]]
+}
+
+# --- real undeclared couplings (no go.mod replace edge), named by the reviewer --------------------
+# Each pair is lifted from this repo: the first path is edited on the branch, the second on main.
+rl_real_fixture() {
+  local f
+  mkdir -p "$TEST_DIR/packages/pg-desk/internal/focus" "$TEST_DIR/packages/pg-decider/internal/prchange" \
+    "$TEST_DIR/packages/pg-decider/internal/rules/testdata/focus" "$TEST_DIR/packages/pa-monitor/internal/core/caffeinate/keepertest" \
+    "$TEST_DIR/packages/pg-keep-awake/cmd/pg-keep-awake" "$TEST_DIR/packages/pg-desk-shadow/internal/prepare" \
+    "$TEST_DIR/packages/pg-connector/pkg" "$TEST_DIR/packages/pg-router/internal"
+  for f in pg-desk pg-decider pa-monitor pg-keep-awake pg-desk-shadow pg-connector pg-router; do
+    printf 'module %s\n' "$f" >"$TEST_DIR/packages/$f/go.mod"
+  done
+  printf 'replace x/pg-connector => ../pg-connector\n' >>"$TEST_DIR/packages/pg-desk/go.mod"
+  cat >"$TEST_DIR/packages/pg-desk/internal/focus/scenarios_test.go" <<'GO'
+package focus
+
+const (
+	scenariosFile = "testdata/state-scenarios.json"
+	// deciderScenariosRel is the decider's copy, relative to this module's root.
+	deciderScenariosRel = "../pg-decider/internal/rules/testdata/focus/state-scenarios.json"
+)
+GO
+  cat >"$TEST_DIR/packages/pg-decider/internal/prchange/realbd_contract_test.go" <<'GO'
+package prchange
+
+func build() {
+		goBuild(t, goBin, moduleDir(t, filepath.Join("..", "pg-desk")), filepath.Join(bins, "pg-desk"), "./cmd/pg-desk")
+		for _, n := range []string{"pg-connector", "pg-connector-issue-beads"} {
+			goBuild(t, goBin, moduleDir(t, filepath.Join("..", "pg-connector")), filepath.Join(conn, n), "./cmd/"+n)
+		}
+}
+GO
+  cat >"$TEST_DIR/packages/pa-monitor/internal/core/caffeinate/keepertest/keepertest.go" <<'GO'
+package keepertest
+
+func sourceDir() string {
+	_, file, _, ok := runtime.Caller(0)
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", "..", "..", "pg-keep-awake", "cmd", "pg-keep-awake"))
+}
+GO
+  cat >"$TEST_DIR/packages/pg-desk-shadow/internal/prepare/seed_integration_test.go" <<'GO'
+package prepare
+
+func src() { src, _ := filepath.Abs("../../../pg-desk") }
+GO
+  printf '{}\n' >"$TEST_DIR/packages/pg-decider/internal/rules/testdata/focus/state-scenarios.json"
+  printf 'package main\n' >"$TEST_DIR/packages/pg-keep-awake/cmd/pg-keep-awake/main.go"
+  printf 'package pkg\n' >"$TEST_DIR/packages/pg-connector/pkg/c.go"
+  printf 'package internal\n' >"$TEST_DIR/packages/pg-router/internal/r.go"
+  printf 'x\n' >"$TEST_DIR/flake.nix"
+  rl_git -C "$TEST_DIR" add -A
+  rl_git -C "$TEST_DIR" commit -q -m "real fixture"
+  add_worktree feat
+  RL_WT="$(pwd -P)"
+  stub_pg_hooks 0
+  export STUB_PGH_STATE=present STUB_PGH_BUNDLE=/bundles/gen-1/bundle
+  git -C "$TEST_DIR" config pgii-integrate-branch.preLandReuse true
+}
+
+# rl_pair <path edited on the branch> <path edited on main> <reused|rerun>
+rl_pair() {
+  rl_real_fixture
+  rl_commit "$RL_WT" "branch edit" "$1"
+  run bash "$BIN" --prek-branch-diff
+  rl_advance_and_rebase "$2"
+  run bash "$BIN" --prek-branch-diff
+  if [ "$3" = reused ]; then
+    [[ "$output" == *"reused"* ]]
+    [ "$(rl_runs)" -eq 1 ]
+  else
+    [[ "$output" != *"reused"* ]]
+    [ "$(rl_runs)" -eq 2 ]
+  fi
+}
+
+@test "pre-land reuse, real pair A: pg-desk reads ../pg-decider testdata; branch in pg-desk + main in pg-decider re-runs" {
+  rl_pair packages/pg-desk/internal/focus/x.go packages/pg-decider/internal/rules/testdata/focus/state-scenarios.json rerun
+}
+
+@test "pre-land reuse, real pair A reversed: branch in pg-decider + main in pg-desk re-runs" {
+  rl_pair packages/pg-decider/internal/rules/x.go packages/pg-desk/internal/focus/y.go rerun
+}
+
+@test "pre-land reuse, real pair B: the PR-change contract test builds pg-desk and pg-connector from source" {
+  rl_pair packages/pg-decider/internal/prchange/x.go packages/pg-connector/pkg/c.go rerun
+}
+
+@test "pre-land reuse, real pair B: branch in pg-connector + main in pg-decider re-runs" {
+  rl_pair packages/pg-connector/pkg/d.go packages/pg-decider/internal/prchange/y.go rerun
+}
+
+@test "pre-land reuse, real pair C: pa-monitor's keeper test builds ../pg-keep-awake" {
+  rl_pair packages/pg-keep-awake/cmd/pg-keep-awake/x.go packages/pa-monitor/internal/core/caffeinate/keepertest/y.go rerun
+}
+
+@test "pre-land reuse, real pair D: pg-desk-shadow tests build ../pg-desk" {
+  rl_pair packages/pg-desk/internal/focus/z.go packages/pg-desk-shadow/internal/prepare/w.go rerun
+}
+
+@test "pre-land reuse, control: a branch in pg-keep-awake and main in pg-router (no coupling) reuses" {
+  rl_pair packages/pg-keep-awake/cmd/pg-keep-awake/x.go packages/pg-router/internal/r.go reused
 }

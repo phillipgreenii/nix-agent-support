@@ -11,7 +11,7 @@ show_help() {
   cat <<'HELP'
 integrate-branch-support: Advisory: report a repo's integration facts + recommended strategy
 
-Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh <old-sha>]
+Usage: integrate-branch-support [--facts | --prek-branch-diff [--no-reuse] | --bundle-refresh <old-sha>]
 
 With no option, print one JSON object (strategy, reason, primary_branch,
 canonical, remote, open_pr, mr_bead) describing how the current branch
@@ -29,13 +29,19 @@ Options:
                       and any other failure are passed through; exit 13 (no
                       hook bundle) and a missing pg-hooks
                       (127) record their notice line and exit 0. Never
-                      links, copies or regenerates a hook config. A passing
-                      run is remembered under <git-common-dir>/integrate-branch/
-                      and reused (one `FF-1b: reused ...` line, exit 0) after a
-                      rebase when the branch patch-id is unchanged and main's
-                      new files lie outside the diff's Go modules and their
-                      local-replace neighbours; any doubt re-runs. Turn off
-                      with git config pgii-integrate-branch.preLandReuse false
+                      links, copies or regenerates a hook config.
+                      Opt-in reuse (git config pgii-integrate-branch.preLandReuse
+                      true; any other value means off): a passing run is
+                      remembered under <git-common-dir>/integrate-branch/ and
+                      reused after a rebase (one `FF-1b: reused ...` line, exit
+                      0) when the branch's changed files are byte-identical
+                      (mode, blob oid, path) and main's new files lie outside
+                      the diff's Go modules and the projects they replace, are
+                      replaced by or name near a `..` path token; any doubt
+                      re-runs. Never inside a nix build. Marker age limit:
+                      INTEGRATE_BRANCH_PRE_LAND_REUSE_MAX_AGE seconds (21600)
+  --no-reuse          With --prek-branch-diff: never record or reuse a pass for
+                      this call, whatever the git config says
   --bundle-refresh <old-sha>
                       FF-4: run from the canonical clone after an ff-merge
                       that moved the primary branch from <old-sha>. When the
@@ -75,6 +81,10 @@ while [[ $# -gt 0 ]]; do
     mode="${1#--}"
     shift
     ;;
+  --no-reuse)
+    PRE_LAND_NO_REUSE=1
+    shift
+    ;;
   --bundle-refresh)
     if [ "$mode" != report ]; then
       echo "integrate-branch-support: --facts, --prek-branch-diff and --bundle-refresh are mutually exclusive" >&2
@@ -94,6 +104,11 @@ while [[ $# -gt 0 ]]; do
     ;;
   esac
 done
+
+if [ -n "$PRE_LAND_NO_REUSE" ] && [ "$mode" != prek-branch-diff ]; then
+  echo "integrate-branch-support: --no-reuse only applies to --prek-branch-diff" >&2
+  exit 1
+fi
 
 # Fail-safe (spec §4.3): this tool has nothing meaningful to report outside
 # a git repository, and every helper below assumes one exists -- guard
