@@ -145,7 +145,7 @@ const ListActivityExecTimeout = ListActivityBackendTimeout + BackendDeadlineMarg
 
 // execTimeout is the deadline runInvoke (exec.go) applies to the umbrella's
 // exec of a backend. It starts at DefaultExecTimeout; tests swap it to a
-// short value (the same swappable-var pattern exec.go's own execCmdFactory
+// short value (the same swappable-var pattern exec.go's own execRunner
 // already uses) so a hang-and-get-killed test proves the mechanism without
 // waiting out the real 35s production value.
 var execTimeout = DefaultExecTimeout

@@ -23,25 +23,24 @@
 package scriptout
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"time"
 )
 
-// execCmdFactory constructs exec.Cmd. Production code uses
-// exec.CommandContext; tests swap this to spawn a test helper binary.
-var execCmdFactory = exec.CommandContext
+// execRunner runs the backend binary (see runner.go). nil means ExecRunner;
+// tests swap it for an in-process double instead of re-executing the test
+// binary (a race-built child sleeps 1 s at exit).
+var execRunner Runner
 
 // runInvoke marshals req, execs binary with it on stdin, and returns the
 // raw stdout bytes (or an error folding in stderr/exit status). Shared by
 // Invoke and InvokeCapabilities.
 //
 // ctx is wrapped in a DefaultExecTimeout deadline (via the swappable
-// execTimeout var) and the *exec.Cmd's WaitDelay is set to
+// execTimeout var) and the Call's WaitDelay (exec.Cmd.WaitDelay) is set to
 // DefaultWaitDelay, so a hung backend binary — or one whose own grandchild
 // holds its stdout pipe open — is killed and reaped within a bounded time
 // rather than hanging this call forever [bead #13]. (pg-connector's own
@@ -64,18 +63,17 @@ func runInvoke(ctx context.Context, t Target, req Request) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, execTimeoutFor(req.Op, req.Config))
 	defer cancel()
 
-	cmd := execCmdFactory(ctx, t.Command[0], t.Command[1:]...)
-	cmd.WaitDelay = DefaultWaitDelay
-	cmd.Stdin = bytes.NewReader(payload)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
 	start := time.Now()
-	runErr := cmd.Run()
+	r := execRunner.do(ctx, Call{
+		Name:      t.Command[0],
+		Args:      t.Command[1:],
+		Stdin:     string(payload),
+		WaitDelay: DefaultWaitDelay,
+	})
+	runErr := runResultErr(ctx, r)
 	elapsed := time.Since(start)
 
-	out := stdout.Bytes()
+	out := []byte(r.Stdout)
 	if len(out) == 0 {
 		if runErr != nil {
 			// Name the call and how long it ran: a bare "signal: killed" is
@@ -83,15 +81,32 @@ func runInvoke(ctx context.Context, t Target, req Request) ([]byte, error) {
 			// the caller with, indistinguishable between ops and between a
 			// 35s stall and an instant crash [bead pg2-5dyz2].
 			detail := callDetail(ctx, req, elapsed)
-			if stderr.Len() > 0 {
+			if r.Stderr != "" {
 				return nil, fmt.Errorf("scriptout: %s: %s: %w (stderr: %s)",
-					binary, detail, runErr, TruncateForFold(stderr.Bytes()))
+					binary, detail, runErr, TruncateForFold([]byte(r.Stderr)))
 			}
 			return nil, fmt.Errorf("scriptout: %s: %s: %w", binary, detail, runErr)
 		}
 		return nil, fmt.Errorf("scriptout: %s: no response on stdout", binary)
 	}
 	return out, nil
+}
+
+// runResultErr renders a failed Result as the error cmd.Run used to return:
+// the start error itself, "signal: killed" for a child ended by a signal or
+// by ctx, or "exit status N". It is nil for a child that exited 0.
+func runResultErr(ctx context.Context, r Result) error {
+	switch {
+	case r.StartErr != nil:
+		return r.StartErr
+	case r.Signaled && ctx.Err() != nil:
+		return errors.New("signal: killed")
+	case r.Signaled:
+		return errors.New("signal: terminated by a signal")
+	case r.Code != 0:
+		return fmt.Errorf("exit status %d", r.Code)
+	}
+	return nil
 }
 
 // callDetail describes a failed backend exec for its error message: the op,

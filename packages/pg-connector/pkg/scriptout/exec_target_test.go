@@ -3,24 +3,23 @@ package scriptout
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
 )
 
-// recordingFactory wraps helperCmdFactory(behavior) and records the
+// recordingFactory wraps helperRunner(behavior) and records the
 // (name, args) the exec layer was asked to run.
 func recordingFactory(t *testing.T, behavior string, gotName *string, gotArgs *[]string) {
 	t.Helper()
-	inner := helperCmdFactory(behavior)
-	orig := execCmdFactory
-	execCmdFactory = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		*gotName = name
-		*gotArgs = append([]string(nil), args...)
-		return inner(ctx, name, args...)
+	inner := helperRunner(behavior)
+	orig := execRunner
+	execRunner = func(ctx context.Context, c Call) Result {
+		*gotName = c.Name
+		*gotArgs = append([]string(nil), c.Args...)
+		return inner(ctx, c)
 	}
-	t.Cleanup(func() { execCmdFactory = orig })
+	t.Cleanup(func() { execRunner = orig })
 }
 
 func TestInvokeTarget_PassesCommandArgsBeforeStdin(t *testing.T) {

@@ -287,7 +287,7 @@ func TestServeLoop_CapabilitiesBespokeShape(t *testing.T) {
 // Provider method in this design) shells out via exec.CommandContext(ctx,
 // ...) and blocks on that child would hang this whole backend process
 // forever. backendTimeout is overridden to a short value (mirroring exec.go's
-// own execCmdFactory swap pattern in exec_test.go) so this stays fast
+// own execRunner swap pattern in exec_test.go) so this stays fast
 // instead of waiting out the real DefaultBackendTimeout.
 func TestServeLoop_HandlerGetsDeadline_DoesNotHangForever(t *testing.T) {
 	origTimeout := backendTimeout

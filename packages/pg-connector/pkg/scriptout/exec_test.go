@@ -4,189 +4,174 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
 )
 
 // --------------------------------------------------------------------
-// Test-helper-process pattern (mirrors the retired PR tool's pkg/plugin/scriptout).
+// In-process backend double (a Runner, see runner.go).
+//
+// It used to re-execute the race-built test binary once per call
+// (GO_WANT_HELPER_PROCESS / TestHelperProcess), and a race-built child
+// sleeps 1 s at exit (atexit_sleep_ms), so every fake call cost about 1 s
+// under -race. The behavior names (GO_HELPER_BEHAVIOR values) are kept so
+// call sites did not change. The real exec path (ExecRunner, runInvoke's
+// WaitDelay) is covered by runner_test.go with sh -c.
 // --------------------------------------------------------------------
 
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
+// encodeLine renders v as json.NewEncoder(os.Stdout).Encode did: compact
+// JSON plus a newline.
+func encodeLine(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
 	}
-	defer os.Exit(0)
-	helperMain()
+	return string(b) + "\n"
 }
 
-func helperMain() {
-	behavior := os.Getenv("GO_HELPER_BEHAVIOR")
-	stdin, _ := io.ReadAll(os.Stdin)
-	_ = stdin
+// helperRun answers one Call as a backend binary would for behavior: the
+// request arrives on c.Stdin, the answer is the Result.
+func helperRun(ctx context.Context, behavior string, c Call) Result {
+	stdin := []byte(c.Stdin)
+	okOut := func(v any) Result { return Result{Stdout: encodeLine(v)} }
 
 	switch behavior {
 	case "ok_auth":
-		_ = json.NewEncoder(os.Stdout).Encode(Response{
+		return okOut(Response{
 			ProtocolVersion: ProtocolVersion,
 			SchemaVersion:   1,
 			Result:          json.RawMessage(`{"state":"OK"}`),
 		})
-		os.Exit(0)
 	case "not_found":
-		_ = json.NewEncoder(os.Stdout).Encode(Response{
+		return Result{Code: 1, Stdout: encodeLine(Response{
 			ProtocolVersion: ProtocolVersion,
 			SchemaVersion:   1,
 			Error:           &Error{Code: "not_found", Message: "no such pr"},
-		})
-		os.Exit(1)
+		})}
 	case "unknown_op":
-		_ = json.NewEncoder(os.Stdout).Encode(Response{
+		return Result{Code: 1, Stdout: encodeLine(Response{
 			ProtocolVersion: ProtocolVersion,
 			Error:           &Error{Code: "unknown_op", Message: `unknown op "auth_status"`},
-		})
-		os.Exit(1)
+		})}
 	case "non_json":
-		_, _ = fmt.Fprintln(os.Stdout, "this is not json")
-		os.Exit(0)
+		return Result{Stdout: "this is not json\n"}
 	case "capabilities":
-		_ = json.NewEncoder(os.Stdout).Encode(CapabilitiesResponse{
+		return okOut(CapabilitiesResponse{
 			ProtocolVersion: ProtocolVersion,
 			SchemaVersions:  map[string]int{"pr": 1},
 			Ops:             []string{"get_pr", OpAuthStatus, OpCapabilities},
 		})
-		os.Exit(0)
 	case "protocol_mismatch":
 		// A well-formed, otherwise-successful envelope from a binary built
 		// against a different (here: newer) wire-envelope protocolVersion
 		// than this process expects — the ordinary-op half of the
 		// umbrella/backend skew this docket exists to catch.
-		_ = json.NewEncoder(os.Stdout).Encode(Response{
+		return okOut(Response{
 			ProtocolVersion: ProtocolVersion + 1,
 			SchemaVersion:   1,
 			Result:          json.RawMessage(`{"state":"OK"}`),
 		})
-		os.Exit(0)
 	case "capabilities_protocol_mismatch":
 		// Same skew, surfaced through the bespoke capabilities shape
 		// instead of the ordinary Response envelope.
-		_ = json.NewEncoder(os.Stdout).Encode(CapabilitiesResponse{
+		return okOut(CapabilitiesResponse{
 			ProtocolVersion: ProtocolVersion + 1,
 			SchemaVersions:  map[string]int{"pr": 1},
 			Ops:             []string{"get_pr", OpAuthStatus, OpCapabilities},
 		})
-		os.Exit(0)
 	case "echo_op":
 		var req Request
 		if err := json.Unmarshal(stdin, &req); err != nil {
-			_ = json.NewEncoder(os.Stdout).Encode(Response{Error: &Error{Code: "unavailable", Message: err.Error()}})
-			os.Exit(1)
+			return Result{Code: 1, Stdout: encodeLine(Response{Error: &Error{Code: "unavailable", Message: err.Error()}})}
 		}
-		_ = json.NewEncoder(os.Stdout).Encode(Response{
+		return okOut(Response{
 			ProtocolVersion: ProtocolVersion,
 			Result:          json.RawMessage(`"` + req.Op + `"`),
 		})
-		os.Exit(0)
 	case "echo_config":
 		// Echoes back the request's own Config member (bead pg2-2j5ac.28.1)
 		// as the result — used to prove Invoke's config parameter actually
 		// reaches the wire request, distinct from echo_op's op-only echo.
 		var req Request
 		if err := json.Unmarshal(stdin, &req); err != nil {
-			_ = json.NewEncoder(os.Stdout).Encode(Response{Error: &Error{Code: "unavailable", Message: err.Error()}})
-			os.Exit(1)
+			return Result{Code: 1, Stdout: encodeLine(Response{Error: &Error{Code: "unavailable", Message: err.Error()}})}
 		}
 		result := req.Config
 		if len(result) == 0 {
 			result = json.RawMessage("null")
 		}
-		_ = json.NewEncoder(os.Stdout).Encode(Response{
+		return okOut(Response{
 			ProtocolVersion: ProtocolVersion,
 			Result:          result,
 		})
-		os.Exit(0)
 	case "echo_request":
 		// Echoes the raw stdin request back as the result, so a test can
 		// assert the wire request is byte-for-byte what the umbrella
 		// sends (bead pg2-91y12: argv changes must not touch stdin).
-		_ = json.NewEncoder(os.Stdout).Encode(Response{
+		return okOut(Response{
 			ProtocolVersion: ProtocolVersion,
 			Result:          json.RawMessage(stdin),
 		})
-		os.Exit(0)
 	case "stderr_only":
-		fmt.Fprintln(os.Stderr, "boom")
-		os.Exit(2)
+		return Result{Code: 2, Stderr: "boom\n"}
 	case "hang":
 		// Blocks for far longer than any test-scoped deadline, writing
 		// nothing to stdout/stderr — simulates a hung gh/bd/backend the
 		// DefaultExecTimeout+WaitDelay pairing exists to bound
-		// [bead pg2-332z8 #13]. Deliberately a bounded sleep (not a true
-		// `select{}` infinite block): if the parent's kill mechanism ever
-		// regresses, this process still self-terminates instead of
-		// leaking an unkillable orphan.
-		time.Sleep(30 * time.Second)
-		os.Exit(0)
+		// [bead pg2-332z8 #13]. The context ending ends it, as the real
+		// runner's kill does (Code -1, Signaled); the bounded fallback means
+		// a call that never carries a deadline still returns.
+		select {
+		case <-ctx.Done():
+			return Result{Code: -1, Signaled: true}
+		case <-time.After(30 * time.Second):
+			return Result{}
+		}
 	case "big_stderr":
 		// Writes far more than MaxFoldedOutputBytes to stderr and nothing
 		// to stdout, exercising runInvoke's stderr-fold path
 		// [bead pg2-332z8 #26].
-		fmt.Fprint(os.Stderr, strings.Repeat("e", MaxFoldedOutputBytes*3))
-		os.Exit(1)
+		return Result{Code: 1, Stderr: strings.Repeat("e", MaxFoldedOutputBytes*3) + "\n"}
 	case "big_nonjson_stdout":
 		// Writes far more than MaxFoldedOutputBytes of non-JSON text to
 		// stdout, exercising Invoke's invalid-JSON stdout-fold path
 		// [bead pg2-332z8 #26].
-		fmt.Fprint(os.Stdout, strings.Repeat("o", MaxFoldedOutputBytes*3))
-		os.Exit(0)
+		return Result{Stdout: strings.Repeat("o", MaxFoldedOutputBytes*3) + "\n"}
 	case "empty_envelope":
 		// Neither result nor error is set — a protocol violation, not a
 		// success [bug A7].
-		_ = json.NewEncoder(os.Stdout).Encode(Response{
+		return okOut(Response{
 			ProtocolVersion: ProtocolVersion,
 			SchemaVersion:   1,
 		})
-		os.Exit(0)
 	case "explicit_null_result":
 		// A deliberate no-payload success: "result" is present but null,
 		// which decodes to a non-empty RawMessage ("null") — distinct
 		// from the omitted-field case above and MUST still be treated as
 		// success [bug A7].
-		_ = json.NewEncoder(os.Stdout).Encode(Response{
+		return okOut(Response{
 			ProtocolVersion: ProtocolVersion,
 			SchemaVersion:   1,
 			Result:          json.RawMessage("null"),
 		})
-		os.Exit(0)
 	default:
-		fmt.Fprintln(os.Stderr, "unknown GO_HELPER_BEHAVIOR")
-		os.Exit(99)
+		return Result{Code: 99, Stderr: "unknown GO_HELPER_BEHAVIOR\n"}
 	}
 }
 
-func helperCmdFactory(behavior string) func(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cs := append([]string{"-test.run=^TestHelperProcess$", "--", name}, args...)
-		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(
-			os.Environ(),
-			"GO_WANT_HELPER_PROCESS=1",
-			"GO_HELPER_BEHAVIOR="+behavior,
-		)
-		return cmd
+// helperRunner returns a Runner that answers every Call with behavior.
+func helperRunner(behavior string) Runner {
+	return func(ctx context.Context, c Call) Result {
+		return helperRun(ctx, behavior, c)
 	}
 }
 
 func withFactory(t *testing.T, behavior string) {
 	t.Helper()
-	orig := execCmdFactory
-	execCmdFactory = helperCmdFactory(behavior)
-	t.Cleanup(func() { execCmdFactory = orig })
+	orig := execRunner
+	execRunner = helperRunner(behavior)
+	t.Cleanup(func() { execRunner = orig })
 }
 
 // --------------------------------------------------------------------
@@ -243,9 +228,9 @@ func TestInvoke_EmptyBinary(t *testing.T) {
 }
 
 func TestInvoke_BinaryNotFound(t *testing.T) {
-	orig := execCmdFactory
-	execCmdFactory = exec.CommandContext
-	t.Cleanup(func() { execCmdFactory = orig })
+	orig := execRunner
+	execRunner = ExecRunner
+	t.Cleanup(func() { execRunner = orig })
 
 	_, err := Invoke(context.Background(), "definitely-does-not-exist-xyz-987", "x", nil, nil)
 	if err == nil {
@@ -447,7 +432,7 @@ func TestInvokeCapabilities_UnknownOp_WrapsSentinel(t *testing.T) {
 // it; a caller-supplied deadline is not involved, so this fails to
 // discriminate the fix only if the internal wrapping itself is missing.
 // execTimeout is overridden to a short value (mirroring exec.go's own
-// execCmdFactory swap pattern) so the test stays fast rather than waiting
+// execRunner swap pattern) so the test stays fast rather than waiting
 // out the real 30s DefaultExecTimeout.
 func TestInvoke_HungChild_KilledAtDeadlineNotHungForever(t *testing.T) {
 	withFactory(t, "hang")

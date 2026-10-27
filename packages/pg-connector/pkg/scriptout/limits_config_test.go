@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -260,14 +259,14 @@ func deadlineOf(t *testing.T, ctx context.Context) time.Duration {
 // exec's context (observed in the exec factory).
 func umbrellaDeadline(t *testing.T, op string, cf json.RawMessage) time.Duration {
 	t.Helper()
-	base := helperCmdFactory("ok_auth")
+	base := helperRunner("ok_auth")
 	var got time.Duration
-	orig := execCmdFactory
-	execCmdFactory = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+	orig := execRunner
+	execRunner = func(ctx context.Context, c Call) Result {
 		got = deadlineOf(t, ctx)
-		return base(ctx, name, args...)
+		return base(ctx, c)
 	}
-	t.Cleanup(func() { execCmdFactory = orig })
+	t.Cleanup(func() { execRunner = orig })
 	if _, err := Invoke(context.Background(), "fake-binary", op, nil, cf); err != nil {
 		t.Fatalf("Invoke %q: %v", op, err)
 	}
