@@ -1864,7 +1864,7 @@ func TestExtractXargsCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			gotExec, gotArgs, gotRepl := extractXargsCommand(tt.args)
+			gotExec, gotArgs, gotRepl, _ := extractXargsCommand(tt.args)
 			if gotExec != tt.wantExec {
 				t.Fatalf("exec = %q, want %q (args %q)", gotExec, tt.wantExec, tt.args)
 			}
@@ -1879,6 +1879,35 @@ func TestExtractXargsCommand(t *testing.T) {
 			}
 			if !reflect.DeepEqual(append([]string{}, gotRepl...), append([]string{}, tt.wantRepl...)) {
 				t.Errorf("repl = %q, want %q", gotRepl, tt.wantRepl)
+			}
+		})
+	}
+}
+
+// TestExtractXargsCommand_ArgFiles pins pg2-b0qcjc: every spelling of -a /
+// --arg-file reports its FILE so the caller can read-check it.
+func TestExtractXargsCommand_ArgFiles(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"-a separate", []string{"-a", "f.txt", "cat"}, []string{"f.txt"}},
+		{"-a glued", []string{"-af.txt", "cat"}, []string{"f.txt"}},
+		{"cluster -0a separate", []string{"-0a", "f.txt", "cat"}, []string{"f.txt"}},
+		{"--arg-file separate", []string{"--arg-file", "f.txt", "cat"}, []string{"f.txt"}},
+		{"--arg-file=", []string{"--arg-file=f.txt", "cat"}, []string{"f.txt"}},
+		{"both spellings", []string{"-a", "a.txt", "--arg-file=b.txt", "cat"}, []string{"a.txt", "b.txt"}},
+		{"other value flags report none", []string{"-n", "1", "-d", "x", "cat"}, nil},
+		{"after the command is not an xargs flag", []string{"cat", "-a", "f.txt"}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, _, got := extractXargsCommand(tt.args)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("argFiles = %q, want %q (args %q)", got, tt.want, tt.args)
 			}
 		})
 	}

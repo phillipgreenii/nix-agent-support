@@ -1472,3 +1472,33 @@ func TestBashRef_SharesShellDashCParseAcrossPasses(t *testing.T) {
 		t.Errorf("cmdparse.Parse(%q) was called %d time(s) across bashRef's three passes, want exactly 1 (shared via shellCScriptCache)", inner, got)
 	}
 }
+
+// TestXargsGluedArgFile pins pg2-b0qcjc: the glued `-a<file>` spelling surfaces
+// its file as a screened operand, and nothing that is not xargs' -a value does.
+func TestXargsGluedArgFile(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		arg  string
+		want string
+		ok   bool
+	}{
+		{"-a.env", ".env", true},
+		{"-a~/.ssh/config", "~/.ssh/config", true},
+		{"-0a.env", ".env", true},
+		{"-0rta.env", ".env", true},
+		{"-a", "", false},
+		{"-0a", "", false},
+		{"--arg-file=.env", "", false},
+		{"-n1", "", false},
+		{"-Ia.env", "", false},
+		{"-na.env", "", false},
+		{"cat", "", false},
+		{"-", "", false},
+	}
+	for _, tt := range tests {
+		got, ok := xargsGluedArgFile(tt.arg)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("xargsGluedArgFile(%q) = %q, %v; want %q, %v", tt.arg, got, ok, tt.want, tt.ok)
+		}
+	}
+}

@@ -444,9 +444,28 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		}
 		// xargs: evaluate the inner command being run
 		if basename == "xargs" {
-			innerExec, innerArgs, replStrs := extractXargsCommand(pc.Args)
+			innerExec, innerArgs, replStrs, argFiles := extractXargsCommand(pc.Args)
 			if innerExec == "" {
 				return hookio.NotApplicable()
+			}
+			// pg2-b0qcjc: `-a FILE` / `--arg-file FILE` make xargs itself open FILE
+			// and run the inner command once per item read from it, so FILE is a
+			// read exactly as `cat FILE` is, whatever the inner command is. Hold it
+			// to the strict read-path check (readPathIssue: the one `cat` gets), not
+			// the looser browsing one, because the file's CONTENT is consumed.
+			// A leading-dash value gets a "./" prefix so pathCandidate cannot
+			// mistake a file literally named `-x` for a flag and skip it.
+			if len(argFiles) > 0 {
+				files := make([]string, len(argFiles))
+				for k, v := range argFiles {
+					if strings.HasPrefix(v, "-") {
+						v = "./" + v
+					}
+					files[k] = v
+				}
+				if issue, cat := readPathIssue(files, pe, "", true, vars); issue != "" {
+					return r.refuseCategorized(cat, "safe-commands: xargs -a/--arg-file "+issue+" (deferred to claude-code)")
+				}
 			}
 			// pg2-imjrv: xargs substitutes every replacement string (-I, -J, -i,
 			// --replace) with each stdin item, in the command name and every
@@ -2156,12 +2175,19 @@ func xargsReplacementIn(replStrs []string, text string) bool {
 }
 
 // extractXargsCommand parses xargs' own flags and returns the inner command
-// executable, its remaining arguments, and the replacement strings (-I, -J,
-// -i, --replace) that xargs substitutes with each stdin item. Returns
-// ("", nil, nil) when no command is found OR when an option is not in the
-// tables above (the leaf cannot be judged).
-func extractXargsCommand(args []string) (string, []string, []string) {
-	var repl []string
+// executable, its remaining arguments, the replacement strings (-I, -J, -i,
+// --replace) that xargs substitutes with each stdin item, and the values of
+// every -a / --arg-file flag. Returns ("", nil, nil, nil) when no command is
+// found OR when an option is not in the tables above (the leaf cannot be
+// judged).
+//
+// The -a / --arg-file values are FILES XARGS ITSELF OPENS and reads for its
+// items (pg2-b0qcjc): they are not the inner command's operands, so judging only
+// the inner command's args never looked at them, and `xargs -a /etc/shadow cat`
+// approved while `cat /etc/shadow` did not. The caller applies the read-path
+// check to them.
+func extractXargsCommand(args []string) (string, []string, []string, []string) {
+	var repl, argFiles []string
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -2173,16 +2199,16 @@ func extractXargsCommand(args []string) (string, []string, []string) {
 		// The inner command's own args (returned below) go through this
 		// file's ordinary zone checks once Evaluate recurses into them.
 		if !strings.HasPrefix(a, "-") {
-			return a, args[i+1:], repl
+			return a, args[i+1:], repl, argFiles
 		}
 		i++
 		switch {
 		case a == "--":
 			// End of xargs' options: the next token is the command.
 			if i < len(args) {
-				return args[i], args[i+1:], repl
+				return args[i], args[i+1:], repl, argFiles
 			}
-			return "", nil, nil
+			return "", nil, nil, nil
 		case strings.HasPrefix(a, "--"):
 			name, val, glued := strings.Cut(a[2:], "=")
 			switch {
@@ -2190,9 +2216,13 @@ func extractXargsCommand(args []string) (string, []string, []string) {
 			case xargsLongValue[name]:
 				if !glued {
 					if i >= len(args) {
-						return "", nil, nil
+						return "", nil, nil, nil
 					}
+					val = args[i]
 					i++
+				}
+				if name == "arg-file" {
+					argFiles = append(argFiles, val)
 				}
 			case xargsLongOptGlued[name]:
 				if name == "replace" {
@@ -2203,7 +2233,7 @@ func extractXargsCommand(args []string) (string, []string, []string) {
 					}
 				}
 			default:
-				return "", nil, nil
+				return "", nil, nil, nil
 			}
 		default:
 			for j := 1; j < len(a); j++ {
@@ -2222,12 +2252,12 @@ func extractXargsCommand(args []string) (string, []string, []string) {
 					break
 				}
 				if strings.IndexByte(xargsShortValue, c) < 0 {
-					return "", nil, nil
+					return "", nil, nil, nil
 				}
 				val := a[j+1:]
 				if val == "" {
 					if i >= len(args) {
-						return "", nil, nil
+						return "", nil, nil, nil
 					}
 					val = args[i]
 					i++
@@ -2235,14 +2265,17 @@ func extractXargsCommand(args []string) (string, []string, []string) {
 				if strings.IndexByte(xargsShortReplace, c) >= 0 {
 					repl = append(repl, val)
 				}
+				if c == 'a' {
+					argFiles = append(argFiles, val)
+				}
 				break
 			}
 			if a == "-" {
-				return "", nil, nil
+				return "", nil, nil, nil
 			}
 		}
 	}
-	return "", nil, nil
+	return "", nil, nil, nil
 }
 
 // isYqInPlace returns true if args carry a flag that turns yq into a WRITER:

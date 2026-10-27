@@ -932,9 +932,48 @@ func secretCandidateArgs(pc cmdparse.ParsedCommand) (args []string, malformed bo
 		// bbSetProseFields/bbProseIndex) for the full enumeration and how it
 		// was verified against bb's actual CLI.
 		return cmdparse.SkipBBProseArgs(pc.Args), false
+	case "xargs":
+		// pg2-b0qcjc: `xargs -a.env cat` is ONE short-flag token that
+		// firstSecretRefIn skips as a flag, so the file xargs itself opens never
+		// reached the screen, while `xargs -a .env cat` and `cat .env` did.
+		// Surface each glued -a value as an operand too (every other token is
+		// still screened as before, so this only ADDS candidates).
+		args := append([]string(nil), pc.Args...)
+		for _, a := range pc.Args {
+			if v, ok := xargsGluedArgFile(a); ok {
+				args = append(args, v)
+			}
+		}
+		return args, false
 	default:
 		return pc.Args, false
 	}
+}
+
+// xargsGluedArgFile returns the FILE of a short-flag token that glues xargs'
+// -a value on, as `-a<file>` or inside a cluster of value-less flags such as
+// `-0a<file>` (xargs' no-value short flags are 0, r, t, p, x and o). A token
+// where -a is not last-in-cluster-after-no-value-flags, or carries no glued
+// text, yields ok=false; it is the same walk safecmds' xargs parser does, kept
+// deliberately narrow because a false negative here is a missed secret.
+func xargsGluedArgFile(arg string) (string, bool) {
+	if len(arg) < 2 || arg[0] != '-' || arg[1] == '-' {
+		return "", false
+	}
+	for j := 1; j < len(arg); j++ {
+		switch c := arg[j]; {
+		case strings.IndexByte("0rtpxo", c) >= 0:
+			continue
+		case c == 'a':
+			if rest := arg[j+1:]; rest != "" {
+				return rest, true
+			}
+			return "", false
+		default:
+			return "", false
+		}
+	}
+	return "", false
 }
 
 // gitGrepArgs reports whether pc.Args — a "git" command's arguments — spell a
