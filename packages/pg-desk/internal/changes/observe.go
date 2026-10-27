@@ -62,7 +62,11 @@ type Flow struct {
 // Observe reads the change-flow observability from the store at now: the
 // single definition /metrics and `status` share. It only reads. maxAge is the
 // sweep bound D used for the due backlog.
-func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error) {
+//
+// owning is the set of owning backend instances of the issue type
+// (OwningSet(cfg, "issue")): an owning-backend issue entity is excluded from
+// Active and Due, because the age-sweep tiers skip it.
+func Observe(st *store.Store, now time.Time, maxAge time.Duration, owning map[string]bool) (Flow, error) {
 	version, err := st.SchemaVersion()
 	if err != nil {
 		return Flow{}, err
@@ -133,8 +137,8 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error)
 		tf := TypeFlow{
 			Type:     t,
 			MaxSeq:   top,
-			Active:   ActiveCount(entities, t),
-			Due:      DueBacklog(entities, t, now, maxAge),
+			Active:   ActiveCount(entities, t, owning),
+			Due:      DueBacklog(entities, t, now, maxAge, owning),
 			Stats:    stats,
 			Repeated: RepeatedDegraded(stats),
 		}

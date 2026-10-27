@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 )
 
 // Coverage reads only the persisted listing status, the active count and due
@@ -188,5 +190,96 @@ func TestWatchedUnwatched(t *testing.T) {
 	}
 	if w.Unwatched(Key{"thread", "x"}) {
 		t.Errorf("an unlisted type is not unwatched")
+	}
+}
+
+func TestWatchedUnwatchedForAnOwningBackendReadsTheColumn(t *testing.T) {
+	w := Watched{
+		"issue": {
+			IDs:   map[string]bool{"PROJ-1": true, "bd-1": true},
+			Known: true,
+			Owned: map[string]bool{"PROJ-1": true, "PROJ-2": true, "PROJ-3": true},
+		},
+	}
+	if w.Unwatched(Key{"issue", "PROJ-1"}) {
+		t.Errorf("an owning issue with watched set read unwatched")
+	}
+	for _, id := range []string{"PROJ-2", "PROJ-3"} {
+		if !w.Unwatched(Key{"issue", id}) {
+			t.Errorf("owning issue %s (watched 0 or NULL) must read unwatched", id)
+		}
+	}
+	if w.Unwatched(Key{"issue", "bd-1"}) || !w.Unwatched(Key{"issue", "bd-2"}) {
+		t.Errorf("a beads issue must follow the persisted set exactly as before")
+	}
+	// An owning entity is judged by its column even when no persisted set
+	// of the type was ever recorded.
+	w["issue"] = WatchSet{IDs: map[string]bool{}, Known: false, Owned: map[string]bool{"PROJ-2": true}}
+	if !w.Unwatched(Key{"issue", "PROJ-2"}) {
+		t.Errorf("an owning issue with watched NULL must read unwatched even with no persisted set")
+	}
+	if w.Unwatched(Key{"issue", "bd-2"}) {
+		t.Errorf("a beads issue with no persisted set stays not-unwatched")
+	}
+}
+
+func TestLoadWatchedReadsTheWatchedColumnForAnOwningBackend(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.Watch.Issue.Queries = []string{"open", "tracked"}
+	f.cfg.Watch.Issue.Backends = map[string]config.WatchBackend{
+		"open":    {Instance: "beads-a"},
+		"tracked": {Instance: "jira-a", OwnsChanges: true},
+	}
+	for _, id := range []string{"PROJ-1", "PROJ-2", "PROJ-3", "bd-1"} {
+		f.writeEntity(Key{"issue", id}, `{}`, true)
+	}
+	jira, beads, yes, no := "jira-a", "beads-a", true, false
+	set := func(id string, backend *string, watched *bool) {
+		if err := f.st.SetEntityColumns(testRepo, "issue", id, backend, watched); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set("PROJ-1", &jira, &yes)
+	set("PROJ-2", &jira, &no)
+	set("PROJ-3", &jira, nil)
+	set("bd-1", &beads, nil)
+	if err := f.st.SetMeta("change_flow.watchset.issue.open", `["bd-1"]`); err != nil {
+		t.Fatal(err)
+	}
+
+	w := LoadWatched(f.st, f.cfg)
+	if w.Unwatched(Key{"issue", "PROJ-1"}) {
+		t.Error("PROJ-1 (watched 1) read unwatched")
+	}
+	if !w.Unwatched(Key{"issue", "PROJ-2"}) || !w.Unwatched(Key{"issue", "PROJ-3"}) {
+		t.Error("PROJ-2 (watched 0) and PROJ-3 (watched NULL) must read unwatched")
+	}
+	if w.Unwatched(Key{"issue", "bd-1"}) {
+		t.Error("bd-1 is in the persisted beads set and must read watched")
+	}
+	if _, found, _ := f.st.GetMeta("change_flow.watchset.issue.tracked"); found {
+		t.Error("a watchset key exists for the owning query")
+	}
+}
+
+// The coverage counts leave an owning-backend issue out of Active and
+// DueBacklog.
+func TestComputeCoverageExcludesOwningBackendEntitiesFromBacklog(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.Watch.Issue.Queries = []string{"tracked"}
+	f.cfg.Watch.Issue.Backends = map[string]config.WatchBackend{"tracked": {Instance: "jira-a", OwnsChanges: true}}
+	f.writeEntity(Key{"issue", "PROJ-1"}, `{}`, true)
+	jira := "jira-a"
+	if err := f.st.SetEntityColumns(testRepo, "issue", "PROJ-1", &jira, nil); err != nil {
+		t.Fatal(err)
+	}
+	in := f.inputs()
+	// Far past hydrated_at + sweep.max_age: a beads entity would be due.
+	rep, err := ComputeCoverage(f.st, f.cfg, fixtureNow.Add(1000*time.Hour), in.Entities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rep.State.PerType["issue"]; got.Active != 0 || got.DueBacklog != 0 {
+		t.Errorf("issue coverage = %+v, want Active 0 and DueBacklog 0 for an owning-backend entity", got)
 	}
 }

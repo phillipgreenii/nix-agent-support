@@ -163,7 +163,7 @@ func TestReadListingStatusesSkipsUndecodableAndScopesToType(t *testing.T) {
 
 func TestWatchedIDsUnionsTheConfiguredQueriesAndReportsKnown(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	if ids, known := WatchedIDs(st, []string{"a", "b"}, "pr"); known || len(ids) != 0 {
+	if ids, known := WatchedIDs(st, []string{"a", "b"}, "pr", nil); known || len(ids) != 0 {
 		t.Fatalf("nothing recorded: ids %v known %v", ids, known)
 	}
 	if err := saveWatchSet(st, "pr", "a", map[string]bool{"x": true}); err != nil {
@@ -175,7 +175,7 @@ func TestWatchedIDsUnionsTheConfiguredQueriesAndReportsKnown(t *testing.T) {
 	if err := saveWatchSet(st, "pr", "unconfigured", map[string]bool{"z": true}); err != nil {
 		t.Fatal(err)
 	}
-	ids, known := WatchedIDs(st, []string{"a", "b", "never-ran"}, "pr")
+	ids, known := WatchedIDs(st, []string{"a", "b", "never-ran"}, "pr", nil)
 	if !known || len(ids) != 2 || !ids["x"] || !ids["y"] {
 		t.Fatalf("ids %v known %v, want the union of a and b", ids, known)
 	}

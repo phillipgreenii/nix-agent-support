@@ -100,7 +100,7 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 	// store that is not on the new schema Observe returns a zero Flow, so
 	// serve keeps working there and simply omits these series.
 	flowFn := func() (changes.Flow, error) {
-		return changes.Observe(st, nowUTC(), cfg.SweepMaxAge())
+		return changes.Observe(st, nowUTC(), cfg.SweepMaxAge(), changes.OwningSet(cfg, changes.EntityTypeIssue))
 	}
 	// The sizing bound is evaluated per (type, tier) with the SAME function
 	// `doctor` uses (changes.EvaluateSweepBound). The poll interval is not

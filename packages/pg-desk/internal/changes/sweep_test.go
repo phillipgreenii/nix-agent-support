@@ -1,12 +1,14 @@
 package changes
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -30,13 +32,13 @@ func sweepEntities() []store.Entity {
 
 func TestActiveCount(t *testing.T) {
 	es := sweepEntities()
-	if got := ActiveCount(es, "pr"); got != 7 {
+	if got := ActiveCount(es, "pr", nil); got != 7 {
 		t.Errorf("pr active = %d, want 7 (inactive and other-type excluded)", got)
 	}
-	if got := ActiveCount(es, "issue"); got != 1 {
+	if got := ActiveCount(es, "issue", nil); got != 1 {
 		t.Errorf("issue active = %d, want 1", got)
 	}
-	if got := ActiveCount(nil, "pr"); got != 0 {
+	if got := ActiveCount(nil, "pr", nil); got != 0 {
 		t.Errorf("empty = %d", got)
 	}
 }
@@ -59,10 +61,10 @@ func TestDueBacklog(t *testing.T) {
 	// not older than 6h), gone (inactive), other-type. The age rule is shown on
 	// the thread type: pr has no due backlog (TestDueBacklogOfPRIsAlwaysZero).
 	es := asType(sweepEntities(), "thread")
-	if got := DueBacklog(es, "thread", sweepTestNow, 6*time.Hour); got != 5 {
+	if got := DueBacklog(es, "thread", sweepTestNow, 6*time.Hour, nil); got != 5 {
 		t.Errorf("DueBacklog = %d, want 5", got)
 	}
-	if got := DueBacklog(es, "thread", sweepTestNow, 100*24*time.Hour); got != 2 {
+	if got := DueBacklog(es, "thread", sweepTestNow, 100*24*time.Hour, nil); got != 2 {
 		t.Errorf("DueBacklog with a huge max age = %d, want 2 (never hydrated and unparseable)", got)
 	}
 }
@@ -74,14 +76,14 @@ func TestDueBacklog(t *testing.T) {
 func TestDueBacklogOfPRIsAlwaysZero(t *testing.T) {
 	es := sweepEntities()
 	for _, maxAge := range []time.Duration{time.Hour, 6 * time.Hour, 100 * 24 * time.Hour} {
-		if got := DueBacklog(es, "pr", sweepTestNow, maxAge); got != 0 {
+		if got := DueBacklog(es, "pr", sweepTestNow, maxAge, nil); got != 0 {
 			t.Errorf("DueBacklog(pr, max age %s) = %d, want 0", maxAge, got)
 		}
 	}
-	if got := DueBacklog(asType(es, "thread"), "thread", sweepTestNow, 6*time.Hour); got != 5 {
+	if got := DueBacklog(asType(es, "thread"), "thread", sweepTestNow, 6*time.Hour, nil); got != 5 {
 		t.Errorf("control: the same rows as thread are %d due, want 5", got)
 	}
-	if got := ActiveCount(es, "pr"); got != 7 {
+	if got := ActiveCount(es, "pr", nil); got != 7 {
 		t.Errorf("pr active = %d, want 7 (the exclusion must not touch the active count)", got)
 	}
 }
@@ -321,5 +323,226 @@ func TestEvaluateSweepBound(t *testing.T) {
 func TestSweepTiersCoverLocalAndRemote(t *testing.T) {
 	if len(SweepTiers) != 2 || SweepTiers[0] != TierLocal || SweepTiers[1] != TierRemote {
 		t.Errorf("SweepTiers = %v, want [local remote]", SweepTiers)
+	}
+}
+
+// --- owning-backend entities are outside the old age-sweep tiers ---
+
+var owningJira = map[string]bool{"jira-a": true}
+
+// owningTierEntities is one age-stale beads issue, one age-stale owning-backend
+// issue, an age-stale owning-backend PR-typed id (the exclusion is for the
+// issue type only), and a fresh beads issue.
+func owningTierEntities() []store.Entity {
+	return []store.Entity{
+		{EntityType: "issue", EntityID: "bd-stale", Backend: "beads-a", HydratedAt: "2026-09-01T00:00:00Z"},
+		{EntityType: "issue", EntityID: "PROJ-1", Backend: "jira-a", HydratedAt: "2026-09-01T00:00:00Z"},
+		{EntityType: "issue", EntityID: "bd-null", HydratedAt: "2026-09-01T00:00:00Z"},
+		{EntityType: "issue", EntityID: "bd-fresh", Backend: "beads-a", HydratedAt: "2026-10-01T11:00:00Z"},
+		{EntityType: "pr", EntityID: "pr-1", Backend: "jira-a", HydratedAt: "2026-09-01T00:00:00Z"},
+	}
+}
+
+func TestActiveCountAndDueBacklogExcludeOwningBackendIssues(t *testing.T) {
+	es := owningTierEntities()
+	if got := ActiveCount(es, "issue", nil); got != 4 {
+		t.Errorf("ActiveCount(no owning set) = %d, want 4", got)
+	}
+	if got := ActiveCount(es, "issue", owningJira); got != 3 {
+		t.Errorf("ActiveCount(owning jira-a) = %d, want 3 (the owning entity left out)", got)
+	}
+	if got := DueBacklog(es, "issue", sweepTestNow, 6*time.Hour, nil); got != 3 {
+		t.Errorf("DueBacklog(no owning set) = %d, want 3", got)
+	}
+	if got := DueBacklog(es, "issue", sweepTestNow, 6*time.Hour, owningJira); got != 2 {
+		t.Errorf("DueBacklog(owning jira-a) = %d, want 2 (bd-stale and bd-null; the owning entity is never due)", got)
+	}
+	// The exclusion is for the issue type: a pr row carrying an owning
+	// backend value is counted as before.
+	if got := ActiveCount(es, "pr", owningJira); got != 1 {
+		t.Errorf("ActiveCount(pr) = %d, want 1", got)
+	}
+}
+
+func TestWithoutOwnedKeepsOtherTypesAndNullBackends(t *testing.T) {
+	es := owningTierEntities()
+	got := withoutOwned(es, "issue", owningJira)
+	var ids []string
+	for _, e := range got {
+		ids = append(ids, e.EntityID)
+	}
+	sort.Strings(ids)
+	if want := []string{"bd-fresh", "bd-null", "bd-stale", "pr-1"}; !reflect.DeepEqual(ids, want) {
+		t.Errorf("withoutOwned = %v, want %v", ids, want)
+	}
+	if got := withoutOwned(es, "issue", nil); len(got) != len(es) {
+		t.Errorf("an empty owning set dropped rows: %d of %d", len(got), len(es))
+	}
+}
+
+func TestOwningSetReadsTheConfiguredOwningInstances(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Watch.Issue.Queries = []string{"mine", "tracked"}
+	cfg.Watch.Issue.Backends = map[string]config.WatchBackend{
+		"mine":    {Instance: "beads-a"},
+		"tracked": {Instance: "jira-a", OwnsChanges: true},
+	}
+	if got := OwningSet(cfg, "issue"); !reflect.DeepEqual(got, owningJira) {
+		t.Errorf("OwningSet(issue) = %v, want %v", got, owningJira)
+	}
+	if got := OwningSet(cfg, "pr"); got != nil {
+		t.Errorf("OwningSet(pr) = %v, want nil", got)
+	}
+	if got := OwningSet(nil, "issue"); got != nil {
+		t.Errorf("OwningSet(nil cfg) = %v, want nil", got)
+	}
+}
+
+// owningEngine is a list engine whose config has one owning instance next to
+// the beads one, with a stale beads entity and a stale owning-backend entity.
+func owningEngine(t *testing.T) (*Engine, *store.Store, *storeHydrator) {
+	t.Helper()
+	e, st, h := newListEngine(t, "open", "tracked")
+	e.Cfg.Watch.Issue.Backends = map[string]config.WatchBackend{
+		"open":    {Instance: "beads-a"},
+		"tracked": {Instance: "jira-a", OwnsChanges: true},
+	}
+	// Both rows: hydrated 12h ago (past sweep.max_age) with a 3h-old log row
+	// (past reconcile_age), so each tier would select either.
+	seedTierRow(t, st, "bd-1", "2026-10-01T00:00:00Z", "F1", "2026-10-01T09:00:00Z")
+	seedTierRow(t, st, "PROJ-1", "2026-10-01T00:00:00Z", "F2", "2026-10-01T09:00:00Z")
+	jira := "jira-a"
+	if err := st.SetEntityColumns("o/r", "issue", "PROJ-1", &jira, nil); err != nil {
+		t.Fatal(err)
+	}
+	beads := "beads-a"
+	if err := st.SetEntityColumns("o/r", "issue", "bd-1", &beads, nil); err != nil {
+		t.Fatal(err)
+	}
+	return e, st, h
+}
+
+func TestOldTiersTouchOnlyTheNonOwningEntity(t *testing.T) {
+	t.Run("remote tier", func(t *testing.T) {
+		e, st, h := owningEngine(t)
+		owningBefore, _, _ := st.GetEntity("o/r", "issue", "PROJ-1")
+		if err := e.sweep(context.Background(), "issue", &pollState{hydrated: map[string]error{}}, &budget{left: 10}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"bd-1"}; !reflect.DeepEqual(h.calls, want) {
+			t.Errorf("remote tier hydrated %v, want %v", h.calls, want)
+		}
+		assertOwningUntouched(t, st, owningBefore)
+	})
+	t.Run("local tier", func(t *testing.T) {
+		e, st, h := owningEngine(t)
+		owningBefore, _, _ := st.GetEntity("o/r", "issue", "PROJ-1")
+		beadsBefore, _, _ := st.GetEntity("o/r", "issue", "bd-1")
+		if err := e.reconcileLocal(context.Background(), "issue", &pollState{hydrated: map[string]error{}}); err != nil {
+			t.Fatal(err)
+		}
+		if len(h.calls) != 0 {
+			t.Errorf("local tier hydrated %v, want none", h.calls)
+		}
+		beadsAfter, _, _ := st.GetEntity("o/r", "issue", "bd-1")
+		if beadsAfter.Version != beadsBefore.Version+1 {
+			t.Errorf("beads entity version = %d, want %d (one local reconcile)", beadsAfter.Version, beadsBefore.Version+1)
+		}
+		assertOwningUntouched(t, st, owningBefore)
+	})
+}
+
+func assertOwningUntouched(t *testing.T, st *store.Store, before store.Entity) {
+	t.Helper()
+	after, found, err := st.GetEntity("o/r", "issue", "PROJ-1")
+	if err != nil || !found {
+		t.Fatalf("GetEntity PROJ-1 = %v, %v", found, err)
+	}
+	if after.Version != before.Version || after.HydratedAt != before.HydratedAt {
+		t.Errorf("owning entity changed: before %+v after %+v", before, after)
+	}
+	if got := len(historyOf(t, st, "PROJ-1")); got != 1 {
+		t.Errorf("owning entity has %d change_log rows, want only its seed row", got)
+	}
+}
+
+func TestObserveExcludesOwningBackendEntitiesFromActiveAndDue(t *testing.T) {
+	_, st, _ := owningEngine(t)
+	flow, err := Observe(st, sweepTestNow, 6*time.Hour, owningJira)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var issue *TypeFlow
+	for i := range flow.Types {
+		if flow.Types[i].Type == "issue" {
+			issue = &flow.Types[i]
+		}
+	}
+	if issue == nil {
+		t.Fatal("no issue type in the flow")
+	}
+	if issue.Active != 1 || issue.Due != 1 {
+		t.Errorf("issue Active/Due = %d/%d, want 1/1 (only the beads entity)", issue.Active, issue.Due)
+	}
+	// The local-tier sweep-bound input is built from the same Active.
+	cfg := &config.Config{}
+	if in := SweepInputsForTier(cfg, *issue, TierLocal); in.ActiveCount != 1 {
+		t.Errorf("local-tier ActiveCount = %d, want 1", in.ActiveCount)
+	}
+	flow, err = Observe(st, sweepTestNow, 6*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tf := range flow.Types {
+		if tf.Type == "issue" && (tf.Active != 2 || tf.Due != 2) {
+			t.Errorf("without the owning set Active/Due = %d/%d, want 2/2", tf.Active, tf.Due)
+		}
+	}
+}
+
+// --- WatchedIDs for an owning backend reads the watched column ---
+
+func TestWatchedIDsOwningReadsTheEntityColumnAndNoWatchsetKey(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	seed := func(id, backend string, watched *bool) {
+		seedIssue(t, st, id, &backend)
+		if watched != nil {
+			if err := st.SetEntityColumns("o/r", "issue", id, nil, watched); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	yes, no := true, false
+	seed("PROJ-1", "jira-a", &yes)
+	seed("PROJ-2", "jira-a", &no)
+	seed("PROJ-3", "jira-a", nil)
+	seed("PROJ-4", "jira-b", &yes) // another, non-owning instance
+	seed("bd-1", "beads-a", &yes)  // watched column is meaningless off an owning backend
+	if err := saveWatchSet(st, "issue", "mine", map[string]bool{"bd-1": true, "bd-2": true}); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, known := WatchedIDs(st, []string{"mine", "tracked"}, "issue", owningJira)
+	if !known {
+		t.Error("known = false with an owning instance, want true")
+	}
+	want := map[string]bool{"PROJ-1": true, "bd-1": true, "bd-2": true}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("ids = %v, want %v (the owning watched entity plus the persisted beads set)", ids, want)
+	}
+	if _, found, _ := st.GetMeta(watchSetKey("issue", "tracked")); found {
+		t.Error("a change_flow.watchset key was written for the owning query")
+	}
+
+	// A non-owning read is exactly the persisted set.
+	ids, known = WatchedIDs(st, []string{"mine"}, "issue", nil)
+	if !known || !reflect.DeepEqual(ids, map[string]bool{"bd-1": true, "bd-2": true}) {
+		t.Errorf("non-owning ids = %v known=%v", ids, known)
+	}
+
+	watched, all := OwningEntityIDs(st, "issue", owningJira)
+	if !reflect.DeepEqual(watched, map[string]bool{"PROJ-1": true}) ||
+		!reflect.DeepEqual(all, map[string]bool{"PROJ-1": true, "PROJ-2": true, "PROJ-3": true}) {
+		t.Errorf("OwningEntityIDs = %v / %v", watched, all)
 	}
 }

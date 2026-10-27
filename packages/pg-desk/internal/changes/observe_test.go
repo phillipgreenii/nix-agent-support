@@ -47,7 +47,7 @@ func seedObserve(t *testing.T) *store.Store {
 
 func TestObserveReportsEveryChangeFlowFamily(t *testing.T) {
 	st := seedObserve(t)
-	flow, err := Observe(st, observeNow, 6*time.Hour)
+	flow, err := Observe(st, observeNow, 6*time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestObserveReportsEveryChangeFlowFamily(t *testing.T) {
 
 func TestObserveDegradesOnAnOldSchemaStore(t *testing.T) {
 	st := store.OpenForTest(t) // schema 1: no change_log or consumer table
-	flow, err := Observe(st, observeNow, 6*time.Hour)
+	flow, err := Observe(st, observeNow, 6*time.Hour, nil)
 	if err != nil {
 		t.Fatalf("Observe on an old-schema store must degrade, not fail: %v", err)
 	}

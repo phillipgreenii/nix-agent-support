@@ -234,7 +234,7 @@ func printChangeFlow(ctx context.Context, w io.Writer, st *store.Store, version 
 		cfg = &config.Config{}
 		fmt.Fprintf(w, "  config: unavailable (%v); defaults assumed\n", cfgErr)
 	}
-	flow, err := changes.Observe(st, changesNow(), cfg.SweepMaxAge())
+	flow, err := changes.Observe(st, changesNow(), cfg.SweepMaxAge(), changes.OwningSet(cfg, changes.EntityTypeIssue))
 	if err != nil {
 		return fmt.Errorf("observe change flow: %w", err)
 	}

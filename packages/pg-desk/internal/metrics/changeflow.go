@@ -97,7 +97,7 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 		return err
 	}
 	due, err := m.Int64ObservableGauge(MetricDueBacklog,
-		metric.WithDescription("active entities with hydrated_at older than the sweep max age (or never hydrated), by type"))
+		metric.WithDescription("active entities with hydrated_at older than the sweep max age (or never hydrated), by type; an owning-backend issue entity is not counted (no age sweep reaches it)"))
 	if err != nil {
 		return err
 	}

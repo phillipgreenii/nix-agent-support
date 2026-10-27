@@ -122,13 +122,16 @@ series.
   definition `status` and `doctor` share).
 - `pg_desk_due_backlog{type}` — active entities whose `hydrated_at` is older than the sweep max age
   (or that were never hydrated); always 0 for `pr` (no sweep re-hydrates a PR on a clock, and the
-  never-hydrated PRs are `pg_desk_pr_unhydrated`).
+  never-hydrated PRs are `pg_desk_pr_unhydrated`). An `issue` entity of a backend that owns its changes
+  is never counted: the age sweep skips it, so its `hydrated_at` does not advance and it would otherwise
+  be due for ever.
 - `pg_desk_consumer_lag{type,consumer}` — the type's highest change sequence minus the consumer's
   cursor.
 - `pg_desk_sweep_bound_violated{type,tier}` — `1` for a (type, tier) whose sweep sizing bound
   `active_count / sweep.max_per_poll x poll_interval <= age` is violated, `0` when it holds. The
   bound is checked per capped age tier: `tier="remote"` (re-hydration, age `sweep.max_age`) and
-  `tier="local"` (reconcile, age `sweep.reconcile_age`). It is the same evaluation `doctor` prints
+  `tier="local"` (reconcile, age `sweep.reconcile_age`). `active_count` leaves out an `issue` entity of
+  a backend that owns its changes, which neither tier touches. It is the same evaluation `doctor` prints
   (`changes.EvaluateSweepBound`), so the metric and the doctor line always agree. `pg-desk` does not
   own the poll interval: `serve` reads it from the router config named by `serve --router-config
 <path>` (or the `PG_DESK_ROUTER_CONFIG` environment variable), re-reading the file on every scrape
@@ -257,7 +260,7 @@ creation time, else the time the store first saw it.
 | `pg_desk_focus_pending_beads`                   | `reason`: `unminted`, `hidden`, `suppressed`, `no_bead_by_design`, `unwatched`, `source_terminal`                 | rows of the current plan with no bead to wait for, by reason (below)                                                                                                                                                             |
 | `pg_desk_focus_oldest_pending_bead_age_seconds` | `reason`                                                                                                          | seconds since the oldest row of that reason was selected; no series for a reason with no row                                                                                                                                     |
 | `pg_desk_focus_divergence`                      | `kind`: the seven kinds below                                                                                     | disagreements between the plan rows, the `focus_selected` annotation and the beads                                                                                                                                               |
-| `pg_desk_focus_unwatched_selected`              | none                                                                                                              | selected rows whose entity is in no `change_flow.watchset.<type>.<query>` set                                                                                                                                                    |
+| `pg_desk_focus_unwatched_selected`              | none                                                                                                              | selected rows whose entity is in no `change_flow.watchset.<type>.<query>` set; for a backend that owns its changes there is no such set, and a row is unwatched when its entity's watched column is NULL or 0                    |
 | `pg_desk_focus_runs`                            | `verb`, `outcome`: `ok`, `partial`, `total`, `period_closed`, `usage`, `empty`                                    | `focus_run` rows by verb and outcome, so partial (exit 2) and total (exit 3) are distinguishable; a run with a NULL exit code (a crash left it unfinalised) counts as `total`; only observed (verb, outcome) pairs have a series |
 | `pg_desk_focus_run_age_seconds`                 | none                                                                                                              | seconds since the last non-dry-run `select`; informational; absent when none ran                                                                                                                                                 |
 | `pg_desk_focus_rank_degraded_inputs`            | `input`: `unparseable_due`, `unmapped_priority`, `age_fallback`, `unblocks_unavailable`, `status_category_absent` | the silent rank degradations of this scrape's rank                                                                                                                                                                               |

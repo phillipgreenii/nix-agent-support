@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
 func collectChangeFlow(t *testing.T, fn ChangeFlowFunc) (metricdata.ResourceMetrics, error) {
@@ -207,5 +209,57 @@ func TestSweepBoundMetricIgnoresNonFlowTypes(t *testing.T) {
 	}
 	if got := boundPoints(t, rm); len(got) != 0 {
 		t.Errorf("emitted %v for a non-flow type", got)
+	}
+}
+
+// The due-backlog gauge counts only entities the age sweep can reach: with an
+// owning backend configured, an age-stale owning-backend issue is not counted
+// and the stale beads issue is.
+func TestDueBacklogGaugeExcludesOwningBackendEntities(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	seed := func(id, backend string) {
+		t.Helper()
+		e := store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "2026-09-01T00:00:00Z"}
+		if _, err := st.WriteEntityStateWithLog(e, 0, "2026-09-01T00:00:00Z", true, []string{"created"}, "sync", "2026-09-01T00:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetEntityColumns("o/r", "issue", id, &backend, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("bd-1", "beads-a")
+	seed("PROJ-1", "jira-a")
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+
+	for _, tc := range []struct {
+		name   string
+		owning map[string]bool
+		want   int64
+	}{
+		{"no owning backend", nil, 2},
+		{"jira-a owns changes", map[string]bool{"jira-a": true}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rm, err := collectChangeFlow(t, func() (changes.Flow, error) {
+				return changes.Observe(st, now, 6*time.Hour, tc.owning)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := findMetric(t, rm, MetricDueBacklog)
+			d, ok := m.Data.(metricdata.Gauge[int64])
+			if !ok {
+				t.Fatalf("%s is %T, want an int64 gauge", MetricDueBacklog, m.Data)
+			}
+			var got int64 = -1
+			for _, p := range d.DataPoints {
+				if typ, _ := p.Attributes.Value("type"); typ.AsString() == "issue" {
+					got = p.Value
+				}
+			}
+			if got != tc.want {
+				t.Errorf("%s{type=issue} = %d, want %d", MetricDueBacklog, got, tc.want)
+			}
+		})
 	}
 }

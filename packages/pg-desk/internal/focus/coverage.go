@@ -78,6 +78,7 @@ func ComputeCoverage(st *store.Store, cfg *config.Config, now time.Time, entitie
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
+	owning := changes.OwningSet(cfg, entityTypeIssue)
 	rows := make([]store.Entity, 0, len(entities))
 	for _, e := range entities {
 		rows = append(rows, e)
@@ -86,8 +87,8 @@ func ComputeCoverage(st *store.Store, cfg *config.Config, now time.Time, entitie
 	known, failed := 0, 0
 	for _, t := range CoverageTypes {
 		cov := TypeCoverage{
-			Active:     changes.ActiveCount(rows, t),
-			DueBacklog: changes.DueBacklog(rows, t, now, cfg.SweepMaxAge()),
+			Active:     changes.ActiveCount(rows, t, owning),
+			DueBacklog: changes.DueBacklog(rows, t, now, cfg.SweepMaxAge(), owning),
 		}
 		cov.OldestHydratedAt = oldestHydrated(rows, t)
 
@@ -198,9 +199,15 @@ func oldestHydrated(rows []store.Entity, entityType string) string {
 // WatchSet is the persisted watch-set membership of one entity type. Known
 // is false when no configured query of the type has a persisted watch set,
 // in which case nothing is reported unwatched (the set was never recorded).
+//
+// For an owning backend there is no persisted set: Owned holds the ids of the
+// entities whose backend column is an owning instance, and IDs holds the
+// watched ones among them (the watched column). An owned id is judged by
+// that column alone, never by Known.
 type WatchSet struct {
 	IDs   map[string]bool
 	Known bool
+	Owned map[string]bool
 }
 
 // Watched maps an entity type to its watch set.
@@ -210,16 +217,28 @@ type Watched map[string]WatchSet
 func LoadWatched(st *store.Store, cfg *config.Config) Watched {
 	w := Watched{}
 	for _, t := range CoverageTypes {
-		ids, known := changes.WatchedIDs(st, cfg.WatchQueries(t), t)
-		w[t] = WatchSet{IDs: ids, Known: known}
+		ids, known := changes.WatchedIDs(st, cfg.WatchQueries(t), t, nil)
+		ws := WatchSet{IDs: ids, Known: known}
+		if owning := changes.OwningSet(cfg, t); len(owning) > 0 {
+			watched, all := changes.OwningEntityIDs(st, t, owning)
+			for id := range watched {
+				ws.IDs[id] = true
+			}
+			ws.Owned = all
+		}
+		w[t] = ws
 	}
 	return w
 }
 
 // Unwatched reports whether k is outside every watch query of its type: the
-// type's watch sets are known and none holds the id.
+// type's watch sets are known and none holds the id. An owning-backend entity
+// is unwatched when its watched column is NULL or 0.
 func (w Watched) Unwatched(k Key) bool {
 	ws, ok := w[k.Type]
+	if ok && ws.Owned[k.ID] {
+		return !ws.IDs[k.ID]
+	}
 	return ok && ws.Known && !ws.IDs[k.ID]
 }
 

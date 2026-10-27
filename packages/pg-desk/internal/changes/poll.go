@@ -509,7 +509,9 @@ func idSet(ids []string) map[string]bool {
 // (origin sweep). The list fingerprint cannot see review threads, merge-state
 // status or edited comment bodies, so only a re-hydration notices them. It
 // draws on the same budget as the added/changed hydrations and runs after
-// them, so a tight budget starves it first; when the budget or a degraded
+// them, so a tight budget starves it first; an issue entity whose backend
+// column is an owning instance is never selected (its change feed replaces the
+// tier); when the budget or a degraded
 // backend stops it short, every watched-query row is marked degraded because a
 // sweep entity belongs to no single query. Entities not reached stay due and
 // are selected on the next poll.
@@ -518,6 +520,7 @@ func (e *Engine) sweep(ctx context.Context, entityType string, st *pollState, bu
 	if err != nil {
 		return fmt.Errorf("changes: list entities: %w", err)
 	}
+	all = withoutOwned(all, entityType, OwningSet(e.Cfg, entityType))
 	skip := map[string]bool{}
 	for id := range exclude {
 		skip[id] = true
@@ -551,7 +554,8 @@ func (e *Engine) sweep(ctx context.Context, entityType string, st *pollState, bu
 // no remote call, runs no hydration and draws on no hydration budget, so it
 // re-evaluates what is already stored and recovers a decider run that failed
 // on an earlier record. What the cap leaves stays due for the next poll.
-// Entities hydrated this call are skipped: their fresh record already
+// An issue entity whose backend column is an owning instance is never
+// reconciled here. Entities hydrated this call are skipped: their fresh record already
 // restarted the age.
 func (e *Engine) reconcileLocal(ctx context.Context, entityType string, st *pollState) error {
 	all, err := e.Store.ListEntities()
@@ -562,6 +566,7 @@ func (e *Engine) reconcileLocal(ctx context.Context, entityType string, st *poll
 	if err != nil {
 		return fmt.Errorf("changes: %w", err)
 	}
+	all = withoutOwned(all, entityType, OwningSet(e.Cfg, entityType))
 	skip := make(map[string]bool, len(st.hydrated))
 	for id := range st.hydrated {
 		skip[id] = true

@@ -73,7 +73,7 @@ func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *
 		checkCfg = &config.Config{}
 	}
 	now := changesNow()
-	flow, err := changes.Observe(st, now, checkCfg.SweepMaxAge())
+	flow, err := changes.Observe(st, now, checkCfg.SweepMaxAge(), changes.OwningSet(checkCfg, changes.EntityTypeIssue))
 	if err != nil {
 		fmt.Fprintf(w, "  observe: FAIL (%v)\n", err)
 		*failures = append(*failures, "change_flow observe")

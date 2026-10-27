@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -16,13 +17,60 @@ const OriginSweep = "sweep"
 // record: re-emitted from the store with no remote call and no hydration.
 const OriginLocalReconcile = "local-reconcile"
 
+// EntityTypeIssue is the issue entity type, the only type with an owning
+// backend.
+const EntityTypeIssue = "issue"
+
+// OwningSet returns the owning backend instances of entityType as a set (nil
+// when none, which every consumer treats as "no entity is owned").
+func OwningSet(cfg *config.Config, entityType string) map[string]bool {
+	if cfg == nil {
+		return nil
+	}
+	insts := cfg.OwningInstances(entityType)
+	if len(insts) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(insts))
+	for _, inst := range insts {
+		out[inst] = true
+	}
+	return out
+}
+
+// OwnedByBackend reports whether e is an issue entity whose backend column is
+// one of the owning instances: an entity the old age-sweep tiers MUST skip and
+// no age-driven count includes. A NULL backend ("") is never owned here.
+func OwnedByBackend(e store.Entity, entityType string, owning map[string]bool) bool {
+	return entityType == EntityTypeIssue && e.Backend != "" && owning[e.Backend]
+}
+
+// withoutOwned returns entities with every OwnedByBackend entity of entityType
+// dropped (entities itself when owning is empty).
+func withoutOwned(entities []store.Entity, entityType string, owning map[string]bool) []store.Entity {
+	if len(owning) == 0 {
+		return entities
+	}
+	out := make([]store.Entity, 0, len(entities))
+	for _, e := range entities {
+		if e.EntityType == entityType && OwnedByBackend(e, entityType, owning) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 // ActiveCount is the number of entities of entityType that are active
 // (Inactive is false). status, /metrics and doctor all use it so they report
 // the same number.
-func ActiveCount(entities []store.Entity, entityType string) int {
+//
+// An entity of the issue type whose backend column is an owning instance is
+// not counted (see OwnedByBackend): the age-driven sweep never reaches it.
+func ActiveCount(entities []store.Entity, entityType string, owning map[string]bool) int {
 	n := 0
 	for _, e := range entities {
-		if e.EntityType == entityType && !e.Inactive {
+		if e.EntityType == entityType && !e.Inactive && !OwnedByBackend(e, entityType, owning) {
 			n++
 		}
 	}
@@ -43,13 +91,16 @@ const EntityTypePR = "pr"
 // maxAge and mark the daily focus draft incomplete for a backlog nothing is
 // going to work off. A PR that was never hydrated is reported by its own
 // gauge (the unhydrated count), not by this one.
-func DueBacklog(entities []store.Entity, entityType string, now time.Time, maxAge time.Duration) int {
+//
+// An owning-backend issue entity is never counted: the old tiers skip it, so
+// its hydrated_at never advances and it would otherwise be due for ever.
+func DueBacklog(entities []store.Entity, entityType string, now time.Time, maxAge time.Duration, owning map[string]bool) int {
 	if entityType == EntityTypePR {
 		return 0
 	}
 	n := 0
 	for _, e := range entities {
-		if e.EntityType == entityType && !e.Inactive && sweepDue(e, now, maxAge) {
+		if e.EntityType == entityType && !e.Inactive && !OwnedByBackend(e, entityType, owning) && sweepDue(e, now, maxAge) {
 			n++
 		}
 	}

@@ -389,7 +389,7 @@ func (e *Engine) resetReplay(ctx context.Context, entityType string, st *pollSta
 				// non-owning; otherwise the sole owning instance claims a
 				// ticket-shaped id.
 				if nonOwningWatched == nil {
-					nonOwningWatched, _ = WatchedIDs(e.Store, e.Cfg.NonOwningWatchQueries(entityType), entityType)
+					nonOwningWatched, _ = WatchedIDs(e.Store, e.Cfg.NonOwningWatchQueries(entityType), entityType, nil)
 				}
 				if !nonOwningWatched[id] {
 					inst, _ = e.Cfg.OwningInstanceForID(entityType, id)
