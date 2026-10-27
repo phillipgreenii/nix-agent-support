@@ -885,7 +885,7 @@ func (g *Gatherer) targetedCall(ctx context.Context, args []string, extraEnv []s
 	case 4:
 		return nil, true, nil
 	default:
-		return nil, false, fmt.Errorf("pg-connector %v: exit %d: %s", args, res.exitCode, wireErrorMessage(res.stdout))
+		return nil, false, exitError(args, res.exitCode, res.stdout)
 	}
 }
 
@@ -907,7 +907,7 @@ func (g *Gatherer) fanOutCall(ctx context.Context, args []string, extraEnv []str
 	case 0, 2:
 		return json.RawMessage(res.stdout), nil
 	default:
-		return nil, fmt.Errorf("pg-connector %v: exit %d: %s", args, res.exitCode, wireErrorMessage(res.stdout))
+		return nil, exitError(args, res.exitCode, res.stdout)
 	}
 }
 
