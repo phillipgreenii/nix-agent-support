@@ -71,8 +71,11 @@ missing tests in the same pass unless the operator asked you to.
      Treat only an OPEN bead whose title matches exactly as a match: `bd search`
      also returns closed beads and substring hits (`internal/collector`). If one
      exists, amend it with your rows instead of filing a second; otherwise file a
-     new bead. (The background sweep will file this same bead shape once
-     `pg2-tkm9g0` wires it; today it files none.)
+     new bead. (The background sweep, `pg-go-mutate-tui`, files this same bead
+     shape itself, one `P3` bead per package once every file of the package has a
+     recorded status, filed once per module, package and package hash. It does
+     not search for an existing bead, so this search-and-amend step still applies
+     to an operator-requested single-package run.)
    - The bead body names the package and carries the exact command you ran, the
      worklist rows (`file:line`, mutation, operator), and the instructions in
      "Working a triage bead" below, copied in so the agent who works the bead has
