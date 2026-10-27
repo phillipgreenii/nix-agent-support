@@ -142,6 +142,10 @@ func Open(path string) (*Store, error) {
 		_ = s.sql.Close()
 		return nil, fmt.Errorf("store: migrate %s: %w", path, err)
 	}
+	if err := ensureIssueFeedStorage(s); err != nil {
+		_ = s.sql.Close()
+		return nil, fmt.Errorf("store: ensure issue feed storage %s: %w", path, err)
+	}
 	return s, nil
 }
 

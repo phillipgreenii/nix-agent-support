@@ -291,8 +291,8 @@ new schema version.
 
 - **`backend`** is the name of the backend instance that serves the entity, so a per-backend rule is
   applied per entity and never per type. NULL means the backend is not known yet.
-- **`watched`** marks the entity as watched. NULL means not watched; clearing the mark
-  sets it back to NULL.
+- **`watched`** marks the entity as watched. NULL means the mark was never stated, 1 means watched,
+  and 0 means stated not watched; a read treats NULL as not watched.
 - **`read_attempt_at`** and **`read_ok_at`** are the time of the entity's last attempted and last
   successful by-id read of a watched entity that no watched query lists any longer, the figures that
   order those reads and the age that alerts on them (see [`changes.md`](changes.md)). NULL means never.
@@ -302,8 +302,10 @@ no other:
 
 - A table is created only if it does not already exist, and a column is added only when the table's own
   declared columns show it absent, because SQLite has no add-column-if-absent. The check and the add
-  run on every ordinary open of the store, before the open path decides that a store already at version
-  2 needs no migration, so a version-2 store gains them too.
+  run on every ordinary open of the store, in a separate function that runs after the migration step
+  returns (the migration step itself returns early for a store already at version 2), so a version-1
+  store and a version-2 store both gain them. The function is idempotent, and it tolerates a second
+  process that added a column between its check and its add.
 - `user_version` and `meta.schema_version` MUST NOT change: a newer version would make a binary built
   before the additions refuse the store, and an older binary MUST still open it (it neither reads nor
   writes the additions).
@@ -352,7 +354,10 @@ request change, and an annotation write.
 ### The failed-ingest table
 
 `ingest_failed` is a small table holding the feed rows that could not be hydrated: one row per
-`(backend instance, feed seq)` with the entity id and the time the failure was first recorded. The feed
+`(backend instance, entity id, feed seq)` carrying the identity of the backend's own store the `seq`
+belongs to, the change kinds of the row (a JSON array), the time the failure was first recorded and the
+latest error text. Recording the same key again updates the error text only and keeps the first-failed
+time. The feed
 is acknowledged by position, so a row that fails is recorded here and passed over, and one permanently
 failing issue never blocks every other issue's feed.
 

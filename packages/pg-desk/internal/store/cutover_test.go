@@ -26,9 +26,15 @@ const syntheticDBName = "pre-cutover-store.sqlite"
 // row shapes the cutover's reserved-key copy has to translate.
 func buildSyntheticPreMigrationDB(t *testing.T, path string) {
 	t.Helper()
-	s, err := Open(path)
+	// openDB + migrate, NOT Open: the fixture models a store written before
+	// ensureIssueFeedStorage existed (no backend/watched columns, no
+	// ingest_failed table), so the checked-in file stays byte-stable.
+	s, err := openDB(path)
 	if err != nil {
-		t.Fatalf("Open %s: %v", path, err)
+		t.Fatalf("open %s: %v", path, err)
+	}
+	if err := migrate(s); err != nil {
+		t.Fatalf("migrate %s: %v", path, err)
 	}
 
 	const repo = "acme/widgets"

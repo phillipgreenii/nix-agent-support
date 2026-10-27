@@ -60,6 +60,18 @@ type Entity struct {
 	// It is the rank's age fallback (the change log is pruned and cannot
 	// supply it). Populated by reads; every writer ignores this field.
 	FirstSeenAt string
+
+	// Backend is the registry backend instance that serves the entity ("" =
+	// NULL, not known yet). Added by ensureIssueFeedStorage on every ordinary
+	// open, so it reads "" on a store opened read-only or raw that lacks the
+	// column. Populated by reads; UpsertEntity and the WriteEntity* writers
+	// ignore it; SetEntityColumns sets it.
+	Backend string
+
+	// Watched is the watched mark (nil = NULL, never stated; true = watched;
+	// false = stated not watched). Same availability and writer rules as
+	// Backend.
+	Watched *bool
 }
 
 // UpsertEntity inserts or replaces the entity row keyed by
@@ -104,15 +116,20 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	if err != nil {
 		return Entity{}, false, err
 	}
-	var headSHA, hydratedAt, listFP, firstSeenAt sql.NullString
+	feedCols, err := s.issueFeedSelect()
+	if err != nil {
+		return Entity{}, false, err
+	}
+	var headSHA, hydratedAt, listFP, firstSeenAt, backend sql.NullString
+	var watched sql.NullInt64
 	var active int
 	row := s.sql.QueryRow(
-		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, `+cols+`
+		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, `+cols+`, `+feedCols+`
 		 FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	)
 	if err := row.Scan(&entity.Repo, &entity.EntityType, &entity.EntityID, &entity.Facts,
-		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA, &entity.Version, &hydratedAt, &active, &listFP, &firstSeenAt); err != nil {
+		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA, &entity.Version, &hydratedAt, &active, &listFP, &firstSeenAt, &backend, &watched); err != nil {
 		if err == sql.ErrNoRows {
 			return Entity{}, false, nil
 		}
@@ -123,6 +140,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	entity.Inactive = active == 0
 	entity.ListFP = listFP.String
 	entity.FirstSeenAt = firstSeenAt.String
+	applyIssueFeedColumns(&entity, backend, watched)
 	return entity, true, nil
 }
 
@@ -151,8 +169,12 @@ func (s *Store) ListEntities() ([]Entity, error) {
 	if err != nil {
 		return nil, err
 	}
+	feedCols, err := s.issueFeedSelect()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.sql.Query(
-		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, ` + cols + `
+		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, ` + cols + `, ` + feedCols + `
 		 FROM entity ORDER BY repo, entity_type, entity_id`,
 	)
 	if err != nil {
@@ -163,9 +185,10 @@ func (s *Store) ListEntities() ([]Entity, error) {
 	var out []Entity
 	for rows.Next() {
 		var e Entity
-		var headSHA, hydratedAt, listFP, firstSeenAt sql.NullString
+		var headSHA, hydratedAt, listFP, firstSeenAt, backend sql.NullString
+		var watched sql.NullInt64
 		var active int
-		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version, &hydratedAt, &active, &listFP, &firstSeenAt); err != nil {
+		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version, &hydratedAt, &active, &listFP, &firstSeenAt, &backend, &watched); err != nil {
 			return nil, fmt.Errorf("store: scan entity row: %w", err)
 		}
 		e.HeadSHA = headSHA.String
@@ -173,6 +196,7 @@ func (s *Store) ListEntities() ([]Entity, error) {
 		e.Inactive = active == 0
 		e.ListFP = listFP.String
 		e.FirstSeenAt = firstSeenAt.String
+		applyIssueFeedColumns(&e, backend, watched)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
