@@ -3,7 +3,7 @@ module github.com/phillipgreenii/claude-extended-tool-approver
 go 1.26.0
 
 require (
-	github.com/phillipgreenii/x v0.0.0-20261025041111-c7b4ad60c6c2
+	github.com/phillipgreenii/x v0.0.0-20261025231613-3cae4f469680
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.61.0
 	mvdan.cc/sh/v3 v3.14.1
