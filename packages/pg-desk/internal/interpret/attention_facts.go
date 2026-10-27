@@ -20,8 +20,8 @@ import (
 type PRAttentionFacts struct {
 	Open  bool
 	Draft bool
-	// CIState is the rollup display state (none, pending, success or
-	// failure) after the check_interpreters exclusions. It is NEVER softened
+	// CIState is the rollup display state (none, unknown, pending, success
+	// or failure) after the check_interpreters exclusions. It is NEVER softened
 	// by review_exempt_checks: that softening only decides the panels.
 	CIState string
 	// CIReviewState is the rollup state the owner-side panel decisions
@@ -53,7 +53,7 @@ func DerivePRAttentionFacts(factsJSON string, cfg *config.Config) (PRAttentionFa
 		interps = cfg.CheckInterpreters
 		exempt = cfg.ReviewExemptChecks
 	}
-	ci := computeCIRollup(facts.CI, interps, pr.HeadSHA, exempt)
+	ci := computeCIRollup(facts.CI, interps, pr.HeadSHA, exempt, pr.ChecksRollup)
 	return PRAttentionFacts{
 		Open:             pr.State == "open",
 		Draft:            pr.Draft,

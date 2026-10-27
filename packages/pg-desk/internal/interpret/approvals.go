@@ -576,7 +576,9 @@ func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, 
 //     unmet, normally outstanding required reviews. EXCEPT while CI runs are
 //     still in flight: BLOCKED is then plausibly just the pending required
 //     check, and an approved PR waiting on CI stays with the owner (the
-//     2026-10-01 pending ruling). ALSO EXCEPT when the raw CI rollup State is
+//     2026-10-01 pending ruling); an "unknown" CI state (checks exist but none
+//     were counted) is treated the same way (operator ruling 2026-10-27, bead
+//     pg2-kwxcb). ALSO EXCEPT when the raw CI rollup State is
 //     "failure": the hard-blocker check already set aside every failure the
 //     reviewer-side softenings forgive (review-exempt jobs, a cancelled run),
 //     so a BLOCKED PR carrying one is plausibly blocked by that very failing
@@ -596,7 +598,7 @@ func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, 
 func teamApprovedPanel(pr prShow, ci ciRollupResult) string {
 	switch pr.MergeStateStatus {
 	case "BLOCKED":
-		if ci.RunsInFlight() || ci.State == "failure" {
+		if ci.RunsInFlight() || ci.State == "unknown" || ci.State == "failure" {
 			return PanelTeamAwaitingOwner
 		}
 		return PanelTeamAwaitingTeam

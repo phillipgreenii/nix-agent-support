@@ -325,7 +325,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 	}
 	ownership := classifyOwnership(selfLogin, pr.Author, commitAuthors)
 
-	ci := computeCIRollup(facts.CI, checkInterpreters, pr.HeadSHA, reviewExempt)
+	ci := computeCIRollup(facts.CI, checkInterpreters, pr.HeadSHA, reviewExempt, pr.ChecksRollup)
 
 	enrichment := computeEnrichment(pr, files, commits)
 	// scoreUrgencyWithHealth fully replaces the base-only computeUrgency
@@ -404,26 +404,30 @@ type prReview struct {
 }
 
 type prShow struct {
-	Repo             string      `json:"repo"`
-	Number           int         `json:"number"`
-	Title            string      `json:"title"`
-	State            string      `json:"state"`
-	Branch           string      `json:"branch"`
-	Base             string      `json:"base"`
-	HeadSHA          string      `json:"head_sha,omitempty"`
-	Author           string      `json:"author"`
-	URL              string      `json:"url"`
-	Draft            bool        `json:"draft"`
-	Merged           bool        `json:"merged"`
-	Body             string      `json:"body,omitempty"`
-	Labels           []string    `json:"labels,omitempty"`
-	Additions        int         `json:"additions,omitempty"`
-	Deletions        int         `json:"deletions,omitempty"`
-	Mergeable        string      `json:"mergeable,omitempty"`
-	MergeStateStatus string      `json:"merge_state_status,omitempty"`
-	ReviewRequests   []string    `json:"review_requests,omitempty"`
-	Comments         []prComment `json:"comments,omitempty"`
-	Reviews          []prReview  `json:"reviews,omitempty"`
+	Repo             string   `json:"repo"`
+	Number           int      `json:"number"`
+	Title            string   `json:"title"`
+	State            string   `json:"state"`
+	Branch           string   `json:"branch"`
+	Base             string   `json:"base"`
+	HeadSHA          string   `json:"head_sha,omitempty"`
+	Author           string   `json:"author"`
+	URL              string   `json:"url"`
+	Draft            bool     `json:"draft"`
+	Merged           bool     `json:"merged"`
+	Body             string   `json:"body,omitempty"`
+	Labels           []string `json:"labels,omitempty"`
+	Additions        int      `json:"additions,omitempty"`
+	Deletions        int      `json:"deletions,omitempty"`
+	Mergeable        string   `json:"mergeable,omitempty"`
+	MergeStateStatus string   `json:"merge_state_status,omitempty"`
+	// ChecksRollup is pg-connector's folded statusCheckRollup (success |
+	// failure | pending | none). It only splits an empty CI rollup into none vs
+	// unknown (computeCIRollup); the per-run rollup stays the CI authority.
+	ChecksRollup   string      `json:"checks_rollup,omitempty"`
+	ReviewRequests []string    `json:"review_requests,omitempty"`
+	Comments       []prComment `json:"comments,omitempty"`
+	Reviews        []prReview  `json:"reviews,omitempty"`
 	// Connections is pg-connector's per-connection truncation report. A
 	// truncated threads/comments/reviews connection means the comment set
 	// above is PARTIAL, so no "no unresolved thread" conclusion may be drawn

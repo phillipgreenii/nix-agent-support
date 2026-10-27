@@ -144,7 +144,7 @@ func TestScoreUrgency(t *testing.T) {
 		raw, _ := json.Marshal(map[string]any{
 			"runs": []map[string]any{{"name": "policy-bot: x", "status": "completed", "conclusion": "failure"}},
 		})
-		ci := computeCIRollup(raw, []config.CheckInterpreterConfig{{Patterns: []string{"^policy-bot"}}}, "", nil)
+		ci := computeCIRollup(raw, []config.CheckInterpreterConfig{{Patterns: []string{"^policy-bot"}}}, "", nil, "")
 		score, reasons := scoreUrgency(prShow{Title: "x"}, nil, ci, nil)
 		if score != 0 || len(reasons) != 0 {
 			t.Fatalf("got score=%d reasons=%v; want 0/[] (excluded check must not count)", score, reasons)
@@ -307,20 +307,29 @@ func TestComputeCIRollup(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  json.RawMessage
-		want string
+		// checks is the PR's stored pr show checks_rollup ("" = field absent).
+		checks string
+		want   string
 	}{
-		{"no runs", mk(), "none"},
-		{"one passing", mk(map[string]any{"status": "completed", "conclusion": "success"}), "success"},
-		{"one failing", mk(map[string]any{"status": "completed", "conclusion": "failure"}), "failure"},
-		{"one pending", mk(map[string]any{"status": "in_progress"}), "pending"},
-		{"failure wins over pending", mk(
+		{name: "no runs", raw: mk(), want: "none"},
+		{name: "no runs, checks_rollup none -> none", raw: mk(), checks: "none", want: "none"},
+		{name: "no runs, checks_rollup success -> unknown", raw: mk(), checks: "success", want: "unknown"},
+		{name: "no runs, checks_rollup failure -> unknown", raw: mk(), checks: "failure", want: "unknown"},
+		{name: "no runs, checks_rollup pending -> unknown", raw: mk(), checks: "pending", want: "unknown"},
+		{name: "no ci payload, checks_rollup success -> unknown", raw: nil, checks: "success", want: "unknown"},
+		{name: "counted run wins over checks_rollup none", raw: mk(map[string]any{"status": "completed", "conclusion": "success"}), checks: "none", want: "success"},
+		{name: "counted failure wins over checks_rollup success", raw: mk(map[string]any{"status": "completed", "conclusion": "failure"}), checks: "success", want: "failure"},
+		{name: "one passing", raw: mk(map[string]any{"status": "completed", "conclusion": "success"}), want: "success"},
+		{name: "one failing", raw: mk(map[string]any{"status": "completed", "conclusion": "failure"}), want: "failure"},
+		{name: "one pending", raw: mk(map[string]any{"status": "in_progress"}), want: "pending"},
+		{name: "failure wins over pending", raw: mk(
 			map[string]any{"status": "completed", "conclusion": "failure"},
 			map[string]any{"status": "in_progress"},
-		), "failure"},
+		), want: "failure"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := computeCIRollup(tt.raw, nil, "", nil).State; got != tt.want {
+			if got := computeCIRollup(tt.raw, nil, "", nil, tt.checks).State; got != tt.want {
 				t.Errorf("computeCIRollup(%s) = %q; want %q", tt.raw, got, tt.want)
 			}
 		})

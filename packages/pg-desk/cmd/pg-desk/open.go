@@ -258,7 +258,7 @@ func openRowFrom(st *store.Store, interp store.Interpretation, kvAnnotations boo
 		Owner:          pr.Author,
 		Title:          pr.Title,
 		URL:            pr.URL,
-		CIStatus:       deskCIStatus(facts.CI),
+		CIStatus:       deskCIStatus(facts.CI, pr.ChecksRollup),
 		HumanApprovers: approvals.HumanApprovers,
 		FilesChanged:   deskFilesCount(facts.PRFiles),
 		LinesChanged:   pr.Additions + pr.Deletions,

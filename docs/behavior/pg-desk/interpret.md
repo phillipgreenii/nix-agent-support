@@ -83,10 +83,19 @@ and MUST NOT use an LLM for any step below.
     team PR is treated as `pending` when other runs are in flight and as `success` otherwise. The CI
     rollup itself is unchanged: the CI state still reads `failure`, the `ci-failing` urgency signal
     fires, and the `build` link ([`links.md`](links.md)) is still produced.
-  - **No CI data (team PRs only).** A rollup of `none` means pg-desk counted no run on the head
-    commit. That conflates "this PR has no CI" with "pg-desk saw no data" (the connector can return
-    nothing for a PR whose checks all pass), so it is not a failure and does not block a team PR.
-    The own-PR panels keep treating it as not green.
+  - **No CI data.** When no run on the head commit is counted, the rollup is split by the PR's
+    stored `checks_rollup` (the folded check state from `pr show`; operator ruling 2026-10-27,
+    option B, bead pg2-kwxcb):
+    - `none` means the PR has no checks at all (`checks_rollup` is `none` or absent). It is not a
+      failure and does not block a team PR. The own-PR panels keep treating it as not green.
+    - `unknown` means no run was counted although `checks_rollup` says checks exist (`success`,
+      `failure` or `pending`): pg-desk is missing data the PR actually has (for example Actions
+      runs the branch-keyed lookup did not return). `unknown` is never green and blocks exactly
+      like `pending`: it is not a failure, so it does not make a team PR `team_awaiting_owner` and
+      does not block an own PR's panel, but an own draft with it is not ready-to-promote, and an
+      approved team PR whose merge state is `BLOCKED` stays with the owner as it does while CI is
+      in flight. It is shown as `unknown` wherever the CI state is displayed (`open`'s CI column,
+      `pr show`'s `ci=`) and is not a `ci-failing` signal.
   - **CI green** is judged only from the PR's current head commit. Workflow runs from earlier
     pushed commits are ignored — GitHub cancels a superseded commit's in-flight runs, and those
     cancellations are not failures of the current state. Within the head commit only the newest
@@ -136,7 +145,7 @@ and MUST NOT use an LLM for any step below.
        nothing about whether the PR is ready (operator ruling 2026-10-05): `BLOCKED` →
        `team_awaiting_team` (merge requirements are still unmet, normally outstanding required
        reviews), except while any CI run is still in flight, when `BLOCKED` is plausibly just the
-       pending check and the PR stays `team_awaiting_owner`, and except when the CI rollup is a
+       pending check (or an `unknown` CI rollup) and the PR stays `team_awaiting_owner`, and except when the CI rollup is a
        failure (including a failure set aside as review-exempt or as a harmless cancelled run),
        when `BLOCKED` is plausibly the failing required check, which is the owner's to fix, so the
        PR is `team_awaiting_owner` (operator ruling 2026-10-12 (Phillip), bead pg2-407y2); `UNKNOWN`

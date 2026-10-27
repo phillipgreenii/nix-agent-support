@@ -511,10 +511,12 @@ func renderTypedShow(w io.Writer, vd viewData) error {
 			head = head[:7]
 		}
 		var facts struct {
-			CI json.RawMessage `json:"ci"`
+			CI     json.RawMessage `json:"ci"`
+			PRShow json.RawMessage `json:"pr_show"`
 		}
 		_ = json.Unmarshal([]byte(vd.entity.Facts), &facts)
-		parts = append(parts, ready, "head="+orDash(head), "ci="+deskCIStatus(facts.CI))
+		show, _ := decodeDeskPRShow(facts.PRShow)
+		parts = append(parts, ready, "head="+orDash(head), "ci="+deskCIStatus(facts.CI, show.ChecksRollup))
 	}
 	parts = append(parts, fmt.Sprintf("as_of=%s (%s)", orDash(v.AsOf), freshness))
 

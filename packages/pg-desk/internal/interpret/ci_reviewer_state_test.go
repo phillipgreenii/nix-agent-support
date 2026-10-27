@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 )
 
 // Reviewer-facing CI state (operator ruling 2026-10-05): the display State and
@@ -105,7 +106,7 @@ func TestComputeCIRollup_ReviewerState(t *testing.T) {
 // Runs excluded by check_interpreters leave the rollup empty, which is "none".
 func TestComputeCIRollup_AllRunsExcludedIsNone(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"runs": []map[string]any{ciRun("gate: approval", "failure", "new", "1", 1)}})
-	got := computeCIRollup(raw, []config.CheckInterpreterConfig{{Patterns: []string{"^gate"}, Type: "approval-gate"}}, "new", nil)
+	got := computeCIRollup(raw, []config.CheckInterpreterConfig{{Patterns: []string{"^gate"}, Type: "approval-gate"}}, "new", nil, "")
 	if got.State != "none" || got.ReviewState() != "none" || got.ReviewerState() != "pending" {
 		t.Fatalf("got State=%q ReviewState=%q ReviewerState=%q; want none/none/pending", got.State, got.ReviewState(), got.ReviewerState())
 	}
@@ -120,6 +121,7 @@ func TestCIRollupResult_DirectConstructionDefaults(t *testing.T) {
 		wantInFlight bool
 	}{
 		{ciRollupResult{State: "none"}, "pending", false},
+		{ciRollupResult{State: "unknown"}, "pending", false},
 		{ciRollupResult{State: "pending"}, "pending", true},
 		{ciRollupResult{State: "success"}, "success", false},
 		{ciRollupResult{State: "failure"}, "failure", false},
@@ -267,4 +269,83 @@ func TestInterpret_OwnPR_NotSoftenedByReviewerRules(t *testing.T) {
 			}
 		})
 	}
+}
+
+// "unknown" (no counted run although the stored checks_rollup says checks exist)
+// is its own State, reads "pending" to every decision (never green, never a
+// failure), and never counts as an in-flight run (operator ruling 2026-10-27,
+// option B, bead pg2-kwxcb).
+func TestComputeCIRollup_UnknownIsNotGreenAndBlocksLikePending(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{"runs": []map[string]any{}})
+	got := computeCIRollup(raw, nil, "new", nil, "success")
+	if got.State != "unknown" || got.ReviewState() != "pending" || got.ReviewerState() != "pending" || got.RunsInFlight() {
+		t.Fatalf("got State=%q ReviewState=%q ReviewerState=%q inFlight=%v; want unknown/pending/pending/false",
+			got.State, got.ReviewState(), got.ReviewerState(), got.RunsInFlight())
+	}
+	// Runs excluded by check_interpreters leave nothing counted: the stored
+	// rollup still says checks exist, so the result is unknown, not none.
+	excluded, _ := json.Marshal(map[string]any{"runs": []map[string]any{ciRun("gate: approval", "failure", "new", "1", 1)}})
+	got = computeCIRollup(excluded, []config.CheckInterpreterConfig{{Patterns: []string{"^gate"}, Type: "approval-gate"}}, "new", nil, "success")
+	if got.State != "unknown" {
+		t.Fatalf("all runs excluded + checks_rollup success: State = %q; want unknown", got.State)
+	}
+}
+
+// End to end through Interpret: the 120536 data gap (zero runs, GitHub says the
+// checks are green) is told apart from a PR with no checks at all.
+func TestInterpret_UnknownCI_EndToEnd(t *testing.T) {
+	approved := []map[string]any{{"id": "r1", "author": "alice", "state": "APPROVED"}}
+	own := func(extra map[string]any) map[string]any {
+		m := map[string]any{"head_sha": "new", "author": "me"}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
+	cases := []struct {
+		name        string
+		extra       map[string]any
+		wantPanel   string
+		wantPromote bool
+		wantCI      string
+	}{
+		{"own draft, no runs, checks_rollup none -> none, not green", own(map[string]any{"draft": true, "checks_rollup": "none"}), PanelMineAwaitingMe, false, "none"},
+		{"own draft, no runs, checks_rollup success -> unknown, not green", own(map[string]any{"draft": true, "checks_rollup": "success"}), PanelMineAwaitingMe, false, "unknown"},
+		{"own non-draft, no runs, checks_rollup none -> blocked (unchanged)", own(map[string]any{"checks_rollup": "none"}), PanelMineAwaitingMe, false, "none"},
+		{"own non-draft, no runs, checks_rollup success -> unknown blocks like pending", own(map[string]any{"checks_rollup": "success"}), PanelMineAwaitingTeam, false, "unknown"},
+		{"team, no runs, unknown -> does not hard-block", map[string]any{"head_sha": "new", "checks_rollup": "success", "review_requests": []string{"me"}}, PanelTeamAwaitingMe, false, "unknown"},
+		{"team approved BLOCKED, unknown -> owner (like in-flight CI)", map[string]any{"head_sha": "new", "checks_rollup": "success", "merge_state_status": "BLOCKED", "reviews": approved}, PanelTeamAwaitingOwner, false, "unknown"},
+		{"team approved BLOCKED, none -> team (unchanged)", map[string]any{"head_sha": "new", "checks_rollup": "none", "merge_state_status": "BLOCKED", "reviews": approved}, PanelTeamAwaitingTeam, false, "none"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			facts := teamPRFacts(t, tc.extra, nil)
+			interp, err := Interpret(facts, wiringClock, wiringConfig())
+			if err != nil {
+				t.Fatalf("Interpret: %v", err)
+			}
+			if interp.Panel != tc.wantPanel {
+				t.Errorf("Panel = %q; want %q", interp.Panel, tc.wantPanel)
+			}
+			if interp.ReadyToPromote != tc.wantPromote {
+				t.Errorf("ReadyToPromote = %v; want %v", interp.ReadyToPromote, tc.wantPromote)
+			}
+			af, err := DerivePRAttentionFacts(mustFactsJSON(t, facts), wiringConfig())
+			if err != nil {
+				t.Fatalf("DerivePRAttentionFacts: %v", err)
+			}
+			if af.CIState != tc.wantCI {
+				t.Errorf("attention CIState = %q; want %q", af.CIState, tc.wantCI)
+			}
+		})
+	}
+}
+
+func mustFactsJSON(t *testing.T, f gather.Facts) string {
+	t.Helper()
+	b, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("marshal facts: %v", err)
+	}
+	return string(b)
 }

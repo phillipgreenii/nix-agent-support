@@ -1,6 +1,10 @@
 package main
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
+)
 
 // deskPRShow is a minimal decode of an entity row's Facts.PRShow raw JSON
 // (gather.Facts, packet 4) — the display fields packet 8's read-side
@@ -20,6 +24,9 @@ type deskPRShow struct {
 	Author    string `json:"author"`
 	Additions int    `json:"additions,omitempty"`
 	Deletions int    `json:"deletions,omitempty"`
+	// ChecksRollup is pr show's folded checks_rollup; it only splits an empty
+	// run rollup into none vs unknown (see deskCIStatus).
+	ChecksRollup string `json:"checks_rollup,omitempty"`
 }
 
 func decodeDeskPRShow(raw json.RawMessage) (deskPRShow, bool) {
@@ -51,18 +58,25 @@ func deskFilesCount(raw json.RawMessage) int {
 	return len(r.Files)
 }
 
-// deskCIStatus computes a coarse CI rollup ("none"|"pending"|"success"|
-// "failure") from an entity row's Facts.CI raw JSON (the `ci list` fan-out
-// payload: {"runs":[...]}) — DISPLAY only (open's CI column, show's
+// deskCIStatus computes a coarse CI rollup ("none"|"unknown"|"pending"|
+// "success"|"failure") from an entity row's Facts.CI raw JSON (the `ci list`
+// fan-out payload: {"runs":[...]}) plus the PR's stored checks_rollup (from
+// Facts.PRShow; "" when unavailable). With no run counted, "unknown" means the
+// checks_rollup says checks exist and "none" means no checks at all
+// (interpret.ChecksExist, operator ruling 2026-10-27, bead pg2-kwxcb) — DISPLAY only (open's CI column, show's
 // rendering), never panel or urgency classification, which stays
 // internal/interpret's sole authority (that package's own computeCIRollup
 // additionally excludes check_interpreters-matched runs; this display-only
 // rollup does not, a deliberate simplification since no acceptance
 // criterion pins the rendered CI string, only which panel a row lands in —
 // interpret's own Panel field, read from the store as-is).
-func deskCIStatus(raw json.RawMessage) string {
+func deskCIStatus(raw json.RawMessage, checksRollup string) string {
+	noRuns := "none"
+	if interpret.ChecksExist(checksRollup) {
+		noRuns = "unknown"
+	}
 	if len(raw) == 0 {
-		return "none"
+		return noRuns
 	}
 	var fo struct {
 		Runs []struct {
@@ -71,7 +85,7 @@ func deskCIStatus(raw json.RawMessage) string {
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal(raw, &fo); err != nil {
-		return "none"
+		return noRuns
 	}
 	var passed, failed, pending int
 	for _, r := range fo.Runs {
@@ -94,6 +108,6 @@ func deskCIStatus(raw json.RawMessage) string {
 	case passed > 0:
 		return "success"
 	default:
-		return "none"
+		return noRuns
 	}
 }

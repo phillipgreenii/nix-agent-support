@@ -25,7 +25,7 @@ func failedRunWithJobs(name, id string, jobs ...map[string]any) map[string]any {
 func rollupOf(t *testing.T, runs []map[string]any, exempt []string) ciRollupResult {
 	t.Helper()
 	raw, _ := json.Marshal(map[string]any{"runs": runs})
-	return computeCIRollup(raw, nil, "new", exempt)
+	return computeCIRollup(raw, nil, "new", exempt, "")
 }
 
 func TestComputeCIRollup_ReviewExempt(t *testing.T) {

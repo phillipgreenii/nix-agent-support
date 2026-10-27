@@ -203,8 +203,11 @@ func computeEnrichment(pr prShow, files []prFile, commits []prCommit) Enrichment
 // convention for other not-yet-consumed keys.
 
 type ciRollupResult struct {
-	// State is the display/rollup state: none | pending | success | failure.
-	// It is NEVER softened by review_exempt_checks or by cancelled runs -- a
+	// State is the display/rollup state: none | unknown | pending | success |
+	// failure. "none" means no checks at all; "unknown" means no run was
+	// counted although the PR's stored checks_rollup says checks exist (pg-desk
+	// is missing data, e.g. checks that are not Actions runs, or runs the
+	// branch-keyed lookup did not return). It is NEVER softened by review_exempt_checks or by cancelled runs -- a
 	// failing exempt job or a cancelled run still reads "failure" here (and in
 	// every display of CI).
 	State string
@@ -234,10 +237,16 @@ type ciRollupResult struct {
 // data never exempts a failure. It is deliberately NOT softened for cancelled
 // runs or for "none": an own draft whose only run was cancelled has never
 // shown green CI, so it must not read as ready to promote, and an own PR with
-// no CI data is not green (operator ruling 2026-10-01).
+// no CI data is not green (operator ruling 2026-10-01). "unknown" (checks exist
+// but none were counted) is the one softening: it reads "pending" -- not green,
+// and not a failure -- exactly like a run still in flight (operator ruling
+// 2026-10-27, option B, bead pg2-kwxcb).
 func (r ciRollupResult) ReviewState() string {
 	if r.reviewState != "" {
 		return r.reviewState
+	}
+	if r.State == "unknown" {
+		return "pending"
 	}
 	return r.State
 }
@@ -246,17 +255,23 @@ func (r ciRollupResult) ReviewState() string {
 // reviewer" decision consults (operator ruling 2026-10-05). It is ReviewState
 // plus two reviewer-only softenings: a cancelled newest run that masks no real
 // job failure does not block (a cancellation says nothing about the code, and
-// the owner has nothing to fix), and "none" -- no countable run -- reads
-// "pending" (it conflates "no CI exists" with "pg-desk saw no data", so it
-// cannot be treated as a failure). Display of CI is unaffected.
+// the owner has nothing to fix), and both "none" (no checks at all) and
+// "unknown" (checks exist but none were counted) read "pending": neither is a
+// failure the owner can fix. Display of CI is unaffected.
 func (r ciRollupResult) ReviewerState() string {
 	if r.reviewerState != "" {
 		return r.reviewerState
 	}
-	if r.State == "none" {
+	if r.State == "none" || r.State == "unknown" {
 		return "pending"
 	}
 	return r.ReviewState()
+}
+
+// ChecksExist reports whether a pr show checks_rollup value (success | failure
+// | pending | none, or empty when the field is absent) says the PR has checks.
+func ChecksExist(checksRollup string) bool {
+	return checksRollup != "" && checksRollup != "none"
 }
 
 // RunsInFlight reports whether at least one counted run is still running.
@@ -269,8 +284,10 @@ func (r ciRollupResult) RunsInFlight() bool {
 // exclusions) is decided by internal/cirun, shared with the `links` verb so a
 // menu's build links and this rollup never disagree. reviewExempt is config
 // review_exempt_checks (exact job names); it never changes State, only the
-// result's ReviewState and ReviewerState.
-func computeCIRollup(raw json.RawMessage, interpreters []config.CheckInterpreterConfig, headSHA string, reviewExempt []string) ciRollupResult {
+// result's ReviewState and ReviewerState. checksRollup is the PR's stored
+// pr show checks_rollup: when no run counts, it splits "none" (no checks at all)
+// from "unknown" (checks exist that pg-desk did not count).
+func computeCIRollup(raw json.RawMessage, interpreters []config.CheckInterpreterConfig, headSHA string, reviewExempt []string, checksRollup string) ciRollupResult {
 	isExempt := cirun.CompileExempt(reviewExempt)
 	var passed, failed, pending, exemptFailed, softFailed int
 	for _, r := range cirun.Evaluate(raw, interpreters, headSHA) {
@@ -311,6 +328,8 @@ func computeCIRollup(raw json.RawMessage, interpreters []config.CheckInterpreter
 		return ciRollupResult{State: "pending", inFlight: true}
 	case passed > 0:
 		return ciRollupResult{State: "success"}
+	case ChecksExist(checksRollup):
+		return ciRollupResult{State: "unknown"}
 	default:
 		return ciRollupResult{State: "none"}
 	}
