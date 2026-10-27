@@ -87,7 +87,7 @@ The invariants of this set are numbered `INV-DECIDER-<n>` across the docs, in RF
 - `INV-DECIDER-7` to `INV-DECIDER-20`, `INV-DECIDER-25`, `INV-DECIDER-27` and `INV-DECIDER-28` are in [`plan-and-apply.md`](plan-and-apply.md).
 - `INV-DECIDER-21` to `INV-DECIDER-24` and `INV-DECIDER-26` are in [`config.md`](config.md).
 - `INV-PRCHANGE-1` to `INV-PRCHANGE-14` are in [`pr-change.md`](pr-change.md).
-- `INV-BACKFILL-1` to `INV-BACKFILL-18` are in [`backfill.md`](backfill.md).
+- `INV-BACKFILL-1` to `INV-BACKFILL-21` are in [`backfill.md`](backfill.md).
 
 ## Scope
 

@@ -234,7 +234,7 @@ its name and the tracker directory are the configuration keys `bd` and `beads_di
 - **INV-BACKFILL-13.** <!-- uuid: 0be88afd-8459-422b-a59c-6b95bfea570c --> The apply summary MUST print each enumerated PR's persisted residual and MUST fail when any is not
   zero or when an enumerated PR has no usable apply-mode record.
 - **INV-BACKFILL-14.** <!-- uuid: 095acc61-4ef3-4a0c-8e6c-a4e5c79f5700 --> The driver MUST NOT keep a clock of its own: it MUST NOT retry inside one run, and its only wait
-  MUST be the pace between two PRs.<<<<<<< ours
+  MUST be the pace between two PRs.
 - **INV-BACKFILL-15.** <!-- uuid: 5c1e8a3d-7b94-4f2a-9d60-e3a17c4b52f8 --> `mark-watched` MUST read every PR that has an open anchor and whose PR is not merged or closed
   with the watch option, MUST then refresh those PRs with the hydrate-only `pg-desk pr refresh`, and
   MUST NOT run the decider, apply anything, write to the tracker or reset a consumer cursor.
@@ -247,17 +247,13 @@ its name and the tracker directory are the configuration keys `bd` and `beads_di
 - **INV-BACKFILL-18.** <!-- uuid: 3f08d6b2-a5e1-4690-8c7d-14b9e2f7a6c0 --> `mark-watched` MUST read the newest GraphQL points left before each call and MUST NOT call below
   the floor, MUST stop at once on an `unauthenticated` read or an unreadable rate signal, and MUST be
   idempotent: running it again marks and refreshes the same PRs and changes nothing else.
-||||||| original
-
-=======
-- **INV-BACKFILL-13.** <!-- uuid: 27149d06-6cd3-413f-a218-a0c5ea00df36 --> `snapshot` MUST record every work item of the tracker in every status, MUST fail closed on an empty
+- **INV-BACKFILL-19.** <!-- uuid: 27149d06-6cd3-413f-a218-a0c5ea00df36 --> `snapshot` MUST record every work item of the tracker in every status, MUST fail closed on an empty
   tracker, and MUST refuse once a flip marker or an apply-mode run record exists unless told it is
   being re-taken after a rollback.
-- **INV-BACKFILL-14.** <!-- uuid: 62071cad-15e6-422a-b7d4-3e2822563c04 --> `rollback` MUST list every write since the flip bound, by timestamp, from the audit comments, MUST
+- **INV-BACKFILL-20.** <!-- uuid: 62071cad-15e6-422a-b7d4-3e2822563c04 --> `rollback` MUST list every write since the flip bound, by timestamp, from the audit comments, MUST
   revert each by its inverse (a create by closing, a close by reopening, a reopen by closing, an
   update by restoring the before-image), MUST NOT undo a status a person changed since, and MUST
   verify the tracker afterwards.
-- **INV-BACKFILL-15.** <!-- uuid: dbd123e1-bf9c-4333-bf83-2772cb20d612 --> `rollback` MUST be a dry run unless told `--apply`, MUST refuse and write nothing when the flip
+- **INV-BACKFILL-21.** <!-- uuid: dbd123e1-bf9c-4333-bf83-2772cb20d612 --> `rollback` MUST be a dry run unless told `--apply`, MUST refuse and write nothing when the flip
   bound is unknown or the snapshot is missing, newer than the bound or inconsistent with the audit
   comments, and a second `rollback --apply` MUST write nothing.
->>>>>>> theirs
