@@ -460,3 +460,117 @@ EOF
 
     rm -rf "$bogus_parent"
 }
+
+# The script's own cleanup of its scratch branch lets git print
+# "Deleted branch tmp-gbm (was ...)" on stdout in every mode; that is not a
+# report about the user's branches, so the "no Deleted wording" checks below
+# ignore it.
+output_without_tmp_cleanup() {
+    echo "$output" | grep -v '^Deleted branch tmp-gbm'
+}
+
+@test "dry-run: a merged branch in a linked worktree is skipped, not reported as deleted (no --delete-merged-worktrees)" {
+    # Same commit as main, so trivially merged into origin/main.
+    git branch merged-wt-branch main
+    wt="$(cd "$GFH_WORK" && pwd -P)/dry-run-skip-worktree"
+    git worktree add "$wt" merged-wt-branch
+
+    run_git_branch_maintenance --dry-run --delete-merged
+    [ "$status" -eq 0 ]
+
+    # The per-branch dry-run line says skip, and the status line is the real
+    # path's has-worktree status.
+    branch_block=$(echo "$output" | grep -A 3 "^Branch: merged-wt-branch$")
+    echo "$branch_block" | grep -q "Would skip (has worktree)"
+    echo "$branch_block" | grep -q "Has worktree, use --delete-merged-worktrees to remove"
+
+    # Neither the branch nor its worktree appears under any deleted or
+    # would-delete summary heading or total.
+    summary=$(echo "$output" | sed -n '/Summary:/,$p')
+    [[ $summary != *"merged-wt-branch"* ]]
+    [[ $summary != *"$wt"* ]]
+    [[ $output != *"Would delete branches"* ]]
+    [[ $output != *"Would delete worktrees"* ]]
+    [[ $output != *"would be deleted"* ]]
+    [[ $(output_without_tmp_cleanup) != *"Deleted"* ]]
+
+    # Nothing was changed.
+    [ -d "$wt" ]
+    git branch | grep -q "merged-wt-branch"
+
+    git worktree remove "$wt" --force 2>/dev/null || true
+}
+
+@test "dry-run: a merged branch in a protected worktree is skipped, not reported as deleted (--delete-merged-worktrees)" {
+    git branch merged-protected-branch main
+    wt="$(cd "$GFH_WORK" && pwd -P)/dry-run-protected-worktree"
+    git worktree add "$wt" merged-protected-branch
+    git config --local --add git-branch-maintenance.protectedWorktree "$wt"
+
+    run_git_branch_maintenance --dry-run --delete-merged --delete-merged-worktrees
+    [ "$status" -eq 0 ]
+
+    branch_block=$(echo "$output" | grep -A 3 "^Branch: merged-protected-branch$")
+    echo "$branch_block" | grep -q "Would skip (has worktree)"
+    echo "$branch_block" | grep -q "Has worktree"
+
+    summary=$(echo "$output" | sed -n '/Summary:/,$p')
+    [[ $summary != *"merged-protected-branch"* ]]
+    [[ $summary != *"$wt"* ]]
+    [[ $output != *"Would delete branches"* ]]
+    [[ $output != *"Would delete worktrees"* ]]
+    [[ $output != *"would be deleted"* ]]
+    [[ $(output_without_tmp_cleanup) != *"Deleted"* ]]
+
+    [ -d "$wt" ]
+    git branch | grep -q "merged-protected-branch"
+
+    git worktree remove "$wt" --force 2>/dev/null || true
+}
+
+@test "dry-run: a merged branch without a worktree is listed under Would delete and counted, with no Deleted wording" {
+    git branch merged-plain-branch main
+
+    run_git_branch_maintenance --dry-run --delete-merged
+    [ "$status" -eq 0 ]
+
+    # Listed under a Would delete heading and counted in a would-delete total.
+    echo "$output" | grep -q "Would delete branches:"
+    echo "$output" | sed -n '/Would delete branches:/,/^$/p' | grep -q "merged-plain-branch"
+    echo "$output" | grep -q "1 branch(es) would be deleted"
+
+    # The per-branch status line reads Would delete, not the raw status token.
+    branch_block=$(echo "$output" | grep -A 3 "^Branch: merged-plain-branch$")
+    echo "$branch_block" | grep -q "Would delete"
+    [[ $branch_block != *"would-deleted"* ]]
+
+    # No line of a dry run reads Deleted, and no worktree total appears
+    # since no worktree is involved.
+    [[ $(output_without_tmp_cleanup) != *"Deleted"* ]]
+    [[ $output != *"worktree(s)"* ]]
+
+    # Nothing was changed.
+    git branch | grep -q "merged-plain-branch"
+}
+
+@test "dry-run: a merged branch deletable with its worktree is listed under Would delete branches and worktrees" {
+    git branch merged-del-wt-branch main
+    wt="$(cd "$GFH_WORK" && pwd -P)/dry-run-delete-worktree"
+    git worktree add "$wt" merged-del-wt-branch
+
+    run_git_branch_maintenance --dry-run --delete-merged --delete-merged-worktrees
+    [ "$status" -eq 0 ]
+
+    echo "$output" | sed -n '/Would delete branches:/,/^$/p' | grep -q "merged-del-wt-branch"
+    echo "$output" | sed -n '/Would delete worktrees:/,/^$/p' | grep -qF "$wt"
+    echo "$output" | grep -q "1 branch(es) would be deleted"
+    echo "$output" | grep -q "1 worktree(s) would be deleted"
+    branch_block=$(echo "$output" | grep -A 3 "^Branch: merged-del-wt-branch$")
+    echo "$branch_block" | grep -q "Would delete (with worktree)"
+    [[ $(output_without_tmp_cleanup) != *"Deleted"* ]]
+
+    [ -d "$wt" ]
+    git branch | grep -q "merged-del-wt-branch"
+
+    git worktree remove "$wt" --force 2>/dev/null || true
+}

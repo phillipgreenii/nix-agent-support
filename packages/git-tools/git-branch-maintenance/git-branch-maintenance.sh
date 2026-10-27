@@ -286,6 +286,12 @@ print_branch_status() {
   deleted-with-worktree)
     echo "  ✅ Deleted (with worktree)"
     ;;
+  would-deleted)
+    echo "  ℹ️  Would delete"
+    ;;
+  would-deleted-with-worktree)
+    echo "  ℹ️  Would delete (with worktree)"
+    ;;
   up-to-date)
     echo "  ✅ Up-to-date"
     ;;
@@ -453,13 +459,15 @@ try_delete_merged() {
     if [[ -n $worktree_path ]]; then
       if [[ $DELETE_MERGED_WORKTREES == "true" ]] && ! is_protected_worktree "$worktree_path"; then
         echo "  [DRY-RUN] Would delete branch and worktree"
+        return 0
       else
         echo "  [DRY-RUN] Would skip (has worktree)"
+        return 4 # has worktree, skip (same code as the real path)
       fi
     else
       echo "  [DRY-RUN] Would delete branch"
+      return 0
     fi
-    return 0
   fi
 
   if [[ -n $worktree_path ]]; then
@@ -516,9 +524,17 @@ show_summary() {
     echo ""
   fi
 
+  # In a dry run nothing is deleted: the same lists hold what WOULD be deleted.
+  local deleted_label="Deleted"
+  local deleted_suffix="deleted"
+  if [[ $DRY_RUN == "true" ]]; then
+    deleted_label="Would delete"
+    deleted_suffix="would be deleted"
+  fi
+
   # Show deleted branches
   if [[ ${#SUMMARY_DELETED_BRANCHES[@]} -gt 0 ]]; then
-    echo "🗑️  Deleted branches:"
+    echo "🗑️  $deleted_label branches:"
     for branch in "${SUMMARY_DELETED_BRANCHES[@]}"; do
       echo "  • $branch"
     done
@@ -527,7 +543,7 @@ show_summary() {
 
   # Show deleted worktrees
   if [[ ${#SUMMARY_DELETED_WORKTREES[@]} -gt 0 ]]; then
-    echo "🗑️  Deleted worktrees:"
+    echo "🗑️  $deleted_label worktrees:"
     for worktree in "${SUMMARY_DELETED_WORKTREES[@]}"; do
       echo "  • $worktree"
     done
@@ -545,10 +561,10 @@ show_summary() {
       echo "  • $merged_count branch(es) became merged"
     fi
     if [[ $deleted_count -gt 0 ]]; then
-      echo "  • $deleted_count branch(es) deleted"
+      echo "  • $deleted_count branch(es) $deleted_suffix"
     fi
     if [[ $worktree_count -gt 0 ]]; then
-      echo "  • $worktree_count worktree(s) deleted"
+      echo "  • $worktree_count worktree(s) $deleted_suffix"
     fi
   else
     echo "ℹ️  No branches became merged or were deleted"
@@ -770,6 +786,10 @@ for branch in "${branches_to_process[@]}"; do
         SUMMARY_DELETED_WORKTREES+=("$worktree_path")
       else
         status="deleted"
+      fi
+      # A dry run deleted nothing: report the would-delete status instead.
+      if [[ $DRY_RUN == "true" ]]; then
+        status="would-$status"
       fi
       ;;
     2) status="protected-from-deletion" ;;
