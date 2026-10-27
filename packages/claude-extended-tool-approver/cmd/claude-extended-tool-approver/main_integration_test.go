@@ -51,6 +51,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot/temproottest"
 )
 
 // cliBinary is the compiled binary under test. It is built LAZILY, by the first
@@ -296,7 +297,7 @@ func TestIntegration_GitResetHardCompound_EmitsEmptyObject(t *testing.T) {
 // chain could in principle re-approve it. See
 // docs/adr/0059-ceta-temp-repo-carve-out.md in phillipgreenii-nix-agent-support.
 func TestIntegration_TempRepoCarveOut_R2Regression(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	cmd := fmt.Sprintf(`GIT_DIR=/etc/pg2-yoqsr-real-integration/.git git -C %s config user.email t@example.com`, tmp)
 	input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
 	result := runHook(t, input)
@@ -321,8 +322,14 @@ func TestIntegration_TempRepoCarveOut_R2Regression(t *testing.T) {
 // scope (R1-R6 name the gitdir/git REFUSALS, never patheval's zone model);
 // tracking it is a separate bead's job. GIT_DIR alone is sufficient to prove
 // the carve-out's positive case end to end.
+//
+// The fixture comes from temproottest.TempDir, not t.TempDir: Go 1.26 honours
+// GOTMPDIR, so a caller that exports it (this machine: /Volumes/gitrepos/build_tmp)
+// lands the fixture outside every built-in temp root and the carve-out correctly
+// refuses it (pg2-xlxvgr). runHook passes os.Environ to the binary, so the
+// declared root reaches the real evaluator.
 func TestIntegration_TempRepoCarveOut_AllTempApproved(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	cmd := fmt.Sprintf(`GIT_DIR=%s/.git git config user.email t@example.com`, tmp)
 	input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
 	result := runHook(t, input)
@@ -338,7 +345,7 @@ func TestIntegration_TempRepoCarveOut_AllTempApproved(t *testing.T) {
 // `.git/hooks/` for the second) — the Verification section requires both
 // "APPROVED", i.e. NOT the `deny` they measured before this bead.
 func TestIntegration_TempRepoCarveOut_BeadReproductionShapes(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := temproottest.TempDir(t)
 	initCmd := fmt.Sprintf(`env GIT_DIR=%s/fake-canonical/.git git -C %s/fixture init`, tmp, tmp)
 	input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, initCmd)
 	if d := getDecision(runHook(t, input)); d == "deny" {
