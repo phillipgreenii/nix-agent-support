@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,79 +14,74 @@ import (
 //
 // ADR 0071 §4 Phase B, B2's Contract requires stubbing a delegate as "a
 // real, separate OS process ... using Go's os/exec + stdlib primitives — no
-// live Claude Code needed". Rather than shipping standalone shell fixtures
-// (that is packet B3's job, against the real built binary), these tests
-// re-exec THIS test binary itself as the delegate subprocess, in the same
-// idiom Go's own os/exec tests use (see os/exec/exec_test.go's
-// TestHelperProcess pattern): TestMain intercepts before any test-flag
-// parsing when GO_WANT_HELPER_PROCESS=1 is set, so the recursive invocation
-// never runs this package's actual Test* functions.
+// live Claude Code needed". Every delegate in this file is therefore still a
+// real child process, started by dispatch.go's own `sh -c <Delegate.Command>`
+// exactly as in production: the stub is a small POSIX shell command line
+// (printf, sed, sleep, a backgrounded grandchild) built by helperCommand
+// below.
+//
+// These stubs used to re-exec THIS test binary as the delegate. Under -race
+// the test binary is race-built, and the race runtime sleeps a flat 1.0 s at
+// every process exit (atexit_sleep_ms), so each delegate call cost about one
+// second (43 children = 41 s of the package's 44 s). sh, printf and sleep are
+// not race-built and exit at once. The race defaults are NOT changed.
+//
+// Why a Runner seam (the pg-decider prchange shape) does not fit here: the
+// behaviour under test is dispatch.go's own process handling (sh -c, the
+// context kill, cmd.WaitDelay against a leaked grandchild), and B2 requires
+// real processes, so a seam that answered in process would bypass the code
+// under test. Output-only stubs (abstain, decide, ...) are shell printf lines
+// instead, so no test depends on a seam fake while the process semantics stay
+// covered by the same real exec path.
 
-func TestMain(m *testing.M) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
-		runHelperProcess()
-		return
-	}
-	os.Exit(m.Run())
-}
-
-// runHelperProcess is the delegate-stub entry point. spec (everything after
-// "--") selects the stub behavior; see the switch below for the vocabulary
-// the tests in this file use.
-func runHelperProcess() {
-	args := os.Args[1:]
-	for len(args) > 0 && args[0] != "--" {
-		args = args[1:]
-	}
-	if len(args) > 0 {
-		args = args[1:]
-	}
-	if len(args) == 0 {
-		os.Exit(1)
-	}
-	spec := args[0]
+// helperCommand builds the Delegate.Command shell string for the stub named by
+// spec ("verb" or "verb:param"); see the switch for the vocabulary the tests
+// in this file use.
+func helperCommand(t *testing.T, spec string) string {
+	t.Helper()
 	verb, param, _ := strings.Cut(spec, ":")
 
 	switch verb {
 	case "abstain":
-		fmt.Print("{}")
+		return printOut("{}")
 	case "decide":
-		fmt.Printf(`{"permissionDecision":%s}`, jsonString(param))
+		return printOut(fmt.Sprintf(`{"permissionDecision":%s}`, jsonString(param)))
 	case "decide-nested":
 		// Emits the real Claude Code hook contract's nested envelope --
 		// what a delegate that is ALSO an independently-registered real
 		// hook (e.g. claude-extended-tool-approver) unconditionally
 		// produces -- rather than this router's own flat convention
 		// (tc-6sfia).
-		fmt.Printf(`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":%s}}`, jsonString(param))
+		return printOut(fmt.Sprintf(`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":%s}}`, jsonString(param)))
 	case "annotate":
-		fmt.Printf(`{"additionalContext":%s}`, jsonString(param))
+		return printOut(fmt.Sprintf(`{"additionalContext":%s}`, jsonString(param)))
 	case "rewrite-input":
-		fmt.Printf(`{"updatedInput":{"marker":%s}}`, jsonString(param))
+		return printOut(fmt.Sprintf(`{"updatedInput":{"marker":%s}}`, jsonString(param)))
 	case "rewrite-output":
-		fmt.Printf(`{"updatedToolOutput":{"marker":%s}}`, jsonString(param))
+		return printOut(fmt.Sprintf(`{"updatedToolOutput":{"marker":%s}}`, jsonString(param)))
 	case "rewrite-decision-input":
-		fmt.Printf(`{"decision":{"updatedInput":{"marker":%s}}}`, jsonString(param))
+		return printOut(fmt.Sprintf(`{"decision":{"updatedInput":{"marker":%s}}}`, jsonString(param)))
 	case "reflect-tool-input":
-		reflectField("tool_input")
+		return reflectField("tool_input")
 	case "reflect-tool-response":
-		reflectField("tool_response")
+		return reflectField("tool_response")
 	case "nonjson":
-		fmt.Print("not json {{{")
+		return printOut("not json {{{")
 	case "wrong-shape":
-		fmt.Print(`{"permissionDecision":123}`)
+		return printOut(`{"permissionDecision":123}`)
 	case "extra-fields":
-		fmt.Print(`{"permissionDecision":"allow","totallyUnknownField":{"x":1}}`)
+		return printOut(`{"permissionDecision":"allow","totallyUnknownField":{"x":1}}`)
 	case "sleep-then-abstain":
+		// "exec sleep" replaces the shell, so the context kill reaches the
+		// sleeping process itself and closes the stdout pipe at once; the
+		// delegate never reaches its "{}" because it is killed first.
 		ms, _ := strconv.Atoi(param)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
-		fmt.Print("{}")
+		return "exec sleep " + sleepSeconds(ms)
 	case "partial-then-hang":
-		// Writes an unterminated JSON fragment, then blocks forever (until
-		// killed) without ever closing stdout on its own — simulates a
-		// delegate killed mid-write.
-		fmt.Print(`{"permission`)
-		select {}
+		// Writes an unterminated JSON fragment, then blocks (until killed)
+		// without ever closing stdout on its own -- simulates a delegate
+		// killed mid-write.
+		return printOut(`{"permission`) + "; exec sleep 30"
 	case "leaky-grandchild":
 		// Spawns a detached grandchild that inherits this process's own
 		// stdout (the router's pipe) and sleeps well past both
@@ -98,17 +90,21 @@ func runHelperProcess() {
 		// cancellation [or a normal quick exit] that leaves a grandchild
 		// process holding the pipe open" (dispatch.go's delegateWaitDelay
 		// doc comment).
-		gc := exec.Command(os.Args[0], "--", "leaky-grandchild-sleep:"+param)
-		gc.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
-		gc.Stdout = os.Stdout
-		_ = gc.Start()
-		os.Exit(0)
-	case "leaky-grandchild-sleep":
 		ms, _ := strconv.Atoi(param)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
-		os.Exit(0)
+		return "sleep " + sleepSeconds(ms) + " &"
 	}
-	os.Exit(0)
+	t.Fatalf("unknown delegate stub spec %q", spec)
+	return ""
+}
+
+// printOut is a shell command that writes s to stdout with no trailing
+// newline.
+func printOut(s string) string {
+	return "printf '%s' " + shQuote(s)
+}
+
+func sleepSeconds(ms int) string {
+	return strconv.FormatFloat(float64(ms)/1000, 'f', 3, 64)
 }
 
 func jsonString(s string) string {
@@ -116,35 +112,15 @@ func jsonString(s string) string {
 	return string(b)
 }
 
-// reflectField reads the incoming hook payload from stdin and echoes the
-// raw JSON of one top-level field back as additionalContext, so a
-// downstream test delegate can prove what it actually received (e.g. a
-// prior delegate's rewrite, not the original payload).
-func reflectField(field string) {
-	var payload map[string]json.RawMessage
-	if err := json.NewDecoder(os.Stdin).Decode(&payload); err != nil {
-		fmt.Print("{}")
-		return
-	}
-	out := map[string]string{}
-	if val, ok := payload[field]; ok {
-		out["additionalContext"] = string(val)
-	}
-	b, _ := json.Marshal(out)
-	os.Stdout.Write(b)
-}
-
-// helperCommand builds a Delegate.Command shell string that re-execs this
-// test binary as a delegate stub running spec, via runHelperProcess above.
-// "exec" replaces the shell outright (no lingering "sh" fork), which keeps
-// the process-tree assumptions in the WaitDelay/leaky-grandchild test exact.
-func helperCommand(t *testing.T, spec string) string {
-	t.Helper()
-	bin, err := filepath.Abs(os.Args[0])
-	if err != nil {
-		t.Fatalf("resolve test binary path: %v", err)
-	}
-	return fmt.Sprintf("GO_WANT_HELPER_PROCESS=1 exec %s -- %s", shQuote(bin), shQuote(spec))
+// reflectField is a shell command that reads the incoming hook payload from
+// stdin and echoes the raw JSON of one top-level field back as
+// additionalContext, so a downstream test delegate can prove what it actually
+// received (e.g. a prior delegate's rewrite, not the original payload). The
+// payload dispatch.go sends is json.Marshal of a map, so it is compact; these
+// tests send a single-field payload, which sed unwraps and JSON-escapes.
+func reflectField(field string) string {
+	return `body=$(cat | sed -e 's/^{"` + field + `":\(.*\)}$/\1/' -e 's/\\/\\\\/g' -e 's/"/\\"/g'); ` +
+		`printf '{"additionalContext":"%s"}' "$body"`
 }
 
 func shQuote(s string) string {
@@ -165,7 +141,7 @@ func helperDelegate(t *testing.T, name, contract string, priority int, spec stri
 
 // generousBudget is far above any plausible loaded-machine delegate latency;
 // merge-outcome tests use it so the production 6s TotalBudget (which each
-// helper-process re-exec can eat a large share of under load) cannot turn a
+// delegate process can eat a large share of under load) cannot turn a
 // later delegate into a Skipped one and flip the merge result (pg2-s2n49).
 const generousBudget = 10 * time.Minute
 
