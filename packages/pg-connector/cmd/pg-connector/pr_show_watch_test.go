@@ -87,7 +87,7 @@ func TestPrShowWatch_HelpListsTheFlagAndNoOtherShowGainedIt(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, "--watch") {
 		t.Fatalf("pr show --help exit %d, does not list --watch:\n%s", code, stdout)
 	}
-	for _, other := range [][]string{{"pr", "files", "--help"}, {"pr", "commits", "--help"}, {"pr", "list", "--help"}} {
+	for _, other := range [][]string{{"pr", "files", "--help"}, {"pr", "commits", "--help"}, {"pr", "list", "--help"}, {"issue", "list", "--help"}, {"issue", "changes", "--help"}} {
 		out, _, _ := executePr(t, other)
 		if strings.Contains(out, "--watch") {
 			t.Errorf("%v lists --watch; the option is on show only:\n%s", other, out)

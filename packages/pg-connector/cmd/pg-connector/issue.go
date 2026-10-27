@@ -79,16 +79,19 @@ func newIssueShowCmd() *cobra.Command {
 	}
 	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
 	freshFlag := cmd.Flags().Bool("fresh", false, "skip the cache read-through and ask the origin (the unavailable stale fallback still applies)")
+	watchFlag := cmd.Flags().Bool("watch", false, "also ask the backend that serves the issue to watch it (forwarded as watch: true; "+
+		"a backend that keeps no store ignores it; the answer is the ordinary show and is never served from the umbrella cache alone)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		reg, err := LoadRegistry()
 		if err != nil {
 			return reportIssueTargetedOutcome(cmd, nil, err, humanizeIssueShow)
 		}
-		// dispatchShow is the read-through entry point: a detail cache entry
-		// within read_ttl answers with no backend call unless --fresh, a live
-		// success keeps the cache current, and the result carries served_from
-		// and age_seconds (INV-CACHE-4, INV-CACHE-5).
-		resp, dispatchErr := dispatchShow(cmd.Context(), reg, "issue", args[0], *backendFlag, *freshFlag)
+		// dispatchShowWatch is the read-through entry point: a detail cache
+		// entry within read_ttl answers with no backend call unless --fresh or
+		// --watch, a live success keeps the cache current, and the result
+		// carries served_from and age_seconds (INV-CACHE-4, INV-CACHE-5). A
+		// show with --watch always reaches the backend (INTF-WIRE-WATCH-1).
+		resp, dispatchErr := dispatchShowWatch(cmd.Context(), reg, "issue", args[0], *backendFlag, *freshFlag, *watchFlag)
 		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueShow)
 	}
 	return cmd

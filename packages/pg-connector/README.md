@@ -154,7 +154,7 @@ per-backend deadline override).
 | Command                                                           | Description                                                                                                                    |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `pr show <id>`                                                    | show a PR's current full state, including comments/review-thread entries (targeted)                                            |
-| `issue show <id>`                                                 | show an issue's current state (targeted)                                                                                       |
+| `issue show <id> [--fresh] [--watch]`                             | show an issue's current state (targeted); `--watch` also asks the serving backend to watch it and always reaches the backend   |
 | `issue create --title <t> [--priority] [--labels] [--issue-type]` | create a new issue (targeted)                                                                                                  |
 | `issue comment <id> --body <b>`                                   | add a comment to an issue (targeted)                                                                                           |
 | `issue transition <id> --state <s>`                               | transition an issue to a backend-declared target state (targeted)                                                              |
