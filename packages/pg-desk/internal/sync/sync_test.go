@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // sync_test.go is this packet's wire-double test harness: an in-process
@@ -21,7 +21,7 @@ import (
 // without starting a process (a race-built re-executed test binary sleeps 1 s
 // at each exit). The helper vocabulary (GO_HELPER_* variables set with
 // t.Setenv, the callRecord log) is kept from the earlier re-executed-binary
-// double; the real exec path is covered by internal/cmdrun.
+// double; the real exec path is covered by x/cmdrun (its own contract tests).
 
 // --- in-process pg-connector double ------------------------------------------
 
@@ -101,7 +101,7 @@ func helperRun(log *callLog, c cmdrun.Call) cmdrun.Result {
 	env := func(name string) string { v, _ := getenv(name); return v }
 
 	if len(args) < 2 || args[0] != "issue" {
-		return cmdrun.Result{Stderr: "unexpected pg-connector invocation: " + strings.Join(args, " "), Code: 99}
+		return cmdrun.Result{Stderr: []byte("unexpected pg-connector invocation: " + strings.Join(args, " ")), Code: 99}
 	}
 
 	switch args[1] {
@@ -127,7 +127,7 @@ func helperRun(log *callLog, c cmdrun.Call) cmdrun.Result {
 		if md == "" {
 			md = "{}"
 		}
-		return cmdrun.Result{Stdout: fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":6,"result":{"id":%q,"state":"closed","metadata":%s}}`, args[2], md)}
+		return cmdrun.Result{Stdout: []byte(fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":6,"result":{"id":%q,"state":"closed","metadata":%s}}`, args[2], md))}
 	case "children":
 		// `issue children <id>`: the live read of id's non-closed direct
 		// children (bead pg2-ubvmh). GO_HELPER_CHILDREN_FAIL_CODE fails it
@@ -150,7 +150,7 @@ func helperRun(log *callLog, c cmdrun.Call) cmdrun.Result {
 			}
 			result = `{"children":[` + strings.Join(kids, ",") + `]}`
 		}
-		return cmdrun.Result{Stdout: `{"protocolVersion":1,"schemaVersion":9,"result":` + result + `}`}
+		return cmdrun.Result{Stdout: []byte(`{"protocolVersion":1,"schemaVersion":9,"result":` + result + `}`)}
 	case "update", "transition":
 		id := ""
 		if len(args) > 2 {
@@ -159,7 +159,7 @@ func helperRun(log *callLog, c cmdrun.Call) cmdrun.Result {
 		// GO_HELPER_FAIL_ID makes any call naming that bead id fail (exit 1,
 		// stderr) - the closure-failure injection point (pg2-kftf9.1).
 		if failID := env("GO_HELPER_FAIL_ID"); failID != "" && failID == id {
-			return cmdrun.Result{Stderr: "boom: injected failure for " + id, Code: 1}
+			return cmdrun.Result{Stderr: []byte("boom: injected failure for " + id), Code: 1}
 		}
 		// GO_HELPER_PARENT_OF impersonates bd >= 1.3.1, which refuses to
 		// close a parent while any child is still open ("cannot close X: N
@@ -174,7 +174,7 @@ func helperRun(log *callLog, c cmdrun.Call) cmdrun.Result {
 		}
 		return fakeIssueResult(id)
 	default:
-		return cmdrun.Result{Stderr: "unexpected issue verb: " + args[1], Code: 99}
+		return cmdrun.Result{Stderr: []byte("unexpected issue verb: " + args[1]), Code: 99}
 	}
 }
 
@@ -228,11 +228,11 @@ func openDescendantsAtThisCall(id string, edges []string, recs []callRecord) int
 // fakeWireError answers with pg-connector's targeted-op failure shape: an error
 // envelope on stdout and exit 1.
 func fakeWireError(code, message string) cmdrun.Result {
-	return cmdrun.Result{Stdout: fmt.Sprintf(`{"protocolVersion":1,"error":{"code":%q,"message":%q}}`, code, message), Code: 1}
+	return cmdrun.Result{Stdout: []byte(fmt.Sprintf(`{"protocolVersion":1,"error":{"code":%q,"message":%q}}`, code, message)), Code: 1}
 }
 
 func fakeIssueResult(id string) cmdrun.Result {
-	return cmdrun.Result{Stdout: fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":5,"result":{"id":%q,"state":"open"}}`, id)}
+	return cmdrun.Result{Stdout: []byte(fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":5,"result":{"id":%q,"state":"open"}}`, id))}
 }
 
 // --- fixtures ----------------------------------------------------------------

@@ -10,15 +10,15 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // gather_test.go is this packet's wire-double test harness: an in-process
 // cmdrun.Runner impersonates pg-connector (a race-built re-executed test
 // binary sleeps 1 s at each exit, so no double starts a process; the real
-// exec path is covered by internal/cmdrun), and every fixture the double
+// exec path is covered by x/cmdrun (its own contract tests)), and every fixture the double
 // answers a TARGETED op with (pr show/files/commits, issue deps) is
 // checked against pkg/scriptout/conformance's real wire-envelope schema
 // (TestFixturesConformToWireSchema below) — reusing that package rather
@@ -65,12 +65,12 @@ func withFactory(t *testing.T, behavior string) *callLog {
 	return log
 }
 
-// useRealRunner puts the production runner (nil, meaning ExecRunner) back
+// useRealRunner puts the production runner (cmdrun.Exec) back
 // for the rest of one test, so a test can exercise a real missing binary.
 func useRealRunner(t *testing.T) {
 	t.Helper()
 	orig := runner
-	runner = nil
+	runner = cmdrun.Exec
 	t.Cleanup(func() { runner = orig })
 }
 
@@ -249,10 +249,10 @@ func helperRun(behavior string, log *callLog, c cmdrun.Call) cmdrun.Result {
 	}
 
 	writeAndExit := func(body string, exitCode int) cmdrun.Result {
-		return cmdrun.Result{Stdout: body, Code: exitCode}
+		return cmdrun.Result{Stdout: []byte(body), Code: exitCode}
 	}
 	fail := func(stderr string, exitCode int) cmdrun.Result {
-		return cmdrun.Result{Stderr: stderr, Code: exitCode}
+		return cmdrun.Result{Stderr: []byte(stderr), Code: exitCode}
 	}
 
 	switch behavior {

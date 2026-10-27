@@ -102,10 +102,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // ChangeKind is the pr-pool event's own change kind, reproduced verbatim
@@ -233,12 +233,12 @@ type Facts struct {
 // compile-time import of packages/pg-connector (D10).
 const pgConnectorBinary = "pg-connector"
 
-// runner is the exec seam (cmdrun.Runner; nil means cmdrun.ExecRunner).
+// runner is the exec seam (a cmdrun.Runner; production is cmdrun.Exec).
 // Production code runs pg-connector through it; gather_test.go swaps it for
 // an in-process pg-connector wire double (this packet's own "fake
 // pg-connector binary or a stubbed exec" wire-double requirement) — the
 // shape mirrors packages/pg-decider/internal/prchange/exec.go's Runner.
-var runner cmdrun.Runner
+var runner cmdrun.Runner = cmdrun.Exec
 
 // ThreadRef is one thread already cross-referenced to the triggering PR in
 // the store — Facts.LinkedThreads' own element type (Phase 13's eighth
@@ -844,11 +844,11 @@ type runResult struct {
 // permission denied, context already canceled, ...) — there is then no
 // exit code to classify.
 func (g *Gatherer) run(ctx context.Context, args []string, extraEnv []string) (runResult, error) {
-	res := cmdrun.Or(runner)(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: extraEnv})
+	res := runner(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: extraEnv})
 	if res.StartErr != nil {
 		return runResult{}, fmt.Errorf("exec pg-connector %v: %w", args, res.StartErr)
 	}
-	return runResult{stdout: []byte(res.Stdout), exitCode: res.Code}, nil
+	return runResult{stdout: res.Stdout, exitCode: res.Code}, nil
 }
 
 // wireEnvelope is the subset of pkg/scriptout's Response envelope this

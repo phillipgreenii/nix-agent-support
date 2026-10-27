@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // fakeShower is this suite's wire double for issueShower, so
@@ -134,24 +134,24 @@ func TestResolvePR_ShowFailurePropagates(t *testing.T) {
 // --- connectorIssueShower: an in-process wire double (a cmdrun.Runner) for
 // the `pg-connector issue show` exec/decode path. It answers `issue show
 // <id>` per behavior ("ok", "not-found", "error"), records every Call, and
-// starts no process; the real exec path is covered by internal/cmdrun.
+// starts no process; the real exec path is covered by x/cmdrun (its own contract tests).
 
 func helperRunner(behavior string, calls *[]cmdrun.Call) cmdrun.Runner {
 	return func(_ context.Context, c cmdrun.Call) cmdrun.Result {
 		*calls = append(*calls, c)
 		args := c.Args
 		if len(args) < 2 || args[0] != "issue" || args[1] != "show" {
-			return cmdrun.Result{Stderr: "unexpected pg-connector invocation: " + strings.Join(args, " "), Code: 99}
+			return cmdrun.Result{Stderr: []byte("unexpected pg-connector invocation: " + strings.Join(args, " ")), Code: 99}
 		}
 		switch behavior {
 		case "ok":
-			return cmdrun.Result{Stdout: `{"protocolVersion":1,"schemaVersion":5,"result":{"id":"bead-1","title":"myorg/repo#42: fix the bug","metadata":{"repo":"myorg/repo","pr_number":"42"}}}`}
+			return cmdrun.Result{Stdout: []byte(`{"protocolVersion":1,"schemaVersion":5,"result":{"id":"bead-1","title":"myorg/repo#42: fix the bug","metadata":{"repo":"myorg/repo","pr_number":"42"}}}`)}
 		case "not-found":
 			return cmdrun.Result{Code: 4}
 		case "error":
-			return cmdrun.Result{Stdout: `{"protocolVersion":1,"error":{"code":"internal","message":"boom"}}`, Code: 1}
+			return cmdrun.Result{Stdout: []byte(`{"protocolVersion":1,"error":{"code":"internal","message":"boom"}}`), Code: 1}
 		default:
-			return cmdrun.Result{Stderr: "unknown GO_HELPER_BEHAVIOR", Code: 99}
+			return cmdrun.Result{Stderr: []byte("unknown GO_HELPER_BEHAVIOR"), Code: 99}
 		}
 	}
 }

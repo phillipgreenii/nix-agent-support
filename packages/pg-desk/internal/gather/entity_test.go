@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // entityLog is every argv (joined with spaces) the entity double saw, in order.
@@ -39,9 +39,9 @@ func entityFactory(t *testing.T, behavior string) *entityLog {
 			for _, c := range code {
 				n = n*10 + int(c-'0')
 			}
-			return cmdrun.Result{Stdout: out, Code: n}
+			return cmdrun.Result{Stdout: []byte(out), Code: n}
 		}
-		return cmdrun.Result{Stderr: "unexpected verb: " + verb, Code: 99}
+		return cmdrun.Result{Stderr: []byte("unexpected verb: " + verb), Code: 99}
 	}
 	t.Cleanup(func() { runner = orig })
 	return log

@@ -19,6 +19,7 @@ cachePackages = [
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/schemas',
+  'github.com/phillipgreenii/x/cmdrun',
   'github.com/phillipgreenii/x/pprofserver',
   'github.com/prometheus/client_golang/prometheus',
   'github.com/prometheus/client_golang/prometheus/promhttp',
@@ -209,8 +210,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261025041111-c7b4ad60c6c2'
-    hash = 'sha256-PoBBCsyw8XnZATqlFIh/M9Mw+2Vqh4Tf+pFk4JIG5vo='
+    version = 'v0.0.0-20261027205228-76ab0ad829aa'
+    hash = 'sha256-qzb1/GN2YpSGIo1JNrSZa3VY+Zv9ASJ7QAox4cgS2bM='
 
   [mod.'github.com/prometheus/client_golang']
     version = 'v1.24.1'

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/x/cmdrun"
 	"github.com/phillipgreenii/x/gitfixture"
 	"github.com/phillipgreenii/x/gittest"
 )
@@ -216,7 +216,7 @@ func (f *closureRealBD) syncer() *Syncer {
 		}
 		// The real binary under the fixture's own hermetic environment, plus the
 		// call's own entries (f.env REPLACES the process environment, so this
-		// does not go through cmdrun.ExecRunner, whose Env appends to it).
+		// does not go through cmdrun.Exec, whose Env appends to it).
 		cmd := exec.CommandContext(ctx, filepath.Join(f.bin, pgConnectorBinary), c.Args...)
 		cmd.Env = append(append([]string{}, f.env...), c.Env...)
 		var out, errb bytes.Buffer
@@ -230,7 +230,7 @@ func (f *closureRealBD) syncer() *Syncer {
 				res.Code = ee.ExitCode()
 			}
 		}
-		res.Stdout, res.Stderr = out.String(), errb.String()
+		res.Stdout, res.Stderr = out.Bytes(), errb.Bytes()
 		return res
 	}
 	cfg := testConfig(ModeApply)

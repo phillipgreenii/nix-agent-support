@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cmdrun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // pgConnectorBinary is the ambient $PATH name this package execs — never a
@@ -18,12 +18,12 @@ import (
 // the same rule gather already follows (design sections 7.3, 7.5).
 const pgConnectorBinary = "pg-connector"
 
-// runner is the exec seam (cmdrun.Runner; nil means cmdrun.ExecRunner).
+// runner is the exec seam (a cmdrun.Runner; production is cmdrun.Exec).
 // Production code runs pg-connector through it; sync_test.go swaps it for an
 // in-process pg-connector wire double, mirroring gather_test.go's own
 // harness (this packet's own Files instruction: "Tests against an in-process
 // pg-connector wire double reusing pkg/scriptout/conformance").
-var runner cmdrun.Runner
+var runner cmdrun.Runner = cmdrun.Exec
 
 // issueClient wraps the subset of `pg-connector issue` this package needs:
 // create/update/transition (plus the live `issue children` read, which
@@ -294,12 +294,12 @@ func (c *issueClient) targetedCall(ctx context.Context, args []string) (issueRes
 // targetedRaw is targetedCall's transport: it runs the verb, classifies the
 // exit code, and returns the envelope's undecoded result payload.
 func (c *issueClient) targetedRaw(ctx context.Context, args []string) (json.RawMessage, error) {
-	res := cmdrun.Or(runner)(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: c.issueBeadsDirEnv()})
+	res := runner(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: c.issueBeadsDirEnv()})
 	if res.StartErr != nil {
 		return nil, fmt.Errorf("sync: exec pg-connector %v: %w", args, res.StartErr)
 	}
 	exitCode := res.Code
-	stdout := []byte(res.Stdout)
+	stdout := res.Stdout
 
 	switch exitCode {
 	case 0:

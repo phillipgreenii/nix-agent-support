@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector v0.0.0
-	github.com/phillipgreenii/x v0.0.0-20261025041111-c7b4ad60c6c2
+	github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
