@@ -513,8 +513,13 @@ func TestMembershipCompleteListingRewritesThePersistedSet(t *testing.T) {
 	if got := persisted(t, st, "open"); !reflect.DeepEqual(got, []string{"bd-2", "bd-3"}) {
 		t.Errorf("persisted = %v, want exactly the listed ids", got)
 	}
-	if !isInactive(t, st, "bd-1") || isInactive(t, st, "bd-2") {
-		t.Error("bd-1 left the listing and must be removed; bd-2 stays")
+	// bd-1 was watched when it left every query: it is an orphan, neither
+	// removed nor deactivated (it is read by id instead).
+	if isInactive(t, st, "bd-1") || isInactive(t, st, "bd-2") {
+		t.Error("bd-1 left the listing but is a watched orphan and must stay active; bd-2 stays")
+	}
+	if n := removedRows(t, st, "bd-1"); n != 0 {
+		t.Errorf("bd-1 has %d removed rows, want none", n)
 	}
 }
 
@@ -538,8 +543,11 @@ func TestMembershipIdStillListedByAnotherQueryIsNotACandidate(t *testing.T) {
 	if _, _, err := runTick(t, e); err != nil {
 		t.Fatal(err)
 	}
-	if !isInactive(t, st, "bd-1") {
-		t.Error("bd-1 is absent from every complete listing and must be removed")
+	if isInactive(t, st, "bd-1") || removedRows(t, st, "bd-1") != 0 {
+		t.Error("bd-1 is watched: absent from every complete listing it becomes an orphan, not a removal")
+	}
+	if got, err := OrphanEntities(st, e.Cfg); err != nil || len(got) != 1 || got[0].EntityID != "bd-1" {
+		t.Errorf("orphans = %+v, %v, want [bd-1]", got, err)
 	}
 }
 
@@ -565,8 +573,9 @@ func TestMembershipDegradedListingNeverRemovesAndOnlyAdds(t *testing.T) {
 
 func TestMembershipFailedDeactivationKeepsTheIdPersistedAndRetries(t *testing.T) {
 	e, st, _ := newListEngine(t, "open")
-	e.Lister = fakeLister{res: listing("bd-1=F1")}
-	if _, _, err := runTick(t, e); err != nil {
+	// An UNWATCHED issue (watched NULL) keeps the removal confirmation.
+	seedRow(t, st, "bd-1", "F1", "2026-10-01T11:00:00Z", true)
+	if err := saveWatchSet(st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = fakeLister{res: listing()}

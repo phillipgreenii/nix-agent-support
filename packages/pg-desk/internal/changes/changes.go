@@ -195,6 +195,11 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 		// served first [design 8.4, 8.5]. Nothing is queued: what the cap or a
 		// failure leaves is found again by the next tick's diff.
 		bud := &budget{left: e.Cfg.HydrationMaxPerPoll()}
+		// The orphan reads come FIRST, out of the same budget and capped by
+		// hydration.orphan_max_per_poll, so changed members cannot starve them.
+		if err := e.readOrphans(ctx, opts, st, bud); err != nil {
+			return Outcome{}, err
+		}
 		// The baseline step comes first: a watched query with no marker is in a
 		// silent baseline run, and only the other queries reach hydrateListed.
 		listedRuns, err := e.baselineStep(ctx, opts, runs, st, bud)

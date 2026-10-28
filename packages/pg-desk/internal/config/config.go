@@ -236,6 +236,10 @@ const (
 	DefaultReconcileAge        = 30 * time.Minute
 	DefaultSweepMaxPerPoll     = 20
 	DefaultHydrationMaxPerPoll = 50
+	// DefaultOrphanMaxPerPoll is hydration.orphan_max_per_poll's default: at
+	// most this many orphans (watched, open issues that no watched query lists
+	// any longer) are read by id per poll, out of hydration.max_per_poll.
+	DefaultOrphanMaxPerPoll = 10
 	// DefaultIngestFailedMaxAge is hydration.ingest_failed_max_age's default:
 	// how old the oldest failed-ingest entry may be before doctor gates.
 	DefaultIngestFailedMaxAge = 30 * time.Minute
@@ -297,6 +301,11 @@ type HydrationConfig struct {
 	// MaxPerPoll caps hydrations per poll; nil means
 	// DefaultHydrationMaxPerPoll.
 	MaxPerPoll *int `yaml:"max_per_poll,omitempty" json:"max_per_poll,omitempty"`
+	// OrphanMaxPerPoll is orphan_max_per_poll: how many orphans one poll reads
+	// by id, FIRST and out of MaxPerPoll's budget; nil means
+	// DefaultOrphanMaxPerPoll. A pointer so an explicit 0 is rejected rather
+	// than read as unset.
+	OrphanMaxPerPoll *int `yaml:"orphan_max_per_poll,omitempty" json:"orphan_max_per_poll,omitempty"`
 	// ReadIssueDeps is read_issue_deps: when true, every hydrated issue's
 	// stored facts also carry `issue deps <id> --full` (issue_deps). False
 	// (the default, and what an unset key means) hydrates issue_show only.
@@ -434,6 +443,15 @@ func (c *Config) HydrationMaxPerPoll() int {
 		return DefaultHydrationMaxPerPoll
 	}
 	return *c.Hydration.MaxPerPoll
+}
+
+// OrphanMaxPerPoll returns hydration.orphan_max_per_poll (default 10): the most
+// orphans one poll reads by id, taken from hydration.max_per_poll's budget.
+func (c *Config) OrphanMaxPerPoll() int {
+	if c.Hydration.OrphanMaxPerPoll == nil {
+		return DefaultOrphanMaxPerPoll
+	}
+	return *c.Hydration.OrphanMaxPerPoll
 }
 
 // HydrationReadIssueDeps returns hydration.read_issue_deps (default false):
@@ -639,6 +657,7 @@ func validateChangeFlow(cfg *Config) error {
 	}{
 		{"sweep.max_per_poll", cfg.Sweep.MaxPerPoll},
 		{"hydration.max_per_poll", cfg.Hydration.MaxPerPoll},
+		{"hydration.orphan_max_per_poll", cfg.Hydration.OrphanMaxPerPoll},
 	} {
 		if n.val != nil && *n.val <= 0 {
 			return fmt.Errorf("%s %d must be positive", n.key, *n.val)

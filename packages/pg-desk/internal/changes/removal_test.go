@@ -411,3 +411,40 @@ func TestRemovalConfirmationFailureIsSurfacedByName(t *testing.T) {
 		t.Errorf("failures = %q", got)
 	}
 }
+
+// A WATCHED issue that left every query is an orphan: the membership step
+// makes no confirmation read, appends no removed row and deactivates nothing,
+// while its id still leaves the persisted set. An unwatched issue (the
+// TestRemovalConfirmationClassifiesAClosedBead case) and every other entity
+// type keep the confirmation read.
+func TestRemovalConfirmationSkipsAWatchedIssueThatLeftEveryQuery(t *testing.T) {
+	e, st, _ := newListEngine(t, "open")
+	ch := newConfirmHydrator(st)
+	e.Hydrator = ch
+	seedRow(t, st, "bd-1", "F1", "2026-10-01T11:00:00Z", true)
+	yes := true
+	if err := st.SetEntityColumns("o/r", "issue", "bd-1", nil, &yes); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveWatchSet(st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.applyMembership("issue", []queryRun{{query: "open", res: listing()}}); len(got) != 0 {
+		t.Fatalf("failures = %v", got)
+	}
+	if len(ch.calls) != 0 {
+		t.Errorf("reads = %v, want no confirmation read", ch.calls)
+	}
+	if isInactive(t, st, "bd-1") {
+		t.Error("a watched issue must not be deactivated by leaving its queries")
+	}
+	if got := kindsLogged(t, st, "issue", "bd-1"); len(got) != 0 {
+		t.Errorf("logged %v, want no removed row", got)
+	}
+	if w, _ := watchedOf(t, st, "bd-1"); !w {
+		t.Error("the watched mark must stay")
+	}
+	if got := loadWatchSet(st, "issue", "open"); len(got) != 0 {
+		t.Errorf("persisted = %v, want the id dropped (that is how it becomes an orphan)", got)
+	}
+}

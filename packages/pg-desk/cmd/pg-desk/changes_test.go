@@ -822,7 +822,10 @@ func recordsOf(env changes.Envelope, id string) []changes.Record {
 	return out
 }
 
-func TestChangesDroppedEntityBecomesInactive(t *testing.T) {
+// A watched issue that drops out of every query is an orphan: it stays active
+// and watched, appends no removed record, and is read by id (an unchanged read
+// writes nothing).
+func TestChangesDroppedWatchedEntityBecomesAnOrphanNotRemoved(t *testing.T) {
 	f := newChangesFixture(t, "issue", "a", "b")
 	f.listing("a", 0, okSource, [2]string{"added", "bd-1"}, [2]string{"added", "bd-2"})
 	f.listing("b", 0, okSource, [2]string{"added", "bd-2"})
@@ -833,28 +836,31 @@ func TestChangesDroppedEntityBecomesInactive(t *testing.T) {
 	}
 
 	// bd-1 drops out of its only query; bd-2 drops out of "a" but "b" still
-	// lists it, so only bd-1 leaves the watched set.
+	// lists it.
 	f.listing("a", 0, okSource)
 	f.listing("b", 0, okSource, [2]string{"added", "bd-2"})
 	env, err := f.envOf("--consumer", "router")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := recordsOf(env, "bd-1"); len(got) != 1 || len(got[0].Kinds) != 1 || got[0].Kinds[0] != "removed" {
-		t.Errorf("bd-1 records = %+v, want exactly one removed", got)
+	if got := recordsOf(env, "bd-1"); len(got) != 0 {
+		t.Errorf("bd-1 records = %+v, want none (an orphan is read, not removed)", got)
 	}
 	if got := recordsOf(env, "bd-2"); len(got) != 0 {
 		t.Errorf("bd-2 is still listed by query b, got %+v", got)
 	}
-	if !f.entity("bd-1").Inactive || f.entity("bd-2").Inactive {
-		t.Errorf("bd-1 inactive=%v bd-2 inactive=%v, want true/false", f.entity("bd-1").Inactive, f.entity("bd-2").Inactive)
+	if f.entity("bd-1").Inactive || f.entity("bd-2").Inactive {
+		t.Errorf("bd-1 inactive=%v bd-2 inactive=%v, want both active", f.entity("bd-1").Inactive, f.entity("bd-2").Inactive)
+	}
+	if f.entity("bd-1").ReadAttemptAt == "" || f.entity("bd-2").ReadAttemptAt != "" {
+		t.Errorf("read_attempt_at bd-1=%q bd-2=%q, want only the orphan bd-1 read", f.entity("bd-1").ReadAttemptAt, f.entity("bd-2").ReadAttemptAt)
 	}
 
-	// Once the last query drops bd-2 it is removed too; a repeat is a no-op.
+	// Once the last query drops bd-2 it is an orphan too; nothing is removed.
 	f.listing("b", 0, okSource)
 	env, err = f.envOf("--consumer", "router")
-	if err != nil || len(recordsOf(env, "bd-2")) != 1 || !f.entity("bd-2").Inactive {
-		t.Fatalf("bd-2: env=%+v err=%v", env, err)
+	if err != nil || len(env.Records) != 0 || f.entity("bd-2").Inactive || f.entity("bd-2").ReadAttemptAt == "" {
+		t.Fatalf("bd-2: env=%+v err=%v inactive=%v attempt=%q", env, err, f.entity("bd-2").Inactive, f.entity("bd-2").ReadAttemptAt)
 	}
 	again, err := f.envOf("--consumer", "router")
 	if err != nil || len(again.Records) != 0 {
@@ -862,7 +868,9 @@ func TestChangesDroppedEntityBecomesInactive(t *testing.T) {
 	}
 }
 
-func TestChangesReturningEntityGetsAdded(t *testing.T) {
+// An entity that left every query and comes back was never removed, so it is
+// not added a second time.
+func TestChangesReturningOrphanIsNotAddedAgain(t *testing.T) {
 	f := newChangesFixture(t, "issue", "a")
 	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
@@ -873,8 +881,8 @@ func TestChangesReturningEntityGetsAdded(t *testing.T) {
 	if _, err := f.envOf("--consumer", "router"); err != nil {
 		t.Fatal(err)
 	}
-	if !f.entity("bd-1").Inactive {
-		t.Fatal("bd-1 should be inactive")
+	if f.entity("bd-1").Inactive {
+		t.Fatal("bd-1 is a watched orphan and must stay active")
 	}
 
 	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
@@ -882,11 +890,11 @@ func TestChangesReturningEntityGetsAdded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := envKindsByID(env); len(got["bd-1"]) != 1 || got["bd-1"][0] != "added" || len(env.Records) != 1 {
-		t.Errorf("a returning entity must get exactly one added, got %v", got)
+	if got := envKindsByID(env); len(got["bd-1"]) != 0 || len(env.Records) != 0 {
+		t.Errorf("a returning orphan must append nothing, got %v", got)
 	}
 	if f.entity("bd-1").Inactive {
-		t.Error("a returning entity must be active again")
+		t.Error("a returning orphan must stay active")
 	}
 }
 

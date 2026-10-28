@@ -98,7 +98,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"WatchBackend", reflect.TypeOf(WatchBackend{}), []string{"instance", "owns_changes"}},
 		{"WatchThreadConfig", reflect.TypeOf(WatchThreadConfig{}), []string{"queries", "active_window"}},
 		{"SweepConfig", reflect.TypeOf(SweepConfig{}), []string{"max_age", "max_per_poll", "reconcile_age"}},
-		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll", "read_issue_deps", "ingest_failed_max_age"}},
+		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll", "orphan_max_per_poll", "read_issue_deps", "ingest_failed_max_age"}},
 		{"FocusConfig", reflect.TypeOf(FocusConfig{}), []string{"time_zone", "coverage_backlog_max", "pending_gate_age", "operator_identities", "priority_map", "suppressed_kind"}},
 	}
 	for _, c := range cases {
@@ -631,6 +631,9 @@ func TestChangeFlowKeys_Defaults(t *testing.T) {
 	if got := cfg.HydrationMaxPerPoll(); got != 50 {
 		t.Errorf("HydrationMaxPerPoll = %d, want 50", got)
 	}
+	if got := cfg.OrphanMaxPerPoll(); got != 10 {
+		t.Errorf("OrphanMaxPerPoll = %d, want the default 10", got)
+	}
 	if got := cfg.IngestFailedMaxAge(); got != 30*time.Minute {
 		t.Errorf("IngestFailedMaxAge = %v, want 30m", got)
 	}
@@ -661,6 +664,7 @@ sweep:
   max_per_poll: 5
 hydration:
   max_per_poll: 9
+  orphan_max_per_poll: 4
   read_issue_deps: true
   ingest_failed_max_age: 45m
 change_log_retention: 14d
@@ -692,6 +696,9 @@ consumer_stale_after: 36h
 	}
 	if got := cfg.HydrationMaxPerPoll(); got != 9 {
 		t.Errorf("HydrationMaxPerPoll = %d", got)
+	}
+	if got := cfg.OrphanMaxPerPoll(); got != 4 {
+		t.Errorf("OrphanMaxPerPoll = %d, want the configured 4", got)
 	}
 	if !cfg.HydrationReadIssueDeps() {
 		t.Errorf("HydrationReadIssueDeps = false, want true")
@@ -755,6 +762,8 @@ func TestLoadFile_ChangeFlowInvalidValuesFail(t *testing.T) {
 		"negative sweep cap":      {"sweep:\n  max_per_poll: -3", "sweep.max_per_poll"},
 		"zero hydration cap":      {"hydration:\n  max_per_poll: 0", "hydration.max_per_poll"},
 		"negative hydration cap":  {"hydration:\n  max_per_poll: -1", "hydration.max_per_poll"},
+		"zero orphan cap":         {"hydration:\n  orphan_max_per_poll: 0", "hydration.orphan_max_per_poll"},
+		"negative orphan cap":     {"hydration:\n  orphan_max_per_poll: -2", "hydration.orphan_max_per_poll"},
 		"empty pr query":          {"watch:\n  pr:\n    queries: [mine, \"\"]", "watch.pr.queries"},
 		"empty issue query":       {"watch:\n  issue:\n    queries: [\" \"]", "watch.issue.queries"},
 		"duplicate thread query":  {"watch:\n  thread:\n    queries: [mentions, mentions]", "watch.thread.queries"},

@@ -146,7 +146,8 @@ func listComplete(res gather.ListFingerprintsResult) bool {
 // is absent from that query's complete listing and is held by NO other
 // configured query: the other-query test reads the persisted set of EVERY
 // configured query, not only the queries run this call (--query Q runs one).
-// Each candidate is first CONFIRMED by exactly one `show` read through the
+// A watched, active issue is never a candidate (see OrphanEntities): it is
+// read by id instead. Each other candidate is first CONFIRMED by exactly one `show` read through the
 // hydrate path (see confirmRemoval) and then deactivated: logged closed or
 // merged when the read shows it terminal, removed when it is still open or
 // not found. A candidate is dropped from the persisted sets only AFTER its
@@ -209,6 +210,19 @@ func (e *Engine) applyMembershipCtx(ctx context.Context, entityType string, runs
 			}
 			if !held {
 				candidates[id] = true
+			}
+		}
+	}
+	// A WATCHED, active issue that left every query is an orphan, not a removal
+	// candidate: it appends no removed row, is not deactivated and keeps its
+	// watched mark, and readOrphans reads it by id until it closes. Its id is
+	// dropped from the persisted sets (that is how it becomes an orphan). An
+	// unwatched issue keeps the removal confirmation below.
+	if entityType == issueEntityType {
+		for id := range candidates {
+			row, found, err := e.Store.GetEntity(e.repo(), entityType, id)
+			if err == nil && found && !row.Inactive && row.Watched != nil && *row.Watched {
+				delete(candidates, id)
 			}
 		}
 	}
