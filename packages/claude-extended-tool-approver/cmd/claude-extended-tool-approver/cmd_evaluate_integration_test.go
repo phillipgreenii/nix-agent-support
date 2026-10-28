@@ -263,3 +263,94 @@ func TestReport_MissesOnly_SkipsOutcomesThatRecordNoDecision(t *testing.T) {
 		}
 	}
 }
+
+// --- retired roots (pg2-ufkenc) ---
+
+// setupRetiredRootDB seeds Grep rows that a user approved and that replay to
+// abstain today (the path is in no configured zone): one under a retired root
+// (/Volumes/ziprecruiter, gone since the 2026-10-15 workspace move), one under
+// a live-looking root, one under a retired root's shared-prefix sibling, and a
+// Bash row that merely MENTIONS the retired root. cwd is the temp dir so
+// nothing is classified stale-cwd.
+func setupRetiredRootDB(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	store, err := asklog.NewStore(filepath.Join(dir, "claude-extended-tool-approver", "asks.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.DB().Exec(`INSERT INTO tool_decisions
+		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
+		 hook_decision, outcome, created_at)
+		VALUES
+		 (1,'s',?,'Grep','h1','{"pattern":"x","path":"/Volumes/ziprecruiter/monorepo/finance"}','grep x',
+		  'allow','approved','2026-01-01T00:00:00Z'),
+		 (2,'s',?,'Grep','h2','{"pattern":"x","path":"/opt/ceta-live-root/finance"}','grep x',
+		  'allow','approved','2026-01-01T00:00:00Z'),
+		 (3,'s',?,'Grep','h3','{"pattern":"x","path":"/Volumes/ziprecruiter-new/finance"}','grep x',
+		  'allow','approved','2026-01-01T00:00:00Z'),
+		 (4,'s',?,'Bash','h4','{"command":"unknown-cmd-xyz /Volumes/ziprecruiter/a"}','unknown-cmd-xyz',
+		  'abstain','approved','2026-01-01T00:00:00Z')`,
+		dir, dir, dir, dir)
+	if err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+	_ = store.Close()
+	return dir
+}
+
+// TestEvaluate_RetiredRootRowsAreNotMisses is pg2-ufkenc's acceptance test,
+// run against the compiled binary over a real SQLite ask log: a row under a
+// retired root is categorized retired-root (not a miss, absent
+// from --misses-only) while a row under a live root is still a miss.
+func TestEvaluate_RetiredRootRowsAreNotMisses(t *testing.T) {
+	dataDir := setupRetiredRootDB(t)
+
+	byID := evaluateJSONByID(t, dataDir)
+	for id, want := range map[float64]string{1: "retired-root", 2: "miss-uncaught", 3: "miss-uncaught", 4: "miss-uncaught"} {
+		if got, _ := byID[id]["category"].(string); got != want {
+			t.Errorf("row %v category = %q, want %q (row: %v)", id, got, want, byID[id])
+		}
+	}
+	if got, _ := byID[1]["replay_result"].(string); got != "abstain" {
+		t.Errorf("retired-root row keeps its replay evidence, replay_result = %q, want abstain", got)
+	}
+
+	misses := evaluateJSONByID(t, dataDir, "--misses-only")
+	if _, ok := misses[1]; ok {
+		t.Errorf("--misses-only listed the retired-root row: %v", misses[1])
+	}
+	for _, id := range []float64{2, 3, 4} {
+		if _, ok := misses[id]; !ok {
+			t.Errorf("--misses-only lost the live-root row %v", id)
+		}
+	}
+
+	summary, err := runSubcommandNoConsumerConfig(t, dataDir, "evaluate")
+	if err != nil {
+		t.Fatalf("evaluate failed: %v\n%s", err, summary)
+	}
+	for _, line := range []string{"Retired root:            1", "Misses (uncaught):       3"} {
+		if !strings.Contains(string(summary), line) {
+			t.Errorf("summary missing %q:\n%s", line, summary)
+		}
+	}
+}
+
+// TestEvaluate_RetiredRootFlags: --include-retired keeps the retired row a miss, and --retired-root adds a root to the built-in list.
+func TestEvaluate_RetiredRootFlags(t *testing.T) {
+	dataDir := setupRetiredRootDB(t)
+
+	byID := evaluateJSONByID(t, dataDir, "--include-retired")
+	if got, _ := byID[1]["category"].(string); got != "miss-uncaught" {
+		t.Errorf("--include-retired: row 1 category = %q, want miss-uncaught", got)
+	}
+
+	byID = evaluateJSONByID(t, dataDir, "--retired-root=/opt/ceta-live-root")
+	if got, _ := byID[2]["category"].(string); got != "retired-root" {
+		t.Errorf("--retired-root: row 2 category = %q, want retired-root", got)
+	}
+	if got, _ := byID[1]["category"].(string); got != "retired-root" {
+		t.Errorf("--retired-root must add to, not replace, the built-in list: row 1 category = %q", got)
+	}
+}

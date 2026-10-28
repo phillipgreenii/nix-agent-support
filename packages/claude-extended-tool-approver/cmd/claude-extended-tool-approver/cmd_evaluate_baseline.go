@@ -43,6 +43,11 @@ type evaluateFilters struct {
 	ApprovalSource string `json:"approval_source"`
 	MissesOnly     bool   `json:"misses_only"`
 	Settings       string `json:"settings"`
+	// RetiredRoots is the comma-joined list of roots under which rows were
+	// categorized "retired-root" rather than replayed ("" when none, i.e.
+	// --include-retired). A baseline captured under a different list would
+	// disagree on every row under the roots that differ.
+	RetiredRoots string `json:"retired_roots"`
 }
 
 // evaluateReport is the envelope `evaluate` reads and writes for baseline
@@ -208,6 +213,9 @@ func mismatchedFilters(loaded, current evaluateFilters) []string {
 	if loaded.Settings != current.Settings {
 		mismatches = append(mismatches, fmt.Sprintf("--settings: baseline=%q current=%q", loaded.Settings, current.Settings))
 	}
+	if loaded.RetiredRoots != current.RetiredRoots {
+		mismatches = append(mismatches, fmt.Sprintf("retired roots (--include-retired/--retired-root): baseline=%q current=%q", loaded.RetiredRoots, current.RetiredRoots))
+	}
 	return mismatches
 }
 
@@ -288,7 +296,7 @@ func writeEvaluateOutput(w io.Writer, format string, report evaluateReport) {
 
 func renderEvaluateReportSummary(w io.Writer, report evaluateReport) {
 	fmt.Fprintf(w, "Captured at:         %s\n", report.CapturedAt)
-	for _, k := range []string{"correct", "miss-caught-by-settings", "miss-uncaught", "needs-review", "unresolved", "stale-cwd"} {
+	for _, k := range []string{"correct", "miss-caught-by-settings", "miss-uncaught", "needs-review", "unresolved", "stale-cwd", "retired-root"} {
 		fmt.Fprintf(w, "%-20s %5d\n", capLabel(k)+":", report.Totals[k])
 	}
 	if report.Delta == nil {

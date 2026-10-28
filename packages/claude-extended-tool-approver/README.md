@@ -91,6 +91,18 @@ were stored as `denied`, which made every SessionEnd sweep look like "the user
 denied it but the hook allows it" — a phantom false-allow. Schema migration 7
 backfills historical rows by inverting the three writers' fingerprints.
 
+**Retired roots.** `evaluate` replays stored rows against TODAY's configured roots, so a row logged
+before a workspace move (a path under `/Volumes/ziprecruiter` or `/Users/phillipg/phillipg_mbp`, both
+gone since 2026-10-15) replays to abstain while its stored verdict was an allow: a false miss no rule
+can fix. A row that would be a miss AND whose `path`/`file_path`/`notebook_path` (or a Glob
+`pattern`) lies under a retired root is categorized `retired-root` instead: it is not counted as a
+miss and `--misses-only` drops it (its `replay_*` fields stay as evidence). Rows under a retired
+root that replay correct keep their category. The built-in list is `defaultRetiredRoots` in
+`cmd/claude-extended-tool-approver/cmd_evaluate_retired_roots.go`; `--retired-root <abs path>`
+(repeatable) adds one for a run, and `--include-retired` switches the reclassification off. A root
+belongs on the list only when it is gone for good: a merely unconfigured root is a real allowlist
+gap and stays a miss. This is a reporting filter only and adds no rule (internal/rules is frozen).
+
 ### Rule failures (`rule_errors`)
 
 A rule that could not GATHER THE EVIDENCE it needs — a resolver subprocess that timed

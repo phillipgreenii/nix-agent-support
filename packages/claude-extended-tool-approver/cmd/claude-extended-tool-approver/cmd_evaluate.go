@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
@@ -59,18 +60,28 @@ type evalResult struct {
 func newEvaluateCmd() *cobra.Command {
 	var days int
 	var since, settingsPath, format, approvalSource, baseline string
-	var missesOnly bool
+	var missesOnly, includeRetired bool
+	var retiredRoots []string
 	var corpusPaths []string
 	cmd := &cobra.Command{
 		Use:   "evaluate",
 		Short: "Replay logged decisions and categorize them as correct or miss",
 		Long: `Replay every logged decision through the current rule engine and
 categorize each as correct, miss-caught-by-settings, miss-uncaught,
-needs-review, unresolved, or stale-cwd.
+needs-review, unresolved, stale-cwd, or retired-root.
 
 A row whose outcome is "unresolved" (never resolved — interrupted, abandoned,
 or swept at SessionEnd) carries no ground truth, so it is categorized
 "unresolved" and is never counted as correct or as a miss.
+
+A row whose tool input (path, file_path, notebook_path, or a Glob pattern) lies
+under a RETIRED root — a root that no longer exists since the 2026-10-15
+workspace move (/Volumes/ziprecruiter, /Users/phillipg/phillipg_mbp, plus any
+--retired-root) — that would otherwise be a miss is categorized "retired-root"
+instead: today's configuration cannot reproduce a verdict about a path that is
+gone, so it is not counted as a miss and --misses-only drops it (its replay_*
+fields stay as evidence). Rows that replay correct keep their category.
+--include-retired switches this off so those rows stay misses.
 
 Use --settings to additionally evaluate each decision against a
 Claude Code settings file so misses can be attributed to settings
@@ -124,14 +135,18 @@ cannot be combined with the ask-log-only flags (--days/--since/--settings/
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(corpusPaths) > 0 {
-				if days > 0 || since != "" || settingsPath != "" || approvalSource != "" || baseline != "" || missesOnly {
-					fmt.Fprintln(os.Stderr, "error: --corpus cannot be combined with --days/--since/--settings/--approval-source/--baseline/--misses-only (it grades a fixed corpus file, not the ask log)")
+				if days > 0 || since != "" || settingsPath != "" || approvalSource != "" || baseline != "" || missesOnly || includeRetired || len(retiredRoots) > 0 {
+					fmt.Fprintln(os.Stderr, "error: --corpus cannot be combined with --days/--since/--settings/--approval-source/--baseline/--misses-only/--include-retired/--retired-root (it grades a fixed corpus file, not the ask log)")
 					os.Exit(1)
 				}
 				runEvaluateCorpus(corpusPaths, format)
 				return nil
 			}
-			runEvaluate(days, since, settingsPath, format, approvalSource, baseline, missesOnly)
+			roots := []string{}
+			if !includeRetired {
+				roots = append(append(roots, defaultRetiredRoots...), retiredRoots...)
+			}
+			runEvaluate(days, since, settingsPath, format, approvalSource, baseline, missesOnly, roots)
 			return nil
 		},
 	}
@@ -142,11 +157,15 @@ cannot be combined with the ask-log-only flags (--days/--since/--settings/
 	cmd.Flags().StringVar(&approvalSource, "approval-source", "", "Only evaluate rows with this approval_source (unknown|bypass|auto|settings|hook|user)")
 	cmd.Flags().StringVar(&baseline, "baseline", "", "Path to a baseline report: captures it if absent, compares against it and reports the decision delta if present")
 	cmd.Flags().BoolVar(&missesOnly, "misses-only", false, "Only show rows where hook is wrong")
+	cmd.Flags().BoolVar(&includeRetired, "include-retired", false, "Keep rows under retired roots as misses instead of categorizing them retired-root")
+	cmd.Flags().StringArrayVar(&retiredRoots, "retired-root", nil, "Absolute root to treat as retired, in addition to the built-in list (repeatable)")
 	cmd.Flags().StringArrayVar(&corpusPaths, "corpus", nil, "Path to a goldencorpus JSON file (repeatable); grades the corpus's own expected_verdict instead of replaying the ask log")
 	return cmd
 }
 
-func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSourceVal, baselineVal string, missesOnlyVal bool) {
+// runEvaluate replays the ask log. retiredRoots is the (possibly empty) list
+// of roots under which a row is categorized "retired-root" instead of replayed.
+func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSourceVal, baselineVal string, missesOnlyVal bool, retiredRoots []string) {
 	days := &daysVal
 	since := &sinceVal
 	settingsPath := &settingsPathVal
@@ -189,6 +208,7 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 		"miss-uncaught":           0,
 		"needs-review":            0,
 		"stale-cwd":               0,
+		"retired-root":            0,
 		"unresolved":              0,
 	}
 
@@ -267,12 +287,22 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 
 		// Categorize
 		r.Category = categorize(r, row)
+		// A row that would be a MISS only because it names a path under a retired
+		// root is not a real miss: today's configuration cannot reproduce a
+		// verdict about a path that is gone (see cmd_evaluate_retired_roots.go).
+		// Rows that replay correct or needs-review keep their category, so the
+		// reclassification never shifts those counts. replay_* stays populated as
+		// the evidence.
+		if strings.HasPrefix(r.Category, "miss-") && retiredRootOf(row.ToolName, row.ToolInputJSON, retiredRoots) != "" {
+			r.Category = "retired-root"
+		}
 
 		counts[r.Category]++
 		// "unresolved" is excluded from --misses-only for the same reason
 		// "stale-cwd" is: it carries no ground truth, so it is not a miss and
-		// must not inflate the miss dataset downstream analysis ranks.
-		if *missesOnly && (r.Category == "correct" || r.Category == "unresolved") {
+		// must not inflate the miss dataset downstream analysis ranks. The same
+		// goes for "retired-root" (a would-be miss about a path that is gone).
+		if *missesOnly && (r.Category == "correct" || r.Category == "unresolved" || r.Category == "retired-root") {
 			continue
 		}
 		results = append(results, r)
@@ -285,6 +315,7 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 			ApprovalSource: *approvalSourceFilter,
 			MissesOnly:     *missesOnly,
 			Settings:       *settingsPath,
+			RetiredRoots:   strings.Join(retiredRoots, ","),
 		}, counts, results)
 		return
 	}
@@ -301,6 +332,7 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 		}
 		fmt.Printf("Total rows:          %5d\n", total)
 		fmt.Printf("Stale CWD:           %5d\n", counts["stale-cwd"])
+		fmt.Printf("Retired root:        %5d\n", counts["retired-root"])
 		fmt.Printf("Correct:             %5d\n", counts["correct"])
 		fmt.Printf("Misses (settings):   %5d\n", counts["miss-caught-by-settings"])
 		fmt.Printf("Misses (uncaught):   %5d\n", counts["miss-uncaught"])
