@@ -330,8 +330,8 @@ SHIM
 # bd_warn_shim: a `bd` first on PATH that prints a warning on stderr for the
 # `ready` call only, then execs the REAL bd (so stdout is the real bd's), as bd
 # does in a tracker without beads.role configured. Scoped to `ready` because this
-# test pins the watchdog's own read (hand-to-human reads its own bd calls with 2>&1,
-# a separate matter outside this suite).
+# test pins the watchdog's own read (hand-to-human's read-back now parses bd's
+# stdout alone, with stderr captured separately; that is covered by its own suite).
 bd_warn_shim() {
   local real_bd shim_dir
   real_bd="$(command -v bd)"
