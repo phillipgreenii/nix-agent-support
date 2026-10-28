@@ -64,8 +64,14 @@ func TestIntegration_NestedSubstitutionInCommandLiteralResolves(t *testing.T) {
 		command string
 	}{
 		{
-			"arithmetic expansion wrapping two nested command substitutions (tc-ltr4's `elapsed:` report)",
-			`SP=` + projectRoot + `; echo "elapsed: $(( $(date +%s) - $(cat $SP/full.start) ))s"`,
+			// pg2-46z4lw: the report's own `$(cat $SP/full.start)` operand no longer
+			// approves (cat of a file is not provably numeric, so its output could be a
+			// hostile arithmetic expression; see
+			// TestIntegration_NestedSubstitutionInArithmeticCatNoLongerApproves). The
+			// provably numeric `wc -l <` reader keeps this row exercising the same
+			// variable-resolution propagation through an arithmetic expansion.
+			"arithmetic expansion wrapping two nested command substitutions (tc-ltr4's `elapsed:` report, numeric reader)",
+			`SP=` + projectRoot + `; echo "elapsed: $(( $(date +%s) - $(wc -l < $SP/full.start) ))s"`,
 		},
 		{
 			"one level of command-substitution nesting (the minimal shape the loss already reproduces at)",
@@ -90,7 +96,7 @@ func TestIntegration_NestedSubstitutionInCommandLiteralResolves(t *testing.T) {
 			// mechanism (not variable resolution) that TestIntegration_
 			// NestedSubstitutionOrCombinatorInnerLeafResolves documents for `||`.
 			"three levels: arithmetic expansion nested inside arithmetic expansion nested inside the outer argument",
-			`D=` + projectRoot + `; echo "$(( 1 + $(( $(cat $D/README.md) )) ))"`,
+			`D=` + projectRoot + `; echo "$(( 1 + $(( $(wc -l < $D/README.md) )) ))"`,
 		},
 	}
 	for _, tt := range relieved {
@@ -99,6 +105,36 @@ func TestIntegration_NestedSubstitutionInCommandLiteralResolves(t *testing.T) {
 			if got.Decision != hookio.Approve {
 				t.Errorf("%q got %v (%s: %s); want Approve — the nested leaf's own $D should now resolve against the earlier sibling assignment",
 					tt.command, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+}
+
+// TestIntegration_NestedSubstitutionInArithmeticCatNoLongerApproves records what bead
+// pg2-46z4lw (decision (a)) did to tc-ltr4's FIRST report. `$(( $(date +%s) - $(cat
+// $SP/full.start) ))` used to approve; it now abstains with the command-substitution
+// refusal, because bash evaluates the OUTPUT of a substitution inside an arithmetic
+// expansion as an expression, and `cat` of a file can print a hostile one such as
+// `a[$(cmd)]` that the review layer (which reads source, not output) cannot see. Only a
+// provably numeric substitution (`date +%s`, `wc -l < file`) may sit inside arithmetic.
+// The payloads are only parsed and reviewed, never run.
+func TestIntegration_NestedSubstitutionInArithmeticCatNoLongerApproves(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	for _, tt := range []struct{ name, command string }{
+		{"the tc-ltr4 elapsed report", `SP=` + projectRoot + `; echo "elapsed: $(( $(date +%s) - $(cat $SP/full.start) ))s"`},
+		{"cat nested in nested arithmetic", `D=` + projectRoot + `; echo "$(( 1 + $(( $(cat $D/README.md) )) ))"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)})
+			if got.Decision == hookio.Approve {
+				t.Fatalf("%q approved (%s: %s); want it to abstain, since cat's output could be a hostile arithmetic expression", tt.command, got.Module, got.Reason)
+			}
+			if !strings.Contains(got.Reason, "evaluates its value") {
+				t.Errorf("%q reason = %q, want the evaluating-expansion refusal", tt.command, got.Reason)
 			}
 		})
 	}

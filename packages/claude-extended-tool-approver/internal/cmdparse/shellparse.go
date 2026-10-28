@@ -3820,13 +3820,52 @@ func isAllElementsIndex(idx syntax.ArithmExpr) bool {
 func isLiteralArith(e syntax.ArithmExpr) bool { return arithHasOnly(e, false) }
 
 // isInertArithExpansion is isLiteralArith for the body of an arithmetic EXPANSION or
-// command (`$(( ))`, `(( ))`, `let`): it additionally accepts a command substitution and
-// a nested arithmetic expansion as operands. A command substitution is judged by the
-// engine's own recursion over its body (it is a Substitution of the leaf), so it does not
-// make the expression a variable lookup; this keeps `$(( $(date +%s) - $(cat f) ))`
-// approvable, as the tc-ltr4 report requires. What such a substitution OUTPUTS being
-// re-evaluated as an expression is NOT modeled (see the pg2-giluda notes in the tests).
+// command (`$(( ))`, `(( ))`, `let`): it additionally accepts a nested arithmetic
+// expansion and a command substitution whose output is PROVABLY NUMERIC
+// (isNumericOutputSubst).
+//
+// Bead pg2-46z4lw, decision (a): bash evaluates the OUTPUT of a command substitution
+// inside an arithmetic expression as an expression in its own right, so a substitution
+// that prints `a[$(cmd)]` (for example `$(cat f)` where f holds that text) runs `cmd`.
+// The engine reviews the substitution's source, never its output, so only a
+// substitution whose output cannot be anything but a number may stay inert. Any other
+// substitution fails closed here (the leaf records it in EvaluatingExpansions), which
+// is why `$(( $(date +%s) - $(cat f) ))` no longer approves: `cat` of a file is not
+// provably numeric. The nested `$(( $(( $(cat f) )) ))` is decided by the same rule.
 func isInertArithExpansion(e syntax.ArithmExpr) bool { return arithHasOnly(e, true) }
+
+// isNumericOutputSubst reports whether cs is a command substitution that can only
+// print an integer (plus surrounding blanks): exactly `date +%s`, or `wc -l` reading
+// only a stdin redirect (`wc -l < file`; a file OPERAND would append the name). The
+// list is deliberately short; extending it needs a proof that the output is numeric
+// for every input.
+func isNumericOutputSubst(cs *syntax.CmdSubst) bool {
+	if cs == nil || cs.ReplyVar || len(cs.Stmts) != 1 {
+		return false
+	}
+	st := cs.Stmts[0]
+	if st.Negated || st.Background || st.Coprocess {
+		return false
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) != 0 {
+		return false
+	}
+	args := make([]string, len(call.Args))
+	for i, w := range call.Args {
+		args[i] = w.Lit()
+		if args[i] == "" {
+			return false // an expansion or quoted part: not a fixed literal argument
+		}
+	}
+	switch {
+	case len(args) == 2 && args[0] == "date" && args[1] == "+%s":
+		return len(st.Redirs) == 0
+	case len(args) == 2 && args[0] == "wc" && args[1] == "-l":
+		return len(st.Redirs) == 1 && st.Redirs[0].Op == syntax.RdrIn
+	}
+	return false
+}
 
 func arithHasOnly(e syntax.ArithmExpr, allowSubst bool) bool {
 	if e == nil {
@@ -3845,7 +3884,7 @@ func arithHasOnly(e syntax.ArithmExpr, allowSubst bool) bool {
 						literal = false
 					}
 				case *syntax.CmdSubst:
-					if !allowSubst {
+					if !allowSubst || !isNumericOutputSubst(part) {
 						literal = false
 					}
 				case *syntax.ArithmExp:

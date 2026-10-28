@@ -34,7 +34,26 @@ func TestEvaluatingExpansions(t *testing.T) {
 
 		{"arith literal", `echo "$((1+2))" $((3 * (4 - 1))) $((0x10)) $((1 ? 2 : 3))`, nil},
 		{"arith legacy literal", `echo "$[1+2]"`, nil},
-		{"arith with command substitution operands", `echo "$(( $(date +%s) - $(cat f) ))" "$(( 1 + $(( $(cat g) )) ))"`, nil},
+
+		// Bead pg2-46z4lw, decision (a): bash evaluates the OUTPUT of a substitution inside
+		// an arithmetic expansion as an expression, so only a substitution whose output is
+		// provably numeric stays inert. `cat f` prints whatever f holds (for example the
+		// text a[$(cmd)]), so it is recorded. The payloads here are only ever parsed.
+		{"arith of provably numeric substitutions", `echo "$(( $(date +%s) - $(date +%s) ))" "$(( 1 + $(wc -l < f) ))"`, nil},
+		{"arith nested of provably numeric substitutions", `echo "$(( 1 + $(( $(date +%s) )) ))"`, nil},
+		{"arith cat substitution", `echo "$(( 1 + $(cat f) ))"`, []string{"$(( 1 + $(cat f) ))"}},
+		{"arith tc-ltr4 date minus cat", `echo "$(( $(date +%s) - $(cat f) ))"`, []string{"$(( $(date +%s) - $(cat f) ))"}},
+		{"arith nested holding cat", `echo "$(( 1 + $(( $(cat g) )) ))"`, []string{"$(( 1 + $(( $(cat g) )) ))", "$(( $(cat g) ))"}},
+		{"arith backtick cat", "echo \"$(( `cat f` ))\"", []string{"$(( `cat f` ))"}},
+		{"arith legacy bracket cat", `echo "$[ $(cat f) ]"`, []string{"$[ $(cat f) ]"}},
+		{"arith date with another format", `echo "$(( $(date +%Y) ))"`, []string{"$(( $(date +%Y) ))"}},
+		{"arith date with an extra argument", `echo "$(( $(date +%s -d x) ))"`, []string{"$(( $(date +%s -d x) ))"}},
+		{"arith wc with a file operand", `echo "$(( $(wc -l f) ))"`, []string{"$(( $(wc -l f) ))"}},
+		{"arith wc without a stdin redirect", `echo "$(( $(wc -l) ))"`, []string{"$(( $(wc -l) ))"}},
+		{"arith pipeline substitution", `echo "$(( $(date +%s | cat) ))"`, []string{"$(( $(date +%s | cat) ))"}},
+		{"arith compound substitution", `echo "$(( $(date +%s; cat f) ))"`, []string{"$(( $(date +%s; cat f) ))"}},
+		{"arith date substitution with a redirect", `echo "$(( $(date +%s > f) ))"`, []string{"$(( $(date +%s > f) ))"}},
+		{"arith the shape that prints a hostile expression", `echo "$(( $(printf 'a[$(true)]') ))"`, []string{`$(( $(printf 'a[$(true)]') ))`}},
 		{"arith command substitution plus variable", `echo "$(( $(date +%s) - n ))"`, []string{"$(( $(date +%s) - n ))"}},
 		{"arith single quoted is literal", `echo '$((x))'`, nil},
 

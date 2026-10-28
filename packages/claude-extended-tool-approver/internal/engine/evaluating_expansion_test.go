@@ -66,6 +66,24 @@ func TestEvaluatingParameterExpansions(t *testing.T) {
 		{"arith in a redirection-only leaf", `> "f$((x))"`, hookio.Reject, denied},
 		{"arith in a for word list", `for f in "$((x))"; do echo hi; done`, hookio.Reject, denied},
 		{"arith substitution plus a variable", `echo "$(( $(date +%s) - n ))"`, hookio.Reject, denied},
+		// --- a substitution inside arithmetic whose OUTPUT could be hostile (bead pg2-46z4lw) ---
+		// bash evaluates a substitution's output as an arithmetic expression, so `cat f`
+		// where f holds `a[$(cmd)]` runs cmd; the review layer sees only the source. Only
+		// a provably numeric substitution (`date +%s`, `wc -l < f`) may stay inside. The
+		// payloads are parsed, never run: nothing here touches the filesystem.
+		{"arith cat substitution", `echo "$(( 1 + $(cat f) ))"`, hookio.Reject, denied},
+		{"arith tc-ltr4 date minus cat", `echo "$(( $(date +%s) - $(cat f) ))"`, hookio.Reject, denied},
+		{"arith nested holding cat", `echo "$(( 1 + $(( $(cat f) )) ))"`, hookio.Reject, denied},
+		{"arith cat in an assignment", `y=$(( $(cat f) )); echo "$y"`, hookio.Reject, denied},
+		{"arith cat in a for word list", `for i in $(( $(cat f) )); do echo hi; done`, hookio.Reject, denied},
+		{"arith cat in an arithmetic command", `(( $(cat f) ))`, hookio.Reject, denied},
+		{"arith cat in let", `let "$(cat f)"`, hookio.Reject, denied},
+		{"arith date with another format", `echo "$(( $(date +%Y) ))"`, hookio.Reject, denied},
+		{"arith wc with a file operand", `echo "$(( $(wc -l f) ))"`, hookio.Reject, denied},
+		{"arith nested numeric then cat", `echo "$(( $(date +%s) + $(( $(date +%s) + $(cat f) )) ))"`, hookio.Reject, denied},
+		{"arith provably numeric wc", `echo "$(( 1 + $(wc -l < f) ))"`, hookio.Approve, ""},
+		{"arith nested provably numeric", `echo "$(( 1 + $(( $(date +%s) )) ))"`, hookio.Approve, ""},
+		{"cat substitution outside arithmetic still approves", `echo "$(cat f)"`, hookio.Approve, ""},
 		{"arith in an unquoted heredoc body", "cat <<EOF\n$((x))\nEOF", hookio.Reject, denied},
 		{"arith in an unquoted heredoc file write", "cat > /tmp/zr-x/plan.md <<EOF\n$((x))\nEOF", hookio.Reject, denied},
 		{"arithmetic command on a variable", `(( x ))`, hookio.Reject, denied},
