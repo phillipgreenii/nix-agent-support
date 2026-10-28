@@ -673,13 +673,22 @@ and reviewability now depends on. Timestamps and log URLs are not signals.
 pg-desk's live path computes NO kinds today. `pg-desk run pr <id>` gathers, compares a facts hash
 (`packages/pg-desk/internal/pipeline/pipeline.go`, `factsChanged`) and persists; its input is only the
 entity id pg-router passes in argv. `classify.Classify` and the local kinds (`annotation_changed`,
-`link_changed`, `work_changed`) have one caller, `RunEntityChange`
-(`internal/pipeline/entity_change.go`), which only `internal/changes` and `pg-desk refresh` call. So:
+`link_changed`, `work_changed`) are called by `RunEntityChange`
+(`internal/pipeline/entity_change.go`), which `internal/changes`, `pg-desk refresh` and the issue path of
+`pg-desk run` call; the rest of `internal/classify` (terminal and issue-status helpers, link diffing) has
+further callers listed below. So:
 
 - After cutover the daemon is the ONLY source of upstream kinds for PRs. pg-desk does not need them: the
   feed decides WHETHER a run is triggered, and the run decides what to do from its facts hash.
-- Retiring `internal/changes` leaves `pg-desk refresh` as the classifier's only caller. `classify` and the
-  local kinds stay as they are for `refresh`; whether to retire them with it is left to the cleanup phase.
+- Retiring `internal/changes` does NOT retire `internal/classify`: the classifier is KEPT (agent decision,
+  2026-10-27, reversible; the operator may overturn it). Its remaining callers are `internal/focus`
+  (`candidates.go`, `rank.go`, `slot.go`, `live.go`, `health.go`), `internal/interpret`
+  (`issue_attention_facts.go`), `internal/pipeline` (`entity_change.go`, `feed_row.go`), and
+  `cmd/pg-desk` (`link.go`, `doctor_changeflow.go`, the last of which goes with the PR change flow). Only
+  `internal/changes` and `doctor_changeflow.go` leave with the PR change flow deletion, so retiring
+  `classify` would mean rewriting focus, interpret, pipeline and link. The importer set is pinned by
+  `TestClassifyImporterSetIsPinned` (`packages/pg-desk/internal/classify/importers_test.go`), so a later
+  deletion is a conscious change to that list.
 - Mergeability noise cannot reach pg-desk's facts hash, because the wire returns the carried-forward value
   (see "Mergeability").
 
@@ -1078,7 +1087,7 @@ lock, viewer change, budget pause and resume, store move-aside or refusal, consu
 | pg-router `desk-reconcile`                                        | Every 30 min (ticked by `pg-desk heartbeat-item`), runs `pg-desk reconcile`: `pr list --query Q --ids-only` (`internal/gather/openids.go`) and `pr show <id> --fresh` per candidate | Kept. Both reads are served by the daemon (its `pr` gather reads lose `--fresh`), so it costs no extra GitHub reads; its closure detection then rests on the daemon's confirming read before `left_query` (see "Query read")                                                                          |
 | pg-router-source-pg-connector adapter                             | Decodes `changes[]{change, source, entity}`, event id from `{change, source, entity_id, head_sha, version}`                                                                         | Decodes the added `seq`, `kinds`, `fields`; the event id stays stable because each row carries its own `version` and `head_sha` (see "Change feed")                                                                                                                                                   |
 | desk-pr lane (`pg-desk run pr <id>`)                              | About 8 reads to origin per PR                                                                                                                                                      | The same calls without `--fresh`, served locally                                                                                                                                                                                                                                                      |
-| pg-desk classifier                                                | Called only by `RunEntityChange` (`internal/changes`, `pg-desk refresh`); the run path uses a facts hash                                                                            | Kept for `pg-desk refresh` only (see "Change kinds"); upstream kinds come from the daemon                                                                                                                                                                                                             |
+| pg-desk classifier                                                | Called by `RunEntityChange` (`internal/changes`, `pg-desk refresh`, issue `pg-desk run`) and by focus, interpret, pipeline and link; the PR run path uses a facts hash              | KEPT (agent decision 2026-10-27, see "Change kinds"); upstream kinds come from the daemon                                                                                                                                                                                                             |
 | pg-desk `head_check` (`pr show --fresh`) and `issue show --fresh` | Fresh reads                                                                                                                                                                         | Kept: the head check is a write precondition (read-your-own-write), and `issue` is another backend                                                                                                                                                                                                    |
 | `darwin/modules/pg-connector-pr-github`                           | Log source and alerts for the old backend                                                                                                                                           | Kept installed until cleanup, so a rollback is still observed, then removed                                                                                                                                                                                                                           |
 | pg-desk freshness and the menu bar data-age row                   | Reads the umbrella ledger                                                                                                                                                           | Unchanged reader; the ledger is stamped from `sources_freshness[]`                                                                                                                                                                                                                                    |
