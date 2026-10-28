@@ -7,7 +7,8 @@
 `phillipgreenii.programs.pg-repo-runner` (`home/programs/pg-repo-runner`).
 
 Bead `pg2-zj2v7m` (F1) is the kernel, the verdict store and `status`. Bead `pg2-j0itft` (F2) is
-runner B, the post-land verifier: the `tips` source and the `verify` role (below). The remaining
+runner B, the post-land verifier: the `tips` source and the `verify` role (below). Bead `pg2-loswfh`
+(F3) is failure surfacing (below). The remaining
 role bodies land in later beads (A: `sync`, C: `build`; the source `workspace-tips`); each of those
 stubs exits 2 with "not implemented".
 
@@ -134,6 +135,54 @@ ARGS...`, with every binary resolved by the absolute store path the nix build in
 (`RR_NICE_BIN`, `RR_NIX_LOG_WRAPPED_BIN`, `RR_NIX_BIN`; the config's `thresholds.nice_level`,
 default 10). F1 offers it; the roles of the later beads call it.
 
+## Failure surfacing
+
+Bead `pg2-loswfh` (F3). The kernel surfaces TRANSITIONS, never steady states (design "Failure
+surfacing", decision D7: a P1 bead per repo plus a notification on transitions; no SwiftBar
+plugin). It is off unless the config carries `[surface] enabled = true`.
+
+| Transition                                   | Raised by                                                 |
+| -------------------------------------------- | --------------------------------------------------------- |
+| `red`: a repo's primary tip fails its check  | `verify` (this version)                                   |
+| `diverged`                                   | `rr_surface_raise REPO diverged SHA [DETAIL]` (runner A)  |
+| `needs-relock`: `push blocked: needs relock` | `rr_surface_raise REPO needs-relock SHA [DETAIL]`         |
+| `build-red`: the workspace build is red      | `rr_surface_raise REPO build-red SHA [DETAIL]` (runner C) |
+
+Per (repo, kind) the state is a Memento, `$XDG_STATE_HOME/pg-repo-runner/surface/<repo>.<kind>.json`
+(`status` lists the open ones). The rules:
+
+1. The first report after a clear (or ever) is the transition: it files ONE bead (type task, priority
+   1, the repo's label from `surface.repo_labels`, metadata `runner = pg-repo-runner`, `repo`, `kind`,
+   `sha`) and posts ONE macOS notification (title and body travel as argv items of a fixed AppleScript,
+   never inside the script text).
+2. A repeated report while the record is open files nothing and notifies nothing. A newer red sha is
+   commented on the bead.
+3. A green check at a sha that DESCENDS from the red tip (`git merge-base --is-ancestor`, a read) comments
+   the green verdict on the bead and closes it, but only a bead whose metadata says `runner =
+pg-repo-runner`; any other bead is left alone and the record is cleared. A green that does not
+   descend leaves everything open. Recovery posts no notification.
+4. Each part (bead, notification, close) is recorded the moment it succeeds. A part that fails (tracker
+   unreachable, notifier failed) stays owed and the next run of that repo finishes exactly that part
+   (BF-2: the runner never files in another tracker; without a label for the repo it files nothing
+   rather than a label-less bead). Before creating, the runner looks for its own open bead for the pair,
+   so a crash between "bead created" and "id stored" adopts the bead instead of duplicating it.
+5. Surfacing never changes the exit status of a role, never reverts, resets, edits or pushes a repo
+   (the expectation is fix-forward), and a red verdict still exits 0. pg-router events and metrics are
+   for malfunction (non-zero exit) only.
+
+The beads go to ONE tracker, `surface.tracker_dir` (a directory holding `.beads`; the workspace uses one
+shared tracker, so the repo label is what tells repos apart, BF-1). `bd` is resolved from the ambient
+PATH of the run (`PG_REPO_RUNNER_BD_BIN` replaces it), like every bd-calling script here, so the
+deployment's pg-router role MUST put the machine's `bd` on that PATH.
+
+**The pg-rescue chain.** The home module of pg-rescue ships the matching `runner-red` chain
+(`notify`, then `runner-red-bead` = `p1-later` plus `runnerRed.repoLabelMap` and
+`runnerRed.backendMap`; no agent handler). `notify` is first because it always declines, while
+`p1-later` ends a chain. The runner itself does NOT invoke that chain in this version: `pg-rescue-bead`
+cannot set the `runner` metadata and cannot close a bead, which the auto-close needs, so the runner
+files, comments and closes through `bd` directly and reads its own label map from `surface.repo_labels`.
+The chain is the pg-rescue-side counterpart for any caller that wants the same filing through pg-rescue.
+
 ## Configuration
 
 The home module renders `$XDG_CONFIG_HOME/pg-repo-runner/config.toml` (override with
@@ -154,21 +203,35 @@ sync = false
 push = false
 ```
 
+Failure surfacing adds, when enabled:
+
+```toml
+[surface]
+enabled = true
+tracker_dir = "/path/to/dir-with-.beads"
+notify = true
+
+[surface.repo_labels]
+nix-example = "example-label"
+```
+
 Every flag defaults to `false`. The allow-list is the ONLY source of repos a runner may touch. The
 pg-router queries and roles that drive the commands belong to the deployment repository, not to this
 package.
 
 ## Test seams (environment)
 
-| Variable                      | Effect                                                         |
-| ----------------------------- | -------------------------------------------------------------- |
-| `PG_REPO_RUNNER_CONFIG`       | Path of the config file.                                       |
-| `PG_REPO_RUNNER_LOADAVG`      | Replaces the 1-minute load reading (the bats suites use this). |
-| `PG_REPO_RUNNER_MAX_LOAD`     | Replaces the load threshold.                                   |
-| `PG_REPO_RUNNER_NCPU`         | Replaces the core count used as the default threshold.         |
-| `PG_REPO_RUNNER_NIX_BIN`      | Replaces the nix binary (the bats suites use it to classify).  |
-| `PG_REPO_RUNNER_RETRY_WINDOW` | Replaces the tip item's retry window, in seconds.              |
-| `XDG_STATE_HOME`              | Root of the state directory.                                   |
+| Variable                       | Effect                                                         |
+| ------------------------------ | -------------------------------------------------------------- |
+| `PG_REPO_RUNNER_CONFIG`        | Path of the config file.                                       |
+| `PG_REPO_RUNNER_LOADAVG`       | Replaces the 1-minute load reading (the bats suites use this). |
+| `PG_REPO_RUNNER_MAX_LOAD`      | Replaces the load threshold.                                   |
+| `PG_REPO_RUNNER_NCPU`          | Replaces the core count used as the default threshold.         |
+| `PG_REPO_RUNNER_NIX_BIN`       | Replaces the nix binary (the bats suites use it to classify).  |
+| `PG_REPO_RUNNER_BD_BIN`        | Replaces the bd binary (default: `bd` on PATH).                |
+| `PG_REPO_RUNNER_OSASCRIPT_BIN` | Replaces the macOS notifier (the surfacing suite records it).  |
+| `PG_REPO_RUNNER_RETRY_WINDOW`  | Replaces the tip item's retry window, in seconds.              |
+| `XDG_STATE_HOME`               | Root of the state directory.                                   |
 
 ## Load threshold: the first calibration sample
 
@@ -214,7 +277,12 @@ measured duration and load of the real runner checks.
   with a reason where no usable nix is on PATH (inside a nix build sandbox), so they run wherever
   `nix` is on PATH (`bats` by hand, a runner that exposes nix), and are skipped under
   `nix build .#checks`.
-- `checks.<system>.test-pg-repo-runner`: all three suites, built through `mkBashScript`.
+- `pg-repo-runner/tests/test-pg-repo-runner-surface.bats`: failure surfacing (F3). Real git, a real
+  workspace and the REAL bd over an embedded throwaway database (`test-support/bd_fixture.bash`: no
+  dolt server, never the shared tracker); the only stand-ins are nix (as above) and a recording script
+  for the macOS notifier. Proves one bead and one notification per transition, no duplicates, the
+  auto-close of only the runner's own bead on a green descendant, and that every failure stays owed.
+- `checks.<system>.test-pg-repo-runner`: all four suites, built through `mkBashScript`.
 - `checks.<system>.test-pg-repo-runner-hm-render`: evaluates the home module (push, verify and sync
   default to false for every repo, no case enables push, the assertions fire), builds the rendered
   `config.toml`, and runs the real package against it.

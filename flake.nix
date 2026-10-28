@@ -699,6 +699,7 @@
               pkgs = final;
               inherit bashBuilders;
               pgNixLogWrapped = basePkgs.pg-nix-log-wrapped or null;
+              beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
             }).pg-repo-runner.script;
           # pg-rescue-resolve-conflict (docket pg2-q6a96, design D4): the argv of the
           # resolve-conflict-script pg-router role -- claim, worktree, rebase
@@ -10880,6 +10881,15 @@
                     chains.mine.handlers = [ "extra" ];
                   };
 
+                  hmRunnerRed = evalHM {
+                    enable = true;
+                    runnerRed = {
+                      repoLabelMap.nix-alpha = "example-label-a";
+                      backendMap.nix-alpha = "example-backend";
+                    };
+                  };
+                  runnerRedCfg = hmRunnerRed.xdg.configFile."pg-rescue/config.toml".source;
+
                   defaultCfg = hmDefault.xdg.configFile."pg-rescue/config.toml".source;
                   overrideCfg = hmOverride.xdg.configFile."pg-rescue/config.toml".source;
                 in
@@ -10930,6 +10940,25 @@
                   ];
                 assert hmDefault.phillipgreenii.programs.pg-rescue.chains.fix-ci.handlers == [ "give-up" ];
                 assert hmDefault.phillipgreenii.programs.pg-rescue.chains.give-up.handlers == [ "give-up" ];
+                # The runner-red chain: notify first (it declines, the chain goes on),
+                # then the P1 bead (deferred, ends the chain); no agent handler.
+                assert
+                  hmDefault.phillipgreenii.programs.pg-rescue.chains.runner-red.handlers == [
+                    "notify"
+                    "runner-red-bead"
+                  ];
+                assert
+                  hmDefault.phillipgreenii.programs.pg-rescue.handlers.runner-red-bead.command
+                  == hmDefault.phillipgreenii.programs.pg-rescue.handlers.p1-later.command;
+                assert
+                  hmRunnerRed.phillipgreenii.programs.pg-rescue.handlers.runner-red-bead.command
+                  == hmDefault.phillipgreenii.programs.pg-rescue.handlers.p1-later.command
+                  ++ [
+                    "--repo-label-map"
+                    "nix-alpha=example-label-a"
+                    "--backend-map"
+                    "nix-alpha=example-backend"
+                  ];
                 pkgs.runCommand "test-pg-rescue-module-ok"
                   {
                     nativeBuildInputs = [
@@ -10952,14 +10981,19 @@
                     pg-rescue check --config ${defaultCfg} --chain conflict
                     pg-rescue check --config ${defaultCfg} --chain fix-ci
                     pg-rescue check --config ${defaultCfg} --chain give-up
+                    pg-rescue check --config ${defaultCfg} --chain runner-red
 
                     toml() { yq -p toml -o json "$@"; }
                     [ "$(toml -r '.chain.sync.handlers | join(",")' ${defaultCfg})" = "flake-lock-conflict,fix-small,fix-large,p1-later,notify" ]
                     [ "$(toml -r '.chain.conflict.handlers | join(",")' ${defaultCfg})" = "flake-lock-conflict,conflict-fix-small,conflict-fix-large,give-up" ]
                     [ "$(toml -r '.chain.fix-ci.handlers | join(",")' ${defaultCfg})" = give-up ]
                     [ "$(toml -r '.chain.give-up.handlers | join(",")' ${defaultCfg})" = give-up ]
-                    [ "$(toml -r '.chain | keys | join(",")' ${defaultCfg})" = "conflict,fix-ci,give-up,sync" ]
-                    [ "$(toml -r '.handler | keys | join(",")' ${defaultCfg})" = "conflict-fix-large,conflict-fix-small,fix-large,fix-small,flake-lock-conflict,give-up,notify,p1-later" ]
+                    [ "$(toml -r '.chain.runner-red.handlers | join(",")' ${defaultCfg})" = "notify,runner-red-bead" ]
+                    [ "$(toml -r '.handler.runner-red-bead.command | join(" ")' ${runnerRedCfg})" = "pg-rescue-bead --priority 1 --dedup-query pg-rescue-open --repo-label-map nix-alpha=example-label-a --backend-map nix-alpha=example-backend" ]
+                    [ "$(toml -r '.handler.runner-red-bead.tags | join(",")' ${defaultCfg})" = deferral ]
+                    ! toml -r '.chain.runner-red.handlers | join(",")' ${defaultCfg} | grep -q 'fix-'
+                    [ "$(toml -r '.chain | keys | join(",")' ${defaultCfg})" = "conflict,fix-ci,give-up,runner-red,sync" ]
+                    [ "$(toml -r '.handler | keys | join(",")' ${defaultCfg})" = "conflict-fix-large,conflict-fix-small,fix-large,fix-small,flake-lock-conflict,give-up,notify,p1-later,runner-red-bead" ]
                     [ "$(toml -r '.handler.conflict-fix-small.command | join(" ")' ${defaultCfg})" = "pg-rescue-claude --model haiku --time-limit 2m --strict-mcp-config --disallowed-tools Bash(git push:*),Bash(git remote:*),Bash(git config:*)" ]
                     [ "$(toml -r '.handler.conflict-fix-large.command | join(" ")' ${defaultCfg})" = "pg-rescue-claude --model sonnet --time-limit 8m --allowed-tools Bash,Read,Edit --disallowed-tools Bash(git push:*),Bash(git remote:*),Bash(git config:*)" ]
                     toml -r '.handler.conflict-fix-small.command[-1]' ${defaultCfg} | grep -q 'git push'
@@ -10987,7 +11021,7 @@
                     [ "$(toml -r '.handler.fix-small.tags | join(",")' ${overrideCfg})" = agent ]
                     [ "$(toml -r '.handler.extra.tags | join(",")' ${overrideCfg})" = deterministic ]
                     [ "$(toml -r '.chain.mine.handlers | join(",")' ${overrideCfg})" = extra ]
-                    [ "$(toml -r '.chain | keys | join(",")' ${overrideCfg})" = "conflict,fix-ci,give-up,mine,sync" ]
+                    [ "$(toml -r '.chain | keys | join(",")' ${overrideCfg})" = "conflict,fix-ci,give-up,mine,runner-red,sync" ]
                     [ "$(toml -r '.handler.give-up.description' ${overrideCfg})" = overridden ]
                     [ "$(toml -r '.handler.give-up.command | join(" ")' ${overrideCfg})" = "pg-rescue-bead --annotate-from-env PG_ROUTER_ITEM_ID --add-label script-gave-up" ]
                     [ "$(toml -r '.handler.give-up.tags | join(",")' ${overrideCfg})" = deferral ]
@@ -15445,6 +15479,12 @@
                     [ "$(tj ${r.live.configFlagged} '.thresholds.retry_window')" = 900 ]
                     [ "$(tj ${r.live.configDefaults} '.thresholds.retry_window')" = 3600 ]
                     [ "$(tj ${r.live.configFlagged} '.repos["nix-alpha"].verify')" = true ]
+                    # failure surfacing (F3): absent unless enabled, rendered as set
+                    [ "$(tj ${r.live.configDefaults} 'has("surface")')" = false ]
+                    [ "$(tj ${r.live.configSurfaced} '.surface.enabled')" = true ]
+                    [ "$(tj ${r.live.configSurfaced} '.surface.tracker_dir')" = '"/example/tracker"' ]
+                    [ "$(tj ${r.live.configSurfaced} '.surface.repo_labels["nix-beta"]')" = '"example-label-b"' ]
+                    [ "$(tj ${r.live.configSurfaced} '[.repos[].push] | map(select(. == true)) | length')" = 0 ]
 
                     # The real package against the module's real output: a throwaway
                     # workspace with one real repo, the rendered config pointed at it.
@@ -16862,6 +16902,7 @@
             // (import ./packages/pg-repo-runner {
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
+              beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
             }).checks
             # test-pg-rescue-resolve-conflict (docket pg2-q6a96). Same one-line idiom
             # as hand-to-human below (real-bd throwaway-DB fixture): without this

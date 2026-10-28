@@ -69,6 +69,14 @@ let
     }
     // lib.optionalAttrs (cfg.thresholds.maxLoad != null) { max_load = cfg.thresholds.maxLoad; };
     repos = lib.mapAttrs (_: r: { inherit (r) verify sync push; }) cfg.repos;
+  }
+  // lib.optionalAttrs cfg.surface.enable {
+    surface = {
+      enabled = true;
+      repo_labels = cfg.surface.repoLabels;
+      inherit (cfg.surface) notify;
+    }
+    // lib.optionalAttrs (cfg.surface.trackerDir != null) { tracker_dir = cfg.surface.trackerDir; };
   };
 
   configFile = tomlFormat.generate "pg-repo-runner-config.toml" settings;
@@ -153,6 +161,52 @@ in
       '';
     };
 
+    surface = {
+      enable = lib.mkEnableOption ''
+        failure surfacing: one P1 bead (the repo's label, metadata
+        `runner = pg-repo-runner`) and one macOS notification per TRANSITION of a
+        repo's tip (green to red, diverged, push blocked: needs relock, a red
+        build), and the runner closes its OWN bead once a later tip that descends
+        from the red one is green. Off by default; the runner never reverts,
+        resets, edits or pushes a repo to repair a red tip
+      '';
+
+      trackerDir = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "/home/me/workspace/some-repo";
+        description = ''
+          Absolute path of the directory whose `.beads` tracker receives the
+          beads (the shared tracker of the workspace; BF-1: the repo label, not
+          the tracker, tells the repos apart). REQUIRED while `surface.enable` is
+          set. If the tracker cannot be reached the transition stays pending and
+          is retried on the next run; the runner never files in another tracker.
+          Renders as `surface.tracker_dir`.
+        '';
+      };
+
+      repoLabels = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = { };
+        example = {
+          nix-repo-base = "base";
+        };
+        description = ''
+          The beads label of each allow-listed repo (the workspace's repo label
+          lookup table). Machine- and workspace-specific, so it has no default.
+          A repo with no entry is never filed label-less: its bead stays pending.
+          Every key of `repos` MUST have an entry (asserted). Renders as
+          `surface.repo_labels`.
+        '';
+      };
+
+      notify = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Post one macOS notification per transition. Renders as `surface.notify`.";
+      };
+    };
+
     internal.configFile = lib.mkOption {
       type = lib.types.path;
       internal = true;
@@ -180,6 +234,20 @@ in
       {
         assertion = cfg.workspaceRoot != null && lib.hasPrefix "/" cfg.workspaceRoot;
         message = "phillipgreenii.programs.pg-repo-runner.workspaceRoot MUST be set to an absolute path while the module is enabled.";
+      }
+      {
+        assertion =
+          !cfg.surface.enable || (cfg.surface.trackerDir != null && lib.hasPrefix "/" cfg.surface.trackerDir);
+        message = "phillipgreenii.programs.pg-repo-runner.surface.trackerDir MUST be an absolute path while surface.enable is set (BF-2: a runner never guesses a tracker).";
+      }
+      {
+        assertion =
+          !cfg.surface.enable || lib.all (k: cfg.surface.repoLabels ? ${k}) (lib.attrNames cfg.repos);
+        message = "phillipgreenii.programs.pg-repo-runner.surface.repoLabels MUST name a label for every repo of `repos` while surface.enable is set (BF-1: a bead is never filed label-less); missing: ${
+          lib.concatStringsSep ", " (
+            lib.filter (k: !(cfg.surface.repoLabels ? ${k})) (lib.attrNames cfg.repos)
+          )
+        }.";
       }
       {
         assertion = lib.all validKey (lib.attrNames cfg.repos);

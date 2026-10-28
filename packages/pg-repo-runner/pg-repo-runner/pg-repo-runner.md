@@ -3,7 +3,7 @@
 > Kernel and facade of the pg-router-managed async repo runners. Each role resolves the repo named by `PG_ROUTER_ITEM_ID`, checks the allow-list and the path, honors the kill switch and the load check, takes a single-flight lease, then acts. Exit `0` for any verdict, `9` for "not now", `2` for a refusal or usage error, `1` for a malfunction.
 > More information: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support>.
 
-- Print the verdict store, the lease and the kill switch:
+- Print the verdict store, the lease, the kill switch and the open failure transitions (red tip, diverged, push blocked):
 
 `pg-repo-runner status`
 

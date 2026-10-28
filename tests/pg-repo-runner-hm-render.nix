@@ -94,6 +94,44 @@ let
       nix-gamma = { };
     };
   };
+  surfaced = evaluate {
+    enable = true;
+    workspaceRoot = "/example/ws";
+    repos = {
+      nix-alpha.verify = true;
+      nix-beta.verify = true;
+    };
+    surface = {
+      enable = true;
+      trackerDir = "/example/tracker";
+      repoLabels = {
+        nix-alpha = "example-label-a";
+        nix-beta = "example-label-b";
+      };
+    };
+  };
+  surfaceNoLabel = evaluate {
+    enable = true;
+    workspaceRoot = "/example/ws";
+    repos = {
+      nix-alpha.verify = true;
+      nix-beta.verify = true;
+    };
+    surface = {
+      enable = true;
+      trackerDir = "/example/tracker";
+      repoLabels.nix-alpha = "example-label-a";
+    };
+  };
+  surfaceNoTracker = evaluate {
+    enable = true;
+    workspaceRoot = "/example/ws";
+    repos.nix-alpha = { };
+    surface = {
+      enable = true;
+      repoLabels.nix-alpha = "example-label-a";
+    };
+  };
   disabled = evaluate {
     enable = false;
   };
@@ -143,6 +181,15 @@ let
     "disabled installs nothing" = disabled.config.home.packages == [ ];
     "default kill switch is under the state home" =
       (opts defaultsOnly).killSwitchPath == "/example/home/.local/state/pg-repo-runner/kill";
+    "surface is off by default" = !(opts defaultsOnly).surface.enable;
+    "surface: no failed assertion when complete" = failedAssertions surfaced == [ ];
+    "surface: push still false everywhere" = noPush surfaced;
+    "surface: a repo without a label is asserted" = mentions "never filed label-less" (
+      messages surfaceNoLabel
+    );
+    "surface: a missing tracker is asserted" = mentions "surface.trackerDir MUST be an absolute path" (
+      messages surfaceNoTracker
+    );
     "no workspace root: asserted" = mentions "workspaceRoot MUST be set" (messages noRoot);
     "relative workspace root: asserted" = mentions "workspaceRoot MUST be set" (messages relativeRoot);
     "path-shaped repo key: asserted" = mentions "plain repo keys" (messages badKey);
@@ -160,6 +207,7 @@ in
   live = {
     configDefaults = configFileOf defaultsOnly;
     configFlagged = configFileOf flagged;
+    configSurfaced = configFileOf surfaced;
     inherit ((opts defaultsOnly)) package;
   };
 }

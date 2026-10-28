@@ -478,3 +478,316 @@ rr_url_path_encode() {
 rr_snapshot_url() {
   printf 'git+file://%s?rev=%s' "$(rr_url_path_encode "$1")" "$2"
 }
+
+# --- failure surfacing (F3) ----------------------------------------------
+#
+# The kernel surfaces TRANSITIONS, never steady states (design "Failure
+# surfacing", decision D7): a repo going red, `diverged`, `push blocked: needs
+# relock`, a red `build`. Each transition gets at most ONE bead (P1, the repo's
+# label, metadata runner = pg-repo-runner) and ONE notification, however often
+# the same state is reported again. The state of every (repo, kind) pair is a
+# Memento in $RR_STATE_DIR/surface/<repo>.<kind>.json, so a crash, an
+# unreachable tracker or a failed notification leaves the transition PENDING
+# and the next pass finishes exactly the missing part (BF-2: never another
+# tracker). A later tip that descends from the red one and is green closes the
+# runner's OWN bead with the green verdict as evidence; a bead without the
+# runner marker is never touched. Nothing here reverts, resets or edits a repo
+# (fix-forward) and nothing pushes.
+#
+# Surfacing is off unless the config carries `[surface] enabled = true`.
+
+# rr_surface_kind_valid KIND: one of the transitions the design names.
+rr_surface_kind_valid() {
+  case "$1" in red | diverged | needs-relock | build-red) return 0 ;; esac
+  return 1
+}
+
+# rr_surface_enabled: the config enables surfacing.
+rr_surface_enabled() {
+  [[ "$(rr_cfg '.surface.enabled // false' 2>/dev/null)" == true ]]
+}
+
+# rr_surface_file REPO KIND: the path of the transition's Memento.
+rr_surface_file() { printf '%s/surface/%s.%s.json' "$RR_STATE_DIR" "$1" "$2"; }
+
+# rr_surface_load REPO KIND: the stored record, or `{}`.
+rr_surface_load() {
+  local f
+  f="$(rr_surface_file "$1" "$2")"
+  if [[ -f $f ]]; then cat "$f"; else echo '{}'; fi
+}
+
+# rr_surface_store REPO KIND JSON: atomic write (temp file, then rename).
+rr_surface_store() {
+  local f tmp dir
+  f="$(rr_surface_file "$1" "$2")"
+  dir="$(dirname "$f")"
+  mkdir -p "$dir" || return 1
+  tmp="$(mktemp "$dir/.$1.$2.XXXXXX")" || return 1
+  if ! printf '%s\n' "$3" >"$tmp" || ! mv -f "$tmp" "$f"; then
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+# rr_surface_records_json: every stored transition record as one JSON array.
+rr_surface_records_json() {
+  local f
+  local -a files=()
+  if [[ -d $RR_STATE_DIR/surface ]]; then
+    while IFS= read -r -d '' f; do
+      files+=("$f")
+    done < <(find "$RR_STATE_DIR/surface" -type f -name '*.json' ! -name '.*' -print0 | sort -z)
+  fi
+  if ((${#files[@]} == 0)); then
+    echo '[]'
+    return 0
+  fi
+  rr_jq -s 'sort_by(.repo, .kind)' "${files[@]}"
+}
+
+# rr_bd ARGS...: bd against the configured tracker and no other (BF-2: no
+# fallback). BEADS_DIR is dropped so the config, not an inherited variable,
+# picks the tracker; dolt is never auto-started.
+rr_bd() {
+  local tracker
+  tracker="$(rr_cfg '.surface.tracker_dir // empty')"
+  if [[ -z $tracker ]]; then
+    rr_err "surface.tracker_dir is not configured"
+    return 1
+  fi
+  env -u BEADS_DIR BEADS_DOLT_AUTO_START=0 "${RR_BD_BIN:-bd}" -C "$tracker" --actor pg-repo-runner "$@"
+}
+
+# rr_bd_norm: bd --json on stdin, normalised to the bare value whether or not
+# BD_JSON_ENVELOPE wrapped it in {"data": ...}.
+rr_bd_norm() {
+  rr_jq -c 'if type == "object" and has("data") then .data else . end'
+}
+
+# rr_surface_label REPO: the repo label from surface.repo_labels, empty when none.
+rr_surface_label() {
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  rr_jq -r --arg k "$1" '.surface.repo_labels[$k] // empty' <<<"$RR_CONFIG_JSON"
+}
+
+# rr_surface_title REPO KIND SHA: the bead title.
+rr_surface_title() {
+  local repo="$1" kind="$2" sha="${3:0:12}"
+  case "$kind" in
+  red) printf '%s: primary tip %s fails nix flake check' "$repo" "$sha" ;;
+  diverged) printf '%s: primary branch has diverged from its remote' "$repo" ;;
+  needs-relock) printf '%s: push blocked: needs relock' "$repo" ;;
+  build-red) printf '%s: workspace build is red at %s' "$repo" "$sha" ;;
+  esac
+}
+
+# rr_surface_body REPO KIND SHA DETAIL: the self-contained bead description.
+rr_surface_body() {
+  local repo="$1" kind="$2" sha="$3" detail="$4"
+  printf 'pg-repo-runner saw a transition on %s: %s (at %s).\n\n' "$repo" "$kind" "$sha"
+  [[ -z $detail ]] || printf 'Evidence: %s\n\n' "$detail"
+  printf 'Read-only facts: `pg-repo-runner status` lists the verdicts and the open transitions.\n\n'
+  printf 'The expectation is FIX-FORWARD: land a fix, which produces a new tip and a new verdict. '
+  printf 'The runner never reverts, resets or edits a repo. When a later tip that descends from '
+  printf 'this one is green, the runner comments here with the green verdict and closes this bead '
+  printf '(it closes only beads carrying metadata runner = pg-repo-runner).\n'
+}
+
+# rr_bead_find REPO KIND: prints the id of the runner's own open bead for the
+# pair (crash recovery: the bead may exist although its id was never stored).
+# Returns 1 when the tracker cannot be queried.
+rr_bead_find() {
+  local out
+  out="$(rr_bd list --metadata-field runner=pg-repo-runner --metadata-field "repo=$1" \
+    --metadata-field "kind=$2" --status open,in_progress,blocked,deferred -n 0 --json 2>/dev/null)" || return 1
+  rr_bd_norm <<<"$out" | rr_jq -r 'if type == "array" then (.[0].id // empty) else empty end'
+}
+
+# rr_bead_create REPO KIND SHA DETAIL: files the P1 bead and prints its id.
+# Refuses (return 1) without a repo label: a bead with no repo label would be
+# invisible to its owner.
+rr_bead_create() {
+  local repo="$1" kind="$2" sha="$3" detail="$4" label meta out
+  label="$(rr_surface_label "$repo")"
+  if [[ -z $label ]]; then
+    rr_err "surface: no repo label for '$repo' in surface.repo_labels: no bead is filed"
+    return 1
+  fi
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  meta="$(rr_jq -nc --arg repo "$repo" --arg kind "$kind" --arg sha "$sha" \
+    '{runner: "pg-repo-runner", repo: $repo, kind: $kind, sha: $sha}')" || return 1
+  out="$(rr_bd create "$(rr_surface_title "$repo" "$kind" "$sha")" --type task --priority 1 \
+    --labels "$label" --metadata "$meta" --description "$(rr_surface_body "$repo" "$kind" "$sha" "$detail")" \
+    --json 2>/dev/null)" || return 1
+  rr_bd_norm <<<"$out" | rr_jq -r 'if type == "array" then .[0].id else .id end // empty'
+}
+
+# rr_bead_close_own ID EVIDENCE: comments EVIDENCE on bead ID and closes it, but
+# only when it carries metadata runner = pg-repo-runner. Returns 0 when the bead
+# is closed (by this call or earlier) or is not ours (left alone), 1 when the
+# tracker could not be reached or refused.
+rr_bead_close_own() {
+  local id="$1" evidence="$2" out owner status
+  out="$(rr_bd show "$id" --json 2>/dev/null)" || return 1
+  out="$(rr_bd_norm <<<"$out" | rr_jq -c 'if type == "array" then .[0] else . end')" || return 1
+  owner="$(rr_jq -r '.metadata.runner // ""' <<<"$out")"
+  status="$(rr_jq -r '.status // ""' <<<"$out")"
+  if [[ $owner != pg-repo-runner ]]; then
+    rr_log "surface: bead $id is not owned by pg-repo-runner; left alone"
+    return 0
+  fi
+  [[ $status == closed ]] && return 0
+  rr_bd comments add "$id" "$evidence" >/dev/null 2>&1 || return 1
+  rr_bd close "$id" --reason "$evidence" >/dev/null 2>&1 || return 1
+}
+
+# rr_notify TITLE BODY: a macOS notification. TITLE and BODY travel as argv items
+# of a FIXED AppleScript, never inside the script text, so nothing in them can be
+# run as AppleScript.
+rr_notify() {
+  "${RR_OSASCRIPT_BIN:-/usr/bin/osascript}" \
+    -e 'on run argv' \
+    -e 'display notification (item 2 of argv) with title (item 1 of argv)' \
+    -e 'end run' "$1" "$2" >/dev/null 2>&1
+}
+
+# rr_surface_flush REPO KIND: finishes whatever the transition still owes, each
+# part recorded as done the moment it succeeds: (1) a requested close, (2) the
+# bead, (3) the notification. A part that fails stays owed and is retried on the
+# next pass; a failure never fails the run.
+rr_surface_flush() {
+  local repo="$1" kind="$2" rec bead notified close_sha evidence id sha detail now title
+  rec="$(rr_surface_load "$repo" "$kind")"
+  [[ "$(rr_jq -r '.state // ""' <<<"$rec")" == open ]] || return 0
+  bead="$(rr_jq -r '.bead // ""' <<<"$rec")"
+  notified="$(rr_jq -r '.notified // false' <<<"$rec")"
+  now="$(rr_now)"
+
+  close_sha="$(rr_jq -r '.pendingClose.sha // ""' <<<"$rec")"
+  if [[ -n $close_sha ]]; then
+    evidence="$(rr_jq -r '.pendingClose.evidence // ""' <<<"$rec")"
+    if [[ -n $bead ]] && ! rr_bead_close_own "$bead" "$evidence"; then
+      rr_log "surface: $repo $kind: closing $bead is pending (tracker unreachable)"
+      return 0
+    fi
+    # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+    rec="$(rr_jq -c --arg now "$now" '.state = "clear" | .updatedAt = $now | .clearedBy = .pendingClose.sha | del(.pendingClose)' <<<"$rec")"
+    rr_surface_store "$repo" "$kind" "$rec"
+    rr_log "surface: $repo $kind cleared by $close_sha${bead:+ (bead $bead closed)}"
+    return 0
+  fi
+
+  sha="$(rr_jq -r '.sha' <<<"$rec")"
+  detail="$(rr_jq -r '.detail // ""' <<<"$rec")"
+  if [[ -z $bead ]]; then
+    if id="$(rr_bead_find "$repo" "$kind")" && [[ -z $id ]]; then
+      id="$(rr_bead_create "$repo" "$kind" "$sha" "$detail")" || id=""
+    fi
+    if [[ -n ${id:-} ]]; then
+      bead="$id"
+      # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+      rec="$(rr_jq -c --arg b "$bead" --arg now "$now" '.bead = $b | .updatedAt = $now' <<<"$rec")"
+      rr_surface_store "$repo" "$kind" "$rec" || return 0
+      rr_log "surface: $repo $kind: bead $bead"
+    else
+      rr_log "surface: $repo $kind: the bead is pending (no tracker, no repo label, or tracker unreachable)"
+    fi
+  fi
+  if [[ $notified != true ]]; then
+    title="pg-repo-runner: $repo $kind"
+    if [[ "$(rr_cfg '.surface.notify | if . == null then true else . end')" != true ]] ||
+      rr_notify "$title" "$(rr_surface_title "$repo" "$kind" "$sha")${bead:+ ($bead)}"; then
+      # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+      rec="$(rr_jq -c --arg now "$now" '.notified = true | .updatedAt = $now' <<<"$(rr_surface_load "$repo" "$kind")")"
+      rr_surface_store "$repo" "$kind" "$rec" || return 0
+    else
+      rr_log "surface: $repo $kind: the notification is pending (osascript failed)"
+    fi
+  fi
+  return 0
+}
+
+# rr_surface_flush_repo REPO: rr_surface_flush for every kind of REPO.
+rr_surface_flush_repo() {
+  local kind
+  rr_surface_enabled || return 0
+  for kind in red diverged needs-relock build-red; do
+    rr_surface_flush "$1" "$kind"
+  done
+}
+
+# rr_surface_raise REPO KIND SHA [DETAIL]: REPO is in a bad state of KIND at SHA.
+# The first report after a clear (or ever) is the TRANSITION: it opens a record
+# and surfaces it (one bead, one notification). A report while the record is
+# already open is a steady state: no bead, no notification; a newer red sha is
+# commented on the bead. Returns 2 on a bad argument.
+rr_surface_raise() {
+  local repo="$1" kind="$2" sha="$3" detail="${4:-}" rec last bead now
+  rr_surface_enabled || return 0
+  rr_valid_key "$repo" && rr_surface_kind_valid "$kind" && rr_valid_sha "$sha" || {
+    rr_err "surface: bad arguments: $repo $kind $sha"
+    return 2
+  }
+  now="$(rr_now)"
+  rec="$(rr_surface_load "$repo" "$kind")"
+  # a close that never completed is void once the state is bad again: the bead is
+  # still the right one for it
+  if [[ -n "$(rr_jq -r '.pendingClose.sha // ""' <<<"$rec")" ]]; then
+    rec="$(rr_jq -c 'del(.pendingClose)' <<<"$rec")"
+    rr_surface_store "$repo" "$kind" "$rec" || return 1
+  fi
+  if [[ "$(rr_jq -r '.state // ""' <<<"$rec")" != open ]]; then
+    # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+    rec="$(rr_jq -nc --arg repo "$repo" --arg kind "$kind" --arg sha "$sha" --arg detail "$detail" --arg now "$now" \
+      '{repo: $repo, kind: $kind, state: "open", sha: $sha, lastSha: $sha, detail: $detail,
+        bead: "", notified: false, openedAt: $now, updatedAt: $now}')" || return 1
+    rr_surface_store "$repo" "$kind" "$rec" || return 1
+    rr_log "surface: $repo $kind: transition at $sha"
+  else
+    last="$(rr_jq -r '.lastSha // ""' <<<"$rec")"
+    if [[ $kind == red && $sha != "$last" ]]; then
+      # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+      rec="$(rr_jq -c --arg sha "$sha" --arg now "$now" '.lastSha = $sha | .updatedAt = $now' <<<"$rec")"
+      rr_surface_store "$repo" "$kind" "$rec" || return 1
+      bead="$(rr_jq -r '.bead // ""' <<<"$rec")"
+      if [[ -n $bead ]]; then
+        rr_bd comments add "$bead" "Still red at a newer tip: $sha. ${detail}" >/dev/null 2>&1 ||
+          rr_log "surface: $repo $kind: could not comment on $bead"
+      fi
+    fi
+  fi
+  rr_surface_flush "$repo" "$kind"
+}
+
+# rr_surface_resolve REPO KIND SHA EVIDENCE: the bad state of KIND is over at SHA.
+# Records the request and finishes it (comment with EVIDENCE, close the runner's
+# own bead). A no-op when no transition of that kind is open.
+rr_surface_resolve() {
+  local repo="$1" kind="$2" sha="$3" evidence="$4" rec now
+  rr_surface_enabled || return 0
+  rec="$(rr_surface_load "$repo" "$kind")"
+  [[ "$(rr_jq -r '.state // ""' <<<"$rec")" == open ]] || return 0
+  now="$(rr_now)"
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  rec="$(rr_jq -c --arg sha "$sha" --arg ev "$evidence" --arg now "$now" \
+    '.pendingClose = {sha: $sha, evidence: $ev} | .updatedAt = $now' <<<"$rec")"
+  rr_surface_store "$repo" "$kind" "$rec" || return 1
+  rr_surface_flush "$repo" "$kind"
+}
+
+# rr_surface_green REPO REPOPATH SHA EVIDENCE: a green check verdict at SHA. It
+# resolves an open red transition when SHA descends from the red tip (a later
+# tip, so the red state is really over); an unrelated green leaves it open.
+rr_surface_green() {
+  local repo="$1" path="$2" sha="$3" evidence="$4" rec last
+  rr_surface_enabled || return 0
+  rec="$(rr_surface_load "$repo" red)"
+  [[ "$(rr_jq -r '.state // ""' <<<"$rec")" == open ]] || return 0
+  last="$(rr_jq -r '.lastSha // ""' <<<"$rec")"
+  if [[ $sha != "$last" ]] && rr_git -C "$path" merge-base --is-ancestor "$last" "$sha" 2>/dev/null; then
+    rr_surface_resolve "$repo" red "$sha" "$evidence"
+  else
+    rr_log "surface: $repo red: green at $sha does not descend from the red tip $last; left open"
+  fi
+}

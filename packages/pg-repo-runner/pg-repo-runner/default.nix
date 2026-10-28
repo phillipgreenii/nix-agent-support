@@ -5,6 +5,9 @@
   # offers (rr_nix_run). null leaves the variable empty: rr_nix_run then runs nix
   # without the wrapper and says so (the workspace rule: never block on it).
   pgNixLogWrapped ? null,
+  # bd, for the test check only (see ../default.nix).
+  beads ? null,
+  testSupport ? null,
 }:
 
 mkBashScript {
@@ -43,5 +46,7 @@ mkBashScript {
     pkgs.jq
     pkgs.tomlq
     pkgs.ps
-  ];
+  ]
+  ++ pkgs.lib.optional (beads != null) beads;
+  inherit testSupport;
 }

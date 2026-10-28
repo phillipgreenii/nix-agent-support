@@ -26,6 +26,12 @@ export RR_NICE_BIN="${RR_NICE_BIN:-nice}"
 # average one: the bats suites use it to count and classify nix runs).
 export RR_NIX_BIN="${PG_REPO_RUNNER_NIX_BIN:-${RR_NIX_BIN:-}}"
 export RR_NIX_LOG_WRAPPED_BIN="${RR_NIX_LOG_WRAPPED_BIN:-}"
+# bd and osascript are resolved from the ambient PATH (like every bd-calling script
+# here; the machine wrapper carries the tracker guards). The PG_REPO_RUNNER_* names
+# are the test seams for the failure-surfacing step: a real bd on a throwaway
+# tracker, a recording stand-in for the macOS notifier.
+export RR_BD_BIN="${PG_REPO_RUNNER_BD_BIN:-${RR_BD_BIN:-bd}}"
+export RR_OSASCRIPT_BIN="${PG_REPO_RUNNER_OSASCRIPT_BIN:-${RR_OSASCRIPT_BIN:-/usr/bin/osascript}}"
 
 # Exit status of a "not now" answer: pg-router re-offers the item.
 RR_EXIT_BUSY=9
@@ -85,6 +91,17 @@ the sampled 1-minute load in the record. A signal exit (128 + n) is a
 malfunction: exit 1, no verdict, pg-router retries. A verdict that already
 exists for <sha> ends the run at once (exit 0, no nix). verify needs a sha.
 
+Failure surfacing (config [surface] enabled = true; off otherwise): a TRANSITION,
+never a steady state, files ONE P1 bead (the repo's label from surface.repo_labels,
+metadata runner = pg-repo-runner) in the tracker surface.tracker_dir and posts ONE
+macOS notification: a repo's tip going red, diverged, push blocked: needs relock,
+a red build. A repeated report files nothing more (a newer red sha is only
+commented on the bead). A later tip that descends from the red one and is green
+comments on the runner's OWN bead with the green verdict and closes it; a bead
+without the marker is never touched. A bead or notification that could not be
+delivered stays owed and is retried on the next run; the runner never files in
+another tracker, and it never reverts, resets, edits or pushes a repo.
+
 Exit codes:
   0  the run completed, whatever the verdict (a red check exits 0)
   9  busy: not now (kill switch, load, lease held); pg-router re-offers the item
@@ -93,7 +110,7 @@ Exit codes:
 
 status [--json] [--repo KEY]:
   Prints every stored verdict (optionally one repo's), whether the lease is free,
-  held or stale, and whether a kill file is present. --json prints only the
+  held or stale, whether a kill file is present, and the open failure transitions. --json prints only the
   verdicts, as one JSON array. It reads the state directory and nothing else.
 
 Files and environment:
@@ -106,6 +123,8 @@ Files and environment:
   PG_REPO_RUNNER_MAX_LOAD  replaces the load threshold
   PG_REPO_RUNNER_NCPU      replaces the core count used as the default threshold
   PG_REPO_RUNNER_NIX_BIN   replaces the nix binary (test seam)
+  PG_REPO_RUNNER_BD_BIN    replaces the bd binary (default: bd on PATH)
+  PG_REPO_RUNNER_OSASCRIPT_BIN   replaces the macOS notifier (test seam)
   PG_REPO_RUNNER_RETRY_WINDOW   seconds an emitted tip item stays offered
                                 (else thresholds.retry_window, else 3600)
 
@@ -207,9 +226,16 @@ act_verify() {
     '{durationS: $d, loadStart: ($l0 | tonumber? // null), loadEnd: ($l1 | tonumber? // null)}')" || return 1
   if ((rc == 0)); then
     rr_verdict_write "$repo" "$full" check green locked "$started" "$finished" "$rc" "$log" "$extra" || return 1
+    # surfacing never changes the exit status of the run: a failure stays owed
+    rr_surface_green "$repo" "$RR_REPO_PATH" "$full" \
+      "Green verdict for $repo@$full (nix flake check, finished $finished, log $log). This tip descends from the red one." ||
+      rr_log "surface: green handling failed for $repo@$full"
   else
     rr_verdict_write "$repo" "$full" check red locked "$started" "$finished" "$rc" "$log" "$extra" || return 1
+    rr_surface_raise "$repo" red "$full" "red check verdict, exit $rc, log $log" ||
+      rr_log "surface: raising the red transition failed for $repo@$full"
   fi
+  rr_surface_flush_repo "$repo" || true
   return 0
 }
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
@@ -355,7 +381,7 @@ run_tips() {
 # --- status -----------------------------------------------------------------
 
 run_status() {
-  local json=0 repo="" verdicts lease kill=""
+  local json=0 repo="" verdicts lease kill="" transitions
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --json) json=1 ;;
@@ -394,6 +420,19 @@ run_status() {
   else
     printf 'verdicts:\n'
     rr_jq -r '.[] | [.repo, .sha[0:12], .kind, .result, .inputs, .finishedAt] | @tsv' <<<"$verdicts"
+  fi
+  transitions="$(rr_surface_records_json)" || transitions='[]'
+  if [[ -n $repo ]]; then
+    # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+    transitions="$(rr_jq -c --arg r "$repo" 'map(select(.repo == $r))' <<<"$transitions")"
+  fi
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  transitions="$(rr_jq -c 'map(select(.state == "open"))' <<<"$transitions")"
+  if [[ $(rr_jq 'length' <<<"$transitions") -eq 0 ]]; then
+    printf 'open transitions: none\n'
+  else
+    printf 'open transitions:\n'
+    rr_jq -r '.[] | [.repo, .kind, .lastSha[0:12], (.bead | if . == "" then "bead-pending" else . end), (if .notified then "notified" else "notify-pending" end)] | @tsv' <<<"$transitions"
   fi
   exit 0
 }
