@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // parseBacklog sums queues[].depth from a cli.status-reply body -- the same
@@ -35,12 +37,12 @@ func parseBacklog(raw []byte) (int, error) {
 func fetchBacklogFromStatus(ctx context.Context, opts runOptions) (int, error) {
 	sctx, cancel := context.WithTimeout(ctx, opts.statusTimeout)
 	defer cancel()
-	r := runner.do(sctx, Call{Name: opts.pgRouterPath, Args: []string{"status", "--json"}})
+	r := runnerOrExec()(sctx, cmdrun.Call{Name: opts.pgRouterPath, Args: []string{"status", "--json"}})
 	var err error
 	switch {
 	case r.StartErr != nil:
 		err = r.StartErr
-	case r.Signaled:
+	case r.Signal != "" || r.CtxErr != nil:
 		err = errors.New("signal: killed")
 	case r.Code != 0:
 		err = fmt.Errorf("exit status %d", r.Code)
@@ -54,5 +56,5 @@ func fetchBacklogFromStatus(ctx context.Context, opts runOptions) (int, error) {
 		}
 		return 0, fmt.Errorf("pg-router status --json: %w", err)
 	}
-	return parseBacklog([]byte(r.Stdout))
+	return parseBacklog(r.Stdout)
 }

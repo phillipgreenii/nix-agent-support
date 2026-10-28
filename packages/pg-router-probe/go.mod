@@ -1,8 +1,9 @@
 module github.com/phillipgreenii/pg-router-probe
 
-go 1.25.0
+go 1.25.9
 
 require (
+	github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/pflag v1.0.5
 )

@@ -136,21 +136,18 @@ func TestListEscalatedHonorsExplicitTimeout(t *testing.T) {
 }
 
 // recordedArgs runs fn and returns the exact argv the in-process double
-// observed on its last call (recordCall, testmain_test.go), so a test can
-// assert on the REAL argv this probe built rather than trusting a code read
-// of the hardcoded --backend constant.
+// observed on its last call during fn (currentFake, testmain_test.go), so a
+// test can assert on the REAL argv this probe built rather than trusting a
+// code read of the hardcoded --backend constant.
 func recordedArgs(t *testing.T, fn func()) string {
 	t.Helper()
-	recordedMu.Lock()
-	recordedCalls = nil
-	recordedMu.Unlock()
+	before := len(currentFake.Calls())
 	fn()
-	recordedMu.Lock()
-	defer recordedMu.Unlock()
-	if len(recordedCalls) == 0 {
+	calls := currentFake.Calls()[before:]
+	if len(calls) == 0 {
 		t.Fatalf("read recorded args: no call reached the double")
 	}
-	return fmt.Sprint(recordedCalls[len(recordedCalls)-1].Args)
+	return fmt.Sprint(calls[len(calls)-1].Args)
 }
 
 func TestEveryPgConnectorCallPinsTheBeadsBackend(t *testing.T) {
