@@ -10,7 +10,8 @@
 // and vocabulary are never re-encoded) plus queries: one member for EVERY query
 // configured for that backend, {"watched": <bool>}. The members a backend
 // declares under vocabulary.queries are copied across as given; a configured
-// query the backend did not list reads {"watched": false}. A backend whose
+// query the backend did not list reads the watched value of its own configured
+// definition (false unless it carries watched = true). A backend whose
 // capabilities call failed contributes a degraded sources[] row with its reason
 // and NO backends entry. The op is answered without a daemon (INTF-WIRE-CAPS-2),
 // so the verb makes exactly one capabilities request per backend and no other.
@@ -25,6 +26,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -121,8 +123,12 @@ func fanOutCapabilities(ctx context.Context, reg *Registry, backends []string) c
 }
 
 // capabilitiesQueries builds a backend's queries member: every member of the
-// backend's own vocabulary.queries as given, then {"watched": false} for each
-// configured query (the names under backends.<name>.queries) it did not list.
+// backend's own vocabulary.queries as given (a backend's own declaration
+// wins), then {"watched": <configured watched>} for each configured query (the
+// names under backends.<name>.queries) it did not list. The backend cannot see
+// its configuration on a capabilities call, so the umbrella fills the value
+// from the backends.<name>.queries definition it holds (a bare string, a list
+// or an object without watched reads false).
 func capabilitiesQueries(reg *Registry, backend string, resp *scriptout.CapabilitiesResponse) (map[string]any, error) {
 	queries := map[string]any{}
 	if declared, ok := resp.Vocabulary["queries"].(map[string]any); ok {
@@ -134,10 +140,16 @@ func capabilitiesQueries(reg *Registry, backend string, resp *scriptout.Capabili
 	if err != nil {
 		return nil, err
 	}
+	config, err := reg.BackendConfig(backend)
+	if err != nil {
+		return nil, err
+	}
 	for _, name := range names {
-		if _, ok := queries[name]; !ok {
-			queries[name] = map[string]any{"watched": false}
+		if _, ok := queries[name]; ok {
+			continue
 		}
+		def, _ := schema.ResolveQueryDef(config, name)
+		queries[name] = map[string]any{"watched": def.Watched}
 	}
 	return queries, nil
 }

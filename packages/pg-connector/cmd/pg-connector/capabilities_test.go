@@ -298,3 +298,62 @@ func TestCapabilities_HumanOutput_ListsEachQueryWatchedValue(t *testing.T) {
 		}
 	}
 }
+
+// A backend that declares no vocabulary.queries (the one-shot beads-like
+// backend) cannot see its configuration on a capabilities call, so the
+// umbrella reports each configured query's own watched value; a member the
+// backend does declare wins over the configuration.
+func TestCapabilities_ConfiguredWatched_FillsMembersTheBackendDidNotDeclare(t *testing.T) {
+	cases := []struct {
+		name        string
+		backendYAML string
+		answer      string
+		want        map[string]map[string]any
+	}{
+		{
+			name: "bare string reads false and expr object with watched true reads true",
+			backendYAML: "  backend-caps-cfg:\n    queries:\n" +
+				"      plain: \"status=open\"\n" +
+				"      watchedq:\n        expr: \"status=open\"\n        watched: true\n",
+			answer: capsAnswerNoQueries,
+			want:   map[string]map[string]any{"plain": {"watched": false}, "watchedq": {"watched": true}},
+		},
+		{
+			name: "list and object without watched read false, explicit false reads false",
+			backendYAML: "  backend-caps-cfg:\n    queries:\n" +
+				"      listed: [\"a\", \"b\"]\n" +
+				"      nowatch:\n        expr: \"x\"\n" +
+				"      off:\n        expr: \"y\"\n        watched: false\n",
+			answer: capsAnswerNoVocab,
+			want:   map[string]map[string]any{"listed": {"watched": false}, "nowatch": {"watched": false}, "off": {"watched": false}},
+		},
+		{
+			name: "a declared member keeps its declared value even when the configuration says otherwise",
+			backendYAML: "  backend-caps-cfg:\n    queries:\n" +
+				"      q:\n        expr: \"a\"\n        watched: false\n" +
+				"      r:\n        expr: \"b\"\n        watched: true\n" +
+				"      s:\n        expr: \"c\"\n        watched: true\n",
+			// the backend declares q watched (config says false) and r
+			// unwatched (config says true); s is not declared.
+			answer: `{"protocolVersion":1,"schemaVersions":{"issue":1},"ops":["capabilities"],"vocabulary":{"queries":{"q":{"watched":true},"r":{"watched":false}}}}`,
+			want:   map[string]map[string]any{"q": {"watched": true}, "r": {"watched": false}, "s": {"watched": true}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			capsConfig(t, "issue", tc.backendYAML, "backend-caps-cfg")
+			capsBackend(t, "backend-caps-cfg", tc.answer)
+			stdout, stderr, code := runCapsArgs(t, []string{"issue", "capabilities"})
+			if code != 0 {
+				t.Fatalf("exit code = %d; stdout=%s stderr=%s", code, stdout, stderr)
+			}
+			w := decodeCapsWire(t, stdout)
+			if len(w.Backends) != 1 {
+				t.Fatalf("want one backend: %s", stdout)
+			}
+			if !reflect.DeepEqual(w.Backends[0].Queries, tc.want) {
+				t.Fatalf("queries = %v, want %v", w.Backends[0].Queries, tc.want)
+			}
+		})
+	}
+}
