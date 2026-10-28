@@ -578,3 +578,121 @@ func TestRunEntityChange_ConcurrentCallsNeverRegressVersion(t *testing.T) {
 		last = r.Version
 	}
 }
+
+// ecIssueVolatile builds an issue gather result like ecIssue whose show
+// carries the volatile fields NormalizeIssuePayload drops (as_of,
+// served_from, age_seconds) and a title.
+func ecIssueVolatile(t *testing.T, title, asOf, servedFrom string, age int) gather.GatherResult {
+	t.Helper()
+	show := map[string]any{
+		"id": "i-1", "owner": "me", "issue_type": "task", "state": "open", "assignee": "me",
+		"title": title, "metadata": workMeta("7"),
+		"as_of": asOf, "served_from": servedFrom, "age_seconds": age,
+	}
+	showJSON, err := json.Marshal(show)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(gather.IssueFacts{IssueShow: showJSON})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return gather.GatherResult{Payload: payload, AsOf: asOf}
+}
+
+// ecState captures what an unchanged write must leave identical: the entity
+// row, its change_log rows, and the interpretation and link tables.
+type ecState struct {
+	Entity  store.Entity
+	Changes []store.ChangeRecord
+	Interps []store.Interpretation
+	Links   []store.XrefLink
+}
+
+func captureState(t *testing.T, p *Pipeline) ecState {
+	t.Helper()
+	e, found, err := p.store.GetEntity(ecRepo, "issue", "i-1")
+	if err != nil || !found {
+		t.Fatalf("GetEntity = (%v, %v)", found, err)
+	}
+	interps, err := p.store.ListInterpretations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	links, err := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ecState{Entity: e, Changes: p.changeRows(t, "issue", "i-1"), Interps: interps, Links: links}
+}
+
+func TestRunEntityChange_SkipUnchangedWrite_UnchangedWritesNothing(t *testing.T) {
+	var gerr error
+	res := ecIssueVolatile(t, "first", "2026-09-16T00:00:00Z", "origin", 0)
+	p := ecPipeline(t, &res, &gerr)
+	lfp := "fp-1"
+	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{ListFP: &lfp})
+	// Tamper with the interpretation row and drop the derived links, so a
+	// post-commit step that ran would visibly restore them.
+	interp, found, err := p.store.GetInterpretation(ecRepo, "issue", "i-1")
+	if err != nil || !found {
+		t.Fatalf("GetInterpretation = (%v, %v)", found, err)
+	}
+	interp.Category = "tampered"
+	if err := p.store.UpsertInterpretation(interp); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.store.ReplaceDerivedXrefs(ecRepo, "issue", "i-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	before := captureState(t, p)
+	if before.Entity.ListFP != lfp || len(before.Interps) != 1 || before.Interps[0].Category != "tampered" || len(before.Links) != 0 {
+		t.Fatalf("setup state = %+v", before)
+	}
+
+	// Only as_of, served_from and age_seconds differ.
+	res = ecIssueVolatile(t, "first", "2026-09-16T05:00:00Z", "cache", 9000)
+	r := mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{SkipUnchangedWrite: true})
+	if !r.Unchanged || r.Written || r.Version != 0 || len(r.Kinds) != 0 {
+		t.Fatalf("result = %+v, want Unchanged and not Written", r)
+	}
+	if after := captureState(t, p); !reflect.DeepEqual(before, after) {
+		t.Fatalf("an unchanged read changed the store:\nbefore %+v\nafter  %+v", before, after)
+	}
+
+	// Negative control: without the option the same read rewrites the row.
+	r = mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{})
+	if r.Unchanged || !r.Written || r.Version != before.Entity.Version+1 {
+		t.Fatalf("control result = %+v, want a write at version %d", r, before.Entity.Version+1)
+	}
+	if after := captureState(t, p); reflect.DeepEqual(before.Interps, after.Interps) || len(after.Links) != 1 {
+		t.Fatalf("control: the post-commit steps did not restore the tampered rows, so the assertion above proves nothing: %+v", after)
+	}
+}
+
+func TestRunEntityChange_SkipUnchangedWrite_ChangedTakesNormalPath(t *testing.T) {
+	var gerr error
+	res := ecIssueVolatile(t, "first", "2026-09-16T00:00:00Z", "origin", 0)
+	p := ecPipeline(t, &res, &gerr)
+	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
+	before := captureState(t, p)
+
+	res = ecIssueVolatile(t, "second", "2026-09-16T00:00:00Z", "origin", 0)
+	r := mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{SkipUnchangedWrite: true})
+	if r.Unchanged || !r.Written || r.Version != before.Entity.Version+1 {
+		t.Fatalf("result = %+v, want a normal write at version %d", r, before.Entity.Version+1)
+	}
+	if after := captureState(t, p); len(after.Changes) != len(before.Changes)+1 {
+		t.Fatalf("change_log rows %d -> %d, want one appended kind row", len(before.Changes), len(after.Changes))
+	}
+}
+
+func TestRunEntityChange_SkipUnchangedWrite_AbsentEntityIsWritten(t *testing.T) {
+	var gerr error
+	res := ecIssueVolatile(t, "first", "2026-09-16T00:00:00Z", "origin", 0)
+	p := ecPipeline(t, &res, &gerr)
+	r := mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{SkipUnchangedWrite: true})
+	if r.Unchanged || !r.Written || r.Version != 1 {
+		t.Fatalf("result = %+v, want a first write", r)
+	}
+}

@@ -66,7 +66,7 @@ func TestOpen_EnsuresIssueFeedStorage(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = s.Close() }()
-			for _, col := range []string{"backend", "watched"} {
+			for _, col := range []string{"backend", "watched", "read_attempt_at", "read_ok_at"} {
 				if !hasEntityColumn(t, s, col) {
 					t.Errorf("entity.%s missing after Open", col)
 				}
@@ -91,13 +91,14 @@ func TestEnsureIssueFeedStorage_LeavesUserVersionAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	if hasEntityColumn(t, s, "backend") || hasIngestFailedTable(t, s) {
+	if hasEntityColumn(t, s, "backend") || hasEntityColumn(t, s, "read_ok_at") || hasIngestFailedTable(t, s) {
 		t.Fatal("fixture unexpectedly has the additions")
 	}
 	if err := ensureIssueFeedStorage(s); err != nil {
 		t.Fatal(err)
 	}
-	if !hasEntityColumn(t, s, "backend") || !hasEntityColumn(t, s, "watched") || !hasIngestFailedTable(t, s) {
+	if !hasEntityColumn(t, s, "backend") || !hasEntityColumn(t, s, "watched") ||
+		!hasEntityColumn(t, s, "read_attempt_at") || !hasEntityColumn(t, s, "read_ok_at") || !hasIngestFailedTable(t, s) {
 		t.Fatal("ensure did not add the columns and table")
 	}
 	if got := userVersion(t, s); got != before {
@@ -202,6 +203,8 @@ func legacyCutoverStore(t *testing.T) (string, int) {
 		`DROP TABLE ingest_failed`,
 		`ALTER TABLE entity DROP COLUMN backend`,
 		`ALTER TABLE entity DROP COLUMN watched`,
+		`ALTER TABLE entity DROP COLUMN read_attempt_at`,
+		`ALTER TABLE entity DROP COLUMN read_ok_at`,
 	} {
 		if _, err := s.sql.Exec(stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)
@@ -219,7 +222,7 @@ func TestOpenReadOnly_StoreWithoutIssueFeedStorage(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	list, err := s.ListEntities()
-	if err != nil || len(list) != 1 || list[0].Backend != "" || list[0].Watched != nil {
+	if err != nil || len(list) != 1 || list[0].Backend != "" || list[0].Watched != nil || list[0].ReadAttemptAt != "" || list[0].ReadOKAt != "" {
 		t.Fatalf("ListEntities = (%+v, %v), want one row with Backend \"\" and Watched nil", list, err)
 	}
 	got, found, err := s.GetEntity(clRepo, clType, clID)
@@ -341,5 +344,118 @@ func TestEntityReads_IssueFeedColumnsOnVersion1(t *testing.T) {
 	list, err := s.ListEntities()
 	if err != nil || len(list) != 1 || list[0].Backend != b || list[0].Watched == nil || !*list[0].Watched {
 		t.Fatalf("ListEntities = (%+v, %v)", list, err)
+	}
+}
+
+// TestSetEntityReadTimes covers the column-only write of the two read times:
+// only non-nil arguments change, nothing else changes, and no change_log row
+// is appended.
+func TestSetEntityReadTimes(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	if _, err := s.WriteEntityWithLog(clEntity("a"), 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	read := func() Entity {
+		t.Helper()
+		e, found, err := s.GetEntity(clRepo, clType, clID)
+		if err != nil || !found {
+			t.Fatalf("GetEntity = (%v, %v)", found, err)
+		}
+		return e
+	}
+	base := read()
+	if base.ReadAttemptAt != "" || base.ReadOKAt != "" {
+		t.Fatalf("fresh row ReadAttemptAt=%q ReadOKAt=%q, want NULLs", base.ReadAttemptAt, base.ReadOKAt)
+	}
+	logBefore := changeCount(t, s)
+
+	attempt1, ok1 := "2026-10-28T01:00:00.123456789Z", "2026-10-28T01:00:01Z"
+	if err := s.SetEntityReadTimes(clRepo, clType, clID, &attempt1, &ok1); err != nil {
+		t.Fatal(err)
+	}
+	got := read()
+	if got.ReadAttemptAt != attempt1 || got.ReadOKAt != ok1 {
+		t.Fatalf("after set: ReadAttemptAt=%q ReadOKAt=%q", got.ReadAttemptAt, got.ReadOKAt)
+	}
+
+	// attemptAt only leaves read_ok_at as it was.
+	attempt2 := "2026-10-28T02:00:00Z"
+	if err := s.SetEntityReadTimes(clRepo, clType, clID, &attempt2, nil); err != nil {
+		t.Fatal(err)
+	}
+	got = read()
+	if got.ReadAttemptAt != attempt2 || got.ReadOKAt != ok1 {
+		t.Errorf("attempt-only write: ReadAttemptAt=%q ReadOKAt=%q, want %q and %q", got.ReadAttemptAt, got.ReadOKAt, attempt2, ok1)
+	}
+	// okAt only leaves read_attempt_at as it was.
+	ok2 := "2026-10-28T02:00:05Z"
+	if err := s.SetEntityReadTimes(clRepo, clType, clID, nil, &ok2); err != nil {
+		t.Fatal(err)
+	}
+	got = read()
+	if got.ReadAttemptAt != attempt2 || got.ReadOKAt != ok2 {
+		t.Errorf("ok-only write: ReadAttemptAt=%q ReadOKAt=%q, want %q and %q", got.ReadAttemptAt, got.ReadOKAt, attempt2, ok2)
+	}
+	// Both nil is a no-op.
+	if err := s.SetEntityReadTimes(clRepo, clType, clID, nil, nil); err != nil {
+		t.Errorf("both nil: %v, want nil", err)
+	}
+
+	if got.Version != base.Version || got.HydratedAt != base.HydratedAt || got.AsOf != base.AsOf ||
+		got.Facts != base.Facts || got.ListFP != base.ListFP || got.Inactive != base.Inactive ||
+		got.Backend != base.Backend || got.Watched != nil {
+		t.Errorf("read-time write touched other columns: before %+v after %+v", base, got)
+	}
+	if n := changeCount(t, s); n != logBefore {
+		t.Errorf("change_log rows %d -> %d, want unchanged", logBefore, n)
+	}
+
+	// The list read returns the same values.
+	list, err := s.ListEntities()
+	if err != nil || len(list) != 1 || list[0].ReadAttemptAt != attempt2 || list[0].ReadOKAt != ok2 {
+		t.Fatalf("ListEntities = (%+v, %v)", list, err)
+	}
+}
+
+func TestSetEntityReadTimes_AbsentRow(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	at := "2026-10-28T01:00:00Z"
+	if err := s.SetEntityReadTimes(clRepo, clType, "nope", &at, nil); !errors.Is(err, ErrNoEntity) {
+		t.Fatalf("err = %v, want ErrNoEntity", err)
+	}
+}
+
+// TestEnsureIssueFeedStorage_AddsReadTimeColumnsOnly opens a store that has
+// the backend and watched columns but lacks the read-time ones: the ensure
+// adds them without changing user_version, and a second open is a no-op.
+func TestEnsureIssueFeedStorage_AddsReadTimeColumnsOnly(t *testing.T) {
+	path, before := legacyCutoverStore(t)
+	s, err := OpenRaw(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE entity ADD COLUMN backend TEXT`,
+		`ALTER TABLE entity ADD COLUMN watched INTEGER`,
+	} {
+		if _, err := s.sql.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	_ = s.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if !hasEntityColumn(t, s, "read_attempt_at") || !hasEntityColumn(t, s, "read_ok_at") {
+		t.Fatal("Open did not add the read-time columns")
+	}
+	if got := userVersion(t, s); got != before {
+		t.Errorf("user_version = %d, want %d", got, before)
+	}
+	if err := ensureIssueFeedStorage(s); err != nil {
+		t.Errorf("second ensure: %v", err)
 	}
 }

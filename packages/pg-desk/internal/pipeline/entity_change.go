@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -79,6 +80,18 @@ type EntityChangeOptions struct {
 	// other (nil kinds): the write of an attention-rule hydration, not of a
 	// change.
 	SnapshotOnly bool
+	// SkipUnchangedWrite makes a hydration of an entity that exists and is
+	// active write nothing when its NORMALISED snapshot equals the stored one
+	// (the same comparison the classifier uses: issueCompareBytes for an
+	// issue, the raw facts for any other type): no entity row write, no
+	// version bump, list_fp untouched, no change_log row, and none of the
+	// post-commit steps (local records, interpretation row, derived-link
+	// replacement). The result has Unchanged true and Written false. A
+	// changed snapshot, an absent or inactive entity, ForceReconcile and a
+	// Watch that marks a not-yet-watched entity take the normal write path.
+	// It is the write of an orphan read, whose caller stamps the read times
+	// with Store.SetEntityReadTimes.
+	SkipUnchangedWrite bool
 
 	// beforeWrite, when set, runs once per compare-and-set attempt after the
 	// old snapshot is read and before the write (a test seam for a
@@ -97,6 +110,9 @@ type EntityChangeResult struct {
 	Retries int
 	// Written is whether the entity row was written.
 	Written bool
+	// Unchanged is true when SkipUnchangedWrite was set and the normalised
+	// snapshot equalled the stored one, so nothing was written.
+	Unchanged bool
 	// Degraded is the gather result's degraded note; non-empty means the read
 	// was NOT written and the previous snapshot stands (the entity stays
 	// active and due).
@@ -312,6 +328,19 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 		}
 		if opts.SnapshotOnly {
 			kinds, propagate, otherLinks = nil, false, nil
+		}
+
+		// An unchanged read of an existing, active entity writes nothing.
+		if opts.SkipUnchangedWrite && !opts.ForceReconcile && found && !row.Inactive &&
+			!(row.Version == 0 && row.HydratedAt == "") && !(opts.Watch && !alreadyWatched) {
+			storedCompare := []byte(row.Facts)
+			if entityType == issueEntityType {
+				storedCompare = issueCompareBytes(storedCompare)
+			}
+			if bytes.Equal(storedCompare, comparePayload) {
+				res.Unchanged = true
+				return res, nil
+			}
 		}
 
 		if opts.beforeWrite != nil {

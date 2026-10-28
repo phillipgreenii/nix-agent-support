@@ -8,11 +8,16 @@ import (
 
 // issueFeedEntityColumns are the nullable entity columns the owning-backend
 // issue flow adds, with their declared types: backend (the registry backend
-// instance that serves the entity) and watched (NULL = never stated,
-// 1 = watched, 0 = stated not watched).
+// instance that serves the entity), watched (NULL = never stated,
+// 1 = watched, 0 = stated not watched), and read_attempt_at / read_ok_at
+// (RFC3339Nano UTC times of the last attempted and last successful by-id
+// read of an orphan; NULL = never). The order is the SELECT order of
+// issueFeedSelect and the scan order of applyIssueFeedColumns.
 var issueFeedEntityColumns = []struct{ name, decl string }{
 	{"backend", "TEXT"},
 	{"watched", "INTEGER"},
+	{"read_attempt_at", "TEXT"},
+	{"read_ok_at", "TEXT"},
 }
 
 // ingestFailedDDL creates the failed-ingest side table: one row per
@@ -30,7 +35,8 @@ const ingestFailedDDL = `CREATE TABLE IF NOT EXISTS ingest_failed (
 )`
 
 // ensureIssueFeedStorage adds the owning-backend issue flow's storage: the
-// entity.backend and entity.watched columns and the ingest_failed table.
+// entity.backend, entity.watched, entity.read_attempt_at and entity.read_ok_at
+// columns and the ingest_failed table.
 //
 // It is the ONE additive mechanism of INV-ICD-10(c): CREATE TABLE IF NOT
 // EXISTS plus an ALTER TABLE ... ADD COLUMN guarded by a pragma table_info
@@ -96,8 +102,8 @@ func (s *Store) tableColumns(table string) (map[string]bool, error) {
 	return have, nil
 }
 
-// issueFeedSelect returns the SELECT expressions for entity.backend and
-// entity.watched, in that order: the real columns when the entity table has
+// issueFeedSelect returns the SELECT expressions for entity.backend,
+// entity.watched, entity.read_attempt_at and entity.read_ok_at, in that order: the real columns when the entity table has
 // them, the constants NULL, NULL when it does not (a store opened read-only
 // or raw that predates the additions). Called before the query is issued,
 // never while a result set is open.
@@ -117,9 +123,12 @@ func (s *Store) issueFeedSelect() (string, error) {
 	return strings.Join(exprs, ", "), nil
 }
 
-// applyIssueFeedColumns copies the scanned backend and watched values onto e.
-func applyIssueFeedColumns(e *Entity, backend sql.NullString, watched sql.NullInt64) {
+// applyIssueFeedColumns copies the scanned backend, watched and read-time
+// values onto e.
+func applyIssueFeedColumns(e *Entity, backend sql.NullString, watched sql.NullInt64, readAttempt, readOK sql.NullString) {
 	e.Backend = backend.String
+	e.ReadAttemptAt = readAttempt.String
+	e.ReadOKAt = readOK.String
 	e.Watched = nil
 	if watched.Valid {
 		w := watched.Int64 != 0
@@ -166,6 +175,47 @@ func (s *Store) SetEntityColumns(repo, entityType, entityID string, backend *str
 	}
 	if n == 0 {
 		return fmt.Errorf("store: set entity columns (%s,%s,%s): %w", repo, entityType, entityID, ErrNoEntity)
+	}
+	return nil
+}
+
+// SetEntityReadTimes is the column-only write of the two read times: it sets
+// entity.read_attempt_at and entity.read_ok_at (RFC3339Nano UTC strings), and
+// nothing else. It updates only the non-nil arguments (a nil argument leaves
+// its column as it was), appends NO change_log row, does NOT bump
+// entity.version, and leaves the snapshot, as_of, hydrated_at, list_fp,
+// active, backend and watched untouched. With both arguments nil it is a
+// no-op returning nil. It returns ErrNoEntity (matchable with errors.Is) when
+// the row is absent.
+func (s *Store) SetEntityReadTimes(repo, entityType, entityID string, attemptAt, okAt *string) error {
+	var sets []string
+	var args []any
+	if attemptAt != nil {
+		sets = append(sets, "read_attempt_at = ?")
+		args = append(args, nullableString(*attemptAt))
+	}
+	if okAt != nil {
+		sets = append(sets, "read_ok_at = ?")
+		args = append(args, nullableString(*okAt))
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	args = append(args, repo, entityType, entityID)
+	res, err := s.sql.Exec(
+		`UPDATE entity SET `+strings.Join(sets, ", ")+`
+		 WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
+		args...,
+	)
+	if err != nil {
+		return fmt.Errorf("store: set entity read times (%s,%s,%s): %w", repo, entityType, entityID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: set entity read times (%s,%s,%s): %w", repo, entityType, entityID, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("store: set entity read times (%s,%s,%s): %w", repo, entityType, entityID, ErrNoEntity)
 	}
 	return nil
 }

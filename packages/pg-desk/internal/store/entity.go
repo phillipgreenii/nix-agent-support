@@ -72,6 +72,13 @@ type Entity struct {
 	// false = stated not watched). Same availability and writer rules as
 	// Backend.
 	Watched *bool
+
+	// ReadAttemptAt and ReadOKAt are the RFC3339Nano UTC times of the last
+	// attempted and the last successful by-id read of the entity as an orphan
+	// ("" = NULL, never). Same availability and writer rules as Backend;
+	// SetEntityReadTimes sets them.
+	ReadAttemptAt string
+	ReadOKAt      string
 }
 
 // UpsertEntity inserts or replaces the entity row keyed by
@@ -120,7 +127,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	if err != nil {
 		return Entity{}, false, err
 	}
-	var headSHA, hydratedAt, listFP, firstSeenAt, backend sql.NullString
+	var headSHA, hydratedAt, listFP, firstSeenAt, backend, readAttempt, readOK sql.NullString
 	var watched sql.NullInt64
 	var active int
 	row := s.sql.QueryRow(
@@ -129,7 +136,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 		repo, entityType, entityID,
 	)
 	if err := row.Scan(&entity.Repo, &entity.EntityType, &entity.EntityID, &entity.Facts,
-		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA, &entity.Version, &hydratedAt, &active, &listFP, &firstSeenAt, &backend, &watched); err != nil {
+		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA, &entity.Version, &hydratedAt, &active, &listFP, &firstSeenAt, &backend, &watched, &readAttempt, &readOK); err != nil {
 		if err == sql.ErrNoRows {
 			return Entity{}, false, nil
 		}
@@ -140,7 +147,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	entity.Inactive = active == 0
 	entity.ListFP = listFP.String
 	entity.FirstSeenAt = firstSeenAt.String
-	applyIssueFeedColumns(&entity, backend, watched)
+	applyIssueFeedColumns(&entity, backend, watched, readAttempt, readOK)
 	return entity, true, nil
 }
 
@@ -185,10 +192,10 @@ func (s *Store) ListEntities() ([]Entity, error) {
 	var out []Entity
 	for rows.Next() {
 		var e Entity
-		var headSHA, hydratedAt, listFP, firstSeenAt, backend sql.NullString
+		var headSHA, hydratedAt, listFP, firstSeenAt, backend, readAttempt, readOK sql.NullString
 		var watched sql.NullInt64
 		var active int
-		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version, &hydratedAt, &active, &listFP, &firstSeenAt, &backend, &watched); err != nil {
+		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version, &hydratedAt, &active, &listFP, &firstSeenAt, &backend, &watched, &readAttempt, &readOK); err != nil {
 			return nil, fmt.Errorf("store: scan entity row: %w", err)
 		}
 		e.HeadSHA = headSHA.String
@@ -196,7 +203,7 @@ func (s *Store) ListEntities() ([]Entity, error) {
 		e.Inactive = active == 0
 		e.ListFP = listFP.String
 		e.FirstSeenAt = firstSeenAt.String
-		applyIssueFeedColumns(&e, backend, watched)
+		applyIssueFeedColumns(&e, backend, watched, readAttempt, readOK)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
