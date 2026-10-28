@@ -282,6 +282,18 @@ func itemKind(it map[string]any) string {
 // and its two named queries, in the shape the deployment declares them (the
 // all-status listing names every status and no limit, since the backend appends
 // its own).
+//
+// timeouts.list lifts the beads backend's "list" deadline to the largest value
+// the registry accepts (scriptout.MaxConfiguredTimeout, 300s; the umbrella kills
+// at 305s) [bead pg2-fhvt4d]. The backend runs a named query's bd expressions
+// serially under ONE list deadline (40s by default, 45s for the umbrella's kill):
+// work-items-all is six `bd list` runs, work-beads five, and each is a cold
+// start of bd's embedded dolt engine. On a host loaded far past its cores
+// (load 65 to 74 on 11 CPUs) those runs overran the default, the backend
+// answered "scriptout: unavailable", the connector reported the beads source
+// degraded and eight scenarios failed on lookup-unavailable or hydration
+// degraded, though the lane's logic was fine. The deadline is a hang guard
+// here, not a performance assertion, so the fixture gives it the headroom.
 const e2eRegistry = `connector:
   issue:
     - name: beads
@@ -290,6 +302,8 @@ search:
   sources: [pg-connector-issue-beads]
 backends:
   beads:
+    timeouts:
+      list: 300s
     queries:
       work-beads:
         - "list --type merge-request --status open,in_progress,blocked"
@@ -638,6 +652,25 @@ func readScenarioNames(t *testing.T) []string {
 		}
 	}
 	return names
+}
+
+// TestLaneE2ERegistryGivesTheListOpHeadroom pins the registry's timeouts.list
+// [bead pg2-fhvt4d]: without it the beads backend answers a named query's bd runs
+// (up to six, serially) inside the default 40s list deadline, which a host loaded
+// far past its cores overruns. It needs no tool, so it runs in the plain unit run.
+func TestLaneE2ERegistryGivesTheListOpHeadroom(t *testing.T) {
+	m := regexp.MustCompile(`(?m)^  beads:\n    timeouts:\n      list: (\S+)\n`).FindStringSubmatch(e2eRegistry)
+	if m == nil {
+		t.Fatal("e2eRegistry has no backends.beads.timeouts.list")
+	}
+	d, err := time.ParseDuration(m[1])
+	if err != nil {
+		t.Fatalf("timeouts.list %q is not a Go duration: %v", m[1], err)
+	}
+	// Six bd runs at the 40s default budget each is the worst serial case.
+	if want := 6 * 40 * time.Second; d < want {
+		t.Fatalf("timeouts.list is %s, want at least %s", d, want)
+	}
 }
 
 func TestLaneE2E(t *testing.T) {
