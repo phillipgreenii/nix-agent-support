@@ -55,8 +55,9 @@ the configured watched queries, else the single owning backend for an id that
 matches ticket_patterns); an id served by queries of two different backends is
 refused with exit 1 before any read. --watch (issue only) also asks that
 backend to watch the one entity and marks it watched in the same write, so its
-first row is delivered; without it an unwatched owning issue is hydrated and
-appends no row.
+first row is delivered (a backend that keeps no store, such as beads, is not
+asked: the hydration write alone marks the entity watched and appends one
+added row); without it an unwatched issue is hydrated and appends no row.
 
 Exit codes: 0 hydrated; 2 hydration degraded (the previous snapshot is kept
 and the entity stays due); 3 hydration failed entirely (previous snapshot
@@ -74,7 +75,7 @@ of the read failed) or hydrate_error (any other failure).`, entityType),
 		},
 	}
 	if entityType == entityTypeIssue {
-		cmd.Flags().BoolVar(&watch, "watch", false, "also ask the issue's backend to watch this one entity and mark it watched in the same write, so its first row is delivered (ignored for a backend that keeps no store)")
+		cmd.Flags().BoolVar(&watch, "watch", false, "also ask the issue's backend to watch this one entity (a backend that keeps no store is not asked) and mark it watched in the same write, so its first row is delivered")
 	}
 	return cmd
 }
@@ -152,8 +153,8 @@ func refreshEntity(ctx context.Context, cfg *config.Config, st *store.Store, ent
 //
 // watch asks the backend to watch the entity and marks it watched in the SAME
 // write. With no resolved backend, the owning instances are probed for the
-// id; an id none holds is read unpinned and the watch is ignored, as it is for
-// a backend that keeps no store. A daemon that answers unavailable while
+// id; an id none holds is read unpinned and watched locally, as is any id of a
+// backend that keeps no store (no backend is asked to watch it). A daemon that answers unavailable while
 // probing or reading is returned as an error wrapping gather.ErrUnavailable
 // (class transient): nothing is written and the next run retries.
 func refreshEntityWatch(ctx context.Context, cfg *config.Config, st *store.Store, entityType, entityID string, watch bool) (pipeline.EntityChangeResult, error) {
@@ -183,7 +184,11 @@ func refreshEntityWatch(ctx context.Context, cfg *config.Config, st *store.Store
 			owning = held
 		}
 		opts.Backend = instance
+		// An owning backend is asked to watch the entity; a backend that keeps no
+		// store (beads) has nothing to ask, so the hydration write alone marks it
+		// watched (WatchLocal) and appends its one added row.
 		opts.Watch = watch && owning
+		opts.WatchLocal = watch && !owning
 	}
 	res, err := newRefreshHydrator(cfg, st).RunEntityChange(ctx, entityType, entityID, refreshChangeKind, opts)
 	changes.RecordHydration(st, entityType, entityID, res, err)

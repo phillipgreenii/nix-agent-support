@@ -30,6 +30,10 @@ ask the backend what changed, and it does not use the backend's feed or its curs
   the same hydration, so its first row passes the gate. It is documented in
   [`operator-commands.md`](operator-commands.md), "issue refresh --watch", and is a one-off, not a
   query.
+- For a beads `issue`, a backend that keeps no store, `--watch` asks no backend to watch anything:
+  the hydration write alone marks the entity watched, in the same statement as the snapshot, and the
+  entity's one first-observation row (kind `added`) passes the gate. A repeat appends no second
+  `added`, and the mark ends when pg-desk deactivates the entity after observing it closed.
 - For `issue`, `refresh` reads the entity's stored `backend` and pins that backend on its read, so an
   id served by a backend that owns its changes never costs a call to another backend first. When the
   stored `backend` is NULL it resolves the backend from the configured watched queries; an id served by

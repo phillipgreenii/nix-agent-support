@@ -51,6 +51,10 @@ type storeHydrator struct {
 	// observation (what the pipeline derives when the hydration is forced to
 	// unobserved) instead of the fixed reconcile.
 	classified bool
+	// facts and kindsOf override, per entity id, the stored facts and the kinds
+	// the write appends (a hydration that observes a close).
+	facts   map[string]string
+	kindsOf map[string][]string
 }
 
 func newStoreHydrator(st *store.Store) *storeHydrator {
@@ -82,11 +86,29 @@ func (h *storeHydrator) RunEntityChange(_ context.Context, entityType, id string
 			kinds = append(kinds, string(r.Kind))
 		}
 	}
+	// WatchLocal is what the pipeline does for an entity no owning backend
+	// holds: the one added row when it was not already watched, and the watched
+	// mark set by the same write.
+	var wo store.WriteOptions
+	if opts.WatchLocal {
+		if !(found && row.Watched != nil && *row.Watched) {
+			kinds = []string{"added"}
+		}
+		on := true
+		wo.Watched = &on
+	}
+	if k, ok := h.kindsOf[id]; ok {
+		kinds = k
+	}
 	if opts.SnapshotOnly {
 		kinds = nil
 	}
-	v, err := h.st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: `{}`, AsOf: "x"},
-		expected, "2026-10-01T11:59:00Z", true, opts.ListFP, kinds, opts.Origin, "2026-10-01T12:00:00Z")
+	facts := `{}`
+	if f, ok := h.facts[id]; ok {
+		facts = f
+	}
+	v, err := h.st.WriteEntityStateWithLogOpts(store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: facts, AsOf: "x"},
+		expected, "2026-10-01T11:59:00Z", true, opts.ListFP, kinds, opts.Origin, "2026-10-01T12:00:00Z", wo)
 	return pipeline.EntityChangeResult{Written: err == nil, Version: v}, err
 }
 
@@ -162,6 +184,10 @@ func TestDiffListedComparesListAgainstStoredListFP(t *testing.T) {
 	seedRow(t, st, "differs", "F1", "2026-10-01T11:00:00Z", true)
 	seedRow(t, st, "gone", "F1", "2026-10-01T11:00:00Z", false)
 	seedRow(t, st, "cutover", "", "2026-10-01T11:00:00Z", true)
+	yes := true
+	if err := st.SetEntityColumns("o/r", "issue", "same", nil, &yes); err != nil {
+		t.Fatal(err)
+	}
 
 	res := listing("same=F1", "differs=F2", "new=F1", "gone=F1", "cutover=F1", "stale=F9")
 	res.Entities[5].Stale = true
@@ -375,11 +401,15 @@ func TestResetReplaysOnlyWatchedActiveIssuesAsAdded(t *testing.T) {
 	seedRow(t, st, "bd-2", "F1", "2026-10-01T11:00:00Z", true)
 	seedRow(t, st, "bd-3", "F1", "2026-10-01T11:00:00Z", true)
 	seedRow(t, st, "bd-4", "F1", "2026-10-01T11:00:00Z", false)
-	yes := true
+	yes, no := true, false
 	for _, id := range []string{"bd-1", "bd-2", "bd-4"} {
 		if err := st.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// bd-3 is stated not watched (a NULL mark would make it a late watch).
+	if err := st.SetEntityColumns("o/r", "issue", "bd-3", nil, &no); err != nil {
+		t.Fatal(err)
 	}
 	e.Lister = fakeLister{res: listing("bd-1=F1", "bd-2=F1", "bd-3=F1")}
 

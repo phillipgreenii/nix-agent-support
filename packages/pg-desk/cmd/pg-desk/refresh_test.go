@@ -625,8 +625,9 @@ func TestRefreshOwningEntityUnavailableIsATransientFailureAndWritesNothing(t *te
 func TestRefreshWatchProbesOwningInstancesWhenNothingNamesTheBackend(t *testing.T) {
 	f := newBackendFixture(t, "bd-7")
 	f.write("show-bd-7.json", `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"bd-7","title":"t","updated_at":"2026-09-30T00:00:00Z","as_of":"2026-09-30T00:00:00Z"}}`)
-	// Not ticket-shaped, in no watch set, held by no owning instance: the
-	// watch is ignored (no error) and the read stays unpinned.
+	// Not ticket-shaped, in no watch set, held by no owning instance: no
+	// backend is asked to watch it (no --watch on the read), the read stays
+	// unpinned, and the hydration write alone marks it watched.
 	if _, err := runRefreshCmd(t, "issue", "bd-7", "--watch"); err != nil {
 		t.Fatalf("refresh --watch: %v", err)
 	}
@@ -634,7 +635,59 @@ func TestRefreshWatchProbesOwningInstancesWhenNothingNamesTheBackend(t *testing.
 	if len(calls) != 2 || calls[0] != "issue show bd-7 --fresh --backend jira-a" || calls[1] != "issue show bd-7 --fresh" {
 		t.Errorf("calls = %q, want one probe and the unpinned read without --watch", calls)
 	}
-	if e := f.entity("issue", "bd-7"); e.Watched != nil {
-		t.Errorf("watched = %v, want unchanged", e.Watched)
+	if e := f.entity("issue", "bd-7"); e.Watched == nil || !*e.Watched || e.Backend != "" {
+		t.Errorf("watched = %v backend = %q, want watched true and no pinned backend", e.Watched, e.Backend)
+	}
+}
+
+// pg-desk issue refresh <beads id> --watch sets the flag in the same write as
+// the hydration and appends exactly one added row; a repeat appends no second
+// added; without --watch an unwatched beads issue is hydrated and appends no
+// row.
+func TestRefreshWatchOfABeadsIssueMarksItWatchedAndAppendsOneAdded(t *testing.T) {
+	f := newBackendFixture(t, "bd-5", "bd-6")
+	for _, id := range []string{"bd-5", "bd-6"} {
+		f.write("show-"+id+".json", `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"`+id+`","title":"t","updated_at":"2026-09-30T00:00:00Z","as_of":"2026-09-30T00:00:00Z"}}`)
+	}
+	addedRows := func(id string) int {
+		n := 0
+		for _, r := range f.history(id) {
+			for _, k := range r.Kinds {
+				if k == "added" {
+					n++
+				}
+			}
+		}
+		return n
+	}
+
+	// Without --watch the unwatched issue is hydrated and stays unwatched.
+	if _, err := runRefreshCmd(t, "issue", "bd-6"); err != nil {
+		t.Fatal(err)
+	}
+	if e := f.entity("issue", "bd-6"); e.Watched != nil {
+		t.Errorf("a plain refresh set watched = %v", *e.Watched)
+	}
+
+	base := addedRows("bd-5")
+	if _, err := runRefreshCmd(t, "issue", "bd-5", "--watch"); err != nil {
+		t.Fatalf("refresh --watch: %v", err)
+	}
+	if e := f.entity("issue", "bd-5"); e.Watched == nil || !*e.Watched {
+		t.Errorf("watched = %v, want true from the hydration write", e.Watched)
+	}
+	if got := addedRows("bd-5"); got != base+1 {
+		t.Fatalf("added rows = %d, want %d (exactly one new)", got, base+1)
+	}
+	if _, err := runRefreshCmd(t, "issue", "bd-5", "--watch"); err != nil {
+		t.Fatalf("repeat refresh --watch: %v", err)
+	}
+	if got := addedRows("bd-5"); got != base+1 {
+		t.Errorf("added rows = %d after a repeat, want %d", got, base+1)
+	}
+	for _, c := range f.calls() {
+		if strings.Contains(c, "--watch") {
+			t.Errorf("call %q asked a backend to watch a beads issue", c)
+		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/classify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -347,7 +348,15 @@ func (e *Engine) deactivateIf(entityType, id string, kinds []string, guard func(
 		if !found || row.Inactive || (guard != nil && !guard(row)) {
 			return nil
 		}
-		_, err = e.Store.WriteEntityStateWithLog(row, row.Version, row.HydratedAt, false, kinds, OriginPGConnector, at)
+		var wo store.WriteOptions
+		if entityType == issueEntityType && !OwningSet(e.Cfg, entityType)[row.Backend] {
+			// The watched flag of an entity no owning backend holds ends with its
+			// deactivation: cleared AFTER the append, in the same transaction, so a
+			// closed or removed row is appended first. An owning backend's flag
+			// belongs to the feed path.
+			wo.ClearWatchedAfterAppend = true
+		}
+		_, err = e.Store.WriteEntityStateWithLogOpts(row, row.Version, row.HydratedAt, false, nil, kinds, OriginPGConnector, at, wo)
 		if err == nil {
 			return nil
 		}
@@ -381,6 +390,10 @@ type listedEntity struct {
 	// hydratedAt orders the changed entities oldest mismatch first.
 	hydratedAt time.Time
 	hydrated   bool
+	// lateWatch marks a known, active entity with an unchanged list_fp whose
+	// watched column is NULL, listed by a baselined query: it is hydrated to be
+	// watched, not because it changed.
+	lateWatch bool
 }
 
 // diffListed merges the successful listings of runs and keeps the entities
@@ -390,8 +403,14 @@ type listedEntity struct {
 // The comparison is ALWAYS list against list, never against show output. An
 // entity the connector marks stale in a listing is ignored for change
 // detection there (its fingerprint describes a cache, not the live entity).
+// For an issue, outside a baseline run, a listed active entity whose list_fp
+// is unchanged but whose watched column is NULL is also selected (a late
+// watch), when at least one of the queries listing it has its baseline marker:
+// an entity listed only by queries still in a baseline run is left to the
+// baseline. The flag itself is set only by the hydration write, never here, so
+// a late watch the budget cuts is selected again at the next poll.
 // The result is ordered changed first, oldest mismatch first (never hydrated
-// counts as oldest, ties by id), then added by id.
+// counts as oldest, ties by id), then added by id, then the late watches by id.
 func (e *Engine) diffListed(entityType string, runs []queryRun) ([]*listedEntity, error) {
 	all, err := e.Store.ListEntities()
 	if err != nil {
@@ -427,7 +446,26 @@ func (e *Engine) diffListed(entityType string, runs []queryRun) ([]*listedEntity
 		}
 	}
 
-	var changed, added []*listedEntity
+	baselined := map[string]bool{}
+	anyBaselined := func(queries []string) (bool, error) {
+		for _, q := range queries {
+			done, ok := baselined[q]
+			if !ok {
+				state, err := ReadBaseline(e.Store, q)
+				if err != nil {
+					return false, err
+				}
+				done = state.Done
+				baselined[q] = done
+			}
+			if done {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+
+	var changed, added, late []*listedEntity
 	for _, id := range order {
 		le := merged[id]
 		row, found := rows[id]
@@ -439,6 +477,16 @@ func (e *Engine) diffListed(entityType string, runs []queryRun) ([]*listedEntity
 			le.change = gather.ChangeChanged
 			le.hydratedAt, le.hydrated = hydratedTime(row)
 			changed = append(changed, le)
+		case entityType == issueEntityType && row.Watched == nil:
+			ok, err := anyBaselined(le.queries)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				le.change = gather.ChangeChanged
+				le.lateWatch = true
+				late = append(late, le)
+			}
 		}
 	}
 	sort.SliceStable(changed, func(i, j int) bool {
@@ -452,8 +500,14 @@ func (e *Engine) diffListed(entityType string, runs []queryRun) ([]*listedEntity
 		return a.id < b.id
 	})
 	sort.SliceStable(added, func(i, j int) bool { return added[i].id < added[j].id })
-	return append(changed, added...), nil
+	sort.SliceStable(late, func(i, j int) bool { return late[i].id < late[j].id })
+	return append(append(changed, added...), late...), nil
 }
+
+// watchLocal is the hydration option of a listed entity of a backend that
+// keeps no store: the hydration write marks it watched and records added when
+// it was not already watched.
+func watchLocal(o *pipeline.EntityChangeOptions) { o.WatchLocal = true }
 
 // hydrateListed hydrates, within the budget, what diffListed found different.
 // Each hydration passes the fingerprint observed in THIS tick's listing so it
@@ -491,7 +545,13 @@ func (e *Engine) hydrateListed(ctx context.Context, opts Options, runs []queryRu
 			fp := p.fp
 			listFP = &fp
 		}
-		herr := e.hydrate(ctx, opts.EntityType, p.id, p.change, OriginPGConnector, false, listFP)
+		var apply []func(*pipeline.EntityChangeOptions)
+		if opts.EntityType == issueEntityType {
+			// The hydration write itself marks the entity watched, in the same
+			// statement, so the first row passes the delivery gate.
+			apply = append(apply, watchLocal)
+		}
+		herr := e.hydrate(ctx, opts.EntityType, p.id, p.change, OriginPGConnector, false, listFP, apply...)
 		st.hydrated[p.id] = herr
 		bud.note(herr)
 		if herr != nil {

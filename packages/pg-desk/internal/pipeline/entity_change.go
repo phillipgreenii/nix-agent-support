@@ -77,6 +77,14 @@ type EntityChangeOptions struct {
 	// passes the delivery gate. A repeat on an already-watched entity appends
 	// no second added.
 	Watch bool
+	// WatchLocal (issue only) is Watch for a backend that keeps no store (a
+	// beads entity): the hydration marks the entity watched in the same write
+	// and records kind added instead of the classified kinds when it was not
+	// already watched, but pins no backend and asks no backend to watch (there
+	// is nothing to ask). A repeat on an already-watched entity appends no
+	// second added. It is ignored for an entity an owning backend holds, whose
+	// flag belongs to the feed path.
+	WatchLocal bool
 	// SnapshotOnly stores the snapshot, interpretation and derived links but
 	// appends no change_log row for this entity and no local record for any
 	// other (nil kinds): the write of an attention-rule hydration, not of a
@@ -297,6 +305,10 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 		newSnap.OwningBackend = backendNow != "" && slices.Contains(owningInstances, backendNow)
 		old.OwningBackend = newSnap.OwningBackend
 		alreadyWatched := found && row.Watched != nil && *row.Watched
+		// markWatched is whether this hydration is the one that watches the
+		// entity: Watch (an owning backend), or WatchLocal for an entity no
+		// owning backend holds.
+		markWatched := opts.Watch || (opts.WatchLocal && entityType == issueEntityType && !newSnap.OwningBackend)
 
 		kindSet := map[string]bool{}
 		propagate = false
@@ -332,7 +344,7 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 			kinds = append(kinds, k)
 		}
 		sort.Strings(kinds)
-		if opts.Watch && !alreadyWatched {
+		if markWatched && !alreadyWatched {
 			kinds = []string{string(classify.KindAdded)}
 			// A late watch replaces the entity's own kinds with the one added row
 			// and, like any other first observation of a watched issue, must not
@@ -346,7 +358,7 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 
 		// An unchanged read of an existing, active entity writes nothing.
 		if opts.SkipUnchangedWrite && !opts.ForceReconcile && found && !row.Inactive &&
-			!(row.Version == 0 && row.HydratedAt == "") && !(opts.Watch && !alreadyWatched) {
+			!(row.Version == 0 && row.HydratedAt == "") && !(markWatched && !alreadyWatched) {
 			storedCompare := []byte(row.Facts)
 			if entityType == issueEntityType {
 				storedCompare = issueCompareBytes(storedCompare)
@@ -365,7 +377,7 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 			b := opts.Backend
 			wo.Backend = &b
 		}
-		if opts.Watch {
+		if markWatched {
 			on := true
 			wo.Watched = &on
 		}

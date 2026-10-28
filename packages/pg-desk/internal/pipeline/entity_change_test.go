@@ -793,3 +793,82 @@ func TestRunEntityChange_AddedForIssueNeverPropagates(t *testing.T) {
 		t.Fatalf("last issue row = %+v, want added at origin reset", last)
 	}
 }
+
+// WatchLocal is Watch for a backend that keeps no store: the hydration write
+// marks the entity watched in the same statement and appends one added row on
+// a first observation and on a late watch, never a second one, and it pins no
+// backend and propagates nothing.
+func TestRunEntityChange_WatchLocal(t *testing.T) {
+	var gerr error
+	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", workMeta("7"))
+	p := ecPipeline(t, &res, &gerr)
+	watched := func(id string) *bool {
+		t.Helper()
+		e, found, err := p.store.GetEntity(ecRepo, "issue", id)
+		if err != nil || !found {
+			t.Fatalf("entity %s: found=%v err=%v", id, found, err)
+		}
+		if e.Backend != "" {
+			t.Fatalf("backend = %q, want none pinned", e.Backend)
+		}
+		return e.Watched
+	}
+
+	// First observation: one added row, watched true from the same write.
+	r := mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{WatchLocal: true})
+	if !r.Written || !reflect.DeepEqual(r.Kinds, []string{"added"}) {
+		t.Fatalf("first observation = %+v, want one added", r)
+	}
+	if w := watched("i-1"); w == nil || !*w {
+		t.Fatalf("watched = %v, want true", w)
+	}
+
+	// A repeat hydration of the watched entity appends no second added.
+	r = mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{WatchLocal: true})
+	if len(r.Kinds) != 0 {
+		t.Errorf("repeat kinds = %v, want none", r.Kinds)
+	}
+	res = ecIssue(t, "open", "someone", "2026-09-16T01:00:00Z", workMeta("7"))
+	r = mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{WatchLocal: true})
+	for _, k := range r.Kinds {
+		if k == "added" {
+			t.Errorf("a changed, already-watched entity appended added: %v", r.Kinds)
+		}
+	}
+	added := 0
+	for _, row := range p.changeRows(t, "issue", "i-1") {
+		for _, k := range row.Kinds {
+			if k == "added" {
+				added++
+			}
+		}
+	}
+	if added != 1 {
+		t.Errorf("added rows = %d, want exactly 1", added)
+	}
+
+	// A late watch: a known entity hydrated without the option stays unwatched
+	// and appends no row under the gate-less store; the WatchLocal hydration
+	// then appends exactly one added and sets the mark.
+	res = ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", workMeta("7"))
+	res.Payload = []byte(`{"issue_show":{"id":"i-2","state":"open","assignee":"me"}}`)
+	mustRun(t, p, "issue", "i-2", gather.ChangeAdded, EntityChangeOptions{SnapshotOnly: true})
+	if w := watched("i-2"); w != nil {
+		t.Fatalf("a snapshot-only hydration set watched = %v", *w)
+	}
+	before := len(p.changeRows(t, "issue", "i-2"))
+	r = mustRun(t, p, "issue", "i-2", gather.ChangeChanged, EntityChangeOptions{WatchLocal: true})
+	if !reflect.DeepEqual(r.Kinds, []string{"added"}) {
+		t.Fatalf("late watch kinds = %v, want exactly [added]", r.Kinds)
+	}
+	if w := watched("i-2"); w == nil || !*w {
+		t.Fatalf("late watch: watched = %v, want true", w)
+	}
+	if got := len(p.changeRows(t, "issue", "i-2")); got != before+1 {
+		t.Errorf("late watch rows = %d, want %d", got, before+1)
+	}
+	mustRun(t, p, "issue", "i-2", gather.ChangeChanged, EntityChangeOptions{WatchLocal: true})
+	if got := len(p.changeRows(t, "issue", "i-2")); got != before+1 {
+		t.Errorf("a repeat late watch grew the rows to %d", got)
+	}
+}
