@@ -45,7 +45,7 @@ type Result struct {
 // this router's own CLAUDE_PLUGIN_DATA, under which each delegate gets its
 // own vendored/<name>/ subdirectory (ADR 0071 §2.7).
 func Dispatch(ctx context.Context, event string, delegates []Delegate, payload map[string]json.RawMessage, projectDir, dataDir string) Result {
-	return dispatch(ctx, TotalBudget, event, delegates, payload, projectDir, dataDir)
+	return dispatch(ctx, TotalBudget, delegateWaitDelay, event, delegates, payload, projectDir, dataDir)
 }
 
 // dispatch is Dispatch with the shared chain budget made explicit, so tests
@@ -53,7 +53,11 @@ func Dispatch(ctx context.Context, event string, delegates []Delegate, payload m
 // that a loaded machine cannot exhaust it and turn a later delegate into a
 // Skipped one (ADR 0071 §4 B1: budget exhaustion is Abstain + partial merge
 // by design, which would otherwise make those tests load-sensitive).
-func dispatch(ctx context.Context, budget time.Duration, event string, delegates []Delegate, payload map[string]json.RawMessage, projectDir, dataDir string) Result {
+//
+// waitDelay is likewise explicit (Dispatch passes delegateWaitDelay) so a
+// test of the killed-child-leaves-fds-open mechanism can use a short one
+// instead of really waiting out the production 2s (ADR 0111, pg2-b495dq).
+func dispatch(ctx context.Context, budget, waitDelay time.Duration, event string, delegates []Delegate, payload map[string]json.RawMessage, projectDir, dataDir string) Result {
 	sorted := make([]Delegate, len(delegates))
 	copy(sorted, delegates)
 	sort.SliceStable(sorted, func(i, j int) bool {
@@ -95,7 +99,7 @@ func dispatch(ctx context.Context, budget time.Duration, event string, delegates
 		}
 
 		start := time.Now()
-		out, verdict := runDelegate(ctx, d, current, projectDir, filepath.Join(dataDir, "vendored", d.Name))
+		out, verdict := runDelegate(ctx, waitDelay, d, current, projectDir, filepath.Join(dataDir, "vendored", d.Name))
 		result.Entries = append(result.Entries, AttributionEntry{
 			Timestamp:     start,
 			HookEventName: event,
@@ -132,7 +136,7 @@ func dispatch(ctx context.Context, budget time.Duration, event string, delegates
 // runDelegate invokes one delegate as a real subprocess, sending payload as
 // its stdin JSON and reading its stdout as the expected hookSpecificOutput
 // shape.
-func runDelegate(ctx context.Context, d Delegate, payload map[string]json.RawMessage, projectDir, delegateDataDir string) (HookOutput, Verdict) {
+func runDelegate(ctx context.Context, waitDelay time.Duration, d Delegate, payload map[string]json.RawMessage, projectDir, delegateDataDir string) (HookOutput, Verdict) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return HookOutput{}, VerdictError
@@ -148,7 +152,7 @@ func runDelegate(ctx context.Context, d Delegate, payload map[string]json.RawMes
 	cmd := exec.CommandContext(ctx, "sh", "-c", d.Command)
 	cmd.Stdin = bytes.NewReader(body)
 	cmd.Env = delegateEnv(projectDir, delegateDataDir)
-	cmd.WaitDelay = delegateWaitDelay
+	cmd.WaitDelay = waitDelay
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout

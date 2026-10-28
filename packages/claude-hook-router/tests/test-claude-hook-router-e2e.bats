@@ -173,3 +173,47 @@ run_router() {
   # discarded as abstain.
   echo "$output" | jq -e '.permissionDecision == "allow"'
 }
+
+# Cross-process data isolation, not a data race (ADR 0071 Phase B, B1/B2;
+# ported from the Go unit test TestCrossProcessDataIsolation by pg2-b495dq,
+# ADR 0111): two real, separate router processes run concurrently, each with
+# its own CLAUDE_PLUGIN_ROOT/CLAUDE_PLUGIN_DATA, and each one's delegate
+# writes the CLAUDE_PLUGIN_DATA value it actually received into a file in
+# that very directory. -race cannot observe across processes and there is no
+# shared memory here by construction, so this belongs in the e2e suite.
+@test "two concurrent router processes keep their delegate data directories isolated" {
+  local id root data project config
+  config=$(jq -nc --arg command 'printf %s "$CLAUDE_PLUGIN_DATA" > "$CLAUDE_PLUGIN_DATA/seen-datadir"; printf %s "{}"' \
+    '{PreToolUse: [{name: "probe", event: "PreToolUse", matcher: "*", command: $command, contract: "decide", priority: 1}]}')
+
+  for id in 1 2; do
+    root="${BATS_TEST_TMPDIR}/iso-${id}/root"
+    data="${BATS_TEST_TMPDIR}/iso-${id}/data"
+    project="${BATS_TEST_TMPDIR}/iso-${id}/project"
+    mkdir -p "$root" "$data" "$project"
+    printf '%s' "$config" >"${root}/router-config.json"
+    printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash"}' >"${BATS_TEST_TMPDIR}/iso-${id}/event.json"
+  done
+
+  local pids=()
+  for id in 1 2; do
+    CLAUDE_PLUGIN_ROOT="${BATS_TEST_TMPDIR}/iso-${id}/root" \
+      CLAUDE_PLUGIN_DATA="${BATS_TEST_TMPDIR}/iso-${id}/data" \
+      CLAUDE_PROJECT_DIR="${BATS_TEST_TMPDIR}/iso-${id}/project" \
+      "$BIN" <"${BATS_TEST_TMPDIR}/iso-${id}/event.json" >"${BATS_TEST_TMPDIR}/iso-${id}/stdout" 2>"${BATS_TEST_TMPDIR}/iso-${id}/stderr" &
+    pids+=($!)
+  done
+  for pid in "${pids[@]}"; do
+    wait "$pid"
+  done
+
+  local seen1 seen2 want1 want2
+  seen1=$(cat "${BATS_TEST_TMPDIR}/iso-1/data/vendored/probe/seen-datadir")
+  seen2=$(cat "${BATS_TEST_TMPDIR}/iso-2/data/vendored/probe/seen-datadir")
+  want1="${BATS_TEST_TMPDIR}/iso-1/data/vendored/probe"
+  want2="${BATS_TEST_TMPDIR}/iso-2/data/vendored/probe"
+
+  [ "$seen1" = "$want1" ]
+  [ "$seen2" = "$want2" ]
+  [ "$seen1" != "$seen2" ]
+}

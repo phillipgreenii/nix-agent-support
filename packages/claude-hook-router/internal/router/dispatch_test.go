@@ -146,7 +146,7 @@ func helperDelegate(t *testing.T, name, contract string, priority int, spec stri
 const generousBudget = 10 * time.Minute
 
 func dispatchGenerous(ctx context.Context, event string, delegates []Delegate, payload map[string]json.RawMessage, projectDir, dataDir string) Result {
-	return dispatch(ctx, generousBudget, event, delegates, payload, projectDir, dataDir)
+	return dispatch(ctx, generousBudget, delegateWaitDelay, event, delegates, payload, projectDir, dataDir)
 }
 
 func rawPayload(fields map[string]string) map[string]json.RawMessage {
@@ -453,19 +453,23 @@ func TestDispatchTotalBudgetExhaustionSkipsLaterDelegateAndReturnsPromptly(t *te
 // dispatch.go's delegateWaitDelay doc comment describes. Without
 // cmd.WaitDelay actually wired up, this would hang for the grandchild's
 // full sleep (or the full 6s TotalBudget); with it, Dispatch returns once
-// WaitDelay (2s) elapses.
+// WaitDelay elapses. The wait delay is injected (a short one, via the
+// explicit dispatch seam) rather than really waiting out the production
+// delegateWaitDelay of 2s (ADR 0111, pg2-b495dq); the grandchild still sleeps
+// well past it, so the mechanism is exercised exactly as before.
 func TestDispatchHangingDelegateBoundedByWaitDelayMechanism(t *testing.T) {
+	const waitDelay = 300 * time.Millisecond
 	delegates := []Delegate{helperDelegate(t, "leaky", "decide", 1, "leaky-grandchild:4000")}
 
 	start := time.Now()
-	result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+	result := dispatch(context.Background(), TotalBudget, waitDelay, "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
 	elapsed := time.Since(start)
 
-	if elapsed < 1500*time.Millisecond {
-		t.Errorf("Dispatch returned after only %s -- want it to actually observe the leaky pipe (suspiciously fast, WaitDelay may not be exercised)", elapsed)
+	if elapsed < waitDelay-50*time.Millisecond {
+		t.Errorf("Dispatch returned after only %s -- want it to actually observe the leaky pipe for the %s wait delay (suspiciously fast, WaitDelay may not be exercised)", elapsed, waitDelay)
 	}
-	if elapsed > 3500*time.Millisecond {
-		t.Errorf("Dispatch took %s, want it bounded by delegateWaitDelay (2s), not the grandchild's 4s sleep or the 6s TotalBudget", elapsed)
+	if elapsed > 2500*time.Millisecond {
+		t.Errorf("Dispatch took %s, want it bounded by the %s wait delay, not the grandchild's 4s sleep or the 6s TotalBudget", elapsed, waitDelay)
 	}
 	if result.Entries[0].Verdict != VerdictError {
 		t.Errorf("verdict = %q, want %q (stdout was force-closed empty/incomplete)", result.Entries[0].Verdict, VerdictError)

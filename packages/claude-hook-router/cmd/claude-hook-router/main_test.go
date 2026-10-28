@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -171,134 +169,5 @@ func TestAttributionLogWrittenForRepresentativeMultiDelegateCall(t *testing.T) {
 	}
 	if second["delegate_name"] != "abstainer" || second["verdict"] != "abstain" {
 		t.Errorf("line 2 = %v, want delegate_name=abstainer verdict=abstain", second)
-	}
-}
-
-// --- Cross-process data isolation -------------------------------------------
-
-// routerBinDir is the temp dir buildRouterBinaryOnce builds into ("" until the
-// first build); TestMain removes it so repeated runs leave nothing in $TMPDIR.
-var routerBinDir string
-
-func TestMain(m *testing.M) {
-	code := m.Run()
-	if routerBinDir != "" {
-		_ = os.RemoveAll(routerBinDir)
-	}
-	os.Exit(code)
-}
-
-var buildRouterBinaryOnce = sync.OnceValues(func() (string, error) {
-	dir, err := os.MkdirTemp("", "claude-hook-router-test-bin-")
-	if err != nil {
-		return "", err
-	}
-	routerBinDir = dir
-	binPath := filepath.Join(dir, "claude-hook-router")
-	cmd := exec.Command("go", "build", "-o", binPath, ".")
-	cmd.Dir = "."
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", &buildError{err: err, stderr: stderr.String()}
-	}
-	return binPath, nil
-})
-
-type buildError struct {
-	err    error
-	stderr string
-}
-
-func (e *buildError) Error() string {
-	return e.err.Error() + ": " + e.stderr
-}
-
-// TestCrossProcessDataIsolation covers "Cross-process data isolation, not a
-// data race: spawn two real, separate router process invocations
-// concurrently ... and assert their filesystem writes land in their own
-// CLAUDE_PLUGIN_DATA subdirectories with no cross-contamination" (ADR 0071
-// §4 Phase B, B1/B2). This runs the REAL built binary as two separate OS
-// processes; it is deliberately an ordinary (non--race-dependent)
-// integration test, since -race cannot observe across separate processes
-// and there is no shared-memory race here by construction.
-func TestCrossProcessDataIsolation(t *testing.T) {
-	binPath, err := buildRouterBinaryOnce()
-	if err != nil {
-		t.Fatalf("build router binary: %v", err)
-	}
-
-	run := func(id string) (dataDir string, err error) {
-		root := t.TempDir()
-		dataDir = t.TempDir()
-		project := t.TempDir()
-		// The delegate writes the CLAUDE_PLUGIN_DATA value it actually
-		// received back into a file inside that very directory -- the
-		// isolation assertion below reads it back per-invocation.
-		config := `{"PreToolUse":[{"name":"probe","event":"PreToolUse","matcher":"*","command":"printf %s \"$CLAUDE_PLUGIN_DATA\" > \"$CLAUDE_PLUGIN_DATA/seen-datadir\"; printf %s '{}'","contract":"decide","priority":1}]}`
-		if werr := os.WriteFile(filepath.Join(root, "router-config.json"), []byte(config), 0o644); werr != nil {
-			return "", werr
-		}
-
-		cmd := exec.Command(binPath)
-		cmd.Env = append(
-			os.Environ(),
-			"CLAUDE_PLUGIN_ROOT="+root,
-			"CLAUDE_PLUGIN_DATA="+dataDir,
-			"CLAUDE_PROJECT_DIR="+project,
-		)
-		cmd.Stdin = strings.NewReader(`{"hook_event_name":"PreToolUse","tool_name":"Bash"}`)
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			return "", &buildError{err: err, stderr: id + ": " + stderr.String()}
-		}
-		return dataDir, nil
-	}
-
-	type outcome struct {
-		dataDir string
-		err     error
-	}
-	results := make(chan outcome, 2)
-	for _, id := range []string{"router-1", "router-2"} {
-		id := id
-		go func() {
-			dataDir, err := run(id)
-			results <- outcome{dataDir: dataDir, err: err}
-		}()
-	}
-	first := <-results
-	second := <-results
-	if first.err != nil {
-		t.Fatalf("first router invocation failed: %v", first.err)
-	}
-	if second.err != nil {
-		t.Fatalf("second router invocation failed: %v", second.err)
-	}
-
-	seenIn := func(dataDir string) string {
-		t.Helper()
-		b, err := os.ReadFile(filepath.Join(dataDir, "vendored", "probe", "seen-datadir"))
-		if err != nil {
-			t.Fatalf("read seen-datadir marker under %s: %v", dataDir, err)
-		}
-		return string(b)
-	}
-
-	firstSeen := seenIn(first.dataDir)
-	secondSeen := seenIn(second.dataDir)
-
-	wantFirst := filepath.Join(first.dataDir, "vendored", "probe")
-	wantSecond := filepath.Join(second.dataDir, "vendored", "probe")
-
-	if firstSeen != wantFirst {
-		t.Errorf("first router's delegate saw CLAUDE_PLUGIN_DATA=%q, want %q", firstSeen, wantFirst)
-	}
-	if secondSeen != wantSecond {
-		t.Errorf("second router's delegate saw CLAUDE_PLUGIN_DATA=%q, want %q", secondSeen, wantSecond)
-	}
-	if firstSeen == secondSeen {
-		t.Fatalf("both concurrent router invocations resolved to the SAME delegate data directory %q -- cross-contamination", firstSeen)
 	}
 }
