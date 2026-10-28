@@ -710,3 +710,55 @@ func TestRefreshWatchOfABeadsIssueMarksItWatchedAndAppendsOneAdded(t *testing.T)
 		}
 	}
 }
+
+// showIssueRead writes a Jira-shaped show answer whose read-answer annotations
+// (served_from, age_seconds and groups[] with the fetched_at/fresh_until
+// stamps) are those of read number n. The tracker content never changes
+// between reads; only the annotations do, as they do on every --fresh read of
+// the daemon.
+func (f *refreshFixture) showIssueRead(id string, n int) {
+	f.t.Helper()
+	stamp := fmt.Sprintf("2026-10-28T10:%02d:00Z", n)
+	f.write("show-"+id+".json", fmt.Sprintf(
+		`{"protocolVersion":1,"schemaVersion":4,"result":{"id":%[1]q,"title":"title of %[1]s","owner":"me","assignee":"x","issue_type":"task","state":"open","labels":["a"],"updated_at":"2026-10-28T09:00:00Z","as_of":%[2]q,"served_from":"origin","age_seconds":%[3]d,"groups":[{"group":"summary","fetched_at":%[2]q,"fresh_until":%[2]q},{"group":"detail","fetched_at":%[2]q,"fresh_until":%[2]q}]}}`,
+		id, stamp, n,
+	))
+}
+
+// pg2-3gd8uf: refreshing an UNCHANGED issue must append no change_log row and
+// must not bump the entity version. The daemon's show answer carries a
+// groups[] read annotation (fetched_at and fresh_until move on every --fresh
+// read); it was not among the volatile keys the issue comparison drops, so
+// every refresh looked like a fields_changed edit.
+func TestRefreshOfAnUnchangedIssueTwiceAppendsNoRowAndKeepsTheVersion(t *testing.T) {
+	f := newRefreshFixture(t)
+	f.showIssueRead("bd-1", 1)
+	if _, err := runRefreshCmd(t, "issue", "bd-1", "--watch"); err != nil {
+		t.Fatalf("first refresh: %v", err)
+	}
+	rows := func() int {
+		h, err := f.seed.ListEntityHistory("o/r", "issue", "bd-1", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(h)
+	}
+	baseRows, baseVersion := rows(), f.entity("issue", "bd-1").Version
+
+	for i := 2; i <= 3; i++ {
+		f.showIssueRead("bd-1", i) // same issue, new read annotations
+		out, err := runRefreshCmd(t, "issue", "bd-1")
+		if err != nil {
+			t.Fatalf("refresh %d: %v", i, err)
+		}
+		if got := rows(); got != baseRows {
+			t.Errorf("refresh %d: change_log rows = %d, want %d (no row for an unchanged issue)", i, got, baseRows)
+		}
+		if got := f.entity("issue", "bd-1").Version; got != baseVersion {
+			t.Errorf("refresh %d: version = %d, want %d (an unchanged issue must not bump it)", i, got, baseVersion)
+		}
+		if !strings.Contains(out, "no change") {
+			t.Errorf("refresh %d: stdout %q, want it to report no change", i, out)
+		}
+	}
+}

@@ -64,6 +64,9 @@ func TestNormalizeIssuePayload_VolatileFieldsNormaliseEqual(t *testing.T) {
 			s["served_from"], s["age_seconds"] = "cache", 90
 			d["served_from"], d["age_seconds"] = "cache", 91
 		},
+		"groups freshness stamps": func(s, d map[string]any) {
+			s["groups"] = []any{map[string]any{"group": "summary", "fetched_at": "2026-10-28T10:00:00Z", "fresh_until": "2026-10-28T10:05:00Z"}}
+		},
 		"entity_meta watched true":  func(s, d map[string]any) { s["entity_meta"] = map[string]any{"watched": true} },
 		"entity_meta watched false": func(s, d map[string]any) { s["entity_meta"] = map[string]any{"watched": false} },
 		"entity_meta in deps":       func(s, d map[string]any) { d["entity_meta"] = map[string]any{"watched": true} },

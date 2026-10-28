@@ -149,7 +149,7 @@ var issueKindFields = map[Kind][]string{
 // comments proxy ignores them.
 var issueVolatileFields = map[string]struct{}{
 	"updated_at": {}, "updated": {}, "as_of": {}, "stale": {},
-	"served_from": {}, "age_seconds": {}, "entity_meta": {},
+	"served_from": {}, "age_seconds": {}, "groups": {}, "entity_meta": {},
 }
 
 func (issueClassifier) Classify(old, new Snapshot) []Record {

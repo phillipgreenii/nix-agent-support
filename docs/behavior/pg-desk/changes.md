@@ -496,8 +496,8 @@ deactivation:
 
 pg-desk decides whether a hydration appended a row by comparing the hydrated snapshot with the
 stored one. The comparison MUST use a NORMALISED snapshot: normalisation drops `as_of`, `stale`,
-`updated_at`, the connector's `served_from` and `age_seconds` (it adds them to every cached show
-answer) and every field in the connector's fingerprint excludes. A byte or hash comparison of the
+`updated_at`, the connector's `served_from`, `age_seconds` and `groups` (it adds them to every show
+answer; the `groups` freshness stamps move on every `--fresh` read) and every field in the connector's fingerprint excludes. A byte or hash comparison of the
 stored payload would never find "unchanged", because the stored payload and its hash differ on every
 read (`as_of` is the read time).
 
@@ -785,7 +785,7 @@ changes`; for a backend that owns its changes it calls `<type> changes` (in manu
   untouched and MUST write nothing but the attempt and success times when nothing differs.
 - **INV-CHANGES-26.** <!-- uuid: c63f9f4c-0d29-4650-b3d6-456a2b3d954d --> Whether a hydration appended a row MUST be decided by comparing NORMALISED snapshots,
   which drop the read-time and volatile fields (`as_of`, `stale`, `updated_at`, `served_from`,
-  `age_seconds` and the connector's fingerprint excludes); a difference MUST yield a row, with
+  `age_seconds`, `groups` and the connector's fingerprint excludes); a difference MUST yield a row, with
   `fields_changed` when no specific kind matches; a change to `updated_at` alone MUST append no row,
   except the beads `comments_changed` proxy.
 - **INV-CHANGES-27.** <!-- uuid: 13a7d5eb-88dc-4611-8f77-e07bc0a55364 --> Hydration of a detected change MUST keep `--fresh` on `issue show`, and an answer marked

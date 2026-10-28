@@ -115,6 +115,10 @@ func runRefresh(cmd *cobra.Command, entityType, ref string, watch bool) error {
 	case res.Degraded != "":
 		return newExitError(exitPartial, fmt.Errorf("refresh: %s %s: hydration degraded (previous snapshot kept, entity stays due): %s", entityType, id, res.Degraded))
 	}
+	if res.Unchanged {
+		_, perr := fmt.Fprintf(cmd.OutOrStdout(), "refreshed %s %s: no change (unchanged, nothing written)\n", entityType, id)
+		return perr
+	}
 	kinds := "no change"
 	if len(res.Kinds) > 0 {
 		kinds = strings.Join(res.Kinds, ", ")
@@ -189,6 +193,9 @@ func refreshEntityWatch(ctx context.Context, cfg *config.Config, st *store.Store
 		// watched (WatchLocal) and appends its one added row.
 		opts.Watch = watch && owning
 		opts.WatchLocal = watch && !owning
+		// A refresh of an unchanged issue writes nothing: no version bump and
+		// no change_log row (the comparison is the normalised one).
+		opts.SkipUnchangedWrite = true
 	}
 	res, err := newRefreshHydrator(cfg, st).RunEntityChange(ctx, entityType, entityID, refreshChangeKind, opts)
 	changes.RecordHydration(st, entityType, entityID, res, err)

@@ -11,8 +11,10 @@ import (
 // depth of an issue payload: they move without the issue changing (INV-ICD-6,
 // INV-ICD-7). as_of, stale, updated and updated_at are the read-time and
 // last-touched stamps, served_from and age_seconds are the umbrella's
-// read-through-cache provenance, and entity_meta is connector metadata that
-// can flip without a content change.
+// read-through-cache provenance, groups is the read answer's per-group
+// freshness bookkeeping (fetched_at and fresh_until move on every --fresh
+// read of an unchanged issue), and entity_meta is connector metadata that can
+// flip without a content change.
 var issueVolatileKeys = map[string]struct{}{
 	"as_of":       {},
 	"stale":       {},
@@ -20,6 +22,7 @@ var issueVolatileKeys = map[string]struct{}{
 	"updated_at":  {},
 	"served_from": {},
 	"age_seconds": {},
+	"groups":      {},
 	"entity_meta": {},
 }
 

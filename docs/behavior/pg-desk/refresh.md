@@ -25,6 +25,9 @@ ask the backend what changed, and it does not use the backend's feed or its curs
   entity yields only `reconcile`. For `issue`, a first observation of a WATCHED entity is kind `added`
   (the one first-observation kind), and a refresh of an `issue` entity that is not watched hydrates it
   but the delivery gate withholds the row, so no row is appended and no event can follow.
+- A refresh of an existing, active `issue` whose normalised snapshot equals the stored one writes
+  nothing (no row, no version bump) and prints `refreshed <type> <id>: no change (unchanged, nothing
+written)`.
 - The appended record's origin is `pg-desk`.
 - `refresh` takes one option, `--watch`, for `issue` only: it marks that one entity watched as part of
   the same hydration, so its first row passes the gate. It is documented in
