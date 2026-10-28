@@ -1,32 +1,17 @@
 package orchestrator
 
 import (
-	"context"
-	"errors"
-	"strings"
 	"sync"
 
-	"github.com/phillipgreenii/pg-router/internal/wireclient"
+	"github.com/phillipgreenii/pg-router/internal/transient"
 )
 
-// Transient handler-failure classes (bead pg2-yu5y2). They are the ONLY
-// failures a role with MaxDispatchRetries > 0 re-runs; anything else (a
-// deterministic failure such as a validation error or a bad exit code 1 with
-// a reasoned message) is never retried, because running it again cannot help
-// and would only add load. The class string is the `class` label of
-// pg_router_dispatch_retries_total.
+// Transient handler-failure classes (bead pg2-yu5y2); the definitions and the
+// classifier live in internal/transient so internal/metrics shares them.
 const (
-	// RetryClassKilled: the handler subprocess was killed by a signal (os/exec
-	// reports exit -1), or the handler reported that one of ITS children was
-	// ("signal: killed" / "exit -1") — the shape a 30s connector timeout under
-	// host overload produces.
-	RetryClassKilled = "killed"
-	// RetryClassDeadline: a deadline expired (context.DeadlineExceeded, or the
-	// handler said so in its error text).
-	RetryClassDeadline = "deadline"
-	// RetryClassUnavailable: the handler or a backend it drives reported itself
-	// unavailable (the connector wire taxonomy's retryable "unavailable" code).
-	RetryClassUnavailable = "unavailable"
+	RetryClassKilled      = transient.ClassKilled
+	RetryClassDeadline    = transient.ClassDeadline
+	RetryClassUnavailable = transient.ClassUnavailable
 )
 
 // DispatchRetryObserver is notified once per scheduled re-run of a failed
@@ -38,39 +23,9 @@ type DispatchRetryObserver interface {
 }
 
 // classifyTransient reports whether err is a transient handler failure worth
-// one more bounded attempt, and which class. A busy decline never reaches
-// here (Offer maps it before), and a cancelled run context is excluded by the
-// caller. Matching mirrors how the failure actually surfaces: the typed
-// *wireclient.ExitError for a killed handler (-1), context.DeadlineExceeded
-// structurally, and the handler's own error text for what it flattened into
-// the reply (its child "signal: killed" / "exit -1:", "deadline exceeded",
-// pg-desk's own `"error_class":"killed"|"deadline"` stderr line the command
-// handler appends to its error, the connector's "unavailable" code).
+// one more bounded attempt, and which class (see transient.Classify).
 func classifyTransient(err error) (class string, ok bool) {
-	if err == nil {
-		return "", false
-	}
-	if errors.Is(err, context.Canceled) {
-		return "", false
-	}
-	var ee *wireclient.ExitError
-	if errors.As(err, &ee) && ee.Code == -1 {
-		return RetryClassKilled, true
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return RetryClassDeadline, true
-	}
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "signal: killed"), strings.Contains(msg, "exit -1"),
-		strings.Contains(msg, `"error_class":"killed"`):
-		return RetryClassKilled, true
-	case strings.Contains(msg, "deadline exceeded"), strings.Contains(msg, `"error_class":"deadline"`):
-		return RetryClassDeadline, true
-	case strings.Contains(msg, "unavailable"):
-		return RetryClassUnavailable, true
-	}
-	return "", false
+	return transient.Classify(err)
 }
 
 // retryLedger counts, per event id, the re-runs already scheduled for one

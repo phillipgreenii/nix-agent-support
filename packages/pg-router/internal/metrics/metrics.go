@@ -75,6 +75,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
+	"github.com/phillipgreenii/pg-router/internal/transient"
 )
 
 // Metric names (the declared catalog, INV-OBS-1; ten members, Task 3.3).
@@ -442,6 +443,21 @@ const UsageLimitSentinel = "session ended on a usage limit or API outage"
 // Precedence is triager-failure, then budget-exceeded, then upstream-killed,
 // then usage-limit. (pg2-e0imq)
 const ReasonUsageLimit = "usage-limit"
+
+// ReasonUpstreamUnavailable is the "reason" label a FailureClassHandlerError
+// series carries when the handler error is classified transient of class
+// unavailable by internal/transient (the test that decides a router re-run, the
+// same one orchestrator.classifyTransient delegates to): the handler or a
+// backend it drives reported itself unavailable. The router re-runs such a
+// failure (a role's max_dispatch_retries, inside the event's window) and most
+// recover, so it is excluded from pg-router-failure-rate; a sustained failure
+// still pages through the PR lane rule pg-desk-pr-lane-failure-rate, and there
+// is no burst rule of its own. Precedence is triager-failure, then
+// budget-exceeded, then upstream-killed, then usage-limit, then
+// upstream-unavailable; an error classified killed or deadline (which that
+// classifier checks first) keeps no reason. (pg2-8o8x9d, decision of pg2-hk1sn
+// option c)
+const ReasonUpstreamUnavailable = "upstream-unavailable"
 
 // TriagerRoleMarker is the substring that marks a role name as an
 // escalation-triage role. It deliberately mirrors the handler's own
@@ -1496,7 +1512,8 @@ func (e *Emitter) OnDispatchFailure(_, listenerID string) {
 // budget-stop sentinel carries reason=ReasonBudgetExceeded; else an error with
 // BOTH upstream-killed sentinels carries reason=ReasonUpstreamKilled (pg2-fy2pm);
 // else a usage-limit sentinel carries reason=ReasonUsageLimit (pg2-e0imq);
-// else no reason.
+// else an error transient.Classify puts in class unavailable carries
+// reason=ReasonUpstreamUnavailable (pg2-8o8x9d); else no reason.
 func (e *Emitter) OnHandlerFailure(_, _, listenerID string, err error) {
 	attrs := []attribute.KeyValue{
 		attribute.String("class", FailureClassHandlerError),
@@ -1513,12 +1530,19 @@ func (e *Emitter) OnHandlerFailure(_, _, listenerID string, err error) {
 		attrs = append(attrs, attribute.String("reason", ReasonUpstreamKilled))
 	case hasUsageLimitSentinel(err):
 		attrs = append(attrs, attribute.String("reason", ReasonUsageLimit))
+	case isUpstreamUnavailable(err):
+		attrs = append(attrs, attribute.String("reason", ReasonUpstreamUnavailable))
 	}
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(attrs...))
 }
 
 func hasBudgetSentinel(err error) bool {
 	return err != nil && strings.Contains(err.Error(), BudgetExceededSentinel)
+}
+
+func isUpstreamUnavailable(err error) bool {
+	class, ok := transient.Classify(err)
+	return ok && class == transient.ClassUnavailable
 }
 
 func hasUsageLimitSentinel(err error) bool {

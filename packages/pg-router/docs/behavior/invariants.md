@@ -255,7 +255,11 @@ sequenceDiagram
   `session ended on a usage limit or API outage`, a session that died on an account usage or spend
   limit or an API outage) is counted with `reason="usage-limit"`, ranking below `triager-failure`, `budget-exceeded` and
   `upstream-killed`; it is excluded from the residual failure-rate alert and **MUST NOT** page at
-  all, remaining visible as its own series (`DEC-OBS-3`, amended). **A failure before a handler's
+  all, remaining visible as its own series (`DEC-OBS-3`, amended). A handler error the core classifies as transient
+  class `unavailable` (the test that decides a router re-run) and that none of the above claims is
+  counted with `reason="upstream-unavailable"`, ranking below `usage-limit`; it is excluded from the
+  residual failure-rate alert, has no alert of its own, and remains visible as its own series
+  (`DEC-OBS-3`, amended). **A failure before a handler's
   payload is ready is a pre-accept decline, never an accepted failure.** A participant that cannot
   bring its payload to the point where it has taken over the work (a launch that fails, times out
   or dies before it is ready) **MUST** answer the offer with a decline, not with a handler error,

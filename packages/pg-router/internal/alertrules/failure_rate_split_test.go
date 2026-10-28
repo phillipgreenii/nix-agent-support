@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/pg-router/internal/metrics"
 )
 
 // The failure-rate alert is split by cause (pg2-irowq): budget stops get their
@@ -13,7 +15,7 @@ import (
 // matched by the first two.
 const (
 	wantBudgetExpr   = `sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[1h])) >= 2`
-	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|launch-failed|session-in-flight|skipped-.+"}[10m]))`
+	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|upstream-unavailable|usage-limit|launch-failed|session-in-flight|skipped-.+"}[10m]))`
 	wantTriagerExpr  = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="triager-failure"}[10m]))`
 )
 
@@ -100,7 +102,7 @@ func TestResidualFailureRateRule(t *testing.T) {
 	// declines (skipped-*, pg2-5x29j), which are healthy and moot by construction, and
 	// the handler's session-in-flight decline (pg2-qaeb8), routine
 	// backpressure like at-capacity. Nothing else.
-	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|usage-limit|launch-failed|session-in-flight|skipped-.+"`) {
+	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|upstream-unavailable|usage-limit|launch-failed|session-in-flight|skipped-.+"`) {
 		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure, upstream-killed, usage-limit, launch-failed, session-in-flight and skipped-*: %q", got)
 	}
 	// docket pg2-12gr4.8: launch-failed (a ccpool session that failed before it was
@@ -223,28 +225,88 @@ func TestResidualExcludesUpstreamKilledOnly(t *testing.T) {
 	}
 	re := regexp.MustCompile("^(?:" + m[1] + ")$")
 	for reason, wantExcluded := range map[string]bool{
-		"upstream-killed":    true,
-		"budget-exceeded":    true,
-		"triager-failure":    true,
-		"origin-unavailable": true,
-		"at-capacity":        true,
-		"skipped-pr-merged":  true,
-		"usage-limit":        true, // pg2-e0imq: an external usage/spend limit or API outage
-		"session-in-flight":  true, // pg2-qaeb8: routine backpressure
-		"launch-failed":      true, // docket pg2-12gr4.8: covered by the role-progress rule
-		"launch-failed2":     false,
-		"launch":             false,
-		"low-disk":           false,
-		"command-busy":       false,
-		"":                   false, // plain handler-error, dispatch-failure: keep paging
-		"capacity-unknown":   false,
-		"pool-unreadable":    false, // pg2-s3pjt: an unreadable pool is not backpressure; it must keep paging
-		"upstream-killed2":   false,
-		"usage-limit2":       false,
-		"usage":              false,
+		"upstream-killed":            true,
+		"budget-exceeded":            true,
+		"triager-failure":            true,
+		"origin-unavailable":         true,
+		"at-capacity":                true,
+		"skipped-pr-merged":          true,
+		"usage-limit":                true, // pg2-e0imq: an external usage/spend limit or API outage
+		"upstream-unavailable":       true, // pg2-8o8x9d: a router-retried class-unavailable handler error
+		"session-in-flight":          true, // pg2-qaeb8: routine backpressure
+		"launch-failed":              true, // docket pg2-12gr4.8: covered by the role-progress rule
+		"launch-failed2":             false,
+		"launch":                     false,
+		"low-disk":                   false,
+		"command-busy":               false,
+		"":                           false, // plain handler-error, dispatch-failure: keep paging
+		"capacity-unknown":           false,
+		"pool-unreadable":            false, // pg2-s3pjt: an unreadable pool is not backpressure; it must keep paging
+		"upstream-killed2":           false,
+		"usage-limit2":               false,
+		"upstream-unavailable2":      false,
+		"upstream-unavailable-extra": false,
+		"unavailable":                false,
+		"connector-unavailable":      false, // a busy decline the handler emits: a sustained outage pages
+		"usage":                      false,
 	} {
 		if got := re.MatchString(reason); got != wantExcluded {
 			t.Errorf("residual excludes reason %q = %v, want %v", reason, got, wantExcluded)
 		}
+	}
+}
+
+// pg2-8o8x9d (pg2-hk1sn option c): the reason the core attaches to a handler error
+// classified class unavailable is excluded from the residual, the exclusion matches
+// the metrics constant (not a retyped literal), and the reason has no alert of its
+// own: a sustained PR-lane failure pages through pg-desk-pr-lane-failure-rate. The
+// promtool fire / no-fire cases live in rule-tests/pg-router-failure-rate.test.yaml.
+func TestResidualExcludesUpstreamUnavailable(t *testing.T) {
+	if metrics.ReasonUpstreamUnavailable != "upstream-unavailable" {
+		t.Fatalf("ReasonUpstreamUnavailable = %q, the rule pins upstream-unavailable", metrics.ReasonUpstreamUnavailable)
+	}
+	m := regexp.MustCompile(`reason!~"([^"]+)"`).FindStringSubmatch(ruleExpr(t, ruleBlock(t, "pg-router-failure-rate")))
+	if m == nil {
+		t.Fatal("no reason!~ matcher in the live residual expr")
+	}
+	re := regexp.MustCompile("^(?:" + m[1] + ")$")
+	// No-fire: the reason is excluded from the residual.
+	if !re.MatchString(metrics.ReasonUpstreamUnavailable) {
+		t.Errorf("the residual must exclude reason %q", metrics.ReasonUpstreamUnavailable)
+	}
+	// Fire: every other reason the Emitter can attach keeps its disposition, and a
+	// handler error with no reason (not class unavailable) keeps paging.
+	for reason, wantExcluded := range map[string]bool{
+		metrics.ReasonTriagerFailure: true,
+		metrics.ReasonBudgetExceeded: true,
+		metrics.ReasonUpstreamKilled: true,
+		metrics.ReasonUsageLimit:     true,
+		"":                           false,
+		"unavailable":                false,
+		"connector-unavailable":      false,
+		"upstream-unavailable-retry": false,
+		"pre-upstream-unavailable":   false,
+	} {
+		if got := re.MatchString(reason); got != wantExcluded {
+			t.Errorf("residual excludes reason %q = %v, want %v", reason, got, wantExcluded)
+		}
+	}
+	// No alert of its own: the only expr naming the reason is the residual's matcher.
+	b, err := os.ReadFile("../../grafana/alerting/alerts.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range regexp.MustCompile(`(?m)^\s*expr: (.+)$`).FindAllStringSubmatch(string(b), -1) {
+		if strings.Contains(e[1], "upstream-unavailable") && e[1] != wantResidualExpr {
+			t.Errorf("only the residual's exclusion may mention upstream-unavailable, got expr %q", e[1])
+		}
+	}
+	if strings.Contains(string(b), "uid: pg-router-upstream-unavailable") {
+		t.Error("upstream-unavailable must not get a rule of its own")
+	}
+	// The rule's description names the exclusion and the rule that still pages.
+	r := ruleBlock(t, "pg-router-failure-rate")
+	if !strings.Contains(r, "reason=upstream-unavailable") || !strings.Contains(r, "pg-desk-pr-lane-failure-rate") {
+		t.Error("residual annotation must name the upstream-unavailable exclusion and pg-desk-pr-lane-failure-rate")
 	}
 }

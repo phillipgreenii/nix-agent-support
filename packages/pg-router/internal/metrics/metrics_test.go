@@ -1269,7 +1269,7 @@ func TestOnHandlerFailure_TriagerFailuresAreBulkheaded(t *testing.T) {
 		reason, _ := dp.Attributes.Value("reason")
 		got[role.AsString()+"|"+reason.AsString()] += dp.Value
 		switch reason.AsString() {
-		case "at-capacity", ReasonBudgetExceeded, "origin-unavailable", ReasonTriagerFailure, ReasonUpstreamKilled, ReasonUsageLimit:
+		case "at-capacity", ReasonBudgetExceeded, "origin-unavailable", ReasonTriagerFailure, ReasonUpstreamKilled, ReasonUsageLimit, ReasonUpstreamUnavailable:
 		default:
 			residual += dp.Value
 		}
@@ -1393,7 +1393,7 @@ func TestOnHandlerFailure_UpstreamKilledRequiresBothSubstrings(t *testing.T) {
 		err  error
 	}{
 		{"worker", errors.New(`wireclient: role "worker" exited -1: signal: killed`)},
-		{"desk-pr", errors.New(`exit 1: unavailable: scriptout: pg-connector-pr-github: error connecting to api.github.com`)},
+		{"desk-pr", errors.New(`exit 1: scriptout: pg-connector-pr-github: error connecting to api.github.com`)},
 		{"desk-pr", nil},
 	})
 	want := map[string]int64{"worker|": 1, "desk-pr|": 2}
@@ -1428,7 +1428,7 @@ func TestOnHandlerFailure_UpstreamKilledDeadlineSentinel(t *testing.T) {
 		// Not a connector deadline: no scriptout marker.
 		{"desk-pr", errors.New(`deadline exceeded after 5s waiting for a lease`)},
 		// A scriptout failure that is neither a kill nor a deadline.
-		{"desk-pr", errors.New(`exit 1: unavailable: scriptout: pg-connector-pr-github: not found`)},
+		{"desk-pr", errors.New(`exit 1: scriptout: pg-connector-pr-github: not found`)},
 	})
 	want := map[string]int64{"desk-pr|upstream-killed": 1, "desk-pr|": 2}
 	if len(got) != len(want) {
@@ -1528,6 +1528,77 @@ func TestOnHandlerFailure_UsageLimitPrecedence(t *testing.T) {
 		"worker|budget-exceeded":                   1,
 		"desk-pr|upstream-killed":                  1,
 		"drain|usage-limit":                        1,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("series = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("series %q = %d, want %d (all: %v)", k, got[k], v, got)
+		}
+	}
+}
+
+// pg2-8o8x9d (option c of pg2-hk1sn): a handler error the router classifies as
+// class unavailable (orchestrator classifyTransient, the same test that decides
+// a re-run) carries reason=upstream-unavailable, whatever wording of
+// "unavailable" the handler used, so a retried-and-recovered failure stops
+// paging pg-router-failure-rate. Errors are the real shapes pr-change emits.
+func TestOnHandlerFailure_UpstreamUnavailable(t *testing.T) {
+	h := newHarness(t)
+	got := handlerFailureSeries(t, h, []struct {
+		role string
+		err  error
+	}{
+		{"pr-change", fmt.Errorf(`wireclient: role "pr-change" exited 1: %w`, errors.New(`decide: work-item lookup: exit 1: unavailable: tracker unreachable`))},
+		{"pr-change", errors.New(`hydration: UNAVAILABLE: pg-connector-github daemon not reachable`)},
+		// Retry classes other than unavailable keep their current reasons.
+		{"pr-change", errors.New(`exit 1: scriptout: pg-connector-pr-github: error connecting to api.github.com`)},
+		{"worker", errors.New(`wireclient: role "worker" exited -1: signal: killed`)},
+		{"worker", fmt.Errorf("rpc: %w", context.DeadlineExceeded)},
+		// killed/deadline win classifyTransient's switch over "unavailable".
+		{"pr-change", errors.New(`unavailable: deadline exceeded while waiting`)},
+		// Not transient at all.
+		{"pr-change", errors.New(`exit 1: invalid_argument: bad PR id`)},
+		{"pr-change", fmt.Errorf("unavailable: %w", context.Canceled)},
+	})
+	want := map[string]int64{
+		"pr-change|upstream-unavailable": 2,
+		"pr-change|":                     4,
+		"worker|":                        2,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("series = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("series %q = %d, want %d (all: %v)", k, got[k], v, got)
+		}
+	}
+}
+
+// pg2-8o8x9d precedence: upstream-unavailable ranks AFTER triager-failure,
+// budget-exceeded, upstream-killed and usage-limit, so each keeps its reason
+// when the same error text also reads as unavailable.
+func TestOnHandlerFailure_UpstreamUnavailablePrecedence(t *testing.T) {
+	h := newHarness(t)
+	limit := `session ended on a usage limit or API outage before claiming its bead (api-rate-limit; no strike counted)`
+	got := handlerFailureSeries(t, h, []struct {
+		role string
+		err  error
+	}{
+		{"alpha-escalation-triager", errors.New(`exit 1: unavailable: tracker`)},
+		{"worker", errors.New(`exit 1: unavailable: session budget exceeded: role=worker limit=time`)},
+		{"desk-pr", errors.New(`exit 1: unavailable: scriptout: pg-connector-pr-github: signal: killed`)},
+		{"drain", errors.New(`exit 1: unavailable: ` + limit)},
+		{"pr-change", errors.New(`exit 1: unavailable: tracker`)},
+	})
+	want := map[string]int64{
+		"alpha-escalation-triager|triager-failure": 1,
+		"worker|budget-exceeded":                   1,
+		"desk-pr|upstream-killed":                  1,
+		"drain|usage-limit":                        1,
+		"pr-change|upstream-unavailable":           1,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("series = %v, want %v", got, want)

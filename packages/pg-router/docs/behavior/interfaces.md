@@ -419,7 +419,10 @@ upstream call killed by the connector's exec timeout) is counted with `reason="u
 isolated kills do not page individually (`DEC-OBS-3`, amended); and a handler error carrying the
 **usage-limit sentinel** below (a session that died on an account usage or spend limit or an API
 outage) is counted with `reason="usage-limit"`, an external limit that does not page
-(`DEC-OBS-3`, amended). A failure **before** the handler's payload is ready is not a post-accept
+(`DEC-OBS-3`, amended); and a handler error the core classifies as transient class `unavailable` (the
+connector wire taxonomy's retryable code, the test that decides a router re-run) that none of those
+claims is counted with `reason="upstream-unavailable"`, so a failure the router re-runs does not page
+individually (`DEC-OBS-3`, amended). A failure **before** the handler's payload is ready is not a post-accept
 class at all: it is a **pre-accept decline** (`INV-FAIL-1`), reported as a decline with an optional
 **kind** and **detail** (`DEC-WIRE-1`), never as a handler error.
 
@@ -471,7 +474,7 @@ such an end from its own strike policy
 so the error is the only signal the core receives; the core cannot see the handler's failure
 signature across the process boundary, so it matches on this text, and it counts the error as a `handler-error` with `reason="usage-limit"`.
 Precedence among `handler-error` reasons is **triager-failure, then budget-exceeded, then
-upstream-killed, then usage-limit**. The substring is a **contract**: changing it breaks the core's
+upstream-killed, then usage-limit, then upstream-unavailable**. The substring is a **contract**: changing it breaks the core's
 `reason="usage-limit"` classification and the residual failure-rate exclusion built on it
 (`DEC-OBS-3`). An unclaimed end for any other cause carries no such substring and keeps counting
 under the residual failure-rate series.

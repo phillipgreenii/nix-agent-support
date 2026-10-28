@@ -124,7 +124,8 @@ minutes and 3 in about 33 do not). Isolated kills stay visible in the metric
 brand-new series does not count its first increment, so the first kill after a pg-router restart is
 not counted and 10 kills on a fresh series read as 9 (the 11th pages); the series is not
 pre-initialized because the core does not know the role set. **Not covered:** a slow-GitHub failure
-that lacks the sentinel (for example `error connecting to api.github.com`) keeps paging the residual
+that lacks the sentinel (for example `error connecting to api.github.com`) and whose text does not
+read as class unavailable (see the `upstream-unavailable` amendment below) keeps paging the residual
 rule individually. Same bounds as above: the reason is a fixed constant and `role` stays
 config-bounded.
 
@@ -162,6 +163,30 @@ visible as `pg_router_failures_total{class="handler-error",reason="usage-limit"}
 matched by the core and emitted by the handler from two separate Go modules, so each side pins the
 literal in its own test. Same bounds as above: the reason is a fixed constant and `role` stays
 config-bounded.
+
+**Amended** (agent decision, reversible, the operator may overturn it; bead `pg2-8o8x9d`, from the
+`pg2-hk1sn` triage, option c). A `handler-error` that `internal/transient` classifies as class
+`unavailable` (the test `orchestrator.classifyTransient` delegates to, which decides a router re-run: the
+error text carries `unavailable`, and does not read as killed or deadline, which that classifier
+checks first) is counted with `reason="upstream-unavailable"`. Precedence is `triager-failure`, then
+`budget-exceeded`, then `upstream-killed`, then `usage-limit`, then `upstream-unavailable`. Why:
+`DEC-RETRY-2` counts every failed attempt as a `handler-error`, so a failure the router re-runs and
+that then succeeds still paged `pg-router-failure-rate` (2026-10-26/27: 32 failed `pr-change`
+attempts on 19 PRs in about 25 hours, of which 25 were tracker lookups unavailable, 4 hydration
+degraded and 3 connector daemon not reachable; 15 of the 19 PRs later succeeded). The residual rule now excludes
+`upstream-unavailable`. **No burst rule of its own**, like `usage-limit`: a sustained PR-lane failure
+still pages through `pg-desk-pr-lane-failure-rate` (above 5 failing runs per stage and class per
+hour, held 15 minutes), which is not registered with `pg-router-probe` until P6, so until then it
+reaches the operator as a Grafana desktop alert only. The count stays visible as
+`pg_router_failures_total{class="handler-error",reason="upstream-unavailable"}`. **Now covered:**
+tracker-lookup unavailability, hydration degraded and connector daemon not reachable. **Still
+pages the residual rule:** a handler error whose text does not read as class unavailable (a bare
+`signal: killed` or `exit -1`, a deadline, a deterministic non-zero exit, no reason at all) and a
+busy `connector-unavailable` decline. **Accepted limitation:** the core sets the reason per
+attempt and cannot tell a re-run attempt from the last one, so a final failed attempt (an event
+whose retry window has passed) is excluded as well; those lost deliveries are visible only through
+the lane rule and the outcome alerts. Same bounds as above: the reason is a fixed constant and `role`
+stays config-bounded.
 
 **Amended** (operator ruling A, Phillip, 2026-10-05; bead `pg2-vn4jb`). The budget-stop rule
 (`pg-router-budget-stops`) is **repeat-only**: it pages when a role records **2 or more**
