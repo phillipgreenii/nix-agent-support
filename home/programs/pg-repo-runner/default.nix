@@ -65,6 +65,7 @@ let
     kill_switch = cfg.killSwitchPath;
     thresholds = {
       nice_level = cfg.thresholds.niceLevel;
+      retry_window = cfg.thresholds.retryWindow;
     }
     // lib.optionalAttrs (cfg.thresholds.maxLoad != null) { max_load = cfg.thresholds.maxLoad; };
     repos = lib.mapAttrs (_: r: { inherit (r) verify sync push; }) cfg.repos;
@@ -128,6 +129,16 @@ in
         type = lib.types.ints.between 0 19;
         default = 10;
         description = "The `nice` level of every nix run a runner starts. Renders as `thresholds.nice_level`.";
+      };
+      retryWindow = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 3600;
+        description = ''
+          Seconds a repo-tip item the `tips` source emits stays offered to
+          pg-router (its `expiresAt`): the retry window for a run that answered
+          "not now", and the de-duplication window of the item id. Renders as
+          `thresholds.retry_window`.
+        '';
       };
     };
 

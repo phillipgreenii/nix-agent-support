@@ -15280,6 +15280,8 @@
                     # flagged: the tunables arrive as set
                     [ "$(tj ${r.live.configFlagged} '.thresholds.max_load')" = 8 ]
                     [ "$(tj ${r.live.configFlagged} '.thresholds.nice_level')" = 15 ]
+                    [ "$(tj ${r.live.configFlagged} '.thresholds.retry_window')" = 900 ]
+                    [ "$(tj ${r.live.configDefaults} '.thresholds.retry_window')" = 3600 ]
                     [ "$(tj ${r.live.configFlagged} '.repos["nix-alpha"].verify')" = true ]
 
                     # The real package against the module's real output: a throwaway
@@ -15294,8 +15296,14 @@
                     sed "s|^workspace_root = .*|workspace_root = \"$ws\"|" ${r.live.configFlagged} >"$TMPDIR/config.toml"
                     export PG_REPO_RUNNER_CONFIG="$TMPDIR/config.toml" PG_REPO_RUNNER_LOADAVG=0.10
 
+                    # verify needs an item id <repo>@<sha>: a bare key is a usage error
                     rc=0
                     PG_ROUTER_ITEM_ID=nix-alpha pg-repo-runner verify >out.txt 2>&1 || rc=$?
+                    [ "$rc" = 2 ]
+                    grep -q "verify needs an item id" out.txt
+                    # sync is still a stub: admitted by the kernel, then exit 2
+                    rc=0
+                    PG_ROUTER_ITEM_ID=nix-alpha pg-repo-runner sync >out.txt 2>&1 || rc=$?
                     [ "$rc" = 2 ]
                     grep -q "not implemented yet" out.txt
                     # verify is on for nix-beta, sync is not: skipped with exit 0

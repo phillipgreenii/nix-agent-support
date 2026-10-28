@@ -297,17 +297,21 @@ rr_lease_release() {
 
 # --- verdict store (Memento) ----------------------------------------------
 
-# rr_verdict_write REPO SHA KIND RESULT INPUTS STARTED FINISHED EXIT LOGPATH
+# rr_verdict_write REPO SHA KIND RESULT INPUTS STARTED FINISHED EXIT LOGPATH [EXTRA]
 # writes $RR_STATE_DIR/verdicts/<repo>/<sha>.<kind>.json, atomically: the
 # document is built in a temp file in the same directory, then renamed over the
 # final name, so a reader sees the old file or the new one and a failure leaves
-# no temp file behind. KIND is check|build, RESULT is green|red|error, INPUTS is
-# locked|override, STARTED and FINISHED are RFC 3339 times, EXIT is the exit
-# status of the work, LOGPATH is where its output went.
-# shellcheck disable=SC2329  # called by the role bodies of the later beads
+# no temp file behind. KIND is check|build, RESULT is green|red|error|superseded
+# (superseded: the repo's tip moved before the check ran, so nothing was run),
+# INPUTS is locked|override, STARTED and FINISHED are RFC 3339 times, EXIT is the
+# exit status of the work, LOGPATH is where its output went. EXTRA, when given,
+# is a JSON object merged into the record (the verify role adds the measured
+# duration and the sampled load).
+# shellcheck disable=SC2329  # called by the role bodies
 rr_verdict_write() {
   local repo="$1" sha="$2" kind="$3" result="$4" inputs="$5"
-  local started="$6" finished="$7" exitc="$8" logp="$9" dir tmp
+  local started="$6" finished="$7" exitc="$8" logp="$9" extra="${10:-}" dir tmp
+  [[ -n $extra ]] || extra='{}'
   rr_valid_key "$repo" || {
     rr_err "verdict: bad repo key: $repo"
     return 2
@@ -321,7 +325,11 @@ rr_verdict_write() {
     return 2
     ;;
   esac
-  case "$result" in green | red | error) ;; *)
+  rr_jq -e 'type == "object"' <<<"$extra" >/dev/null 2>&1 || {
+    rr_err "verdict: extra is not a JSON object"
+    return 2
+  }
+  case "$result" in green | red | error | superseded) ;; *)
     rr_err "verdict: bad result: $result"
     return 2
     ;;
@@ -342,9 +350,9 @@ rr_verdict_write() {
   if ! rr_jq -n \
     --arg repo "$repo" --arg sha "$sha" --arg kind "$kind" --arg result "$result" \
     --arg inputs "$inputs" --arg startedAt "$started" --arg finishedAt "$finished" \
-    --argjson exit "$exitc" --arg logPath "$logp" \
+    --argjson exit "$exitc" --arg logPath "$logp" --argjson extra "$extra" \
     '{repo: $repo, sha: $sha, kind: $kind, result: $result, inputs: $inputs,
-      startedAt: $startedAt, finishedAt: $finishedAt, exit: $exit, logPath: $logPath}' \
+      startedAt: $startedAt, finishedAt: $finishedAt, exit: $exit, logPath: $logPath} + $extra' \
     >"$tmp"; then
     rm -f "$tmp"
     return 1
@@ -404,4 +412,69 @@ rr_nix_run() {
     rr_err "pg-nix-log-wrapped is not configured; running nix without it"
     "$nice" -n "$level" "$nix" "$@"
   fi
+}
+
+# --- tips and verify helpers (runner B) -----------------------------------
+
+# rr_epoch: seconds since the epoch.
+rr_epoch() { date -u +%s; }
+
+# rr_iso_at EPOCH: an RFC 3339 UTC time.
+rr_iso_at() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
+
+# rr_retry_window: how long an emitted tip item stays offered, in seconds
+# (PG_REPO_RUNNER_RETRY_WINDOW, else the config's thresholds.retry_window, else
+# 3600). It is also the de-duplication window of the item id.
+rr_retry_window() {
+  local v="${PG_REPO_RUNNER_RETRY_WINDOW:-}"
+  [[ -n $v ]] || v="$(rr_cfg '.thresholds.retry_window // empty')"
+  [[ $v =~ ^[1-9][0-9]*$ ]] || v=3600
+  printf '%s' "$v"
+}
+
+# rr_verdict_exists REPO SHA KIND: a verdict file is stored for exactly that key.
+rr_verdict_exists() {
+  [[ -f $RR_STATE_DIR/verdicts/$1/$2.$3.json ]]
+}
+
+# rr_repo_branch ROOT KEY: the primary branch of KEY, from pn-workspace.toml
+# (repos.<key>.branch), `main` when it names none.
+rr_repo_branch() {
+  local json
+  json="$(rr_tq "$1/pn-workspace.toml" 2>/dev/null)" || return 1
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  rr_jq -r --arg k "$2" '.repos[$k].branch // "main"' <<<"$json"
+}
+
+# rr_tip_of PATH BRANCH: the full sha of refs/heads/BRANCH, read from git objects
+# only (no working tree is read). Fails when the branch does not exist.
+rr_tip_of() {
+  rr_git -C "$1" rev-parse --verify -q "refs/heads/$2^{commit}"
+}
+
+# rr_signal_exit RC: succeeds when RC is 128 plus a signal number, a process the
+# runner could not see finish (killed under overload): a malfunction, never red.
+rr_signal_exit() {
+  [[ $1 =~ ^[0-9]+$ ]] && (($1 > 128 && $1 <= 192))
+}
+
+# rr_url_path_encode PATH: PATH percent-encoded for the path of a flake URL. Only
+# the characters that mean something in a URL (and non-ASCII bytes) are encoded.
+rr_url_path_encode() {
+  local s="$1" out="" c i
+  local LC_ALL=C
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+    [A-Za-z0-9/._~-]) out+="$c" ;;
+    *) out+="$(printf '%%%02X' "'$c")" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# rr_snapshot_url PATH SHA: the flake reference of the commit SHA of the repository
+# at PATH, as an immutable git snapshot (git objects only, no working tree).
+rr_snapshot_url() {
+  printf 'git+file://%s?rev=%s' "$(rr_url_path_encode "$1")" "$2"
 }

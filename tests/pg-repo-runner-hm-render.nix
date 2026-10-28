@@ -79,8 +79,11 @@ let
   flagged = evaluate {
     enable = true;
     workspaceRoot = "/example/ws";
-    thresholds.maxLoad = 8;
-    thresholds.niceLevel = 15;
+    thresholds = {
+      maxLoad = 8;
+      niceLevel = 15;
+      retryWindow = 900;
+    };
     killSwitchPath = "/example/kill";
     repos = {
       nix-alpha = {

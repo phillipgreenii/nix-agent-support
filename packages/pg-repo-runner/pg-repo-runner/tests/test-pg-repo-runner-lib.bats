@@ -330,3 +330,69 @@ nix flake check --no-write-lock-file" ]
   [ "$status" -eq 0 ]
   [[ $output == *"running nix without it"* ]]
 }
+
+@test "rr_verdict_write accepts superseded, and merges an extra JSON object into the record" {
+  rr_verdict_write nix-alpha "$SHA" check superseded locked a b 0 ""
+  [ "$(jq -r .result "$RR_STATE_DIR/verdicts/nix-alpha/$SHA.check.json")" = superseded ]
+  rr_verdict_write nix-alpha "$SHA" check green locked a b 0 x '{"durationS":42,"loadStart":1.5,"loadEnd":null}'
+  local f="$RR_STATE_DIR/verdicts/nix-alpha/$SHA.check.json"
+  [ "$(jq -r .durationS "$f")" = 42 ]
+  [ "$(jq -r .loadStart "$f")" = 1.5 ]
+  [ "$(jq -r .loadEnd "$f")" = null ]
+  [ "$(jq -r .result "$f")" = green ]
+  # an extra that is not an object is refused before the store is touched
+  run rr_verdict_write nix-alpha "$SHA" build green locked a b 0 x '[1]'
+  [ "$status" -eq 2 ]
+  [ ! -e "$RR_STATE_DIR/verdicts/nix-alpha/$SHA.build.json" ]
+}
+
+# ---- runner B helpers -----------------------------------------------------
+
+@test "rr_verdict_exists is true for exactly the stored repo, sha and kind" {
+  write_verdict nix-alpha
+  rr_verdict_exists nix-alpha "$SHA" check
+  run rr_verdict_exists nix-alpha "$SHA" build
+  [ "$status" -eq 1 ]
+  run rr_verdict_exists nix-beta "$SHA" check
+  [ "$status" -eq 1 ]
+  run rr_verdict_exists nix-alpha abcdef1 check
+  [ "$status" -eq 1 ]
+}
+
+@test "rr_signal_exit is exactly 129 to 192" {
+  local n
+  for n in 129 130 137 143 192; do rr_signal_exit "$n"; done
+  for n in 0 1 2 100 127 128 193 255 "" x; do
+    if rr_signal_exit "$n"; then
+      echo "wrongly a signal exit: '$n'"
+      return 1
+    fi
+  done
+}
+
+@test "rr_url_path_encode keeps path characters and encodes the ones a URL gives meaning to" {
+  [ "$(rr_url_path_encode /a/b-c_d.e~f)" = /a/b-c_d.e~f ]
+  [ "$(rr_url_path_encode '/a b/c?d#e%f&g')" = '/a%20b/c%3Fd%23e%25f%26g' ]
+}
+
+@test "rr_snapshot_url is a git+file URL of the exact commit" {
+  [ "$(rr_snapshot_url '/ws/nix alpha' "$SHA")" = "git+file:///ws/nix%20alpha?rev=$SHA" ]
+}
+
+@test "rr_iso_at formats an epoch as RFC 3339 UTC" {
+  [ "$(rr_iso_at 0)" = 1970-01-01T00:00:00Z ]
+  [ "$(rr_iso_at 1790000000)" = 2026-09-21T14:13:20Z ]
+}
+
+@test "rr_retry_window: environment, then config, then an hour; junk falls back" {
+  export RR_CONFIG_JSON='{}'
+  [ "$(rr_retry_window)" = 3600 ]
+  export RR_CONFIG_JSON='{"thresholds":{"retry_window":900}}'
+  [ "$(rr_retry_window)" = 900 ]
+  PG_REPO_RUNNER_RETRY_WINDOW=60 run rr_retry_window
+  [ "$output" = 60 ]
+  PG_REPO_RUNNER_RETRY_WINDOW=soon run rr_retry_window
+  [ "$output" = 3600 ]
+  export RR_CONFIG_JSON='{"thresholds":{"retry_window":0}}'
+  [ "$(rr_retry_window)" = 3600 ]
+}

@@ -366,14 +366,42 @@ The canonical clone's primary-branch tip commit, as an immutable git reference. 
 no agent has the repo checked out, in a plain worktree, or in a workforest set, because it never
 looks at any working tree.
 
-### Open probe (not asserted)
+### Open probe: result (verified 2026-10-28, bead `pg2-j0itft`)
 
 `nix-ziprecruiter` carries a clone-time hook (in `pn-workspace.toml`) that creates a git-ignored
-symlink to a sibling repo's source, so a `git+file://...?rev=` snapshot lacks that symlink. Whether
-the repo's build still resolves without it is not established here. The first implementation bead
-MUST verify that `nix-ziprecruiter` evaluates and checks from a commit snapshot; if not, that
-repo's verifier tree becomes a runner C set (a recorded exception), never the working tree of the
-canonical clone.
+symlink, `modules/pg-pr-zr/pg-connector-src`, to a sibling repo's source, so a `git+file://...?rev=`
+snapshot lacks that symlink (confirmed: the snapshot's store path has no `pg-connector-src`, while the
+canonical working tree has the symlink). **Result: no exception is needed. `nix-ziprecruiter`
+evaluates and checks from a commit snapshot, and the verifier tree stays the immutable commit for
+this repo too (no runner C set is needed for it).**
+
+Why it works: the symlink serves only local `go build`, `go test` and the commit-time preflight
+script. The nix build never reads it: `modules/pg-pr-zr/build.nix` re-points the `replace =>
+./pg-connector-src` vendor link at the sibling flake's `pg-connector-src` output (an input of the
+flake, passed as `pgConnectorSrc`), and it filters the path with `lib.fileset.maybeMissing`.
+
+Evidence (run against a read-only local commit, `HEAD` of the canonical clone, no network:
+`--offline`, `--no-write-lock-file`; nothing in that repo was modified):
+
+```text
+SHA=eeb9c881141e68bb1d070868802a9df28dcffa7d
+U="git+file:///Volumes/gitrepos/phillipg/nix-ziprecruiter?rev=$SHA"
+
+1. nix flake metadata --offline --no-write-lock-file "$U"
+   -> Path: /nix/store/vfkd05xy66vl489ywcrd7x237pql5j2b-source, Revision: eeb9c881..., every
+      input resolved from the lock offline (exit 0)
+2. nix flake check --no-build --offline --no-write-lock-file "$U"
+   -> 137 "derivation evaluated" lines, "all checks passed!", exit 0
+      (every output evaluates from the snapshot, which has no pg-connector-src)
+3. nix build --offline --no-link --no-write-lock-file -L \
+        "$U#checks.aarch64-darwin.pg-pr-zr-build" "$U#checks.aarch64-darwin.pg-pr-zr-go-tests"
+   -> builds pg-connector-src, vendor-env, pg-pr-zr-go-tests (the full module test run printed
+      "ok  .../modules/pg-pr-zr/cmd/pg-pr-cicd-captains-log") and pg-pr-zr itself, exit 0
+      (the two checks that consume the symlink's path pass from the snapshot)
+```
+
+The result for the full `nix flake check` (builds every check) is recorded below by the bead that
+runs it; items 2 and 3 are the evidence that the symlink is not an input to any nix path.
 
 ## Runner C: cross-repo workspace builder
 

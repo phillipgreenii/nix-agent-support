@@ -11,7 +11,11 @@
 
 `pg-repo-runner status --json --repo {{repo-key}}`
 
-- Run a role by hand for one repo (the kernel runs; the role body is not implemented yet and exits `2`):
+- Print the repo tips that have no check verdict yet, as JSONL:
+
+`pg-repo-runner tips`
+
+- Check one repo tip by hand (an immutable `nix flake check`, then a verdict; a red check still exits `0`):
 
 `PG_ROUTER_ITEM_ID={{repo-key}}@{{sha}} pg-repo-runner verify`
 

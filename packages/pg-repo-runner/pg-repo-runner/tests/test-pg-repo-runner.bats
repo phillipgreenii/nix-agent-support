@@ -192,10 +192,7 @@ write_verdict() { # REPO SHA KIND RESULT
   [ "$status" -eq 2 ]
 }
 
-@test "the two sources are stubs that exit 2, not implemented" {
-  run "${RUNNER[@]}" tips
-  [ "$status" -eq 2 ]
-  [[ $output == *"not implemented"* ]]
+@test "workspace-tips is a stub that exits 2, not implemented" {
   run "${RUNNER[@]}" workspace-tips
   [ "$status" -eq 2 ]
   [[ $output == *"not implemented"* ]]
@@ -204,7 +201,7 @@ write_verdict() { # REPO SHA KIND RESULT
 # ---- resolve: the allow-list ----------------------------------------------
 
 @test "a repo in pn-workspace.toml but NOT in the allow-list is refused" {
-  role verify "nix-gamma@$ALPHA_SHA"
+  role sync "nix-gamma@$ALPHA_SHA"
   [ "$status" -eq 2 ]
   [[ $output == *"not in the allow-list"* ]]
   assert_not_admitted
@@ -212,19 +209,19 @@ write_verdict() { # REPO SHA KIND RESULT
 }
 
 @test "a repo in the allow-list but NOT a pn-workspace.toml repo key is refused" {
-  role verify "nix-ghost@$ALPHA_SHA"
+  role sync "nix-ghost@$ALPHA_SHA"
   [ "$status" -eq 2 ]
   [[ $output == *"not a repo key of pn-workspace.toml"* ]]
   assert_not_admitted
 }
 
 @test "a missing or malformed PG_ROUTER_ITEM_ID is a usage error" {
-  role verify ""
+  role sync ""
   [ "$status" -eq 2 ]
   [[ $output == *"PG_ROUTER_ITEM_ID is not set"* ]]
   local bad
   for bad in "../nix-alpha" "nix-alpha/../nix-beta" "/etc" "nix-alpha@" "nix-alpha@not-hex"; do
-    role verify "$bad"
+    role sync "$bad"
     [ "$status" -eq 2 ] || {
       echo "not refused: $bad"
       return 1
@@ -234,28 +231,28 @@ write_verdict() { # REPO SHA KIND RESULT
 }
 
 @test "a repo key without a sha resolves too" {
-  role verify nix-alpha
+  role sync nix-alpha
   assert_admitted
 }
 
 # ---- path check -----------------------------------------------------------
 
 @test "a key whose directory is a symlink out of the workspace is refused" {
-  role verify "nix-link@$ALPHA_SHA"
+  role sync "nix-link@$ALPHA_SHA"
   [ "$status" -eq 2 ]
   [[ $output == *"path check failed"* ]]
   assert_not_admitted
 }
 
 @test "a key whose directory is not a git repository is refused" {
-  role verify "nix-plain@$ALPHA_SHA"
+  role sync "nix-plain@$ALPHA_SHA"
   [ "$status" -eq 2 ]
   [[ $output == *"path check failed"* ]]
 }
 
 @test "a key whose directory does not exist is refused" {
   rm -rf "$WS/nix-alpha"
-  role verify
+  role sync
   [ "$status" -eq 2 ]
   [[ $output == *"path check failed"* ]]
 }
@@ -264,7 +261,7 @@ write_verdict() { # REPO SHA KIND RESULT
   # the workspace root is inside a repository, so git finds a top level for
   # nix-plain, but it is the root's, not the key's own path.
   gfh_init_repo "$WS" "pg-repo-runner"
-  role verify "nix-plain@$ALPHA_SHA"
+  role sync "nix-plain@$ALPHA_SHA"
   [ "$status" -eq 2 ]
   [[ $output == *"path check failed"* ]]
 }
@@ -272,7 +269,7 @@ write_verdict() { # REPO SHA KIND RESULT
 @test "a workspace root that is itself a symlink is fine: the real paths must agree" {
   ln -s "$WS" "$TEST_DIR/ws-link"
   write_config "$TEST_DIR/ws-link"
-  role verify
+  role sync
   assert_admitted
 }
 
@@ -293,7 +290,7 @@ write_verdict() { # REPO SHA KIND RESULT
 @test "the state-dir push.disabled file yields exit 9" {
   mkdir -p "$STATE"
   touch "$STATE/push.disabled"
-  role verify
+  role sync
   [ "$status" -eq 9 ]
   [[ $output == *"kill switch present"* ]]
   assert_not_admitted
@@ -302,47 +299,47 @@ write_verdict() { # REPO SHA KIND RESULT
 
 @test "the config's kill file yields exit 9, and removing it admits again" {
   touch "$TEST_DIR/config-kill"
-  role verify
+  role sync
   [ "$status" -eq 9 ]
   assert_not_admitted
   rm "$TEST_DIR/config-kill"
-  role verify
+  role sync
   assert_admitted
 }
 
 # ---- load check -----------------------------------------------------------
 
 @test "a load at or above the threshold yields exit 9" {
-  PG_REPO_RUNNER_LOADAVG=36.16 role verify
+  PG_REPO_RUNNER_LOADAVG=36.16 role sync
   [ "$status" -eq 9 ]
   [[ $output == *"not below"* ]]
   assert_not_admitted
   assert_no_lease
-  PG_REPO_RUNNER_LOADAVG=11.00 role verify
+  PG_REPO_RUNNER_LOADAVG=11.00 role sync
   [ "$status" -eq 9 ]
 }
 
 @test "a load just below the threshold is admitted" {
-  PG_REPO_RUNNER_LOADAVG=10.99 role verify
+  PG_REPO_RUNNER_LOADAVG=10.99 role sync
   assert_admitted
 }
 
 @test "without a configured threshold the core count is the threshold" {
   write_config "$WS"
   sed -i.bak '/^max_load/d' "$TEST_DIR/config.toml"
-  PG_REPO_RUNNER_NCPU=4 PG_REPO_RUNNER_LOADAVG=4.00 role verify
+  PG_REPO_RUNNER_NCPU=4 PG_REPO_RUNNER_LOADAVG=4.00 role sync
   [ "$status" -eq 9 ]
-  PG_REPO_RUNNER_NCPU=4 PG_REPO_RUNNER_LOADAVG=3.99 role verify
+  PG_REPO_RUNNER_NCPU=4 PG_REPO_RUNNER_LOADAVG=3.99 role sync
   assert_admitted
 }
 
 @test "the environment threshold overrides the config" {
-  PG_REPO_RUNNER_MAX_LOAD=0.25 role verify
+  PG_REPO_RUNNER_MAX_LOAD=0.25 role sync
   [ "$status" -eq 9 ]
 }
 
 @test "an unreadable load average is a malfunction, exit 1" {
-  PG_REPO_RUNNER_LOADAVG=lots role verify
+  PG_REPO_RUNNER_LOADAVG=lots role sync
   [ "$status" -eq 1 ]
   [[ $output == *"cannot read the 1-minute load average"* ]]
 }
@@ -353,7 +350,7 @@ write_verdict() { # REPO SHA KIND RESULT
   start_sleeper
   mkdir -p "$STATE"
   ln -s "$SLEEPER_OWNER" "$STATE/lease"
-  role verify
+  role sync
   [ "$status" -eq 9 ]
   [[ $output == *"lease is held"* ]]
   assert_not_admitted
@@ -371,7 +368,7 @@ write_verdict() { # REPO SHA KIND RESULT
   wait "$dead"
   mkdir -p "$STATE"
   ln -s "$dead:Thu Jan 1 00:00:00 1970" "$STATE/lease"
-  role verify
+  role sync
   assert_admitted
   assert_no_lease
   [ -z "$(find "$STATE" -maxdepth 1 -name '.reclaim.*')" ]
@@ -381,26 +378,24 @@ write_verdict() { # REPO SHA KIND RESULT
   start_sleeper
   mkdir -p "$STATE"
   ln -s "$SLEEPER:Thu Jan 1 00:00:00 1970" "$STATE/lease"
-  role verify
+  role sync
   assert_admitted
   assert_no_lease
 }
 
 @test "the lease is released after an admitted run, so the next run is admitted too" {
-  role verify
+  role sync
   assert_admitted
   assert_no_lease
-  role verify
+  role sync
   assert_admitted
 }
 
 # ---- the role stubs and the run log ---------------------------------------
 
-@test "verify, sync and build reach their stub once admitted" {
-  role verify
-  assert_admitted
-  [[ $output == *"role 'verify' is not implemented yet"* ]]
+@test "sync and build reach their stub once admitted" {
   role sync
+  assert_admitted
   [[ $output == *"role 'sync' is not implemented yet"* ]]
   [ "$status" -eq 2 ]
   # build is workspace-wide: no repo item is needed
@@ -410,10 +405,10 @@ write_verdict() { # REPO SHA KIND RESULT
 }
 
 @test "every run is explained in the run log under the state directory" {
-  role verify
-  PG_REPO_RUNNER_LOADAVG=99 role verify
+  role sync
+  PG_REPO_RUNNER_LOADAVG=99 role sync
   [ -f "$STATE/run.log" ]
-  grep -q "role=verify item=nix-alpha@$ALPHA_SHA admitted" "$STATE/run.log"
+  grep -q "role=sync item=nix-alpha@$ALPHA_SHA admitted" "$STATE/run.log"
   grep -q 'exit=2' "$STATE/run.log"
   grep -q 'exit=9 busy: 1-minute load 99 is not below ' "$STATE/run.log"
 }
@@ -422,20 +417,20 @@ write_verdict() { # REPO SHA KIND RESULT
 
 @test "a missing config is a malfunction, exit 1" {
   rm "$TEST_DIR/config.toml"
-  role verify
+  role sync
   [ "$status" -eq 1 ]
   [[ $output == *"config is not readable"* ]]
 }
 
 @test "a config that is not TOML is a malfunction, exit 1" {
   echo 'this = is = not toml' >"$TEST_DIR/config.toml"
-  role verify
+  role sync
   [ "$status" -eq 1 ]
 }
 
 @test "a config without a usable workspace_root is a malfunction, exit 1" {
   write_config "$TEST_DIR/no-such-dir"
-  role verify
+  role sync
   [ "$status" -eq 1 ]
   [[ $output == *"workspace_root"* ]]
 }
@@ -500,7 +495,7 @@ write_verdict() { # REPO SHA KIND RESULT
   [ "$(tq -o json -f "$TEST_DIR/config.toml" . | jq '[.repos[].push] | map(select(. == true)) | length')" = 0 ]
   local before
   before="$(git -C "$TEST_DIR/remotes/alpha.git" rev-parse main)"
-  role verify
+  role sync
   assert_admitted
   [ "$(git -C "$TEST_DIR/remotes/alpha.git" rev-parse main)" = "$before" ]
   [ "$(git -C "$WS/nix-alpha" rev-parse HEAD)" = "$ALPHA_SHA" ]

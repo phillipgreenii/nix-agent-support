@@ -3,7 +3,8 @@
 # pg2-zj2v7m, F1). This entry point owns argument parsing, the subcommand
 # dispatch and the kernel sequence; the steps themselves are the rr_* functions
 # in pg-repo-runner.bash. The role bodies of runners B, A and C land in later
-# beads: F1 provides the kernel and stubs that exit 2 "not implemented".
+# beads: F1 provides the kernel and stubs that exit 2 "not implemented"; F2 (bead
+# pg2-j0itft) replaces the `tips` source and the `verify` role (runner B).
 #
 # nix build already sources pg-repo-runner.bash ahead of this body
 # (mkBashScript's hasSupportBash injection); this guard only fires for a raw
@@ -21,7 +22,9 @@ export RR_GIT_BIN="${RR_GIT_BIN:-git}"
 export RR_JQ_BIN="${RR_JQ_BIN:-jq}"
 export RR_TQ_BIN="${RR_TQ_BIN:-tq}"
 export RR_NICE_BIN="${RR_NICE_BIN:-nice}"
-export RR_NIX_BIN="${RR_NIX_BIN:-}"
+# PG_REPO_RUNNER_NIX_BIN replaces the nix binary (a test seam, like the load
+# average one: the bats suites use it to count and classify nix runs).
+export RR_NIX_BIN="${PG_REPO_RUNNER_NIX_BIN:-${RR_NIX_BIN:-}}"
 export RR_NIX_LOG_WRAPPED_BIN="${RR_NIX_LOG_WRAPPED_BIN:-}"
 
 # Exit status of a "not now" answer: pg-router re-offers the item.
@@ -34,12 +37,12 @@ pg-repo-runner: Kernel and facade of the pg-router-managed async repo runners
 Usage: pg-repo-runner COMMAND [OPTIONS]
 
 Commands:
-  tips             Source: emit one JSONL item per allow-listed repo tip with no
-                   verdict (not implemented yet; exits 2)
+  tips             Source: emit one JSONL item per allow-listed repo (verify on)
+                   whose primary tip has no check verdict
   workspace-tips   Source: emit the debounced workspace tip tuple (not
                    implemented yet; exits 2)
-  verify           Role: verify the repo named by PG_ROUTER_ITEM_ID (the kernel
-                   runs; the role body is not implemented yet and exits 2)
+  verify           Role: check the repo tip named by PG_ROUTER_ITEM_ID
+                   (<repo>@<sha>) with an immutable-snapshot nix flake check
   sync             Role: sync the repo named by PG_ROUTER_ITEM_ID (same)
   build            Role: build the whole workspace (same)
   status           Print the verdict store, the lease and the kill switch
@@ -66,7 +69,21 @@ The roles run the kernel steps in this order, and stop at the first that fails:
   6. lease     One lease file in the state dir, shared by every role, taken
                without waiting. Held by a live process: exit 9. A dead owner (or
                a recycled pid) is reclaimed.
-  7. act       The role body (a stub that exits 2 in this version).
+  7. act       The role body (verify is implemented; sync and build are stubs
+               that exit 2 in this version).
+
+verify, in its act step: <sha> MUST exist (else the run is skipped, exit 0); if
+the repo's primary branch no longer points at <sha> a "superseded" verdict is
+stored and no nix runs; otherwise it runs
+
+  nice -n <level> pg-nix-log-wrapped nix flake check --no-write-lock-file \
+      "git+file://<canonical path>?rev=<sha>"
+
+(an immutable commit: no working tree is read) and stores a check verdict:
+green on exit 0, red on any other non-zero exit, with the measured duration and
+the sampled 1-minute load in the record. A signal exit (128 + n) is a
+malfunction: exit 1, no verdict, pg-router retries. A verdict that already
+exists for <sha> ends the run at once (exit 0, no nix). verify needs a sha.
 
 Exit codes:
   0  the run completed, whatever the verdict (a red check exits 0)
@@ -88,6 +105,9 @@ Files and environment:
   PG_REPO_RUNNER_LOADAVG   replaces the 1-minute load reading (test seam)
   PG_REPO_RUNNER_MAX_LOAD  replaces the load threshold
   PG_REPO_RUNNER_NCPU      replaces the core count used as the default threshold
+  PG_REPO_RUNNER_NIX_BIN   replaces the nix binary (test seam)
+  PG_REPO_RUNNER_RETRY_WINDOW   seconds an emitted tip item stays offered
+                                (else thresholds.retry_window, else 3600)
 
 Report bugs to: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support/issues>
 HELP
@@ -107,12 +127,90 @@ decline() {
   exit "$RR_EXIT_BUSY"
 }
 
-# --- role bodies (stubs; F2, F5 and F8 replace them) ------------------------
+# --- role bodies (sync and build are stubs; F5 and F8 replace them) ---------
 
+# early_verify: before the admission steps. A verdict that is already stored for
+# the item's sha means the work is done (Idempotent Receiver): the run ends with
+# exit 0 and starts no nix, whatever the load or the lease. Returns 0 to end the
+# run, 1 to carry on.
+# shellcheck disable=SC2329  # invoked indirectly as "early_$role"
+early_verify() {
+  if rr_verdict_exists "$RR_ITEM_REPO" "$RR_ITEM_SHA" check; then
+    rr_log "exit=0 skipped: a check verdict for $RR_ITEM_REPO@$RR_ITEM_SHA is already stored"
+    return 0
+  fi
+  return 1
+}
+
+# act_verify: runner B. The precheck is only that the sha exists; the canonical
+# working tree is never read (the check runs on an immutable git snapshot).
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
 act_verify() {
-  rr_err "role 'verify' is not implemented yet"
-  return 2
+  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now
+  root="$(rr_cfg '.workspace_root // empty')"
+
+  # precheck: the sha exists as a commit
+  if ! full="$(rr_git -C "$RR_REPO_PATH" rev-parse --verify -q "${RR_ITEM_SHA}^{commit}")"; then
+    rr_log "skipped: $RR_ITEM_SHA is not a commit of $repo"
+    return 0
+  fi
+  # the full sha is the verdict key (an abbreviated item sha resolves here)
+  if rr_verdict_exists "$repo" "$full" check; then
+    rr_log "skipped: a check verdict for $repo@$full is already stored"
+    return 0
+  fi
+
+  # latest wins: only the current tip of the primary branch is checked
+  branch="$(rr_repo_branch "$root" "$repo")" || {
+    rr_err "cannot read the primary branch of '$repo' from pn-workspace.toml"
+    return 1
+  }
+  tip="$(rr_tip_of "$RR_REPO_PATH" "$branch")" || {
+    rr_err "the primary branch refs/heads/$branch of '$repo' does not exist"
+    return 1
+  }
+  if [[ $tip != "$full" ]]; then
+    now="$(rr_now)"
+    rr_verdict_write "$repo" "$full" check superseded locked "$now" "$now" 0 "" || return 1
+    rr_log "superseded: the tip of $branch is $tip, not $full; no nix run"
+    return 0
+  fi
+
+  [[ -n ${RR_NIX_BIN:-} ]] || {
+    rr_err "no nix binary is configured (RR_NIX_BIN)"
+    return 1
+  }
+  log="$RR_STATE_DIR/logs/$repo/$full.check.log"
+  mkdir -p "$RR_STATE_DIR/logs/$repo" || return 1
+  url="$(rr_snapshot_url "$RR_REPO_PATH" "$full")"
+
+  started="$(rr_now)"
+  t0="$(rr_epoch)"
+  load0="$(rr_loadavg1)" || load0=""
+  rr_log "check start: nix flake check --no-write-lock-file $url (load $load0)"
+  rc=0
+  rr_nix_run flake check --no-write-lock-file "$url" >"$log" 2>&1 || rc=$?
+  t1="$(rr_epoch)"
+  finished="$(rr_now)"
+  load1="$(rr_loadavg1)" || load1=""
+  rr_log "check end: exit=$rc after $((t1 - t0))s (load $load1), output in $log"
+
+  if rr_signal_exit "$rc"; then
+    rr_err "nix was killed by signal $((rc - 128)) (exit $rc): a malfunction, no verdict is stored"
+    return 1
+  fi
+
+  # The duration and the load are the calibration input for thresholds.max_load:
+  # the 1-minute load average sampled when the check started and when it ended.
+  # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+  extra="$(rr_jq -nc --argjson d "$((t1 - t0))" --arg l0 "$load0" --arg l1 "$load1" \
+    '{durationS: $d, loadStart: ($l0 | tonumber? // null), loadEnd: ($l1 | tonumber? // null)}')" || return 1
+  if ((rc == 0)); then
+    rr_verdict_write "$repo" "$full" check green locked "$started" "$finished" "$rc" "$log" "$extra" || return 1
+  else
+    rr_verdict_write "$repo" "$full" check red locked "$started" "$finished" "$rc" "$log" "$extra" || return 1
+  fi
+  return 0
 }
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
 act_sync() {
@@ -143,6 +241,9 @@ run_role() {
     [[ -n $item ]] || die "PG_ROUTER_ITEM_ID is not set" 2
     rr_parse_item_id "$item" || die "malformed PG_ROUTER_ITEM_ID: $item" 2
     key="$RR_ITEM_REPO"
+    if [[ $role == verify && -z $RR_ITEM_SHA ]]; then
+      die "verify needs an item id <repo>@<sha>, got: $item" 2
+    fi
     rr_repo_listed "$key" || die "repo '$key' is not in the allow-list" 2
     rc=0
     rr_workspace_has_key "$root" "$key" || rc=$?
@@ -156,6 +257,10 @@ run_role() {
     # 3. enabled
     if ! rr_repo_flag "$key" "$role"; then
       rr_log "exit=0 skipped: $role is not enabled for '$key'"
+      exit 0
+    fi
+    # 3b. idempotent receiver: a role may end the run when its work is stored
+    if declare -F "early_$role" >/dev/null && "early_$role"; then
       exit 0
     fi
   fi
@@ -184,6 +289,67 @@ run_role() {
   "act_$role" || rc=$?
   rr_log "exit=$rc"
   exit "$rc"
+}
+
+# --- tips (the source of runner B) -----------------------------------------
+
+# run_tips: one JSONL record per allow-listed repo (verify on) whose primary tip
+# has no check verdict, on stdout and nothing else. The id carries the sha, so a
+# re-emit is the same event and a new tip is a new one; expiresAt is the retry
+# window. "Tips without a verdict" is derived state, so a crash resumes by
+# construction. A repo that fails the resolve or the path check is logged and
+# skipped: one broken entry never blanks the others. Not subject to the kill
+# switch, the load check or the lease: it only reads refs and the store.
+run_tips() {
+  local root key now_e at expires branch tip rc keys
+  [[ $# -eq 0 ]] || die "tips takes no arguments" 2
+  # shellcheck disable=SC2034  # read by rr_log in pg-repo-runner.bash
+  RR_ROLE=tips
+  rr_init_state || die "cannot create the state directory" 1
+  rr_load_config || die "cannot load the config" 1
+  root="$(rr_cfg '.workspace_root // empty')"
+  [[ -n $root && -d $root ]] || die "config workspace_root is missing or not a directory" 1
+  now_e="$(rr_epoch)"
+  at="$(rr_iso_at "$now_e")"
+  expires="$(rr_iso_at "$((now_e + $(rr_retry_window)))")"
+  keys="$(rr_cfg '(.repos // {}) | to_entries | map(select(.value.verify == true) | .key) | sort | .[]')" ||
+    die "cannot read the allow-list" 1
+  while IFS= read -r key; do
+    [[ -n $key ]] || continue
+    if ! rr_valid_key "$key"; then
+      rr_log "tips: skipped '$key': not a plain repo key"
+      continue
+    fi
+    rc=0
+    rr_workspace_has_key "$root" "$key" || rc=$?
+    if ((rc != 0)); then
+      rr_log "tips: skipped '$key': not a repo key of pn-workspace.toml (or the file is unreadable)"
+      continue
+    fi
+    if ! rr_path_check "$root" "$key"; then
+      rr_log "tips: skipped '$key': $root/$key is not the top level of a git repository at that exact real path"
+      continue
+    fi
+    branch="$(rr_repo_branch "$root" "$key")" || {
+      rr_log "tips: skipped '$key': cannot read its branch"
+      continue
+    }
+    if ! tip="$(rr_tip_of "$RR_REPO_PATH" "$branch")"; then
+      rr_log "tips: skipped '$key': refs/heads/$branch does not exist"
+      continue
+    fi
+    if rr_verdict_exists "$key" "$tip" check; then
+      continue
+    fi
+    # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
+    rr_jq -nc --arg repo "$key" --arg sha "$tip" --arg branch "$branch" \
+      --arg at "$at" --arg exp "$expires" \
+      '{id: ($repo + "@" + $sha), type: "repo-tip", title: ($repo + " tip"),
+        metadata: {repo: $repo, sha: $sha, branch: $branch}, at: $at, expiresAt: $exp}' ||
+      die "cannot emit the item for '$key'" 1
+  done <<<"$keys"
+  rr_log "tips: done"
+  exit 0
 }
 
 # --- status -----------------------------------------------------------------
@@ -258,7 +424,8 @@ done
 }
 
 case "$cmd" in
-tips | workspace-tips)
+tips) run_tips "$@" ;;
+workspace-tips)
   rr_err "command '$cmd' is not implemented yet"
   exit 2
   ;;
