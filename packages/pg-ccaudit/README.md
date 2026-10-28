@@ -397,10 +397,17 @@ record in full, most of it the same skill and slash-command boilerplate re-injec
 thousands of times.
 
 A schema bump **clears the database** so the next sweep re-ingests from zero. That is
-the only correct migration here: every bump so far adds captured data that was never
-written to the database in the first place, so there is nothing to backfill from, and
-leaving the old rows in place would answer the new queries with structurally valid,
-silently incomplete numbers. A full corpus re-ingest is measured at 2,430 files /
+the only correct migration here: the bumps that add captured data (schemas 1 to 2) add
+data that was never written to the database in the first place, so there is nothing to
+backfill from, and leaving the old rows in place would answer the new queries with
+structurally valid, silently incomplete numbers.
+
+Schema 3 (bead `pg2-pqsvsl`) changes no DDL. It excludes the status-line capture
+files (`<session>.status.jsonl`, rate-limit records rather than transcript events)
+from discovery, matching `claude-transcript`'s `DiscoverTranscripts`. The bump is
+what purges the `files` and `events` rows an earlier sweep already wrote for them:
+ingest never deletes a row for a file it stops discovering, so without the bump
+those rows would keep inflating coverage counts. A full corpus re-ingest is measured at 2,430 files /
 1.3 GB in 35 s.
 
 ## Nix

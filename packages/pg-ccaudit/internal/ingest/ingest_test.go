@@ -702,6 +702,51 @@ func TestReplayingABytesRangeDoesNotDuplicate(t *testing.T) {
 	}
 }
 
+// A <session>.status.jsonl is the status-line capture the claude-status-line
+// hook writes beside a transcript: rate-limit records, not transcript events.
+// It must never be discovered, and so never reach the files or events tables.
+func TestStatusSiblingIsNotDiscoveredAsTranscript(t *testing.T) {
+	root := fixtureCorpus(t)
+	line := `{"ts":"2026-10-28T00:00:00Z","session_id":"S-MAIN","hostname":"h","rate_limits":{}}` + "\n"
+	for _, p := range []string{
+		filepath.Join(root, "projA", "sess-main.status.jsonl"),
+		filepath.Join(root, "projB", "sess-bad.status.jsonl"),
+		filepath.Join(root, "projA", "sess-main", "subagents", "agent-x.status.jsonl"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte(line), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	paths, err := discover(root)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(paths) != wantFiles {
+		t.Errorf("discovered %d files, want %d: %v", len(paths), wantFiles, paths)
+	}
+	for _, p := range paths {
+		if strings.HasSuffix(p, ".status.jsonl") {
+			t.Errorf("status sibling discovered as a transcript: %s", p)
+		}
+	}
+
+	_, db := openTestDB(t, false)
+	stats := sweep(t, db, root)
+	if stats.Scanned != wantFiles {
+		t.Errorf("scanned = %d, want %d", stats.Scanned, wantFiles)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM files WHERE path LIKE '%.status.jsonl'`); got != 0 {
+		t.Errorf("files holds %d status sibling row(s), want 0", got)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM events`); got != wantEvents {
+		t.Errorf("events = %d, want %d", got, wantEvents)
+	}
+}
+
 func TestProjectDirRecorded(t *testing.T) {
 	root := fixtureCorpus(t)
 	_, db := openTestDB(t, false)

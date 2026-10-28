@@ -205,8 +205,22 @@ func Run(ctx context.Context, db *sql.DB, opt Options) (Stats, error) {
 	return stats, nil
 }
 
+// statusSiblingSuffix marks the status-line capture file the claude-status-line
+// hook writes beside a transcript (<session>.status.jsonl). Its lines carry
+// rate-limit fields, not transcript events, so it is never a transcript. This
+// mirrors claude-transcript's DiscoverTranscripts, which skips the same file.
+const statusSiblingSuffix = ".status.jsonl"
+
+// isTranscriptName reports whether a file name is a Claude Code transcript: a
+// .jsonl that is not a status-line capture sibling.
+func isTranscriptName(name string) bool {
+	return strings.HasSuffix(name, ".jsonl") && !strings.HasSuffix(name, statusSiblingSuffix)
+}
+
 // discover lists every transcript under root, sorted so a sweep is
 // order-deterministic and its progress output is diffable between runs.
+// Status-line siblings (<session>.status.jsonl) are not transcripts and are
+// skipped.
 func discover(root string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -220,7 +234,7 @@ func discover(root string) ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if strings.HasSuffix(d.Name(), ".jsonl") {
+		if isTranscriptName(d.Name()) {
 			out = append(out, p)
 		}
 		return nil

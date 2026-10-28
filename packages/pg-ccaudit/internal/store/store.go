@@ -60,7 +60,9 @@ const DriverName = "sqlite"
 //
 // 1 — pg2-xnnab's DDL.
 // 2 — pg2-oisvb adds user_text.
-const SchemaVersion = 2
+// 3 — pg2-pqsvsl: no DDL change. Ingest stopped treating <session>.status.jsonl
+// as a transcript; the bump purges the rows those files already produced.
+const SchemaVersion = 3
 
 // Schema is the CORRECTED DDL from bead pg2-xnnab, plus pg2-oisvb's user_text.
 // `IF NOT EXISTS` is the only addition to the specified columns: it makes Open
