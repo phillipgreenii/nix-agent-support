@@ -290,6 +290,7 @@ package.
 | `PG_REPO_RUNNER_MAX_LOAD`      | Replaces the load threshold.                                   |
 | `PG_REPO_RUNNER_NCPU`          | Replaces the core count used as the default threshold.         |
 | `PG_REPO_RUNNER_NIX_BIN`       | Replaces the nix binary (the bats suites use it to classify).  |
+| `PG_REPO_RUNNER_GIT_BIN`       | Replaces the git binary (the sync suite records git calls).    |
 | `PG_REPO_RUNNER_BD_BIN`        | Replaces the bd binary (default: `bd` on PATH).                |
 | `PG_REPO_RUNNER_OSASCRIPT_BIN` | Replaces the macOS notifier (the surfacing suite records it).  |
 | `PG_REPO_RUNNER_RETRY_WINDOW`  | Replaces the tip item's retry window, in seconds.              |

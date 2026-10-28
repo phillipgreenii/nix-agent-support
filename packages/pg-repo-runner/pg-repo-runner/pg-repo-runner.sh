@@ -18,7 +18,9 @@ fi
 # (absolute store paths); a raw run has none, so each falls back to its bare
 # name. `export` is what lets shellcheck see these as used by
 # pg-repo-runner.bash, which the built script only `source`s from the store.
-export RR_GIT_BIN="${RR_GIT_BIN:-git}"
+# PG_REPO_RUNNER_GIT_BIN replaces the git binary (a test seam: the sync suite
+# records every git call through a wrapper that execs the real git).
+export RR_GIT_BIN="${PG_REPO_RUNNER_GIT_BIN:-${RR_GIT_BIN:-git}}"
 export RR_JQ_BIN="${RR_JQ_BIN:-jq}"
 export RR_TQ_BIN="${RR_TQ_BIN:-tq}"
 export RR_NICE_BIN="${RR_NICE_BIN:-nice}"
@@ -139,6 +141,7 @@ Files and environment:
   PG_REPO_RUNNER_MAX_LOAD  replaces the load threshold
   PG_REPO_RUNNER_NCPU      replaces the core count used as the default threshold
   PG_REPO_RUNNER_NIX_BIN   replaces the nix binary (test seam)
+  PG_REPO_RUNNER_GIT_BIN   replaces the git binary (test seam)
   PG_REPO_RUNNER_BD_BIN    replaces the bd binary (default: bd on PATH)
   PG_REPO_RUNNER_OSASCRIPT_BIN   replaces the macOS notifier (test seam)
   PG_REPO_RUNNER_RETRY_WINDOW   seconds an emitted tip item stays offered
@@ -335,6 +338,7 @@ act_sync() {
 
 # rr_sync_not_diverged REPO TIP EVIDENCE: the repo is not diverged any more;
 # closes the runner's own open diverged bead, if there is one.
+# shellcheck disable=SC2329  # called by act_sync, which is itself invoked indirectly
 rr_sync_not_diverged() {
   rr_surface_resolve "$1" diverged "$2" "No longer diverged: $3 (tip $2)." ||
     rr_log "surface: resolving the diverged transition failed for $1"

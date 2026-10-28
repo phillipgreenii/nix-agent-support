@@ -15498,9 +15498,18 @@
                     PG_ROUTER_ITEM_ID=nix-alpha pg-repo-runner verify >out.txt 2>&1 || rc=$?
                     [ "$rc" = 2 ]
                     grep -q "verify needs an item id" out.txt
-                    # sync is still a stub: admitted by the kernel, then exit 2
+                    # sync runs for real (F5): admitted by the kernel, then one pass over
+                    # a repo with no remote and no commit, which pushes nothing, exits 0
+                    # and leaves a record
                     rc=0
                     PG_ROUTER_ITEM_ID=nix-alpha pg-repo-runner sync >out.txt 2>&1 || rc=$?
+                    [ "$rc" = 0 ]
+                    grep -q ' admitted$' "$XDG_STATE_HOME/pg-repo-runner/run.log"
+                    grep -q ' sync: nix-alpha ' "$XDG_STATE_HOME/pg-repo-runner/run.log"
+                    [ -f "$XDG_STATE_HOME/pg-repo-runner/sync/nix-alpha.json" ]
+                    # build is still a stub: admitted by the kernel, then exit 2
+                    rc=0
+                    pg-repo-runner build >out.txt 2>&1 || rc=$?
                     [ "$rc" = 2 ]
                     grep -q "not implemented yet" out.txt
                     # verify is on for nix-beta, sync is not: skipped with exit 0

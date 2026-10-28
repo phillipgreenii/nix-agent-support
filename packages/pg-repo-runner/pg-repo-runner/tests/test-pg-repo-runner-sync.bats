@@ -166,7 +166,7 @@ printf '%s\n' "\$*" >>"$TEST_DIR/git.argv"
 exec "$real" "\$@"
 EOF
   chmod +x "$TEST_DIR/git-wrapper"
-  export RR_GIT_BIN="$TEST_DIR/git-wrapper"
+  export PG_REPO_RUNNER_GIT_BIN="$TEST_DIR/git-wrapper"
 }
 
 make_notifier() {
