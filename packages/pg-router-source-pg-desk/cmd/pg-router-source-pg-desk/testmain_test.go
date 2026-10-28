@@ -1,34 +1,38 @@
 // testmain_test.go: the in-process pg-desk double. withHelper swaps the
-// Runner seam for a fake that impersonates pg-desk: it records the argv it
-// was given (so tests can assert on the exact pg-desk command line, e.g. that
-// --cached is never passed), answers with the fixture named by
+// Runner seam for a cmdruntest.Fake that impersonates pg-desk: it records the
+// argv it was given (so tests can assert on the exact pg-desk command line,
+// e.g. that --cached is never passed), answers with the fixture named by
 // GO_HELPER_STDOUT_FILE (or the literal GO_HELPER_STDOUT) on stdout,
 // GO_HELPER_STDERR on stderr, and exit code GO_HELPER_EXIT. The vocabulary is
 // kept from the earlier re-executed-test-binary double (a race-built child
 // sleeps 1 s at exit); nothing here starts a process. The real exec path is
-// covered by runner_test.go.
+// cmdrun.Exec, covered by the shared cmdruntest.RunContract suite in x and,
+// through this adapter, by runner_test.go.
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/cmdrun"
+	"github.com/phillipgreenii/x/cmdruntest"
 )
 
-// fakePgDesk is what withHelper installs; calls is every Call it saw.
+// fakePgDesk is what withHelper installs; Calls() is every Call it saw.
 type fakePgDesk struct {
-	calls []Call
+	*cmdruntest.Fake
 }
 
 // lastArgs is the argv of the most recent call (nil when never called).
 func (f *fakePgDesk) lastArgs() []string {
-	if len(f.calls) == 0 {
+	calls := f.Calls()
+	if len(calls) == 0 {
 		return nil
 	}
-	return f.calls[len(f.calls)-1].Args
+	return calls[len(calls)-1].Args
 }
 
 // withHelper swaps the Runner seam for an in-process pg-desk double with the
@@ -40,23 +44,23 @@ func withHelper(t *testing.T, env ...string) *fakePgDesk {
 		k, v, _ := strings.Cut(e, "=")
 		cfg[k] = v
 	}
-	f := &fakePgDesk{}
-	orig := runner
-	runner = func(_ context.Context, c Call) Result {
-		f.calls = append(f.calls, c)
-		var res Result
+	f := &fakePgDesk{Fake: cmdruntest.New(t)}
+	f.On(cmdruntest.MatchName(pgDeskBinary)).Respond(func(cmdrun.Call) cmdrun.Result {
+		var res cmdrun.Result
 		if file := cfg["GO_HELPER_STDOUT_FILE"]; file != "" {
 			b, err := os.ReadFile(file)
 			if err != nil {
-				return Result{Stderr: "helper: " + err.Error(), Code: 99}
+				return cmdrun.Result{Stderr: []byte("helper: " + err.Error()), Code: 99}
 			}
-			res.Stdout = string(b)
+			res.Stdout = b
 		}
-		res.Stdout += cfg["GO_HELPER_STDOUT"]
-		res.Stderr = cfg["GO_HELPER_STDERR"]
+		res.Stdout = append(res.Stdout, cfg["GO_HELPER_STDOUT"]...)
+		res.Stderr = []byte(cfg["GO_HELPER_STDERR"])
 		res.Code, _ = strconv.Atoi(cfg["GO_HELPER_EXIT"])
 		return res
-	}
+	})
+	orig := runner
+	runner = f.Runner()
 	t.Cleanup(func() { runner = orig })
 	return f
 }

@@ -1,67 +1,21 @@
-// runner_test.go: real-process tests of ExecRunner (V-3 regression guard for
-// the real exec path; everything else answers the Runner seam in process).
-// They run sh -c, not the test binary.
+// runner_test.go: the one real-process test (V-3 regression guard for the real
+// exec path through the seam; everything else answers the Runner seam in
+// process). It runs a #!/bin/sh stub, not the test binary. The behaviour of
+// cmdrun.Exec itself (exit codes, separate stdout and stderr, env, stdin,
+// signal death, context end, start errors) is covered by the shared
+// cmdruntest.RunContract suite in x.
 package main
 
 import (
 	"context"
-	"errors"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
-	"time"
 )
-
-func TestExecRunnerMapsExitCodeAndCapturesStdoutAndStderrSeparately(t *testing.T) {
-	r := ExecRunner(context.Background(), Call{Name: "sh", Args: []string{"-c", "printf out; printf err >&2; exit 3"}})
-	if r.Code != 3 || r.Signaled || r.StartErr != nil {
-		t.Fatalf("Code=%d Signaled=%v StartErr=%v, want 3 false nil", r.Code, r.Signaled, r.StartErr)
-	}
-	if r.Stdout != "out" || r.Stderr != "err" {
-		t.Errorf("stdout=%q stderr=%q, want out / err", r.Stdout, r.Stderr)
-	}
-}
-
-func TestExecRunnerPassesEnvAndStdin(t *testing.T) {
-	r := ExecRunner(context.Background(), Call{
-		Name:  "sh",
-		Args:  []string{"-c", `printf '%s|' "$PGD_PROBE"; cat`},
-		Stdin: "in",
-		Env:   []string{"PGD_PROBE=v"},
-	})
-	if r.Code != 0 || r.Stdout != "v|in" {
-		t.Errorf("Code=%d stdout=%q, want 0 and v|in", r.Code, r.Stdout)
-	}
-}
-
-func TestExecRunnerReportsASignalledChild(t *testing.T) {
-	r := ExecRunner(context.Background(), Call{Name: "sh", Args: []string{"-c", "kill -9 $$"}})
-	if !r.Signaled || r.Code != -1 || r.StartErr != nil {
-		t.Errorf("Code=%d Signaled=%v StartErr=%v, want -1 true nil", r.Code, r.Signaled, r.StartErr)
-	}
-}
-
-func TestExecRunnerReportsATimedOutChildAsSignaled(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	r := ExecRunner(ctx, Call{Name: "sh", Args: []string{"-c", "sleep 30"}})
-	if !r.Signaled || r.Code != -1 {
-		t.Errorf("Code=%d Signaled=%v, want -1 true", r.Code, r.Signaled)
-	}
-}
-
-func TestExecRunnerMissingBinaryIsAStartError(t *testing.T) {
-	r := ExecRunner(context.Background(), Call{Name: "pg-desk-no-such-binary-for-test"})
-	var pe *exec.Error
-	if r.StartErr == nil || !errors.As(r.StartErr, &pe) || r.Code != -1 {
-		t.Errorf("Code=%d StartErr=%v, want -1 and an *exec.Error", r.Code, r.StartErr)
-	}
-}
 
 // The seam end to end with the real runner: a real child that exits 2 with a
 // body on stdout is classified like pg-desk's partial result.
-func TestRunPgDeskThroughExecRunnerUsesTheRealPath(t *testing.T) {
+func TestRunPgDeskThroughExecUsesTheRealPath(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(dir+"/pg-desk", []byte("#!/bin/sh\nprintf '%s' \"$*\"\nexit 2\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -73,5 +27,13 @@ func TestRunPgDeskThroughExecRunnerUsesTheRealPath(t *testing.T) {
 	}
 	if res.exitCode != 2 || !classifyExit(res.exitCode) || !strings.Contains(string(res.stdout), "widget changes") {
 		t.Errorf("exit=%d stdout=%q", res.exitCode, res.stdout)
+	}
+}
+
+// A pg-desk that is not on $PATH is a start error, not an exit code.
+func TestRunPgDeskMissingBinaryIsAStartError(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if _, err := runPgDesk(context.Background(), []string{"changes"}); err == nil {
+		t.Fatal("want a start error when pg-desk is not on PATH")
 	}
 }

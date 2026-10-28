@@ -9,6 +9,8 @@ package main
 import (
 	"context"
 	"fmt"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // pgDeskBinary is the ambient $PATH name this adapter execs.
@@ -25,11 +27,11 @@ type pgDeskResult struct {
 // $PATH, permission denied, ...): there is then no exit code and no child
 // stderr.
 func runPgDesk(ctx context.Context, args []string) (pgDeskResult, error) {
-	r := runnerOrExec()(ctx, Call{Name: pgDeskBinary, Args: args})
+	r := runnerOrExec()(ctx, cmdrun.Call{Name: pgDeskBinary, Args: args})
 	if r.StartErr != nil {
 		return pgDeskResult{}, fmt.Errorf("%s: cannot run: %w", pgDeskBinary, r.StartErr)
 	}
-	return pgDeskResult{stdout: []byte(r.Stdout), stderr: []byte(r.Stderr), exitCode: r.Code}, nil
+	return pgDeskResult{stdout: r.Stdout, stderr: r.Stderr, exitCode: r.Code}, nil
 }
 
 // classifyExit translates pg-desk's `changes` exit codes into what

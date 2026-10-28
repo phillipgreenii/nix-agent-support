@@ -191,7 +191,7 @@ func TestPgDeskInvocationNeverPassesCached(t *testing.T) {
 	if _, stderr, code := runCLI(t, "widget", "--consumer", "router"); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
 	}
-	if n := fake.calls[0].Name; n != "pg-desk" {
+	if n := fake.Calls()[0].Name; n != "pg-desk" {
 		t.Errorf("binary = %q, want pg-desk", n)
 	}
 	want := []string{"widget", "changes", "--consumer", "router", "--json"}
@@ -407,7 +407,7 @@ func TestRetryWindowInvalidFailsBeforeRunningPgDesk(t *testing.T) {
 		if code != 1 || stdout != "" || stderr == "" {
 			t.Errorf("window %q: code=%d stdout=%q stderr=%q, want 1, empty stdout, a diagnostic", window, code, stdout, stderr)
 		}
-		if len(fake.calls) != 0 {
+		if len(fake.Calls()) != 0 {
 			t.Errorf("window %q: pg-desk was run", window)
 		}
 	}
