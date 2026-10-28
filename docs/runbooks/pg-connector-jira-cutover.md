@@ -136,7 +136,11 @@ Two consequences shape the order:
    `UNREACHABLE` line names the Jira instance, and none appears that the before-list lacked. The
    dispatch-check mismatch of step 2 MUST be clear now.
 9. The live check T-18, last. Its four legs, with the sample commands in placeholders:
-   1. `pg-router run-query --json query:<jira issue source>` shows zero items in steady state.
+   1. `pg-router run-query --json query:<jira issue source>` shows no STUCK item: on a busy deployment real
+      Jira edits keep arriving, so a non-zero count is normal (pg2-7ns8o4 saw 2, 6 and 1 items, each time
+      different change ids). Run it three times a poll interval apart and read `pg-desk status`: pass when
+      the consumer lag returns to `0` between runs and no change id (seq) appears in two runs; fail when
+      a seq repeats or the lag only grows. Zero items is the pass on a quiet deployment.
    2. One edit to a WATCHED Jira issue yields exactly one `change_log` row and one decider run.
    3. An edit to an UNWATCHED Jira issue yields none.
    4. A change to a pull request linked to an unwatched Jira issue yields none.
@@ -210,3 +214,13 @@ A Jira entity that no owning backend holds (one stored only because pull-request
 its `backend` set to the non-owning backend by the backfill's probe
 (`docs/behavior/pg-desk/operator-commands.md`, "issue backfill-backend"); the done condition requires
 only that `backend` is set (not NULL).
+
+## A watched Jira issue that no query lists
+
+An open Jira issue with `watched=1` that no daemon query lists any more (it left its query by an ordinary
+membership change) is NOT a stale flag: for an owning backend the daemon keeps tracking it and the feed
+delivers its rows by the watched flag, so pg-desk has no orphan read for it (INV-ICD-17, INV-ICD-20(f)).
+The flag clears only on a feed row of kind `closed` or `removed`, or an answer whose `entity_meta.watched`
+is false (`internal/pipeline/feed_row.go`; tests `TestIngestFeedRow_ClosedRowAppendsDeactivatesAndClearsWatched`
+and `TestIngestFeedRow_WatchedMirrorsEntityMeta`). Treat such a row as a defect only if the issue is closed
+or the daemon reports it unwatched and the flag stays 1.
