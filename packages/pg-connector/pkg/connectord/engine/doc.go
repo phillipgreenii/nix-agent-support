@@ -66,20 +66,18 @@
 //   - DetectGone is idempotent per tombstone: it records, in store_meta, the
 //     tombstoned_at it appended a removed row for, and a repeat call for the
 //     same tombstone appends nothing.
-//   - Emission: under registry.EmitAll every tracked entity gets its rows; under
-//     registry.EmitWatchedOnly DetectPrimary, DetectGroup, DetectGone and
-//     AppendMembership return at once for an entity that is not watched (no
-//     pending row, no version bump, no sequence number). Every appended row
-//     carries the watched flag read in its own transaction (true when the same
-//     write set it).
-//   - Watch and WatchOne set the flag (first cause wins, never cleared). Under
-//     EmitWatchedOnly a WatchLate of a known entity (one with stored primary
-//     content) appends one Added-role row; a baseline watch, a watch of a
-//     never-seen entity and every watch under EmitAll append none. A one-off
+//   - Emission (registry.EmitWatchedOnly, the one mode): DetectPrimary,
+//     DetectGroup, DetectGone and AppendMembership return at once for an entity
+//     that is not watched (no pending row, no version bump, no sequence number).
+//     Every appended row carries the watched flag read in its own transaction
+//     (true when the same write set it).
+//   - Watch and WatchOne set the flag (first cause wins, never cleared). A
+//     WatchLate of a known entity (one with stored primary content) appends one
+//     Added-role row; a baseline watch and a watch of a never-seen entity append
+//     none. A one-off
 //     watch is applied BEFORE the refresh or read it concerns, so the change that
 //     read finds is a row of a watched entity.
 //   - An arrival (AppendMembership with Watch set) is ONE row: the membership kind
-//     when Spec.Membership.StoreRows, joined only under EmitWatchedOnly by the
-//     Added kind when the arrival newly set the flag; an empty union appends
+//     when Spec.Membership.StoreRows, joined by the Added kind when the arrival newly set the flag; an empty union appends
 //     nothing, and WatchBaseline sets the flag and appends nothing at all.
 package engine

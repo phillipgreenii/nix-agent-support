@@ -56,7 +56,7 @@ type rig struct {
 	purpose governor.Purpose
 }
 
-func newRig(t *testing.T) *rig { return newRigWithSpec(t, legacySpec()) }
+func newRig(t *testing.T) *rig { return newRigWithSpec(t, Spec()) }
 
 // newRigWithSpec is newRig over the registration spec.
 func newRigWithSpec(t *testing.T, spec registry.Spec) *rig {
@@ -99,14 +99,25 @@ func sample() summary.Summary {
 
 const ref = "phillipgreenii/example#7"
 
-// seed stores the entity (version 5) and its summary.
-func (r *rig) seed(s summary.Summary) {
+// seed stores the entity (version 5, watched: the engine appends rows only for
+// a watched PR) and its summary.
+func (r *rig) seed(s summary.Summary) { r.seedWith(s, true) }
+
+// seedUnwatched is seed for a PR nobody watches.
+func (r *rig) seedUnwatched(s summary.Summary) { r.seedWith(s, false) }
+
+func (r *rig) seedWith(s summary.Summary, watched bool) {
 	r.t.Helper()
 	raw, err := json.Marshal(s)
 	r.must(err)
 	r.must(r.inTx(func(tx *store.Tx) error {
 		if err := tx.PutEntity(context.Background(), store.EntityRow{Kind: LogKindPR, ID: s.NodeID, Version: 5}); err != nil {
 			return err
+		}
+		if watched {
+			if _, err := tx.SetWatched(context.Background(), LogKindPR, s.NodeID, registry.ViaDirect, t0); err != nil {
+				return err
+			}
 		}
 		return tx.PutGroup(context.Background(), store.GroupRow{
 			Kind: LogKindPR, ID: s.NodeID, Group: groups.Summary, Content: raw, Generation: 1,

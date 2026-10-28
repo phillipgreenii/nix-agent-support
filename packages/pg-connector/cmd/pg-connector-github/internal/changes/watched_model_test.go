@@ -26,7 +26,7 @@ func TestModel_AnUnwatchedPRNeverEmitsAndTheFlagIsStickyUntilEviction(t *testing
 		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
 			rng := rand.New(rand.NewSource(seed))
 			r := newRigWithSpec(t, Spec())
-			r.seed(sample())
+			r.seedUnwatched(sample())
 			var (
 				watched  bool // the model's flag
 				wantRows int  // the model's row count
@@ -60,7 +60,7 @@ func TestModel_AnUnwatchedPRNeverEmitsAndTheFlagIsStickyUntilEviction(t *testing
 					watched = true
 				default: // eviction, then the PR comes back unwatched
 					r.must(r.st.DeleteEntity(context.Background(), LogKindPR, node))
-					r.seed(sample())
+					r.seedUnwatched(sample())
 					trail = append(trail, "evict")
 					watched = false
 				}

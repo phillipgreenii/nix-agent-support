@@ -166,7 +166,6 @@ func TestArgumentErrorsAreInvalidArgument(t *testing.T) {
 		"changes: no arguments":          {"changes", ``},
 		"changes: not an object":         {"changes", `[1]`},
 		"changes: no consumer":           {"changes", `{"query":"mine"}`},
-		"changes: no query":              {"changes", `{"consumer":"c"}`},
 		"changes: consumer not a string": {"changes", `{"consumer":3,"query":"mine"}`},
 		"changes: cached not a boolean":  {"changes", `{"consumer":"c","query":"mine","cached":"yes"}`},
 		"changes: reset not a boolean":   {"changes", `{"consumer":"c","query":"mine","reset":1}`},

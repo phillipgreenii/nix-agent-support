@@ -11,10 +11,10 @@ const LogKindIssue = groups.EntityKind
 
 // Spec is the Jira daemon's registration with the shared change engine.
 //
-// Emission and Delivery are set explicitly: the zero values are the legacy
-// modes (registry.EmitAll, registry.DeliverByMembership), and a Jira row exists
-// only for a watched issue. The membership words are roles only (StoreRows is
-// false), so entered_query and left_query are not in Changes.
+// Emission and Delivery are the watched modes (the only modes, and so the zero
+// values): a Jira row exists only for a watched issue. The membership words are
+// roles only (StoreRows is false, a permanent per-connector policy), so
+// entered_query and left_query are not in Changes.
 func Spec() registry.Spec {
 	return registry.Spec{
 		EntityKind:   LogKindIssue,

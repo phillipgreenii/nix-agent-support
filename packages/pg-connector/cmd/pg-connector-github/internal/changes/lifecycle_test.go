@@ -76,7 +76,7 @@ func (l *lrig) open() {
 		l.t.Fatal(err)
 	}
 	l.t.Cleanup(func() { _ = st.Close() })
-	e, err := NewWithSpec(Config{Clock: l.clk, BodyCap: 64}, legacySpec())
+	e, err := NewWithSpec(Config{Clock: l.clk, BodyCap: 64}, Spec())
 	if err != nil {
 		l.t.Fatal(err)
 	}

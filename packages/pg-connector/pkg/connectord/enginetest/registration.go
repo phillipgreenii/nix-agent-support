@@ -87,8 +87,8 @@ func WithSpec(fn func(*registry.Spec)) Option {
 }
 
 // NewRegistration returns the fake connector's registration with every option
-// applied in order. The default delivers by membership, emits for every entity,
-// stores membership rows and does not watch ad-hoc queries.
+// applied in order. The default delivers by watched, emits for watched entities
+// only, stores membership rows and does not watch ad-hoc queries.
 func NewRegistration(opts ...Option) Registration {
 	r := Registration{
 		Entity:      vocab.W("alpha"),
@@ -112,8 +112,8 @@ func NewRegistration(opts ...Option) Registration {
 		Roles:        registry.Roles{Added: r.Added, Removed: r.Removed, EnteredQuery: r.Entered, LeftQuery: r.Left},
 		Views:        []registry.View{{Name: r.ViewAll}, {Name: r.ViewToggled, AnyOf: []string{r.Toggled}}},
 		FoldRef:      strings.ToLower,
-		Emission:     registry.EmitAll,
-		Delivery:     registry.DeliverByMembership,
+		Emission:     registry.EmitWatchedOnly,
+		Delivery:     registry.DeliverByWatched,
 		Membership:   registry.MembershipPolicy{StoreRows: true},
 	}
 	for _, o := range opts {

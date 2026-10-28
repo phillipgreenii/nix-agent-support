@@ -65,7 +65,7 @@ func (r *engineRig) watchedWith(t *testing.T, id, via string) bool {
 }
 
 func TestWatched_AnUnwatchedQueryMarksNothingAndKeepsTheStorelessShortcut(t *testing.T) {
-	r := newEngineRig(t) // the settings mark nothing watched
+	r := newUnwatchedEngineRig(t) // the settings mark nothing watched
 	r.list(true, memA)
 	r.runKey(t)
 	r.list(true, memA, memB)

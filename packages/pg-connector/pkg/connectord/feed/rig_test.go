@@ -66,8 +66,8 @@ func testSpec() registry.Spec {
 			{Name: viewFlagged, AnyOf: []string{kindFlag}},
 		},
 		FoldRef:    foldRef,
-		Emission:   registry.EmitAll,
-		Delivery:   registry.DeliverByMembership,
+		Emission:   registry.EmitWatchedOnly,
+		Delivery:   registry.DeliverByWatched,
 		Membership: registry.MembershipPolicy{StoreRows: true},
 	}
 }
@@ -205,6 +205,7 @@ func newRig(t *testing.T, opts ...func(*Config)) *rig {
 	q := newFakeQueries()
 	q.set("mine", true, refA)
 	q.set("team", true, refA, refB)
+	q.setWatchedRefs(refA, refB)
 	obs := &recorder{}
 	cfg := Config{Spec: testSpec(), Store: st, Queries: q, Clock: clk, Retention: 14 * day, ConsumerStaleAfter: 7 * day, Observer: obs}
 	for _, o := range opts {
@@ -217,7 +218,8 @@ func newRig(t *testing.T, opts ...func(*Config)) *rig {
 	return &rig{t: t, st: st, clk: clk, q: q, obs: obs, f: f}
 }
 
-// add appends one log row for ref at the clock's time and returns its Seq.
+// add appends one log row for ref at the clock's time, with the watched
+// snapshot set (the feed delivers only such rows), and returns its Seq.
 func (r *rig) add(ref string, kinds []string, fields ...engine.Field) int64 {
 	r.t.Helper()
 	raw, err := engine.EncodeFields(fields)
@@ -229,6 +231,7 @@ func (r *rig) add(ref string, kinds []string, fields ...engine.Field) int64 {
 		var aerr error
 		seq, aerr = tx.AppendChange(context.Background(), store.ChangeRow{
 			Kind: entityKind, ID: ref, Version: 1, Kinds: kinds, Fields: raw, Origin: "refresh", At: r.clk.Now(),
+			Watched: true,
 		})
 		return aerr
 	})

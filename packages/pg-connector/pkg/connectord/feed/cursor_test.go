@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -21,11 +20,11 @@ import (
 // HT-36). A consumer holds one cursor; the view and scope of the call that
 // created it are fixed.
 
-// watchedRig is a rig whose registration delivers by watched.
+// watchedRig is newRig under the name the watched-delivery tests use: the one
+// delivery mode of the registration is by watched.
 func watchedRig(t *testing.T, opts ...func(*Config)) *rig {
 	t.Helper()
-	all := append([]func(*Config){func(c *Config) { c.Spec.Delivery = registry.DeliverByWatched }}, opts...)
-	return newRig(t, all...)
+	return newRig(t, opts...)
 }
 
 func wantScopeConflict(t *testing.T, err error, existing string) {
@@ -99,16 +98,8 @@ func TestAResetRebindsTheCursorToTheNewScopeAtTheHead(t *testing.T) {
 	eqSeqs(t, r.poll(viewAll, "c", "team").Rows, next)
 }
 
-func TestScopeIsRequiredExactlyWhenDeliveryIsByMembership(t *testing.T) {
+func TestScopeIsOptionalAndWhenGivenMustBeAConfiguredQuery(t *testing.T) {
 	ctx := context.Background()
-
-	byMembership := newRig(t)
-	if _, err := byMembership.f.Poll(ctx, PollRequest{View: viewAll, Consumer: "c"}); !errors.Is(err, scriptout.ErrInvalidArgument) {
-		t.Fatalf("a poll without a scope by membership = %v, want invalid_argument", err)
-	}
-	if err := ackErr(byMembership.f, ctx, viewAll, "c", "", 0); !errors.Is(err, scriptout.ErrInvalidArgument) {
-		t.Fatalf("an ack without a scope by membership = %v, want invalid_argument", err)
-	}
 
 	byWatched := watchedRig(t)
 	if _, err := byWatched.f.Poll(ctx, PollRequest{View: viewAll, Consumer: "c"}); err != nil {
@@ -265,19 +256,6 @@ func TestResetUnderWatchedDeliveryReplaysWatchedMembersAndAppendsNoRow(t *testin
 	r.q.setWatchedRefs()
 	if res, err := r.f.Poll(ctx, PollRequest{View: viewAll, Consumer: "u", Reset: true}); err != nil || res.Replay == nil || len(res.Replay) != 0 {
 		t.Fatalf("reset with nothing watched = %+v, %v", res, err)
-	}
-}
-
-func TestResetByMembershipReplaysTheScopeMembersAndAppendsNoRow(t *testing.T) {
-	r := newRig(t)
-	r.q.setWatchedRefs(refOther) // not consulted by membership delivery
-	head := r.plain(refA)
-	res, err := r.f.Poll(context.Background(), PollRequest{View: viewAll, Consumer: "c", Scope: "team", Reset: true})
-	if err != nil || !slices.Equal(res.Replay, []string{refA, refB}) {
-		t.Fatalf("reset = %+v, %v, want the members of team", res, err)
-	}
-	if got := r.head(); got != head {
-		t.Fatalf("a reset appended a row: head %d -> %d", head, got)
 	}
 }
 

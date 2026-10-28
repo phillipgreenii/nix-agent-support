@@ -13,30 +13,25 @@ import (
 	"slices"
 )
 
-// Emission says which entities the change engine appends rows for.
+// Emission says which entities the change engine appends rows for. The zero
+// value is the one mode there is.
 type Emission int
 
 const (
-	// EmitAll appends a row for every tracked entity. It is the behaviour the
-	// first adopter has before the lane refactor; a row carries the entity's
-	// watched flag as it stood.
-	EmitAll Emission = iota
 	// EmitWatchedOnly appends a row only for an entity whose watched flag is set
 	// in the same transaction (or is set by the same write).
-	EmitWatchedOnly
+	EmitWatchedOnly Emission = iota
 )
 
-// Delivery says how the feed selects the rows a consumer receives.
+// Delivery says how the feed selects the rows a consumer receives. The zero
+// value is the one mode there is.
 type Delivery int
 
 const (
-	// DeliverByMembership is the behaviour the first adopter has before the lane
-	// refactor: a query name is required, a member's rows are delivered, and a
-	// non-member's row only when a membership kind names the query.
-	DeliverByMembership Delivery = iota
 	// DeliverByWatched delivers the rows whose watched snapshot is set, whether
-	// or not the entity is still a member of any query.
-	DeliverByWatched
+	// or not the entity is still a member of any query. A query name is optional:
+	// when given it filters.
+	DeliverByWatched Delivery = iota
 )
 
 // Roles name the four change kinds the feed protocol itself needs. Added and

@@ -9,18 +9,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 )
 
-// legacySpec is the registration as it was before the PR lane flip: a row for
-// every observed PR (EmitAll) and delivery by query membership
-// (DeliverByMembership). The engine tests that pin the detection, pending-row
-// and settle rules run under it, because those rules do not depend on the modes
-// and their fixtures are not watched.
-func legacySpec() registry.Spec {
-	s := Spec()
-	s.Emission = registry.EmitAll
-	s.Delivery = registry.DeliverByMembership
-	return s
-}
-
 // encodeAwaited is the stored form of an awaited list, for the tests that seed
 // a pending row directly.
 func encodeAwaited(aw []Awaiting) (json.RawMessage, error) { return json.Marshal(aw) }

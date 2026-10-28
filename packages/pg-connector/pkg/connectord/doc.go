@@ -23,7 +23,7 @@
 //     Settings and Tracker; it stores each run's members and marks watched ones.
 //   - feed is the change feed: Poll, Ack, Positions and Prune over one cursor per
 //     consumer, bound to a view and an optional scope, with the delivery rule of
-//     the registration's mode (DeliverByMembership or DeliverByWatched).
+//     the registration's delivery mode (DeliverByWatched).
 //   - feedop serves the feed over the daemon's socket (the changes and
 //     changes_ack handlers, and WatchArg for a read that asks to watch).
 //   - groupkit holds the group freshness table and the generation-checked write

@@ -153,7 +153,7 @@ func (f *Feed) Poll(ctx context.Context, req PollRequest) (PollResult, error) {
 }
 
 func (f *Feed) poll(ctx context.Context, req PollRequest) (PollResult, error) {
-	view, err := f.validate(req.View, req.Consumer, req.Scope)
+	view, err := f.validate(req.View, req.Consumer)
 	if err != nil {
 		return PollResult{}, err
 	}
@@ -283,26 +283,22 @@ func (f *Feed) baselined(ctx context.Context, scope string, members Members) (bo
 	return true, nil
 }
 
-// replay is the reference list a Reset hands back to be replayed as added. With
-// DeliverByMembership it is the scope's members. With DeliverByWatched it is the
+// replay is the reference list a Reset hands back to be replayed as added: the
 // watched members of the scope, or every watched reference for an unscoped
 // consumer.
 func (f *Feed) replay(ctx context.Context, scope string, members Members) ([]string, error) {
-	refs := members.Refs
-	if f.cfg.Spec.Delivery == registry.DeliverByWatched {
-		watched, err := f.cfg.Queries.WatchedRefs(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if scope == "" {
-			refs = watched
-		} else {
-			set := newMemberSet(watched, f.cfg.Spec.FoldRef)
-			refs = nil
-			for _, r := range members.Refs {
-				if set.has(r) {
-					refs = append(refs, r)
-				}
+	watched, err := f.cfg.Queries.WatchedRefs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var refs []string
+	if scope == "" {
+		refs = watched
+	} else {
+		set := newMemberSet(watched, f.cfg.Spec.FoldRef)
+		for _, r := range members.Refs {
+			if set.has(r) {
+				refs = append(refs, r)
 			}
 		}
 	}
@@ -399,7 +395,7 @@ func (f *Feed) Ack(ctx context.Context, req AckRequest) (AckResult, error) {
 }
 
 func (f *Feed) ack(ctx context.Context, req AckRequest) (AckResult, error) {
-	view, err := f.validate(req.View, req.Consumer, req.Scope)
+	view, err := f.validate(req.View, req.Consumer)
 	if err != nil {
 		return AckResult{}, err
 	}

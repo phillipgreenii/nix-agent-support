@@ -121,18 +121,15 @@ func (f *Feed) resolveView(name string) (registry.View, error) {
 	return registry.View{}, scriptout.WrapError(scriptout.ErrInvalidArgument, fmt.Sprintf("feed view %q is not one of the registered views", name))
 }
 
-// validate checks the request fields every call shares and returns the view. A
-// scope is required exactly when the registration delivers by membership;
-// otherwise it is optional.
-func (f *Feed) validate(view, consumer, scope string) (registry.View, error) {
+// validate checks the request fields every call shares and returns the view. The
+// scope is optional, so it is not checked here.
+func (f *Feed) validate(view, consumer string) (registry.View, error) {
 	v, err := f.resolveView(view)
 	switch {
 	case err != nil:
 		return registry.View{}, err
 	case consumer == "":
 		return registry.View{}, scriptout.WrapError(scriptout.ErrInvalidArgument, "a consumer name is required")
-	case scope == "" && f.cfg.Spec.Delivery == registry.DeliverByMembership:
-		return registry.View{}, scriptout.WrapError(scriptout.ErrInvalidArgument, "a query name is required")
 	}
 	return v, nil
 }

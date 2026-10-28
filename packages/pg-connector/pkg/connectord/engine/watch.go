@@ -19,8 +19,7 @@ const (
 	// a baseline run.
 	WatchBaseline WatchMode = iota + 1
 	// WatchLate sets the flag and, when it was newly set and the emission rules
-	// say so (Spec.Emission is registry.EmitWatchedOnly), appends one row of the
-	// Spec.Roles.Added kind.
+	// say so, appends one row of the Spec.Roles.Added kind.
 	WatchLate
 )
 
@@ -42,23 +41,18 @@ type WatchRequest struct {
 // and Appended whether it appended a row.
 type WatchResult struct{ Newly, Appended bool }
 
-// watchedGate reports whether detection for id must stop: the emission is
-// registry.EmitWatchedOnly and the entity is not watched. It reads the flag in
-// the open transaction.
+// watchedGate reports whether detection for id must stop: the entity is not
+// watched. It reads the flag in the open transaction.
 func (e *Engine) watchedGate(ctx context.Context, tx *store.Tx, id string) (skip bool, err error) {
-	if e.spec.Emission != registry.EmitWatchedOnly {
-		return false, nil
-	}
 	watched, err := tx.IsWatched(ctx, e.spec.EntityKind, id)
 	return !watched, err
 }
 
 // Watch sets the entity's watched flag inside tx, first cause wins. A flag that
 // was already set changes nothing and appends nothing. When the flag was newly
-// set and the mode is WatchLate under registry.EmitWatchedOnly, one row of the
-// Added role is appended, provided the entity has stored primary content (a
-// known entity); an entity with none gets the flag only, and so does every
-// watch under registry.EmitAll and every WatchBaseline.
+// set and the mode is WatchLate, one row of the Added role is appended,
+// provided the entity has stored primary content (a known entity); an entity
+// with none gets the flag only, and so does every WatchBaseline.
 func (e *Engine) Watch(ctx context.Context, tx *store.Tx, w WatchRequest) (WatchResult, error) {
 	switch {
 	case tx == nil:
@@ -75,7 +69,7 @@ func (e *Engine) Watch(ctx context.Context, tx *store.Tx, w WatchRequest) (Watch
 		return WatchResult{}, err
 	}
 	res := WatchResult{Newly: newly}
-	if !newly || w.Mode != WatchLate || e.spec.Emission != registry.EmitWatchedOnly {
+	if !newly || w.Mode != WatchLate {
 		return res, nil
 	}
 	prim, ok, err := e.storedPrimary(ctx, tx, w.ID)

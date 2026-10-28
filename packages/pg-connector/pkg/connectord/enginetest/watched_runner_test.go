@@ -104,23 +104,6 @@ func TestALaterRunOfAWatchedQueryAddsOneRowPerArrivalAndNoneForAWatchedMember(t 
 	}
 }
 
-func TestUnderEmitAllAWatchedQueryAddsNoAddedRow(t *testing.T) {
-	r := watchedQueryRig(t, WithEmission(registry.EmitAll))
-	reg := r.Reg
-	r.Lister.Script(queryMine, true, member(idOne, refOne))
-	r.RunQuery(queryMine)
-	seedKnown(r, idTwo, refTwo)
-	r.Lister.Script(queryMine, true, member(idOne, refOne), member(idTwo, refTwo))
-	r.RunQuery(queryMine)
-
-	rows := r.Rows()
-	WantRowKinds(t, rows, []string{reg.Entered})
-	WantRefs(t, rows, refTwo)
-	if via, ok := watchedVia(t, r, idTwo); !ok || via != registry.ViaQuery+queryMine {
-		t.Errorf("the arrival is not flagged: watched = %v via %q", ok, via)
-	}
-}
-
 func TestTheWatchedFlipBurstEqualsTheKnownMembers(t *testing.T) {
 	r := watchedQueryRig(t, WithEmission(registry.EmitWatchedOnly))
 	reg := r.Reg
@@ -251,7 +234,7 @@ func TestAWatchFetchDoesNotJoinAPlainRunOfTheSameKey(t *testing.T) {
 // the scope for, a row raw-inserted with the snapshot unset reaches nobody, and a
 // row appended before the entity was watched is never delivered.
 func TestDeliverByWatchedOnTheRig(t *testing.T) {
-	r := NewRig(t, WithRegistration(WithEmission(registry.EmitAll), WithDelivery(registry.DeliverByWatched)))
+	r := NewRig(t)
 	reg := r.Reg
 	r.Settings.Define(queryMine, "expression-one")
 	seedKnown(r, idOne, refOne)
@@ -260,9 +243,15 @@ func TestDeliverByWatchedOnTheRig(t *testing.T) {
 	r.RunQuery(queryMine)
 	r.Poll(reg.ViewAll, consumer, queryMine) // the cursor starts at the tail
 
-	// Before the watch the engine appends under EmitAll, with the snapshot unset.
-	retitle(t, r, idOne, "before the watch")
-	mustWatch(t, r, watchRequest(idOne, refOne))
+	// A raw row of an entity before it was watched, with the snapshot unset (the
+	// engine appends none for an unwatched entity).
+	if err := r.InTx(func(ctx context.Context, tx *store.Tx) error {
+		_, err := tx.AppendChange(ctx, store.ChangeRow{Kind: reg.Entity, ID: refOne, Kinds: []string{reg.Retitled}, At: r.Clock.Now()})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mustWatch(t, r, engine.WatchRequest{ID: idOne, Ref: refOne, Via: registry.ViaDirect, Mode: engine.WatchBaseline})
 	retitle(t, r, idOne, "after the watch")
 	// A raw row of a never watched entity.
 	if err := r.InTx(func(ctx context.Context, tx *store.Tx) error {

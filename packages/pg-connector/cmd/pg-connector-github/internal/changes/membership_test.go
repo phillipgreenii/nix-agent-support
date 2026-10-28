@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/classify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/groups"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
@@ -19,6 +20,11 @@ func (r *rig) membership(m Membership) error {
 
 func TestAMembershipRowForAPRTheStoreHasNotSeenCreatesItsEntityAtVersionOne(t *testing.T) {
 	r := newRig(t)
+	// The PR is watched but never stored: a watched query flagged it.
+	r.must(r.inTx(func(tx *store.Tx) error {
+		_, err := tx.SetWatched(context.Background(), LogKindPR, node, registry.ViaQuery+"mine", t0)
+		return err
+	}))
 	r.clk.Advance(time.Minute)
 	r.must(r.membership(Membership{Kind: classify.KindEnteredQuery, Query: "mine", Node: node, Ref: ref}))
 	rows := r.changes()

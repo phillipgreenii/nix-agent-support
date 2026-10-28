@@ -17,7 +17,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/entity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	shared "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/query"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
@@ -132,17 +131,16 @@ func newEngineRig(t *testing.T) *engineRig {
 	conf := &fakeConfirmer{by: map[string]Confirmation{}}
 	lg := &logs{}
 	r := newRigWith(t, func(c *Config) {
-		// The membership rows are asserted for entities nothing watches, so the engine
-		// runs the registration as it was before emission by the watched flag.
-		spec := changes.Spec()
-		spec.Emission, spec.Delivery = registry.EmitAll, registry.DeliverByMembership
-		e, err := changes.NewWithSpec(changes.Config{Clock: c.Clock}, spec)
+		// The engine appends rows only for a watched PR, so every query is watched.
+		e, err := changes.NewWithSpec(changes.Config{Clock: c.Clock}, changes.Spec())
 		if err != nil {
 			t.Fatal(err)
 		}
 		c.Changes, c.Confirm, c.Log = e, conf, lg.log
 		c.Tracker = noTracker{} // the members are not refreshed: only the membership rows are under test
-		for name := range c.Settings.PR.Queries {
+		for name, q := range c.Settings.PR.Queries {
+			q.Watched = true
+			c.Settings.PR.Queries[name] = q
 			c.Settings.QueryTTL[name] = config.Duration(engineQueryTTL)
 		}
 	})
@@ -243,7 +241,9 @@ func TestMembership_ARepositoryRenameIsNeitherAnArrivalNorADeparture(t *testing.
 	// It does not block later runs, which then compare the new reference.
 	r.list(true, renamed, memB, memC)
 	r.runKey(t)
-	if rows := r.rows(t); len(rows) != 1 || !slices.Equal(rows[0].Kinds, []string{classify.KindEnteredQuery}) {
+	if rows := r.rows(t); len(rows) != 1 || !slices.Equal(rows[0].Kinds, []string{classify.KindEnteredQuery, "added"}) {
+		// The arrival into a watched query is newly watched, so its row is the union
+		// of the entered kind and the added kind.
 		t.Errorf("rows after a later arrival = %+v, want exactly the arrival", rows)
 	}
 }

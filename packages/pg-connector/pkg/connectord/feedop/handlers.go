@@ -36,8 +36,7 @@ type Deps struct {
 // and "changes_ack": changes {consumer, query?, cached, reset} and changes_ack
 // {consumer, query?, next_seq}, each stamped with Deps.SchemaVersion and acting on
 // the consumer's one cursor (bound to Deps.View and the query it names). The query
-// is required for a registration that delivers by membership and optional for
-// one that delivers by watched marker. Every answer carries the store's identity
+// is optional. Every answer carries the store's identity
 // (store_identity).
 func Handlers(d Deps) map[string]scriptout.OpHandler {
 	if d.Clock == nil {
@@ -51,12 +50,6 @@ func Handlers(d Deps) map[string]scriptout.OpHandler {
 }
 
 type handler struct{ deps Deps }
-
-// queryRequired reports whether a call must name a query: a registration that
-// delivers by membership has no rows without one.
-func (h *handler) queryRequired() bool {
-	return h.deps.Feed.Spec().Delivery == registry.DeliverByMembership
-}
 
 // view is the registered view the instance serves; a name the Spec does not
 // register is the zero view (the feed itself refuses such a poll).
@@ -80,7 +73,7 @@ func (h *handler) changes(ctx context.Context, raw json.RawMessage) (any, error)
 	if err := noTimeBound(m, "before"); err != nil {
 		return nil, err
 	}
-	consumer, query, err := keyArgs(m, h.queryRequired())
+	consumer, query, err := keyArgs(m)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +159,7 @@ func (h *handler) ack(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	consumer, query, err := keyArgs(m, h.queryRequired())
+	consumer, query, err := keyArgs(m)
 	if err != nil {
 		return nil, err
 	}

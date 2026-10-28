@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
@@ -28,13 +27,11 @@ type Membership struct {
 
 // AppendMembership records a membership change. With Watch set it first sets the
 // entity's watched flag (creating the entity row), and with WatchBaseline it
-// stops there. Under registry.EmitWatchedOnly an entity that is not watched gets
-// nothing at all.
+// stops there. An entity that is not watched gets nothing at all.
 //
 // Otherwise the arrival is ONE row, the union of two parts: the membership kind
-// with its query field, only when Spec.Membership.StoreRows; and, only under
-// registry.EmitWatchedOnly, the Added kind when this very call newly set the
-// flag (the Added part carries no fields). An empty union appends nothing.
+// with its query field, only when Spec.Membership.StoreRows; and the Added kind
+// when this very call newly set the flag (the Added part carries no fields). An empty union appends nothing.
 // The row is merged into the entity's pending row when one exists and that row
 // is left pending (a membership change never waits on the barrier itself and
 // never ends someone else's), and otherwise appended at once with origin
@@ -73,7 +70,7 @@ func (e *Engine) AppendMembership(ctx context.Context, tx *store.Tx, m Membershi
 	if e.spec.Membership.StoreRows {
 		res = Merge(e.spec.Changes, MembershipResult(e.spec.Roles, m.Kind, m.Query), Result{Fields: m.Extra})
 	}
-	if newly && m.Kind == e.spec.Roles.EnteredQuery && e.spec.Emission == registry.EmitWatchedOnly {
+	if newly && m.Kind == e.spec.Roles.EnteredQuery {
 		res = Merge(e.spec.Changes, res, Result{Kinds: []string{e.spec.Roles.Added}})
 	}
 	if res.Empty() {

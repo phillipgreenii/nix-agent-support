@@ -53,8 +53,8 @@ func testSpec() registry.Spec {
 		Roles:        registry.Roles{Added: changeAdded, Removed: changeGone, EnteredQuery: changeJoined, LeftQuery: changeLeft},
 		Views:        []registry.View{{Name: kindWidget}},
 		FoldRef:      foldCase,
-		Emission:     registry.EmitAll,
-		Delivery:     registry.DeliverByMembership,
+		Emission:     registry.EmitWatchedOnly,
+		Delivery:     registry.DeliverByWatched,
 		Membership:   registry.MembershipPolicy{StoreRows: true},
 	}
 }
@@ -241,12 +241,16 @@ func (r *rig) must(err error) {
 	}
 }
 
-// seed stores the entity (version 5) and its primary content.
+// seed stores the entity (version 5, watched: the engine appends rows only for
+// a watched entity) and its primary content.
 func (r *rig) seed(id string, w widget) {
 	r.t.Helper()
 	r.must(r.inTx(func(tx *store.Tx) error {
 		ctx := context.Background()
 		if err := tx.PutEntity(ctx, store.EntityRow{Kind: kindWidget, ID: id, Version: 5}); err != nil {
+			return err
+		}
+		if _, err := tx.SetWatched(ctx, kindWidget, id, registry.ViaDirect, t0); err != nil {
 			return err
 		}
 		row := store.GroupRow{

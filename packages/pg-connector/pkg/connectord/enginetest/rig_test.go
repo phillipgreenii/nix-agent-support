@@ -47,7 +47,7 @@ func TestEveryOptionLeavesAValidSpec(t *testing.T) {
 
 func TestOptionsOverrideTheirSpecFieldAndNothingElse(t *testing.T) {
 	base := NewRegistration().Spec
-	if base.Emission != registry.EmitAll || base.Delivery != registry.DeliverByMembership ||
+	if base.Emission != registry.EmitWatchedOnly || base.Delivery != registry.DeliverByWatched ||
 		!base.Membership.StoreRows || base.AdHocQueryWatch {
 		t.Fatalf("default policies = %+v", base)
 	}
@@ -93,9 +93,11 @@ func TestTheRigRunsTheEngineTheQueryRunnerAndTheFeedTogether(t *testing.T) {
 	r := NewRig(t)
 	reg := r.Reg
 	r.Settings.Define(queryMine, "expression-one")
+	r.Settings.SetWatched(queryMine, true)
 	r.Seed(idOne, Content{Ref: refOne, Stamp: "s1", Title: "A title", At: Start})
 
-	// The first complete run is the baseline: it appends no arrival row.
+	// The first complete run is the baseline: it flags its members as watched and
+	// appends no arrival row.
 	r.Lister.Script(queryMine, true, query.Member{ID: idOne, Ref: refOne})
 	row := r.RunQuery(queryMine)
 	if !slices.Equal(row.IDs, []string{refOne}) || row.BaselineAt.IsZero() {
@@ -155,7 +157,7 @@ func TestTheRigRunsTheEngineTheQueryRunnerAndTheFeedTogether(t *testing.T) {
 func TestAFetchOfAGroupSettlesAPendingRowAskedForByTheContent(t *testing.T) {
 	r := NewRig(t)
 	reg := r.Reg
-	r.Seed(idOne, Content{Ref: refOne, Stamp: "s1", Title: "A title", At: Start})
+	seedWatched(t, r, idOne, Content{Ref: refOne, Stamp: "s1", Title: "A title", At: Start})
 	r.SeedGroup(idOne, reg.Extra, "one")
 
 	// The change asks for the extra group: nothing is appended until it is fetched.
@@ -180,7 +182,7 @@ func TestScriptedHooksReplaceTheDefaultClassification(t *testing.T) {
 	r.Classifier.OnPrimary = func(prev, next Content) (engine.Result, []string, error) {
 		return engine.Result{Kinds: []string{reg.Toggled}}, nil, nil
 	}
-	r.Seed(idOne, Content{Ref: refOne, Stamp: "s1"})
+	seedWatched(t, r, idOne, Content{Ref: refOne, Stamp: "s1"})
 	r.Clock.Advance(time.Minute)
 	if err := r.ChangePrimary(idOne, governor.PurposeRefresh, func(c *Content) { c.Stamp = "s2" }); err != nil {
 		t.Fatal(err)
@@ -192,7 +194,7 @@ func TestAClassifierErrorFailsTheChange(t *testing.T) {
 	r := NewRig(t)
 	boom := errors.New("scripted failure")
 	r.Classifier.OnPrimary = func(Content, Content) (engine.Result, []string, error) { return engine.Result{}, nil, boom }
-	r.Seed(idOne, Content{Ref: refOne})
+	seedWatched(t, r, idOne, Content{Ref: refOne})
 	if err := r.ChangePrimary(idOne, governor.PurposeRefresh, func(c *Content) { c.Title = "x" }); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the scripted failure", err)
 	}

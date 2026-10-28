@@ -81,6 +81,14 @@ func seedKnown(r *Rig, id, ref string) {
 	r.Clock.Advance(time.Minute)
 }
 
+// seedWatched is Rig.Seed for an entity that is also watched (a baseline watch,
+// which appends nothing): the engine appends rows only for a watched entity.
+func seedWatched(t *testing.T, r *Rig, id string, c Content) {
+	t.Helper()
+	r.Seed(id, c)
+	mustWatch(t, r, engine.WatchRequest{ID: id, Ref: c.Ref, Via: registry.ViaDirect, Mode: engine.WatchBaseline})
+}
+
 func retitle(t *testing.T, r *Rig, id, title string) {
 	t.Helper()
 	if err := r.ChangePrimary(id, governor.PurposeRefresh, func(c *Content) { c.Title = title }); err != nil {
@@ -192,18 +200,6 @@ func TestAPendingRowOfAnEntityWatchedBeforeItSettlesAppends(t *testing.T) {
 	}
 }
 
-func TestEmitAllAppendsForAnUnwatchedEntityAsBefore(t *testing.T) {
-	r := NewRig(t)
-	reg := r.Reg
-	seedKnown(r, idOne, refOne)
-	retitle(t, r, idOne, "Another title")
-	rows := r.Rows()
-	WantRowKinds(t, rows, []string{reg.Retitled})
-	if rows[0].Watched {
-		t.Error("a row of an unwatched entity carries the watched snapshot")
-	}
-}
-
 // INV-HOIST-13 and HT-9: watch rules.
 func TestWatchAppendsOneAddedRowForAKnownEntityOnlyUnderWatchedOnlyEmission(t *testing.T) {
 	t.Run("EmitWatchedOnly, a known entity", func(t *testing.T) {
@@ -237,23 +233,6 @@ func TestWatchAppendsOneAddedRowForAKnownEntityOnlyUnderWatchedOnlyEmission(t *t
 			t.Errorf("entity changed: %+v then %+v", ent, after)
 		}
 		WantSeqs(t, r.Rows(), rows[0].Seq)
-	})
-	t.Run("EmitAll appends none", func(t *testing.T) {
-		r := NewRig(t)
-		seedKnown(r, idOne, refOne)
-		res := mustWatch(t, r, engine.WatchRequest{ID: idOne, Ref: refOne, Via: registry.ViaDirect, Mode: engine.WatchLate})
-		if !res.Newly || res.Appended {
-			t.Fatalf("Watch = %+v, want newly and nothing appended", res)
-		}
-		WantNoRows(t, r.Rows())
-		if got := versionOf(t, r, idOne); got != 1 {
-			t.Errorf("version = %d, want 1", got)
-		}
-		// The flag is stored and snapshotted: the next row carries it.
-		retitle(t, r, idOne, "Another title")
-		if rows := r.Rows(); len(rows) != 1 || !rows[0].Watched {
-			t.Errorf("rows = %+v, want one watched row", rows)
-		}
 	})
 	t.Run("a baseline watch appends none", func(t *testing.T) {
 		r := watchedOnlyRig(t)
@@ -365,7 +344,6 @@ func TestWatchOneBeforeAReadMakesTheChangeTheReadFindsARowOfAWatchedEntity(t *te
 // The arrival of an entity into a watched query is one row.
 func TestAnArrivalIsOneRowTheUnionOfItsParts(t *testing.T) {
 	type arrival struct {
-		emission  registry.Emission
 		storeRows bool
 		watch     engine.WatchMode
 		// preWatched: the entity is already watched, by another cause.
@@ -383,83 +361,53 @@ func TestAnArrivalIsOneRowTheUnionOfItsParts(t *testing.T) {
 	}{
 		{
 			"watch-only, rows stored, late: the entered and added kinds in canonical order",
-			arrival{emission: registry.EmitWatchedOnly, storeRows: true, watch: engine.WatchLate},
+			arrival{storeRows: true, watch: engine.WatchLate},
 			func(g Registration) []string { return engine.OrderKinds(g.Spec.Changes, []string{g.Entered, g.Added}) }, true,
 		},
 		{
 			"watch-only, rows stored, late, a known entity: still one row",
-			arrival{emission: registry.EmitWatchedOnly, storeRows: true, watch: engine.WatchLate, known: true},
+			arrival{storeRows: true, watch: engine.WatchLate, known: true},
 			func(g Registration) []string { return engine.OrderKinds(g.Spec.Changes, []string{g.Entered, g.Added}) }, true,
 		},
 		{
 			"watch-only, no rows stored, late: the added kind alone",
-			arrival{emission: registry.EmitWatchedOnly, watch: engine.WatchLate},
+			arrival{watch: engine.WatchLate},
 			func(g Registration) []string { return []string{g.Added} }, true,
 		},
 		{
 			"watch-only, rows stored, late, already watched: the entered kind alone",
-			arrival{emission: registry.EmitWatchedOnly, storeRows: true, watch: engine.WatchLate, preWatched: true},
+			arrival{storeRows: true, watch: engine.WatchLate, preWatched: true},
 			func(g Registration) []string { return []string{g.Entered} }, true,
 		},
 		{
 			"watch-only, no rows stored, late, already watched: nothing",
-			arrival{emission: registry.EmitWatchedOnly, watch: engine.WatchLate, preWatched: true},
-			nil, true,
-		},
-		{
-			"emit-all, rows stored, late: the entered kind alone, the flag set",
-			arrival{emission: registry.EmitAll, storeRows: true, watch: engine.WatchLate},
-			func(g Registration) []string { return []string{g.Entered} }, true,
-		},
-		{
-			"emit-all, no rows stored, late: nothing, the flag set",
-			arrival{emission: registry.EmitAll, watch: engine.WatchLate},
+			arrival{watch: engine.WatchLate, preWatched: true},
 			nil, true,
 		},
 		{
 			"watch-only, rows stored, baseline: the flag and no row",
-			arrival{emission: registry.EmitWatchedOnly, storeRows: true, watch: engine.WatchBaseline},
+			arrival{storeRows: true, watch: engine.WatchBaseline},
 			nil, true,
 		},
 		{
 			"watch-only, no rows stored, baseline: the flag and no row",
-			arrival{emission: registry.EmitWatchedOnly, watch: engine.WatchBaseline},
-			nil, true,
-		},
-		{
-			"emit-all, rows stored, baseline: the flag and no row",
-			arrival{emission: registry.EmitAll, storeRows: true, watch: engine.WatchBaseline},
-			nil, true,
-		},
-		{
-			"emit-all, no rows stored, baseline: the flag and no row",
-			arrival{emission: registry.EmitAll, watch: engine.WatchBaseline},
+			arrival{watch: engine.WatchBaseline},
 			nil, true,
 		},
 		{
 			"watch-only, rows stored, no watch, unwatched: nothing",
-			arrival{emission: registry.EmitWatchedOnly, storeRows: true},
+			arrival{storeRows: true},
 			nil, false,
 		},
 		{
 			"watch-only, rows stored, no watch, already watched: the entered kind",
-			arrival{emission: registry.EmitWatchedOnly, storeRows: true, preWatched: true},
+			arrival{storeRows: true, preWatched: true},
 			func(g Registration) []string { return []string{g.Entered} }, true,
-		},
-		{
-			"emit-all, rows stored, no watch: the entered kind as before",
-			arrival{emission: registry.EmitAll, storeRows: true},
-			func(g Registration) []string { return []string{g.Entered} }, false,
-		},
-		{
-			"emit-all, no rows stored, no watch: nothing",
-			arrival{emission: registry.EmitAll},
-			nil, false,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := NewRig(t, WithRegistration(WithEmission(tc.in.emission), WithStoreRows(tc.in.storeRows)))
+			r := NewRig(t, WithRegistration(WithStoreRows(tc.in.storeRows)))
 			reg := r.Reg
 			if tc.in.known {
 				seedKnown(r, idOne, refOne)
@@ -585,84 +533,63 @@ func TestMembershipKindsAreRequiredInTheCatalogOnlyWhenRowsAreStored(t *testing.
 }
 
 // The watched snapshot of every row the engine appends: Complete, DetectGone,
-// AppendMembership and Watch, under both emission modes.
+// AppendMembership and Watch.
 func TestEveryRowTheEngineAppendsCarriesTheWatchedSnapshot(t *testing.T) {
-	for _, emission := range []registry.Emission{registry.EmitAll, registry.EmitWatchedOnly} {
-		t.Run(map[registry.Emission]string{registry.EmitAll: "emit-all", registry.EmitWatchedOnly: "watch-only"}[emission], func(t *testing.T) {
-			r := NewRig(t, WithRegistration(WithEmission(emission)))
-			reg := r.Reg
-			watchedFlag := func(id string) bool {
-				ent, _ := entityOf(t, r, id)
-				return !ent.WatchedAt.IsZero()
-			}
+	r := NewRig(t)
+	reg := r.Reg
 
-			// Complete: a settled pending row.
-			settle := func(id, ref string) {
-				seedKnown(r, id, ref)
-				r.SeedGroup(id, reg.Extra, "one")
-				if err := r.ChangePrimary(id, governor.PurposeRefresh, func(c *Content) {
-					c.Title, c.Await = "Another title", []string{reg.Extra}
-				}); err != nil {
-					t.Fatal(err)
-				}
-				if err := r.RefreshGroup(id, reg.Extra, "two", r.Clock.Now()); err != nil {
-					t.Fatal(err)
-				}
-			}
-			// DetectGone: a tombstone.
-			// AppendMembership: an arrival.
-			var unwatchedRows []store.ChangeRow
-			if emission == registry.EmitAll {
-				settle(idOne, refOne)
-				if err := goneOf(t, r, idOne); err != nil {
-					t.Fatal(err)
-				}
-				if err := membershipOf(t, r, engine.Membership{Kind: reg.Entered, Query: queryMine, ID: idOne, Ref: refOne}); err != nil {
-					t.Fatal(err)
-				}
-				unwatchedRows = r.Rows()
-				WantRowKinds(t, unwatchedRows,
-					[]string{reg.Retitled, reg.Tweaked}, []string{reg.Removed}, []string{reg.Entered})
-				for _, row := range unwatchedRows {
-					if row.Watched {
-						t.Errorf("row %d of an unwatched entity has the snapshot set", row.Seq)
-					}
-				}
-				if watchedFlag(idOne) {
-					t.Fatal("the entity is watched")
-				}
-			}
+	// Complete: a settled pending row.
+	settle := func(id, ref string) {
+		seedKnown(r, id, ref)
+		r.SeedGroup(id, reg.Extra, "one")
+		if err := r.ChangePrimary(id, governor.PurposeRefresh, func(c *Content) {
+			c.Title, c.Await = "Another title", []string{reg.Extra}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.RefreshGroup(id, reg.Extra, "two", r.Clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-			// The same three, for an entity whose flag is set before.
-			start := len(unwatchedRows)
-			mustWatch(t, r, engine.WatchRequest{ID: idTwo, Ref: refTwo, Via: registry.ViaDirect, Mode: engine.WatchBaseline})
-			settle(idTwo, refTwo)
-			if err := goneOf(t, r, idTwo); err != nil {
-				t.Fatal(err)
-			}
-			if err := membershipOf(t, r, engine.Membership{Kind: reg.Entered, Query: queryMine, ID: idTwo, Ref: refTwo}); err != nil {
-				t.Fatal(err)
-			}
-			rows := r.Rows()[start:]
-			WantRowKinds(t, rows, []string{reg.Retitled, reg.Tweaked}, []string{reg.Removed}, []string{reg.Entered})
-			for _, row := range rows {
-				if !row.Watched {
-					t.Errorf("row %d of a watched entity lacks the snapshot", row.Seq)
-				}
-			}
+	// An entity that is not watched gets no row from any of the three.
+	settle(idOne, refOne)
+	if err := goneOf(t, r, idOne); err != nil {
+		t.Fatal(err)
+	}
+	if err := membershipOf(t, r, engine.Membership{Kind: reg.Entered, Query: queryMine, ID: idOne, Ref: refOne}); err != nil {
+		t.Fatal(err)
+	}
+	WantNoRows(t, r.Rows())
 
-			// A flag set by the very write that appends the row is in its snapshot.
-			if err := membershipOf(t, r, engine.Membership{
-				Kind: reg.Entered, Query: queryMine, ID: "id-3", Ref: "Example-Org/Thing#3",
-				Watch: engine.WatchLate, Via: registry.ViaQuery + queryMine,
-			}); err != nil {
-				t.Fatal(err)
-			}
-			last := r.Rows()
-			if row := last[len(last)-1]; row.ID != "Example-Org/Thing#3" || !row.Watched {
-				t.Errorf("last row = %+v, want the arrival's row with the flag set in the same write", row)
-			}
-		})
+	// The same three, for an entity whose flag is set before: DetectGone is a
+	// tombstone, AppendMembership an arrival.
+	mustWatch(t, r, engine.WatchRequest{ID: idTwo, Ref: refTwo, Via: registry.ViaDirect, Mode: engine.WatchBaseline})
+	settle(idTwo, refTwo)
+	if err := goneOf(t, r, idTwo); err != nil {
+		t.Fatal(err)
+	}
+	if err := membershipOf(t, r, engine.Membership{Kind: reg.Entered, Query: queryMine, ID: idTwo, Ref: refTwo}); err != nil {
+		t.Fatal(err)
+	}
+	rows := r.Rows()
+	WantRowKinds(t, rows, []string{reg.Retitled, reg.Tweaked}, []string{reg.Removed}, []string{reg.Entered})
+	for _, row := range rows {
+		if !row.Watched {
+			t.Errorf("row %d of a watched entity lacks the snapshot", row.Seq)
+		}
+	}
+
+	// A flag set by the very write that appends the row is in its snapshot.
+	if err := membershipOf(t, r, engine.Membership{
+		Kind: reg.Entered, Query: queryMine, ID: "id-3", Ref: "Example-Org/Thing#3",
+		Watch: engine.WatchLate, Via: registry.ViaQuery + queryMine,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	last := r.Rows()
+	if row := last[len(last)-1]; row.ID != "Example-Org/Thing#3" || !row.Watched {
+		t.Errorf("last row = %+v, want the arrival's row with the flag set in the same write", row)
 	}
 }
 
@@ -672,6 +599,7 @@ func TestTheRigSettlesOnceAndRecordsATombstoneOnce(t *testing.T) {
 	r := NewRig(t)
 	reg := r.Reg
 	seedKnown(r, idOne, refOne)
+	mustWatch(t, r, engine.WatchRequest{ID: idOne, Ref: refOne, Via: registry.ViaDirect, Mode: engine.WatchBaseline})
 	r.SeedGroup(idOne, reg.Extra, "one")
 
 	// The baseline of a group appends nothing.

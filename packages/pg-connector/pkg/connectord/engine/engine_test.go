@@ -109,7 +109,7 @@ func TestBaselinesAddNothingAndCreateNoPendingRow(t *testing.T) {
 	}
 }
 
-func TestAChangeThatQueuesNothingAppendsAtOnceOnAnUnwatchedEntity(t *testing.T) {
+func TestAChangeThatQueuesNothingAppendsAtOnceOnAWatchedEntity(t *testing.T) {
 	r := newRig(t)
 	r.seed(idOne, sample())
 	r.clk.Advance(time.Minute)
@@ -449,6 +449,9 @@ func TestATombstoneForAnEntityWithNoStoredContentAppendsNothingAndDropsItsPendin
 		if err := tx.EnsureEntity(ctx, kindWidget, idOne); err != nil {
 			return err
 		}
+		if _, err := tx.SetWatched(ctx, kindWidget, idOne, registry.ViaDirect, t0); err != nil {
+			return err
+		}
 		return tx.PutPending(ctx, store.PendingChange{Kind: kindWidget, ID: idOne, Awaited: []byte("[]"), DetectedAt: t0, Deadline: t0})
 	}))
 	r.must(r.inTx(func(tx *store.Tx) error {
@@ -491,6 +494,11 @@ func (r *rig) membership(m Membership) error {
 
 func TestAMembershipRowForAnEntityTheStoreHasNotSeenCreatesItAtVersionOne(t *testing.T) {
 	r := newRig(t)
+	// The entity is watched but never stored: a watched query flagged it.
+	r.must(r.inTx(func(tx *store.Tx) error {
+		_, err := tx.SetWatched(context.Background(), kindWidget, idOne, registry.ViaQuery+"mine", t0)
+		return err
+	}))
 	r.clk.Advance(time.Minute)
 	r.must(r.membership(Membership{Kind: changeJoined, Query: "mine", ID: idOne, Ref: refOne}))
 	rows := r.changes()

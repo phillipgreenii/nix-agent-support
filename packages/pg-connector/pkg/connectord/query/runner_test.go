@@ -56,8 +56,8 @@ func testSpec() registry.Spec {
 		Roles:        registry.Roles{Added: changeAdded, Removed: changeGone, EnteredQuery: changeJoined, LeftQuery: changeLeft},
 		Views:        []registry.View{{Name: kindWidget}},
 		FoldRef:      foldCase,
-		Emission:     registry.EmitAll,
-		Delivery:     registry.DeliverByMembership,
+		Emission:     registry.EmitWatchedOnly,
+		Delivery:     registry.DeliverByWatched,
 		Membership:   registry.MembershipPolicy{StoreRows: true},
 	}
 }

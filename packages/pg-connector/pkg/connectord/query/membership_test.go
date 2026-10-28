@@ -81,7 +81,21 @@ type engineRig struct {
 	log  *logs
 }
 
+// newEngineRig is a rig over a real engine whose configured queries are all
+// watched: the engine appends rows only for a watched entity.
 func newEngineRig(t *testing.T) *engineRig {
+	t.Helper()
+	conf := &fakeConfirmer{by: map[string]Confirmation{}}
+	lg := &logs{}
+	r := newRigWith(t, func(c *Config) {
+		c.Settings = watchedSettings{c.Settings}
+		c.Changes, c.Confirmer, c.Log = newEngine(t, c.Clock), conf, lg.log
+	})
+	return &engineRig{rig: r, conf: conf, log: lg}
+}
+
+// newUnwatchedEngineRig is newEngineRig whose settings mark nothing watched.
+func newUnwatchedEngineRig(t *testing.T) *engineRig {
 	t.Helper()
 	conf := &fakeConfirmer{by: map[string]Confirmation{}}
 	lg := &logs{}
@@ -226,7 +240,7 @@ func TestMembership_ABrandNewMemberInABaselinedQueryIsRecordedAndItsEntityCreate
 		t.Fatalf("rows = %+v, want exactly one arrival", rows)
 	}
 	row := rows[0]
-	if !slices.Equal(row.Kinds, []string{changeJoined}) || row.Origin != "query" || row.ID != memC.ref {
+	if !slices.Equal(row.Kinds, []string{changeAdded, changeJoined}) || row.Origin != "query" || row.ID != memC.ref {
 		t.Errorf("row = %+v", row)
 	}
 	if f, ok := fieldOf(t, row, "query:mine"); !ok || string(f.After) != `"mine"` {
@@ -258,7 +272,7 @@ func TestMembership_ARenameIsNeitherAnArrivalNorADeparture(t *testing.T) {
 	// It does not block later runs, which then compare the new reference.
 	r.list(true, renamed, memB, memC)
 	r.runKey(t)
-	if rows := r.rows(t); len(rows) != 1 || !slices.Equal(rows[0].Kinds, []string{changeJoined}) {
+	if rows := r.rows(t); len(rows) != 1 || !slices.Equal(rows[0].Kinds, []string{changeAdded, changeJoined}) {
 		t.Errorf("rows after a later arrival = %+v, want exactly the arrival", rows)
 	}
 }
@@ -444,7 +458,10 @@ func TestMembership_ABudgetRefusedConfirmationIsAFailedRunNotADroppedDeparture(t
 }
 
 func TestMembership_WithoutAConfirmerADepartureIsNeitherRecordedNorDropped(t *testing.T) {
-	r := newRigWith(t, func(c *Config) { c.Changes = newEngine(t, c.Clock) })
+	r := newRigWith(t, func(c *Config) {
+		c.Settings = watchedSettings{c.Settings}
+		c.Changes = newEngine(t, c.Clock)
+	})
 	r.list(true, memA, memB, memC)
 	r.runKey(t)
 	r.list(true, memA, memB, memD) // D arrives, C departs
@@ -460,7 +477,7 @@ func TestMembership_WithoutAConfirmerADepartureIsNeitherRecordedNorDropped(t *te
 	// Arrivals alone (no departure) are still recorded.
 	r.list(true, memA, memB, memC, memD)
 	r.runKey(t)
-	if rows := r.rows(t); len(rows) != 1 || !slices.Equal(rows[0].Kinds, []string{changeJoined}) {
+	if rows := r.rows(t); len(rows) != 1 || !slices.Equal(rows[0].Kinds, []string{changeAdded, changeJoined}) {
 		t.Errorf("rows = %+v, want D's arrival", rows)
 	}
 }

@@ -59,11 +59,17 @@ the document names no employer, workspace, channel or person; the operator is "t
    PR-flavoured test fixtures. They cannot change without rewriting shipped rungs. Recommendation: accept, with the
    deferred packet H16 (rename rung and neutralise) as the follow-up. Override cost: renaming inside this hoist adds the work of
    the deferred packet H16 (L: a rename rung plus the governor refactor) to it and reopens shipped schemas.
-9. **You also accept (iv, transitional modes live in shared code).** `EmitAll`, `DeliverByMembership`, the
-   scope-required rule and `StoreRows` are GitHub's pre-refactor behaviour inside the shared library until packet H15.
+9. **You also accept (iv, transitional modes live in shared code).** `EmitAll`, `DeliverByMembership` and the
+   scope-required rule are GitHub's pre-refactor behaviour inside the shared library until packet H15.
    Exit condition (observable, no date): H15 runs when P2a has been applied, the deployment's queries are marked
-   `watched`, and no consumer polls with a scope. Recommendation: accept. Override cost: removing them now means
+   `watched`, and no consumer depends on the scope-required rule (a consumer MAY still poll with a query: under
+   `DeliverByWatched` the query is an optional filter). Recommendation: accept. Override cost: removing them now means
    flipping GitHub in the hoist, which silences its feed because `watched` defaults to false.
+   `StoreRows` is **not** one of the transitional items: it is a permanent per-connector policy (GitHub true, Jira false;
+   `INV-JIRA-CHG-5` forbids membership rows for Jira), stays in the shared library after H15, and its tests (HT-35,
+   `INV-HOIST-14`) stay. (Amended 2026-10-27 by agent decision on bead `pg2-q1e1e`, reversible by the operator: this
+   item had listed `StoreRows` with the transitional modes, which contradicted the H15 packet text, `INV-HOIST-14` and
+   HT-35.)
 10. **Settled facts:** the bead's ordering question is moot (`pg2-z5fax.4` is closed and landed); the one pick is
     resolved (item 1); no open pick remains.
 
@@ -1031,7 +1037,8 @@ Rules (each is a test row of `INV-HOIST-8`):
    `Reset`, which rebinds the cursor to the new scope and moves it to the head. This is what makes `--query` "a filter that
    never gives the consumer a second position" (D3) without silent loss.
 4. `Scope` is required exactly when `Spec.Delivery == DeliverByMembership` (as `query` is today); otherwise it is optional,
-   and when given it MUST be a configured query (`ErrQueryNotRecognized`).
+   and when given it MUST be a configured query (`ErrQueryNotRecognized`). (After H15 the rule is gone: `Scope` is always
+   optional.)
 5. The first poll of an unscoped consumer creates the cursor at the tail only when every configured **watched** query has its
    baseline; until then it answers empty with `NextSeq` at the head and creates nothing, and the consumer's `Ack` of that
    `NextSeq` creates it (the existing path, `feed.go:151-154`). A scoped first poll keeps today's rule (that query's baseline).
@@ -1705,8 +1712,10 @@ symbols, `doc.go` and the GitHub behavior docs updated. Tests: HT-26 (guard gree
 is written against sections 6, 9, 10 and 15.
 
 **H15 (S, deferred): remove the legacy modes.** Consumes: H13. Gate (observable): P2a applied, the deployment's queries marked `watched`, no
-consumer polling with a scope. Produces: `EmitAll`, `DeliverByMembership` and the scope-required rule deleted with their code
-and tests. Tests: HT-2, HT-32.
+consumer depending on the scope-required rule (polling with a query is fine: under `DeliverByWatched` it is an optional
+filter). Produces: `EmitAll`, `DeliverByMembership` and the scope-required rule deleted with their code
+and tests; the zero values of `Emission` and `Delivery` become the watched modes and the test rig defaults follow. `StoreRows`
+stays: it is a permanent per-connector policy, not a legacy mode (decision item 9). Tests: HT-2, HT-32.
 
 **H16 (L, deferred): rename rung and neutralise the baseline.** Consumes: H13. Gate: the operator asks for it. Produces: a rung v8 renaming
 the opaque columns to neutral names, the neutralisation of the baselined governor, job-table and wording items, and an

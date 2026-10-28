@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -60,8 +62,8 @@ func testSpec() registry.Spec {
 		Roles:        registry.Roles{Added: kindAdded, Removed: kindRemoved, EnteredQuery: kindEntered, LeftQuery: kindLeft},
 		Views:        []registry.View{{Name: viewAll}, {Name: viewFlagged, AnyOf: []string{kindFlag}}},
 		FoldRef:      foldRef,
-		Emission:     registry.EmitAll,
-		Delivery:     registry.DeliverByMembership,
+		Emission:     registry.EmitWatchedOnly,
+		Delivery:     registry.DeliverByWatched,
 		Membership:   registry.MembershipPolicy{StoreRows: true},
 	}
 }
@@ -80,9 +82,24 @@ func (q *fakeQueries) Known(name string) bool {
 	_, ok := q.members[name]
 	return ok
 }
-func (q *fakeQueries) Names() []string                               { return nil }
-func (q *fakeQueries) Watched(string) bool                           { return false }
-func (q *fakeQueries) WatchedRefs(context.Context) ([]string, error) { return nil, nil }
+func (q *fakeQueries) Names() []string     { return nil }
+func (q *fakeQueries) Watched(string) bool { return false }
+
+// WatchedRefs is every member of every query: the fake treats them all as watched.
+func (q *fakeQueries) WatchedRefs(context.Context) ([]string, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var refs []string
+	for _, name := range slices.Sorted(maps.Keys(q.members)) {
+		for _, ref := range q.members[name].Refs {
+			if !slices.Contains(refs, ref) {
+				refs = append(refs, ref)
+			}
+		}
+	}
+	return refs, nil
+}
+
 func (q *fakeQueries) Members(_ context.Context, name string) (feed.Members, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -186,7 +203,7 @@ func (r *rig) add(ref string, version int64, stamp string, kinds []string, field
 	}
 	var seq int64
 	err = r.st.InTx(context.Background(), func(tx *store.Tx) error {
-		row := store.ChangeRow{Kind: entityKind, ID: ref, Version: version, Kinds: kinds, Fields: raw, Origin: "refresh", At: r.clk.Now()}
+		row := store.ChangeRow{Kind: entityKind, ID: ref, Version: version, Kinds: kinds, Fields: raw, Origin: "refresh", At: r.clk.Now(), Watched: true}
 		row.SetStamp(stamp)
 		var aerr error
 		seq, aerr = tx.AppendChange(context.Background(), row)

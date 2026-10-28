@@ -9,6 +9,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/classify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
@@ -103,6 +104,9 @@ func TestATombstoneForAnEntityWhoseSummaryIsGoneDeletesItsPendingRow(t *testing.
 	r := newRig(t)
 	r.must(r.inTx(func(tx *store.Tx) error {
 		if err := tx.EnsureEntity(context.Background(), LogKindPR, node); err != nil {
+			return err
+		}
+		if _, err := tx.SetWatched(context.Background(), LogKindPR, node, registry.ViaDirect, t0); err != nil {
 			return err
 		}
 		return tx.PutPending(context.Background(), store.PendingChange{Kind: LogKindPR, ID: node, Awaited: []byte(`[]`), DetectedAt: t0, Deadline: t0})

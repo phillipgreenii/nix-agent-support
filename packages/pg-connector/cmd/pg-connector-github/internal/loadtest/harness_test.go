@@ -107,14 +107,13 @@ type scenarioOpts struct {
 	// ages in nineteen minutes (the tracked-set scenario covers one summary
 	// cycle in ten).
 	defaultAges bool
-	// realRegistration runs the change engine as the daemon runs it now: a row
-	// only for a watched PR, delivered by the watched flag. The default scenario
-	// keeps the registration of before the flip (a row for every PR) because its
-	// properties are about the pending-row machinery under a burst on PRs nobody
-	// watches; the tracked-set scenario is about what the flip changes, so a PR
-	// nobody watches has no pending row and no dependents queued behind a change.
-	// It runs no consumer (the feed needs a watched query, which the harness does
-	// not model).
+	// realRegistration keeps only the scenario's own watched PRs (watchMembers
+	// and watchDirect): a PR nobody watches has no row, no pending row and no
+	// dependents queued behind a change, which is what the tracked-set scenario
+	// measures. It runs no consumer (the feed needs a watched query, which the
+	// harness does not model). Without it every PR is watched, because the
+	// default scenario's properties are about the pending-row machinery under a
+	// burst on every PR and a row exists only for a watched PR.
 	realRegistration bool
 }
 
@@ -635,13 +634,9 @@ func newHarness(t *testing.T, o scenarioOpts) *harness {
 	}
 	// The load properties (barrier deadlines, rows against truth, one consumer
 	// seeing every row) are about the pending-row machinery under a burst of head
-	// changes on PRs nobody watches, so the engine runs the registration as it was
-	// before emission by the watched flag: a row for every observed PR.
-	spec := changes.Spec()
-	if !o.realRegistration {
-		spec.Emission, spec.Delivery = registry.EmitAll, registry.DeliverByMembership
-	}
-	h.chg, err = changes.NewWithSpec(changes.Config{Clock: h.clk, SettleTimeout: h.cfg.SettleTimeout.Std(), BodyCap: int(h.cfg.ChangeBodyCap)}, spec)
+	// changes. The engine appends rows only for a watched PR, so a scenario that
+	// is not the tracked-set one marks every PR watched (see markWatched).
+	h.chg, err = changes.NewWithSpec(changes.Config{Clock: h.clk, SettleTimeout: h.cfg.SettleTimeout.Std(), BodyCap: int(h.cfg.ChangeBodyCap)}, changes.Spec())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -690,7 +685,7 @@ func newHarness(t *testing.T, o scenarioOpts) *harness {
 	h.fd, err = feed.NewWithSpec(feed.Config{
 		Store: h.rig.Store, Queries: allQueries{refs: refs}, Clock: h.clk,
 		Retention: h.cfg.ChangeLogRetention.Std(), ConsumerStaleAfter: h.cfg.ConsumerStaleAfter.Std(),
-	}, spec)
+	}, changes.Spec())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1158,12 +1153,16 @@ func (h *harness) markWatched() {
 			h.t.Fatal(err)
 		}
 	}
-	if h.opt.watchMembers {
+	watchMembers, watchDirect := h.opt.watchMembers, h.opt.watchDirect
+	if !h.opt.realRegistration {
+		watchMembers, watchDirect = true, h.nPRs
+	}
+	if watchMembers {
 		for i := 0; i < h.nMembers; i++ {
 			mark(i, registry.ViaQuery+queryName(0))
 		}
 	}
-	for i := h.nMembers; i < h.nMembers+h.opt.watchDirect && i < h.nPRs; i++ {
+	for i := h.nMembers; i < h.nMembers+watchDirect && i < h.nPRs; i++ {
 		mark(i, registry.ViaDirect)
 	}
 }

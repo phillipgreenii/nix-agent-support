@@ -14,7 +14,7 @@ func rowOf(t *testing.T, kinds []string, fields ...engine.Field) store.ChangeRow
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store.ChangeRow{Kind: entityKind, ID: refA, Kinds: kinds, Fields: raw}
+	return store.ChangeRow{Kind: entityKind, ID: refA, Kinds: kinds, Fields: raw, Watched: true}
 }
 
 func viewNamed(spec registry.Spec, name string) registry.View {
@@ -45,8 +45,8 @@ func runDeliveryCases(t *testing.T, view string, cases []deliveryCase) {
 	}
 }
 
-// The legacy table of the unfiltered view.
-func TestDeliverLegacyTableOfTheUnfilteredView(t *testing.T) {
+// The scoped table of the unfiltered view, for rows whose snapshot is set.
+func TestDeliverScopedTableOfTheUnfilteredView(t *testing.T) {
 	k := func(kinds ...string) []string { return kinds }
 	runDeliveryCases(t, viewAll, []deliveryCase{
 		{"member plain change", rowOf(t, k(kindContent)), true, true, "changed"},
@@ -71,8 +71,8 @@ func TestDeliverLegacyTableOfTheUnfilteredView(t *testing.T) {
 	})
 }
 
-// The legacy table of a view that filters by kind.
-func TestDeliverLegacyTableOfTheFilteredView(t *testing.T) {
+// The scoped table of a view that filters by kind, for rows whose snapshot is set.
+func TestDeliverScopedTableOfTheFilteredView(t *testing.T) {
 	k := func(kinds ...string) []string { return kinds }
 	runDeliveryCases(t, viewFlagged, []deliveryCase{
 		{"member flagged change", rowOf(t, k(kindFlag)), true, true, "changed"},

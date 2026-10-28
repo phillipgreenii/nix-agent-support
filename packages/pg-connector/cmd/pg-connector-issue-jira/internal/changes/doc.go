@@ -7,7 +7,7 @@
 // # Emission and delivery
 //
 // The registration sets registry.EmitWatchedOnly and registry.DeliverByWatched
-// explicitly, because the zero values of both are the legacy modes: the engine
+// explicitly (they are the only modes): the engine
 // appends a row only for an issue whose watched flag is set in the same
 // transaction, and a row is delivered by that stored flag. An unwatched issue
 // gets no row, no pending row and no version bump.

@@ -18,19 +18,16 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
-// HT-25: the wire of the two ops. A registration that delivers by watched marker
-// answers changes and changes_ack with no query, one that delivers by membership
-// still requires it, a given query binds the scope, and every answer carries the
+// HT-25: the wire of the two ops. A registration answers changes and changes_ack
+// with no query, a given query binds the scope, and every answer carries the
 // store identity.
 
 var storeIdentityShape = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-// newWatchedRig is newRig over a registration that delivers by watched marker.
+// newWatchedRig is newRig over a registration spec set up in the test itself.
 func newWatchedRig(t *testing.T) *rig {
 	t.Helper()
-	spec := testSpec()
-	spec.Delivery = registry.DeliverByWatched
-	return newRigOverSpec(t, filepath.Join(t.TempDir(), "store.db"), spec)
+	return newRigOverSpec(t, filepath.Join(t.TempDir(), "store.db"), testSpec())
 }
 
 // newRigOverSpec opens the store at path and serves view viewAll of spec.
@@ -105,21 +102,8 @@ func TestAGivenQueryBindsTheScopeOfAWatchedRegistrationAndTheAckKeepsIt(t *testi
 	}
 }
 
-func TestAMembershipRegistrationStillRefusesAMissingQuery(t *testing.T) {
-	r := newRig(t, viewAll, nil)
-	for op, args := range map[string]string{
-		"changes":     `{"consumer":"c"}`,
-		"changes_ack": `{"consumer":"c","next_seq":0}`,
-	} {
-		_, err := r.call(op, args)
-		if !errors.Is(err, scriptout.ErrInvalidArgument) || !strings.Contains(err.Error(), "query") {
-			t.Errorf("%s with no query = %v, want invalid_argument naming query", op, err)
-		}
-	}
-}
-
 func TestEveryAnswerCarriesTheStoreIdentityAndItIsStableAcrossCalls(t *testing.T) {
-	for name, r := range map[string]*rig{"membership": newRig(t, viewAll, nil), "watched": newWatchedRig(t)} {
+	for name, r := range map[string]*rig{"default": newRig(t, viewAll, nil), "own store": newWatchedRig(t)} {
 		want, err := r.st.Identity(context.Background())
 		if err != nil {
 			t.Fatal(err)

@@ -37,7 +37,7 @@ type watchRig struct {
 	clk  *governor.ManualClock
 }
 
-func newWatchRig(t *testing.T, emission registry.Emission) *watchRig {
+func newWatchRig(t *testing.T) *watchRig {
 	t.Helper()
 	st, _, err := store.Open(filepath.Join(t.TempDir(), "store.db"), store.Options{Synchronous: "OFF"})
 	if err != nil {
@@ -45,12 +45,7 @@ func newWatchRig(t *testing.T, emission registry.Emission) *watchRig {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	clk := governor.NewManualClock(t0)
-	spec := changes.Spec()
-	spec.Emission = emission
-	if emission == registry.EmitWatchedOnly {
-		spec.Delivery = registry.DeliverByWatched
-	}
-	chg, err := changes.NewWithSpec(changes.Config{Clock: clk}, spec)
+	chg, err := changes.NewWithSpec(changes.Config{Clock: clk}, changes.Spec())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +135,7 @@ func watchArgs(id string, watch string) string {
 }
 
 func TestAWatchReadOfAPRTheStoreHasNeverSeenWatchesItAndAppendsNoRow(t *testing.T) {
-	r := newWatchRig(t, registry.EmitWatchedOnly)
+	r := newWatchRig(t)
 	eng := &storeEngine{rig: r, t: t, res: filesResult(t), persistIfFresh: true}
 	if _, err := r.handler(eng, OpFiles, true)(watchArgs(wireID, "true")); err != nil {
 		t.Fatal(err)
@@ -158,7 +153,7 @@ func TestAWatchReadOfAPRTheStoreHasNeverSeenWatchesItAndAppendsNoRow(t *testing.
 }
 
 func TestAWatchReadOfAKnownPRWatchesItBeforeTheReadAndAppendsOneAddedRow(t *testing.T) {
-	r := newWatchRig(t, registry.EmitWatchedOnly)
+	r := newWatchRig(t)
 	r.persist(t, nil) // the daemon knows the PR: alias, entity and summary stored
 	eng := &storeEngine{rig: r, t: t, res: filesResult(t)}
 	if _, err := r.handler(eng, OpFiles, true)(watchArgs(wireID, "true")); err != nil {
@@ -188,7 +183,7 @@ func TestAWatchReadOfAKnownPRWatchesItBeforeTheReadAndAppendsOneAddedRow(t *test
 func TestAWatchReadChangeIsARowOfAWatchedPR(t *testing.T) {
 	// The ordering the design needs: the watch is set before the refresh the read
 	// triggers, so the change that refresh finds is delivered.
-	r := newWatchRig(t, registry.EmitWatchedOnly)
+	r := newWatchRig(t)
 	r.persist(t, nil)
 	eng := &storeEngine{rig: r, t: t, res: filesResult(t)}
 	h := r.handler(&refreshingEngine{storeEngine: eng}, OpFiles, true)
@@ -218,7 +213,7 @@ func (e *refreshingEngine) Ensure(ctx context.Context, id string, want []string,
 }
 
 func TestAReadWithoutTheWatchOptionWatchesNothingAndClearsNothing(t *testing.T) {
-	r := newWatchRig(t, registry.EmitWatchedOnly)
+	r := newWatchRig(t)
 	r.persist(t, nil)
 	eng := &storeEngine{rig: r, t: t, res: filesResult(t)}
 	if _, err := r.handler(eng, OpFiles, true)(`{"id":"` + wireID + `"}`); err != nil {
@@ -245,28 +240,10 @@ func TestAReadWithoutTheWatchOptionWatchesNothingAndClearsNothing(t *testing.T) 
 	}
 }
 
-func TestUnderTheTransitionalEmissionAWatchReadSetsTheFlagAndAppendsNoRow(t *testing.T) {
-	// The registration as it ships until the flip (emission for every tracked PR):
-	// the flag is stored, which is what lets the deployment declare its queries
-	// watched first, and no extra row is appended.
-	r := newWatchRig(t, registry.EmitAll)
-	r.persist(t, nil)
-	eng := &storeEngine{rig: r, t: t, res: filesResult(t)}
-	if _, err := r.handler(eng, OpFiles, true)(watchArgs(wireID, "true")); err != nil {
-		t.Fatal(err)
-	}
-	if r.entity(t).WatchedAt.IsZero() {
-		t.Error("the flag must be stored under the transitional emission")
-	}
-	if rows := r.rows(t); len(rows) != 0 {
-		t.Errorf("rows = %+v, want none under the transitional emission", rows)
-	}
-}
-
 func TestWatchIsAcceptedByEveryReadOp(t *testing.T) {
 	for _, op := range []string{OpShow, OpFiles, OpCommits, OpReviewPending} {
 		t.Run(op, func(t *testing.T) {
-			r := newWatchRig(t, registry.EmitWatchedOnly)
+			r := newWatchRig(t)
 			r.persist(t, nil)
 			eng := &storeEngine{rig: r, t: t}
 			switch op {
@@ -292,7 +269,7 @@ func TestWatchIsAcceptedByEveryReadOp(t *testing.T) {
 }
 
 func TestAWatchThatIsNotABooleanIsInvalidArgumentAndNothingIsRead(t *testing.T) {
-	r := newWatchRig(t, registry.EmitWatchedOnly)
+	r := newWatchRig(t)
 	r.persist(t, nil)
 	eng := &storeEngine{rig: r, t: t, res: filesResult(t)}
 	for _, bad := range []string{`"yes"`, `1`, `[true]`, `{"a":1}`} {
@@ -307,7 +284,7 @@ func TestAWatchThatIsNotABooleanIsInvalidArgumentAndNothingIsRead(t *testing.T) 
 }
 
 func TestAWatchReadWithoutAWatcherIsUnavailableAndReadsNothing(t *testing.T) {
-	r := newWatchRig(t, registry.EmitWatchedOnly)
+	r := newWatchRig(t)
 	eng := &storeEngine{rig: r, t: t, res: filesResult(t)}
 	_, err := r.handler(eng, OpFiles, false)(watchArgs(wireID, "true"))
 	if err == nil || code(t, err) != "unavailable" || eng.calls != 0 {
@@ -320,7 +297,7 @@ func TestAWatchReadWithoutAWatcherIsUnavailableAndReadsNothing(t *testing.T) {
 }
 
 func TestAWatchReadOfAPRThatIsGoneWatchesNothing(t *testing.T) {
-	r := newWatchRig(t, registry.EmitWatchedOnly)
+	r := newWatchRig(t)
 	eng := &storeEngine{rig: r, t: t, res: groupsvc.EnsureResult{Summary: summary.Summary{NodeID: cannedSummary().NodeID, Gone: true}}}
 	_, err := r.handler(eng, OpFiles, true)(watchArgs(wireID, "true"))
 	if err == nil || code(t, err) != "not_found" {
@@ -332,7 +309,7 @@ func TestAWatchReadOfAPRThatIsGoneWatchesNothing(t *testing.T) {
 }
 
 func TestAFailedReadOfAPRTheStoreHasNeverSeenWatchesNothing(t *testing.T) {
-	r := newWatchRig(t, registry.EmitWatchedOnly)
+	r := newWatchRig(t)
 	eng := &storeEngine{rig: r, t: t, err: scriptout.WrapError(scriptout.ErrUnavailable, "the origin is down")}
 	_, err := r.handler(eng, OpFiles, true)(watchArgs(wireID, "true"))
 	if err == nil || code(t, err) != "unavailable" {

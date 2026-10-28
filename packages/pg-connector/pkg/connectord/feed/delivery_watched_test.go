@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
@@ -31,7 +30,6 @@ type watchedCase struct {
 func runWatchedCases(t *testing.T, view string, cases []watchedCase) {
 	t.Helper()
 	spec := testSpec()
-	spec.Delivery = registry.DeliverByWatched
 	for _, tc := range cases {
 		deliver, change := Deliver(spec, viewNamed(spec, view), tc.row, tc.scope, tc.member)
 		if deliver != tc.deliver || change != tc.change {
@@ -99,17 +97,16 @@ func TestDeliverByWatchedWireWord(t *testing.T) {
 	})
 }
 
-// The legacy rule is untouched by the new one: the same rows under the default
-// delivery keep the legacy answers, snapshot or not.
-func TestDeliverByMembershipIgnoresTheSnapshot(t *testing.T) {
-	spec := testSpec() // DeliverByMembership
-	for _, watched := range []bool{false, true} {
-		row := watchedRowOf(t, watched, []string{kindContent})
-		if ok, word := Deliver(spec, viewNamed(spec, viewAll), row, "q", true); !ok || word != "changed" {
-			t.Errorf("watched=%v member: got (%v, %q), want (true, changed)", watched, ok, word)
-		}
-		if ok, word := Deliver(spec, viewNamed(spec, viewAll), row, "q", false); ok || word != "" {
-			t.Errorf("watched=%v non-member: got (%v, %q), want (false, \"\")", watched, ok, word)
+// The snapshot decides first: a row whose snapshot is not set reaches nobody,
+// member or not, scoped or not.
+func TestDeliverDropsARowWhoseSnapshotIsNotSet(t *testing.T) {
+	spec := testSpec()
+	row := watchedRowOf(t, false, []string{kindContent})
+	for _, scope := range []string{"", "q"} {
+		for _, member := range []bool{false, true} {
+			if ok, word := Deliver(spec, viewNamed(spec, viewAll), row, scope, member); ok || word != "" {
+				t.Errorf("scope %q member %v: got (%v, %q), want (false, \"\")", scope, member, ok, word)
+			}
 		}
 	}
 }
